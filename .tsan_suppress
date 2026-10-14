@@ -1,0 +1,4 @@
+# libc++ std::promise/future shared-state lifetime reports from WorkerPool::submit
+# currently drown out actionable TSAN output. The submitted worker bodies remain
+# instrumented; this suppresses reports whose stacks include promise internals.
+race:std::__1::promise

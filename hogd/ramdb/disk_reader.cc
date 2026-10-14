@@ -1,0 +1,792 @@
+#include "hogd/ramdb/disk_reader.h"
+
+#include <fcntl.h>
+#include <unistd.h> // NOLINT(misc-include-cleaner) for off_t
+
+#include <algorithm>
+#include <array>
+#include <cassert>
+#include <cerrno>
+#include <cstddef>
+#include <format>
+#include <functional>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <string>
+#include <string_view>
+#include <type_traits>
+#include <unordered_set>
+#include <utility>
+#include <vector>
+
+#include "hogd/base/bits.h"
+#include "hogd/base/io.h"
+#include "hogd/base/log.h"
+#include "hogd/base/span.h"
+#include "hogd/base/status.h"
+#include "hogd/base/string.h"
+#include "hogd/base/time.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/ramdb/constants.h"
+#include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/loglet.h"
+
+namespace hogd {
+
+namespace {
+
+// LogletBuffer buffers item changes before transferring to memory. This is
+// required because we must validate the checksum of all changes in each LSN
+// before applying them.
+class LogletBuffer {
+public:
+  LogletBuffer(LogletAllocator *allocator) : allocator_(allocator) {}
+  ~LogletBuffer() = default;
+
+  // push_item places src in the buffer and reserves space for its KV pair.
+  ItemHeader *push_item(ItemHeader *src);
+
+  // take_buffer returns all pending loglets including the head and resets to
+  // an empty buffer.
+  std::vector<UniqueLoglet> take_buffer();
+
+  // calculate_crc32c returns the CRC32C of the bytes currently in the buffer.
+  uint32_t calculate_crc32c();
+
+  // size returns the number of bytes currently in the buffer.
+  size_t size() const
+  {
+    size_t size = static_cast<bool>(head_) ? head_->size() : 0;
+    for (const UniqueLoglet &ul : buf_)
+      size += ul->size();
+    return size;
+  }
+
+private:
+  LogletAllocator *allocator_;
+  std::vector<UniqueLoglet> buf_;
+  UniqueLoglet head_;
+  uint32_t crc_{0};
+};
+
+inline ItemHeader *
+LogletBuffer::push_item(ItemHeader *src)
+{
+  // allocate a new loglet if needed.
+  if (!head_ || head_->bytes_left() < src->total_bytes()) [[unlikely]] {
+    if (head_) {
+      // it's faster to calculate the CRC now because this head loglet is still
+      // hot in the cache.
+      crc_ = crc32c_append(crc_, head_->get_bytes());
+      buf_.emplace_back(std::move(head_));
+    }
+    head_ = make_unique_loglet(*allocator_, LogletMode::kDiskBuffer);
+    if (!head_)
+      return nullptr;
+  }
+
+  // reserve space and copy onto the head loglet.
+  return head_->clone(src);
+}
+
+inline std::vector<UniqueLoglet>
+LogletBuffer::take_buffer()
+{
+  crc_ = 0;
+  if (head_)
+    buf_.emplace_back(std::move(head_));
+  return std::exchange(buf_, std::vector<UniqueLoglet>());
+}
+
+inline uint32_t
+LogletBuffer::calculate_crc32c()
+{
+  if (!head_)
+    return crc_;
+  return crc32c_append(crc_, head_->get_bytes());
+}
+
+inline bool
+crc_valid(uint32_t commit_crc, LogletBuffer &buf, ItemHeader *commit_hdr)
+{
+  // The next slot is persisted as canonical zero bytes (#1530); zero it on the
+  // reconstructed header too so the checksum is independent of the host's
+  // nullptr representation.
+  commit_hdr->clear_next();
+  uint32_t crc = crc32c_append(buf.calculate_crc32c(), byte_view(*commit_hdr));
+  if (commit_crc != crc) {
+    error("CRC check failed! Expected {:x}, got {:x}.", commit_crc, crc);
+    return false;
+  }
+  return true;
+}
+
+inline bool
+all_zero(std::span<const std::byte> bytes)
+{
+  return std::ranges::all_of(bytes,
+                             [](std::byte b) { return b == std::byte{0}; });
+}
+
+// rest_is_zero returns true if every byte from r's position to the end of the
+// file is zero. A read error counts as not zero.
+inline bool
+rest_is_zero(BufferedReader &r)
+{
+  std::array<std::byte, 4096> buf;
+  while (true) {
+    ErrnoStatus<size_t> n = r.read(std::span(buf));
+    if (!n)
+      return false;
+    if (*n == 0)
+      return true;
+    if (!all_zero(std::span(buf).first(*n)))
+      return false;
+  }
+}
+
+// SafeItemHeader is a version of ItemHeader that uses only primitive types.
+// This is necessary because it would be UB to load an out of range value into
+// storage, as it is an enum class in ItemHeader. Since the on-disk log could
+// be corrupted, there's a risk this might happen.
+struct SafeItemHeader {
+  uint8_t storage;
+  uint8_t type;
+  uint16_t key_len;
+  uint32_t value_len;
+  uint64_t lsn;
+  uint64_t _padding_garbage_next_pointer; // Always 0 in stable copies of item.
+
+  // returns an ItemHeader if it is valid.
+  std::optional<ItemHeader> operator()() const
+  {
+    if (storage > std::to_underlying(ItemStorage::kCommit))
+      return std::nullopt;
+    if (key_len == 0)
+      return std::nullopt;
+    if (sizeof(ItemHeader) + key_len + value_len > kBigItemThreshold)
+      return std::nullopt;
+    if (_padding_garbage_next_pointer != 0) {
+      warn("padding in stored item non-zero");
+      return std::nullopt;
+    }
+    ItemHeader hdr(static_cast<ItemStorage>(storage), type, key_len, value_len);
+    hdr.lsn = lsn;
+    return hdr;
+  }
+};
+
+static_assert(sizeof(SafeItemHeader) == sizeof(ItemHeader));
+static_assert(std::is_trivially_copyable_v<SafeItemHeader>);
+static_assert(offsetof(SafeItemHeader, storage) ==
+              offsetof(ItemHeader, storage));
+static_assert(offsetof(SafeItemHeader, type) == offsetof(ItemHeader, type));
+static_assert(offsetof(SafeItemHeader, key_len) ==
+              offsetof(ItemHeader, key_len));
+static_assert(offsetof(SafeItemHeader, value_len) ==
+              offsetof(ItemHeader, value_len));
+static_assert(offsetof(SafeItemHeader, lsn) == offsetof(ItemHeader, lsn));
+static_assert(offsetof(SafeItemHeader, _padding_garbage_next_pointer) ==
+              offsetof(ItemHeader, next));
+
+// helper class that parses log and snapshot file names
+struct FileMetadata {
+  static std::optional<FileMetadata> from_path(const Directory &dir,
+                                               std::string_view path)
+  {
+    FileMetadata file{};
+
+    file.path_ = path;
+    file.snapshot_file_ = has_extension(path, "snap");
+
+    ErrnoStatus<struct stat> r = dir.stat(file.path_);
+    if (!r) {
+      info("couldn't stat filename {}; ignoring", file.path_);
+      return std::nullopt;
+    }
+    file.bytes_ = r->st_size;
+
+    if (file.snapshot_file_) {
+      std::vector<std::string_view> parts = split(file.path_, '-');
+      if (parts.size() < 2) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+
+      auto lsn = parse_integer<uint64_t>(parts[0]);
+      if (!lsn) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+      file.begin_lsn_ = *lsn;
+
+      lsn = parse_integer<uint64_t>(parts[1]);
+      if (!lsn) {
+        debug("unexpected snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+      file.end_lsn_exclusive_ = *lsn;
+
+      // Require the canonical "{begin}-{end}.snap" spelling. parse_integer
+      // accepts leading zeros and trailing characters, so aliases such as
+      // "00-01.snap" parse to the same LSN range as "0-1.snap" but may hold
+      // different, individually CRC-valid content. operator<() would then
+      // treat the aliases as equivalent, and recovery would pick between them
+      // by directory enumeration order, so two honest validators could restart
+      // from different accepted state commitments (#1049). Reconstructing the
+      // canonical name and rejecting anything else guarantees at most one
+      // snapshot per parsed range, since a directory cannot hold two entries
+      // with the same name.
+      if (file.path_ !=
+          std::format("{}-{}.snap", file.begin_lsn_, file.end_lsn_exclusive_)) {
+        debug("non-canonical snapshot filename {}; ignoring", file.path_);
+        return std::nullopt;
+      }
+
+      return file;
+    }
+
+    bool log_file = has_extension(path, "log");
+    if (!log_file)
+      return std::nullopt;
+
+    std::optional<uint64_t> tmp = parse_integer<uint64_t>(file.path_);
+    if (!tmp) {
+      debug("invalid log file name `{}`", file.path_);
+      return std::nullopt;
+    }
+    file.begin_lsn_ = *tmp;
+    file.end_lsn_exclusive_ = std::numeric_limits<uint64_t>::max();
+
+    // Require the canonical "{lsn}.log" spelling, for the same reason as
+    // snapshots above: reject leading-zero or trailing-character aliases that
+    // parse to the same LSN.
+    if (file.path_ != std::format("{}.log", file.begin_lsn_)) {
+      debug("non-canonical log filename {}; ignoring", file.path_);
+      return std::nullopt;
+    }
+
+    return file;
+  }
+
+  bool operator<(const FileMetadata &b) const
+  {
+    if (this == std::addressof(b))
+      return false;
+
+    // wal files can only be recovered after any snapshot files.
+    if (snapshot_file_ && !b.snapshot_file_)
+      return true;
+
+    if (!snapshot_file_ && b.snapshot_file_)
+      return false;
+
+    if (begin_lsn_ < b.begin_lsn_)
+      return true;
+
+    if (begin_lsn_ > b.begin_lsn_)
+      return false;
+
+    // Prioritize files that cover "longer" lsn ranges.
+    return end_lsn_exclusive_ > b.end_lsn_exclusive_;
+  }
+
+  std::string path_;
+  uint64_t begin_lsn_;
+  uint64_t end_lsn_exclusive_;
+  bool snapshot_file_;
+
+  size_t bytes_;
+
+private:
+  FileMetadata() = default;
+};
+
+// Return of kCorruption indicates recovery should not continue.
+// No other return aside from okay should be returned.  If load_log_file
+// returns okay it has guaranteed that the processed log file only contains
+// committed log entries. If this file is_last_log_file it will truncate the
+// file if needed to ensure this invariant. If the file !is_last_log_file
+// it will return kCorruption if a file ends with uncommitted entries.
+// Inductively, this rule should ensure that in a normal sequence of crashes
+// (1) that recovery always succeeds unless some file was externally
+// truncated/corrupted and
+// (2) that after resuming cur_lsn > the begin_lsn on every WAL filename
+// in the directory, which ensures two runs of the database don't overwrite
+// each other's records and diverge.
+DBStatus<void>
+load_log_file(
+    LogletAllocator &allocator, Directory &dir, const FileMetadata &file,
+    uint64_t &cur_lsn, std::optional<uint64_t> target_lsn, bool is_last_file,
+    bool truncate_tail,
+    const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func)
+{
+  DBStatus<File> f = dir.openat(file.path_, truncate_tail ? O_RDWR : O_RDONLY)
+                         .transform_error(to_db_error);
+  if (!f) {
+    warn("couldn't open logfile `{}`: {}", file.path_, f.error());
+    return DBError(DBCode::kCorruption);
+  }
+
+  BufferedReader r(*f);
+  LogletBuffer buf(&allocator);
+  bool uncommitted_records = false;
+  off_t uncommitted_off = 0; // NOLINT(misc-include-cleaner)
+
+  while (!target_lsn || cur_lsn < *target_lsn) {
+    // read the next ItemHeader from the log file.
+    SafeItemHeader tmp;
+    ErrnoStatus<void> ret = read_full(r, writable_byte_view(tmp));
+    if (!ret) {
+      if (ret.error() == ENODATA)
+        goto eof;
+
+      // fail the whole recovery
+      error("error reading log file: {}", ret.error());
+      return DBError(DBCode::kCorruption);
+    }
+
+    uncommitted_records = true;
+
+    // A zero header is never valid (key_len == 0). In the last file, treat it
+    // as a torn tail from a crash mid-append and truncate, but only if nothing
+    // but zeros follows; a zeroed header ahead of live records is corruption.
+    if (is_last_file && all_zero(byte_view(tmp))) {
+      if (!rest_is_zero(r)) {
+        error("zeroed record ahead of later records in {}", file.path_);
+        return DBError(DBCode::kCorruption);
+      }
+      goto eof;
+    }
+
+    // validate the header.
+    ItemHeader hdr;
+    if (std::optional<ItemHeader> ret = tmp(); ret) {
+      hdr = *ret;
+    }
+    else {
+      error("error validating item header");
+      return DBError(DBCode::kCorruption);
+    }
+
+    bool skip =
+        // skip records if that lsn has already been recovered
+        (hdr.lsn < cur_lsn) ||
+        // snapshot files can have items of different lsn mixed up, so skip
+        // items that beyond the lsn range of what we are trying to recover.
+        (target_lsn && hdr.lsn >= *target_lsn);
+
+    if (skip) {
+      if (hdr.storage == ItemStorage::kCommit) {
+        // A commit below cur_lsn belongs to an already-recovered batch, so its
+        // records were skipped too and the buffer must be empty; a non-empty
+        // buffer means its LSN was tampered to drop durable rows without
+        // validation (#4320). (A commit >= target_lsn is a legitimate
+        // point-in-time truncation and still drops the buffer below.)
+        if (hdr.lsn < cur_lsn && buf.size() != 0) {
+          error("skipped commit marker in {} precedes cur_lsn {} with {} "
+                "buffered bytes; treating as corruption",
+                file.path_, cur_lsn, buf.size());
+          return DBError(DBCode::kCorruption);
+        }
+        buf.take_buffer();
+        uncommitted_records = false;
+        uncommitted_off = r.offset();
+      }
+
+      // kNormal/kTombstone records are written with the loglet's
+      // alignof(ItemHeader) padding (see Loglet::alloc), so the on-disk
+      // payload length is align_up(kv_bytes, alignof(ItemHeader)). kCommit
+      // records are written without that trailing padding (commit_buf is
+      // sizeof(ItemHeader) + sizeof(uint32_t)), so the unpadded kv_bytes is
+      // the right skip there.
+      size_t to_skip = hdr.storage == ItemStorage::kCommit
+                           ? hdr.kv_bytes()
+                           : align_up(hdr.kv_bytes(), alignof(ItemHeader));
+      ErrnoStatus<size_t> ret = r.skip(to_skip);
+      if (!ret) {
+        info("failure while skipping {} bytes in {}", to_skip, file.path_);
+        return DBError(DBCode::kCorruption);
+      }
+      // hit eof while trying to skip
+      if (*ret < to_skip)
+        goto eof;
+      continue;
+    }
+
+    // parse the header.
+    using enum ItemStorage;
+    switch (hdr.storage) {
+    case kNormal:
+    case kTombstone:
+    {
+      ItemHeader *dst = buf.push_item(&hdr);
+      if (!dst) {
+        debug("out of memory in recovery buffer");
+        return DBError(DBCode::kNoMemory);
+      }
+      ret = read_full(r, dst->get_all());
+      if (!ret) {
+        if (ret.error() == ENODATA)
+          goto eof;
+        info("couldn't read item: {}", ret.error());
+        return DBError(DBCode::kCorruption);
+      }
+      break;
+    }
+
+    case kBig:
+    {
+      panic("not implemented yet");
+      break;
+    }
+
+    case kCommit:
+    {
+      // validate the commit header.
+      uint32_t commit_crc;
+      ret = read_full(r, writable_byte_view(commit_crc));
+      if (!ret) {
+        if (ret.error() == ENODATA)
+          goto eof;
+        debug("couldn't read commit record crc");
+        return DBError(DBCode::kCorruption);
+      }
+      // The checksum is persisted little-endian (#1816).
+      commit_crc = le_to_cpu(commit_crc);
+      if (!crc_valid(commit_crc, buf, &hdr)) {
+        info("crc check failure checking commit for lsn {}", hdr.lsn);
+        return DBError(DBCode::kCorruption);
+      }
+
+      // insert the changes into the database.
+      // for WAL files this applies just one lsn of items. snapshot
+      // files may commit items of many lsns per commit record.
+      DBStatus<void> ret = func(buf.take_buffer());
+      if (!ret) {
+        error("failed applying callback to recovery buffer: {}", ret.error());
+        return DBError(DBCode::kCorruption);
+      }
+      uncommitted_records = false;
+      uncommitted_off = r.offset();
+
+      if (!file.snapshot_file_) {
+        if (cur_lsn != hdr.lsn) {
+          error("replaying log file {}, saw commit for lsn {} while expecting "
+                "lsn {}",
+                file.path_, hdr.lsn, cur_lsn);
+          return DBError{DBCode::kCorruption};
+        }
+      }
+      // A snapshot commits at end_lsn - 1; reject anything else, including a
+      // zero end_lsn whose successor would wrap to zero (#4229).
+      else if (file.end_lsn_exclusive_ == 0 ||
+               hdr.lsn != file.end_lsn_exclusive_ - 1) {
+        error("snapshot {} has commit for lsn {} but its filename range ends "
+              "at lsn {}",
+              file.path_, hdr.lsn, file.end_lsn_exclusive_);
+        return DBError{DBCode::kCorruption};
+      }
+
+      cur_lsn = hdr.lsn + 1;
+      info("replayed lsn {}, cur_lsn now {}", hdr.lsn, cur_lsn);
+      break;
+    }
+
+    default:
+    {
+      error("record with unknown storage type {}",
+            std::to_underlying(hdr.storage));
+      return DBError(DBCode::kCorruption);
+    }
+    }
+  }
+eof:
+
+  if (!uncommitted_records)
+    return {};
+
+  if (is_last_file) {
+    if (!truncate_tail) {
+      info("{} has uncommitted records from offset {}; open() truncates them",
+           file.path_, uncommitted_off);
+      return {};
+    }
+    info("truncating uncommitted records from {} starting at offset {}",
+         file.path_, uncommitted_off);
+    ErrnoStatus<void> trunc_ret = f->ftruncate(uncommitted_off),
+                      sync_ret = f->sync();
+    if (!trunc_ret || !sync_ret) {
+      error("failed to truncate {} which has uncommitted records starting at "
+            "offset {}; cannot guarantee future recoveries will succeed so "
+            "terminating recovery; inspect and trim this file and manually "
+            "retry recovery to continue: {} {}",
+            file.path_, uncommitted_off, trunc_ret.error(), sync_ret.error());
+      return DBError(DBCode::kCorruption);
+    }
+    // truncating uncommitted records from the last wal file is fine; safe to
+    // recover.
+    return {};
+  }
+  // uncommitted records anywhere else in an incomplete file is a problem.
+  // inductively, that should never happen (due to the ftruncate above) unless
+  // files were corrupted.
+  error("file {} ended with uncommitted records but isn't the last wal file",
+        file.path_);
+  return DBError(DBCode::kCorruption);
+}
+
+DBStatus<std::vector<FileMetadata>>
+find_files(const Directory &dir)
+{
+  DBStatus<std::vector<std::string>> filenames =
+      dir.list().transform_error(to_db_error);
+  if (!filenames)
+    return filenames.error();
+
+  std::vector<FileMetadata> files{};
+  for (auto &fn : *filenames) {
+    auto file = FileMetadata::from_path(dir, fn);
+    if (file)
+      files.emplace_back(*file);
+  }
+  std::ranges::sort(files, &FileMetadata::operator<);
+
+  return std::move(files);
+}
+
+std::vector<FileMetadata>
+log_files(const std::vector<FileMetadata> &files)
+{
+  return files | std::views::filter([](auto &f) { return !f.snapshot_file_; }) |
+         std::ranges::to<std::vector<FileMetadata>>();
+}
+
+std::optional<FileMetadata>
+longest_snapshot(const std::vector<FileMetadata> &files, uint64_t max_begin_lsn)
+{
+  auto candidates = files | std::views::filter([max_begin_lsn](auto &f) {
+                      return f.snapshot_file_ &&
+                             f.begin_lsn_ <= max_begin_lsn &&
+                             f.end_lsn_exclusive_ > max_begin_lsn;
+                    }) |
+                    std::ranges::to<std::vector<FileMetadata>>();
+
+  if (candidates.empty())
+    return std::nullopt;
+
+  return std::ranges::min(candidates, &FileMetadata::operator<);
+}
+
+} // namespace
+
+DBStatus<uint64_t>
+DiskReader::load(Directory &dir, std::optional<uint64_t> target_lsn,
+                 uint64_t *max_snapshot_end_lsn)
+{
+  ElapsedTimer timer{};
+  std::shared_ptr<void> _{nullptr, [&timer](void *) {
+                            info("recovery took {:.2f}", timer.elapsed());
+                          }};
+
+  uint64_t lsn = 0;
+  DBStatus<void> ret = load_database(
+      dir,
+      [this](std::vector<UniqueLoglet> &&log) {
+        return apply_changes(std::move(log));
+      },
+      target_lsn, /*truncate_tail=*/true, &lsn, max_snapshot_end_lsn);
+  // Recovery is all or nothing (see load_database). Uncommitted records after
+  // the last commit are truncated by load_log_file, not reported here.
+  if (!ret)
+    return ret.error();
+  assert(!target_lsn || *target_lsn == lsn);
+  return lsn;
+}
+
+DBStatus<uint64_t>
+DiskReader::verify(Directory &dir)
+{
+  uint64_t lsn = 0;
+  DBStatus<void> ret = load_database(
+      dir,
+      [](std::vector<UniqueLoglet> && /*log*/) -> DBStatus<void> { return {}; },
+      std::nullopt, /*truncate_tail=*/false, &lsn);
+  if (!ret)
+    return ret.error();
+  return lsn;
+}
+
+size_t
+DiskReader::log_bytes(const Directory &dir)
+{
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return 0;
+  }
+
+  auto all_log_files = *files | std::views::filter([](auto &f) {
+    return !f.snapshot_file_;
+  }) | std::ranges::to<std::vector<FileMetadata>>();
+
+  size_t total_log_bytes =
+      std::ranges::fold_left(all_log_files |
+                                 std::views::transform(&FileMetadata::bytes_),
+                             0, std::plus<>());
+  return total_log_bytes;
+}
+
+void
+DiskReader::cleanup(const Directory &dir)
+{
+  info("cleaning up log files");
+
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return;
+  }
+
+  uint64_t missing_lsn = 0;
+  std::unordered_set<std::string> needed{};
+
+  std::optional<FileMetadata> snapshot{};
+  do {
+    snapshot = longest_snapshot(*files, missing_lsn);
+    if (snapshot) {
+      info("... {}", snapshot->path_);
+      needed.emplace(snapshot->path_);
+      missing_lsn = snapshot->end_lsn_exclusive_;
+    }
+  } while (snapshot);
+  for (const auto &fn : needed)
+    info("snapshot retained {}", fn);
+
+  auto all_log_files = log_files(*files);
+
+  std::span needed_wal_files{all_log_files};
+  // a log file is not needed if there is a log file with a higher begin lsn
+  // that is <= the first missing lsn (the records it contains must all be
+  // less than the newer log file).
+  while (needed_wal_files.size() > 1 &&
+         needed_wal_files[1].begin_lsn_ <= missing_lsn) {
+    needed_wal_files = needed_wal_files.subspan(1);
+  }
+
+  for (auto &&f :
+       needed_wal_files | std::views::transform(&FileMetadata::path_))
+    needed.insert(f);
+
+  for (auto &file : *files) {
+    if (needed.contains(file.path_)) {
+      debug("file {} needed for recovery; retaining", file.path_);
+      continue;
+    }
+    info("file {} not needed for recovery; cleaning up", file.path_);
+    ErrnoStatus<void> r = dir.unlink(file.path_);
+    if (!r)
+      warn("failed to remove {} during cleanup", file.path_);
+  }
+}
+
+DBStatus<void>
+DiskReader::load_database(
+    Directory &dir,
+    const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
+    std::optional<uint64_t> target_lsn, bool truncate_tail,
+    uint64_t *loaded_lsn, uint64_t *max_snapshot_end_lsn)
+{
+  uint64_t cur_lsn = 0;
+  uint64_t max_snap_end = 0;
+  DBStatus<void> ret{};
+
+  DBStatus<std::vector<std::string>> filenames =
+      dir.list().transform_error(to_db_error);
+  if (!filenames)
+    return filenames.error();
+
+  auto files = find_files(dir);
+  if (!files) {
+    warn("couldn't find files for cleanup in {}", dir.get_path());
+    return DBError{DBCode::kNotFound};
+  }
+
+  size_t left_to_process = files->size();
+  for (FileMetadata &file : *files) {
+    left_to_process--;
+
+    if (file.snapshot_file_) {
+      if (file.end_lsn_exclusive_ < cur_lsn) {
+        info("skipping unneeded snapshot file {}", file.path_);
+        continue;
+      }
+
+      if (file.begin_lsn_ > cur_lsn) {
+        warn("missing data detected: gap at LSN {}", cur_lsn);
+        return DBError(DBCode::kNotFound);
+      }
+    }
+
+    info("loading file {}", file.path_);
+
+    uint64_t tmp = cur_lsn;
+    ret = load_log_file(allocator_, dir, file, cur_lsn, target_lsn,
+                        left_to_process == 0, truncate_tail, func);
+    if (!ret) {
+      // Recovery is all or nothing: a record that fails validation anywhere
+      // in the stream aborts it, so the caller never sees a partial prefix.
+      warn("couldn't load logfile {} (recovered through LSN {}): {}",
+           file.path_, cur_lsn, ret.error());
+      return ret;
+    }
+
+    // file contained no useful records
+    if (tmp == cur_lsn)
+      continue;
+
+    // Track the highest snapshot end LSN that contributed to recovery.
+    if (file.snapshot_file_)
+      max_snap_end = std::max(max_snap_end, file.end_lsn_exclusive_);
+  }
+
+  // we reached the end; are we still missing data?
+  if (target_lsn && cur_lsn != *target_lsn) {
+    warn("missing data detected: loaded LSN {} < target LSN {}", cur_lsn,
+         *target_lsn);
+    return DBError(DBCode::kNotFound);
+  }
+
+  if (loaded_lsn)
+    *loaded_lsn = cur_lsn;
+  if (max_snapshot_end_lsn)
+    *max_snapshot_end_lsn = max_snap_end;
+  return {};
+}
+
+DBStatus<void>
+DiskReader::apply_changes(std::vector<UniqueLoglet> &&log)
+{
+  // apply all the changes for this LSN.
+  for (UniqueLoglet &ll : log) {
+    for (ItemHeader &hdr : *ll) {
+      if (DBStatus<void> ret = map_.apply_change(&hdr); !ret) [[unlikely]] {
+        error("couldn't apply change: {}", ret.error());
+        return ret.error();
+      }
+    }
+    ll.reset(); // eagerly release memory.
+  }
+
+  // expand the map size if needed.
+  if (map_.prepare_expand())
+    map_.do_expand();
+
+  return {};
+}
+
+} // namespace hogd

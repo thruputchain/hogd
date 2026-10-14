@@ -1,0 +1,22 @@
+[package]
+name = "faucet_caller"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+sdk = { workspace = true }
+airdrop_faucet = { path = "../airdrop_faucet" }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["sdk/dev", "airdrop_faucet/dev"]
+logging = ["sdk/logging"]
+
+[[bin]]
+name = "faucet_caller"
+path = "src/main.rs"
+required-features = ["entrypoints"]

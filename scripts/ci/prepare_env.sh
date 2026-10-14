@@ -1,0 +1,42 @@
+echo "prepare the environment for building hogd"
+
+set -ex
+
+echo 'setting up cargo'
+source ./scripts/ci/setup_cargo.sh
+
+# Fetch private workspace sources before any potentially lengthy tool builds.
+echo 'cargo fetch'
+CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh || return $?
+
+echo 'setting up ccache'
+ln -s "$USER_HOME/.cache" "$HOME/.cache"
+
+CBINDGEN_VERSION=0.29.2
+if command -v cbindgen >/dev/null 2>&1 && cbindgen --version | grep -qx "cbindgen ${CBINDGEN_VERSION}"; then
+  echo "cbindgen ${CBINDGEN_VERSION} already installed"
+else
+  echo "installing cbindgen ${CBINDGEN_VERSION}"
+  cargo install --locked --force --version "${CBINDGEN_VERSION}" cbindgen
+fi
+
+echo 'gcc-15 version check'
+gcc-15 --version
+
+echo 'g++-15 version check'
+g++-15 --version
+
+echo 'clang version check'
+clang --version
+
+# echo 'add cargo to PATH'
+# echo "$HOME/.cargo/bin" >> $GITHUB_PATH #XXX
+
+echo 'path check'
+echo $PATH
+
+echo 'cargo version check'
+cargo --version
+
+echo 'set gcc-15 in check'
+echo "GCC_CC=gcc-15 GCC_CXX=g++-15" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh

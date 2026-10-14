@@ -1,0 +1,22 @@
+{
+  "host_defs": [
+    {
+      "host_id": "hog1",
+      "host_tags": [],
+      "ssh_user": "",
+      "ssh_address": "10.100.0.101",
+      "ssh_port": null,
+      "ssh_private_key": "",
+      "host_config": {
+        "public_ip": "10.100.0.101",
+        "private_ip": "10.100.0.101",
+        "agent_port": 11055,
+        "pkg_dir": "/tmp/petar-hogx/pkg",
+        "app_dir": "/tmp/petar-hogx/app",
+        "var_dir": "/tmp/petar-hogx/var",
+        "tmp_dir": "/tmp/petar-hogx/tmp"
+      }
+    }
+  ],
+  "assembly_defs": []
+}

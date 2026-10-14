@@ -1,0 +1,645 @@
+#include "hogd/hog_exec/runtime/invocation_frame.h"
+
+#include <algorithm>
+#include <cassert>
+#include <iterator>
+#include <limits>
+#include <map>
+#include <optional>
+#include <ranges>
+#include <span>
+#include <utility>
+#include <variant>
+#include <vector>
+
+#include "contract.hh"
+#include "db_conflict.hh"
+#include "event.hh"
+#include "ffi_enums.hh"
+#include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
+#include "hogd/base/types.h"
+#include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/auth_subtoken.h"
+#include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
+#include "hogd/hog_exec/runtime/item/item_view.h"
+#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
+#include "invoke_flag.hh"
+#include "retrocausal_queue.hh"
+#include "storage_item.hh"
+#include "syscall_error.hh"
+#include "transaction.hh"
+#include "transaction_trace.hh"
+#include "types.hh"
+#include "x23/async.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+InvocationFrame::InvocationFrame(
+    ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
+    size_t event_count,
+    std::vector<RegisteredAuthToken> &&forwarded_auth_tokens,
+    uint32_t inherited_try_invoke_depth, NetworkConfigParams const &params)
+  : hash_buffers_(params.max_sha256_buffers), address_(address),
+    calldata_(std::forward<Calldata>(calldata)), flags_(flags),
+    event_count_(event_count),
+    total_try_invoke_depth_(inherited_try_invoke_depth),
+    auth_tokens_(std::move(forwarded_auth_tokens)),
+    forwarded_auth_token_count_(static_cast<uint32_t>(auth_tokens_.size()))
+{}
+
+void
+InvocationFrame::commit_manually_reverted_frame(InvocationFrame &&frame)
+{
+  assert(frame.should_revert());
+  child_return_output_ = std::move(frame.to_return_output_);
+  child_returned_auth_tokens_ = {};
+
+  // The forwarded tokens never left this frame, so a reverted child has
+  // nothing to give back.
+  child_forwarded_auth_tokens_.clear();
+}
+
+void
+InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
+{
+  child_return_output_ = std::move(frame.to_return_output_);
+  event_count_ = frame.event_count_;
+
+  events_.reserve(events_.size() + frame.events_.size());
+  events_.append_range(
+      std::ranges::subrange(std::make_move_iterator(frame.events_.begin()),
+                            std::make_move_iterator(frame.events_.end())));
+
+  new_contract_deployments_.reserve(new_contract_deployments_.size() +
+                                    frame.new_contract_deployments_.size());
+  for (auto const &[addr, hash] : frame.new_contract_deployments_) {
+    [[maybe_unused]] auto [_, inserted_new] =
+        new_contract_deployments_.emplace(addr, hash);
+    assert(inserted_new);
+  }
+
+  // transfer modified items from child frame to current frame
+  modified_items_.reserve(modified_items_.size() +
+                          frame.modified_items_.size());
+  for (auto &[key, item] : frame.modified_items_) {
+    modified_items_.insert_or_assign(key, std::move(item));
+  }
+
+  try_invoke_frame_count_ += frame.try_invoke_frame_count_;
+  total_try_invoke_depth_ = frame.total_try_invoke_depth_;
+
+  // The tokens forwarded to the child leave this frame now that the child has
+  // committed. The tokens it returned join this frame under consecutive new
+  // ids, in order.
+  remove_auth_tokens(child_forwarded_auth_tokens_);
+  child_forwarded_auth_tokens_.clear();
+  child_returned_auth_tokens_ = {.start = static_cast<uint32_t>(
+                                     next_auth_token_id()),
+                                 .count = 0};
+  for (auto child_token_id : frame.returned_auth_token_ids_) {
+    // Return ends the child, so it still owns every token it returned.
+    auto token_id = add_auth_token(frame.take_auth_token(child_token_id));
+    if (!token_id.has_value()) {
+      panic("a frame cannot hold 2^32 auth tokens within any gas limit");
+    }
+    assert(*token_id == child_returned_auth_tokens_.start +
+                            child_returned_auth_tokens_.count);
+    ++child_returned_auth_tokens_.count;
+  }
+}
+
+x23::Async<SystemStatus<void>>
+InvocationFrame::mark_frame_as_failed(
+    PerTransactionDatabaseProxy &db_proxy) const
+{
+  if (try_invoke_frame_count_ > 0) {
+    auto st = co_await db_proxy.pop_subtransactions(try_invoke_frame_count_);
+    if (!st.has_value()) {
+      co_return st.error();
+    }
+  }
+  co_return SystemStatus<void>{};
+}
+
+void
+InvocationFrame::commit_failed_child_frame()
+{
+  child_return_output_ =
+      InvocationFrameOutput{InvocationFrameStatusCode::Fault};
+  child_returned_auth_tokens_ = {};
+  // The forwarded tokens never left this frame, so a failed child has nothing
+  // to give back.
+  child_forwarded_auth_tokens_.clear();
+}
+
+void
+InvocationFrame::log_event(TxEmittedEvent event)
+{
+  event_count_++;
+  events_.emplace_back(std::move(event));
+}
+
+void
+InvocationFrame::set_frame_return(
+    InvocationFrameOutput &&return_output,
+    std::vector<uint32_t> &&returned_auth_token_ids)
+{
+  to_return_output_ = std::move(return_output);
+  // only return auth tokens in frame success
+  assert(returned_auth_token_ids.empty() ||
+         to_return_output_.status_code() == InvocationFrameStatusCode::Return);
+  returned_auth_token_ids_ = std::move(returned_auth_token_ids);
+}
+
+namespace {
+
+StorageDelta
+make_deployed_contract_delta(DeployedContractHash const &hash)
+{
+  StorageDelta delta = StorageDelta(StorageDeltaType::kDeltaTypeDeployContract);
+  delta.deployed_contract_hash() = hash;
+  return delta;
+}
+
+} // namespace
+
+void
+InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
+{
+  assert(!depth_cap_reached(params));
+  total_try_invoke_depth_++;
+}
+
+x23::Async<SystemStatus<bool>>
+InvocationFrame::try_acquire_frame_locks(
+    PerTransactionDatabaseProxy &db_proxy,
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
+{
+  // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
+  // true on a successful lock acquisition, false on contention failure.
+  // On success, counts the pushed subtransaction against this frame; the root
+  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
+  // count, since the root frame is discarded immediately after commit.
+  //
+  // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
+  // or advanced here; InvocationFrameStack::finish_frame checks it before
+  // calling this for a child TryInvoke frame and bumps the depth afterwards,
+  // in the one place shared by every execution mode. The child cap reserves
+  // one slot for the root commit's subtransaction push.
+
+  db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
+                   observations.size());
+
+  for (auto const &[key, item_view] : modified_items_) {
+    const AddressAndKey addrkey = key.to_address_and_key();
+    bool has_observations = false;
+    std::span<QueueEntry const> uncovered_obs;
+    if (auto it = observations.find(addrkey); it != observations.end()) {
+      has_observations = !it->second.empty();
+      auto consumed = item_view.get_retrocausally_consumed_count();
+      CHECK_LE(consumed, it->second.size());
+      uncovered_obs = std::span<QueueEntry const>(it->second).subspan(consumed);
+    }
+    auto [delta, flags] = item_view.get_delta(uncovered_obs);
+    if (has_observations && delta &&
+        delta->type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
+      co_return SystemStatus<bool>{false};
+    }
+    if (delta) {
+      db_proxy.add_delta(addrkey, std::move(*delta), flags);
+    }
+  }
+
+  for (auto const &[addrkey, entries] : observations) {
+    if (!entries.empty() &&
+        !modified_items_.contains(FrameItemKey::from(addrkey))) {
+      StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
+      delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
+                                                               entries.end()};
+      db_proxy.add_delta(addrkey, std::move(delta),
+                         std::to_underlying(StorageDeltaFlags::None));
+    }
+  }
+
+  for (auto const &[addr, deployment] : new_contract_deployments_) {
+    AddressAndKey addrkey = {.address = addr,
+                             .key = StorageKey(StorageKeyType::Metadata)};
+    db_proxy.add_delta(addrkey, make_deployed_contract_delta(deployment),
+                       std::to_underlying(StorageDeltaFlags::None));
+  }
+
+  auto res = co_await db_proxy.try_push_current_subtransaction();
+  if (!res.has_value()) {
+    co_return res.error();
+  }
+  if (res.value()) {
+    try_invoke_frame_count_++;
+  }
+  co_return res.value();
+}
+
+void
+InvocationFrame::collect_storage_deltas(
+    x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const
+{
+  out.reserve(out.size() + modified_items_.size() +
+              new_contract_deployments_.size());
+  for (auto const &[key, item_view] : modified_items_) {
+    auto [delta, flags] = item_view.get_delta();
+    if (delta) {
+      out.push_back(FlaggedStorageDelta{
+          .addrkey = key.to_address_and_key(),
+          .delta = *delta,
+          .flags = flags,
+      });
+    }
+  }
+
+  for (auto const &[addr, deployment] : new_contract_deployments_) {
+    AddressAndKey addrkey = {.address = addr,
+                             .key = StorageKey(StorageKeyType::Metadata)};
+    StorageDelta delta = make_deployed_contract_delta(deployment);
+    out.push_back(FlaggedStorageDelta{
+        .addrkey = addrkey,
+        .delta = delta,
+        .flags = std::to_underlying(StorageDeltaFlags::None),
+    });
+  }
+}
+
+SystemStatus<void>
+InvocationFrameStack::start_frame(ContractAddress const &address,
+                                  Calldata &&calldata, InvokeFlagSet flags,
+                                  ValidatedAuthTokens &&owned_auth_tokens)
+{
+  assert(frame_stack_.empty() ||
+         check_auth_tokens_owned(owned_auth_tokens.ids()));
+
+  size_t event_count =
+      frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
+  uint32_t parent_depth =
+      frame_stack_.empty() ? 0
+                           : frame_stack_.back().get_total_try_invoke_depth();
+
+  auto forwarded_ids = std::move(owned_auth_tokens).release();
+  // A root frame has no parent to forward it tokens.
+  assert(!frame_stack_.empty() || forwarded_ids.empty());
+
+  // The only allocations; emplace_back is strongly exception-safe (noexcept
+  // move ctor), so a throw leaves the stack unchanged (#3058).
+  try {
+    // The child shares the parent's forwarded tokens, which it numbers 0..N-1
+    // in the order the parent listed them.
+    std::vector<RegisteredAuthToken> forwarded_tokens;
+    forwarded_tokens.reserve(forwarded_ids.size());
+    for (auto token_id : forwarded_ids) {
+      auto const *token = frame_stack_.back().lookup_auth_token(token_id);
+      CHECK_PTR(token);
+      forwarded_tokens.push_back(*token);
+    }
+    frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
+                              event_count, std::move(forwarded_tokens),
+                              parent_depth, config_params_);
+  } catch (...) {
+    return SystemError{SystemErrorCode::Unrecoverable};
+  }
+
+  if (frame_stack_.size() >= 2) {
+    // Non-allocating, so it cannot throw: once here the frame is admitted. The
+    // forwarded tokens leave the parent when the child commits.
+    frame_stack_[frame_stack_.size() - 2].set_child_forwarded_auth_tokens(
+        std::move(forwarded_ids));
+  }
+  return {};
+}
+
+x23::Async<SystemStatus<std::pair<InvokeResult, bool>>>
+InvocationFrameStack::finish_frame(InvokeStatus<void> result,
+                                   ExecutionModeData &execution_mode_data,
+                                   DbConflictResult *try_invoke_conflict_out)
+{
+  InvokeResult frame_result = {
+      .result_ = result,
+      .gas_consumed_ = 0,
+  };
+
+  [[maybe_unused]] bool try_invoke_failed = false;
+
+  assert(!frame_stack_.empty());
+  bool manually_reverted = frame_stack_.back().should_revert();
+
+  // handle the try_invoke data
+  if (frame_stack_.back().is_try_invoke()) {
+    // Only relevant in the case where the deterministic part of the frame
+    // succeeds AND the frame is not manually reverting. A manually-reverted
+    // frame discards its writes, so probing locks for those writes is
+    // incorrect: it would consume a nondeterministic bit that should not
+    // exist, and a lock conflict or DB error would wrongly rewrite the
+    // result.
+    if (frame_result.is_frame_success() && !manually_reverted) {
+      bool acq_success = false;
+
+      if (frame_stack_.back().depth_cap_reached(config_params_)) {
+        // Deterministic failure across both proposal and validation modes.
+        // No nondeterministic bit is logged or consumed here, so the bit
+        // stream represents only lock-acquisition outcomes.
+        acq_success = false;
+      }
+      else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+        static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
+        auto acq_res =
+            co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+                                                                 no_obs);
+        if (!acq_res.has_value()) {
+          frame_stack_.pop_back();
+          co_return acq_res.error();
+        }
+        acq_success = acq_res.value();
+
+        // Hand the just-attempted push's conflict diagnostic back to the caller
+        // so it can be recorded on this frame's trace. None on a successful
+        // acquire (last_push_conflict_ is reset at the start of every push).
+        if (try_invoke_conflict_out) {
+          *try_invoke_conflict_out = db_proxy_.last_push_conflict();
+        }
+
+        std::get<ProposalModeData>(execution_mode_data)
+            .log_nondeterministic_bit(acq_success);
+      }
+      else if (std::holds_alternative<ViewingModeData>(execution_mode_data)) {
+        auto bit = std::get<ViewingModeData>(execution_mode_data)
+                       .view_try_invoke_bit();
+        acq_success = bit.get();
+      }
+      else {
+        auto res = std::get<ValidationModeData>(execution_mode_data)
+                       .consume_nondeterministic_bit();
+        if (!res.has_value()) {
+          frame_stack_.pop_back();
+          co_return SystemError{SystemErrorCode::ValidationFailure};
+        }
+        acq_success = res.value().get();
+        if (acq_success) {
+          auto const &obs = std::visit(
+              [](auto const &mode)
+                  -> std::map<AddressAndKey, std::vector<QueueEntry>> const & {
+                return mode.observations_to_validate();
+              },
+              execution_mode_data);
+          for (auto const &[addrkey, entries] : obs) {
+            if (entries.empty()) {
+              continue;
+            }
+            auto *view =
+                frame_stack_.back().get_item_view(FrameItemKey::from(addrkey));
+            if (view && !view->get<RetrocausalQueueItem>() &&
+                !view->get<UnmodifiedItem>()) {
+              frame_stack_.pop_back();
+              co_return SystemError{SystemErrorCode::ValidationFailure};
+            }
+          }
+        }
+      }
+
+      // Each mode above only decides whether the child succeeded; the depth
+      // cap is advanced here so that no mode can settle a success without
+      // counting it. A mode-specific bump was how viewing came to skip the
+      // cap.
+      if (acq_success) {
+        frame_stack_.back().note_try_invoke_success(config_params_);
+      }
+      else {
+        // If the frame locks were not acquired successfully, then we mark
+        // the entire frame as failing.
+        try_invoke_failed = true;
+        // TODO(geoff): perhaps add additional gas consumption
+        frame_result = InvokeResult{
+            .result_ = InvokeError{InvokeErrorCode::Deterministic},
+            .gas_consumed_ = 0,
+        };
+      }
+    }
+    // otherwise nothing to do here with try_invoke
+  }
+
+  if (frame_result.should_frame_revert() || manually_reverted) {
+    auto st = co_await frame_stack_.back().mark_frame_as_failed(db_proxy_);
+    if (!st.has_value()) {
+      frame_stack_.pop_back();
+      co_return st.error();
+    }
+  }
+
+  if (frame_result.should_frame_revert()) {
+    assert(try_invoke_failed ||
+           frame_stack_.back().get_frame_output().status_code() ==
+               InvocationFrameStatusCode::Fault);
+    frame_stack_.pop_back();
+
+    if (!frame_stack_.empty()) {
+      // Contain the auth-token restore allocation at the noexcept
+      // finish_frame() boundary; the child is already popped (#3378).
+      try {
+        frame_stack_.back().commit_failed_child_frame();
+      } catch (...) {
+        co_return SystemError{SystemErrorCode::Unrecoverable};
+      }
+    }
+
+    co_return SystemStatus<std::pair<InvokeResult, bool>>{
+        std::pair{frame_result, manually_reverted}};
+  }
+
+  // commit child invocation frame successfully
+  assert(frame_result.is_frame_success());
+
+  size_t stack_size = frame_stack_.size();
+  if (stack_size >= 2) {
+    // Commit the frame to it's parent
+    // Accounts for whether or not the frame is set to manually revert.
+    // Contain the commit's allocation at the noexcept finish_frame() boundary,
+    // popping the child so the stack stays coherent (#3378).
+    try {
+      if (frame_stack_.back().should_revert()) {
+        frame_stack_[stack_size - 2].commit_manually_reverted_frame(
+            std::move(frame_stack_.back()));
+      }
+      else {
+        frame_stack_[stack_size - 2].commit_successful_child_frame(
+            std::move(frame_stack_.back()));
+      }
+    } catch (...) {
+      frame_stack_.pop_back();
+      co_return SystemError{SystemErrorCode::Unrecoverable};
+    }
+  }
+  else {
+    assert(stack_size == 1);
+    // last frame -- push frame contents to external caller
+    // (SystemCallHandler), via the supplied lambda
+    last_frame_action_(std::move(frame_stack_.back()));
+  }
+
+  frame_stack_.pop_back();
+
+  co_return SystemStatus<std::pair<InvokeResult, bool>>{
+      std::pair{frame_result, manually_reverted}};
+}
+
+void
+InvocationFrameStack::log_trace_finish(InvocationFrameTrace &trace)
+{
+  assert(!frame_stack_.empty());
+  frame_stack_.back().collect_storage_deltas(trace.storage_writes);
+  trace.status = frame_stack_.back().get_frame_output();
+}
+
+std::optional<ContractAddress>
+InvocationFrameStack::get_msg_sender() const
+{
+  return frame_stack_.size() >= 2
+             ? std::optional<ContractAddress>{frame_stack_[frame_stack_.size() -
+                                                           2]
+                                                  .address()}
+             : std::nullopt;
+}
+
+std::optional<DeployedContractHash>
+InvocationFrameStack::lookup_locally_deployed_contract(
+    ContractAddress const &addr) const
+{
+  for (auto const &frame : std::ranges::reverse_view(frame_stack_)) {
+    if (auto out = frame.lookup_locally_deployed_contract(addr)) {
+      assert(out.has_value());
+      return out;
+    }
+  }
+  return std::nullopt;
+}
+
+ItemView *
+InvocationFrame::add_item_view(FrameItemKey const &key, ItemView new_view)
+{
+  assert(!modified_items_.contains(key));
+  auto [iter, _] = modified_items_.emplace(key, std::move(new_view));
+  return &iter->second;
+}
+
+ItemView *
+InvocationFrameStack::get_item_view(FrameItemKey const &key)
+{
+  const int32_t stack_depth = frame_stack_.size();
+  assert(stack_depth > 0);
+
+  auto &active_frame = frame_stack_.back();
+
+  // do we already have a frame in the top active frame
+  if (auto *active_frame_view = active_frame.get_item_view(key)) {
+    return active_frame_view;
+  }
+
+  // otherwise create view in active frame, by either copying from
+  // a parent call frame or from storage
+  for (int32_t i = stack_depth - 2; i >= 0; --i) {
+    auto &frame = frame_stack_[i];
+
+    if (auto const *local_view = frame.get_item_view(key)) {
+      // refresh the parent frame view in the top frame
+      return active_frame.add_item_view(key, *local_view);
+    }
+  }
+
+  return frame_stack_.back().add_item_view(key, ItemView());
+}
+
+ItemView *
+InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
+{
+  return get_item_view(FrameItemKey::from(addrkey));
+}
+
+ItemView *
+InvocationFrameStack::get_item_view(StorageKeyContractData const &data_key)
+{
+  return get_item_view(frame_item_key(data_key));
+}
+
+RegisteredAuthToken const *
+InvocationFrameStack::lookup_auth_token(uint32_t token_id) const
+{
+  assert(!frame_stack_.empty());
+  return frame_stack_.back().lookup_auth_token(token_id);
+}
+
+SyscallStatus<uint32_t>
+InvocationFrameStack::mint_auth_token(RegisteredAuthToken token)
+{
+  if (frame_stack_.empty()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  auto token_id = frame_stack_.back().add_auth_token(std::move(token));
+  if (!token_id.has_value()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+  return token_id.value();
+}
+
+SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
+InvocationFrameStack::consume_auth_token(uint32_t token_id)
+{
+  assert(!frame_stack_.empty());
+  auto &frame = frame_stack_.back();
+  auto const *token = frame.lookup_auth_token(token_id);
+  if (token == nullptr) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  if (token->root_node->consumer_address != frame.address()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  // The children take the frame's next ids, which must all fit in a uint32_t.
+  size_t child_count = token->root_node->child_nodes.size();
+  if (child_count >
+      std::numeric_limits<uint32_t>::max() - frame.next_auth_token_id()) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
+
+  auto consumed = frame.take_auth_token(token_id);
+  if (child_count == 0) {
+    return ConsumeAuthTokenResult{.token = std::move(consumed),
+                                  .new_token_id_start = 0,
+                                  .new_token_id_count = 0};
+  }
+
+  // Each child shares its node with the consumed token.
+  auto new_token_id_start = static_cast<uint32_t>(frame.next_auth_token_id());
+  for (auto const &child : consumed.root_node->child_nodes) {
+    auto child_id = frame.add_auth_token(
+        RegisteredAuthToken{.mint_address = consumed.mint_address,
+                            .expiry_height = consumed.expiry_height,
+                            .root_node = child});
+    // The ids were checked to fit above.
+    CHECK(child_id.has_value());
+  }
+  return ConsumeAuthTokenResult{.token = std::move(consumed),
+                                .new_token_id_start = new_token_id_start,
+                                .new_token_id_count =
+                                    static_cast<uint32_t>(child_count)};
+}
+
+bool
+InvocationFrameStack::check_auth_tokens_owned(
+    std::span<uint32_t const> token_ids) const
+{
+  assert(!frame_stack_.empty());
+  return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
+    return frame_stack_.back().check_owns_auth_token(token_id);
+  });
+}
+
+} // namespace hogd

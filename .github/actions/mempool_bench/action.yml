@@ -1,0 +1,97 @@
+name: "Run Mempool Bench"
+description: "Run the mempool benchmarks"
+inputs:
+  build-dir:
+    description: "Build directory to use"
+    required: true
+    type: string
+  work-dir:
+    description: "Work directory to use"
+    required: true
+    type: string
+runs:
+  using: "composite"
+  steps:
+    - name: set port env vars
+      run: |
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EXECUTOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolExecutorServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_DB_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolDbServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_EVENT_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolEventServerPort)" >> $GITHUB_ENV
+        echo "MEMPOOL_COORDINATOR_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kMempoolCoordinatorServerPort)" >> $GITHUB_ENV
+      shell: bash
+    - name: make sure bench servers are running
+      run: |
+        ./scripts/wait-port.sh hog1 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog6 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog7 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog8 ${{ env.CI_CONTROL_PORT }}
+        ./scripts/wait-port.sh hog11 ${{ env.CI_CONTROL_PORT }}
+      shell: bash
+    - name: clear work dirs
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} clear_work_dir
+      shell: bash
+    - name: launch loadgen
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} start hogd/loadgen/loadgen_server -p 11222
+      shell: bash
+    - name: wait for loadgen
+      run: ./scripts/wait-port.sh hog7 11222
+      shell: bash
+    - name: launch first hog-exec
+      # the mempool runs on hog10
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      # can't wait for hog-exec: that's waiting on the coordinator
+      shell: bash
+    - name: launch second hog-exec
+      # the mempool runs on hog10
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      # can't wait for hog-exec: that's waiting on the coordinator
+      shell: bash
+    - name: launch third hog-exec
+      # the mempool runs on hog10
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      # can't wait for hog-exec: that's waiting on the coordinator
+      shell: bash
+    - name: check hog-exec is running
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} expect_running
+      shell: bash
+    - name: launch event
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hog_event/hog-event --mempool-addr hog10:${{ env.MEMPOOL_EVENT_PORT }} --work-dir ${{ inputs.work-dir }}/
+      shell: bash
+    - name: launch hog-db
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} start hogd/hog_db/hog-db --db-path ${{ inputs.work-dir }}/ --ram-bytes 10000000000 --coordinator-addr hog10:${{ env.MEMPOOL_DB_PORT }}
+      shell: bash
+    - name: make sure procs are running
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} expect_running
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} expect_running
+      shell: bash
+    - name: launch fake coordinator and mempool
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hog_mempool/test/coordinator hog10:${{ env.MEMPOOL_COORDINATOR_PORT }} hog7:11222 > coordinator_output.txt 2>&1 &
+        bash -c 'timeout 90s ./${{ inputs.build-dir }}/hogd/hog_mempool/hog-mempool 1 1; status=$?; [ $status -eq 124 ] && status=0; exit $status'
+      shell: bash
+    - name: clone metrics history # This is idempotent
+      run: ./scripts/clone_metrics_history.sh
+      shell: bash
+    - name: log integration metrics
+      run: ./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+      shell: bash
+
+    - name: stop running processes
+      if: always()
+      shell: bash
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog7 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} stop
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop

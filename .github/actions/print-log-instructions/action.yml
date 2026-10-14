@@ -1,0 +1,32 @@
+name: Print Log Download Instructions
+description: Prints GitHub CLI command to view logs for the current job
+
+runs:
+  using: composite
+  steps:
+    - name: Print log download instructions
+      if: always()
+      shell: bash
+      env:
+        # The numeric job id that `gh run view --job` takes is the job's check
+        # run id, so no API lookup is needed.
+        JOB_ID: ${{ job.check_run_id }}
+        GH_TOKEN: ${{ github.token }}
+        JOB_KEY: ${{ github.job }}
+        RUN_JOBS_URL: https://api.github.com/repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/jobs
+        REPO: ${{ github.repository }}
+      run: |
+        # A convenience step: it must never fail or stall the job. When the
+        # GitHub API was slow, the old unbounded lookup hung for minutes and
+        # then failed in jq, turning green jobs red, and a failed job does
+        # not commit its cache volume.
+        if [ -z "$JOB_ID" ]; then
+          JOB_ID=$(curl -fsS --max-time 15 \
+            -H "Authorization: Bearer $GH_TOKEN" \
+            -H "Accept: application/vnd.github+json" \
+            "$RUN_JOBS_URL" |
+            jq -r --arg name "$JOB_KEY" '.jobs[]? | select(.name == $name) | .id') || true
+        fi
+
+        echo "To download logs, run"
+        echo "gh run view --log --job ${JOB_ID:-<job id>} --repo $REPO"

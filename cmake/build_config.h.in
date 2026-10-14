@@ -1,0 +1,9 @@
+#pragma once
+
+namespace hogd {
+
+// Keep checkout-specific paths out of global compiler definitions so only
+// translation units that need build-tree artifacts receive a path-dependent key.
+inline constexpr char kBuildRoot[] = "@CMAKE_BINARY_DIR@";
+
+} // namespace hogd

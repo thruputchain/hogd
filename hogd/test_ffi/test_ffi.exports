@@ -1,0 +1,30 @@
+# Exported symbols for libtest_ffi (macOS).
+# Only the extern "C" API from test_bindings.h is public.
+_abort_transaction
+_advance_new_block
+_close_runtime_context
+_close_syscall_handler
+_create_db
+_do_verify_contract
+_enable_syscall_logging
+_finish_mock_invocation_frame
+_free_db
+_free_ffi_data_buffer
+_get_cost_model
+_get_network_config
+_get_snapshot_storage_item
+_mock_syscall_entrypoint
+_open_mock_invocation_frame
+_open_mocked_syscall_handler
+_open_runtime_context
+_open_syscall_handler
+_pop_context
+_push_context
+_register_new_contract
+_root_invoke
+_setup_create_contract
+_setup_deploy_contract
+_setup_grant_contract_storage_tokens
+_try_commit_transaction
+_verify_signed_transaction_auth
+_verify_signed_transaction_auth_from_db

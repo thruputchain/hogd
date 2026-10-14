@@ -1,0 +1,155 @@
+add_library(
+  loadgen
+  erc20_experiment.cc
+  erc20_basic_auth_experiment.cc
+  loadgen_server.cc
+  status.cc
+)
+
+target_link_libraries(loadgen
+  hogd
+  genesis
+)
+
+add_dependencies(
+  loadgen
+  all_riscv_contracts
+  all_contract_headers
+  all_riscvs_built # erc20_experiment loads .rv32a artifacts
+)
+
+target_include_directories(loadgen PRIVATE
+  ${CMAKE_BINARY_DIR}
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+)
+
+add_executable(
+  loadgen_tests
+  erc20_experiment_tests.cc
+)
+hogd_discover_tests(loadgen_tests)
+
+target_link_libraries(
+  loadgen_tests
+  loadgen
+  runtime_test_lib
+  precompiles
+  gtest
+)
+
+add_dependencies(
+  loadgen_tests
+  all_riscv_contracts
+  all_contract_headers
+)
+
+add_executable(
+  loadgen_server
+  main.cc
+)
+
+target_link_libraries(
+  loadgen_server
+  loadgen
+  metrics
+  http
+  hogd
+)
+
+if(BUILD_BENCHMARKS)
+  # create loadgen benchmark binary
+  add_executable(
+    erc20_experiment_bench
+    erc20_experiment_bench.cc
+  )
+  target_link_libraries(
+    erc20_experiment_bench
+    loadgen
+    benchmark::benchmark
+  )
+
+  add_dependencies(
+    erc20_experiment_bench
+    all_riscv_contracts
+    all_contract_headers
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET erc20_experiment_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
+
+# create tx_size_stats binary
+add_executable(
+  tx_size_stats
+  tx_size_stats.cc
+)
+target_link_libraries(
+  tx_size_stats
+  loadgen
+  hogd
+)
+
+add_dependencies(
+  tx_size_stats
+  all_riscv_contracts
+  all_contract_headers
+)
+
+# create gas_usage_metric binary
+add_executable(
+  gas_usage_metric
+  gas_usage_metric.cc
+)
+target_link_libraries(
+  gas_usage_metric
+  loadgen
+  hogd
+  protocol
+  runtime_test_util
+  runtime_test_lib
+  precompiles
+  gtest
+)
+
+add_dependencies(
+  gas_usage_metric
+  all_riscv_contracts
+  all_contract_headers
+)
+
+# in-process payments execution benchmark, no servers needed
+if(BUILD_BENCHMARKS)
+  add_executable(
+    payments_exec_bench
+    payments_exec_bench.cc
+  )
+  target_link_libraries(
+    payments_exec_bench
+    loadgen
+    hogd
+    protocol
+    runtime_test_util
+    runtime_test_lib
+    precompiles
+    gtest
+    benchmark::benchmark
+  )
+
+  add_dependencies(
+    payments_exec_bench
+    all_riscv_contracts
+    all_contract_headers
+  )
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET payments_exec_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()
+
+# The opt-in corpus builder supplies generated headers; normal builds do not
+# compile hundreds of synthetic contract variants.
+set(HACKATHON_ARTIFACT_DIR "" CACHE PATH "Compiled hackathon contract corpus")
+if(HACKATHON_ARTIFACT_DIR)
+  add_executable(hackathon_corpus EXCLUDE_FROM_ALL hackathon_corpus.cc)
+  target_include_directories(hackathon_corpus PRIVATE ${HACKATHON_ARTIFACT_DIR} ${CMAKE_BINARY_DIR})
+  target_link_libraries(hackathon_corpus loadgen)
+endif()

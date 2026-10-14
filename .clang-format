@@ -1,0 +1,32 @@
+---
+Language: Cpp
+BasedOnStyle: LLVM
+Standard: Latest
+AllowBreakBeforeNoexceptSpecifier: OnlyWithParen
+AllowShortFunctionsOnASingleLine: InlineOnly
+AlwaysBreakAfterDefinitionReturnType: TopLevel
+# BreakTemplateDeclarations: MultiLine
+BreakBeforeBraces: Custom
+BraceWrapping:
+  AfterCaseLabel: true
+  AfterFunction: true
+  BeforeElse: true
+  SplitEmptyFunction: false
+  SplitEmptyRecord: false
+  SplitEmptyNamespace: true
+BreakBeforeConceptDeclarations: Allowed
+#ColumnLimit: 79
+ConstructorInitializerIndentWidth: 2
+InsertNewlineAtEOF: true
+LineEnding: LF
+PenaltyBreakTemplateDeclaration: 0
+PenaltyBreakBeforeFirstCallParameter: 100
+RequiresClausePosition: WithPreceding
+ShortNamespaceLines: 0
+SpaceAfterTemplateKeyword: false
+SpaceBeforeParens: Custom
+SpaceBeforeParensOptions:
+  AfterRequiresInClause: true
+DerivePointerAlignment: false
+PointerAlignment: Right
+...

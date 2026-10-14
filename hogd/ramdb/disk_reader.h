@@ -1,0 +1,71 @@
+// disk_reader.h - the read path for persistent on-disk storage.
+
+#pragma once
+
+#include <optional>
+#include <vector>
+
+#include "hogd/base/io.h"
+#include "hogd/base/types.h"
+#include "hogd/ramdb/loglet.h"
+#include "hogd/ramdb/scalable_map.h"
+
+namespace hogd {
+
+class DiskReader {
+public:
+  DiskReader(LogletAllocator &allocator, ScalableMap &map)
+    : allocator_(allocator), map_(map)
+  {}
+  ~DiskReader() = default;
+
+  // Disable move and copy.
+  DiskReader(DiskReader &&r) = delete;
+  DiskReader &operator=(DiskReader &&r) = delete;
+  DiskReader(const DiskReader &r) = delete;
+  DiskReader &operator=(const DiskReader &r) = delete;
+
+  // load loads a database from disk. It loads up to lsn if specified, or
+  // otherwise the highest valid LSN. It returns the LSN that was loaded if
+  // successful.
+  DBStatus<uint64_t> load(Directory &dir,
+                          std::optional<uint64_t> lsn = std::nullopt,
+                          uint64_t *max_snapshot_end_lsn = nullptr);
+
+  // verify checks the integrity of a database on disk. it returns the highest
+  // LSN that is valid.
+  DBStatus<uint64_t> verify(Directory &dir);
+
+  // inspects log files in dir and returns total amount of space they
+  // occupy in bytes. used by Database to decide whether to call cleanup().
+  static size_t log_bytes(const Directory &dir);
+  // given a dir of snapshot and log files, figure out which ones need to be
+  // preserved to enable recovery, then delete the rest. used by Database
+  // for periodic disk cleanup when log adds a new file.
+  static void cleanup(const Directory &dir);
+
+private:
+  // the allocator to use for loglet buffers.
+  LogletAllocator &allocator_;
+  // the map to insert items into.
+  ScalableMap &map_;
+
+  // load_database calls func with a buffer of changes for each commit record
+  // in an entire database.  It extracts these changes from the log files in
+  // dir. It stops when target_lsn is reached or there is a failure. Recovery
+  // is all or nothing: on success it sets loaded_lsn to the last LSN loaded;
+  // on failure nothing is published and the database must not be used.
+  // With truncate_tail the last file is opened for writing and an uncommitted
+  // tail is cut off (load); without it every file is opened read-only and the
+  // tail is left in place (verify).
+  DBStatus<void> load_database(
+      Directory &dir,
+      const std::function<DBStatus<void>(std::vector<UniqueLoglet> &&)> &func,
+      std::optional<uint64_t> target_lsn, bool truncate_tail,
+      uint64_t *loaded_lsn = nullptr, uint64_t *max_snapshot_end_lsn = nullptr);
+
+  // apply_changes loads a buffer of changes into map_.
+  DBStatus<void> apply_changes(std::vector<UniqueLoglet> &&log);
+};
+
+} // namespace hogd

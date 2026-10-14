@@ -1,0 +1,390 @@
+// -*- C++ -*-
+
+#pragma once
+
+#include <array>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <functional>
+#include <initializer_list>
+#include <new>
+#include <ranges>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+#if HAVE_BUILTIN_ARM_YIELD
+#include <arm_acle.h>
+#endif // HAVE_BUILTIN_ARM_YIELD
+
+namespace x23 {
+
+using std::int16_t;
+using std::int32_t;
+using std::int64_t;
+using std::int8_t;
+using std::intptr_t;
+using std::ptrdiff_t;
+using std::size_t;
+using std::uint16_t;
+using std::uint32_t;
+using std::uint64_t;
+using std::uint8_t;
+using std::uintptr_t;
+
+using std::declval;
+
+// FORWARD(arg) is like std::forward<decltype(arg)>(arg), which
+// creates an expression whose type corresponds to the type with which
+// variable arg was declared--rvalue reference if arg is an rvalue
+// reference, lvalue reference otherwise.
+//
+// arg should always be an unparenthesized id-expression--usually a
+// function parameter declared as a forwarding reference (auto &&arg).
+//
+// We play some games to force a compilation error in the event that
+// arg is parenthesized, as this would cause us to get the wrong
+// decltype--i.e., the type of an expression, not the type with which
+// a variable was declared.  (An expression is already its own type,
+// so you don't need std::forward in that case.)
+#define __FORWARD_IGNORE(x) // causes error if invoked with 2 arguments
+#define __FORWARD_APPLY_IGNORE(x) __FORWARD_IGNORE(x)
+#define __FORWARD_PARENTHESIZED_TO_COMMA(x) ,
+#define FORWARD(arg)                                                           \
+  static_cast<decltype(arg) &&>(arg)                                           \
+      __FORWARD_APPLY_IGNORE(__FORWARD_PARENTHESIZED_TO_COMMA arg)
+
+// Types T and U differ only in reference and const/volatile
+// qualifiers or pointer/array.
+template<typename T, typename U>
+concept decays_to = std::same_as<std::decay_t<T>, std::decay_t<U>>;
+
+// Match an lvalue or rvalue, const or non-const U.
+template<typename T, typename U>
+concept references = std::convertible_to<T, const U &>;
+
+// True for types that are not const or reference to const.
+template<typename T>
+concept is_mutable = !std::is_const_v<std::remove_reference_t<T>>;
+
+template<typename T, typename... Ts>
+concept is_one_of = (std::same_as<T, Ts> || ...);
+
+template<typename RG, typename T>
+concept is_range_of =
+    std::ranges::range<RG> && std::same_as<std::ranges::range_value_t<RG>, T>;
+
+// Lambda with ad-hoc polymorphism.  For example:
+//
+//   auto f = Multilambda{
+//     [](int i) { /* ... do int thing ... */ },
+//     [](std::string_view sv) { /* ... do string thing ... */ },
+//   };
+//
+// See here for an explanation of how this works:
+// https://www.scs.stanford.edu/~dm/blog/param-pack.html#multilambda
+template<typename... Lambdas> struct Multilambda : Lambdas... {
+  using Lambdas::operator()...;
+};
+template<typename... Lambdas>
+Multilambda(Lambdas...) -> Multilambda<Lambdas...>;
+
+// true if T is the type TMPL<Args...> for some Args...  However,
+// doesn't work if TMPL has any non-type template arguments.
+template<typename T, template<typename...> typename Tmpl>
+concept is_template_instance = decltype(Multilambda{
+    []<typename... U>(const Tmpl<U...> &) { return std::true_type{}; },
+    [](const auto &) { return std::false_type{}; },
+}(declval<T>()))::value;
+
+namespace detail {
+template<size_t N, typename T0, typename... T> requires (N <= sizeof...(T))
+struct TypeNumHelper {
+  using type = typename TypeNumHelper<N - 1, T...>::type;
+};
+template<typename T0, typename... T> struct TypeNumHelper<0, T0, T...> {
+  using type = T0;
+};
+
+inline decltype(auto)
+last_arg(auto &&arg0, auto &&...rest)
+{
+  if constexpr (sizeof...(rest) == 0)
+    return arg0;
+  else
+    return last_arg(std::forward<decltype(rest)>(rest)...);
+}
+} // namespace detail
+
+// type_num<N, T0, T1, ...> is just TN
+template<size_t N, typename... T> requires (N < sizeof...(T))
+using TypeNum = detail::TypeNumHelper<N, T...>::type;
+
+// type_num<T0, T1, ..., Tmax> is just Tmax
+template<typename... T> requires (sizeof...(T) > 0)
+using LastType = TypeNum<sizeof...(T) - 1, T...>;
+
+// Make it easy to check inclusion of multiple categories represented
+// as an enum class, e.g.:
+//
+//   if (c & FlagSet{kVarBytes, kFixedBytes}) ...
+template<typename E> requires std::is_enum_v<E>
+struct FlagSet {
+  using enum_type = E;
+  using set_type = std::underlying_type_t<E>;
+
+  set_type flags_{};
+
+  constexpr FlagSet() noexcept = default;
+  constexpr FlagSet(enum_type e) noexcept : flags_(set_type(e)) {}
+  constexpr FlagSet(std::initializer_list<enum_type> il) noexcept
+  {
+    for (auto e : il)
+      flags_ |= set_type(e);
+  }
+  constexpr explicit operator bool() const noexcept { return flags_; }
+  constexpr FlagSet operator&(FlagSet e) const noexcept
+  {
+    FlagSet ret;
+    ret.flags_ = flags_ & e.flags_;
+    return ret;
+  }
+  constexpr friend FlagSet operator&(enum_type e, FlagSet s) noexcept
+  {
+    return FlagSet{e} & s;
+  }
+};
+
+// Make an object of type Type if Cond is true.  Otherwise return an
+// empty tuple.
+template<bool Cond, typename Type, typename... Args>
+constexpr auto
+make_if(Args &&...args)
+{
+  if constexpr (Cond)
+    return Type(std::forward<Args>(args)...);
+  else
+    return std::tuple<>{};
+}
+
+// Basically std::invocable<F, Args...> except if Args... is the
+// single type void, then checks std::invocable<F>.
+template<typename F, typename... Args>
+concept void_invocable =
+    std::invocable<F, Args...> ||
+    (sizeof...(Args) == 1 && (std::same_as<void, Args> && ...) &&
+     std::invocable<F>);
+
+// void_invocable and noexcept
+template<typename F, typename... Args>
+concept noexcept_invocable = void_invocable<F, Args...> && [] {
+  if constexpr (sizeof...(Args) == 1 && (std::same_as<void, Args> && ...))
+    return noexcept(std::invoke(declval<F>()));
+  else
+    return noexcept(std::invoke(declval<F>(), declval<Args>()...));
+}();
+
+// Return the result of f2(f1(args...)) unless f1 returns void, in
+// which case invoke f1(args...) and then return the result of f2().
+template<typename F2, typename F1, typename... Args>
+requires (!std::is_void_v<std::invoke_result_t<F1, Args...>>) &&
+         std::invocable<F2, std::invoke_result_t<F1, Args...>>
+inline decltype(auto)
+compose(F2 &&f2, F1 &&f1, Args &&...args)
+    noexcept(noexcept(std::invoke(std::forward<F2>(f2),
+                                  std::invoke(std::forward<F1>(f1),
+                                              std::forward<Args>(args)...))))
+{
+  return std::invoke(std::forward<F2>(f2),
+                     std::invoke(std::forward<F1>(f1),
+                                 std::forward<Args>(args)...));
+}
+template<typename F2, typename F1, typename... Args>
+requires std::is_void_v<std::invoke_result_t<F1, Args...>> && std::invocable<F2>
+inline decltype(auto)
+compose(F2 &&f2, F1 &&f1, Args &&...args)
+    noexcept(noexcept(std::invoke(std::forward<F1>(f1),
+                                  std::forward<Args>(args)...)) &&
+             noexcept(std::invoke(std::forward<F2>(f2))))
+{
+  std::invoke(std::forward<F1>(f1), std::forward<Args>(args)...);
+  return std::invoke(std::forward<F2>(f2));
+}
+
+template<typename F2, typename F1, typename... Args>
+concept can_compose =
+    requires { compose(declval<F2>(), declval<F1>(), declval<Args>()...); };
+
+template<typename F2, typename F1, typename... Args>
+concept can_compose_noexcept =
+    can_compose<F2, F1, Args...> &&
+    noexcept(compose(declval<F2>(), declval<F1>(), declval<Args>()...));
+
+enum class CallableCategory {
+  kFunction = 1 << 1,
+  kMethod = 1 << 2,
+  kObject = 1 << 3
+};
+
+// Function traits, allow you to extract argument and return types
+// from a function.
+template<typename F> struct FnTraits;
+template<typename R, typename... A, bool NE> requires (sizeof...(A) > 0)
+struct FnTraits<R (*)(A...) noexcept(NE)> {
+  using return_type = R;
+  static constexpr size_t num_args = sizeof...(A);
+  template<size_t N> requires (N < num_args)
+  using arg_type = TypeNum<N, A...>;
+  static constexpr bool is_noexcept = NE;
+  static constexpr CallableCategory category = CallableCategory::kFunction;
+};
+template<typename R, bool NE> struct FnTraits<R (*)() noexcept(NE)> {
+  using return_type = R;
+  static constexpr size_t num_args = 0;
+  static constexpr bool is_noexcept = NE;
+  static constexpr CallableCategory category = CallableCategory::kFunction;
+};
+template<typename R, typename S, typename... A, bool NE>
+struct FnTraits<R (S::*)(A...) noexcept(NE)>
+  : FnTraits<R (*)(A...) noexcept(NE)> {
+  using object_type = S;
+  static constexpr CallableCategory category = CallableCategory::kMethod;
+};
+template<typename R, typename S, typename... A, bool NE>
+struct FnTraits<R (S::*)(A...) const noexcept(NE)>
+  : FnTraits<R (*)(A...) noexcept(NE)> {
+  using object_type = S;
+  static constexpr CallableCategory category = CallableCategory::kMethod;
+};
+template<typename Obj> requires requires { &Obj::operator(); }
+struct FnTraits<Obj> : FnTraits<decltype(&Obj::operator())> {
+  static constexpr CallableCategory category = CallableCategory::kObject;
+};
+template<typename F> requires (!std::same_as<F, std::decay_t<F>>)
+struct FnTraits<F> : FnTraits<std::decay_t<F>> {};
+
+template<size_t N, typename F>
+using ArgNumType = typename FnTraits<F>::template arg_type<N>;
+
+// variant_index<std::variant<T0, T1, T2>, Tn> is 0 when Tn is T0, 1
+// when Tn is T1, etc.
+template<typename U, typename T>
+constexpr size_t variant_index =
+    []<template<typename...> typename V, typename... Ts>(V<Ts...> *) {
+      // Cause a compilation error if type not in argument:
+      static_assert((std::same_as<Ts, T> || ...), "type not in argument list");
+      size_t ret = 0;
+      (void)((std::same_as<Ts, T> || (++ret, false)) || ...);
+      return ret;
+    }(static_cast<U *>(nullptr));
+
+// Try to find a common return type for a bunch of functions, but fall
+// back to void if any of the types are void or they otherwise don't
+// have a common type.
+template<typename... T>
+using merged_return_t = decltype([] {
+  if constexpr (requires { typename std::common_type_t<T...>; })
+    return [] -> std::common_type_t<T...> { std::unreachable(); }();
+  else
+    return;
+}());
+
+// Tag type to request that the return type of with_n be inferred.
+struct auto_t {};
+
+namespace detail {
+// Comparison-chain dispatch for with_n.  A chain of n == I tests keeps
+// every arm a direct call the optimizer can inline and constant-fold
+// (and can still turn into a jump table for large ranges), unlike a
+// table of function pointers, which is an opaque indirect call.
+// always_inline guarantees the chain flattens at every optimization
+// level: each level is a distinct instantiation (not true recursion),
+// so without it an uninlined chain would cost Max - Min nested calls
+// per dispatch.
+template<typename R, size_t Min, size_t Max, typename F>
+[[gnu::always_inline]] constexpr R
+with_n_impl(size_t n, F &&f)
+{
+  if constexpr (Min < Max) {
+    if (n == Min) {
+      if constexpr (std::is_void_v<R>) {
+        std::forward<F>(f)(std::integral_constant<size_t, Min>{});
+        return;
+      }
+      else
+        return std::forward<F>(f)(std::integral_constant<size_t, Min>{});
+    }
+    return with_n_impl<R, Min + 1, Max>(n, std::forward<F>(f));
+  }
+  else {
+    // Callers must guarantee n is in [Min, Max), so this is
+    // unreachable in correct code.  (x23::panic would be the natural
+    // spelling, but debug.h includes this header.)  In constant
+    // evaluation an out-of-range n is a compile-time error on either
+    // branch.
+#if NDEBUG
+    std::unreachable();
+#else
+    std::abort();
+#endif
+  }
+}
+} // namespace detail
+
+// Convert a run-time size_t n into a compile-time
+// std::integral_constant, and invoke a function object on that
+// constant.  You must supply a Max value of N (one greater than the
+// maximum n you could ask for at runtime), and may supply a Min value
+// (the lowest you would ask for).  You can optionally supply a return
+// type R, or if R is auto_t, it will infer the return type.  n outside
+// [Min, Max) is a precondition violation: it aborts in debug builds
+// and is undefined behavior under NDEBUG.
+//
+// Make sure f takes the std::integral_constant argument by value and
+// not by reference so that it can convert to a compile-time constant.
+template<size_t Max, size_t Min = 0, typename R = auto_t, typename F>
+requires (Max >= Min)
+constexpr inline decltype(auto)
+with_n(size_t n, F &&f)
+{
+  return [n, &f]<size_t... I>(std::index_sequence<I...>) -> decltype(auto) {
+    using return_type =
+        std::conditional_t<std::same_as<R, auto_t>,
+                           merged_return_t<decltype(std::forward<F>(f)(
+                               std::integral_constant<size_t, I + Min>{}))...>,
+                           R>;
+    return detail::with_n_impl<return_type, Min, Max>(n, std::forward<F>(f));
+  }(std::make_index_sequence<Max - Min>{});
+}
+
+namespace detail {
+// What you should do when spinning (e.g., to give other hardware
+// threads priority).
+inline void
+pause_instruction()
+{
+#if HAVE_BUILTIN_IA32_PAUSE
+  __builtin_ia32_pause();
+#elif HAVE_BUILTIN_ARM_YIELD
+  // XXX - only works on clang?
+  __builtin_arm_yield();
+#endif // HAVE_BUILTIN_ARM_YIELD
+}
+} // namespace detail
+
+// Note: this could break binary compatibility, but we don't have that
+// across compilers anyway because of how clang deals with
+// [[no_unique_address]]:
+// https://github.com/llvm/llvm-project/issues/50766
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Wpragmas"
+#pragma GCC diagnostic ignored "-Wunknown-warning-option"
+#pragma GCC diagnostic ignored "-Wunknown-warning-group"
+#pragma GCC diagnostic ignored "-Winterference-size"
+constexpr size_t hardware_destructive_interference_size =
+    std::hardware_destructive_interference_size;
+#pragma GCC diagnostic pop
+
+} // namespace x23

@@ -1,0 +1,368 @@
+#include "hogd/ramdb/disk_writer.h"
+
+#include <fcntl.h>
+
+#include <algorithm>
+#include <atomic>
+#include <cassert>
+#include <chrono>
+#include <cstddef>
+#include <cstring>
+#include <format>
+#include <mutex>
+#include <new>
+#include <span>
+#include <stop_token>
+#include <string>
+#include <string_view>
+#include <thread>
+#include <utility>
+#include <vector>
+
+#include "hogd/base/bits.h"
+#include "hogd/base/cleanup.h"
+#include "hogd/base/io.h"
+#include "hogd/base/log.h"
+#include "hogd/base/span.h"
+#include "hogd/base/status.h"
+#include "hogd/base/string.h"
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/metrics/metrics.h"
+#include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/loglet.h"
+
+namespace hogd {
+
+DBStatus<File>
+DiskWriter::create_next_file()
+{
+  std::string filename =
+      std::vformat(filename_format_, std::make_format_args(synced_lsn_));
+
+  // create the new log file.
+  DBStatus<File> f = dir_.openat(filename, O_WRONLY | O_CREAT | O_TRUNC)
+                         .transform_error(to_db_error);
+  if (!f)
+    return f.error();
+
+  // sync the directory to include the new file. This is needed or the file
+  // could disappear after a crash.
+  DBStatus<void> ret = dir_.sync().transform_error(to_db_error);
+  if (!ret)
+    return ret.error();
+
+  debug("created log file {}", filename);
+  return f;
+}
+
+void
+DiskWriter::init(uint64_t lsn, std::string_view filename_format,
+                 size_t log_file_size_threshold)
+{
+  cur_lsn_ = synced_lsn_ = lsn;
+  filename_format_ = filename_format;
+  file_size_threshold_ = log_file_size_threshold;
+  writer_th_ = std::jthread(
+      [this](const std::stop_token &stoken) { write_worker(stoken); });
+}
+
+void
+DiskWriter::write_worker(const std::stop_token &stoken)
+{
+  // initialize the buffer used for commit records.
+  // the uint32 is the crc32c of the committed data.
+  alignas(ItemHeader) uint8_t commit_buf[sizeof(ItemHeader) + sizeof(uint32_t)];
+  auto *commit_hdr =
+      new (commit_buf) ItemHeader(ItemStorage::kCommit, 0, sizeof(uint32_t), 0);
+  commit_hdr->clear_next();
+
+  // called when a write to disk failed. wakes blocked commit() calls.
+  auto signal_ioerror = [this] {
+    std::scoped_lock guard(to_disk_lock_);
+    io_error_ = true;
+    commit_cv_.notify_all();
+  };
+
+  // create the log file.
+  DBStatus<File> f = create_next_file();
+  if (!f) {
+    warn("couldn't create initial file: {}", f.error());
+    signal_ioerror();
+    return;
+  }
+
+  if (wal_grew_observer_)
+    wal_grew_observer_();
+
+  BufferedWriter w(*f);
+  uint32_t crc = 0;
+  size_t bytes_written = 0;
+
+  while (true) {
+    std::vector<UniqueLoglet> q;
+
+    {
+      // wait for work to become available.
+      std::unique_lock ul(to_disk_lock_);
+      worker_cv_.wait(ul, stoken, [this] { return !to_disk_.empty(); });
+      if (to_disk_.empty() && stoken.stop_requested()) [[unlikely]]
+        return;
+
+      // take all the work that has been enqueued so far.
+      std::swap(to_disk_, q);
+    }
+
+    // compute checksum and write to disk.
+    for (UniqueLoglet &ll : q) {
+      // Handle Commit Record
+      if (!ll) {
+        // prepare the commit record.
+        commit_hdr->lsn = synced_lsn_;
+        crc = crc32c_append(crc, writable_byte_view(*commit_hdr));
+        // Persist the checksum in a fixed (little-endian) byte order rather
+        // than the host's native uint32_t representation (#1816).
+        uint32_t crc_le = cpu_to_le(crc);
+        // Derive the CRC destination from commit_buf, not the ItemHeader tail,
+        // so the pointer carries the buffer's provenance to these bytes
+        // (#4329).
+        std::ranges::copy(writable_byte_view(crc_le),
+                          std::as_writable_bytes(std::span(commit_buf))
+                              .subspan(sizeof(ItemHeader), sizeof(uint32_t))
+                              .begin());
+        crc = 0;
+
+        // write the commit record and sync everything to disk.
+        if (ErrnoStatus<void> commit_status =
+                write_full(w, std::as_writable_bytes(std::span(commit_buf)))
+                    .and_then([&w] { return w.flush_and_sync(); });
+            !commit_status) [[unlikely]] {
+          // Report the errno: without it an ENOSPC on the log directory is
+          // indistinguishable from a hardware EIO, and the sync failure
+          // surfaces to callers as an undifferentiated DBCode::kIO (#3206).
+          warn("couldn't sync commit record to disk: {}",
+               commit_status.error());
+          signal_ioerror();
+          return;
+        }
+
+        // wake the thread blocked in sync().
+        {
+          std::scoped_lock guard(to_disk_lock_);
+          ++synced_lsn_;
+          // only one thread will be waiting for this LSN, but efficiency
+          // doesn't matter here so it's simpler to wake them all.
+          commit_cv_.notify_all();
+        }
+
+        // start a new log file if the current size exceeds the threshold.
+        if (bytes_written > file_size_threshold_) {
+          assert(w.empty());
+          bytes_written = 0;
+          f = create_next_file();
+          if (!f) {
+            warn("couldn't create next file: {}", f.error());
+            signal_ioerror();
+            return;
+          }
+          if (auto flush_status = w.reset(*f); !flush_status) [[unlikely]] {
+            warn("couldn't flush buffer to disk: {}", flush_status.error());
+            signal_ioerror();
+            return;
+          }
+          if (wal_grew_observer_)
+            wal_grew_observer_();
+        }
+        continue;
+      }
+
+      // Handle Change Records
+      crc = crc32c_append(crc, ll->get_bytes());
+      ErrnoStatus<void> ret = write_full(w, ll->get_bytes());
+      if (!ret) [[unlikely]] {
+        warn("couldn't write change record to disk: {}", ret.error());
+        signal_ioerror();
+        return;
+      }
+
+      // Report progress in consuming buffer.
+      size_t n = ll->get_bytes().size();
+      bytes_written += n;
+      ll.reset(); // proactively free loglet
+      bytes_out_.store(bytes_out_.load(std::memory_order_relaxed) + n,
+                       std::memory_order_release);
+    }
+  }
+}
+
+DBStatus<uint64_t>
+DiskWriter::sync()
+{
+  // See sync_active_ in disk_writer.h.
+  sync_active_.store(true, std::memory_order_relaxed);
+  Defer sync_guard{
+      [this] { sync_active_.store(false, std::memory_order_relaxed); }};
+
+  std::unique_lock ul(to_disk_lock_);
+
+  // Reserve the queue slots (one per dirty head plus the commit marker) before
+  // draining any head, so an allocation failure here leaves the heads and
+  // to_disk_ untouched: the sync fails atomically and is retryable instead of
+  // stranding drained loglets with no following commit marker (#2657).
+  try {
+    to_disk_.reserve(to_disk_.size() + heads_.size() + 1);
+  } catch (const std::bad_alloc &) {
+    return DBError(DBCode::kNoMemory);
+  }
+
+  // Ask write_worker() to write the partial loglets in all heads and then the
+  // commit record. write_worker() may also still be writing full loglets
+  // requested from enqueue_to_disk().
+  for (WriteHead &h : heads_) {
+    // A writer that passed the sync_active_ CHECK before this sync began is
+    // still inside write_record() holding the head lock; that is the
+    // overlap the flag alone cannot see, so fail stop on it here. try_lock
+    // cannot deadlock with a writer blocked in enqueue_to_disk() on
+    // to_disk_lock_.
+    CHECK(h.lock.try_lock());
+    std::scoped_lock hl(std::adopt_lock, h.lock);
+    if (!h.ll)
+      continue;
+    bytes_in_ += h.ll->get_bytes().size();
+    to_disk_.emplace_back(std::move(h.ll));
+  }
+  to_disk_.emplace_back();
+  worker_cv_.notify_one();
+
+  // wait for the write_worker() to finish all pending writes before this LSN.
+  uint64_t lsn = ++cur_lsn_;
+  commit_cv_.wait(ul, [this, lsn] { return synced_lsn_ >= lsn || io_error_; });
+  if (io_error_)
+    return DBError(DBCode::kIO);
+  return lsn;
+}
+
+void
+DiskWriter::print_stats()
+{
+  size_t in, out;
+  {
+    std::scoped_lock guard(to_disk_lock_);
+    in = bytes_in_;
+  }
+  out = bytes_out_.load(std::memory_order_relaxed);
+
+  time_point now = std::chrono::steady_clock::now();
+  std::chrono::nanoseconds ns = now - prev_stats_time_;
+  // Guard against a zero/non-positive interval: dividing by it yields a
+  // non-finite double, and converting that to size_t for print_iec_bytes is
+  // undefined behavior (#1523). bytes_out_ only grows, so the numerator is >=
+  // 0.
+  size_t rate = ns.count() > 0
+                    ? static_cast<size_t>((out - prev_bytes_out_) * 1e9 /
+                                          static_cast<double>(ns.count()))
+                    : 0;
+
+  info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
+       print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
+
+  prev_bytes_out_ = out;
+  prev_stats_time_ = now;
+}
+
+void
+DiskWriter::register_metrics()
+{
+  bytes_out_metric_ = Metrics::instance().gauge(
+      Metrics::ComponentName::kDb, "ramdb_disk_writer_bytes_out",
+      "Number of bytes written to log files since the last database recovery.");
+}
+
+void
+DiskWriter::record_metrics()
+{
+  bytes_out_metric_.record(bytes_out_.load(std::memory_order_relaxed));
+}
+
+void
+DiskWriter::enqueue_to_disk(UniqueLoglet &&ll)
+{
+  std::scoped_lock guard(to_disk_lock_);
+  bytes_in_ += ll->get_bytes().size();
+  to_disk_.emplace_back(std::move(ll));
+  worker_cv_.notify_one();
+}
+
+inline Loglet *
+ScopedDiskWrite::get_loglet(size_t kv_len)
+{
+  assert(ul_.owns_lock());
+
+  // Try to use the write head's current loglet.
+  if (head_.ll && head_.ll->bytes_left() >= sizeof(ItemHeader) + kv_len)
+      [[likely]] {
+    return head_.ll.get();
+  }
+
+  // Otherwise the loglet is full or has not yet been allocated. Try to
+  // allocate a new one, and enqueue the existing one to be written to disk.
+  if (head_.ll)
+    w_.enqueue_to_disk(std::move(head_.ll));
+  head_.ll = make_unique_loglet(w_.allocator_, LogletMode::kDiskBuffer);
+  return head_.ll.get();
+}
+
+DBStatus<uint64_t>
+ScopedDiskWrite::modify(ItemHeader *src, bool use_src_lsn)
+{
+  assert(ul_.owns_lock());
+
+  // get a loglet with enough space.
+  Loglet *ll = get_loglet(src->kv_bytes());
+  if (!ll) [[unlikely]]
+    return DBError(DBCode::kNoMemory);
+
+  // append the modification record.
+  ItemHeader *dst = ll->clone(src);
+  assert(dst != nullptr);
+  // zero the alignment padding so the record/CRC don't carry stale memory; the
+  // lsn re-assignment and key/value copy below overwrite anything this clear
+  // overlaps. The guard avoids forming an out-of-range pointer when the
+  // payload is empty.
+  if (std::span<std::byte> all = dst->get_all();
+      all.size() >= alignof(ItemHeader)) [[likely]]
+    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
+                alignof(ItemHeader));
+  dst->lsn = use_src_lsn ? src->lsn : w_.cur_lsn_;
+  dst->clear_next();
+  std::ranges::copy(src->get_key_and_value(), dst->get_key_and_value().begin());
+  return {dst->lsn};
+}
+
+DBStatus<void>
+ScopedDiskWrite::remove(std::span<const std::byte> key)
+{
+  assert(ul_.owns_lock());
+
+  // get a loglet with enough space.
+  Loglet *ll = get_loglet(key.size());
+  if (!ll) [[unlikely]]
+    return DBError(DBCode::kNoMemory);
+
+  // append the removal record.
+  ItemHeader *hdr = ll->alloc(ItemStorage::kTombstone, 0, key.size(), 0);
+  assert(hdr != nullptr);
+  // zero the alignment padding; the lsn store and key copy below overwrite
+  // any overlap. The guard avoids forming an out-of-range pointer when the
+  // payload is empty (reachable via remove() with an empty key).
+  if (std::span<std::byte> all = hdr->get_all();
+      all.size() >= alignof(ItemHeader)) [[likely]]
+    std::memset(all.data() + all.size() - alignof(ItemHeader), 0,
+                alignof(ItemHeader));
+  hdr->lsn = w_.cur_lsn_;
+  hdr->clear_next();
+  std::ranges::copy(key, hdr->get_key().begin());
+  return {};
+}
+
+} // namespace hogd

@@ -1,0 +1,48 @@
+# Universal ctags configuration for XDR (RFC4506/RFC5531) files
+#
+# Place this in ~/.config/ctags/xdr.ctags or include it in your
+# project's .ctags file
+
+--langdef=XDR
+--langmap=XDR:.x
+
+# Kind definitions for XDR
+--kinddef-XDR=c,constant,constants
+--kinddef-XDR=t,typedef,type definitions
+--kinddef-XDR=s,struct,structures
+--kinddef-XDR=u,union,unions
+--kinddef-XDR=e,enum,enumerations
+--kinddef-XDR=m,member,enum/struct/union members
+--kinddef-XDR=p,program,programs
+--kinddef-XDR=v,version,versions
+--kinddef-XDR=f,function,procedure definitions
+
+# Constants defined with 'const'
+--regex-XDR=/^[ \t]*const[ \t]+[a-zA-Z_][a-zA-Z0-9_]*[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=/\1/c/
+
+# Type definitions with 'typedef'
+--regex-XDR=/^[ \t]*typedef[ \t]+.*[ \t*]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*[<>]*[ \t]*[[<;]/\1/t/
+
+# Structure definitions
+--regex-XDR=/^[ \t]*struct[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)/\1/s/
+
+# Union definitions
+--regex-XDR=/^[ \t]*union[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)/\1/u/
+
+# Enumeration definitions
+--regex-XDR=/^[ \t]*enum[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)/\1/e/
+
+# Enum members (constants inside enums)
+--regex-XDR=/^[ \t]*([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*=[ \t]*[0-9]+/\1/m/
+
+# Structure/union members (field definitions, handles pointers and arrays)
+--regex-XDR=/^[ \t]*[a-zA-Z_][a-zA-Z0-9_<>*]*[ \t*]+([a-zA-Z_][a-zA-Z0-9_]*)[ \t]*[[<;]/\1/m/
+
+# Program definitions
+--regex-XDR=/^[ \t]*program[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)/\1/p/
+
+# Version definitions
+--regex-XDR=/^[ \t]*version[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)/\1/v/
+
+# Procedure definitions (functions within versions)
+--regex-XDR=/^[ \t]*[a-zA-Z_][a-zA-Z0-9_<>]*[ \t]+([a-zA-Z_][a-zA-Z0-9_]*)\(/\1/f/

@@ -1,0 +1,1240 @@
+#include "hogd/devnode/hog_devnode_node.h"
+
+#include <algorithm>
+#include <chrono>
+#include <cstddef>
+#include <cstdint>
+#include <cstdlib>
+#include <exception>
+#include <expected>
+#include <fcntl.h>
+#include <filesystem>
+#include <format>
+#include <limits>
+#include <memory>
+#include <optional>
+#include <set>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <sys/socket.h>
+#include <system_error>
+#include <thread>
+#include <utility>
+
+#include "auth_card.hh"
+#include "auth_rpc.hh"
+#include "db_sched.hh"
+#include "genesis.hh"
+#include "header.hh"
+#include "hogd/base/cleanup.h"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/io.h"
+#include "hogd/base/json.h"
+#include "hogd/base/log.h"
+#include "hogd/base/network.h"
+#include "hogd/base/network_hash.h"
+#include "hogd/base/os.h"
+#include "hogd/base/rpc_message_size.h"
+#include "hogd/base/rpc_server.h"
+#include "hogd/base/status.h"
+#include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/bootstrap_manifest.h"
+#include "hogd/devnode/hog_devnode_tmp_dir.h"
+#include "hogd/devnode/manifest_hex.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_db/hog_age_reconciliation.h"
+#include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/rpc_from_auth.h"
+#include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/rpc_from_gateway.h"
+#include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_exec/interface/rpc_from_view_gateway.h"
+#include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/pull_controller.h"
+#include "hogd/hog_indexer/rpc_from_block_explorer.h"
+#include "hogd/hog_indexer/status.h"
+#include "hogd/hog_mempool/registration.h"
+#include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/scheduler.h"
+#include "hogd/hog_mempool/shared.h"
+#include "hogd/ramdb/db.h"
+#include "hogd/ramdb/db_status.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "hogd/version.h"
+#include "hogd/xdr/indexer_payload_validation.h"
+#include "indexer.hh"
+#include "parallel.hh"
+#include "rpc_types.hh"
+#include "sched_coord.hh"
+#include "sched_db.hh"
+#include "sched_event.hh"
+#include "transaction.hh"
+#include "types.hh"
+#include "x23/async.h"
+
+namespace hogd {
+
+namespace {
+constexpr char kIndexerDbSubdir[] = "indexer-db";
+constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
+constexpr std::size_t kMaxDataDirMetadataBytes = 256 * 1024;
+constexpr int kMetadataTempOpenFlags =
+    O_WRONLY | O_CREAT | O_TRUNC | O_CLOEXEC; // NOLINT(misc-include-cleaner)
+
+void
+maybe_inject_post_executor_failure()
+{
+  const char *value =
+      std::getenv("HOG_DEVNODE_TEST_THROW_AFTER_EXECUTOR_START");
+  if (value != nullptr && std::string_view(value) == "1") {
+    throw std::runtime_error("injected hog-devnode constructor failure");
+  }
+}
+
+void
+maybe_inject_post_genesis_failure()
+{
+  const char *value = std::getenv("HOG_DEVNODE_TEST_THROW_AFTER_GENESIS_LOAD");
+  if (value != nullptr && std::string_view(value) == "1") {
+    throw std::runtime_error("injected hog-devnode post-genesis failure");
+  }
+}
+
+bool
+withhold_indexer_pull_for_test()
+{
+  const char *value = std::getenv("HOG_DEVNODE_TEST_WITHHOLD_INDEXER_PULL");
+  return value != nullptr && std::string_view(value) == "1";
+}
+
+template<typename T>
+T
+require_io(ErrnoStatus<T> status, std::string_view operation)
+{
+  if (!status.has_value()) {
+    throw std::runtime_error(
+        std::format("{} failed: {}", operation, status.error()));
+  }
+  return std::move(*status);
+}
+
+void
+require_io(ErrnoStatus<void> status, std::string_view operation)
+{
+  if (!status.has_value()) {
+    throw std::runtime_error(
+        std::format("{} failed: {}", operation, status.error()));
+  }
+}
+
+std::filesystem::path
+metadata_path(std::filesystem::path const &data_dir)
+{
+  return data_dir / kDataDirMetadataFile;
+}
+
+std::string
+build_data_dir_metadata_json(LocalBootstrapConfig const &config)
+{
+  std::string buffer;
+  json::Writer(buffer).object([&](json::Writer &w) {
+    w.field("schemaVersion", std::int64_t{4});
+    w.field("kind", "hog-devnode-data");
+    w.object_field("bootstrapConfig", [&](json::Writer &w) {
+      w.object_field("bootstrapFaucet", [&](json::Writer &faucet) {
+        faucet.field("publicKey", hex_string(config.faucet_public_key));
+        faucet.field("initialStorageTokens",
+                     std::to_string(kLocalFaucetStorageTokens));
+      });
+      w.array_field("bootstrapAccounts", [&](json::Writer &accounts) {
+        for (auto const &account : config.accounts) {
+          accounts.object([&](json::Writer &allocation) {
+            allocation.field("publicKey", hex_string(account.public_key));
+            allocation.field("initialStorageTokens",
+                             std::to_string(account.storage_tokens));
+          });
+        }
+      });
+      if (!config.network_config_overrides.empty()) {
+        w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          for (auto const &[name, value] : config.network_config_overrides) {
+            fields.field(name, static_cast<std::int64_t>(value));
+          }
+        });
+      }
+    });
+  });
+  return buffer;
+}
+
+std::string
+read_metadata_file(std::filesystem::path const &path)
+{
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec)) {
+    if (ec) {
+      throw std::runtime_error(
+          std::format("could not inspect hog-devnode data metadata '{}': {}",
+                      path.string(), ec.message()));
+    }
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata file is missing: {}",
+                    path.string()));
+  }
+
+  const std::uintmax_t size = std::filesystem::file_size(path, ec);
+  if (ec) {
+    throw std::runtime_error(
+        std::format("could not size hog-devnode data metadata '{}': {}",
+                    path.string(), ec.message()));
+  }
+  if (size > kMaxDataDirMetadataBytes) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata exceeds {} bytes",
+                    kMaxDataDirMetadataBytes));
+  }
+
+  File file = require_io(File::open(path.string(),
+                                    O_RDONLY), // NOLINT(misc-include-cleaner)
+                         "open hog-devnode data metadata");
+
+  std::string bytes(size, '\0');
+  std::span<std::byte> remaining = std::as_writable_bytes(std::span(bytes));
+  while (!remaining.empty()) {
+    std::size_t count =
+        require_io(file.read(remaining), "read hog-devnode data metadata");
+    if (count == 0) {
+      break;
+    }
+    remaining = remaining.subspan(count);
+  }
+  bytes.resize(bytes.size() - remaining.size());
+  return bytes;
+}
+
+const json::Value &
+require_object_field(const json::Value &parent, std::string_view key,
+                     std::string_view context)
+{
+  const json::Value *field = parent.find(key);
+  if (field == nullptr) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata missing {}.{}", context, key));
+  }
+  if (field->type() != json::Value::Type::kObject) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata field {}.{} is not an object",
+                    context, key));
+  }
+  return *field;
+}
+
+std::string_view
+require_string_field(const json::Value &parent, std::string_view key,
+                     std::string_view context)
+{
+  const json::Value *field = parent.find(key);
+  if (field == nullptr) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata missing {}.{}", context, key));
+  }
+  std::optional<std::string_view> value = field->as_string();
+  if (!value.has_value()) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata field {}.{} is not a string",
+                    context, key));
+  }
+  return *value;
+}
+
+std::int64_t
+require_integer_field(const json::Value &parent, std::string_view key,
+                      std::string_view context)
+{
+  const json::Value *field = parent.find(key);
+  if (field == nullptr) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata missing {}.{}", context, key));
+  }
+  std::optional<std::int64_t> value = field->as_integer();
+  if (!value.has_value()) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata field {}.{} is not an integer",
+                    context, key));
+  }
+  return *value;
+}
+
+void
+require_string_value(std::string_view actual, std::string_view expected,
+                     std::string_view field)
+{
+  if (actual != expected) {
+    throw std::runtime_error(std::format(
+        "unsupported hog-devnode data metadata {} '{}', expected '{}'", field,
+        actual, expected));
+  }
+}
+
+LocalBootstrapConfig
+parse_data_dir_metadata(std::string_view bytes)
+{
+  std::expected<json::Value, json::ParseError> parsed = json::parse(bytes);
+  if (!parsed.has_value()) {
+    throw std::runtime_error(
+        std::format("hog-devnode data metadata JSON parse failed at {}: {}",
+                    parsed.error().offset, parsed.error().message));
+  }
+  if (parsed->type() != json::Value::Type::kObject) {
+    throw std::runtime_error("hog-devnode data metadata root is not an object");
+  }
+
+  const std::int64_t schema_version =
+      require_integer_field(*parsed, "schemaVersion", "root");
+  if (schema_version >= 1 && schema_version <= 3) {
+    throw std::runtime_error(
+        "hog-devnode data metadata uses legacy bootstrap accounts; use the "
+        "original "
+        "runtime for this data directory or choose a new data directory");
+  }
+  if (schema_version != 4) {
+    throw std::runtime_error(std::format(
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 4",
+        schema_version));
+  }
+  std::set<std::string_view> root_fields;
+  for (auto const &[name, unused] : parsed->as_object()) {
+    if ((name != "schemaVersion" && name != "kind" &&
+         name != "bootstrapConfig") ||
+        !root_fields.insert(name).second) {
+      throw std::runtime_error(
+          std::format("unknown or duplicate data metadata field '{}'", name));
+    }
+  }
+  require_string_value(require_string_field(*parsed, "kind", "root"),
+                       "hog-devnode-data", "kind");
+
+  const json::Value &config_json =
+      require_object_field(*parsed, "bootstrapConfig", "root");
+  std::set<std::string_view> config_fields;
+  for (auto const &[name, unused] : config_json.as_object()) {
+    if ((name != "bootstrapFaucet" && name != "bootstrapAccounts" &&
+         name != "networkConfigOverrides") ||
+        !config_fields.insert(name).second) {
+      throw std::runtime_error(
+          std::format("unknown bootstrapConfig field '{}'", name));
+    }
+  }
+  auto allocations = parse_local_bootstrap_accounts(config_json);
+  if (!allocations) {
+    throw std::runtime_error(
+        std::format("invalid hog-devnode data metadata: {}",
+                    allocations.error()));
+  }
+  LocalBootstrapConfig config = std::move(*allocations);
+  if (const auto *overrides = config_json.find("networkConfigOverrides")) {
+    if (overrides->type() != json::Value::Type::kObject) {
+      throw std::runtime_error(
+          "data metadata networkConfigOverrides must be an object");
+    }
+    for (auto const &[name, value] : overrides->as_object()) {
+      const auto number = value.as_integer();
+      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
+        throw std::runtime_error(
+            "data metadata network override must be a uint32 integer");
+      }
+      add_local_network_config_override(config.network_config_overrides,
+                                        std::format("{}={}", name, *number));
+    }
+  }
+  return config;
+}
+
+void
+require_matching_bootstrap_config(LocalBootstrapConfig const &persisted,
+                                  LocalBootstrapConfig const &requested)
+{
+  if (persisted.faucet_public_key != requested.faucet_public_key ||
+      persisted.accounts != requested.accounts) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different bootstrap "
+        "accounts; "
+        "reuse the original public allocations or choose a new data directory");
+  }
+  if (persisted.network_config_overrides !=
+      requested.network_config_overrides) {
+    throw std::runtime_error(
+        "hog-devnode data dir was initialized with different --network-config "
+        "overrides; reuse the original overrides or choose a fresh data "
+        "directory");
+  }
+}
+
+void
+preflight_data_dir_metadata(
+    std::optional<std::filesystem::path> const &data_dir,
+    LocalBootstrapConfig const &requested_config)
+{
+  if (!data_dir.has_value()) {
+    return;
+  }
+  std::error_code ec;
+  const std::filesystem::path path = metadata_path(*data_dir);
+  if (!std::filesystem::exists(path, ec)) {
+    if (ec) {
+      throw std::runtime_error(std::format(
+          "could not inspect hog-devnode data dir metadata '{}': {}",
+          path.string(), ec.message()));
+    }
+    // Directory setup runs before this preflight. Empty subsystem directories
+    // are a fresh skeleton; any persisted file requires compatible metadata.
+    for (const auto *name : {"ramdb", "events", "indexer"}) {
+      const auto subsystem = *data_dir / name;
+      if (!std::filesystem::exists(subsystem, ec)) {
+        if (ec) {
+          throw std::runtime_error(
+              std::format("could not inspect data directory: {}",
+                          ec.message()));
+        }
+        continue;
+      }
+      for (const auto &entry :
+           std::filesystem::recursive_directory_iterator(subsystem)) {
+        if (!entry.is_directory()) {
+          throw std::runtime_error(
+              "hog-devnode data directory has persisted state but no bootstrap "
+              "metadata; "
+              "use the original runtime or choose a new data directory");
+        }
+      }
+    }
+    return;
+  }
+  LocalBootstrapConfig persisted_config =
+      parse_data_dir_metadata(read_metadata_file(path));
+  require_matching_bootstrap_config(persisted_config, requested_config);
+}
+
+void
+write_metadata_atomically(std::filesystem::path const &path,
+                          std::string_view bytes)
+{
+  Directory dir = require_io(Directory::open(path.parent_path().string(),
+                                             /*create=*/false),
+                             "open hog-devnode data metadata directory");
+  const std::string filename = path.filename().string();
+  const std::string tmp_filename = std::format("{}.tmp", filename);
+  Defer cleanup_tmp([&] { std::ignore = dir.unlink(tmp_filename); });
+  File file = require_io(dir.openat(tmp_filename, kMetadataTempOpenFlags, 0600),
+                         "open hog-devnode data metadata temp file");
+  std::span<const std::byte> remaining =
+      std::as_bytes(std::span(bytes.data(), bytes.size()));
+  while (!remaining.empty()) {
+    std::size_t count = require_io(file.write(remaining),
+                                   "write hog-devnode data metadata temp file");
+    if (count == 0) {
+      throw std::runtime_error("write hog-devnode data metadata wrote 0 bytes");
+    }
+    remaining = remaining.subspan(count);
+  }
+  require_io(file.sync(), "fsync hog-devnode data metadata temp file");
+  require_io(file.close(), "close hog-devnode data metadata temp file");
+  require_io(dir.rename(tmp_filename, filename),
+             "rename hog-devnode data metadata");
+  require_io(dir.sync(), "fsync hog-devnode data metadata directory");
+}
+
+std::string
+ramdb_reserve_failure_message(std::size_t ramdb_bytes, std::string_view detail)
+{
+  constexpr double kGiB = 1024.0 * 1024.0 * 1024.0;
+  std::string message =
+      std::format("ramdb failed to reserve {:.1f} GiB ({})",
+                  static_cast<double>(ramdb_bytes) / kGiB, detail);
+  if (const std::size_t physical = total_physical_memory(); physical > 0) {
+    message += std::format("; system has {:.1f} GiB physical RAM",
+                           static_cast<double>(physical) / kGiB);
+  }
+  message += ". Reduce capacity with --ramdb-bytes.";
+  return message;
+}
+
+// run_ramdb_open translates the std::system_error that the Database
+// constructor throws when the ramdb arena mmap is refused (ENOMEM under the
+// kernel's overcommit accounting) into an actionable startup error. Other
+// system errors pass through unchanged.
+template<typename Fn>
+auto
+run_ramdb_open(std::size_t ramdb_bytes, Fn &&fn)
+{
+  try {
+    return fn();
+  } catch (const std::system_error &e) {
+    if (e.code() == std::errc::not_enough_memory) {
+      throw std::runtime_error(
+          ramdb_reserve_failure_message(ramdb_bytes, e.code().message()));
+    }
+    throw;
+  }
+}
+
+} // namespace
+
+HogDevnodeNode::HogDevnodeNode(
+    std::string bind_host, std::uint16_t requested_scheduler_port,
+    HogDevnodeDirectories directories,
+    LocalBootstrapConfig const &bootstrap_config,
+    std::optional<std::filesystem::path> const &data_dir,
+    NetworkHash network_hash, std::size_t ramdb_bytes)
+  : bind_host_(std::move(bind_host)), network_hash_(network_hash),
+    data_dir_(data_dir), bootstrap_config_(bootstrap_config),
+    ramdb_bytes_(ramdb_bytes), dirs_(std::move(directories)),
+    opened_db_([this] {
+      // Reject incompatible bootstrap intent before opening or migrating any
+      // persisted chain state.
+      preflight_data_dir_metadata(data_dir_, bootstrap_config_);
+      return open_db_backend();
+    }()),
+    event_ctx_(dirs_.event.directory()), event_sched_server_(event_ctx_),
+    event_exec_server_(event_ctx_), event_indexer_server_(event_ctx_)
+{
+  try {
+    // A composed devnode exclusively owns the process-wide registration
+    // namespace, so discard stale in-process state before startup.
+    Registration::registration().clear();
+    HogDbDAO db = std::move(*opened_db_);
+    opened_db_.reset();
+
+    // Genesis bootstrap payloads can be larger than the transport default.
+    mempool_coord_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_gateway_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    mempool_auth_server_->max_message_size_ = kDevRpcMaxMessageSize;
+
+    // Start the mempool RPC servers. All of the subsystems register with the
+    // mempool, so the mempool RPC servers need to start first.
+    sched_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    sched_event_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    sched_exec_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    mempool_coord_server_.start_server(
+        make_bind_host_port(bind_host_, requested_scheduler_port));
+    mempool_gateway_server_.start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    mempool_auth_server_->start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+
+    auto sched_db_client_res =
+        create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+    if (!sched_db_client_res)
+      panic("devnode connect to sched_db failed: {}",
+            sched_db_client_res.error().error_code().message());
+    auto sched_db_client =
+        std::make_unique<sched_db_client_t>(std::move(*sched_db_client_res));
+    init_db_backend(std::move(db), std::move(sched_db_client));
+
+    // [db_executor_server_] handles RPCs from the executor.
+    db_executor_server_ = std::make_unique<HogDbExecutorServer>(*ctx_);
+    db_executor_server_->start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+    // [db_scheduler_server_] handles RPCs from the mempool.
+    db_scheduler_server_ = std::make_unique<HogDbSchedServer>(*ctx_);
+    (*db_scheduler_server_)->max_message_size_ = kDevRpcMaxMessageSize;
+    db_scheduler_server_->start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
+    db_auth_server_ = std::make_unique<HogDbAuthServer>(*ctx_);
+    db_auth_server_->start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    // Read-only state reads served to the public RPC gateway over x23.
+    db_gateway_server_ = std::make_unique<HogDbGatewayServer>(*ctx_);
+    db_gateway_server_->start_server(
+        make_bind_host_port(bind_host_, /*port=*/0));
+
+    std::string dbauth_address =
+        format_advertised_address(bind_host_, db_auth_server_->port());
+    auto dbauth_res = make_dbauth_client(dbauth_address)();
+    if (!dbauth_res)
+      panic("devnode connect to dbauth failed: {}",
+            dbauth_res.error().error_code().message());
+    dbauth_client_t dbauth_client = std::move(*dbauth_res);
+    auth_server_ =
+        std::make_unique<AuthServer>(std::move(dbauth_client), network_hash_);
+
+    auth_db_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    auth_mempool_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    auth_db_server_.start_server(make_bind_host_port(bind_host_, /*port=*/0));
+    auth_mempool_server_.start_server(make_bind_host_port(bind_host_,
+                                                          /*port=*/0));
+    auth_db_server_->impl()->set_auth_server(*auth_server_);
+    auth_mempool_server_->impl()->set_auth_server(*auth_server_);
+
+    event_sched_server_.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
+    event_exec_server_.max_message_size_ = kDevRpcMaxMessageSize;
+    event_indexer_server_.max_message_size_ = kIndexerRpcMaxMessageSize;
+    event_sched_server_.start_server(make_bind_host_port(bind_host_,
+                                                         /*port=*/0));
+    event_exec_server_.start_server(make_bind_host_port(bind_host_,
+                                                        /*port=*/0));
+    event_indexer_server_.start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
+
+    view_gateway_server_ = std::make_unique<ViewGatewayServer>(
+        format_advertised_address(bind_host_, db_executor_server_->port()),
+        bind_host_, event_exec_server_.port());
+    view_gateway_server_->start_server(make_bind_host_port(bind_host_,
+                                                           /*port=*/0));
+
+    init_indexer_backend();
+    if (recovered_existing_chain_) {
+      auto origin =
+          event_ctx_.indexer_outbox_store().load_current_epoch_origin();
+      if (!origin) {
+        throw std::runtime_error(
+            "failed to inspect recovered event outbox epoch origin");
+      }
+      if (!*origin) {
+        throw std::runtime_error(
+            "recovered devnode chain has no durable outbox origin; clean chain "
+            "rollout required");
+      }
+      reconcile_event_outbox_with_recovered_tip();
+      validate_event_outbox_against_recovered_tip();
+    }
+    reconcile_indexer_with_recovered_tip();
+    start_indexer_servers();
+
+    // We start the executor server in [register_executor_with_mempool()].
+
+    // Start the fake coordinator. The real coordinator lives in chuckd, but
+    // hog-devnode only needs the scheduler back-channel that the mempool
+    // requires during startup.
+    coordinator_sched_server_->max_message_size_ = kDevRpcMaxMessageSize;
+    coordinator_sched_server_.start_server(make_bind_host_port(bind_host_,
+                                                               /*port=*/0));
+
+    // Now have all of the subsystems register themselves with the mempool.
+    register_db_with_mempool();
+    AuthCard auth_card = register_auth_with_mempool();
+    register_coordinator_with_mempool()();
+    // finish_init() installs the mempool's auth-data callback. Subscribe only
+    // after that callback exists, because a recovered DB immediately reports
+    // its current height through auth_data_changed().
+    auth_server_->subscribe_to_auth_data_changes(std::move(auth_card))();
+    if (recovered_existing_chain_) {
+      register_event_with_mempool();
+      start_indexer_pull();
+      register_executor_with_mempool();
+      maybe_inject_post_executor_failure();
+      bootstrap_config_ = validate_recovered_data_dir(bootstrap_config);
+      load_recovered_bootstrap_metadata(bootstrap_config_);
+    }
+    else {
+      bootstrap_config_ = validate_fresh_data_dir(bootstrap_config);
+      write_data_dir_metadata();
+      materialize_bootstrap_accounts(bootstrap_config_)();
+    }
+  } catch (...) {
+    prepare_for_failed_construction();
+    throw;
+  }
+}
+
+HogDevnodeNode::~HogDevnodeNode()
+{
+  try {
+    // The controller borrows the event endpoint, failure cache, and IndexDB.
+    indexer_pull_controller_.reset();
+    // Shutdown is intentionally loud while this topology is still mirroring the
+    // fragile MempoolTestInfra lifecycle; unexpected exceptions here are bugs.
+    // Note: unlike prepare_for_failed_construction(), we do not need to drain
+    // [mempool_auth_server_] here. [ctx_.reset()] below tears down the DB's
+    // auth-change subscription manager, whose destructor waits for in-flight
+    // [authdb_forward_key_changes_chunk] forwards -- and thus the downstream
+    // [auth_data_changed] callbacks -- to finish, before the member destructors
+    // tear down [mempool_coord_server_]. Draining the auth server here would
+    // instead close it while the subscription manager is still forwarding,
+    // surfacing spurious "input too short" RPC errors on shutdown.
+    // [sched_db_server_] sends RPCs to [db_scheduler_server_] (via the
+    // scheduler). Reset the scheduler pointer before destructing
+    // [db_scheduler_server_] so that [sched_db_server_] does not send an RPC to
+    // a stopped server.
+    sched_db_server_.impl()->reset_scheduler()();
+    // The scheduler sends RPCs to [db_scheduler_server_] in a detached
+    // coroutine. Shut it down before destroying [db_scheduler_server_], or the
+    // detached coroutine may send on an invalid file descriptor.
+    mempool_coord_server_.impl()->scheduler()->shut_down()();
+    // This mirrors MempoolTestInfra's current shutdown assumption: the RPC
+    // servers do not yet have a coordinated clean-shutdown API, but executor
+    // shutdown is required so the [Executor] destructor does not block.
+    executor_.shut_down();
+
+    view_gateway_server_->impl()->shut_down();
+    view_gateway_server_.reset();
+    db_gateway_server_.reset();
+    db_auth_server_.reset();
+    db_scheduler_server_.reset();
+    db_executor_server_.reset();
+    // [ctx_] holds a sched_db_client, so destroy it after the scheduler-facing
+    // database servers are gone.
+    ctx_.reset();
+  } catch (const std::exception &e) {
+    error("~HogDevnodeNode received exception: {}", e.what());
+    CHECK(false);
+  } catch (...) {
+    error("~HogDevnodeNode received exception");
+    CHECK(false);
+  }
+}
+
+void
+HogDevnodeNode::prepare_for_failed_construction() noexcept
+{
+  try {
+    indexer_pull_controller_.reset();
+    // This cleanup closes the auth server before member destruction reaches
+    // the coordinator. First stop callback admission and drain callbacks that
+    // already captured coordinator state; this also clears the coordinator's
+    // borrowed auth pointer before the server is destroyed. This is also safe
+    // when construction failed before a callback was registered.
+    [](RpcServer<MempoolCoordinatorRpc> &mempool_coord_server)
+        -> x23::Async<void> {
+      co_await default_threadpool().bg();
+      co_await mempool_coord_server.impl()->disconnect_auth_callback();
+    }(mempool_coord_server_)();
+    mempool_auth_server_.reset();
+    // Mirror ~HogDevnodeNode's scheduler teardown. If construction failed after
+    // the coordinator registered the scheduler (e.g. the post-genesis failure
+    // injection), the scheduler is running a detached coroutine that sends RPCs
+    // to [db_scheduler_server_]. The member destructors that run after we
+    // rethrow will tear down [db_scheduler_server_], so shut the scheduler down
+    // first or the detached coroutine may send on an invalid file descriptor.
+    // The scheduler is only registered once register_coordinator_with_mempool()
+    // has run, so skip this when construction failed before then.
+    std::shared_ptr<Scheduler> scheduler =
+        mempool_coord_server_.impl()->scheduler();
+    if (scheduler != nullptr) {
+      sched_db_server_.impl()->reset_scheduler()();
+      scheduler->shut_down()();
+    }
+    executor_.shut_down();
+    if (view_gateway_server_ != nullptr) {
+      view_gateway_server_->impl()->shut_down();
+    }
+  } catch (const std::exception &e) {
+    error("HogDevnodeNode failed-start cleanup received exception: {}",
+          e.what());
+  } catch (...) {
+    error("HogDevnodeNode failed-start cleanup received exception");
+  }
+}
+
+void
+HogDevnodeNode::init_indexer_backend()
+{
+  std::filesystem::path db_path =
+      std::filesystem::path(dirs_.indexer.directory()) / kIndexerDbSubdir;
+  IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(db_path);
+  if (!db_status) {
+    panic("[IndexDB::open_or_make_new] failed with {}", db_status.error());
+  }
+  IndexDB &db = db_status.value();
+  indexer_db_ = std::make_unique<IndexDB>(std::move(db));
+}
+
+void
+HogDevnodeNode::start_indexer_servers()
+{
+  indexer_block_explorer_server_ =
+      std::make_unique<RpcServer<IndexerBlockExplorerRpc>>(
+          *indexer_db_, indexer_failure_cache_);
+  indexer_block_explorer_server_->max_message_size_ = kDevRpcMaxMessageSize;
+  indexer_block_explorer_server_->start_server(
+      make_bind_host_port(bind_host_, /*port=*/0));
+}
+
+void
+HogDevnodeNode::reconcile_event_outbox_with_recovered_tip()
+{
+  const DbTip tip = ctx_->get_tip();
+  auto reconciled = event_ctx_.reconcile_outbox_tip(tip.id, tip.value)();
+  if (!reconciled) {
+    throw std::runtime_error(
+        "recovered event outbox does not reconcile with HogDB tip");
+  }
+}
+
+void
+HogDevnodeNode::validate_event_outbox_against_recovered_tip() const
+{
+  const DbTip tip = ctx_->get_tip();
+  const BlockHeight tip_height = tip.value.proposal_header.block_height;
+  auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
+  if (!latest) {
+    throw std::runtime_error(
+        "failed to inspect recovered event outbox latest record");
+  }
+  if (*latest && tip_height != std::numeric_limits<BlockHeight>::max() &&
+      (*latest)->block_height == tip_height + 1 &&
+      (*latest)->prev_hash == sha256(tip.value)) {
+    // Event publication and HogDB commit are concurrent. The event commit is
+    // called only after finalization, so this expected crash window is safe.
+    return;
+  }
+  if (*latest && (*latest)->block_height > tip_height) {
+    throw std::runtime_error(std::format(
+        "recovered event outbox latest height {} is ahead of HogDB tip {}",
+        (*latest)->block_height, tip_height));
+  }
+
+  if (tip_height == 0) {
+    auto origin = event_ctx_.indexer_outbox_store().load_current_epoch_origin();
+    if (!origin || !*origin || (*origin)->origin.first_height != 1 ||
+        (*origin)->origin.first_prev_hash != sha256(tip.value) || *latest) {
+      throw std::runtime_error(
+          "recovered genesis requires an empty outbox prepared at height 1");
+    }
+    return;
+  }
+
+  if (!*latest || (*latest)->block_height != tip_height) {
+    throw std::runtime_error(std::format(
+        "recovered event outbox is missing canonical HogDB tip height {}",
+        tip_height));
+  }
+  if ((*latest)->consensus_hash != sha256(tip.value)) {
+    throw std::runtime_error(
+        "recovered event outbox latest consensus does not match HogDB tip");
+  }
+}
+
+void
+HogDevnodeNode::reconcile_indexer_with_recovered_tip()
+{
+  if (!recovered_existing_chain_) {
+    return;
+  }
+
+  const DbTip tip = ctx_->get_tip();
+  const BlockHeight tip_height = tip.value.proposal_header.block_height;
+  IndexerStatus<BlockHeight> indexed_height_status =
+      indexer_db_->latest_block();
+  if (!indexed_height_status) {
+    throw std::runtime_error("failed to read indexer watermark");
+  }
+  const BlockHeight indexed_height = *indexed_height_status;
+  auto latest = event_ctx_.indexer_outbox_store().latest_committed_record_raw();
+  if (!latest) {
+    throw std::runtime_error(
+        "failed to inspect recovered event outbox latest record");
+  }
+  const BlockHeight finalized_height =
+      *latest ? std::max(tip_height, (*latest)->block_height) : tip_height;
+  if (indexed_height > finalized_height) {
+    throw std::runtime_error(std::format(
+        "recovered hog-devnode indexer is ahead of finalized event outbox: "
+        "indexed height {}, finalized height {}",
+        indexed_height, finalized_height));
+  }
+}
+
+void
+HogDevnodeNode::start_indexer_pull()
+{
+  if (withhold_indexer_pull_for_test()) {
+    return;
+  }
+  indexer_pull_controller_ = std::make_unique<IndexerPullController>(
+      format_advertised_address(bind_host_, event_indexer_server_.port()),
+      *indexer_db_, indexer_failure_cache_);
+  indexer_pull_controller_->wait_until_caught_up();
+}
+
+LocalBootstrapConfig
+HogDevnodeNode::validate_fresh_data_dir(
+    LocalBootstrapConfig const &requested_config) const
+{
+  if (!data_dir_.has_value()) {
+    return requested_config;
+  }
+  std::error_code ec;
+  if (std::filesystem::exists(metadata_path(*data_dir_), ec)) {
+    LocalBootstrapConfig persisted_config =
+        parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+    require_matching_bootstrap_config(persisted_config, requested_config);
+    return persisted_config;
+  }
+  if (ec) {
+    throw std::runtime_error(
+        std::format("could not inspect hog-devnode data dir metadata '{}': {}",
+                    metadata_path(*data_dir_).string(), ec.message()));
+  }
+  return requested_config;
+}
+
+LocalBootstrapConfig
+HogDevnodeNode::validate_recovered_data_dir(
+    LocalBootstrapConfig const &requested_config)
+{
+  if (!data_dir_.has_value()) {
+    return requested_config;
+  }
+
+  std::error_code ec;
+  if (!std::filesystem::exists(metadata_path(*data_dir_), ec)) {
+    if (ec) {
+      throw std::runtime_error(std::format(
+          "could not inspect hog-devnode data dir metadata '{}': {}",
+          metadata_path(*data_dir_).string(), ec.message()));
+    }
+    throw std::runtime_error(
+        "hog-devnode data dir has committed chain state but no bootstrap "
+        "metadata; use the original runtime or choose a new data directory");
+  }
+
+  LocalBootstrapConfig persisted_config =
+      parse_data_dir_metadata(read_metadata_file(metadata_path(*data_dir_)));
+  require_matching_bootstrap_config(persisted_config, requested_config);
+  return persisted_config;
+}
+
+void
+HogDevnodeNode::write_data_dir_metadata() const
+{
+  if (!data_dir_.has_value()) {
+    return;
+  }
+
+  write_metadata_atomically(metadata_path(*data_dir_),
+                            build_data_dir_metadata_json(bootstrap_config_));
+}
+
+void
+HogDevnodeNode::load_recovered_bootstrap_metadata(
+    LocalBootstrapConfig const &config)
+{
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
+  genesis_configuration_ = std::move(artifact.genesis_configuration);
+  genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
+  bootstrap_accounts_ = std::move(artifact.accounts);
+  if (ctx_->get_tip().value.proposal_header.block_height == 0) {
+    throw std::runtime_error(
+        "hog-devnode data dir has bootstrap genesis but no initialization "
+        "block; reinitialize the data dir");
+  }
+  refresh_bootstrap_account_balances();
+}
+
+x23::Async<void>
+HogDevnodeNode::materialize_bootstrap_accounts(
+    LocalBootstrapConfig const &config)
+{
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode materialize_bootstrap_accounts connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
+  BootstrapAccountArtifact artifact =
+      build_local_bootstrap_account_artifact(config, network_hash_,
+                                             ctx_->get_cost_model());
+  genesis_configuration_ = artifact.genesis_configuration;
+  const auto genesis_result = client.schedcoord_load_genesis_configuration(
+      std::move(artifact.genesis_configuration))();
+  if (genesis_result != DbSchedResult::DbSchedResultOK) {
+    panic("devnode could not load the genesis configuration: {}. A "
+          "--network-config override is likely outside the bounds this build "
+          "accepts. If this node has a persistent --data-dir, it already "
+          "recorded the requested overrides; correct them and start from a "
+          "fresh data directory.",
+          genesis_result);
+  }
+  co_await initialize_fresh_event_outbox_origin();
+  register_event_with_mempool();
+  register_executor_with_mempool();
+  maybe_inject_post_executor_failure();
+  maybe_inject_post_genesis_failure();
+
+  SignedTransactionBatch batch;
+  batch.append_range(artifact.initialization_txs);
+  commit_initialization_batch(batch);
+  start_indexer_pull();
+
+  bootstrap_accounts_ = std::move(artifact.accounts);
+  refresh_bootstrap_account_balances();
+  co_return;
+}
+
+x23::Async<void>
+HogDevnodeNode::initialize_fresh_event_outbox_origin()
+{
+  const DbTip genesis_tip = ctx_->get_tip();
+  if (genesis_tip.value.proposal_header.block_height != 0) {
+    throw std::runtime_error(
+        "fresh devnode genesis did not establish canonical height 0");
+  }
+  auto initialized =
+      co_await event_ctx_.indexer_outbox_store()
+          .initialize_current_epoch_origin(1, sha256(genesis_tip.value));
+  if (!initialized) {
+    throw std::runtime_error(
+        std::format("failed to initialize fresh devnode outbox origin: {}",
+                    initialized.error()));
+  }
+  co_return;
+}
+
+void
+HogDevnodeNode::commit_initialization_batch(SignedTransactionBatch const &txs)
+{
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode commit_initialization_batch connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
+  SchedulerGetTipResult tip = client.schedcoord_get_tip()();
+  CHECK_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ParallelSignedTransactionBatch parallel = t_to_parallel_batch(txs)();
+  GenesisCeremonyRequest request{
+      .expected_parent_height = 0,
+      .expected_parent_value_hash = sha256(tip.db_tip().value),
+      .context = ProposalContext{.protocol = 0},
+      .transactions = std::move(parallel),
+  };
+  GenesisCeremonyResult result =
+      client.schedulercoord_commit_genesis_ceremony(std::move(request))();
+  CHECK_EQ(result.outcome(), GenesisCeremonyOutcome::GenesisCeremonyCommitted);
+}
+
+void
+HogDevnodeNode::refresh_bootstrap_account_balances()
+{
+  for (BootstrapAccountMetadata &account : bootstrap_accounts_) {
+    if (account.address !=
+        derive_bootstrap_account_address(account.public_key)) {
+      throw std::runtime_error(
+          "bootstrap account address does not match derived native account");
+    }
+
+    HogDbStatus<int128_t> balance =
+        ctx_->get_db().read_address_balance(account.address);
+    if (!balance.has_value()) {
+      throw std::runtime_error(
+          "bootstrap account metadata does not match recovered chain: missing "
+          "balance");
+    }
+    if (*balance < 0 ||
+        std::cmp_greater(*balance, std::numeric_limits<std::uint64_t>::max())) {
+      throw std::runtime_error(
+          "bootstrap account metadata does not match recovered chain: invalid "
+          "balance");
+    }
+    account.storage_tokens = static_cast<std::uint64_t>(*balance);
+  }
+}
+
+HogDbDAO
+HogDevnodeNode::open_db_backend() const
+{
+  DBStatus<std::uint64_t> lsn = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::check(dirs_.db.directory(), ramdb_bytes_);
+  });
+  if (!lsn.has_value()) {
+    lsn.error().raise("ramdb integrity check failed for '{}'",
+                      dirs_.db.directory());
+  }
+  info("database '{}' passed integrity check; current LSN is {}",
+       dirs_.db.directory(), *lsn);
+
+  DBStatus<std::unique_ptr<Database>> ramdb = run_ramdb_open(ramdb_bytes_, [&] {
+    return Database::open_lsn(dirs_.db.directory(), *lsn, ramdb_bytes_);
+  });
+  if (!ramdb.has_value()) {
+    ramdb.error().raise("ramdb open failed for '{}'", dirs_.db.directory());
+  }
+
+  HogDbDAO db(RAMDB(std::move(*ramdb)));
+  HogDbStatus<DbTip> recovered_tip = db.read_dbtip();
+  if (!recovered_tip && recovered_tip.error().code() != HogDbCode::kNotFound) {
+    throw std::runtime_error(std::format("failed to read recovered DbTip: {}",
+                                         recovered_tip.error()));
+  }
+
+  StorageLongHash full_hash = db.compute_full_db_hash();
+  if (!recovered_tip) {
+    if (full_hash != StorageLongHash{}) {
+      throw std::runtime_error("recovered database has state but no DbTip");
+    }
+    return db;
+  }
+  if (full_hash != recovered_tip->storage_long_hash) {
+    throw std::runtime_error(
+        "recovered database storage hash does not match DbTip");
+  }
+  if (RPCContext::has_committed_tip(*recovered_tip) &&
+      recovered_tip->value.proposal_header.network_hash != network_hash_) {
+    throw std::runtime_error(std::format(
+        "unsupported hog-devnode data directory: recovered chain network "
+        "hash {} does not match requested network hash {}",
+        format_network_hash(recovered_tip->value.proposal_header.network_hash),
+        format_network_hash(network_hash_)));
+  }
+  return db;
+}
+
+void
+HogDevnodeNode::init_db_backend(
+    HogDbDAO db, std::unique_ptr<sched_db_client_t> sched_db_client)
+{
+  ctx_ =
+      std::make_unique<RPCContext>(std::move(db), std::move(sched_db_client));
+  if (ctx_->has_committed_tip()) {
+    HogDbStatus<StorageCostModel> cost_model = ctx_->get_db().read_cost_model();
+    if (!cost_model) {
+      panic("failed to read recovered cost model: {}", cost_model.error());
+    }
+    ctx_->initialize_cost_model(*cost_model);
+    recovered_existing_chain_ = true;
+    // Hog ages are scheduler-visible state derived from committed balances,
+    // and nothing republishes them for blocks that committed before this
+    // process started. hog-db's own main does this at startup; a composed
+    // devnode has to as well, or every account reads zero hogs available and
+    // the scheduler discards every transaction it is handed.
+    HogDbStatus<void> reconciled = reconcile_startup_hog_ages(ctx_->get_db());
+    if (!reconciled.has_value()) {
+      throw std::runtime_error(
+          std::format("failed to reconcile startup hog ages: {}",
+                      reconciled.error()));
+    }
+    info("recovered hog-devnode database at committed height {}",
+         ctx_->get_tip().value.proposal_header.block_height);
+  }
+  else {
+    ctx_->initialize_cost_model(StorageCostModel::default_cost_model());
+  }
+}
+
+void
+HogDevnodeNode::register_db_with_mempool()
+{
+  auto client_res =
+      create_client<SchedDb1>(bind_host_, sched_db_server_.port())();
+  if (!client_res)
+    panic("devnode register_db_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
+  std::string exec_address =
+      format_advertised_address(bind_host_, db_executor_server_->port());
+  std::string sched_address =
+      format_advertised_address(bind_host_, db_scheduler_server_->port());
+  std::string auth_address =
+      format_advertised_address(bind_host_, db_auth_server_->port());
+  const BlockHeight block_height =
+      std::max<BlockHeight>(ctx_->get_tip().value.proposal_header.block_height,
+                            BlockHeight{0});
+  client.scheddb_intro_shard({.protocol = version::kHogdProtocol(),
+                              .block_height = block_height,
+                              .address_for_exec = exec_address.c_str(),
+                              .address_for_sched = sched_address.c_str(),
+                              .address_for_auth = auth_address.c_str()})();
+}
+
+void
+HogDevnodeNode::register_event_with_mempool()
+{
+  auto client_res =
+      create_client<SchedEvent1>(bind_host_, sched_event_server_.port())();
+  if (!client_res)
+    panic("devnode register_event_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
+  std::string exec_address =
+      format_advertised_address(bind_host_, event_exec_server_.port());
+  std::string sched_address =
+      format_advertised_address(bind_host_, event_sched_server_.port());
+  EventCard card{.protocol = version::kHogdProtocol(),
+                 .upid = {},
+                 .address_for_exec = exec_address.c_str(),
+                 .address_for_sched = sched_address.c_str()};
+  while (true) {
+    EventPrepareResult prepared = client.schedevent_prepare_event(card)();
+    if (prepared.outcome() == EventPrepareOutcome::EventPrepareNotReady) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+    CHECK_EQ(prepared.outcome(), EventPrepareOutcome::EventPrepareOK);
+    EventRegistrationSnapshot snapshot = prepared.snapshot();
+    CHECK(event_ctx_
+              .reconcile_outbox_tip(snapshot.tip.block_id,
+                                    snapshot.tip.consensus_value)()
+              .has_value());
+    EventActivationResult activated =
+        client.schedevent_activate_event(snapshot)();
+    if (activated.outcome() == EventActivationOutcome::EventActivationOK) {
+      break;
+    }
+    CHECK_EQ(activated.outcome(), EventActivationOutcome::EventActivationRetry);
+  }
+}
+
+AuthCard
+HogDevnodeNode::register_auth_with_mempool()
+{
+  auto client_res =
+      create_client<MempoolAuth1>(bind_host_, mempool_auth_server_->port())();
+  if (!client_res)
+    panic("devnode register_auth_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  sched_auth_client_t client = std::move(*client_res);
+  AuthCard auth_card = {
+      .protocol = version::kHogdProtocol(),
+      .upid = {},
+      .address_for_db =
+          format_advertised_address(bind_host_, auth_db_server_.port()).c_str(),
+      .address_for_mempool =
+          format_advertised_address(bind_host_, auth_mempool_server_.port())
+              .c_str()};
+  client.mempoolauth_intro_auth(auth_card)();
+  auth_server_->set_mempool_client(std::move(client));
+  return auth_card;
+}
+
+void
+HogDevnodeNode::register_executor_with_mempool()
+{
+  const sockaddr_storage coordinator_sockaddr =
+      host_port_to_sockaddr(bind_host_, sched_exec_server_.port());
+  executor_.start(bind_host_, /*self_port=*/0, coordinator_sockaddr);
+  mempool_coord_server_->impl()->finish_runtime_init()();
+}
+
+x23::Async<void>
+HogDevnodeNode::register_coordinator_with_mempool()
+{
+  auto client_res =
+      create_client<SchedulerCoord1>(bind_host_,
+                                     mempool_coord_server_.port())();
+  if (!client_res)
+    panic("devnode register_coordinator_with_mempool connect failed: {}",
+          client_res.error().error_code().message());
+  auto client = std::move(*client_res);
+  std::string coord_address =
+      format_advertised_address(bind_host_, coordinator_sched_server_.port());
+  CoordCard card{.protocol = version::kHogdProtocol(),
+                 .address_for_sched = coord_address.c_str()};
+  CHECK_EQ(co_await client.schedulercoord_intro_coord(card),
+           CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
+}
+
+} // namespace hogd

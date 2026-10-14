@@ -1,0 +1,16 @@
+#pragma once
+
+// Set to 1 if <stacktrace> is included and enabled
+#cmakedefine01 HAVE_CXX_STACKTRACE
+
+// RocksDB config options:
+// Select which compression algorithms are available
+#cmakedefine01 ROCKSDB_WITH_SNAPPY
+
+#cmakedefine01 ROCKSDB_WITH_LZ4
+
+#cmakedefine01 ROCKSDB_WITH_ZSTD
+
+#cmakedefine01 ROCKSDB_WITH_ZLIB
+
+#cmakedefine01 ROCKSDB_WITH_BZ2

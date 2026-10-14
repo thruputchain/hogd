@@ -1,0 +1,20 @@
+add_library(
+  http
+  http.cc
+)
+target_link_libraries(
+  http
+  base
+  x23
+)
+
+add_executable(
+  http_test
+  http_test.cc
+)
+target_link_libraries(
+  http_test
+  http
+  GTest::gtest_main
+)
+hogd_discover_tests(http_test)

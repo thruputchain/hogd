@@ -1,0 +1,49 @@
+# hog_exec / C++-specific syscall properties, keyed by syscall name. These are
+# hog_exec implementation details that do not affect the wire ABI, so they live
+# here rather than in protocol/syscalls.yaml. gen_syscalls.py reads this as the
+# single source of truth for these flags; every key must name a syscall in
+# syscalls.yaml and set only known properties, or generation fails.
+#
+# Properties (default false):
+#   needs_gas: inner body is handed the frame's remaining gas (WrappedGasAmount
+#              remaining_gas) to reserve variable, input-dependent costs.
+#   async:     inner body may suspend (reads/writes hog_db); its declaration
+#              returns MaybeAsyncSyscallInnerResult and body is a coroutine.
+syscalls:
+  SHA256:
+    needs_gas: true
+  SHA256Update:
+    needs_gas: true
+  GetTransactionStatistics:
+    needs_gas: true
+  VerifySignature:
+    needs_gas: true
+  Invoke:
+    needs_gas: true
+    # Invoke recurses into Runtime::invoke, so it suspends wherever the child
+    # invocation does.
+    async: true
+  BytestringGetLen:
+    async: true
+  BytestringGet:
+    async: true
+  BytestringSet:
+    async: true
+  NonnegativeIntGet:
+    async: true
+  NonnegativeIntSetAdd:
+    async: true
+  DeleteObject:
+    async: true
+  RetrocausalQueueInsert:
+    async: true
+  RetrocausalQueueConsume:
+    async: true
+  RetrocausalQueuePeekLen:
+    async: true
+  DeployContract:
+    async: true
+  ChangePublicKeyRegistration:
+    async: true
+  WriteAddressRequiredWeight:
+    async: true

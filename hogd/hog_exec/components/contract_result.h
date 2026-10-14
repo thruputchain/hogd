@@ -1,0 +1,235 @@
+#pragma once
+
+#include <array>
+#include <bit>
+#include <concepts>
+#include <cstddef>
+#include <cstdint>
+#include <cstring>
+#include <span>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+#include <variant>
+
+#include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/components/library_exception.hh"
+#include "hogd/xdr/transaction.hh"
+#include "x23/serialize.h"
+#include "x23/serialize_cxs.h"
+#include "x23/vec.h"
+
+namespace hogd {
+
+// The C++ mirror of the SDK's `Signed<T>` (spec kind `signed_token`): an XDR
+// struct with no fields, since its handle travels out-of-band. `handle` is not
+// on the wire: decoding leaves it kUnassigned and NativeContractBuilder fills
+// it in declaration order.
+struct SignedToken {
+  static constexpr uint32_t kUnassigned = UINT32_MAX;
+  uint32_t handle = kUnassigned;
+
+  bool operator==(SignedToken const &) const noexcept = default;
+};
+
+template<typename T, uint64_t Selector> struct ContractException {
+  constexpr static uint64_t kSelector = Selector;
+  T exn;
+};
+
+// Preimage bytes must be the SDK's UTF-8 encoding regardless of the ordinary
+// execution character set, so the arguments and separators are u8 literals.
+inline uint64_t
+calculate_selector(std::u8string_view major_version, std::u8string_view crate,
+                   std::u8string_view type_name)
+{
+  x23::Buf buf;
+  buf.append_range(major_version);
+  buf.append_range(std::u8string_view(u8"::"));
+  buf.append_range(crate);
+  buf.append_range(std::u8string_view(u8"::"));
+  buf.append_range(type_name);
+  auto hash = sha256(buf);
+  // First 8 digest bytes as big-endian u64 (matches contract SDK).
+  uint64_t out = 0;
+  static_assert(std::endian::native == std::endian::little);
+  std::memcpy(&out, hash.data(), sizeof(out));
+  out = std::byteswap(out);
+  return out;
+}
+
+// SHA256("1::sdk::LibraryExn")[0..8] as big-endian u64 (sdk_rs
+// exception_selector).
+inline constexpr uint64_t kLibraryExceptionSelector = 0xe562d59059c60ac3ULL;
+
+using LibraryException =
+    ContractException<LibraryExn, kLibraryExceptionSelector>;
+
+template<typename... T> struct ContractErrorType {
+public:
+  ContractErrorType(ReturnBuffer &&abort_buffer)
+  {
+    // Dispatch uses the fixed `kLibraryExceptionSelector` constant directly;
+    // it is validated against `calculate_selector` in contract_result_test.cc,
+    // not recomputed here (which would depend on the execution charset).
+    uint64_t selector = 0;
+    auto used_bytes =
+        x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
+    if (!used_bytes) {
+      variant_ = RawAbortType{std::move(abort_buffer)};
+      return;
+    }
+
+    std::span<const uint8_t> const body_span(abort_buffer.data() + *used_bytes,
+                                             abort_buffer.size() - *used_bytes);
+
+    bool matched =
+        this->template try_dispatch_exceptions<LibraryException, T...>(
+            selector, body_span);
+    if (!matched) {
+      variant_ = RawAbortType{std::move(abort_buffer)};
+    }
+  }
+
+  template<typename U>
+  requires (std::is_same_v<std::remove_cvref_t<U>, LibraryException> ||
+            (sizeof...(T) > 0 &&
+             (std::is_same_v<std::remove_cvref_t<U>, T> || ...)))
+  ContractErrorType(U &&exn) : variant_(std::forward<U>(exn))
+  {}
+
+private:
+  struct RawAbortType {
+    ReturnBuffer abort_buffer;
+  };
+
+  explicit ContractErrorType(RawAbortType raw) : variant_(std::move(raw)) {}
+
+  // `U` is `ContractException<Exn, Sel>` with `kSelector` and `exn`.
+  //
+  // Open-enum semantics: when `exn` is (or contains) an enum, a successful
+  // decode may yield a value outside `xdr_meta<E>::tags`. This is intentional
+  // — x23 enums are open, and callers must handle unknown enum values
+  // defensively (no no-default switches on contract-returned enums). An
+  // attacker-controlled body producing such a value is not a trust-boundary
+  // violation; do not add tag-set validation here.
+  template<typename U>
+  x23::CxsStatus<bool> try_dispatch_exception(uint64_t selector,
+                                              std::span<const uint8_t> body)
+  {
+    if (selector != U::kSelector) {
+      return false;
+    }
+    std::remove_cvref_t<decltype(std::declval<U>().exn)> exn{};
+    if (auto status = x23::deserialize_cxs(&exn, body); !status)
+      return status.error();
+    variant_ = U{exn};
+    return true;
+  }
+
+  template<typename U, typename... Rest>
+  bool try_dispatch_exceptions(uint64_t selector, std::span<const uint8_t> body)
+  {
+    auto matched = try_dispatch_exception<U>(selector, body);
+    if (!matched)
+      return false;
+    if (*matched)
+      return true;
+    if constexpr (sizeof...(Rest) > 0)
+      return try_dispatch_exceptions<Rest...>(selector, body);
+    return false;
+  }
+
+public:
+  // Forward an exception without decoding and re-encoding its body. Wallets
+  // use this after validating the selector, matching SDK RawExceptionRef.
+  static ContractErrorType from_raw_abort(ReturnBuffer abort_buffer)
+  {
+    return ContractErrorType(RawAbortType{std::move(abort_buffer)});
+  }
+
+  // Re-serialize to (u64 selector, CXS body) format.
+  x23::CxsStatus<ReturnBuffer> serialize() const
+  {
+    return std::visit(
+        [](auto const &v) -> x23::CxsStatus<ReturnBuffer> {
+          using V = std::remove_cvref_t<decltype(v)>;
+          if constexpr (std::is_same_v<V, RawAbortType>) {
+            return v.abort_buffer;
+          }
+          else {
+            // V is a ContractException<Exn, Sel>
+            auto buf = x23::serialize_cxs(V::kSelector, v.exn);
+            if (!buf)
+              return buf.error();
+            return ReturnBuffer(buf->begin(), buf->end());
+          }
+        },
+        variant_);
+  }
+
+  std::variant<LibraryException, RawAbortType, T...> variant_;
+};
+
+// Parse and work with result types returned by contract methods.
+template<typename T, typename... Exns> class Result {
+public:
+  constexpr static bool kIsContractResultType = true;
+
+  using ok_type = std::conditional_t<std::is_same_v<T, void>, std::tuple<>, T>;
+  using err_type = ContractErrorType<Exns...>;
+
+  struct OkType {
+    ok_type value_;
+  };
+
+  template<typename... Args> requires std::is_constructible_v<ok_type, Args...>
+  static Result make_ok(Args &&...args)
+  {
+    return Result(OkType(std::forward<Args>(args)...));
+  }
+
+  template<typename... Args> requires std::is_constructible_v<err_type, Args...>
+  static Result make_err(Args &&...args)
+  {
+    return Result(err_type(std::forward<Args>(args)...));
+  }
+
+  Result(OkType &&t) : variant_(std::move(t)) {}
+  Result(err_type e) : variant_(std::move(e)) {}
+
+  auto const &ok() const { return std::get<OkType>(variant_).value_; }
+  auto const &err() const { return std::get<err_type>(variant_); }
+
+  bool is_ok() const { return std::holds_alternative<OkType>(variant_); }
+  bool is_err() const { return std::holds_alternative<err_type>(variant_); }
+
+private:
+  static_assert(!std::is_same_v<OkType, err_type>);
+  std::variant<OkType, err_type> variant_;
+};
+
+template<typename T>
+concept is_contract_result_type = requires {
+  { T::kIsContractResultType } -> std::convertible_to<bool>;
+};
+
+static_assert(is_contract_result_type<Result<void>>);
+
+} // namespace hogd
+
+// A SignedToken is an XDR struct with no fields, so both XDR and CXS encode it
+// as zero bytes; x23 reads the field list from tuple_size.
+template<>
+struct std::tuple_size<hogd::SignedToken>
+  : std::integral_constant<std::size_t, 0> {};
+
+// NOLINTBEGIN(readability-identifier-naming)
+template<> struct x23::xdr_meta<hogd::SignedToken> {
+  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr const char *type_name = "SignedToken";
+  static constexpr std::array<std::string_view, 0> field_names{};
+};
+// NOLINTEND(readability-identifier-naming)

@@ -1,0 +1,840 @@
+# groundhog-wasm-meter Integration Plan
+
+> **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
+
+**Goal:** Integrate `groundhog-wasm-meter` v0.1.1 into hogd so that newly deployed contracts are verified for correct stack-limit instrumentation, the stack limit global is set at instantiation time, and test contracts are instrumented at load time.
+
+**Architecture:** Three integration points: (1) `verify()` called inside existing Rust `verify_contract` methods in wasmi and wasmtime crates; (2) `__groundhog_stack_limit` global set to 4096 during Rust module instantiation; (3) `instrument()` exposed via FFI from a new `wasm_meter` Rust crate, with a C++ RAII wrapper used by test contract loaders.
+
+**Tech Stack:** Rust (groundhog-wasm-meter 0.1.1, wasmi 0.36.5, wasmtime 42.0.0), C++23, CMake, cbindgen
+
+**Spec:** `docs/superpowers/specs/2026-04-06-wasm-meter-integration-design.md`
+
+**Build:** Use the `build` skill to compile. Only run one build at a time — never parallel builds.
+
+---
+
+### Task 1: Cargo dependency wiring + new wasm_meter crate skeleton
+
+**Files:**
+- Create: `hogd/rust/.cargo/config.toml`
+- Create: `hogd/rust/wasm_meter/Cargo.toml`
+- Create: `hogd/rust/wasm_meter/src/lib.rs`
+- Create: `hogd/rust/wasm_meter/cbindgen.toml`
+- Create: `hogd/rust/wasm_meter/CMakeLists.txt`
+- Modify: `hogd/rust/Cargo.toml`
+- Modify: `hogd/rust/wasmi/Cargo.toml`
+- Modify: `hogd/rust/wasmtime/Cargo.toml`
+- Modify: `hogd/rust/unified/Cargo.toml`
+- Modify: `hogd/rust/unified/src/lib.rs`
+- Modify: `hogd/rust/CMakeLists.txt`
+
+- [ ] **Step 1: Create `.cargo/config.toml`**
+
+Create `hogd/rust/.cargo/config.toml`:
+```toml
+[registries]
+groundhog = { index = "sparse+https://groundhog.dev/crates/api/v1/crates/" }
+
+[source]
+groundhog = { registry = "sparse+https://groundhog.dev/crates/api/v1/crates/" }
+```
+
+- [ ] **Step 2: Add workspace dependency and member**
+
+In `hogd/rust/Cargo.toml`, add `groundhog-wasm-meter` to `[workspace.dependencies]` after the `groundhog-xdr` line:
+
+```toml
+groundhog-wasm-meter = { version = "0.1.1", registry = "groundhog" }
+```
+
+Add `"wasm_meter"` to the `members` list:
+
+```toml
+members = [
+    "crypto",
+    "wasmi",
+    "wasmtime",
+    "unified",
+    "contract_types",
+    "common",
+    "synchronized_map",
+    "test_ffi_bindings",
+    "wasm_meter"
+]
+```
+
+- [ ] **Step 3: Add dep to wasmi crate**
+
+In `hogd/rust/wasmi/Cargo.toml`, add under `[dependencies]`:
+
+```toml
+groundhog-wasm-meter = { workspace = true }
+```
+
+- [ ] **Step 4: Add dep to wasmtime crate**
+
+In `hogd/rust/wasmtime/Cargo.toml`, add under `[dependencies]`:
+
+```toml
+groundhog-wasm-meter = { workspace = true }
+```
+
+- [ ] **Step 5: Create wasm_meter crate Cargo.toml**
+
+Create `hogd/rust/wasm_meter/Cargo.toml`:
+```toml
+[package]
+name = "wasm_meter"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+groundhog-wasm-meter = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]
+```
+
+- [ ] **Step 6: Create wasm_meter crate lib.rs (skeleton)**
+
+Create `hogd/rust/wasm_meter/src/lib.rs`:
+```rust
+use core::slice;
+use std::ptr;
+
+#[repr(C)]
+pub struct WasmMeterInstrumentResult {
+    pub data: *mut u8,
+    pub len: usize,
+    pub success: bool,
+}
+
+/// # Safety
+/// `wasm_ptr` must point to `wasm_len` bytes of valid wasm bytecode.
+#[no_mangle]
+pub unsafe extern "C" fn wasm_meter_instrument(
+    wasm_ptr: *const u8,
+    wasm_len: usize,
+) -> WasmMeterInstrumentResult {
+    if wasm_ptr.is_null() {
+        return WasmMeterInstrumentResult {
+            data: ptr::null_mut(),
+            len: 0,
+            success: false,
+        };
+    }
+    let wasm = unsafe { slice::from_raw_parts(wasm_ptr, wasm_len) };
+    match groundhog_wasm_meter::instrument(wasm) {
+        Ok(bytes) => {
+            let mut boxed = bytes.into_boxed_slice();
+            let data = boxed.as_mut_ptr();
+            let len = boxed.len();
+            std::mem::forget(boxed);
+            WasmMeterInstrumentResult {
+                data,
+                len,
+                success: true,
+            }
+        }
+        Err(e) => {
+            eprintln!("wasm_meter_instrument failed: {e}");
+            WasmMeterInstrumentResult {
+                data: ptr::null_mut(),
+                len: 0,
+                success: false,
+            }
+        }
+    }
+}
+
+/// # Safety
+/// `ptr` and `len` must have been returned by a successful `wasm_meter_instrument` call.
+/// Must not be called more than once for the same allocation.
+#[no_mangle]
+pub unsafe extern "C" fn wasm_meter_free(ptr: *mut u8, len: usize) {
+    if !ptr.is_null() && len > 0 {
+        unsafe {
+            drop(Box::from_raw(slice::from_raw_parts_mut(ptr, len)));
+        }
+    }
+}
+```
+
+- [ ] **Step 7: Create wasm_meter cbindgen.toml**
+
+Create `hogd/rust/wasm_meter/cbindgen.toml`:
+```toml
+language = "C++"
+
+pragma_once = true
+autogen_warning = "/* Warning, this file is autogenerated by cbindgen. Do not modify this manually. */"
+include_version = false
+namespace = "hogd"
+using_namespaces = []
+sys_includes = []
+includes = []
+no_includes = false
+after_includes = ""
+
+braces = "SameLine"
+line_length = 100
+tab_width = 2
+documentation = true
+documentation_style = "auto"
+documentation_length = "full"
+line_endings = "LF"
+
+style = "both"
+sort_by = "Name"
+usize_is_size_t = true
+
+[defines]
+
+[export]
+include = []
+exclude = []
+item_types = []
+renaming_overrides_prefixing = false
+
+[export.rename]
+
+[export.body]
+
+[export.mangle]
+
+[fn]
+rename_args = "None"
+args = "auto"
+sort_by = "Name"
+
+[struct]
+rename_fields = "None"
+derive_constructor = false
+derive_eq = false
+derive_neq = false
+derive_lt = false
+derive_lte = false
+derive_gt = false
+derive_gte = false
+
+[enum]
+rename_variants = "None"
+add_sentinel = false
+prefix_with_name = false
+derive_helper_methods = false
+derive_const_casts = false
+derive_mut_casts = false
+derive_tagged_enum_destructor = false
+derive_tagged_enum_copy_constructor = false
+enum_class = true
+private_default_tagged_enum_constructor = false
+
+[const]
+allow_static_const = true
+allow_constexpr = false
+sort_by = "Name"
+
+[macro_expansion]
+bitflags = false
+
+[parse]
+parse_deps = false
+exclude = []
+clean = false
+extra_bindings = []
+
+[parse.expand]
+crates = []
+all_features = false
+default_features = true
+features = []
+```
+
+- [ ] **Step 8: Create wasm_meter CMakeLists.txt**
+
+Create `hogd/rust/wasm_meter/CMakeLists.txt`:
+```cmake
+add_custom_command(
+    OUTPUT
+        ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    DEPENDS
+      ${CMAKE_CURRENT_SOURCE_DIR}/src/lib.rs
+      ${CMAKE_CURRENT_SOURCE_DIR}/../Cargo.lock
+    COMMAND
+      cbindgen --config cbindgen.toml --crate wasm_meter --output ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+    WORKING_DIRECTORY
+      ${CMAKE_CURRENT_SOURCE_DIR}
+)
+
+add_custom_target(
+	generate_wasm_meter_ffi_h ALL
+	DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/bindings.h
+)
+```
+
+- [ ] **Step 9: Add wasm_meter as unified dep**
+
+In `hogd/rust/unified/Cargo.toml`, add under `[dependencies]`:
+
+```toml
+wasm_meter = { path = "../wasm_meter" }
+```
+
+- [ ] **Step 10: Reference wasm_meter from unified lib.rs**
+
+In `hogd/rust/unified/src/lib.rs`, add at the end:
+
+```rust
+extern crate wasm_meter;
+```
+
+The file should read:
+```rust
+pub use crypto_lib::*;
+pub use wasmi_lib::*;
+pub use wasmtime_lib::*;
+extern crate wasm_meter;
+```
+
+- [ ] **Step 11: Add wasm_meter subdirectory to Rust CMakeLists**
+
+In `hogd/rust/CMakeLists.txt`, add after the existing `add_subdirectory` lines:
+
+```cmake
+add_subdirectory(wasm_meter)
+```
+
+The first block should read:
+```cmake
+add_subdirectory(crypto)
+add_subdirectory(wasmi)
+add_subdirectory(wasmtime)
+add_subdirectory(contract_types)
+add_subdirectory(wasm_meter)
+```
+
+- [ ] **Step 12: Fetch the crate from registry**
+
+The build system uses `CARGO_NET_OFFLINE=true`. Before building, fetch the new crate:
+
+```bash
+cd hogd/rust && cargo fetch
+```
+
+- [ ] **Step 13: Build to verify Rust compiles**
+
+Use the `build` skill to build. The Rust workspace should compile with the new crate and wasm_meter FFI.
+
+- [ ] **Step 14: Commit**
+
+```bash
+git add hogd/rust/.cargo/config.toml hogd/rust/Cargo.toml hogd/rust/Cargo.lock \
+  hogd/rust/wasmi/Cargo.toml hogd/rust/wasmtime/Cargo.toml \
+  hogd/rust/unified/Cargo.toml hogd/rust/unified/src/lib.rs \
+  hogd/rust/wasm_meter/ hogd/rust/CMakeLists.txt
+git commit -m "feat: add groundhog-wasm-meter dependency and wasm_meter FFI crate"
+```
+
+---
+
+### Task 2: Add verify() to wasmi and wasmtime verify_contract
+
+**Files:**
+- Modify: `hogd/rust/wasmi/src/wasmi_context.rs:255-273`
+- Modify: `hogd/rust/wasmtime/src/context.rs:149-167`
+
+- [ ] **Step 1: Add verify() to wasmi verify_contract**
+
+In `hogd/rust/wasmi/src/wasmi_context.rs`, in the `verify_contract` method, replace the final `true` (line 272) with the verify check. The method should become:
+
+```rust
+    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+        let engine = Self::new_engine();
+        let module = match Module::new(&engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: {}", e);
+                return false;
+            }
+        };
+        if !check_memory_limit(&module) {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: memory limit check failed"
+            );
+            return false;
+        }
+        if let Err(e) = groundhog_wasm_meter::verify(contract_data) {
+            #[cfg(debug_assertions)]
+            eprintln!("Contract verification failed: wasm-meter: {e}");
+            return false;
+        }
+        true
+    }
+```
+
+- [ ] **Step 2: Add verify() to wasmtime verify_contract**
+
+In `hogd/rust/wasmtime/src/context.rs`, same pattern. The method should become:
+
+```rust
+    pub fn verify_contract(&self, contract_data: &[u8]) -> bool {
+        let engine = self.engine();
+        let module = match Module::new(engine, contract_data) {
+            Ok(m) => m,
+            Err(e) => {
+                #[cfg(debug_assertions)]
+                eprintln!("Contract verification failed: {}", e);
+                return false;
+            }
+        };
+        if !check_memory_limit(&module) {
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "Contract verification failed: memory limit check failed"
+            );
+            return false;
+        }
+        if let Err(e) = groundhog_wasm_meter::verify(contract_data) {
+            #[cfg(debug_assertions)]
+            eprintln!("Contract verification failed: wasm-meter: {e}");
+            return false;
+        }
+        true
+    }
+```
+
+- [ ] **Step 3: Build to verify compilation**
+
+Use the `build` skill. Rust should compile. Tests will fail at this point because test contracts are not yet instrumented — that's expected.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add hogd/rust/wasmi/src/wasmi_context.rs hogd/rust/wasmtime/src/context.rs
+git commit -m "feat: add groundhog-wasm-meter verify() to contract verification"
+```
+
+---
+
+### Task 3: Set __groundhog_stack_limit at instantiation time
+
+**Files:**
+- Modify: `hogd/rust/wasmtime/src/runtime.rs:100-101`
+- Modify: `hogd/rust/wasmi/src/wasmi_runtime.rs:114-116`
+
+- [ ] **Step 1: Set global in wasmtime instantiation**
+
+In `hogd/rust/wasmtime/src/runtime.rs`, in `WasmtimeRuntime::new()`, replace line 101:
+
+```rust
+        Ok(Some(Self { store, instance }))
+```
+
+with:
+
+```rust
+        let stack_limit_global = instance
+            .get_global(&mut store, "__groundhog_stack_limit")
+            .expect("instrumented module must export __groundhog_stack_limit");
+        stack_limit_global
+            .set(&mut store, wasmtime::Val::I64(4096))
+            .expect("__groundhog_stack_limit must be a mutable i64 global");
+        Ok(Some(Self { store, instance }))
+```
+
+- [ ] **Step 2: Set global in wasmi instantiation**
+
+In `hogd/rust/wasmi/src/wasmi_runtime.rs`, in `WasmiRuntime::new()`, replace line 116:
+
+```rust
+        Some(Self { store, instance })
+```
+
+with:
+
+```rust
+        let stack_limit_global = instance
+            .get_global(&store, "__groundhog_stack_limit")
+            .expect("instrumented module must export __groundhog_stack_limit");
+        stack_limit_global
+            .set(
+                &mut store,
+                wasmi::Val::I64(4096),
+            )
+            .expect("__groundhog_stack_limit must be a mutable i64 global");
+        Some(Self { store, instance })
+```
+
+Note: wasmi's `Instance::get_global` takes `&Store` (not `&mut Store`) for the lookup, but `Global::set` takes `&mut Store`.
+
+- [ ] **Step 3: Build to verify compilation**
+
+Use the `build` skill. Rust should compile. Tests will still fail because test contracts aren't instrumented yet.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add hogd/rust/wasmtime/src/runtime.rs hogd/rust/wasmi/src/wasmi_runtime.rs
+git commit -m "feat: set __groundhog_stack_limit to 4096 at module instantiation"
+```
+
+---
+
+### Task 4: C++ RAII wrapper for instrument FFI
+
+**Files:**
+- Create: `hogd/hogexec/runtime/wasm/instrumented_bytes.h`
+- Create: `hogd/hogexec/runtime/wasm/instrumented_bytes.cc`
+- Modify: `hogd/hogexec/runtime/wasm/CMakeLists.txt`
+
+- [ ] **Step 1: Create instrumented_bytes.h**
+
+Create `hogd/hogexec/runtime/wasm/instrumented_bytes.h`:
+```cpp
+#pragma once
+
+#include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <span>
+
+namespace hogd {
+
+// Owns bytes returned by wasm_meter_instrument(). Move-only.
+class InstrumentedBytes {
+public:
+  // Returns nullopt on instrumentation failure.
+  static std::optional<InstrumentedBytes>
+  instrument(std::span<const uint8_t> wasm);
+
+  std::span<const uint8_t> data() const;
+
+  ~InstrumentedBytes();
+  InstrumentedBytes(InstrumentedBytes &&other) noexcept;
+  InstrumentedBytes &operator=(InstrumentedBytes &&other) noexcept;
+  InstrumentedBytes(const InstrumentedBytes &) = delete;
+  InstrumentedBytes &operator=(const InstrumentedBytes &) = delete;
+
+private:
+  InstrumentedBytes(uint8_t *data, size_t len);
+  uint8_t *data_ = nullptr;
+  size_t len_ = 0;
+};
+
+} // namespace hogd
+```
+
+- [ ] **Step 2: Create instrumented_bytes.cc**
+
+Create `hogd/hogexec/runtime/wasm/instrumented_bytes.cc`:
+```cpp
+#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
+
+#include <utility>
+
+#include "hogd/rust/wasm_meter/bindings.h"
+
+namespace hogd {
+
+InstrumentedBytes::InstrumentedBytes(uint8_t *data, size_t len)
+  : data_(data)
+  , len_(len)
+{}
+
+InstrumentedBytes::~InstrumentedBytes()
+{
+  if (data_ != nullptr) {
+    wasm_meter_free(data_, len_);
+  }
+}
+
+InstrumentedBytes::InstrumentedBytes(InstrumentedBytes &&other) noexcept
+  : data_(std::exchange(other.data_, nullptr))
+  , len_(std::exchange(other.len_, 0))
+{}
+
+InstrumentedBytes &
+InstrumentedBytes::operator=(InstrumentedBytes &&other) noexcept
+{
+  if (this != &other) {
+    if (data_ != nullptr) {
+      wasm_meter_free(data_, len_);
+    }
+    data_ = std::exchange(other.data_, nullptr);
+    len_ = std::exchange(other.len_, 0);
+  }
+  return *this;
+}
+
+std::optional<InstrumentedBytes>
+InstrumentedBytes::instrument(std::span<const uint8_t> wasm)
+{
+  auto result = wasm_meter_instrument(wasm.data(), wasm.size());
+  if (!result.success) {
+    return std::nullopt;
+  }
+  return InstrumentedBytes(result.data, result.len);
+}
+
+std::span<const uint8_t>
+InstrumentedBytes::data() const
+{
+  return {data_, len_};
+}
+
+} // namespace hogd
+```
+
+- [ ] **Step 3: Add instrumented_bytes to wasm CMakeLists**
+
+In `hogd/hogexec/runtime/wasm/CMakeLists.txt`, add a new OBJECT library after `wasm_runtime_test_objects` (after line 49) for instrumented_bytes, and make it available to both test objects and the contract_loader:
+
+```cmake
+add_library(wasm_meter_objects OBJECT
+  instrumented_bytes.cc
+)
+
+target_link_libraries(
+  wasm_meter_objects
+  hogd_interface
+)
+
+add_dependencies(
+  wasm_meter_objects
+  generate_wasm_meter_ffi_h
+)
+
+target_include_directories(
+  wasm_meter_objects
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+```
+
+Also add `wasm_meter_objects` to the `wasm_runtime_test` executable's link libraries. Find the existing block:
+```cmake
+target_link_libraries(
+  wasm_runtime_test
+  runtime
+  runtime_test_util
+  GTest::gtest
+)
+```
+And add `$<TARGET_OBJECTS:wasm_meter_objects>` to the `wasm_runtime_test` executable's object list. Change:
+```cmake
+add_executable(
+  wasm_runtime_test
+  wasm_runtime_test_main.cc
+  $<TARGET_OBJECTS:wasm_runtime_test_objects>
+)
+```
+to:
+```cmake
+add_executable(
+  wasm_runtime_test
+  wasm_runtime_test_main.cc
+  $<TARGET_OBJECTS:wasm_runtime_test_objects>
+  $<TARGET_OBJECTS:wasm_meter_objects>
+)
+```
+
+- [ ] **Step 4: Build to verify C++ compiles**
+
+Use the `build` skill. The new C++ files should compile. Don't worry about test failures yet.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add hogd/hogexec/runtime/wasm/instrumented_bytes.h \
+  hogd/hogexec/runtime/wasm/instrumented_bytes.cc \
+  hogd/hogexec/runtime/wasm/CMakeLists.txt
+git commit -m "feat: add InstrumentedBytes RAII wrapper for wasm_meter_instrument FFI"
+```
+
+---
+
+### Task 5: Instrument test contracts at load time
+
+**Files:**
+- Modify: `hogd/hogexec/runtime/wasm/test_load_wasm.h`
+- Modify: `built_contracts/contract_loader.cc`
+- Modify: `built_contracts/CMakeLists.txt`
+
+- [ ] **Step 1: Instrument in test_load_wasm.h**
+
+In `hogd/hogexec/runtime/wasm/test_load_wasm.h`, add the include at the top (after the existing includes):
+
+```cpp
+#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
+```
+
+Then replace the `load_raw_file` function body. Change:
+
+```cpp
+static ContractBlob
+load_raw_file(std::string_view filename)
+{
+  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
+  FILE *f = std::fopen(file.c_str(), "r");
+  if (f == nullptr)
+    throw std::runtime_error("failed to load wasm file: " + file);
+
+  ContractBlob contents;
+  constexpr size_t kBufferSize = 65536;
+  char buf[kBufferSize];
+
+  int count = -1;
+  while (count != 0) {
+    count = std::fread(buf, sizeof(char), kBufferSize, f);
+    std::span<char> buf_span(&buf[0], count);
+    if (count > 0)
+      contents.wasm.append_range(buf_span);
+  }
+  std::fclose(f);
+
+  return contents;
+}
+```
+
+to:
+
+```cpp
+static ContractBlob
+load_raw_file(std::string_view filename)
+{
+  std::string file = std::string(CMAKE_ROOT_BINARY_DIR) + std::string(filename);
+  FILE *f = std::fopen(file.c_str(), "r");
+  if (f == nullptr)
+    throw std::runtime_error("failed to load wasm file: " + file);
+
+  ContractBlob contents;
+  constexpr size_t kBufferSize = 65536;
+  char buf[kBufferSize];
+
+  int count = -1;
+  while (count != 0) {
+    count = std::fread(buf, sizeof(char), kBufferSize, f);
+    std::span<char> buf_span(&buf[0], count);
+    if (count > 0)
+      contents.wasm.append_range(buf_span);
+  }
+  std::fclose(f);
+
+  auto instrumented = InstrumentedBytes::instrument(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(contents.wasm.data()),
+      contents.wasm.size()));
+  if (!instrumented) {
+    throw std::runtime_error("failed to instrument wasm file: " + file);
+  }
+  contents.wasm.clear();
+  contents.wasm.append_range(instrumented->data());
+
+  return contents;
+}
+```
+
+- [ ] **Step 2: Instrument in built_contracts/contract_loader.cc**
+
+In `built_contracts/contract_loader.cc`, add the include at the top (after the existing includes):
+
+```cpp
+#include "hogd/hogexec/runtime/wasm/instrumented_bytes.h"
+```
+
+Then in the anonymous namespace `load_raw_file` function, add instrumentation after `std::fclose(f);` and before `return contents;`. Change:
+
+```cpp
+  std::fclose(f);
+
+  return contents;
+```
+
+to:
+
+```cpp
+  std::fclose(f);
+
+  auto instrumented = InstrumentedBytes::instrument(
+      std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(contents.wasm.data()),
+          contents.wasm.size()));
+  if (!instrumented) {
+    throw std::runtime_error("failed to instrument wasm file: " +
+                             std::string(filename));
+  }
+  contents.wasm.clear();
+  contents.wasm.append_range(instrumented->data());
+
+  return contents;
+```
+
+- [ ] **Step 3: Wire built_contracts CMakeLists**
+
+In `built_contracts/CMakeLists.txt`, the `contract_loader` library needs to link the wasm_meter_objects and have include paths. After the existing `target_link_libraries(contract_loader ...)` block, add:
+
+```cmake
+target_include_directories(contract_loader PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(contract_loader generate_wasm_meter_ffi_h)
+```
+
+The contract_loader also needs to compile instrumented_bytes.cc. The simplest approach: add it as a source to contract_loader. Change:
+
+```cmake
+add_library(contract_loader
+  contract_loader.cc
+)
+```
+
+to:
+
+```cmake
+add_library(contract_loader
+  contract_loader.cc
+  ${CMAKE_SOURCE_DIR}/hogd/hogexec/runtime/wasm/instrumented_bytes.cc
+)
+```
+
+And add the source directory to includes so it can find the header. Add to the existing `target_include_directories`:
+
+```cmake
+target_include_directories(contract_loader PUBLIC
+  ${CMAKE_CURRENT_SOURCE_DIR}
+  ${CMAKE_BINARY_DIR}/hogd/xdr
+  ${CMAKE_SOURCE_DIR}
+)
+```
+
+(Adding `${CMAKE_SOURCE_DIR}` enables includes like `"hogd/hogexec/runtime/wasm/instrumented_bytes.h"`.)
+
+- [ ] **Step 4: Build and run tests**
+
+Use the `build` skill. Build the project. Then run the wasm runtime tests:
+
+```bash
+cd <build-dir> && ctest -R wasm_runtime_test -V
+```
+
+All tests should now pass — contracts are instrumented at load time, `verify()` accepts them, and the stack limit global is set at instantiation.
+
+- [ ] **Step 5: Run broader tests**
+
+Run the full test suite to catch any regressions:
+
+```bash
+cd <build-dir> && ctest -V
+```
+
+- [ ] **Step 6: Commit**
+
+```bash
+git add hogd/hogexec/runtime/wasm/test_load_wasm.h \
+  built_contracts/contract_loader.cc \
+  built_contracts/CMakeLists.txt
+git commit -m "feat: instrument test contracts at load time via wasm_meter"
+```

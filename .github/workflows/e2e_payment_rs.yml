@@ -1,0 +1,63 @@
+name: E2E Payment RS (hog_sched)
+
+on:
+    workflow_dispatch:
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    # Published crates and pinned submodules retain the legacy registry identity.
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
+jobs:
+    build:
+        runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
+
+        steps:
+            - name: Clean up .gitconfig
+              run: |
+                  echo "Cleaning up .gitconfig"
+                  rm -f /home/hogci/.gitconfig
+            - uses: actions/checkout@v6
+              with:
+                persist-credentials: false
+
+            - name: Configure private sources
+              id: private-sources
+              uses: ./.github/actions/private-sources
+              with:
+                app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+                private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+                ssh-private-key: |
+                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                  ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
+            - name: Run hog schedule
+              run: |
+                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+                  hog_sched \
+                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
+                    --key=github_repo --value=${{ github.repository }} \
+                    --key=git_token --value=${{ steps.private-sources.outputs.token }} \
+                    --key=git_commit --value=${{ github.sha }} \
+                    --key=git_branch --value=$BRANCH_NAME \
+                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+                    ./scripts/schedules/e2e_payment_rs.toml
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions
+            - name: Remove job-local Git credentials
+              if: always()
+              shell: bash
+              run: |
+                if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+                  rm -f -- "$GIT_CONFIG_GLOBAL"
+                fi

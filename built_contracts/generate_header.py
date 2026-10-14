@@ -1,0 +1,269 @@
+#!/usr/bin/env python3
+
+import argparse
+import hashlib
+import json
+import os
+import struct
+import sys
+
+
+def major_version(version_str):
+    """Extract major version matching sdk_rs/contract-util/src/semver.rs.
+
+    - "1.2.3" -> "1"
+    - "0.9.2" -> "0.9"
+    - "0.0.2" -> "0.0.2"
+    """
+    parts = version_str.split(".")
+    major = int(parts[0]) if len(parts) > 0 else 0
+    minor = int(parts[1]) if len(parts) > 1 else 0
+    patch = int(parts[2].split("-")[0]) if len(parts) > 2 else 0
+    if major > 0:
+        return str(major)
+    elif minor > 0:
+        return f"{major}.{minor}"
+    elif patch > 0:
+        return f"{major}.{minor}.{patch}"
+    else:
+        return version_str
+
+
+def compute_entrypoint_id(interface_name, version_str, method_name):
+    """Compute entrypoint ID: sha256(interface_name :: major_ver :: method_name)[0:8].
+
+    The "::" separators must match sdk_rs/contract-util/src/lib.rs
+    (contract_entrypoint_id) and the C++ sdk_entrypoint_derivation: without them
+    distinct (interface, major, method) triples can concatenate to identical
+    bytes and collide to the same id.
+    """
+    mv = major_version(version_str)
+    h = hashlib.sha256()
+    h.update(interface_name.encode())
+    h.update(b"::")
+    h.update(mv.encode())
+    h.update(b"::")
+    h.update(method_name.encode())
+    return struct.unpack(">Q", h.digest()[:8])[0]
+
+
+def declared_name(spec_id):
+    """The declared name of a spec id: what the generated C++ calls a type.
+
+    The spec names a user-defined type by an id object (crate, major,
+    module_path, declared). The headers use only the declared name.
+    """
+    return spec_id["declared"]
+
+
+def map_type(ty):
+    """Map a spec type descriptor to a C++ type string."""
+    kind = ty["kind"]
+    if kind == "u8":
+        return "uint8_t"
+    elif kind == "u32":
+        return "uint32_t"
+    elif kind == "i32":
+        return "int32_t"
+    elif kind == "u64":
+        return "uint64_t"
+    elif kind == "i64":
+        return "int64_t"
+    elif kind == "u128":
+        return "std::tuple<uint64_t, uint64_t>"
+    elif kind == "i128":
+        return "std::tuple<int64_t, uint64_t>"
+    elif kind == "bool":
+        return "bool"
+    elif kind == "void":
+        return "void"
+    elif kind == "address":
+        return "ContractAddress"
+    elif kind == "vec":
+        inner = map_type(ty["element"])
+        max_len = ty["max_len"]
+        return f"x23::Vec<{inner}, {max_len}>"
+    elif kind == "array":
+        inner = map_type(ty["element"])
+        length = ty["len"]
+        return f"std::array<{inner}, {length}>"
+    elif kind == "option":
+        inner = map_type(ty["inner"])
+        return f"x23::Ptr<{inner}>"
+    elif kind == "tuple":
+        items = [map_type(item) for item in ty["items"]]
+        if len(items) == 1:
+            return items[0]
+        return f"std::tuple<{', '.join(items)}>"
+    elif kind == "named":
+        return declared_name(ty["name"])
+    elif kind == "signed_token":
+        # `Signed<T>` serializes to zero bytes; the handle arrives out-of-band.
+        # `preimage` (the signed payload type, or null when opaque) is metadata
+        # only and does not change the C++ mirror.
+        return "SignedToken"
+    else:
+        raise ValueError(f"unmapped C++ type kind '{kind}'")
+
+
+def generate_interface_struct(interface, rv32_file=None):
+    """Generate a single C++ struct for one contract interface."""
+    interface_name = interface["name"]
+    version = interface["version"]
+    methods = interface["methods"]
+    throws = interface.get("throws", [])
+
+    # Build list of ContractException<Type, Selector> for each throw
+    exception_types = []
+    for throw_entry in throws:
+        selector = throw_entry.get("selector", "")
+        err_ty = throw_entry.get("type", {})
+        if err_ty.get("kind") == "named":
+            name = declared_name(err_ty["name"])
+            exception_types.append(f"ContractException<{name}, {selector}ULL>")
+
+    # Method names and entrypoint IDs
+    export_names = [m["name"] for m in methods]
+    entrypoints = [
+        compute_entrypoint_id(interface_name, version, name) for name in export_names
+    ]
+
+    # Export names are `u8""` so their bytes are the UTF-8 encoding regardless of
+    # the C++ ordinary execution charset (-fexec-charset). The host entrypoint-id
+    # derivation hashes these bytes, so it matches the UTF-8-derived kEntrypoints
+    # on any execution charset. See hogd #2898. (kTraitName/kVersion are u8"" for
+    # the same reason.)
+    export_names_str = ",\n            ".join(f'u8"{name}"' for name in export_names)
+    entrypoints_str = ",\n            ".join(f"0x{ep:016x}ULL" for ep in entrypoints)
+
+    # Function signatures
+    function_signatures = []
+    for method in methods:
+        return_type = map_type(method["return_type"])
+        args = [map_type(arg["type"]) for arg in method["args"]]
+
+        if exception_types:
+            exn_args = ", ".join(exception_types)
+            return_type = f"Result<{return_type}, {exn_args}>"
+
+        if args:
+            sig = f"{return_type}(*)({', '.join(args)})"
+        else:
+            sig = f"{return_type}(*)()"
+        function_signatures.append(sig)
+
+    signatures_str = ",\n             ".join(function_signatures)
+
+    rv32_file_str = (
+        f'constexpr static std::string_view kRv32File = "{rv32_file}";'
+        if rv32_file
+        else ""
+    )
+
+    return f"""
+struct {interface_name} {{
+    // kTraitName/kVersion/kExportNames are u8"" so the host entrypoint-id
+    // derivation hashes UTF-8 bytes independent of -fexec-charset. See #2898.
+    constexpr static std::u8string_view kTraitName = u8"{interface_name}";
+    constexpr static std::u8string_view kVersion = u8"{version}";
+    {rv32_file_str}
+
+    constexpr static std::string_view kSerializationFormat = "cxs";
+
+    // These will be sorted before being passed as indices to method id derivation.
+    constexpr static auto kExportNames = std::array<std::u8string_view, {len(export_names)}>{{
+            {export_names_str}
+        }};
+
+    constexpr static auto kEntrypoints = std::array<uint64_t, {len(entrypoints)}>{{
+            {entrypoints_str}
+        }};
+
+    using export_types = std::tuple<{signatures_str}>;
+}};
+"""
+
+
+def generate_header(
+    json_file, output_file=None, namespace=None, extra_includes=None, rv32_file=None
+):
+    with open(json_file, "r") as f:
+        spec = json.load(f)
+
+    interfaces = spec["interfaces"]
+
+    namespace_forward = f"namespace {namespace} {{\n" if namespace else ""
+    namespace_close = f"\n}} // namespace {namespace}" if namespace else ""
+
+    if extra_includes:
+        extra_includes_str = "\n".join(
+            f'#include "{include}"' for include in extra_includes
+        )
+    else:
+        extra_includes_str = ""
+
+    # Generate a struct for each interface
+    structs = []
+    for iface in interfaces:
+        structs.append(generate_interface_struct(iface, rv32_file))
+
+    header_content = f"""#pragma once
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <string_view>
+#include <tuple>
+
+#include "x23/vec.h"
+#include "x23/x23.h"
+#include "types.hh"
+#include "hogd/hog_exec/components/contract_result.h"
+
+// Auto-generated from contract spec
+// DO NOT EDIT
+
+using namespace hogd;
+
+{extra_includes_str}
+
+{namespace_forward}
+{"".join(structs)}
+{namespace_close}
+
+"""
+
+    if output_file:
+        with open(output_file, "w") as f:
+            f.write(header_content)
+        print(f"Generated header file: {output_file}")
+    else:
+        print(header_content)
+
+
+def main():
+    parser = argparse.ArgumentParser(
+        description="Generate a C++ header file from a JSON contract spec.",
+    )
+    parser.add_argument("json_spec_file", help="Path to the JSON contract spec file")
+    parser.add_argument("-o", "--output", dest="output_file")
+    parser.add_argument("-n", "--namespace")
+    parser.add_argument("-r", "--rv32", dest="rv32_file")
+    parser.add_argument("-i", "--include", dest="extra_includes", action="append")
+    args = parser.parse_args()
+
+    if not os.path.exists(args.json_spec_file):
+        print(f"Error: JSON spec file '{args.json_spec_file}' not found", file=sys.stderr)
+        sys.exit(1)
+
+    generate_header(
+        args.json_spec_file,
+        args.output_file,
+        args.namespace,
+        args.extra_includes,
+        args.rv32_file,
+    )
+
+
+if __name__ == "__main__":
+    main()

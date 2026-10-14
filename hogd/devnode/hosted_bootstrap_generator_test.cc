@@ -1,0 +1,577 @@
+#include <sys/wait.h>
+
+#include <cerrno>
+#include <chrono>
+#include <cstdint>
+#include <cstdlib>
+#include <expected>
+#include <filesystem>
+#include <format>
+#include <fstream>
+#include <gtest/gtest.h>
+#include <ios>
+#include <iterator>
+#include <optional>
+#include <span>
+#include <stdexcept>
+#include <string>
+#include <string_view>
+#include <system_error>
+#include <unistd.h>
+#include <vector>
+
+#include "contract.hh"
+#include "hogd/base/cleanup.h"
+#include "hogd/base/json.h"
+#include "hogd/base/network_config_params.h"
+#include "hogd/devnode/bootstrap_accounts.h"
+#include "hogd/devnode/hosted_bootstrap_generator.h"
+#include "hogd/devnode/manifest_hex.h"
+#include "hogd/genesis/genesis_configuration.h"
+#include "hogd/init.h"
+#include "hogd/storage_cost/storage_cost_model.h"
+#include "network_config.hh"
+#include "types.hh"
+
+#ifndef HOG_HOSTED_BOOTSTRAP_BINARY
+#error "HOG_HOSTED_BOOTSTRAP_BINARY must be defined by CMake"
+#endif
+
+namespace hogd {
+namespace {
+
+const json::Value &
+require_field(json::Value const &parent, std::string_view key)
+{
+  const json::Value *field = parent.find(key);
+  if (field == nullptr) {
+    throw std::runtime_error(std::format("missing field {}", key));
+  }
+  return *field;
+}
+
+std::string_view
+require_string(json::Value const &value)
+{
+  std::optional<std::string_view> string = value.as_string();
+  if (!string.has_value()) {
+    throw std::runtime_error("expected JSON string");
+  }
+  return *string;
+}
+
+std::filesystem::path
+unique_test_dir(std::string_view name)
+{
+  return std::filesystem::temp_directory_path() /
+         std::format(
+             "hog-hosted-bootstrap-{}-{}-{}", name, getpid(),
+             std::chrono::steady_clock::now().time_since_epoch().count());
+}
+
+std::string
+read_text_file(std::filesystem::path const &path)
+{
+  std::ifstream input(path, std::ios::binary);
+  if (!input) {
+    throw std::runtime_error(std::format("failed to read {}", path.string()));
+  }
+  return std::string(std::istreambuf_iterator<char>(input),
+                     std::istreambuf_iterator<char>());
+}
+
+int
+run_hosted_bootstrap(std::vector<std::string> args)
+{
+  args.insert(args.begin(), HOG_HOSTED_BOOTSTRAP_BINARY);
+  std::vector<char *> argv;
+  argv.reserve(args.size() + 1);
+  for (std::string &arg : args) {
+    argv.push_back(arg.data());
+  }
+  argv.push_back(nullptr);
+
+  const auto pid = fork();
+  if (pid < 0) {
+    throw std::runtime_error("fork failed");
+  }
+  if (pid == 0) {
+    execv(HOG_HOSTED_BOOTSTRAP_BINARY, argv.data());
+    _exit(127);
+  }
+
+  int status = 0;
+  while (waitpid(pid, &status, 0) < 0) {
+    if (errno != EINTR) {
+      throw std::runtime_error("waitpid failed");
+    }
+  }
+  return status;
+}
+
+TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
+{
+  HostedBootstrapGeneratorConfig config{
+      .network_hash =
+          [] {
+            NetworkHash hash{};
+            hash.back() = 1;
+            return hash;
+          }(),
+      .bootstrap_config =
+          BootstrapAccountConfig{
+              .count = 2,
+              .seed = "hosted-test-seed",
+              .storage_tokens = 12345,
+          },
+  };
+
+  HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
+
+  EXPECT_EQ(artifact.accounts.size(), 2UL);
+  EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
+
+  std::expected<json::Value, json::ParseError> genesis =
+      json::parse(artifact.genesis_json);
+  ASSERT_TRUE(genesis.has_value()) << genesis.error().message;
+  EXPECT_EQ(require_string(require_field(*genesis, "network_hash")),
+            "0000000000000000000000000000000000000000000000000000000000000001");
+  EXPECT_EQ(require_string(
+                require_field(require_field(*genesis, "storage_cost_model"),
+                              "bytestring_cost_per_byte")),
+            "10");
+  // The genesis artifact has to carry the execution parameters too: a
+  // consumer that rebuilds the configuration without them would compute a
+  // different config hash and fail genesis load.
+  const json::Value &network_config = require_field(*genesis, "network_config");
+  const auto &params =
+      require_field(require_field(require_field(network_config, "0"), "v0"),
+                    "params");
+  ASSERT_EQ(params.type(), json::Value::Type::kArray);
+  const auto encoded_params = params.as_array();
+  const auto &stated_params =
+      artifact.genesis_configuration.network_config.v0().params;
+  ASSERT_EQ(encoded_params.size(), stated_params.size());
+  // Names are pinned in network_config_params_test; check that each stated
+  // parameter reaches the artifact under its name.
+  for (std::size_t i = 0; i < stated_params.size(); ++i) {
+    const ConfigParam &param = stated_params[i];
+    const auto &body =
+        require_field(encoded_params[i], std::format("{}", param.param()));
+    EXPECT_EQ(
+        require_field(body, config_param_name(param.param())).as_integer(),
+        std::int64_t{config_param_value(param)});
+  }
+  EXPECT_EQ(network_config.find("max_sha256_buffers"), nullptr);
+
+  const json::Value &default_wallet = require_field(*genesis, "default_wallet");
+  // Genesis-JSON hashes are unprefixed hex (see contract_hash above);
+  // hex_string prepends 0x.
+  EXPECT_EQ(std::format("0x{}",
+                        require_string(require_field(default_wallet, "hash"))),
+            hex_string(native_default_wallet_hash().hash));
+  EXPECT_EQ(require_field(default_wallet, "contract_size").as_integer(),
+            std::optional<std::int64_t>{0});
+  EXPECT_EQ(require_string(require_field(default_wallet, "contract_type")),
+            "kNative");
+  const json::Value &root_contract = require_field(*genesis, "root_contract");
+  EXPECT_EQ(require_string(require_field(root_contract, "contract_type")),
+            "kRv32");
+  EXPECT_FALSE(
+      require_string(
+          require_field(require_field(root_contract, "rv32_contract"), "data"))
+          .empty());
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(artifact.metadata_json);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  std::optional<std::int64_t> schema_version =
+      require_field(*metadata, "schemaVersion").as_integer();
+  EXPECT_EQ(schema_version, std::optional<std::int64_t>{2});
+  EXPECT_EQ(require_string(require_field(*metadata, "kind")),
+            "hog-hosted-bootstrap");
+  EXPECT_EQ(require_string(require_field(*metadata, "networkHash")),
+            "0000000000000000000000000000000000000000000000000000000000000001");
+  EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
+            2UL);
+  for (const json::Value &account :
+       require_field(*metadata, "bootstrapAccounts").as_array()) {
+    EXPECT_EQ(require_string(require_field(account, "role")),
+              "hosted_dev_account");
+  }
+  EXPECT_EQ(metadata->find("faucet"), nullptr);
+  EXPECT_EQ(require_field(*metadata, "bootstrap").find("devWallet"), nullptr);
+  std::span<const json::Value> initialization_txs =
+      require_field(*metadata, "initializationTransactions").as_array();
+  ASSERT_EQ(initialization_txs.size(), 1UL);
+  EXPECT_TRUE(require_string(require_field(initialization_txs[0], "hash"))
+                  .starts_with("0x"));
+  EXPECT_FALSE(require_string(require_field(initialization_txs[0], "xdr"))
+                   .starts_with("0x"));
+}
+
+TEST(HostedBootstrapGenerator, DefaultRemainsHomogeneousWithoutFaucet)
+{
+  HostedBootstrapGeneratorConfig config;
+  HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
+
+  ASSERT_EQ(artifact.accounts.size(), 10UL);
+  for (std::uint32_t index = 0; index < artifact.accounts.size(); ++index) {
+    EXPECT_EQ(artifact.accounts[index].index, index);
+    EXPECT_EQ(artifact.accounts[index].address,
+              derive_bootstrap_account_address(
+                  artifact.accounts[index].public_key));
+    EXPECT_EQ(artifact.accounts[index].role,
+              BootstrapAccountRole::kHostedDevAccount);
+    EXPECT_EQ(artifact.accounts[index].initial_storage_tokens,
+              1'000'000'000ULL);
+  }
+  EXPECT_FALSE(artifact.faucet.has_value());
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(artifact.metadata_json);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  EXPECT_EQ(metadata->find("faucet"), nullptr);
+  EXPECT_EQ(require_field(*metadata, "bootstrap").find("devWallet"), nullptr);
+}
+
+TEST(HostedBootstrapGenerator, GeneratesExplicitFaucetWallet)
+{
+  const Ed25519PublicKey faucet_public_key =
+      derive_bootstrap_account_keypair("faucet-test-seed", 0).first;
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 2;
+  config.faucet = HostedFaucetConfig{
+      .public_key = faucet_public_key,
+      .storage_tokens = 987654321,
+  };
+
+  HostedBootstrapArtifact first = build_hosted_bootstrap_artifact(config);
+  HostedBootstrapArtifact second = build_hosted_bootstrap_artifact(config);
+
+  if (!first.faucet.has_value() || !second.faucet.has_value()) {
+    ADD_FAILURE() << "expected faucet metadata";
+    return;
+  }
+  HostedFaucetMetadata const &first_faucet = first.faucet.value();
+  HostedFaucetMetadata const &second_faucet = second.faucet.value();
+  EXPECT_EQ(first.accounts.size(), 2UL);
+  EXPECT_EQ(first.initialization_txs.size(), 1UL);
+  EXPECT_EQ(first_faucet.public_key, faucet_public_key);
+  EXPECT_EQ(first_faucet.wallet_address,
+            derive_bootstrap_account_address(faucet_public_key));
+  EXPECT_TRUE(first.initialization_txs.front().tx.contracts_to_deploy.empty());
+  EXPECT_EQ(first_faucet.initial_storage_tokens, 987654321UL);
+  EXPECT_EQ(second_faucet.wallet_address, first_faucet.wallet_address);
+  EXPECT_EQ(second.genesis_json, first.genesis_json);
+  EXPECT_EQ(second.metadata_json, first.metadata_json);
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(first.metadata_json);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  const json::Value &faucet = require_field(*metadata, "faucet");
+  EXPECT_EQ(require_string(require_field(faucet, "role")), "faucet");
+  EXPECT_EQ(require_string(require_field(faucet, "publicKey")),
+            hex_string(faucet_public_key));
+  EXPECT_EQ(require_string(require_field(faucet, "walletAddress")),
+            hex_string(first_faucet.wallet_address));
+  EXPECT_EQ(require_string(require_field(faucet, "initialStorageTokens")),
+            "987654321");
+  EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
+            2UL);
+}
+
+TEST(HostedBootstrapGenerator, RejectsInvalidFaucetAllocation)
+{
+  HostedBootstrapGeneratorConfig config;
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair("faucet-test-seed", 0).first,
+      .storage_tokens = 0,
+  };
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+
+  config.faucet->storage_tokens = 1;
+  config.faucet->public_key = {};
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+
+  config.faucet->public_key =
+      derive_bootstrap_account_keypair(config.bootstrap_config.seed, 0).first;
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, RejectsAggregateAllocationAboveTokenSupply)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply / 2;
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair("independent-faucet-seed", 0).first,
+      .storage_tokens = kTokenSupply - (kTokenSupply / 2),
+  };
+
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, AcceptsAllocationAtTokenSupplyLimit)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const auto ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.bootstrap_config.storage_tokens = kTokenSupply - ceremony_funding;
+
+  EXPECT_NO_THROW(build_hosted_bootstrap_artifact(config));
+}
+
+TEST(HostedBootstrapGenerator, RejectsMoreThanOneHostedCeremonyTransaction)
+{
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 16;
+  EXPECT_NO_THROW(build_hosted_bootstrap_artifact(config));
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair("independent-faucet", 0).first,
+      .storage_tokens = 1'000'000'000,
+  };
+  try {
+    build_hosted_bootstrap_artifact(config);
+    FAIL()
+        << "expected the extra faucet allocation to exceed the ceremony limit";
+  } catch (std::runtime_error const &error) {
+    EXPECT_NE(std::string(error.what()).find("single-transaction ceremony"),
+              std::string::npos);
+  }
+}
+
+TEST(HostedBootstrapGenerator, CountsFundingForEveryCeremonyTransaction)
+{
+  constexpr std::uint64_t kTokenSupply =
+      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+  const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+  const auto ceremony_funding = static_cast<std::uint64_t>(
+      (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
+      cost_model.get_replay_cache_cost(1));
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 17;
+  config.bootstrap_config.storage_tokens =
+      (kTokenSupply - ceremony_funding) / config.bootstrap_config.count;
+
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator,
+     RejectsSeedDerivedFaucetKeyOutsideAllocatedAccounts)
+{
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+  config.faucet = HostedFaucetConfig{
+      .public_key =
+          derive_bootstrap_account_keypair(config.bootstrap_config.seed, 1)
+              .first,
+      .storage_tokens = 1,
+  };
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+
+  config.bootstrap_config.count = 0;
+  config.faucet->public_key =
+      derive_bootstrap_account_keypair(config.bootstrap_config.seed,
+                                       kMaxBootstrapAccounts - 1)
+          .first;
+  EXPECT_THROW(build_hosted_bootstrap_artifact(config), std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, CliRequiresCompleteFaucetConfiguration)
+{
+  std::filesystem::path dir = unique_test_dir("cli-partial");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  const Ed25519PublicKey faucet_public_key =
+      derive_bootstrap_account_keypair("faucet-cli-test-seed", 0).first;
+  const int status = run_hosted_bootstrap({
+      "generate",
+      "--faucet-public-key",
+      hex_string(faucet_public_key),
+      "--genesis-out",
+      (dir / "genesis.json").string(),
+      "--metadata-out",
+      (dir / "metadata.json").string(),
+  });
+
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_NE(WEXITSTATUS(status), EXIT_SUCCESS);
+  EXPECT_FALSE(std::filesystem::exists(dir / "genesis.json"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "metadata.json"));
+}
+
+TEST(HostedBootstrapGenerator, CliRejectsMalformedFaucetPublicKey)
+{
+  std::filesystem::path dir = unique_test_dir("cli-invalid-key");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  const int status = run_hosted_bootstrap({
+      "generate",
+      "--faucet-public-key",
+      std::string(64, 'g'),
+      "--faucet-tokens",
+      "456789",
+      "--genesis-out",
+      (dir / "genesis.json").string(),
+      "--metadata-out",
+      (dir / "metadata.json").string(),
+  });
+
+  ASSERT_TRUE(WIFEXITED(status));
+  EXPECT_NE(WEXITSTATUS(status), EXIT_SUCCESS);
+  EXPECT_FALSE(std::filesystem::exists(dir / "genesis.json"));
+  EXPECT_FALSE(std::filesystem::exists(dir / "metadata.json"));
+}
+
+TEST(HostedBootstrapGenerator, CliGeneratesExplicitFaucetWallet)
+{
+  std::filesystem::path dir = unique_test_dir("cli-faucet");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  const Ed25519PublicKey faucet_public_key =
+      derive_bootstrap_account_keypair("faucet-cli-test-seed", 0).first;
+  const std::vector<std::string> args{
+      "generate",
+      "--dev-accounts",
+      "1",
+      "--faucet-public-key",
+      hex_string(faucet_public_key),
+      "--faucet-tokens",
+      "456789",
+      "--genesis-out",
+      (dir / "genesis.json").string(),
+      "--metadata-out",
+      (dir / "metadata.json").string(),
+  };
+  const int status = run_hosted_bootstrap(args);
+
+  ASSERT_TRUE(WIFEXITED(status));
+  ASSERT_EQ(WEXITSTATUS(status), EXIT_SUCCESS);
+  const std::string first_genesis = read_text_file(dir / "genesis.json");
+  const std::string first_metadata = read_text_file(dir / "metadata.json");
+
+  const int rerun_status = run_hosted_bootstrap(args);
+  ASSERT_TRUE(WIFEXITED(rerun_status));
+  ASSERT_EQ(WEXITSTATUS(rerun_status), EXIT_SUCCESS);
+  EXPECT_EQ(read_text_file(dir / "genesis.json"), first_genesis);
+  EXPECT_EQ(read_text_file(dir / "metadata.json"), first_metadata);
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(first_metadata);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  EXPECT_EQ(require_string(
+                require_field(require_field(*metadata, "faucet"), "publicKey")),
+            hex_string(faucet_public_key));
+}
+
+TEST(HostedBootstrapGenerator, AllowsZeroBootstrapAccounts)
+{
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 0;
+
+  HostedBootstrapArtifact artifact = build_hosted_bootstrap_artifact(config);
+
+  EXPECT_TRUE(artifact.accounts.empty());
+  EXPECT_EQ(artifact.initialization_txs.size(), 1UL);
+
+  std::expected<json::Value, json::ParseError> metadata =
+      json::parse(artifact.metadata_json);
+  ASSERT_TRUE(metadata.has_value()) << metadata.error().message;
+  EXPECT_EQ(require_field(*metadata, "bootstrapAccounts").as_array().size(),
+            0UL);
+}
+
+TEST(HostedBootstrapGenerator, WriteArtifactAllowsIdenticalRerun)
+{
+  std::filesystem::path dir = unique_test_dir("same");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  std::filesystem::path genesis = dir / "nested" / "genesis.json";
+  std::filesystem::path metadata = dir / "nested" / "metadata.json";
+
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+
+  write_hosted_bootstrap_artifact(config, genesis, metadata);
+  std::string first_genesis = read_text_file(genesis);
+  std::string first_metadata = read_text_file(metadata);
+  write_hosted_bootstrap_artifact(config, genesis, metadata);
+
+  EXPECT_EQ(read_text_file(genesis), first_genesis);
+  EXPECT_EQ(read_text_file(metadata), first_metadata);
+}
+
+TEST(HostedBootstrapGenerator, WriteArtifactRejectsExistingEmptyFile)
+{
+  std::filesystem::path dir = unique_test_dir("empty");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  std::filesystem::create_directories(dir);
+  std::filesystem::path genesis = dir / "genesis.json";
+  std::filesystem::path metadata = dir / "metadata.json";
+  {
+    std::ofstream output(genesis, std::ios::binary);
+    ASSERT_TRUE(output.good());
+  }
+
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+
+  EXPECT_THROW(write_hosted_bootstrap_artifact(config, genesis, metadata),
+               std::runtime_error);
+}
+
+TEST(HostedBootstrapGenerator, WriteArtifactDoesNotClobberTmpLikeOutputPath)
+{
+  std::filesystem::path dir = unique_test_dir("tmp-collision");
+  Defer cleanup([&] {
+    std::error_code ec;
+    std::filesystem::remove_all(dir, ec);
+  });
+  std::filesystem::path genesis = dir / "metadata.json.tmp";
+  std::filesystem::path metadata = dir / "metadata.json";
+
+  HostedBootstrapGeneratorConfig config;
+  config.bootstrap_config.count = 1;
+
+  write_hosted_bootstrap_artifact(config, genesis, metadata);
+
+  EXPECT_TRUE(std::filesystem::exists(genesis));
+  EXPECT_TRUE(std::filesystem::exists(metadata));
+  EXPECT_NE(read_text_file(genesis), read_text_file(metadata));
+}
+
+} // namespace
+} // namespace hogd
+
+int
+main(int argc, char **argv)
+{
+  int ret = hogd::hogd_init(argc, argv);
+  if (ret) {
+    return ret;
+  }
+  ::testing::InitGoogleTest(&argc, argv);
+  return RUN_ALL_TESTS();
+}

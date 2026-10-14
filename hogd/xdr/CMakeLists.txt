@@ -1,0 +1,78 @@
+add_xdr(
+  protocol
+  ../../protocol/address_auth.x
+  ../../protocol/auth_token.x
+  ../../protocol/auth_card.x
+  ../../protocol/auth_claim.x
+  ../../protocol/auth_rpc.x
+  ../../protocol/batch.x
+  ../../protocol/catchup.x
+  ../../protocol/ci_server.x
+  ../../protocol/consensus.x
+  ../../protocol/contract.x
+  ../../protocol/coord_sched.x
+  ../../protocol/db_sched.x
+  ../../protocol/db_conflict.x
+  ../../protocol/discovery.x
+  ../../protocol/event.x
+  ../../protocol/event_rpc.x
+  ../../protocol/executor_to_db_rpc.x
+  ../../protocol/exec_result.x
+  ../../protocol/exec_sched.x
+  ../../protocol/ffi_enums.x
+  ../../protocol/genesis.x
+  ../../protocol/header.x
+  ../../protocol/hog_exec_constants.x
+  ../../protocol/indexer.x
+  ../../protocol/integration.x
+  ../../protocol/invoke_flag.x
+  ../../protocol/invoke_args.x
+  ../../protocol/loadgen.x
+  ../../protocol/network.x
+  ../../protocol/network_config.x
+  ../../protocol/pagination.x
+  ../../protocol/parallel.x
+  ../../protocol/port.x
+  ../../protocol/precompiles.x
+  ../../protocol/proposal.x
+  ../../protocol/preimage.x
+  ../../protocol/rpc_types.x
+  ../../protocol/scp.x
+  ../../protocol/sc_types.x
+  ../../protocol/sc_val.x
+  ../../protocol/sched_coord.x
+  ../../protocol/sched_db.x
+  ../../protocol/sched_event.x
+  ../../protocol/sched_exec.x
+  ../../protocol/sched_gateway.x
+  ../../protocol/standard_asset_events.x
+  ../../protocol/storage_cost.x
+  ../../protocol/storage_item.x
+  ../../protocol/storage_lock.x
+  ../../protocol/transaction.x
+  ../../protocol/transaction_trace.x
+  ../../protocol/types.x
+  ../../protocol/validator.x
+  ../../protocol/view.x
+  ../../protocol/db_gateway.x
+  ../../protocol/view_gateway.x
+  ../../protocol/retrocausal_queue.x
+  ../../protocol/syscall_error.x
+  event_cursor_internal.x
+  event_outbox_internal.x
+  syscall.x
+)
+target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
+target_include_directories(protocol INTERFACE "${CMAKE_CURRENT_SOURCE_DIR}")
+add_dependencies(build_protocol generate_syscall_x)
+target_link_libraries(protocol INTERFACE crypto_interface)
+
+add_library(
+  indexer_payload_validation STATIC
+  indexer_payload_validation.cc
+)
+target_link_libraries(
+  indexer_payload_validation
+  PUBLIC protocol
+  PRIVATE hogd merkle
+)

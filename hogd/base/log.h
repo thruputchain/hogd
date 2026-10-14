@@ -1,0 +1,447 @@
+// log.h - logging infrastructure
+
+#pragma once
+
+#include <cstddef>
+#include <cstdio>
+#include <unistd.h>
+
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <format>
+#include <memory>
+#include <source_location>
+#include <span>
+#include <string_view>
+#include <type_traits>
+#include <utility>
+#include <version>
+
+#ifdef __APPLE__
+#include <thread>
+#endif
+
+#include "hogd/base/compiler.h"
+#include "hogd/base/string.h"
+#include "hogd/base/sync.h"
+#include "hogd/base/types.h"
+#include "x23/debug.h" // IWYU pragma: keep
+
+namespace hogd {
+
+// LogLevel indicates the severity of the log message.
+//
+// Release builds will include kCritical, kError, kWarn, and kInfo.
+// Debug builds will additionally include kDebug and kTrace.
+enum class LogLevel {
+  kCritical, // Serious errors that are not recoverable.
+  kError,    // Serious errors that are recoverable.
+  kWarn,     // Warning messages.
+  kInfo,     // Informational messages.
+  kDebug,    // Extra messages to help with debugging.
+  kTrace,    // Exact steps performed in a program (might flood the log).
+};
+
+// log_level_to_char converts a log severity to a single character identifier
+constexpr char
+log_level_to_char(LogLevel level)
+{
+  using enum LogLevel;
+  switch (level) {
+  case kCritical:
+    return 'C';
+  case kError:
+    return 'E';
+  case kWarn:
+    return 'W';
+  case kInfo:
+    return 'I';
+  case kDebug:
+    return 'D';
+  case kTrace:
+    return 'T';
+  default:
+    return 'U';
+  }
+}
+
+// kMaxLogLevel specifies which log severity should be printed at compile time
+// based on the build type.
+inline constexpr LogLevel kMaxLogLevel =
+    is_debug_build() ? LogLevel::kTrace : LogLevel::kInfo;
+
+// should_log returns true if the log message should be enabled at compile time.
+constexpr bool
+should_log(LogLevel level)
+{
+  return level <= kMaxLogLevel;
+}
+
+// Logger provides an interface for custom logging sinks. This allows for
+// customization of both the format in which logs are printed and the output
+// they are printed to.
+class Logger {
+public:
+  // available just in case a Logger wants to do some teardown.
+  virtual ~Logger() = default;
+
+  // vlog appends a log message.
+  virtual void vlog(LogLevel level, std::string_view fmt,
+                    const std::source_location &loc, std::format_args args) = 0;
+  // flush forces writes to complete for any pending log messages.
+  virtual void flush() = 0;
+
+  virtual LogLevel get_max_log_level() const { return kMaxLogLevel; }
+};
+
+// ConsoleLogger prints formatted log messages to stderr.
+class ConsoleLogger : public Logger {
+public:
+  ConsoleLogger(LogLevel level = is_debug_build() ? LogLevel::kDebug
+                                                  : LogLevel::kInfo)
+    : max_level_(level)
+  {}
+
+  void vlog(LogLevel level, std::string_view fmt,
+            const std::source_location &loc, std::format_args args) override;
+  void flush() override;
+
+  // set_log_level adjusts the maximum severity level to print at runtime
+  void set_log_level(LogLevel level) { max_level_ = level; }
+
+  // get_log_level returns the maximum severity level to print at runtime
+  LogLevel get_max_log_level() const override { return max_level_; }
+
+private:
+  LogLevel max_level_;
+};
+
+// JsonConsoleLogger prints newline-delimited JSON log records to stderr.
+class JsonConsoleLogger : public Logger {
+public:
+  JsonConsoleLogger(LogLevel level = is_debug_build() ? LogLevel::kDebug
+                                                      : LogLevel::kInfo)
+    : max_level_(level)
+  {}
+
+  void vlog(LogLevel level, std::string_view fmt,
+            const std::source_location &loc, std::format_args args) override;
+  void flush() override;
+
+  void set_log_level(LogLevel level) { max_level_ = level; }
+  LogLevel get_max_log_level() const override { return max_level_; }
+
+private:
+  LogLevel max_level_;
+};
+
+namespace detail {
+
+extern std::unique_ptr<Logger> logger;
+
+inline std::string_view
+source_basename(std::string_view path)
+{
+  size_t pos = path.rfind('/');
+  if (pos == std::string_view::npos)
+    return path;
+  return path.substr(pos + 1);
+}
+
+template<LogLevel Level>
+void
+do_log(std::string_view fmt, const std::source_location &loc,
+       std::format_args args)
+{
+  if constexpr (should_log(Level)) {
+    logger->vlog(Level, fmt, loc, args);
+  }
+}
+
+[[noreturn]] void do_panic(std::string_view fmt,
+                           const std::source_location &loc,
+                           std::format_args args);
+
+template<typename Tag>
+bool
+should_log_first_n(int n)
+{
+  static LossyCounter<int> c;
+  if (c >= n)
+    return false;
+  c.inc();
+  return true;
+}
+
+template<typename Tag>
+bool
+should_log_every_n(int n)
+{
+  static LossyCounter<uint32_t> c;
+  return c.inc() % static_cast<uint32_t>(n) == 0;
+}
+
+template<typename Tag>
+bool
+should_log_every_n_sec(float n)
+{
+  int64_t now = std::chrono::duration_cast<std::chrono::microseconds>(
+                    std::chrono::steady_clock::now().time_since_epoch())
+                    .count();
+  static std::atomic<int64_t> next_ts{0};
+  int64_t next = next_ts.load(std::memory_order_relaxed);
+  do {
+    if (now < next)
+      return false;
+  } while (!next_ts.compare_exchange_weak(next,
+                                          now + static_cast<int64_t>(n * 1e6),
+                                          std::memory_order_relaxed,
+                                          std::memory_order_relaxed));
+  return true;
+}
+
+} // namespace detail
+
+// NOLINTBEGIN(readability-identifier-naming)
+
+// log appends a log message with a severity level determined at runtime.
+template<typename... Args> struct log {
+  log(LogLevel level, std::format_string<Args...> fmt, Args &&...args,
+      const std::source_location &loc = std::source_location::current())
+  {
+    if (level > kMaxLogLevel)
+      return;
+
+    detail::logger->vlog(level, fmt.get(), loc, std::make_format_args(args...));
+  }
+};
+
+template<typename... Args>
+log(LogLevel, std::format_string<Args...>, Args &&...) -> log<Args...>;
+
+// panic appends a critical log message and terminates the program.
+template<typename... Args> struct panic {
+  [[noreturn]] panic(
+      std::format_string<Args...> fmt, Args &&...args,
+      const std::source_location &loc = std::source_location::current())
+  {
+    detail::do_panic(fmt.get(), loc, std::make_format_args(args...));
+  }
+};
+
+template<typename... Args>
+panic(std::format_string<Args...>, Args &&...) -> panic<Args...>;
+
+//
+// Convenient logging functions for each severity level.
+//
+// These versions will automatically compile out depending on the build type.
+//
+// Example:
+// warn("foo={}, too large", foo);
+//
+
+#define MAKE_LOG_FUNC(func, level)                                             \
+  template<typename... Args> struct func {                                     \
+    func(std::format_string<Args...> fmt, Args &&...args,                      \
+         const std::source_location &loc = std::source_location::current())    \
+    {                                                                          \
+      detail::do_log<LogLevel::level>(fmt.get(), loc,                          \
+                                      std::make_format_args(args...));         \
+    }                                                                          \
+  };                                                                           \
+  template<typename... Args>                                                   \
+  func(std::format_string<Args...>, Args &&...)->func<Args...>
+
+MAKE_LOG_FUNC(critical, kCritical);
+MAKE_LOG_FUNC(error, kError);
+MAKE_LOG_FUNC(warn, kWarn);
+MAKE_LOG_FUNC(info, kInfo);
+MAKE_LOG_FUNC(debug, kDebug);
+MAKE_LOG_FUNC(trace, kTrace);
+
+#undef MAKE_LOG_FUNC
+
+//
+// Convenient logging functions for each severity level with extended
+// functionality.
+//
+// These versions will also automatically compile out depending on the build
+// type.
+//
+// Example:
+// warn_first_n(1, "foo={}, too large", foo); // only warns once
+//
+
+#define MAKE_LOG_FUNC_EX(func, should_type, should_fn, level)                  \
+  template<typename Tag, typename... Args> struct func {                       \
+    func(should_type n, std::format_string<Args...> fmt, Args &&...args,       \
+         const std::source_location &loc = std::source_location::current())    \
+    {                                                                          \
+      if constexpr (LogLevel::level <= kMaxLogLevel) {                         \
+        if (!detail::should_log_##should_fn<Tag>(n))                           \
+          return;                                                              \
+        detail::logger->vlog(LogLevel::level, fmt.get(), loc,                  \
+                             std::make_format_args(args...));                  \
+      }                                                                        \
+    }                                                                          \
+  };                                                                           \
+  template<typename Tag = decltype([] {}), typename... Args>                   \
+  func(should_type n, std::format_string<Args...>, Args &&...)                 \
+      ->func<Tag, Args...>
+
+// first_n - stops logging after n invocations at the call site
+MAKE_LOG_FUNC_EX(critical_first_n, int, first_n, kCritical);
+MAKE_LOG_FUNC_EX(error_first_n, int, first_n, kError);
+MAKE_LOG_FUNC_EX(warn_first_n, int, first_n, kWarn);
+MAKE_LOG_FUNC_EX(info_first_n, int, first_n, kInfo);
+MAKE_LOG_FUNC_EX(debug_first_n, int, first_n, kDebug);
+MAKE_LOG_FUNC_EX(trace_first_n, int, first_n, kTrace);
+
+// every_n - logs once after each n invocations at the call site
+MAKE_LOG_FUNC_EX(critical_every_n, int, every_n, kCritical);
+MAKE_LOG_FUNC_EX(error_every_n, int, every_n, kError);
+MAKE_LOG_FUNC_EX(warn_every_n, int, every_n, kWarn);
+MAKE_LOG_FUNC_EX(info_every_n, int, every_n, kInfo);
+MAKE_LOG_FUNC_EX(debug_every_n, int, every_n, kDebug);
+MAKE_LOG_FUNC_EX(trace_every_n, int, every_n, kTrace);
+
+// every_n_sec - logs after at least n seconds have elapsed at the call site
+MAKE_LOG_FUNC_EX(critical_every_n_sec, float, every_n_sec, kCritical);
+MAKE_LOG_FUNC_EX(error_every_n_sec, float, every_n_sec, kError);
+MAKE_LOG_FUNC_EX(warn_every_n_sec, float, every_n_sec, kWarn);
+MAKE_LOG_FUNC_EX(info_every_n_sec, float, every_n_sec, kInfo);
+MAKE_LOG_FUNC_EX(debug_every_n_sec, float, every_n_sec, kDebug);
+MAKE_LOG_FUNC_EX(trace_every_n_sec, float, every_n_sec, kTrace);
+
+#undef MAKE_LOG_FUNC_EX
+
+namespace detail {
+template<typename T> struct is_byte_array : std::false_type {};
+template<std::size_t N>
+struct is_byte_array<std::array<uint8_t, N>> : std::true_type {};
+} // namespace detail
+
+template<typename T>
+constexpr auto
+format_arg(T &&t)
+{
+  if constexpr (std::is_same_v<std::remove_cvref_t<T>, std::nullptr_t>) {
+    return static_cast<const void *>(nullptr);
+  }
+#if (__cpp_lib_format_ranges < 202207L)
+  else if constexpr (detail::is_byte_array<std::remove_cvref_t<T>>::value) {
+    return encode_hex(std::as_bytes(std::span(t)));
+  }
+#endif
+  else {
+    return std::forward<T>(t);
+  }
+}
+
+// report_dropped_log writes a best-effort breadcrumb to stderr, without
+// allocating, that a diagnostic log line could not be emitted because emitting
+// it threw (typically std::bad_alloc while formatting) inside a noexcept body.
+// Callers on noexcept syscall/runtime paths catch the throw, call this so the
+// failure is not completely silent, and then fail the operation as
+// Unrecoverable -- the throw must never cross the noexcept boundary and call
+// std::terminate(). Re-allocating to log the failure would be unsafe on the
+// (cold) allocation-failure path, so this writes fixed strings straight to
+// stderr. Mirrors report_dropped_syscall_trace() in syscall_entry_outer.h.
+inline void
+report_dropped_log(const char *what) noexcept
+{
+  std::fputs("error emitting log message: ", stderr);
+  std::fputs(what, stderr);
+  std::fputc('\n', stderr);
+}
+
+} // namespace hogd
+
+#ifdef __APPLE__
+inline auto
+gettid()
+{
+  return std::this_thread::get_id();
+}
+#endif
+
+namespace hogd {
+
+#define LOG_INTERNAL_CHECK(op, invop, expr1, expr2)                            \
+  do {                                                                         \
+    auto __val1 = expr1;                                                       \
+    auto __val2 = expr2;                                                       \
+    if (!(__val1 op __val2)) {                                                 \
+      x23::panic("{}:{} (TID {}) CHECK FAILED: {} {} {} [{} {} {}]", __FILE__, \
+                 __LINE__, gettid(), CSTR(expr1), CSTR(op), CSTR(expr2),       \
+                 hogd::format_arg(__val1), CSTR(invop),                        \
+                 hogd::format_arg(__val2));                                    \
+    }                                                                          \
+  } while (0)
+
+#define CHECK_EQ(val1, val2) LOG_INTERNAL_CHECK(==, !=, val1, val2)
+#define CHECK_NE(val1, val2) LOG_INTERNAL_CHECK(!=, ==, val1, val2)
+#define CHECK_LT(val1, val2) LOG_INTERNAL_CHECK(<, >=, val1, val2)
+#define CHECK_LE(val1, val2) LOG_INTERNAL_CHECK(<=, <, val1, val2)
+#define CHECK_GT(val1, val2) LOG_INTERNAL_CHECK(>, <=, val1, val2)
+#define CHECK_GE(val1, val2) LOG_INTERNAL_CHECK(>=, >, val1, val2)
+#define CHECK_PTR(val1) CHECK_NE(static_cast<const void *>(val1), nullptr)
+#define CHECK_NULL(val1) CHECK_EQ(static_cast<const void *>(val1), nullptr)
+#define CHECK(val1) CHECK_NE(val1, 0)
+
+#ifdef NDEBUG
+
+#define DCHECK_EQ(val1, val2)
+#define DCHECK_NE(val1, val2)
+#define DCHECK_LT(val1, val2)
+#define DCHECK_LE(val1, val2)
+#define DCHECK_GT(val1, val2)
+#define DCHECK_GE(val1, val2)
+#define DCHECK_PTR(val1)
+#define DCHECK_NULL(val1)
+#define DCHECK(val1)
+
+#else // NDEBUG
+
+#define DCHECK_EQ(val1, val2) CHECK_EQ(val1, val2)
+#define DCHECK_NE(val1, val2) CHECK_NE(val1, val2)
+#define DCHECK_LT(val1, val2) CHECK_LT(val1, val2)
+#define DCHECK_LE(val1, val2) CHECK_LE(val1, val2)
+#define DCHECK_GT(val1, val2) CHECK_GT(val1, val2)
+#define DCHECK_GE(val1, val2) CHECK_GE(val1, val2)
+#define DCHECK_PTR(val1) CHECK_PTR(val1)
+#define DCHECK_NULL(val1) CHECK_NULL(val1)
+#define DCHECK(val1) CHECK(val1)
+
+#endif // NDEBUG
+
+// NOLINTEND(readability-identifier-naming)
+
+// log_init initializes the logging subsystem.
+//
+// logger can be whatever type of logging sink you would like. This function
+// must be called before using logging.
+inline void
+log_init(std::unique_ptr<Logger> logger)
+{
+  detail::logger = std::move(logger);
+}
+
+inline bool
+runtime_log_level(LogLevel level)
+{
+  return level <= detail::logger->get_max_log_level();
+}
+
+// Replace the current logger with a new one.
+// returns the old logger (so it can be swapped back in later).
+inline std::unique_ptr<Logger>
+swap_logger(std::unique_ptr<Logger> logger)
+{
+  std::swap(detail::logger, logger);
+  return logger;
+}
+
+} // namespace hogd

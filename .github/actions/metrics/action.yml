@@ -1,0 +1,28 @@
+name: "Run Metrics"
+description: "Run the metrics.sh script with a single positional argument (string) passed as a parameter."
+inputs:
+  build-dir:
+    description: "Directory to pass as argument to metrics.sh (e.g., build type or path)"
+    required: true
+    type: string
+runs:
+  using: "composite"
+  steps:
+    - name: set port env vars
+      run: |
+        echo "CI_CONTROL_PORT=$(./${{ inputs.build-dir }}/hogd/utils/get_port kCIControlServerPort)" >> $GITHUB_ENV
+      shell: bash
+    - name: make sure bench servers are running
+      run: |
+        ./scripts/wait-port.sh hog11 ${{ env.CI_CONTROL_PORT }}
+      shell: bash
+    - name: clone metrics history # This is idempotent
+      run: ./scripts/clone_metrics_history.sh
+      shell: bash
+    - name: run metrics
+      run: ./scripts/metrics.sh ${{ inputs.build-dir }}
+      shell: bash
+    - name: stop any running processes
+      run: |
+        ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog11 ${{ env.CI_CONTROL_PORT }} stop
+      shell: bash

@@ -1,0 +1,64 @@
+#pragma once
+
+#define X23_NAME "@PROJECT_NAME@"
+#define X23_VERSION "@PROJECT_VERSION@"
+
+#define X23_PACKAGE_STRING X23_NAME " " X23_VERSION
+
+// Set to 1 if you are on x86 and the compiler supports __builtin_ia32_pause.
+#cmakedefine01 HAVE_BUILTIN_IA32_PAUSE
+
+// Set to 1 if you are on arm and the compiler supports __builtin_arm_yield.
+#cmakedefine01 HAVE_BUILTIN_ARM_YIELD
+
+// Set to 1 if your operating system supports epoll
+#cmakedefine01 USE_EPOLL
+
+// Set to 1 if your operating system supports the accept4 syscall
+#cmakedefine01 HAVE_ACCEPT4
+
+// Define to 1 if you have the sched_cpu() system call
+#cmakedefine01 HAVE_SCHED_GETCPU
+
+// Define to 1 if you have the sched_setaffinity() system call
+#cmakedefine01 HAVE_SCHED_SETAFFINITY
+
+// Define to something other than 0 if CPU_SETSIZE is too small on
+// your machine
+#define X23_CPUSET_NCPUS @X23_CPUSET_NCPUS@
+
+// Set to 1 if you can't call consteval functions from inside if consteval
+#cmakedefine01 HAVE_BROKEN_P2564R3
+
+// Set to 1 unless the compiler generates internal compiler errors
+// compiling the coro trace code.
+#cmakedefine01 X23_CORO_SLOC_OK
+
+// Define to 1 to enable tracing of coroutine flow (when
+// x23::CoroTrace::enable is true), or 0 to disable.  CMake resolves the
+// auto-detect to a concrete 0/1 in x23/CMakeLists.txt; see the comment
+// there for why this isn't a plain `#cmakedefine`.
+#cmakedefine01 X23_CORO_TRACE
+
+// Define to 1 to enable tracing of how file descriptors are handled.
+// 0 to disable.  Leave undefined to set it based on DEBUG.
+#cmakedefine X23_FD_TRACE @X23_FD_TRACE@
+
+// Define to 1 if you have the abi::__cxa_demangle function
+#cmakedefine01 HAVE_CXA_DEMANGLE
+
+// Define to 1 if you have std::stacktrace
+#cmakedefine01 HAVE_STD_STACKTRACE
+
+// Define to 1 if you have backtrace and backtrace_symbols in <execinfo.h>
+#cmakedefine01 HAVE_BACKTRACE_SYMBOLS
+
+// Define to 1 if you have a working std::atomic<std::shared_ptr<T>>
+#cmakedefine01 HAVE_ATOMIC_SHARED_PTR
+
+// Define to 1 if you have getprogname() in stdlib.h
+#cmakedefine01 HAVE_GETPROGNAME
+
+// Set to 1 with versions of LLVM that don't have the following patch:
+// https://github.com/llvm/llvm-project/pull/194281
+#cmakedefine01 HAVE_BROKEN_CORO_GRO_CLEANUP
