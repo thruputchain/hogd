@@ -103,6 +103,12 @@ target_link_libraries(
   mldsa_native_signer
 )
 
+# mldsa_oracle runs hogd's ML-DSA-65 for the differential test against Go's
+# crypto/mldsa in mldsa_diff/. It links the test-only signer, so it is a test
+# tool and must never ship.
+add_executable(mldsa_oracle mldsa_oracle.cc)
+target_link_libraries(mldsa_oracle crypto mldsa_signer)
+
 add_library(
   crypto_test_objects OBJECT 
   crypto_test.cc
