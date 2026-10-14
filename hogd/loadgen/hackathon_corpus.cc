@@ -115,7 +115,8 @@ generate(int argc, char **argv)
     if (name != "--out" && name != "--artifacts" && name != "--apps" &&
         name != "--users" && name != "--wallets" && name != "--seed" &&
         name != "--stage-seconds" && name != "--warmup-seconds" &&
-        name != "--shared-code" && name != "--rate-divisor")
+        name != "--shared-code" && name != "--rate-divisor" &&
+        name != "--rate-multiplier")
       throw std::runtime_error("unknown argument " + name);
   }
   const auto number = [&](const char *key, uint64_t fallback) {
@@ -132,10 +133,12 @@ generate(int argc, char **argv)
   const uint64_t stage = number("--stage-seconds", 60),
                  warmup = number("--warmup-seconds", 30);
   const uint64_t divisor = number("--rate-divisor", 1);
+  const uint64_t multiplier = number("--rate-multiplier", 1);
   const bool shared = number("--shared-code", 0) != 0;
   if (count < 5 || nusers < 2 || nusers > 10000 || count > 10000 ||
       nwallets < 1 || nwallets > 5 || stage < 2 || stage > 3600 ||
-      warmup > 3600 || divisor < 1 || divisor > 100)
+      warmup > 3600 || divisor < 1 || divisor > 100 || multiplier < 1 ||
+      multiplier > 100)
     throw std::runtime_error("invalid corpus size or duration");
   std::filesystem::path out = args.at("--out"),
                         artifacts = args.at("--artifacts");
@@ -251,7 +254,8 @@ generate(int argc, char **argv)
           phase != 0 && second >= duration / 2 &&
           second < duration / 2 + std::min<uint64_t>(5, duration / 2);
       const uint64_t rate =
-          std::max<uint64_t>(1, rates[phase] / divisor) * (burst ? 5 : 1);
+          std::max<uint64_t>(1, rates[phase] * multiplier / divisor) *
+          (burst ? 5 : 1);
       if (phase > 0) {
         auto desired =
             predeployed + ((uint64_t(phase - 1) * stage + second + 1) *
@@ -318,6 +322,7 @@ generate(int argc, char **argv)
     w.field("warmupSeconds", int64_t(warmup));
     w.field("stageSeconds", int64_t(stage));
     w.field("rateDivisor", int64_t(divisor));
+    w.field("rateMultiplier", int64_t(multiplier));
     w.field("networkHash", hex(c.network));
     w.array_field("initializationHashes", [&](json::Writer &a) {
       for (const auto &batch : init.initialization_txs)

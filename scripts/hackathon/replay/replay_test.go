@@ -130,7 +130,7 @@ func TestSlowRPCDoesNotThrottleOfferedArrivals(t *testing.T) {
 	}))
 	defer server.Close()
 	out := filepath.Join(t.TempDir(), "run")
-	c := Config{Corpus: dir, Output: out, URL: server.URL, Outstanding: 1, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
+	c := Config{Corpus: dir, Output: out, URL: server.URL, Outstanding: 1, ReceiptWorkers: 4, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
 	if err := Run(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
@@ -180,7 +180,7 @@ func TestAmbiguousSubmissionIsReconciledByReceipt(t *testing.T) {
 	defer cancel()
 	done := make(chan struct{})
 	go func() {
-		pollReceipts(ctx, server.Client(), server.URL, time.Now(), results, &mu, deployed)
+		pollReceipts(ctx, server.Client(), server.URL, time.Now(), results, &mu, deployed, 4)
 		close(done)
 	}()
 	for {
@@ -213,7 +213,7 @@ func TestDependencyBlockedArrivalsAreAccounted(t *testing.T) {
 	json.NewEncoder(file).Encode(ops[0])
 	file.Close()
 	out := filepath.Join(t.TempDir(), "run")
-	c := Config{Corpus: dir, Output: out, URL: "http://unused.invalid", Outstanding: 1, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
+	c := Config{Corpus: dir, Output: out, URL: "http://unused.invalid", Outstanding: 1, ReceiptWorkers: 4, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
 	if err = Run(context.Background(), c); err != nil {
 		t.Fatal(err)
 	}
@@ -225,4 +225,77 @@ func TestDependencyBlockedArrivalsAreAccounted(t *testing.T) {
 	if result.Outcome != "dependency_blocked" || result.StartNs != 0 {
 		t.Fatalf("unexpected result: %+v", result)
 	}
+}
+
+func TestReceiptWorkersPollDisjointBatchesConcurrently(t *testing.T) {
+	const workers = 4
+	results := make([]Result, workers*128+1)
+	for i := range results {
+		results[i] = Result{Operation: Operation{Hash: fmt.Sprintf("0x%04x", i), Kind: "call"}, StartNs: 1, Outcome: "admitted"}
+	}
+	// A future transaction must remain unpolled until it is submitted.
+	results[len(results)-1].StartNs = 0
+	results[len(results)-1].Outcome = "unsent"
+	arrived, release := make(chan struct{}, workers), make(chan struct{})
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var batch []rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Error(err)
+			return
+		}
+		select {
+		case arrived <- struct{}{}:
+		default:
+		}
+		select {
+		case <-release:
+		case <-ctx.Done():
+			return
+		}
+		replies := make([]rpcResponse, 0, len(batch))
+		for _, req := range batch {
+			if req.ID == len(results)-1 {
+				t.Error("polled an unsubmitted transaction")
+			}
+			replies = append(replies, rpcResponse{ID: req.ID, Result: json.RawMessage(fmt.Sprintf(`{"txHash":%q,"height":"3","status":{"result":"ok"}}`, req.Params[0]))})
+		}
+		json.NewEncoder(w).Encode(replies)
+	}))
+	defer server.Close()
+	defer cancel()
+	var mu sync.Mutex
+	done := make(chan struct{})
+	go func() {
+		pollReceipts(ctx, server.Client(), server.URL, time.Now(), results, &mu, map[int]bool{}, workers)
+		close(done)
+	}()
+	for i := 0; i < workers; i++ {
+		select {
+		case <-arrived:
+		case <-ctx.Done():
+			t.Fatal("receipt requests did not overlap across workers")
+		}
+	}
+	close(release)
+	for {
+		mu.Lock()
+		complete := 0
+		for _, result := range results {
+			if result.ReceiptNs > 0 {
+				complete++
+			}
+		}
+		mu.Unlock()
+		if complete == workers*128 {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("only reconciled %d receipts", complete)
+		case <-time.After(time.Millisecond):
+		}
+	}
+	cancel()
+	<-done
 }

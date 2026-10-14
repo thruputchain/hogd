@@ -26,6 +26,13 @@ def summarize(directory):
         phases[row["phase"]].append(row)
     manifest = json.loads((directory / "corpus/manifest.json").read_text())
     report = {"phases": {}, "overlap": {}, "metricDeltas": {}}
+    # Completion throughput belongs to the observation window, even when the
+    # transaction was offered in an earlier stage and accumulated in a backlog.
+    receipts = sorted(r["receiptNs"] for rows in phases.values() for r in rows if r.get("receiptNs", 0) > 0)
+    successes = sorted(r["receiptNs"] for rows in phases.values() for r in rows if r.get("receiptNs", 0) > 0 and r.get("execution") == "ok")
+    admissions = sorted(r["endNs"] for rows in phases.values() for r in rows if r["outcome"] == "admitted")
+    submissions_started = sorted(r["startNs"] for rows in phases.values() for r in rows if r["startNs"] > 0)
+    reconciled = sorted(max(r["endNs"], r["receiptNs"]) for rows in phases.values() for r in rows if r["outcome"] == "admitted" and r.get("receiptNs", 0) > 0)
     for phase, rows in sorted(phases.items()):
         duration = manifest["warmupSeconds"] if phase == 0 else manifest["stageSeconds"]
         start_ns = 0 if phase == 0 else (manifest["warmupSeconds"] + (phase-1)*manifest["stageSeconds"]) * 1e9
@@ -37,8 +44,12 @@ def summarize(directory):
         report["phases"][str(phase)] = {
             "offered": len(rows), "submitted": len(submitted), "outcomes": outcomes,
             "execution": execution, "offeredPerSecond": len(rows)/duration,
-            "admittedWithinWindowPerSecond": sum(r["outcome"] == "admitted" and start_ns <= r["endNs"] < end_ns for r in rows)/duration,
-            "observedCommittedWithinWindowPerSecond": sum(start_ns <= r.get("receiptNs", 0) < end_ns and r.get("receiptNs", 0) > 0 for r in rows)/duration,
+            "submittedWithinWindowPerSecond": (bisect.bisect_left(submissions_started, end_ns)-bisect.bisect_left(submissions_started, start_ns))/duration,
+            "clientDropped": outcomes["missed_arrival"] + outcomes["outstanding_limit"],
+            "admittedWithinWindowPerSecond": (bisect.bisect_left(admissions, end_ns)-bisect.bisect_left(admissions, start_ns))/duration,
+            "observedCommittedWithinWindowPerSecond": (bisect.bisect_left(receipts, end_ns)-bisect.bisect_left(receipts, start_ns))/duration,
+            "observedSuccessfulWithinWindowPerSecond": (bisect.bisect_left(successes, end_ns)-bisect.bisect_left(successes, start_ns))/duration,
+            "admittedUnconfirmedAtWindowEnd": bisect.bisect_left(admissions, end_ns)-bisect.bisect_left(reconciled, end_ns),
             "rpcLatencyMs": quantiles([(r["endNs"]-r["startNs"])/1e6 for r in completed]),
             "arrivalDelayMs": quantiles([(r["startNs"]-r["dueNs"])/1e6 for r in submitted]),
             "receiptObservationMs": quantiles([(r["receiptNs"]-r["startNs"])/1e6 for r in rows if r.get("receiptNs",0)>0]),
@@ -114,9 +125,12 @@ def summarize(directory):
                 for p in (50,95,99)
             }
     (directory / "summary.json").write_text(json.dumps(report, indent=2)+"\n")
-    text = ["# Hackathon replay", "", "All application traffic uses the RPC gateway. Receipt times include polling/indexer delay.", "", "| Phase | Offered | Sent | RPC p99 ms | Execution outcomes |", "|---|---:|---:|---:|---|"]
+    text = ["# Hackathon replay", "", "All application traffic uses the RPC gateway. Receipt times include polling/indexer delay.", "", "| Phase | Offered/s | Sent/s | Admitted/s | Observed OK/s | Client drops | Unconfirmed at end | RPC p99 ms | Receipt p99 ms |", "|---|---:|---:|---:|---:|---:|---:|---:|---:|"]
     for phase, data in report["phases"].items():
-        text.append(f"| {phase} | {data['offered']} | {data['submitted']} | {data['rpcLatencyMs']['p99']} | {dict(data['execution'])} |")
+        text.append(f"| {phase} | {data['offeredPerSecond']:.1f} | {data['submittedWithinWindowPerSecond']:.1f} | {data['admittedWithinWindowPerSecond']:.1f} | {data['observedSuccessfulWithinWindowPerSecond']:.1f} | {data['clientDropped']} | {data['admittedUnconfirmedAtWindowEnd']} | {data['rpcLatencyMs']['p99']} | {data['receiptObservationMs']['p99']} |")
+    text.extend(["", "Client drops count missed arrivals and exhausted submission slots; inspect them before attributing a throughput plateau to the system.", "Unconfirmed counts include unresolved auth updates and receipt/indexer lag, so they are not a direct mempool queue measurement.", "", "Per-arrival-stage accounting (including receipts observed during later stages or drain):", ""])
+    for phase, data in report["phases"].items():
+        text.append(f"- Phase {phase}: offered={data['offered']}, outcomes={dict(data['outcomes'])}, execution={dict(data['execution'])}.")
     text.extend(["", "Sampled ingestion overlap with block processing:", ""])
     for phase, data in report["overlap"].items():
         text.append(f"- {phase}: {data['sampledOverlappingSubmissions']} overlapping submissions across {data['blockIntervals']} intervals." if data["exercised"] else f"- {phase}: not exercised by this run.")

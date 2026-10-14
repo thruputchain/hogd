@@ -112,7 +112,7 @@ Python runner. The override is retained in the run identity; mismatches are
 rejected by default. Protocol 0.53 bindings differ from this checkout's
 `hogp/2f5211766e8a878` only in CI notification files; 0.52 bindings are incompatible.
 
-The workload is synthetic: 100 signed users, 500 distinct application artifacts,
+The CI workload is synthetic: 1,000 signed users, 500 distinct application artifacts,
 five wallet artifacts, one/two-signature accounts, deployments, and auth-data
 updates. Application families exercise token-like distributions, counters,
 records, hashing, and cross-contract calls/events. These are benchmark fixtures,
@@ -129,13 +129,30 @@ transactions, and a deterministic arrival schedule. Fixture keys are disposable
 and deterministically derived, never devnet keys. The corpus is for a **fresh**
 benchmark chain; replaying it on an existing chain is unsupported.
 
-The default schedule warms up for 30 seconds, then runs 60-second stages at 100,
-500, 1,000 and 2,500 calls/second, each with a five-second fivefold burst.
-Deployments are additional traffic. The client caps outstanding submissions at
-2,048, records arrivals more than 100 ms late, and drains receipts for 120 seconds.
+The CI schedule warms up for 30 seconds at 1,000 calls/second, then runs
+60-second stages at 1,000, 5,000, 10,000 and 25,000 calls/second. Each stage
+contains a five-second fivefold burst (up to 125,000 calls/second). Deployments
+are additional traffic. The client allows 16,384 concurrent submissions and uses
+16 receipt-polling workers. It records arrivals more than 100 ms late and drains
+receipts for 120 seconds.
 It does not automatically retry ambiguous submissions. Each corpus runs through
 the RPC gateway three times, with fresh state. The workflow repeats those runs
 for the shared-code control, giving six measured runs in total.
+
+Workflow inputs `users`, `rate_multiplier`, `outstanding`, `receipt_workers`,
+and `repeats` override these defaults. The shell wrapper accepts the corresponding
+`HACKATHON_USERS`, `HACKATHON_RATE_MULTIPLIER`, `HACKATHON_OUTSTANDING`,
+`HACKATHON_RECEIPT_WORKERS`, and `HACKATHON_REPEATS` environment variables.
+Use `users=100` and `rate_multiplier=1` for the earlier low-load corpus; the
+standalone corpus builder retains these lower defaults for local use. The
+multiplier applies before `--rate-divisor` and is saved in the manifest.
+
+Reports show offered, submitted, admitted and observed-successful TX/s separately,
+plus client drops and admitted transactions without observed receipts at each
+stage boundary. Completion throughput includes receipts for earlier-stage
+transactions. A plateau with missed arrivals or exhausted submission slots can
+be a client limit; a run that keeps up with all offered traffic does not establish
+maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 
 The standalone `hackathon-replay` tool lives in `scripts/hackathon/replay`.
 Its `bootstrap` command supplies only the saved genesis configuration and ceremony

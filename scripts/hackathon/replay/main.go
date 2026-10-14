@@ -39,7 +39,8 @@ func command(ctx context.Context, args []string) error {
 	}
 	f.StringVar(&c.Output, "output", "", "new result directory")
 	f.StringVar(&c.URL, "url", "http://127.0.0.1:9546", "RPC gateway URL for setup, submissions, and receipts")
-	f.IntVar(&c.Outstanding, "outstanding", 2048, "maximum concurrent submissions")
+	f.IntVar(&c.Outstanding, "outstanding", 16384, "maximum concurrent submissions")
+	f.IntVar(&c.ReceiptWorkers, "receipt-workers", 16, "concurrent receipt polling workers")
 	f.DurationVar(&c.Drain, "drain", 120*time.Second, "receipt drain timeout")
 	f.DurationVar(&c.Timeout, "request-timeout", 15*time.Second, "request timeout")
 	f.DurationVar(&c.MaxLateness, "max-lateness", 100*time.Millisecond, "drop arrivals delayed beyond this")

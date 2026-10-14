@@ -216,7 +216,7 @@ class Cluster:
         a, d = self.args, self.directory
         metrics = {"mempool": 8075, "auth": 8052, "db": 8083, "exec0": 8042, "exec1": 8043, "event": 8093, "indexer": 8062, "gateway": 9547}
         endpoints = ",".join(f"{name}=http://{self.address(name,port)}/metrics" for name, port in metrics.items())
-        self.start("replay", [a.build / "hackathon-replay", "run", "--corpus", d / "corpus", "--output", d / "replay", "--url", f"http://{self.address('gateway',9546)}", "--metrics", endpoints, "--drain", f"{a.drain}s"])
+        self.start("replay", [a.build / "hackathon-replay", "run", "--corpus", d / "corpus", "--output", d / "replay", "--url", f"http://{self.address('gateway',9546)}", "--metrics", endpoints, "--drain", f"{a.drain}s", "--outstanding", str(a.outstanding), "--receipt-workers", str(a.receipt_workers)])
         duration = json.loads((d / "corpus/manifest.json" if a.local else a.corpus / "manifest.json").read_text())["durationSeconds"]
         waiter = self.processes["replay"] if a.local else subprocess.Popen([str(self.control), self.hosts["replay"], self.port, "wait"])
         deadline = time.monotonic() + a.ready_timeout + duration + 2*a.drain + 120
@@ -258,11 +258,13 @@ def main():
     p.add_argument("--repeats", type=int, default=3)
     p.add_argument("--ready-timeout", type=int, default=600)
     p.add_argument("--drain", type=int, default=120)
+    p.add_argument("--outstanding", type=int, default=16384)
+    p.add_argument("--receipt-workers", type=int, default=16)
     args = p.parse_args()
     for name in ("build", "gateway", "scpd", "corpus", "output"):
         setattr(args, name, getattr(args,name).resolve())
-    if args.repeats < 1 or args.drain < 1:
-        p.error("repeats and drain must be positive")
+    if min(args.repeats, args.drain, args.outstanding, args.receipt_workers) < 1:
+        p.error("repeats, drain, outstanding and receipt-workers must be positive")
     if not args.local and not args.control_port:
         p.error("CI replay requires --control-port and exclusive allocated benchmark hosts")
     if args.local:
@@ -285,7 +287,8 @@ def main():
             digest = subprocess.check_output(["ssh", "-n", "-oBatchMode=yes", HOSTS[name], shlex.join(["sha256sum", str(path)])], text=True).split()[0]
         identity["binaries"][name] = digest
     identity["scpSha256"] = hashlib.sha256(args.scpd.read_bytes()).hexdigest() if args.local else subprocess.check_output(["ssh", "-n", "-oBatchMode=yes", "hog4", shlex.join(["sha256sum", str(args.scpd)])], text=True).split()[0]
-    identity["corpusSha256"] = hashlib.sha256((args.corpus / "transactions.jsonl").read_bytes()).hexdigest()
+    with (args.corpus / "transactions.jsonl").open("rb") as corpus_file:
+        identity["corpusSha256"] = hashlib.file_digest(corpus_file, "sha256").hexdigest()
     (args.output / "identity.json").write_text(json.dumps(identity, indent=2))
     for repeat in range(args.repeats):
         directory = args.output / f"gateway-{repeat}"

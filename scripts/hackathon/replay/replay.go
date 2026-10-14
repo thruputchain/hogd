@@ -25,6 +25,7 @@ import (
 type Config struct {
 	Corpus, Output, URL         string
 	Outstanding                 int
+	ReceiptWorkers              int
 	Drain, Timeout, MaxLateness time.Duration
 	Metrics                     map[string]string
 }
@@ -158,7 +159,7 @@ func load(c Config) (Manifest, []Operation, error) {
 // Run bounds concurrency without pacing arrivals by completions. A transport
 // timeout is ambiguous and remains eligible for receipt reconciliation.
 func Run(ctx context.Context, c Config) error {
-	if c.Outstanding < 1 || c.Drain <= 0 || c.Timeout <= 0 || c.MaxLateness <= 0 || c.URL == "" {
+	if c.Outstanding < 1 || c.ReceiptWorkers < 1 || c.Drain <= 0 || c.Timeout <= 0 || c.MaxLateness <= 0 || c.URL == "" {
 		return fmt.Errorf("invalid replay configuration")
 	}
 	m, ops, err := load(c)
@@ -198,7 +199,10 @@ func Run(ctx context.Context, c Config) error {
 	defer cancel()
 	var background sync.WaitGroup
 	background.Add(1)
-	go func() { defer background.Done(); pollReceipts(runCtx, client, c.URL, start, results, &mu, deployed) }()
+	go func() {
+		defer background.Done()
+		pollReceipts(runCtx, client, c.URL, start, results, &mu, deployed, c.ReceiptWorkers)
+	}()
 	metricErrors := make(chan error, 1)
 	background.Add(1)
 	go func() { defer background.Done(); metricErrors <- scrape(runCtx, client, c.Output, c.Metrics) }()
@@ -356,34 +360,65 @@ func preflight(ctx context.Context, client *http.Client, url string, hashes []st
 	}
 	return nil
 }
-func pollReceipts(ctx context.Context, client *http.Client, url string, start time.Time, results []Result, mu *sync.Mutex, deployed map[int]bool) {
-	cursor := 0
-	deployments := []int{}
-	for i := range results {
-		if results[i].Kind == "deploy" {
-			deployments = append(deployments, i)
-		}
+func pollReceipts(ctx context.Context, client *http.Client, url string, start time.Time, results []Result, mu *sync.Mutex, deployed map[int]bool, workers int) {
+	var group sync.WaitGroup
+	for worker := 0; worker < workers; worker++ {
+		group.Add(1)
+		go func(worker int) {
+			defer group.Done()
+			pollReceiptShard(ctx, client, url, start, results, mu, deployed, worker, workers)
+		}(worker)
 	}
+	group.Wait()
+}
+
+func pollReceiptShard(ctx context.Context, client *http.Client, url string, start time.Time, results []Result, mu *sync.Mutex, deployed map[int]bool, next, stride int) {
+	// Each worker owns disjoint transaction indices. Keep a queue of submitted
+	// transactions rather than repeatedly scanning millions of future/completed
+	// rows under the same mutex used by the arrival scheduler.
+	pending, head := []int{}, 0
+	deployments := []int{}
 	for ctx.Err() == nil {
 		requests := make([]rpcRequest, 0, 128)
 		mu.Lock()
+		for scanned := 0; next < len(results) && scanned < 4096; scanned++ {
+			r := &results[next]
+			if r.Outcome == "unsent" {
+				break
+			}
+			if r.StartNs > 0 {
+				if r.Kind == "deploy" {
+					deployments = append(deployments, next)
+				} else {
+					pending = append(pending, next)
+				}
+			}
+			next += stride
+		}
 		// Deployments are dependencies and must not wait behind a large poll sweep.
+		remainingDeployments := deployments[:0]
 		for _, i := range deployments {
 			r := &results[i]
-			if r.Kind == "deploy" && r.StartNs > 0 && r.ReceiptNs == 0 {
-				requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
-				if len(requests) == 128 {
-					break
+			if r.ReceiptNs == 0 {
+				remainingDeployments = append(remainingDeployments, i)
+				if len(requests) < 128 {
+					requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
 				}
 			}
 		}
-		for scanned := 0; scanned < len(results) && len(requests) < 128; scanned++ {
-			i := cursor
-			cursor = (cursor + 1) % len(results)
+		deployments = remainingDeployments
+		for head < len(pending) && len(requests) < 128 {
+			i := pending[head]
+			head++
 			r := results[i]
-			if r.Kind != "deploy" && r.StartNs > 0 && r.ReceiptNs == 0 {
+			if r.ReceiptNs == 0 {
 				requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
 			}
+		}
+		if head >= 4096 && head >= len(pending)/2 {
+			copy(pending, pending[head:])
+			pending = pending[:len(pending)-head]
+			head = 0
 		}
 		mu.Unlock()
 		if len(requests) == 0 {
@@ -419,6 +454,14 @@ func pollReceipts(ctx context.Context, client *http.Client, url string, start ti
 			}
 			mu.Unlock()
 		}
+		mu.Lock()
+		for _, req := range requests {
+			r := &results[req.ID]
+			if r.Kind != "deploy" && r.ReceiptNs == 0 {
+				pending = append(pending, req.ID)
+			}
+		}
+		mu.Unlock()
 		select {
 		case <-ctx.Done():
 			return

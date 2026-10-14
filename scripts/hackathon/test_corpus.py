@@ -14,11 +14,26 @@ class CorpusTest(unittest.TestCase):
         if not (artifacts / "wallet_4.rv32a").exists():
             self.skipTest("requires five compiled wallet variants")
         with tempfile.TemporaryDirectory() as name:
-            for users in (10, 100):
+            for users in (10, 100, 1000):
                 for shared in (0, 1):
                     output = Path(name) / f"users-{users}-shared-{shared}"
                     subprocess.run([os.environ["HACKATHON_CORPUS_BINARY"], "--artifacts", str(artifacts), "--out", str(output), "--apps", "5", "--users", str(users), "--wallets", "5", "--shared-code", str(shared), "--stage-seconds", "2", "--warmup-seconds", "1", "--rate-divisor", "100"], check=True, capture_output=True)
                     self.assertGreater((output / "genesis.xdr").stat().st_size, 0)
+
+    def test_rate_multiplier_preserves_duration_and_accounts_for_bursts(self):
+        with tempfile.TemporaryDirectory() as name:
+            output = Path(name) / "scaled"
+            subprocess.run([os.environ["HACKATHON_CORPUS_BINARY"], "--artifacts", os.environ["HACKATHON_ARTIFACTS"], "--out", str(output), "--apps", "5", "--users", "1000", "--wallets", "5", "--stage-seconds", "2", "--warmup-seconds", "1", "--rate-divisor", "100", "--rate-multiplier", "10"], check=True, capture_output=True)
+            manifest = json.loads((output / "manifest.json").read_text())
+            rows = [json.loads(line) for line in (output / "transactions.jsonl").read_text().splitlines()]
+            # 10 warmup + (10+50+100+250)*(one normal + one 5x second)
+            # plus the one application deployed during measured traffic.
+            self.assertEqual(len(rows), 2471)
+            self.assertEqual(manifest["rateMultiplier"], 10)
+            self.assertEqual(manifest["users"], 1000)
+            self.assertEqual(manifest["durationSeconds"], 9)
+            self.assertEqual(len(rows), manifest["operations"])
+            self.assertEqual(len(rows), len({r["hash"] for r in rows}))
 
     def test_reproducible_signed_corpus_and_unique_transaction_ids(self):
         with tempfile.TemporaryDirectory() as name:

@@ -4,6 +4,19 @@ set -Eeuo pipefail
 : "${WORK_DIR:?WORK_DIR must point to a fresh benchmark work directory}"
 : "${HACKATHON_GATEWAY_BINARY:?absolute compatible hog-gateway path on hog4 required}"
 : "${HACKATHON_GATEWAY_SHA256:?pinned gateway sha256 required}"
+: "${HACKATHON_USERS:=1000}"
+: "${HACKATHON_RATE_MULTIPLIER:=10}"
+: "${HACKATHON_OUTSTANDING:=16384}"
+: "${HACKATHON_RECEIPT_WORKERS:=16}"
+: "${HACKATHON_REPEATS:=3}"
+for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10; do
+  IFS=: read -r name minimum maximum <<<"$setting"
+  value=${!name}
+  if [[ ! "$value" =~ ^[1-9][0-9]{0,5}$ ]] || ((value < minimum || value > maximum)); then
+    echo "$name must be an integer between $minimum and $maximum" >&2
+    exit 1
+  fi
+done
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD_DIR=$(realpath "$BUILD_DIR")
 WORK_DIR=$(realpath -m "$WORK_DIR")
@@ -55,9 +68,11 @@ if [[ -n "${HACKATHON_GATEWAY_PROTOCOL:-}" ]]; then
 fi
 for shared in 0 1; do
   CORPUS="$WORK_DIR/hackathon-corpus-$shared"
-  "$BUILD_DIR/hogd/loadgen/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared"
+  "$BUILD_DIR/hogd/loadgen/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
+    --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
   python3 "$ROOT/scripts/hackathon/cluster.py" \
     --build "$BUILD_DIR" --scpd "$BUILD_DIR/scpd.dev" \
     --gateway "$HACKATHON_GATEWAY_BINARY" --gateway-sha256 "$HACKATHON_GATEWAY_SHA256" \
-    "${GATEWAY_ARGS[@]}" --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared"
+    "${GATEWAY_ARGS[@]}" --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared" \
+    --outstanding "$HACKATHON_OUTSTANDING" --receipt-workers "$HACKATHON_RECEIPT_WORKERS" --repeats "$HACKATHON_REPEATS"
 done
