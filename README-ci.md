@@ -133,7 +133,12 @@ The CI schedule warms up for 30 seconds at 1,000 calls/second, then runs
 60-second stages at 1,000, 5,000, 10,000 and 25,000 calls/second. Each stage
 contains a five-second fivefold burst (up to 125,000 calls/second). Deployments
 are additional traffic. The client allows 16,384 concurrent submissions and uses
-16 receipt-polling workers. It records arrivals more than 100 ms late and drains
+16 receipt-polling workers. The harness writes and retains `gateway.toml`,
+setting the gateway connection cap to submission slots + receipt workers + 128
+(16,528 by default), so its default 2,000-connection cap does not stop the
+load before ingestion. HTTP errors are counted separately from transport errors;
+HTTP 429 rejections are not repeatedly polled for nonexistent receipts.
+It records arrivals more than 100 ms late and drains
 receipts for 120 seconds.
 It does not automatically retry ambiguous submissions. Each corpus runs through
 the RPC gateway three times, with fresh state. The workflow repeats those runs

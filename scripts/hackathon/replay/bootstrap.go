@@ -5,6 +5,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net"
 	"net/http"
@@ -101,6 +102,10 @@ func serveBootstrap(ctx context.Context, corpus, address string) error {
 func submit(ctx context.Context, client *http.Client, url string, op Operation, id int) (string, error) {
 	var reply rpcResponse
 	if err := rpc(ctx, client, url, request(id, "sendRawTransaction", op.Raw), &reply); err != nil {
+		var status httpStatusError
+		if errors.As(err, &status) {
+			return "http_error", err
+		}
 		return "transport_error", err
 	}
 	if len(reply.Error) > 0 && string(reply.Error) != "null" {

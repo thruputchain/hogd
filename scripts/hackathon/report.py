@@ -38,12 +38,14 @@ def summarize(directory):
         start_ns = 0 if phase == 0 else (manifest["warmupSeconds"] + (phase-1)*manifest["stageSeconds"]) * 1e9
         end_ns = start_ns + duration * 1e9
         outcomes = collections.Counter(r["outcome"] for r in rows)
-        execution = collections.Counter(r.get("execution", "unresolved") for r in rows if r["startNs"] > 0)
+        execution = collections.Counter(r.get("execution", "not_admitted" if r.get("httpStatus") == 429 else "unresolved") for r in rows if r["startNs"] > 0)
+        http_statuses = collections.Counter(str(r["httpStatus"]) for r in rows if r.get("httpStatus"))
         submitted = [r for r in rows if r["startNs"] > 0]
         completed = [r for r in submitted if r["endNs"] > 0]
         report["phases"][str(phase)] = {
             "offered": len(rows), "submitted": len(submitted), "outcomes": outcomes,
             "execution": execution, "offeredPerSecond": len(rows)/duration,
+            "httpStatusCounts": http_statuses,
             "submittedWithinWindowPerSecond": (bisect.bisect_left(submissions_started, end_ns)-bisect.bisect_left(submissions_started, start_ns))/duration,
             "clientDropped": outcomes["missed_arrival"] + outcomes["outstanding_limit"],
             "admittedWithinWindowPerSecond": (bisect.bisect_left(admissions, end_ns)-bisect.bisect_left(admissions, start_ns))/duration,
@@ -130,7 +132,7 @@ def summarize(directory):
         text.append(f"| {phase} | {data['offeredPerSecond']:.1f} | {data['submittedWithinWindowPerSecond']:.1f} | {data['admittedWithinWindowPerSecond']:.1f} | {data['observedSuccessfulWithinWindowPerSecond']:.1f} | {data['clientDropped']} | {data['admittedUnconfirmedAtWindowEnd']} | {data['rpcLatencyMs']['p99']} | {data['receiptObservationMs']['p99']} |")
     text.extend(["", "Client drops count missed arrivals and exhausted submission slots; inspect them before attributing a throughput plateau to the system.", "Unconfirmed counts include unresolved auth updates and receipt/indexer lag, so they are not a direct mempool queue measurement.", "", "Per-arrival-stage accounting (including receipts observed during later stages or drain):", ""])
     for phase, data in report["phases"].items():
-        text.append(f"- Phase {phase}: offered={data['offered']}, outcomes={dict(data['outcomes'])}, execution={dict(data['execution'])}.")
+        text.append(f"- Phase {phase}: offered={data['offered']}, outcomes={dict(data['outcomes'])}, HTTP statuses={dict(data['httpStatusCounts'])}, execution={dict(data['execution'])}.")
     text.extend(["", "Sampled ingestion overlap with block processing:", ""])
     for phase, data in report["overlap"].items():
         text.append(f"- {phase}: {data['sampledOverlappingSubmissions']} overlapping submissions across {data['blockIntervals']} intervals." if data["exercised"] else f"- {phase}: not exercised by this run.")

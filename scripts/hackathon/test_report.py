@@ -48,6 +48,23 @@ class ReportTest(unittest.TestCase):
             self.assertEqual(phases["1"]["admittedUnconfirmedAtWindowEnd"], 0)
             self.assertEqual(phases["1"]["clientDropped"], 1)
 
+    def test_http_rejections_are_distinct_from_unresolved_submissions(self):
+        with tempfile.TemporaryDirectory() as name:
+            directory = Path(name)
+            (directory / "replay").mkdir()
+            (directory / "corpus").mkdir()
+            (directory / "corpus/manifest.json").write_text(json.dumps({"operations": 2, "stageSeconds": 1, "warmupSeconds": 1}))
+            records = [{"phase": 1, "dueNs": 1_000_000_000, "startNs": 1_001_000_000, "endNs": 1_003_000_000, "outcome": "http_error", "httpStatus": status} for status in (429, 500)]
+            (directory / "replay/results.jsonl").write_text("\n".join(json.dumps(r) for r in records))
+            (directory / "mempool.stdout.log").write_text("INGESTION_INTERVAL phase=submit_gateway start_ns=100 end_ns=300\nINGESTION_INTERVAL phase=commit start_ns=200 end_ns=400\n")
+            (directory / "replay/metrics.jsonl").write_text('\n'.join(json.dumps({"name": "mempool", "text": f"tx_total {n}\n"}) for n in (0, 1)))
+            phase = summarize(directory)["phases"]["1"]
+            self.assertEqual(phase["httpStatusCounts"], {"429": 1, "500": 1})
+            self.assertEqual(phase["execution"], {"not_admitted": 1, "unresolved": 1})
+            self.assertEqual(phase["submitted"], 2)
+            self.assertEqual(phase["clientDropped"], 0)
+            self.assertEqual(phase["admittedUnconfirmedAtWindowEnd"], 0)
+
 
 if __name__ == "__main__":
     unittest.main()

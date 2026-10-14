@@ -7,6 +7,7 @@ import (
 	"context"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -52,6 +53,7 @@ type Result struct {
 	EndNs      int64  `json:"endNs"`
 	Outcome    string `json:"outcome"`
 	Error      string `json:"error,omitempty"`
+	HTTPStatus int    `json:"httpStatus,omitempty"`
 	ReceiptNs  int64  `json:"receiptNs,omitempty"`
 	Height     string `json:"height,omitempty"`
 	Execution  string `json:"execution,omitempty"`
@@ -77,6 +79,16 @@ type receipt struct {
 	GasUsed string `json:"gasUsed"`
 }
 
+type httpStatusError struct{ code int }
+
+func (e httpStatusError) Error() string { return fmt.Sprintf("HTTP %d", e.code) }
+
+func needsReceipt(r Result) bool {
+	// HTTP 429 is a rejection before gateway admission. Transport failures and
+	// timeouts remain ambiguous and must still be reconciled by transaction ID.
+	return r.StartNs > 0 && r.ReceiptNs == 0 && r.HTTPStatus != http.StatusTooManyRequests
+}
+
 func request(id int, method, value string) rpcRequest {
 	return rpcRequest{"2.0", id, "groundhog_" + method, []string{value}}
 }
@@ -96,7 +108,7 @@ func rpc(ctx context.Context, client *http.Client, url string, body any, result 
 	}
 	defer response.Body.Close()
 	if response.StatusCode != 200 {
-		return fmt.Errorf("HTTP %d", response.StatusCode)
+		return httpStatusError{code: response.StatusCode}
 	}
 	return json.NewDecoder(io.LimitReader(response.Body, 32<<20)).Decode(result)
 }
@@ -173,7 +185,10 @@ func Run(ctx context.Context, c Config) error {
 	if err = os.WriteFile(filepath.Join(c.Output, "config.json"), configFile, 0644); err != nil {
 		return err
 	}
-	transport := &http.Transport{MaxIdleConns: c.Outstanding + 32, MaxIdleConnsPerHost: c.Outstanding + 32, MaxConnsPerHost: c.Outstanding + 32}
+	// Receipt workers and telemetry must retain connections even when every
+	// submission slot is occupied, including runs configured with many pollers.
+	connections := c.Outstanding + c.ReceiptWorkers + 32
+	transport := &http.Transport{MaxIdleConns: connections, MaxIdleConnsPerHost: connections, MaxConnsPerHost: connections}
 	defer transport.CloseIdleConnections()
 	client := &http.Client{Transport: transport, Timeout: c.Timeout}
 	// Setup uses the same gateway as measured submissions and completes before
@@ -258,6 +273,10 @@ func Run(ctx context.Context, c Config) error {
 			results[i].Outcome = outcome
 			if e != nil {
 				results[i].Error = e.Error()
+				var status httpStatusError
+				if errors.As(e, &status) {
+					results[i].HTTPStatus = status.code
+				}
 			}
 			mu.Unlock()
 		}(i, op)
@@ -275,7 +294,7 @@ func Run(ctx context.Context, c Config) error {
 		mu.Lock()
 		pending := false
 		for _, r := range results {
-			if r.StartNs > 0 && r.ReceiptNs == 0 {
+			if needsReceipt(r) {
 				pending = true
 				break
 			}
@@ -386,7 +405,7 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 			if r.Outcome == "unsent" {
 				break
 			}
-			if r.StartNs > 0 {
+			if needsReceipt(*r) {
 				if r.Kind == "deploy" {
 					deployments = append(deployments, next)
 				} else {
@@ -399,7 +418,7 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 		remainingDeployments := deployments[:0]
 		for _, i := range deployments {
 			r := &results[i]
-			if r.ReceiptNs == 0 {
+			if needsReceipt(*r) {
 				remainingDeployments = append(remainingDeployments, i)
 				if len(requests) < 128 {
 					requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
@@ -411,7 +430,7 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 			i := pending[head]
 			head++
 			r := results[i]
-			if r.ReceiptNs == 0 {
+			if needsReceipt(r) {
 				requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
 			}
 		}
@@ -457,7 +476,7 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 		mu.Lock()
 		for _, req := range requests {
 			r := &results[req.ID]
-			if r.Kind != "deploy" && r.ReceiptNs == 0 {
+			if r.Kind != "deploy" && needsReceipt(*r) {
 				pending = append(pending, req.ID)
 			}
 		}
