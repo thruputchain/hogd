@@ -651,6 +651,27 @@ private:
   friend T;
 };
 
+// A union field declared #[cpp(box)] is a Box of the union, which is that
+// union to the union protocol: arms are reached through get<I>, which Box
+// forwards, and the discriminant through the boxed value.
+template<is_xdr_union T> struct union_ops<Box<T>> : union_ops<T> {
+  using base = union_ops<T>;
+  using base::get_discriminant;
+  using base::index;
+  using base::set_discriminant;
+  using typename base::discriminant_type;
+
+  static constexpr int index(const Box<T> &u) { return base::index(*u); }
+  static constexpr discriminant_type get_discriminant(const Box<T> &u)
+  {
+    return base::get_discriminant(*u);
+  }
+  static constexpr void set_discriminant(Box<T> &u, discriminant_type d)
+  {
+    base::set_discriminant(*u, d);
+  }
+};
+
 // Set the discriminant of a union.  Note:  you can always get the
 // value of a discriminant of union u with get<0>(u).  But since
 // setting the union requires additional logic for changing the active

@@ -511,3 +511,15 @@ struct box_leaves_plain {
   box_bytes bytes;
   box_arms_plain arm;
 };
+
+// #[cpp(box)] on a struct field whose type is a union. box_union_field_plain
+// is the same type unboxed.
+struct box_union_field {
+  box_arms_plain u; // #[cpp(box)]
+  int tail;
+};
+
+struct box_union_field_plain {
+  box_arms_plain u;
+  int tail;
+};
