@@ -516,6 +516,37 @@ TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)
   EXPECT_FALSE(IndexDB::open(path_).has_value());
 }
 
+TEST_F(StrictIndexerTest, NegativeTxRecordHeightFailsClosed)
+{
+  IndexerOutboxOrigin origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransaction body = make_body(1, 0xBB);
+  IndexerCommittedBlock first =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  const TransactionHash tx_hash = sha256(body.signed_tx.tx);
+  db_.reset();
+
+  // Rewrite the tx_index row with the same payload but height -1.
+  const BlockHeight negative_height = -1;
+  std::string value(reinterpret_cast<const char *>(&negative_height),
+                    sizeof(negative_height));
+  const x23::Buf payload = x23::serialize(body, make_log(body, 0xA0));
+  value.append(reinterpret_cast<const char *>(payload.data()), payload.size());
+  std::string key;
+  IndexerKeyFormat::make_tx_key(key, tx_hash);
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily, key,
+                          value);
+
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+  auto record = reopened->get_tx_record(tx_hash);
+  ASSERT_FALSE(record.has_value());
+  EXPECT_EQ(record.error(), IndexerErrorCode::kInternal);
+}
+
 TEST_F(StrictIndexerTest, ReopenRejectsMalformedPerHeightIdentity)
 {
   IndexerOutboxOrigin origin = make_origin();

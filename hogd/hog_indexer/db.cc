@@ -1523,6 +1523,13 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
 
   try {
     TxRecord record = parse_tx_value(value);
+    // Ingestion never writes a height below the retained range, so such a
+    // row is corrupt: fail it as internal rather than serving it as history.
+    if (record.height < oldest_block()) {
+      error("tx_index row for tx {} has out-of-range height {}",
+            HexArray(tx_hash).str(), static_cast<int64_t>(record.height));
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     const int64_t watermark =
         highest_indexed_block_.load(std::memory_order_acquire);
     if (watermark == kNoBlocksIndexed || record.height > watermark) {
