@@ -1,5 +1,0 @@
-x23 uses cmake.  You can install it by running the following commands:
-
-cmake .
-make
-sudo make install
