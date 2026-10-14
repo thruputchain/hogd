@@ -1112,13 +1112,15 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
   // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
-  // the one event log, between its root output and its events.
-  constexpr size_t kExpectedByteLength = 584;
-  const SHA256Hash kExpectedDigest{0xc1, 0x3a, 0x73, 0xe8, 0x42, 0x6f, 0x15,
-                                   0x4c, 0x1c, 0x7b, 0xc8, 0xf3, 0x1f, 0xc7,
-                                   0xfc, 0x93, 0x60, 0xad, 0x3b, 0x6e, 0xda,
-                                   0x1b, 0x37, 0x16, 0x87, 0x17, 0x8b, 0x88,
-                                   0x48, 0x68, 0x9a, 0xde};
+  // the one event log, between its root output and its events. It moved again
+  // when SignedTransaction gained pubkey_claim_key: four more bytes for the
+  // absent key at the end of the one transaction body.
+  constexpr size_t kExpectedByteLength = 588;
+  const SHA256Hash kExpectedDigest{0xee, 0x08, 0xab, 0x8e, 0xeb, 0x72, 0xa9,
+                                   0x64, 0xa9, 0xb3, 0xd2, 0x90, 0xeb, 0xaf,
+                                   0xbc, 0xa9, 0xb9, 0x07, 0x63, 0xfb, 0xf8,
+                                   0x93, 0x78, 0xff, 0xb9, 0xdd, 0xf8, 0xfc,
+                                   0x6a, 0xa4, 0x41, 0x7e};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
