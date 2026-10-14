@@ -39,6 +39,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/manifest_hex.h"
@@ -248,11 +249,10 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
       }};
   // A bootstrap account is a standalone pubkey account with no on-chain auth
   // data, so it authorizes itself with the preimage of its own address.
+  PublicKey sender_key(CryptographicScheme::Ed25519);
+  sender_key.ed25519() = sender.public_key;
   AuthClaim claim(AuthClaimType::kPubkeySignature);
-  auto &preimage = claim.pubkey_preimage();
-  preimage.pubkey.scheme(CryptographicScheme::Ed25519);
-  preimage.pubkey.ed25519() = sender.public_key;
-  preimage.nonce = 0;
+  claim.pubkey_preimage() = make_pubkey_account_preimage(sender_key, 0);
   Transaction tx{
       .invocation = {.invoked_address = sender.address,
                      .entrypoint = wallet::entrypoint<u8"execute">(),
@@ -268,8 +268,9 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
   Signature signature(CryptographicScheme::Ed25519);
   signature.ed25519() = *bytes;
   return {.tx = std::move(tx),
-          .signatures = {
-              DecoratedSignature{.public_key_id = 0, .signature = signature}}};
+          .signatures = {DecoratedSignature{.public_key_id = 0,
+                                            .signature = signature}},
+          .pubkey_claim_key = sender_key};
 }
 
 void

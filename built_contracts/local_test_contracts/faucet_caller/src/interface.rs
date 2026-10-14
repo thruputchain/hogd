@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// A contract-shaped faucet user for the bootstrap-loop scenario: a pubkey
 /// account funds itself from the airdrop faucet, deploys this contract

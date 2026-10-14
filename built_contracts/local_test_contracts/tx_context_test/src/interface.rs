@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// Exercises the transaction-context syscalls that report facts about the
 /// enclosing transaction and block: GetSourceTransactionHash (which has no

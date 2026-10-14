@@ -109,9 +109,8 @@ TEST(FFIHelpers, SourceAddressClaimAllowedKeysPassthroughUnchanged)
 TEST(FFIHelpers, PubkeySignatureClaimRoundtrip)
 {
   AuthClaim a(AuthClaimType::kPubkeySignature);
-  a.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
   for (size_t i = 0; i < 32; i++) {
-    a.pubkey_preimage().pubkey.ed25519()[i] = static_cast<uint8_t>(i + 1);
+    a.pubkey_preimage().pubkey_hash[i] = static_cast<uint8_t>(i + 1);
   }
   a.pubkey_preimage().nonce = 42;
   auto b = roundtrip_auth_claim(a);
@@ -124,25 +123,23 @@ TEST(FFIHelpers, PubkeySignatureClaimRoundtrip)
   ASSERT_EQ(a, *b);
 }
 
-TEST(FFIHelpers, PublicKeyRoundtrip)
+// The claim names its key by a 32-byte hash, so the contract-visible claim is
+// the same size whatever the key's scheme.
+TEST(FFIHelpers, PubkeyPreimageCarriesKeyHash)
 {
-  generated::PublicKey ffi_pk{};
-  ffi_pk.ed25519.tag = generated::PublicKey::PublicKey_Ed25519;
-  for (size_t i = 0; i < 32; i++) {
-    ffi_pk.ed25519.ed25519[i] = static_cast<uint8_t>(i + 1);
-  }
-  auto cpp_pk = FFIHelperType<generated::PublicKey>::to_cpp(ffi_pk);
-  ASSERT_TRUE(cpp_pk.has_value());
-  ASSERT_EQ(cpp_pk->scheme(), CryptographicScheme::Ed25519);
-  for (size_t i = 0; i < 32; i++) {
-    ASSERT_EQ(cpp_pk->ed25519()[i], static_cast<uint8_t>(i + 1));
-  }
+  static_assert(sizeof(generated::AuthClaim) == 48);
 
-  auto ffi_pk2 = FFIHelperType<generated::PublicKey>::to_ffi(*cpp_pk);
-  ASSERT_EQ(ffi_pk2.tag(), generated::PublicKey::PublicKey_Ed25519);
+  AuthClaim a(AuthClaimType::kPubkeySignature);
   for (size_t i = 0; i < 32; i++) {
-    ASSERT_EQ(ffi_pk2.ed25519.ed25519[i], static_cast<uint8_t>(i + 1));
+    a.pubkey_preimage().pubkey_hash[i] = static_cast<uint8_t>(0x80 + i);
   }
+  a.pubkey_preimage().nonce = 7;
+
+  auto ffi = FFIHelperType<generated::AuthClaim>::to_ffi(a);
+  ASSERT_EQ(ffi.tag(), generated::AuthClaim::AuthClaim_kPubkeySignature);
+  EXPECT_EQ(ffi.k_pubkey_signature.pubkey_preimage.pubkey_hash,
+            a.pubkey_preimage().pubkey_hash);
+  EXPECT_EQ(ffi.k_pubkey_signature.pubkey_preimage.nonce, 7U);
 }
 
 // The tag() accessor must read the discriminant regardless of which body
@@ -189,41 +186,30 @@ TEST(FFIHelpers, AuthClaimInvalidTags)
 
 // GetAuthClaim hands the contract every byte of generated::AuthClaim, so every
 // byte must be a function of the auth claim.  The bytes that hold no payload --
-// the gap between a variant's tag and its 8-aligned payload, the gap before
-// nonce, and the tail of the union left over by the shorter variant -- are
+// the gap between a variant's tag and its 8-aligned payload, and the tail of
+// the union left over by the shorter variant -- are
 // named `reserved` fields, so initializing the claim zeroes them.  They must
 // reach the contract as zeros, not as whatever the host stack last held.
 
 TEST(FFIHelpers, PubkeySignatureClaimExposesNoStackBytes)
 {
   AuthClaim a(AuthClaimType::kPubkeySignature);
-  a.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
   for (size_t i = 0; i < 32; i++) {
-    a.pubkey_preimage().pubkey.ed25519()[i] = static_cast<uint8_t>(0x40 + i);
+    a.pubkey_preimage().pubkey_hash[i] = static_cast<uint8_t>(0x40 + i);
   }
   a.pubkey_preimage().nonce = 0x0102030405060708ULL;
 
   auto const raw = contract_visible_bytes(a);
 
   using PubkeyBody = generated::AuthClaim::AuthClaim_kPubkeySignature_Body;
-  using Preimage = generated::PubkeyAccountPreimage;
 
   // Gap between the 4-byte tag and the 8-aligned payload.
   constexpr size_t kReservedOffset = offsetof(PubkeyBody, reserved);
   constexpr size_t kPayloadOffset = offsetof(PubkeyBody, pubkey_preimage);
 
-  // Gap between the 36-byte pubkey and the 8-aligned nonce.
-  constexpr size_t kPreimageReserved =
-      kPayloadOffset + offsetof(Preimage, reserved);
-  constexpr size_t kNonceOffset = kPayloadOffset + offsetof(Preimage, nonce);
-
   for (size_t i = kReservedOffset; i < kPayloadOffset; i++) {
     EXPECT_EQ(byte_at(raw, i), 0)
         << "tag/payload reserved byte " << i << " is visible to the contract";
-  }
-  for (size_t i = kPreimageReserved; i < kNonceOffset; i++) {
-    EXPECT_EQ(byte_at(raw, i), 0)
-        << "pubkey/nonce reserved byte " << i << " is visible to the contract";
   }
 }
 

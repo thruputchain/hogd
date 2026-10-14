@@ -224,7 +224,8 @@ TEST(Mempool, AuthenticatedPubkeyAccountMissingFromHogDbIsRecoverable)
   public_key.ed25519() = raw_public_key;
   SecretKey secret_key(CryptographicScheme::Ed25519);
   secret_key.ed25519() = raw_secret_key;
-  PubkeyAccountPreimage preimage{.pubkey = public_key, .nonce = 42};
+  PubkeyAccountPreimage preimage =
+      make_pubkey_account_preimage(public_key, /*nonce=*/42);
   const std::optional<ContractAddress> address = pubkey_auth_address(preimage);
   if (!address.has_value()) {
     ADD_FAILURE() << "failed to derive pubkey auth address";
@@ -236,6 +237,7 @@ TEST(Mempool, AuthenticatedPubkeyAccountMissingFromHogDbIsRecoverable)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
   txs[0].tx.auth_claim = std::move(claim);
+  txs[0].pubkey_claim_key = public_key;
   txs[0].signatures.push_back(make_signature(secret_key, txs[0].tx,
                                              /*public_key_id=*/0,
                                              MempoolTestInfra::kNetworkHash));
@@ -4149,8 +4151,8 @@ TEST(Mempool, GenesisCeremonyMintsDeploysAndRejectsRetry)
   auto [raw_public_key, raw_secret_key] = ed25519_keygen();
   PublicKey public_key(CryptographicScheme::Ed25519);
   public_key.ed25519() = raw_public_key;
-  const auto native_account = pubkey_auth_address(
-      PubkeyAccountPreimage{.pubkey = public_key, .nonce = 0});
+  const auto native_account =
+      pubkey_auth_address(make_pubkey_account_preimage(public_key, 0));
   if (!native_account.has_value()) {
     ADD_FAILURE() << "native account address derivation failed";
     return;

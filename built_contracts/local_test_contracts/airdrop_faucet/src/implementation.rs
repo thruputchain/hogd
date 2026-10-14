@@ -1,6 +1,6 @@
 use crate::AirdropFaucet;
-use groundhog_erc20_if::ERC20Client;
-use sdk::*;
+use thruput_erc20_if::ERC20Client;
+use thruput_sdk::*;
 
 /// Funds the token contract's own rows (its balance row and the total-supply
 /// row): the faucet-root analog of the stock genesis ceremony's
@@ -33,7 +33,7 @@ pub struct AirdropFaucetContract;
 impl AirdropFaucet for AirdropFaucetContract {
     fn claim(amount: i128) {
         let receiver = get_caller();
-        let token_address = sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN;
+        let token_address = thruput_sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN;
         let token = ERC20Client::new(&token_address);
 
         let bootstrapped = non_negative_int_try_get(&bootstrap_key())
