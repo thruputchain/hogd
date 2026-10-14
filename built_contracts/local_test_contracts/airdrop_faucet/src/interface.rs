@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// A testnet airdrop faucet meant to be installed as the genesis ROOT
 /// contract: the native token's mint is gated on

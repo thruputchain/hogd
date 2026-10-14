@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// Exercises the auth-configuration syscalls from a contract frame:
 /// WriteAddressRequiredWeight and GetAuthClaim, neither of which has any

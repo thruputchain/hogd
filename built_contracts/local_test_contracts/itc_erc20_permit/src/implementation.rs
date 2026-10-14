@@ -4,8 +4,8 @@ use crate::interface::*;
 use crate::permit_interface::{
     DeleteAllowanceGrant, ERC20Permit, ERC20PermitError, PermitGrant,
 };
-use sdk::signer::Signed;
-use sdk::*;
+use thruput_sdk::signer::Signed;
+use thruput_sdk::*;
 
 // Compute keys for storing things
 
@@ -72,7 +72,7 @@ fn delete_allowance_for(owner: &ContractAddress, spender: &ContractAddress) {
     AllowanceDeleteEvent::new(owner, spender, removed).log();
 }
 
-#[sdk::storage]
+#[thruput_sdk::storage]
 pub struct Token;
 
 #[contract]
