@@ -93,6 +93,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: |
@@ -105,6 +107,7 @@ jobs:
             external/crc32c \
             external/blake3 \
             external/corrosion \
+            external/mldsa-native \
             built_contracts/integration_test_contracts
 
       - name: Cargo Fetch

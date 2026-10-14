@@ -35,3 +35,5 @@ cache_repo google/crc32c
 cache_repo google/glog
 cache_repo BLAKE3-team/BLAKE3
 cache_repo corrosion-rs/corrosion
+cache_repo pq-code-package/mldsa-native
+cache_repo C2SP/wycheproof
