@@ -602,6 +602,46 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
   EXPECT_EQ(*reopened->latest_block(), 2);
 }
 
+TEST_F(StrictIndexerTest, MalformedContractKeyDoesNotTruncateEventHistory)
+{
+  ProposedTransaction first_body = make_body(80, 0x80);
+  ProposedTransaction second_body = make_body(81, 0x81);
+  ASSERT_TRUE(db_->consume_events(1,
+                                  TxEventLogBatch{make_log(first_body, 0x82)},
+                                  ProposedTransactionBatch{first_body})
+                  .has_value());
+  ASSERT_TRUE(db_->consume_events(2,
+                                  TxEventLogBatch{make_log(second_body, 0x82)},
+                                  ProposedTransactionBatch{second_body})
+                  .has_value());
+  db_.reset();
+
+  // A bare address||kind||height key sorts between the two valid rows.
+  ContractAddress emitter;
+  std::ranges::fill(emitter, 0x82);
+  std::string malformed;
+  IndexerKeyFormat::make_contract_key_prefix(malformed, emitter,
+                                             IndexerKeyFormat::kEvent, 2);
+  overwrite_column_family(path_, IndexerKeyFormat::kContractIndexColumnFamily,
+                          malformed, "");
+
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+  for (IterationOrder order : {IterationOrder::IterationOrderAscending,
+                               IterationOrder::IterationOrderDescending}) {
+    EventQuery query{};
+    query.filters.emplace_back().contract_addresses.push_back(emitter);
+    query.order = order;
+    query.anchor.kind(order == IterationOrder::IterationOrderAscending
+                          ? BlockAnchorKind::AnchorAtBeginning
+                          : BlockAnchorKind::AnchorAtEnd);
+    query.limit = 10;
+    auto page = reopened->get_events(query);
+    ASSERT_TRUE(page.has_value());
+    EXPECT_EQ(page->events.size(), 2);
+  }
+}
+
 TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)
 {
   db_.reset();

@@ -1887,41 +1887,45 @@ public:
 
 private:
   // Decode the iterator's current key into `current_`.  Stops
-  // (has_current_=false) on iter end, on a key that has left the
-  // contract's prefix range, or on a malformed key.
+  // (has_current_=false) on iter end or on a key that has left the
+  // contract's prefix range.  A malformed key inside the range is a
+  // corrupt row: log and step past it rather than ending the scan, so
+  // it cannot silently truncate the contract's later history.
   void refresh_current()
   {
-    if (!iter_->Valid()) {
-      has_current_ = false;
-      return;
-    }
-    rocksdb::Slice key = iter_->key();
-    const std::string_view key_sv(key.data(), key.size());
-    if (key_sv.size() < IndexerKeyFormat::kContractKeyPrefixSize ||
-        !key_sv.starts_with(kind_prefix_)) {
-      has_current_ = false;
-      return;
-    }
-    auto parsed = IndexerKeyFormat::parse_contract_key(key_sv);
-    if (!parsed) {
-      has_current_ = false;
-      return;
-    }
-    current_.block = parsed->block_height;
-    current_.tx = parsed->tx_hash;
-    current_.seq = parsed->sequence_number;
-    if (order_ == IterationOrder::IterationOrderAscending &&
-        current_.block > max_block_) {
+    has_current_ = false;
+    while (iter_->Valid()) {
+      rocksdb::Slice key = iter_->key();
+      const std::string_view key_sv(key.data(), key.size());
+      if (key_sv.size() < IndexerKeyFormat::kContractKeyPrefixSize ||
+          !key_sv.starts_with(kind_prefix_)) {
+        return;
+      }
+      auto parsed = IndexerKeyFormat::parse_contract_key(key_sv);
+      if (!parsed) {
+        error("ContractIter: skipping malformed contract_index key ({} bytes)",
+              key_sv.size());
+        if (order_ == IterationOrder::IterationOrderAscending) {
+          iter_->Next();
+        }
+        else {
+          iter_->Prev();
+        }
+        continue;
+      }
+      current_.block = parsed->block_height;
+      current_.tx = parsed->tx_hash;
+      current_.seq = parsed->sequence_number;
       // Rows above the contiguous watermark are not servable: they
       // (or a block below them) may still be ingesting, so they are
       // not yet immutable.  Ascending keys only grow, so this
       // iterator is exhausted for the current query.  Descending
       // never gets here — its seek anchor is clamped to the
       // watermark before iteration starts.
-      has_current_ = false;
+      has_current_ = order_ != IterationOrder::IterationOrderAscending ||
+                     current_.block <= max_block_;
       return;
     }
-    has_current_ = true;
   }
 
   ContractAddress contract_;
