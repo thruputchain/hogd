@@ -454,3 +454,60 @@ struct box_add_args {
   box_expr left;
   box_expr right;
 };
+
+// #[cpp(box)] on scalar union arms and struct fields whose types are not
+// structs. box_arms_plain and box_leaves_plain are the same types unboxed, so
+// tests can check that boxing does not change the encoding.
+typedef opaque box_big_opaque[1952];
+typedef opaque box_bytes<>;
+typedef int box_ints<>;
+
+enum box_arm_type {
+  kBoxArmSmall = 0,
+  kBoxArmBig = 1,
+  kBoxArmStruct = 2,
+  kBoxArmBytes = 3,
+  kBoxArmInts = 4
+};
+
+union box_arms switch (box_arm_type t)
+{
+case kBoxArmSmall:
+  int small;
+case kBoxArmBig:
+  box_big_opaque big; // #[cpp(box)]
+case kBoxArmStruct:
+  fix_12 st; // #[cpp(box)]
+case kBoxArmBytes:
+  box_bytes bytes; // #[cpp(box)]
+case kBoxArmInts:
+  box_ints ints; // #[cpp(box)]
+};
+
+union box_arms_plain switch (box_arm_type t)
+{
+case kBoxArmSmall:
+  int small;
+case kBoxArmBig:
+  box_big_opaque big;
+case kBoxArmStruct:
+  fix_12 st;
+case kBoxArmBytes:
+  box_bytes bytes;
+case kBoxArmInts:
+  box_ints ints;
+};
+
+struct box_leaves {
+  box_big_opaque big; // #[cpp(box)]
+  unsigned hyper n;   // #[cpp(box)]
+  box_bytes bytes;    // #[cpp(box)]
+  box_arms arm;
+};
+
+struct box_leaves_plain {
+  box_big_opaque big;
+  unsigned hyper n;
+  box_bytes bytes;
+  box_arms_plain arm;
+};
