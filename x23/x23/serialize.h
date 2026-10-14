@@ -116,7 +116,9 @@ consteval SizeBounds
 xdr_size_bounds()
 {
   using enum XdrCategory;
-  if constexpr (is_one_of<X, Blacklist...> || !is_xdr_type<X>)
+  if constexpr (is_boxed_leaf<X>)
+    return xdr_size_bounds<typename X::value_type, Blacklist...>();
+  else if constexpr (is_one_of<X, Blacklist...> || !is_xdr_type<X>)
     // If X is in Blacklist, it means we have a recursive or
     // mutually-recursive type, so it could go on forever.  (min
     // doesn't matter because in any recursive type there's a Ptr or
@@ -335,6 +337,11 @@ struct Serializer {
   template<is_xdr_struct X> void operator()(const X &x)
   {
     visit_fields(*this, x);
+  }
+  template<typename T> requires is_boxed_leaf<Box<T>>
+  void operator()(const Box<T> &b)
+  {
+    (*this)(*b);
   }
   template<is_xdr_union X> void operator()(const X &u)
   {
@@ -596,7 +603,9 @@ consteval auto
 get_field_types()
 {
   using enum XdrCategory;
-  if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>)
+  if constexpr (is_boxed_leaf<X>)
+    return get_field_types<typename X::value_type>();
+  else if constexpr (is_xdr_cat<X, kPtr, kVec, kArray>)
     return type_sequence<typename X::value_type>{};
   else if constexpr (is_xdr_cat<X, kStruct>)
     return []<size_t... I>(std::index_sequence<I...>) {
@@ -882,6 +891,12 @@ struct Deserializer
     x.resize(b);
     if (b)
       go<Safe>(*x);
+  }
+
+  template<bool Safe, typename T> requires is_boxed_leaf<Box<T>>
+  void go(Box<T> &b)
+  {
+    go<Safe>(*b);
   }
 
   template<bool Safe, is_xdr_struct X> void go(X &x)

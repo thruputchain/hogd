@@ -56,7 +56,9 @@ show(const X0 &x, size_t indent = 0, Out ret = {})
     };
 
     using enum XdrCategory;
-    if constexpr (!is_xdr_type<X>) {
+    if constexpr (is_boxed_leaf<X>)
+      go(out, *x, indent);
+    else if constexpr (!is_xdr_type<X>) {
       if constexpr (requires { *out = show(x, indent, std::move(*out)); })
         *out = show(x, indent, std::move(*out));
       else
