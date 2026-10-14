@@ -8,10 +8,9 @@
 
 #pragma once
 
-#include <array>
 #include <cstddef>
-#include <cstdint>
 
+#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -24,11 +23,12 @@ constexpr size_t kMlDsa65SignatureBytes = 3309;
 // accepts.
 constexpr size_t kMlDsaMaxContextBytes = 255;
 
+// MlDsa65PublicKey and MlDsa65Signature are the protocol's (types.x).
 // Every byte string of a public key's length decodes to some public key, but
 // not every byte string of a signature's length is a well-formed signature;
 // mldsa65_verify rejects malformed ones like any other invalid signature.
-using MlDsa65PublicKey = std::array<uint8_t, kMlDsa65PublicKeyBytes>;
-using MlDsa65Signature = std::array<uint8_t, kMlDsa65SignatureBytes>;
+static_assert(sizeof(MlDsa65PublicKey) == kMlDsa65PublicKeyBytes);
+static_assert(sizeof(MlDsa65Signature) == kMlDsa65SignatureBytes);
 
 // mldsa65_verify returns whether sig is a valid ML-DSA-65 signature on msg
 // under public_key with the context string ctx, as computed by ML-DSA.Verify

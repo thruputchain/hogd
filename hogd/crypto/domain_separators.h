@@ -6,8 +6,10 @@
 
 #include "auth_claim.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "preimage.hh"
+#include "types.hh"
 #include "x23/serialize_cxs.h"
 
 namespace hogd {
@@ -42,8 +44,40 @@ domain_separator_cxs()
 constexpr static auto kPubkeyAuthDomainSeparatorCxs =
     domain_separator_cxs<u8"PubkeyAccount">();
 
+constexpr static auto kPublicKeyHashDomainSeparatorCxs =
+    domain_separator_cxs<u8"PublicKey">();
+
 constexpr static auto kTransactionSignatureDomainSeparatorCxs =
     domain_separator_cxs<u8"Transaction">();
+
+// Hashes a public key, scheme included, into the PublicKeyHash that names it
+// in a PubkeyAccountPreimage: SHA256(domain_separator || cxs(key)). Returns
+// std::nullopt if the key cannot be CXS-serialized (e.g. an unrecognized
+// scheme), so callers on the (guest-reachable) auth-verification path can
+// reject it instead of aborting the process.
+inline std::optional<PublicKeyHash>
+public_key_hash(PublicKey const &key)
+{
+  auto serialized = x23::serialize_cxs(key);
+  if (!serialized.has_value()) {
+    return std::nullopt;
+  }
+  SHA256Hasher hasher;
+  hasher.update(kPublicKeyHashDomainSeparatorCxs);
+  hasher.update(*serialized);
+  PublicKeyHash hash = hasher.finalize();
+  return hash;
+}
+
+// Builds the PubkeyAccountPreimage naming key, which must be of a known scheme
+// (a trusted key, not one from a transaction).
+inline PubkeyAccountPreimage
+make_pubkey_account_preimage(PublicKey const &key, uint64_t nonce)
+{
+  std::optional<PublicKeyHash> hash = public_key_hash(key);
+  CHECK(hash.has_value());
+  return {.pubkey_hash = *hash, .nonce = nonce};
+}
 
 // Derives the address of a standalone-pubkey account:
 // SHA256(domain_separator || cxs(preimage)). Returns std::nullopt if the

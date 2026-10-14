@@ -610,9 +610,10 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
             InvocationFrameStatusCode::Fault);
 
   auto wallet_query = make_query();
-  wallet_query.auth_claim.pubkey_preimage().pubkey.scheme(
-      CryptographicScheme::Ed25519);
-  wallet_query.auth_claim.pubkey_preimage().pubkey.ed25519().fill(42);
+  PublicKey owner_key(CryptographicScheme::Ed25519);
+  owner_key.ed25519().fill(42);
+  wallet_query.auth_claim.pubkey_preimage() =
+      make_pubkey_account_preimage(owner_key, /*nonce=*/0);
   const auto owner =
       pubkey_auth_address(wallet_query.auth_claim.pubkey_preimage());
   if (!owner.has_value()) {
