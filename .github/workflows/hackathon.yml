@@ -30,6 +30,7 @@ jobs:
     benchmark:
         name: Gateway workload (one validator)
         runs-on: self-hosted
+        timeout-minutes: 130
         permissions:
             contents: read
             actions: read
@@ -73,6 +74,7 @@ jobs:
                     exit 1
                   fi
                   hog_sched \
+                    --timeout-sec=7200 \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_token --value=${{ steps.private-sources.outputs.token }} \

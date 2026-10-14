@@ -64,16 +64,20 @@ class Cluster:
                 out.close(); err.close()
             self.logs[name] = (host, str(output), str(errors))
         else:
+            # A separate session includes children such as scpd in our cleanup.
             # exec preserves the PID controlled by control_server. Recording it
             # lets us monitor every service, including colocated services that
             # its most-recent-process status RPC cannot individually query.
             pidfile = self.directory / f"{name}.pid"
-            command = ["/bin/bash", "-c", 'printf "%s\\n" "$$" > "$1"; shift; exec "$@"', "bash", str(pidfile), *command]
+            command = ["/usr/bin/setsid", "/bin/bash", "-c", 'printf "%s\\n" "$$" > "$1"; shift; exec "$@"', "bash", str(pidfile), *command]
             result = subprocess.check_output([str(self.control), host, self.port, "start", *command], text=True)
             paths = [re.search(rf"CONTROL_{stream}_PATH=(.*)", result) for stream in ("STDOUT", "STDERR")]
             if not all(paths):
                 raise RuntimeError(f"missing control log paths for {name}: {result}")
             self.logs[name] = (host, *(p[1].strip() for p in paths))
+            # start returns after fork, before the child necessarily writes its
+            # PID. Wait for that handoff before checking process health.
+            self.remote(host, ["bash", "-c", 'for ((i=0; i<100; i++)); do [[ -s "$1" ]] && exit 0; sleep 0.05; done; exit 1', "bash", pidfile], timeout=15)
         print(f"started {name} on {host}", flush=True)
 
     def check_services(self):
@@ -89,12 +93,12 @@ class Cluster:
 
     def wait_log(self, name, marker):
         deadline = time.monotonic() + self.args.ready_timeout
+        next_check = 0
         host, stdout, stderr = self.logs[name]
         while time.monotonic() < deadline:
-            if self.args.local:
-                for running, proc in self.processes.items():
-                    if proc.poll() is not None:
-                        raise RuntimeError(f"{running} exited: {Path(self.logs[running][2]).read_text()[-4000:]}")
+            if time.monotonic() >= next_check:
+                self.check_services()
+                next_check = time.monotonic() + 5
             match = self.remote(host, ["grep", "-F", "-m", "1", "--", marker, stdout, stderr], stdout=subprocess.DEVNULL, check=False)
             if match.returncode == 0:
                 return
@@ -121,11 +125,26 @@ class Cluster:
                 except ProcessLookupError:
                     pass
         else:
+            # control_server stops only its direct children. In particular, a
+            # crashed coordinator can leave scpd listening on the next run's
+            # port. Signal the sessions we created, including their descendants.
             for host in set(self.hosts.values()):
-                subprocess.run([str(self.control), host, self.port, "stop"], timeout=60, check=False)
+                self.signal_remote_groups(host, "TERM")
+            for host in set(self.hosts.values()):
+                try:
+                    subprocess.run([str(self.control), host, self.port, "stop"], timeout=10, check=False)
+                except subprocess.TimeoutExpired:
+                    print(f"forcing service cleanup on {host}", flush=True)
+                finally:
+                    self.signal_remote_groups(host, "KILL")
             for name, (host, stdout, stderr) in self.logs.items():
                 for source, suffix in ((stdout, "stdout"), (stderr, "stderr")):
                     subprocess.run(["scp", "-q", "-oBatchMode=yes", f"{host}:{source}", str(self.directory / f"{name}.{suffix}.log")], check=False)
+
+    def signal_remote_groups(self, host, sig):
+        files = [self.directory / f"{name}.pid" for name, (running_host, *_) in self.logs.items() if running_host == host]
+        if files:
+            self.remote(host, ["bash", "-c", 'sig=$1; shift; for file do if read -r pid < "$file" && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then kill -"$sig" -- -"$pid" 2>/dev/null || true; fi; done', "bash", sig, *files], timeout=15)
 
     def launch(self, corpus):
         a, d = self.args, self.directory
@@ -176,10 +195,12 @@ class Cluster:
 
     def wait_gateway(self):
         deadline = time.monotonic() + self.args.ready_timeout
+        next_check = 0
         url = f"http://{self.address('gateway', 9547)}/readyz"
         while time.monotonic() < deadline:
-            if self.args.local and self.processes["gateway"].poll() is not None:
-                raise RuntimeError("gateway exited: " + Path(self.logs["gateway"][2]).read_text()[-2000:])
+            if time.monotonic() >= next_check:
+                self.check_services()
+                next_check = time.monotonic() + 5
             try:
                 with urllib.request.urlopen(url, timeout=5) as response:
                     if response.status == 200:
