@@ -136,7 +136,7 @@ export WORK_DIR=work_dir/
 
 echo 'start local benchmark control server'
 mkdir -p work_dir/
-./release/hogd/hog_exec/bench/control_server -p "$CI_CONTROL_PORT" -w work_dir/ > work_dir/control.log 2>&1 &
+./release/hogd/hog_exec/bench/control_server -p "$CI_CONTROL_PORT" -w work_dir/ < /dev/null > work_dir/control.log 2>&1 &
 control_pid=$!
 cleanup_benchmark_job() {
   local status=$?
@@ -150,7 +150,9 @@ cleanup_benchmark_job() {
 trap cleanup_benchmark_job EXIT
 
 echo 'run single-validator hackathon benchmark' 
-./scripts/ci/hackathon_bench.sh
+# hog_sched feeds this shell through a PTY. Keep child SSH/SCP commands from
+# consuming its remaining commands, including the final exit and cleanup.
+./scripts/ci/hackathon_bench.sh < /dev/null
 
 """
 after = """

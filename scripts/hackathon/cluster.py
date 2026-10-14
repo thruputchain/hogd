@@ -36,7 +36,9 @@ class Cluster:
     def remote(self, host, argv, **kwargs):
         command = list(map(str, argv))
         if not self.args.local:
-            command = ["ssh", "-oBatchMode=yes", "-oConnectTimeout=5", host, shlex.join(command)]
+            # hog_sched supplies its shell script on stdin through a PTY. A
+            # nested ssh must not consume the remaining script (including exit).
+            command = ["ssh", "-n", "-oBatchMode=yes", "-oConnectTimeout=5", host, shlex.join(command)]
         kwargs.setdefault("check", True)
         return subprocess.run(command, **kwargs)
 
@@ -266,7 +268,7 @@ def main():
     if args.local:
         actual = hashlib.sha256(args.gateway.read_bytes()).hexdigest()
     else:
-        actual = subprocess.check_output(["ssh", "-oBatchMode=yes", "hog4", shlex.join(["sha256sum",str(args.gateway)])], text=True).split()[0]
+        actual = subprocess.check_output(["ssh", "-n", "-oBatchMode=yes", "hog4", shlex.join(["sha256sum",str(args.gateway)])], text=True).split()[0]
     if actual != args.gateway_sha256:
         p.error("gateway checksum mismatch")
     args.output.mkdir(parents=True, exist_ok=False)
@@ -280,9 +282,9 @@ def main():
         if args.local:
             digest = hashlib.sha256(path.read_bytes()).hexdigest()
         else:
-            digest = subprocess.check_output(["ssh", "-oBatchMode=yes", HOSTS[name], shlex.join(["sha256sum", str(path)])], text=True).split()[0]
+            digest = subprocess.check_output(["ssh", "-n", "-oBatchMode=yes", HOSTS[name], shlex.join(["sha256sum", str(path)])], text=True).split()[0]
         identity["binaries"][name] = digest
-    identity["scpSha256"] = hashlib.sha256(args.scpd.read_bytes()).hexdigest() if args.local else subprocess.check_output(["ssh", "-oBatchMode=yes", "hog4", shlex.join(["sha256sum", str(args.scpd)])], text=True).split()[0]
+    identity["scpSha256"] = hashlib.sha256(args.scpd.read_bytes()).hexdigest() if args.local else subprocess.check_output(["ssh", "-n", "-oBatchMode=yes", "hog4", shlex.join(["sha256sum", str(args.scpd)])], text=True).split()[0]
     identity["corpusSha256"] = hashlib.sha256((args.corpus / "transactions.jsonl").read_bytes()).hexdigest()
     (args.output / "identity.json").write_text(json.dumps(identity, indent=2))
     for repeat in range(args.repeats):
