@@ -2115,6 +2115,11 @@ IndexDB::get_events(EventQuery const &query) const
     // Hydrate.
     auto tx_events = get_tx_events(win_pos.tx);
     if (!tx_events) {
+      // Only a missing row is skippable; a read or decode failure must
+      // fail the query rather than silently drop the event (#4453).
+      if (tx_events.error() != IndexerErrorCode::kDBNotFound) {
+        return tx_events.error();
+      }
       error("get_events: tx_index miss for tx {} at block {}",
             HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
       winner->advance(order);
