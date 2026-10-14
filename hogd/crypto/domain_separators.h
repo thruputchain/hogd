@@ -6,7 +6,6 @@
 
 #include "auth_claim.hh"
 #include "hogd/base/cpputil.h"
-#include "hogd/base/log.h"
 #include "hogd/crypto/crypto.h"
 #include "preimage.hh"
 #include "types.hh"
@@ -70,13 +69,12 @@ public_key_hash(PublicKey const &key)
 }
 
 // Builds the PubkeyAccountPreimage naming key, which must be of a known scheme
-// (a trusted key, not one from a transaction).
+// (a trusted key, not one from a transaction): an unknown one throws
+// std::bad_optional_access.
 inline PubkeyAccountPreimage
 make_pubkey_account_preimage(PublicKey const &key, uint64_t nonce)
 {
-  std::optional<PublicKeyHash> hash = public_key_hash(key);
-  CHECK(hash.has_value());
-  return {.pubkey_hash = *hash, .nonce = nonce};
+  return {.pubkey_hash = public_key_hash(key).value(), .nonce = nonce};
 }
 
 // Derives the address of a standalone-pubkey account:
