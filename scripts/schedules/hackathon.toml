@@ -149,7 +149,7 @@ cleanup_benchmark_job() {
 }
 trap cleanup_benchmark_job EXIT
 
-echo 'run single-validator hackathon benchmark' 
+echo 'run single-validator hackathon benchmark'
 # hog_sched feeds this shell through a PTY. Keep child SSH/SCP commands from
 # consuming its remaining commands, including the final exit and cleanup.
 ./scripts/ci/hackathon_bench.sh < /dev/null
