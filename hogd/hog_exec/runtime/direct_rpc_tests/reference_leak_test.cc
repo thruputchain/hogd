@@ -7,7 +7,6 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -77,7 +76,9 @@ public:
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
-    rcq_set_consume(delta.retrocausal_queue()) =
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() =
         RetrocausalQueueConsumeDelta{.past_block_consume =
                                          RetrocausalQueuePastBlockConsumeDelta{
                                              .max_fully_consumed_block_number =

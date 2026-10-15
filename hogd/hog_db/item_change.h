@@ -491,6 +491,37 @@ public:
 
   uint16_t max_insert_count() const { return max_insert_count_; }
 
+  // Whether the transaction deleted or overwrote the key first, leaving
+  // HogDb to consume the committed queue.
+  bool is_replace() const
+  {
+    auto status = delta_.consume.status();
+    return status == RetrocausalQueueConsume::kRcqReplace ||
+           status == RetrocausalQueueConsume::kRcqReplaceConsume;
+  }
+
+  // The kRcqConsume arm, or null.
+  RetrocausalQueueConsumeDelta const *consume() const
+  {
+    if (delta_.consume.status() != RetrocausalQueueConsume::kRcqConsume) {
+      return nullptr;
+    }
+    return &*delta_.consume.delta();
+  }
+
+  // The current-block entries an explicit consume carries; empty if none.
+  std::span<QueueEntry const> current_block_consumed() const
+  {
+    switch (delta_.consume.status()) {
+    case RetrocausalQueueConsume::kRcqConsume:
+      return delta_.consume.delta()->current_block_consumed;
+    case RetrocausalQueueConsume::kRcqReplaceConsume:
+      return delta_.consume.current_block_consumed();
+    default:
+      return {};
+    }
+  }
+
 private:
   RetrocausalQueueDelta delta_;
   static_assert(std::numeric_limits<uint16_t>::max() >=

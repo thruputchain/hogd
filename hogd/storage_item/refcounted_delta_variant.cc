@@ -14,7 +14,6 @@
 #include "address_auth.hh"
 #include "auth_claim.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -268,8 +267,10 @@ RetrocausalQueueArgs::get_marginal_cost_upper_bound(
 
   int64_t new_inserted_entries =
       delta.retrocausal_queue().insert.added_entries.size();
-  new_inserted_entries -=
-      rcq_current_block_consumed(delta.retrocausal_queue()).size();
+  if (auto const &consume = delta.retrocausal_queue().consume;
+      consume.status() == RetrocausalQueueConsume::kRcqConsume) {
+    new_inserted_entries -= consume.delta()->current_block_consumed.size();
+  }
 
   int64_t active_size = std::max<int64_t>(0, new_inserted_entries);
 

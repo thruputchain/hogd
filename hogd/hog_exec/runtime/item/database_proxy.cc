@@ -21,7 +21,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
@@ -427,11 +426,24 @@ constexpr size_t kRcqDeltaOverhead =
     kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + (4 * kXdrWord);
 
 inline size_t
+consumed_count(RetrocausalQueueConsume const &consume)
+{
+  switch (consume.status()) {
+  case RetrocausalQueueConsume::kRcqConsume:
+    return consume.delta()->current_block_consumed.size();
+  case RetrocausalQueueConsume::kRcqReplaceConsume:
+    return consume.current_block_consumed().size();
+  default:
+    return 0;
+  }
+}
+
+inline size_t
 footprint_bound(RetrocausalQueueDelta const &rq)
 {
   size_t entries = rq.insert.added_entries.size() +
                    rq.observed_concurrent_entries.size() +
-                   rcq_current_block_consumed(rq).size();
+                   consumed_count(rq.consume);
   return kRcqDeltaOverhead + (entries * kXdrMax<QueueEntry>);
 }
 

@@ -6,10 +6,10 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mockdb/in_memory_database.h"
+#include "hogd/storage_item/retrocausal_queue.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -27,34 +27,42 @@ namespace {
 void
 resolve_rcq_replace(StorageDelta &delta, StorageItemWrapper const *committed)
 {
-  if (delta.type() != StorageDeltaType::kDeltaTypeRetrocausalQueue ||
-      !rcq_is_replace(delta.retrocausal_queue())) {
+  if (delta.type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
     return;
   }
-  auto &rq = delta.retrocausal_queue();
+  auto &consume = delta.retrocausal_queue().consume;
+  auto status = consume.status();
+  if (status != RetrocausalQueueConsume::kRcqReplace &&
+      status != RetrocausalQueueConsume::kRcqReplaceConsume) {
+    return;
+  }
   RetrocausalQueue const *queue =
       committed &&
               committed->type() == StorageItemType::kItemTypeRetrocausalQueue
           ? &committed->queue()
           : nullptr;
   uint64_t live_entries = queue ? queue->get_live_entries() : 0;
-  if (rcq_consume_status(rq) == kRcqReplace && live_entries == 0) {
-    rcq_set_consume_status(rq, kRcqNoConsume);
+  if (status == RetrocausalQueueConsume::kRcqReplace && live_entries == 0) {
+    consume.status(RetrocausalQueueConsume::kRcqNoConsume);
     return;
   }
-  auto &consume = rcq_set_consume(rq);
-  if (!queue) {
-    consume.past_block_consume = {};
+
+  RetrocausalQueueConsumeDelta resolved{};
+  if (status == RetrocausalQueueConsume::kRcqReplaceConsume) {
+    resolved.current_block_consumed =
+        std::move(consume.current_block_consumed());
   }
-  else if (live_entries == 0) {
-    consume.past_block_consume = queue->get_consume_state();
+  if (queue && live_entries == 0) {
+    resolved.past_block_consume = queue->get_consume_state();
   }
-  else {
-    consume.past_block_consume = {
+  else if (queue) {
+    resolved.past_block_consume = {
         .max_fully_consumed_block_number = queue->get_max_live_block_num(),
         .partial_consumed_number = 0,
     };
   }
+  consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+      std::move(resolved);
 }
 
 } // namespace

@@ -3,10 +3,10 @@
 #include <algorithm>
 #include <stdexcept>
 
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/storage_item/storage_item_wrapper.h"
+#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "storage_lock.hh"
@@ -108,7 +108,8 @@ delta_to_lock(StorageDelta const &delta, BlockExecutionMode mode,
   {
     lock.full_typeclass_lock().extra_lock_data.item_type(
         StorageItemType::kItemTypeRetrocausalQueue);
-    if (rcq_consume_delta(delta.retrocausal_queue())) {
+    if (delta.retrocausal_queue().consume.status() ==
+        RetrocausalQueueConsume::kRcqConsume) {
       lock.full_typeclass_lock().extra_lock_data.consume_lock() = 1;
     }
     return lock;

@@ -8,7 +8,6 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -85,7 +84,9 @@ public:
     RetrocausalQueuePastBlockConsumeDelta consume_delta = {
         .max_fully_consumed_block_number = max_fully_consumed_block_number,
         .partial_consumed_number = partial_consumed_number};
-    rcq_set_consume(delta.retrocausal_queue()) =
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() =
         RetrocausalQueueConsumeDelta{.past_block_consume = consume_delta,
                                      .current_block_consumed =
                                          current_block_consumed};
@@ -103,7 +104,9 @@ public:
     RetrocausalQueuePastBlockConsumeDelta consume_delta = {
         .max_fully_consumed_block_number = max_fully_consumed_block_number,
         .partial_consumed_number = partial_consumed_number};
-    rcq_set_consume(delta.retrocausal_queue()) =
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() =
         RetrocausalQueueConsumeDelta{.past_block_consume = consume_delta,
                                      .current_block_consumed =
                                          current_block_consumed};

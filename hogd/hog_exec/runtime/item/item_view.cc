@@ -12,7 +12,6 @@
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -367,23 +366,36 @@ RetrocausalQueueItem::get_delta(
       StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
   // load the retrocausally consumed entries
-  // TODO(geoff): In proposal mode, we could reduce some copying in the
-  // ItemView by loading this list of consumed entries from the snapshot base
-  // item.
-  auto &rq = delta.retrocausal_queue();
-  if (queue_delta_.replace) {
-    // HogDb places the consume of the replaced queue; only an explicit
-    // consume's current-block entries go on the wire.
-    if (queue_delta_.consume) {
-      rcq_set_consume_status(rq, kRcqReplaceConsume).current_block_consumed() =
-          queue_delta_.consume->current_block_consumed;
+  auto &consume = delta.retrocausal_queue().consume;
+  if (queue_delta_.consume) {
+    // TODO(geoff): In proposal mode, we could reduce some copying in the
+    // ItemView by loading this list of consumed entries from the snapshot base
+    // item.
+    RetrocausalQueueConsumeDelta consume_delta = *queue_delta_.consume;
+
+    // In debug builds, we shuffle the order of entries in the concurrent
+    // consumes, as these are not supposed to affect the result of the db
+    // operation.
+    if constexpr (is_debug_build()) {
+      std::shuffle(consume_delta.current_block_consumed.begin(),
+                   consume_delta.current_block_consumed.end(),
+                   std::mt19937{std::random_device{}()});
+    }
+
+    if (queue_delta_.replace) {
+      // HogDb places the consume of the replaced queue, so only the
+      // current-block entries go on the wire.
+      consume.status(RetrocausalQueueConsume::kRcqReplaceConsume)
+          .current_block_consumed() =
+          std::move(consume_delta.current_block_consumed);
     }
     else {
-      rcq_set_consume_status(rq, kRcqReplace);
+      consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+          std::move(consume_delta);
     }
   }
-  else if (queue_delta_.consume) {
-    rcq_set_consume(rq) = *queue_delta_.consume;
+  else if (queue_delta_.replace) {
+    consume.status(RetrocausalQueueConsume::kRcqReplace);
   }
   CHECK_LE(self_consumed_index_, queue_delta_.insert.added_entries.size());
   delta.retrocausal_queue().insert.added_entries.append(
@@ -395,18 +407,8 @@ RetrocausalQueueItem::get_delta(
         observed_entries.begin(), observed_entries.end()};
   }
 
-  // In debug builds, we shuffle the order of entries in the concurrent
-  // consumes, as these are not supposed to affect the result of the db
-  // operation.
-  if constexpr (is_debug_build()) {
-    if (rcq_has_explicit_consume(rq)) {
-      auto &consumed = rcq_mutable_current_block_consumed(rq);
-      std::shuffle(consumed.begin(), consumed.end(),
-                   std::mt19937{std::random_device{}()});
-    }
-    // We don't shuffle the order of this-block inserts -- some of the tests
-    // have logic conditioned on the order of concurrent inserts.
-  }
+  // We don't shuffle the order of this-block inserts -- some of the tests
+  // have logic conditioned on the order of concurrent inserts.
   return delta;
 }
 

@@ -7,7 +7,6 @@
 #include <unordered_map>
 #include <vector>
 
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/item_change.h"
@@ -75,26 +74,20 @@ public:
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;
 
-  // Whether [delta] makes its transaction the block's consumer. A replace
-  // delta consumes the committed queue described by [meta], so even a
-  // kRcqReplace is one whenever that queue still has live entries.
-  static bool claims_consumer(const RetrocausalQueueDelta &delta,
+  // Whether [change] makes its transaction the block's consumer. A replace
+  // consumes the committed queue described by [meta], so even a kRcqReplace
+  // is one whenever that queue still has live entries.
+  static bool claims_consumer(const change_type &change,
                               const RetrocausalQueueMetadata &meta)
   {
-    return rcq_has_explicit_consume(delta) ||
-           (rcq_consume_status(delta) == kRcqReplace && meta.live_entries > 0);
-  }
-
-  // The past-block position a replace delta resolves to: past every entry of
-  // the committed queue described by [meta].
-  static RetrocausalQueuePastBlockConsumeDelta
-  replaced_past_consume(const RetrocausalQueueMetadata &meta)
-  {
-    if (meta.live_entries == 0) {
-      return meta.consume_state;
+    switch (change.delta().consume.status()) {
+    case RetrocausalQueueConsume::kRcqNoConsume:
+      return false;
+    case RetrocausalQueueConsume::kRcqReplace:
+      return meta.live_entries > 0;
+    default:
+      return true;
     }
-    return {.max_fully_consumed_block_number = meta.max_live_block_num,
-            .partial_consumed_number = 0};
   }
 
   static uint64_t live_block_count(const RetrocausalQueueMetadata &meta)

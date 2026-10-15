@@ -27,7 +27,6 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
-#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
@@ -627,7 +626,9 @@ RCQBenchmark::run_sequential()
 
         InvokeTX tx(block_tx);
         RetrocausalQueueDelta delta;
-        rcq_set_consume(delta).past_block_consume = {
+        delta.consume.status(RetrocausalQueueConsume::kRcqConsume)
+            .delta()
+            ->past_block_consume = {
             .max_fully_consumed_block_number = next_block,
             .partial_consumed_number = 0,
         };
@@ -783,7 +784,9 @@ RCQBenchmark::run_concurrent()
 
             InvokeTX tx(*block_tx_ptr);
             RetrocausalQueueDelta delta;
-            auto &consume = rcq_set_consume(delta);
+            auto &consume =
+                *delta.consume.status(RetrocausalQueueConsume::kRcqConsume)
+                     .delta();
 
             auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
             if (meta_r)

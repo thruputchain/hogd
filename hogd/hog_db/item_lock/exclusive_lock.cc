@@ -84,8 +84,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // Under exclusive lock there is no concurrency, so every
     // current-block consumed entry must have been added by this same TX.
     // Verify identity: each consumed entry exists in added_entries.
-    if (auto const &consumed = rcq_current_block_consumed(inner->delta());
-        !consumed.empty()) {
+    if (auto consumed = inner->current_block_consumed(); !consumed.empty()) {
       auto const &added = inner->delta().insert.added_entries;
 
       std::multiset<QueueEntry> added_set(added.begin(), added.end());
@@ -107,7 +106,7 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     uint64_t live = (*meta)->live_entries;
     uint64_t added = inner->delta().insert.added_entries.size();
     uint64_t consumed = inner->consumed_past_entries_;
-    consumed += rcq_current_block_consumed(inner->delta()).size();
+    consumed += inner->current_block_consumed().size();
 
     if (consumed > live + added) {
       return HogDbError{HogDbCode::kInvalidExecutorBehavior};

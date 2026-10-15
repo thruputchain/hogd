@@ -24,6 +24,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -162,7 +163,7 @@ private:
   // The delta under construction. get_delta() encodes consume and replace as
   // the wire's RetrocausalQueueConsume.
   struct QueueDelta {
-    std::optional<RetrocausalQueueConsumeDelta> consume;
+    x23::Ptr<RetrocausalQueueConsumeDelta> consume;
     RetrocausalQueueInsertDelta insert;
     // Set for a key this transaction deleted or overwrote; consume then holds
     // only current-block entries.
