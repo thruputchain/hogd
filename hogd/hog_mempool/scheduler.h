@@ -165,8 +165,6 @@ public:
     MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
   }
 
-  // Removes any cached/runqueue entries for these hashes. Missing and repeated
-  // hashes are harmless, including repeats handled by different workers.
   x23::Async<void>
   remove_from_scheduler(x23::span<const TransactionHash> hashes);
 

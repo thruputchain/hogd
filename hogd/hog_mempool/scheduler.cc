@@ -1433,16 +1433,11 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
           size_t num_removed_from_runqueue = 0;
           for (const TransactionHash &tx_hash : hash_chunk) {
-            // Cleanup may repeat a hash or refer to a transaction already
-            // evicted locally. A validated block owns its transaction data
-            // independently of this cache.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
                   scheduler.txs_.find(tx_hash);
-              if (!tx_value_ptr) {
-                continue;
-              }
+              CHECK_PTR(tx_value_ptr);
               tx_value = *tx_value_ptr;
             }
 
@@ -1454,14 +1449,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             {
               auto [account_state, account_lock] =
                   scheduler.get_account_state(account);
-              // Two removal workers can both complete the first lookup before
-              // either acquires the account lock. Recheck in account-then-cache
-              // order and retain both locks through the counter update/erase.
-              const auto [cached_value, txs_lock] =
-                  scheduler.txs_.find(tx_hash);
-              if (!cached_value) {
-                continue;
-              }
               std::map<TxKey, std::shared_ptr<TxValue>> &txs =
                   account_state->txs;
               // The tx may or may not be on the runqueue. If the tx is included
@@ -1472,10 +1459,14 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
-              // Update the counter while the cache is locked, and erase with
-              // that same lock so a duplicate removal cannot decrement twice.
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              //
+              // [txs_.remove()] acquires a lock, so the subtraction from
+              // [tx_cache_size_] happens before the tx is removed from [txs_]
+              // from the perspective of anyone accessing the tx in [txs_].
               scheduler.tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-              CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
+              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
             }
           }
 

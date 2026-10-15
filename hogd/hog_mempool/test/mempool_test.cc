@@ -1412,18 +1412,15 @@ TEST(Mempool, NominateTxWithError)
             kNumBlocks + 1);
 }
 
-// This test does the following to exercise a failed CHECK that was later fixed:
+// Resubmission must not requeue a nominated tx from an excluded account:
 //   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
 //      account's balance (txs[1]).
 //   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
 //      account is removed from [ready_accounts_] while the nomination is
 //      pending.
-//   3. The client resubmits txs[0]. It is added back to the scheduler runqueue;
-//      the account is *not* added back to [ready_accounts_].
-//   4. Commit the nominated block. [remove_from_scheduler()] removes the
-//      account's txs from the runqueue. In that function, [account_is_ready()]
-//      returns false and [ready_accounts_.erase()] returns 0. Before the fix,
-//      [ready_accounts_.erase()] would trigger a CHECK.
+//   3. The client resubmits txs[0]. It remains cached for the nomination and
+//      stays off the runqueue.
+//   4. Commit the nominated block and remove txs[0] from the cache.
 TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1454,10 +1451,10 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 
   // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
-  // from the runqueue and attempts to remove the account from
-  // [ready_accounts_].
+  // from the cache.
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   const SchedulerTransactionOutcome outcome =
@@ -1498,10 +1495,11 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
 
-  // The resubmit lands on the excluded account's runqueue.
+  // The resubmitted tx remains cached for the nomination, off the runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 
   // Commit the validated block, not the nominated one.
   auto res_validate =
