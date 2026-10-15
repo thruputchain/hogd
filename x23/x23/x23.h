@@ -419,6 +419,10 @@ template<size_t I, typename T>
 requires requires { typename std::tuple_element<I, T>::type; }
 struct std::tuple_element<I, x23::Box<T>> : std::tuple_element<I, T> {};
 
+namespace x23 {
+
+// In namespace x23 so argument-dependent lookup finds them for a Box of any
+// type, including one declared in another namespace.
 template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &b)
@@ -440,6 +444,8 @@ get(x23::Box<T> &&b)
 {
   return get<I>(*std::move(b));
 }
+
+} // namespace x23
 
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {
