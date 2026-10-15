@@ -1503,8 +1503,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   HogDevnodeProcess process = HogDevnodeProcess::start();
   Readiness readiness = process.wait_for_readiness();
 
-  EXPECT_EQ(readiness.network_hash,
-            "0000000000000000000000000000000000000000000000000000000000000000");
+  EXPECT_EQ(readiness.network_hash, std::string(32, '1'));
   EXPECT_EQ(readiness.scheduler.host, "127.0.0.1");
   EXPECT_GT(readiness.scheduler.port, 0);
   EXPECT_EQ(readiness.scheduler_gateway.host, "127.0.0.1");
@@ -1572,7 +1571,9 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
   EXPECT_EQ(require_string_field(*cost_model, "replayCacheCostPerEntry", ""),
             "7");
   EXPECT_EQ(require_string_field(*cost_model, "balanceCost", ""), "1234");
-  EXPECT_TRUE(require_string_field(*cost_model, "hash", "").starts_with("0x"));
+  EXPECT_TRUE(
+      decode_base58_fixed<32>(require_string_field(*cost_model, "hash", ""))
+          .has_value());
 
   expect_clean_exit(process);
 }
@@ -2180,8 +2181,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
   });
   Readiness readiness = process.wait_for_readiness();
 
-  EXPECT_EQ(readiness.network_hash,
-            "00000000000000000000000000000000000000000000000000000000000000aa");
+  EXPECT_EQ(readiness.network_hash, std::string(31, '1') + "3w");
   ASSERT_EQ(readiness.bootstrap_accounts.size(), 3UL);
   const json::Value *derivation =
       readiness.manifest.find("bootstrapAccountDerivation");
@@ -2845,9 +2845,7 @@ TEST(HogDevnode, DataDirRejectsLegacyNetworkHashAfterFaucetInitialization)
     });
     Readiness readiness = process.wait_for_readiness();
     EXPECT_EQ(readiness.chain_state, "fresh");
-    EXPECT_EQ(
-        readiness.network_hash,
-        "00000000000000000000000000000000000000000000000000000000000000aa");
+    EXPECT_EQ(readiness.network_hash, std::string(31, '1') + "3w");
 
     sched_coord_client_t scheduler =
         create_client<SchedulerCoord1>(readiness.scheduler.host,
@@ -2902,9 +2900,9 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
           manifest_path.string(),
       },
       "recovered chain network hash "
-      "0000000000000000000000000000000000000000000000000000000000000000 "
+      "11111111111111111111111111111111 "
       "does not match requested network hash "
-      "00000000000000000000000000000000000000000000000000000000000000aa");
+      "11111111111111111111111111111113w");
 }
 
 TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
