@@ -7,7 +7,8 @@ from pathlib import Path
 import shutil
 import subprocess
 
-ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_DIR = Path(__file__).resolve().parent
+ROOT = BENCHMARK_DIR.parents[2]
 
 
 def build(output, apps, wallets):
@@ -44,14 +45,14 @@ path = "src/main.rs"
 required-features = ["entrypoints"]
 ''')
         (crate / "src/main.rs").write_text(f'#![no_std]\n#![no_main]\nextern crate hackathon_{kind};\n')
-        shutil.copyfile(ROOT / f"scripts/hackathon/contracts/{kind}/src/lib.rs", crate / "src/lib.rs")
+        shutil.copyfile(BENCHMARK_DIR / f"contracts/{kind}/src/lib.rs", crate / "src/lib.rs")
     subprocess.run(["cargo", "metadata", "--offline", "--format-version=1"], cwd=project, stdout=subprocess.DEVNULL, check=True)
     version = subprocess.check_output(["groundhog", "--version"], text=True).strip()
     if not version.startswith("groundhog 0.26.0"):
         raise ValueError(f"expected groundhog 0.26.0, got {version}")
     records = []
     for kind, count in (("app", apps), ("wallet", wallets)):
-        template = (ROOT / f"scripts/hackathon/contracts/{kind}/src/lib.rs").read_text()
+        template = (BENCHMARK_DIR / f"contracts/{kind}/src/lib.rs").read_text()
         for index in range(count):
             source = template.replace("const VARIANT: u64 = 1;", f"const VARIANT: u64 = {index + 1};")
             source = source.replace("const FAMILY: u64 = 0;", f"const FAMILY: u64 = {index % 5};")

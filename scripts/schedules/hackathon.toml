@@ -35,7 +35,7 @@ git submodule update --init --recursive --quiet
 
 # Fetch Go dependencies before any lengthy Rust/C++ preparation or build.
 bash ./scripts/ci/fetch_go_modules.sh || exit 1
-GOWORK=off go -C scripts/hackathon/replay mod download
+GOWORK=off go -C hogd/loadgen/hackathon/replay mod download
 
 source ./scripts/ci/prepare_env.sh
 
@@ -49,7 +49,7 @@ pushd release >/dev/null
 popd >/dev/null
 
 echo 'build standalone gateway replay client'
-GOWORK=off go -C scripts/hackathon/replay build -o "$PWD/release/hackathon-replay" .
+GOWORK=off go -C hogd/loadgen/hackathon/replay build -o "$PWD/release/hackathon-replay" .
 
 echo 'clear hog-db file directory'
 rm -r ./work_dir/ || true

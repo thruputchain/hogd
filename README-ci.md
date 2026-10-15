@@ -159,7 +159,10 @@ transactions. A plateau with missed arrivals or exhausted submission slots can
 be a client limit; a run that keeps up with all offered traffic does not establish
 maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 
-The standalone `hackathon-replay` tool lives in `scripts/hackathon/replay`.
+The benchmark implementation lives in `hogd/loadgen/hackathon`: the corpus builder,
+contract fixtures, Python harness and reports, tests, and standalone Go replay tool.
+The CI launcher and host schedule remain in `scripts/ci` and `scripts/schedules`.
+The standalone `hackathon-replay` tool lives in `hogd/loadgen/hackathon/replay`.
 Its `bootstrap` command supplies only the saved genesis configuration and ceremony
 over chuckd's existing loadgen interface, keeping the internal work stream open
 without supplying application transactions. The stock `bench coordinator_loadgen`
@@ -183,14 +186,14 @@ For a local correctness smoke, build the normal service targets with
 and build the standalone replay tool and a smaller corpus:
 
 ```sh
-GOWORK=off go -C scripts/hackathon/replay build -o /tmp/codex-build/hackathon-replay .
-python3 scripts/hackathon/build_contracts.py --output /tmp/hackathon-artifacts --apps 5 --wallets 5
+GOWORK=off go -C hogd/loadgen/hackathon/replay build -o /tmp/codex-build/hackathon-replay .
+python3 hogd/loadgen/hackathon/build_contracts.py --output /tmp/hackathon-artifacts --apps 5 --wallets 5
 scripts/build.sh -d /tmp/codex-build -t Release \
   -x -DHACKATHON_ARTIFACT_DIR=/tmp/hackathon-artifacts hackathon_corpus
-/tmp/codex-build/hogd/loadgen/hackathon_corpus \
+/tmp/codex-build/hogd/loadgen/hackathon/hackathon_corpus \
   --artifacts /tmp/hackathon-artifacts --out /tmp/hackathon-corpus \
   --apps 5 --users 10 --wallets 5 --stage-seconds 2 --warmup-seconds 1 --rate-divisor 100
-python3 scripts/hackathon/cluster.py --local --build /tmp/codex-build \
+python3 hogd/loadgen/hackathon/cluster.py --local --build /tmp/codex-build \
   --scpd /absolute/path/to/scpd.dev --gateway /absolute/path/to/hog-gateway \
   --gateway-sha256 <expected-sha256> --corpus /tmp/hackathon-corpus \
   --output /tmp/hackathon-results --repeats 1
@@ -224,8 +227,8 @@ No latency regression threshold or automatic recurring schedule is installed.
 Focused checks:
 
 ```sh
-HACKATHON_CORPUS_BINARY=/tmp/codex-build/hogd/loadgen/hackathon_corpus \
+HACKATHON_CORPUS_BINARY=/tmp/codex-build/hogd/loadgen/hackathon/hackathon_corpus \
 HACKATHON_ARTIFACTS=/tmp/hackathon-artifacts \
-python3 -m unittest discover -s scripts/hackathon -p 'test_*.py'
-GOWORK=off go -C scripts/hackathon/replay test -race ./...
+python3 -m unittest discover -s hogd/loadgen/hackathon -p 'test_*.py'
+GOWORK=off go -C hogd/loadgen/hackathon/replay test -race ./...
 ```

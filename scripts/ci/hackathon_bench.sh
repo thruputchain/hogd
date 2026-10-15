@@ -56,7 +56,7 @@ PYREPORT
   exit "$status"
 }
 trap retain_results EXIT
-python3 "$ROOT/scripts/hackathon/build_contracts.py" --output "$ARTIFACTS"
+python3 "$ROOT/hogd/loadgen/hackathon/build_contracts.py" --output "$ARTIFACTS"
 "$ROOT/scripts/build.sh" -d "$BUILD_DIR" -t Release -x "-DHACKATHON_ARTIFACT_DIR=$ARTIFACTS" hackathon_corpus
 CONTROL_PORT=$("$BUILD_DIR/hogd/utils/get_port" kCIControlServerPort)
 source "$ROOT/scripts/ci/bench_harness.sh"
@@ -68,9 +68,9 @@ if [[ -n "${HACKATHON_GATEWAY_PROTOCOL:-}" ]]; then
 fi
 for shared in 0 1; do
   CORPUS="$WORK_DIR/hackathon-corpus-$shared"
-  "$BUILD_DIR/hogd/loadgen/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
+  "$BUILD_DIR/hogd/loadgen/hackathon/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
     --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
-  python3 "$ROOT/scripts/hackathon/cluster.py" \
+  python3 "$ROOT/hogd/loadgen/hackathon/cluster.py" \
     --build "$BUILD_DIR" --scpd "$BUILD_DIR/scpd.dev" \
     --gateway "$HACKATHON_GATEWAY_BINARY" --gateway-sha256 "$HACKATHON_GATEWAY_SHA256" \
     "${GATEWAY_ARGS[@]}" --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared" \

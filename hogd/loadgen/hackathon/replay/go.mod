@@ -15,6 +15,6 @@ require (
 	golang.org/x/sys v0.37.0 // indirect
 )
 
-replace github.com/groundhogchain/lib-go => ../../../groundhog-go/lib-go
+replace github.com/groundhogchain/lib-go => ../../../../groundhog-go/lib-go
 
-replace github.com/groundhogchain/protocol-go => ../../../groundhog-go/protocol-go
+replace github.com/groundhogchain/protocol-go => ../../../../groundhog-go/protocol-go

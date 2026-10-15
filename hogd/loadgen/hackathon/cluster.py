@@ -14,7 +14,8 @@ import time
 import urllib.request
 import urllib.error
 
-ROOT = Path(__file__).resolve().parents[2]
+BENCHMARK_DIR = Path(__file__).resolve().parent
+ROOT = BENCHMARK_DIR.parents[2]
 HOSTS = {"coordinator": "hog4", "gateway": "hog4", "exec0": "hog5", "exec1": "hog6", "replay": "hog7", "bootstrap": "hog7", "auth": "hog8", "event": "hog9", "indexer": "hog9", "mempool": "hog10", "db": "hog11"}
 BINS = {"mempool": "hogd/hog_mempool/hog-mempool", "db": "hogd/hog_db/hog-db", "auth": "hogd/hog_auth/hog-auth", "event": "hogd/hog_event/hog-event", "indexer": "hogd/hog_indexer/hog-indexer", "exec0": "hogd/hog_exec/hog-exec", "exec1": "hogd/hog_exec/hog-exec", "coordinator": "chuckd.dev", "replay": "hackathon-replay", "bootstrap": "hackathon-replay"}
 
@@ -320,7 +321,7 @@ def main():
         finally:
             cluster.stop()
             if (directory / "replay/results.jsonl").exists():
-                report = subprocess.run(["python3", str(ROOT / "scripts/hackathon/report.py"), str(directory)], check=False)
+                report = subprocess.run(["python3", str(BENCHMARK_DIR / "report.py"), str(directory)], check=False)
                 if successful and report.returncode:
                     raise RuntimeError("report validation failed; raw results retained")
 

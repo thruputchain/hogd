@@ -149,7 +149,5 @@ endif()
 # compile hundreds of synthetic contract variants.
 set(HACKATHON_ARTIFACT_DIR "" CACHE PATH "Compiled hackathon contract corpus")
 if(HACKATHON_ARTIFACT_DIR)
-  add_executable(hackathon_corpus EXCLUDE_FROM_ALL hackathon_corpus.cc)
-  target_include_directories(hackathon_corpus PRIVATE ${HACKATHON_ARTIFACT_DIR} ${CMAKE_BINARY_DIR})
-  target_link_libraries(hackathon_corpus loadgen)
+  add_subdirectory(hackathon)
 endif()
