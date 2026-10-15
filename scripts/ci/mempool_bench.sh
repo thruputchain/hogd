@@ -148,7 +148,7 @@ set +e
 timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
+  --network-hash 11111111111111111111111111111112 \
   --num-db-shards 1 \
   --num-exec-shards 2 \
   --db-port "$MEMPOOL_DB_PORT" \
