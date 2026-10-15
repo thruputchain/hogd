@@ -76,7 +76,7 @@ IndexDB::block_query_tip() const
   return tip;
 }
 
-IndexerStatus<BlockQueryRecord>
+IndexerStatus<IndexDB::VerifiedBlockQueryRecord>
 IndexDB::read_block_query_record(BlockHeight height) const
 {
   std::string stored;
@@ -104,13 +104,14 @@ IndexDB::read_block_query_record(BlockHeight height) const
     IndexerCommittedBlockIdentity identity;
     x23::deserialize(&record, bytes(stored));
     x23::deserialize(&identity, bytes(identity_bytes));
+    const auto hash = sha256(record.value);
     if (record.value.proposal_header.block_height != height ||
-        sha256(record.value) != identity.consensus_hash) {
+        hash != identity.consensus_hash) {
       error("block query metadata at {} disagrees with its committed identity",
             height);
       return IndexerError(IndexerErrorCode::kInternal);
     }
-    return record;
+    return VerifiedBlockQueryRecord{std::move(record), hash};
   } catch (const std::exception &e) {
     error("cannot decode block query metadata at {}: {}", height, e.what());
     return IndexerError(IndexerErrorCode::kInternal);
@@ -131,7 +132,7 @@ IndexDB::get_block_by_height(BlockHeight height) const
   if (!record) {
     return record.error();
   }
-  return std::move(record->value);
+  return std::move(record->record.value);
 }
 
 IndexerStatus<TransactionRefPage>
@@ -176,7 +177,7 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
   if (!record) {
     return record.error();
   }
-  const auto block_hash = sha256(record->value);
+  const auto block_hash = record->hash;
   if (cursor && cursor->block_hash != block_hash) {
     return page;
   }
@@ -203,7 +204,8 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
   // precedes this iterator and only exposes completed atomic batches.
   std::unique_ptr<rocksdb::Iterator> iter(
       db_->NewIterator(options, db_->DefaultColumnFamily()));
-  uint64_t remaining = record->transaction_count;
+  const auto transaction_count = record->record.transaction_count;
+  uint64_t remaining = transaction_count;
   if (cursor) {
     const std::string key =
         IndexerKeyFormat::make_block_ref_key(query.height, cursor->last_hash);
@@ -215,10 +217,10 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
       return page;
     }
     auto ordinal = read_ordinal(iter->value().ToStringView());
-    if (!ordinal || *ordinal >= record->transaction_count) {
+    if (!ordinal || *ordinal >= transaction_count) {
       return IndexerError(IndexerErrorCode::kInternal);
     }
-    remaining = ascending ? record->transaction_count - *ordinal - 1 : *ordinal;
+    remaining = ascending ? transaction_count - *ordinal - 1 : *ordinal;
     if (ascending) {
       iter->Next();
     }
@@ -239,8 +241,8 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
     const auto ordinal = read_ordinal(iter->value().ToStringView());
     if (!key.starts_with(prefix) || key.size() != prefix.size() + 32 ||
         !remaining || !ordinal ||
-        *ordinal != (ascending ? record->transaction_count - remaining
-                               : remaining - 1)) {
+        *ordinal !=
+            (ascending ? transaction_count - remaining : remaining - 1)) {
       return IndexerError(IndexerErrorCode::kInternal);
     }
     // Validate the lookahead too before returning a continuation cursor.

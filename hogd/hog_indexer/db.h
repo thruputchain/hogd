@@ -229,7 +229,11 @@ private:
   IndexerStatus<void> initialize_progress_from_db();
   static std::string block_query_format();
   IndexerStatus<BlockHeight> block_query_tip() const;
-  IndexerStatus<BlockQueryRecord>
+  struct VerifiedBlockQueryRecord {
+    BlockQueryRecord record;
+    ConsensusValueHash hash;
+  };
+  IndexerStatus<VerifiedBlockQueryRecord>
   read_block_query_record(BlockHeight height) const;
 
   // True iff `h` is at or below the contiguous watermark or buffered
