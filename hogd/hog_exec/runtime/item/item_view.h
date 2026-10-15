@@ -159,7 +159,16 @@ private:
 
   void construct_consume_delta();
 
-  RetrocausalQueueDelta queue_delta_{};
+  // The delta under construction. get_delta() encodes consume and replace as
+  // the wire's RetrocausalQueueConsume.
+  struct QueueDelta {
+    std::optional<RetrocausalQueueConsumeDelta> consume;
+    RetrocausalQueueInsertDelta insert;
+    // Set for a key this transaction deleted or overwrote; consume then holds
+    // only current-block entries.
+    bool replace = false;
+  };
+  QueueDelta queue_delta_{};
 
   // Can't overflow locally_consumed_index_ in a uint16
   static_assert(std::numeric_limits<uint16_t>::max() >=

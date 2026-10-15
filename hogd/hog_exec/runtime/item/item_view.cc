@@ -12,6 +12,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -366,14 +367,25 @@ RetrocausalQueueItem::get_delta(
       StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
   // load the retrocausally consumed entries
-  if (queue_delta_.consume) {
-    // TODO(geoff): In proposal mode, we could reduce some copying in the
-    // ItemView by loading this list of consumed entries from the snapshot base
-    // item.
-    delta.retrocausal_queue().consume = queue_delta_.consume;
+  // TODO(geoff): In proposal mode, we could reduce some copying in the
+  // ItemView by loading this list of consumed entries from the snapshot base
+  // item.
+  auto &rq = delta.retrocausal_queue();
+  if (queue_delta_.replace) {
+    // HogDb places the consume of the replaced queue; only an explicit
+    // consume's current-block entries go on the wire.
+    if (queue_delta_.consume) {
+      rcq_set_consume_status(rq, kRcqReplaceConsume).current_block_consumed() =
+          queue_delta_.consume->current_block_consumed;
+    }
+    else {
+      rcq_set_consume_status(rq, kRcqReplace);
+    }
+  }
+  else if (queue_delta_.consume) {
+    rcq_set_consume(rq) = *queue_delta_.consume;
   }
   CHECK_LE(self_consumed_index_, queue_delta_.insert.added_entries.size());
-  delta.retrocausal_queue().replace = queue_delta_.replace;
   delta.retrocausal_queue().insert.added_entries.append(
       queue_delta_.insert.added_entries.begin() + self_consumed_index_,
       queue_delta_.insert.added_entries.end());
@@ -387,11 +399,10 @@ RetrocausalQueueItem::get_delta(
   // consumes, as these are not supposed to affect the result of the db
   // operation.
   if constexpr (is_debug_build()) {
-    if (delta.retrocausal_queue().consume) {
-      std::shuffle(
-          delta.retrocausal_queue().consume->current_block_consumed.begin(),
-          delta.retrocausal_queue().consume->current_block_consumed.end(),
-          std::mt19937{std::random_device{}()});
+    if (rcq_has_explicit_consume(rq)) {
+      auto &consumed = rcq_mutable_current_block_consumed(rq);
+      std::shuffle(consumed.begin(), consumed.end(),
+                   std::mt19937{std::random_device{}()});
     }
     // We don't shuffle the order of this-block inserts -- some of the tests
     // have logic conditioned on the order of concurrent inserts.

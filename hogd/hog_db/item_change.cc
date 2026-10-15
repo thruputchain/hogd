@@ -12,6 +12,7 @@
 #include "auth_claim.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/status.h"
 
@@ -163,19 +164,17 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
 
   // Once a transaction replaces the queue it stays replaced: a later delete
   // and recreate replaces it again.
-  if (earlier.delta_.replace && !delta_.replace) {
+  if (rcq_is_replace(earlier.delta_) && !rcq_is_replace(delta_)) {
     return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
   }
 
-  if (delta_.replace) {
+  if (rcq_is_replace(delta_)) {
     // A replacement consumes the whole committed queue, which subsumes any
-    // earlier past-block position, and it leaves that consume implicit when
-    // there are no other consumes, so the consume may disappear. Concurrent
-    // entries already consumed are carried over and can only grow.
-    auto current_consumed = [](RetrocausalQueueDelta const &d) -> size_t {
-      return d.consume ? d.consume->current_block_consumed.size() : 0;
-    };
-    if (current_consumed(delta_) < current_consumed(earlier.delta_)) {
+    // earlier past-block position, and may leave that consume to HogDb
+    // (kRcqReplace), so an explicit consume may disappear. Concurrent entries
+    // already consumed are carried over and can only grow.
+    if (rcq_current_block_consumed(delta_).size() <
+        rcq_current_block_consumed(earlier.delta_).size()) {
       return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
     }
     return true;
@@ -185,17 +184,19 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
   // each frame inherits the prior frame's ItemView state (including consume),
   // and the single-consumer constraint means only one tx per block can consume.
   // An honest executor never drops or reduces consumes.
-  if (earlier.delta_.consume && !delta_.consume) {
+  auto const *earlier_consume = rcq_consume_delta(earlier.delta_);
+  auto const *consume = rcq_consume_delta(delta_);
+  if (earlier_consume && !consume) {
     return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
   }
 
-  if (earlier.delta_.consume && delta_.consume) {
-    auto const &ec = earlier.delta_.consume->past_block_consume;
-    auto const &nc = delta_.consume->past_block_consume;
+  if (earlier_consume && consume) {
+    auto const &ec = earlier_consume->past_block_consume;
+    auto const &nc = consume->past_block_consume;
     bool monotonic =
         (ec < nc) ||
-        (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
-                         delta_.consume->current_block_consumed.size());
+        (ec == nc && earlier_consume->current_block_consumed.size() <=
+                         consume->current_block_consumed.size());
     if (!monotonic) {
       return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
     }

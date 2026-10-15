@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
@@ -421,17 +422,16 @@ footprint_bound(AuthDataChangeArgs const & /*auth*/)
 // with the delta, so it is bounded from the entry counts (each entry charged
 // kXdrMax<QueueEntry>) rather than the type maximum -- the latter is the full
 // per-tx observation cap, far above a typical delta. The overhead term covers
-// the past-consume struct, the array/optional framing words, and the replace
-// flag.
+// the past-consume struct and the array/union framing words.
 constexpr size_t kRcqDeltaOverhead =
-    kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + (5 * kXdrWord);
+    kXdrMax<RetrocausalQueuePastBlockConsumeDelta> + (4 * kXdrWord);
 
 inline size_t
 footprint_bound(RetrocausalQueueDelta const &rq)
 {
   size_t entries = rq.insert.added_entries.size() +
                    rq.observed_concurrent_entries.size() +
-                   (rq.consume ? rq.consume->current_block_consumed.size() : 0);
+                   rcq_current_block_consumed(rq).size();
   return kRcqDeltaOverhead + (entries * kXdrMax<QueueEntry>);
 }
 

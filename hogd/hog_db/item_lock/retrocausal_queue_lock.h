@@ -7,6 +7,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/item_change.h"
@@ -75,13 +76,13 @@ public:
   get_meta(const LockContext *ctx) const;
 
   // Whether [delta] makes its transaction the block's consumer. A replace
-  // delta consumes the committed queue described by [meta], so it is one
-  // whenever that queue still has live entries, with or without an explicit
-  // consume.
+  // delta consumes the committed queue described by [meta], so even a
+  // kRcqReplace is one whenever that queue still has live entries.
   static bool claims_consumer(const RetrocausalQueueDelta &delta,
                               const RetrocausalQueueMetadata &meta)
   {
-    return delta.consume || (delta.replace && meta.live_entries > 0);
+    return rcq_has_explicit_consume(delta) ||
+           (rcq_consume_status(delta) == kRcqReplace && meta.live_entries > 0);
   }
 
   // The past-block position a replace delta resolves to: past every entry of

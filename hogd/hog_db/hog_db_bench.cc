@@ -27,6 +27,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/hog_db/auth_change_subscription_manager.h"
@@ -626,14 +627,10 @@ RCQBenchmark::run_sequential()
 
         InvokeTX tx(block_tx);
         RetrocausalQueueDelta delta;
-        // NOLINTNEXTLINE(modernize-make-unique)
-        delta.consume.reset(new RetrocausalQueueConsumeDelta{
-            .past_block_consume =
-                {
-                    .max_fully_consumed_block_number = next_block,
-                    .partial_consumed_number = 0,
-                },
-        });
+        rcq_set_consume(delta).past_block_consume = {
+            .max_fully_consumed_block_number = next_block,
+            .partial_consumed_number = 0,
+        };
         if (auto ret =
                 tx.request_retrocausal_queue(queue_keys_[q], std::move(delta),
                                              std::to_underlying(
@@ -786,15 +783,14 @@ RCQBenchmark::run_concurrent()
 
             InvokeTX tx(*block_tx_ptr);
             RetrocausalQueueDelta delta;
-            auto *consume = new RetrocausalQueueConsumeDelta{};
+            auto &consume = rcq_set_consume(delta);
 
             auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
             if (meta_r)
-              consume->past_block_consume = meta_r->consume_state;
+              consume.past_block_consume = meta_r->consume_state;
 
             for (auto &e : collected)
-              consume->current_block_consumed.push_back(std::move(e));
-            delta.consume.reset(consume);
+              consume.current_block_consumed.push_back(std::move(e));
 
             if (auto ret = tx.request_retrocausal_queue(
                     queue_keys_[q], std::move(delta),

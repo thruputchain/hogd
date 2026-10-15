@@ -6,6 +6,7 @@
 
 #include "contract.hh"
 #include "executor_to_db_rpc.hh"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/mockdb/in_memory_database.h"
@@ -27,28 +28,33 @@ void
 resolve_rcq_replace(StorageDelta &delta, StorageItemWrapper const *committed)
 {
   if (delta.type() != StorageDeltaType::kDeltaTypeRetrocausalQueue ||
-      !delta.retrocausal_queue().replace) {
-    return;
-  }
-  if (!committed ||
-      committed->type() != StorageItemType::kItemTypeRetrocausalQueue) {
+      !rcq_is_replace(delta.retrocausal_queue())) {
     return;
   }
   auto &rq = delta.retrocausal_queue();
-  auto const &queue = committed->queue();
-  if (queue.get_live_entries() == 0) {
-    if (rq.consume) {
-      rq.consume->past_block_consume = queue.get_consume_state();
-    }
+  RetrocausalQueue const *queue =
+      committed &&
+              committed->type() == StorageItemType::kItemTypeRetrocausalQueue
+          ? &committed->queue()
+          : nullptr;
+  uint64_t live_entries = queue ? queue->get_live_entries() : 0;
+  if (rcq_consume_status(rq) == kRcqReplace && live_entries == 0) {
+    rcq_set_consume_status(rq, kRcqNoConsume);
     return;
   }
-  if (!rq.consume) {
-    rq.consume.emplace();
+  auto &consume = rcq_set_consume(rq);
+  if (!queue) {
+    consume.past_block_consume = {};
   }
-  rq.consume->past_block_consume = {
-      .max_fully_consumed_block_number = queue.get_max_live_block_num(),
-      .partial_consumed_number = 0,
-  };
+  else if (live_entries == 0) {
+    consume.past_block_consume = queue->get_consume_state();
+  }
+  else {
+    consume.past_block_consume = {
+        .max_fully_consumed_block_number = queue->get_max_live_block_num(),
+        .partial_consumed_number = 0,
+    };
+  }
 }
 
 } // namespace

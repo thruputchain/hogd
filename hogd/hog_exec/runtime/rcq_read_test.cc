@@ -4,6 +4,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "retrocausal_queue.hh"
@@ -47,7 +48,7 @@ public:
                          uint64_t partial_consumed_number)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    rcq_set_consume(delta.retrocausal_queue()) = RetrocausalQueueConsumeDelta{
         .past_block_consume =
             RetrocausalQueuePastBlockConsumeDelta{
                 .max_fully_consumed_block_number =
@@ -63,7 +64,7 @@ public:
                                 std::vector<QueueEntry> const &values)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    rcq_set_consume(delta.retrocausal_queue()) = RetrocausalQueueConsumeDelta{
         .past_block_consume =
             RetrocausalQueuePastBlockConsumeDelta{
                 .max_fully_consumed_block_number =

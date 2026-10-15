@@ -20,6 +20,7 @@
 #include "contract.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/test_support/alloc_fault.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -904,13 +905,14 @@ TEST(ItemLockTest, RCQNarrowAcceptsReplaceAfterPastConsume)
   // Sub1 consumed past entries; sub2 deleted and recreated the queue. The
   // replacement subsumes the past consume and may carry no consume itself.
   RetrocausalQueueDelta delta1;
-  delta1.consume.emplace();
-  delta1.consume->past_block_consume.max_fully_consumed_block_number = 3;
-  delta1.consume->past_block_consume.partial_consumed_number = 1;
+  rcq_set_consume(delta1);
+  rcq_consume_delta(delta1)
+      ->past_block_consume.max_fully_consumed_block_number = 3;
+  rcq_consume_delta(delta1)->past_block_consume.partial_consumed_number = 1;
   auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
 
   RetrocausalQueueDelta delta2;
-  delta2.replace = true;
+  rcq_set_consume_status(delta2, kRcqReplace);
   delta2.insert.added_entries.push_back(QueueEntry{0x0A});
   auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
 
@@ -923,12 +925,11 @@ TEST(ItemLockTest, RCQNarrowAcceptsReplaceDroppingSelfConsume)
   // A replacement that self-consumed is replaced again: the second has no
   // consume of its own.
   RetrocausalQueueDelta delta1;
-  delta1.replace = true;
-  delta1.consume.emplace();
+  rcq_set_consume_status(delta1, kRcqReplaceConsume);
   auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
 
   RetrocausalQueueDelta delta2;
-  delta2.replace = true;
+  rcq_set_consume_status(delta2, kRcqReplace);
   auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
 
   auto result = second.narrow(first);
@@ -938,7 +939,7 @@ TEST(ItemLockTest, RCQNarrowAcceptsReplaceDroppingSelfConsume)
 TEST(ItemLockTest, RCQNarrowRejectsUndoingReplace)
 {
   RetrocausalQueueDelta delta1;
-  delta1.replace = true;
+  rcq_set_consume_status(delta1, kRcqReplace);
   auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
 
   RetrocausalQueueDelta delta2;
@@ -953,12 +954,12 @@ TEST(ItemLockTest, RCQNarrowRejectsReplaceDroppingConcurrentConsumes)
 {
   // Concurrent entries consumed before the replacement carry into it.
   RetrocausalQueueDelta delta1;
-  delta1.consume.emplace();
-  delta1.consume->current_block_consumed.push_back(QueueEntry{0x0A});
+  rcq_set_consume(delta1);
+  rcq_consume_delta(delta1)->current_block_consumed.push_back(QueueEntry{0x0A});
   auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
 
   RetrocausalQueueDelta delta2;
-  delta2.replace = true;
+  rcq_set_consume_status(delta2, kRcqReplace);
   auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
 
   auto result = second.narrow(first);
@@ -1278,11 +1279,10 @@ TEST(ItemLockTest, FailedRCQExclusiveUpgradeIsFailureAtomic)
   // pending deletion makes the change exclusive (a type change).
   RetrocausalQueueDelta delta;
   delta.insert.added_entries.push_back(inserted_entry);
-  delta.consume =
-      x23::Ptr<RetrocausalQueueConsumeDelta>(new RetrocausalQueueConsumeDelta{
-          .past_block_consume = {.max_fully_consumed_block_number = 1,
-                                 .partial_consumed_number = 0},
-          .current_block_consumed = {consumed_entry}});
+  rcq_set_consume(delta) = RetrocausalQueueConsumeDelta{
+      .past_block_consume = {.max_fully_consumed_block_number = 1,
+                             .partial_consumed_number = 0},
+      .current_block_consumed = {consumed_entry}};
 
   ItemChange recreated_rcq(RetrocausalQueueIt(std::move(delta)));
   ASSERT_TRUE(recreated_rcq.narrow(deletion).has_value());

@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -978,7 +979,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx_b = make_new_per_tx_db_proxy(UINT64_MAX);
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    rcq_set_consume(delta.retrocausal_queue()) = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 0,
                                .partial_consumed_number = 0},
         .current_block_consumed = {entry}};
@@ -1147,7 +1148,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx_b = make_new_per_tx_db_proxy(UINT64_MAX);
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    rcq_set_consume(delta.retrocausal_queue()) = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 0,
                                .partial_consumed_number = 0},
         .current_block_consumed = {entry}};
@@ -1352,7 +1353,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto tx = make_new_per_tx_db_proxy(UINT64_MAX);
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    rcq_set_consume(delta.retrocausal_queue()) = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 1,
                                .partial_consumed_number = 1},
         .current_block_consumed = {}};

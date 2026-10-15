@@ -10,6 +10,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/debug/delta_validity_checks.h"
@@ -104,7 +105,8 @@ StorageItemDeltaManager::try_reserve_delta(StorageDelta const &delta)
     return variant_.try_set_variant<DeleteArgs>() != nullptr;
   case StorageDeltaType::kDeltaTypeRetrocausalQueue:
   {
-    bool requires_consume = delta.retrocausal_queue().consume != nullptr;
+    bool requires_consume =
+        rcq_consume_delta(delta.retrocausal_queue()) != nullptr;
     if (auto *args = variant_.try_set_variant<RetrocausalQueueArgs>()) {
       if (requires_consume) {
         if (!args->try_reserve_consume()) {
@@ -214,9 +216,8 @@ StorageItemDeltaManager::commit_delta(StorageDelta const &delta,
   {
     auto &args = variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>();
     args.commit_insert(delta.retrocausal_queue().insert, *invalid_state_flag_);
-    if (delta.retrocausal_queue().consume) {
-      args.commit_consume(*delta.retrocausal_queue().consume,
-                          *invalid_state_flag_);
+    if (auto const *consume = rcq_consume_delta(delta.retrocausal_queue())) {
+      args.commit_consume(*consume, *invalid_state_flag_);
     }
   } break;
   case StorageDeltaType::kDeltaTypeConsumeUniquifier:
@@ -696,7 +697,7 @@ StorageItemDeltaManager::revert_set_typeclass_lock_to_set_typeclass(
   {
     // If we took out the consume lock, but no longer need it
     if (lock.full_typeclass_lock().extra_lock_data.consume_lock() == 1) {
-      if (!delta.retrocausal_queue().consume) {
+      if (!rcq_consume_delta(delta.retrocausal_queue())) {
         variant_.get_variant_arm_unchecked<RetrocausalQueueArgs>()
             .revert_consume();
       }

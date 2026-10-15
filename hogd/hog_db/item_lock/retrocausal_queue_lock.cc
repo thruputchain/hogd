@@ -248,17 +248,13 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     });
   }
 
-  if (delta.replace) {
+  if (rcq_is_replace(delta)) {
     // The executor replaced the key without reading the committed queue, so
     // HogDb places the consume: past every committed entry (see
-    // commit_change). Any explicit consume carries only current-block entries.
-    if (delta.consume && delta.consume->past_block_consume !=
-                             RetrocausalQueuePastBlockConsumeDelta{}) {
-      return HogDbError{HogDbCode::kInvalidExecutorBehavior};
-    }
+    // commit_change).
     after->consumed_past_entries_ = meta.live_entries;
   }
-  else if (delta.consume) {
+  else if (auto const *consume = rcq_consume_delta(delta)) {
     // Now that we know this transaction will commit, we need to do one more
     // thing before we compute storage costs. commit_change() should not
     // consult the DAO, but the number of entries consumed by this delta
@@ -268,7 +264,7 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
     size_t consumed_entries = 0;
 
     auto const &snapshot_consume = meta.consume_state;
-    auto const &new_consume = delta.consume->past_block_consume;
+    auto const &new_consume = consume->past_block_consume;
 
     // Reject consumes that reference blocks beyond the current max live block.
     // No valid hog_exec could ever generate such a consume; attempting to
@@ -362,8 +358,8 @@ RetrocausalQueueLock::try_atomic_change_lock(const change_type *before,
   // commit_change returns the actual marginal cost (which may be much less),
   // and the excess is refunded via released_cost in InvokeTX::commit.
   size_t net_entries = delta.insert.added_entries.size();
-  if (delta.consume) {
-    size_t current_consumed = delta.consume->current_block_consumed.size();
+  if (rcq_has_explicit_consume(delta)) {
+    size_t current_consumed = rcq_current_block_consumed(delta).size();
     net_entries =
         (net_entries > current_consumed) ? net_entries - current_consumed : 0;
   }
@@ -388,10 +384,8 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   for (auto const &entry : change.delta_.observed_concurrent_entries) {
     ++per_tx_demand[entry];
   }
-  if (change.delta_.consume) {
-    for (auto const &entry : change.delta_.consume->current_block_consumed) {
-      ++per_tx_demand[entry];
-    }
+  for (auto const &entry : rcq_current_block_consumed(change.delta_)) {
+    ++per_tx_demand[entry];
   }
 
   std::unique_lock<std::mutex> lock(mtx_);
@@ -400,13 +394,16 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   CHECK(r.has_value());
   auto &meta = **r;
 
-  // Spell out the consume a replace delta leaves implicit, so the rest of
-  // this lock sees it as an ordinary consume of the whole committed queue.
-  if (change.delta_.replace && claims_consumer(change.delta_, meta)) {
-    if (!change.delta_.consume) {
-      change.delta_.consume.emplace();
+  // Spell out the consume a replace delta leaves to HogDb, so the rest of
+  // this lock sees an ordinary consume of the whole committed queue.
+  if (rcq_is_replace(change.delta_)) {
+    if (claims_consumer(change.delta_, meta)) {
+      rcq_set_consume(change.delta_).past_block_consume =
+          replaced_past_consume(meta);
     }
-    change.delta_.consume->past_block_consume = replaced_past_consume(meta);
+    else {
+      rcq_set_consume_status(change.delta_, kRcqNoConsume);
+    }
   }
 
   auto calculate_cost = [&]() {
@@ -438,9 +435,10 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   auto &delta = change.delta_;
 
   const size_t elements_added = delta.insert.added_entries.size();
-  const bool has_consume = delta.consume != nullptr;
+  auto *consume = rcq_consume_delta(delta);
+  const bool has_consume = consume != nullptr;
   const size_t current_consumed_count =
-      has_consume ? delta.consume->current_block_consumed.size() : 0;
+      has_consume ? consume->current_block_consumed.size() : 0;
 
   // Release excess reservation from self-consume high-water mark.
   size_t excess_reserved = change.max_insert_count() - elements_added;
@@ -453,7 +451,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     ++entry_tracking_[entry].insert_count;
   }
   if (has_consume) {
-    for (auto const &entry : delta.consume->current_block_consumed) {
+    for (auto const &entry : consume->current_block_consumed) {
       ++entry_tracking_[entry].consume_count;
     }
   }
@@ -473,7 +471,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   // Move consume delta into lock-owned state.
   if (has_consume) {
     CHECK(!consume_delta_.has_value());
-    consume_delta_.emplace(std::move(*delta.consume));
+    consume_delta_.emplace(std::move(*consume));
   }
 
   int64_t element_delta = static_cast<int64_t>(elements_added) -

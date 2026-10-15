@@ -4,6 +4,7 @@
 #include <optional>
 #include <utility>
 
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/storage_item/invalid_state_flag.h"
@@ -101,7 +102,7 @@ make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
   if (consume_delta) {
-    delta.retrocausal_queue().consume.emplace(*consume_delta);
+    rcq_set_consume(delta.retrocausal_queue()) = *consume_delta;
   }
   delta.retrocausal_queue().insert = std::move(insert_delta);
   return delta;

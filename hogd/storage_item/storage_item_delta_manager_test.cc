@@ -9,6 +9,7 @@
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
+#include "hogd/base/rcq_delta.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/init.h"
@@ -745,7 +746,7 @@ make_rcq_delta(std::optional<RetrocausalQueueConsumeDelta> consume_delta,
 {
   StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
   if (consume_delta) {
-    delta.retrocausal_queue().consume.emplace(*consume_delta);
+    rcq_set_consume(delta.retrocausal_queue()) = *consume_delta;
   }
   delta.retrocausal_queue().insert = std::move(insert_delta);
   return delta;
@@ -1515,12 +1516,12 @@ TEST_P(DeltaManagerTest, RCQFailedReservationReleasesReference)
   // First, reserve RCQ with consume to set the consumer_lock_
   StorageDelta rcq_delta1(StorageDeltaType::kDeltaTypeRetrocausalQueue);
   rcq_delta1.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
-  rcq_delta1.retrocausal_queue().consume.emplace(
+  rcq_set_consume(rcq_delta1.retrocausal_queue()) =
       RetrocausalQueueConsumeDelta{.past_block_consume =
                                        RetrocausalQueuePastBlockConsumeDelta{
                                            .max_fully_consumed_block_number = 0,
                                            .partial_consumed_number = 0},
-                                   .current_block_consumed = {}});
+                                   .current_block_consumed = {}};
 
   auto lk1 = item.try_reserve(rcq_delta1, StorageLock(StorageLockType::kNone));
   ASSERT_TRUE(lk1); // Should succeed
@@ -1529,12 +1530,12 @@ TEST_P(DeltaManagerTest, RCQFailedReservationReleasesReference)
   // This should fail because consumer_lock_ is already true
   StorageDelta rcq_delta2(StorageDeltaType::kDeltaTypeRetrocausalQueue);
   rcq_delta2.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
-  rcq_delta2.retrocausal_queue().consume.emplace(
+  rcq_set_consume(rcq_delta2.retrocausal_queue()) =
       RetrocausalQueueConsumeDelta{.past_block_consume =
                                        RetrocausalQueuePastBlockConsumeDelta{
                                            .max_fully_consumed_block_number = 0,
                                            .partial_consumed_number = 0},
-                                   .current_block_consumed = {}});
+                                   .current_block_consumed = {}};
 
   auto lk2 = item.try_reserve(rcq_delta2, StorageLock(StorageLockType::kNone));
   ASSERT_FALSE(lk2); // Should fail due to consumer_lock_ conflict
