@@ -135,7 +135,7 @@ storage_cost_model_hash(StorageCostModel const &model)
 void
 write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 {
-  w.field("hash", hex_string(storage_cost_model_hash(model)));
+  w.field("hash", encode_base58(storage_cost_model_hash(model)));
   w.field("baseDataItemCost", int128_to_decimal(model.kBaseItemCost));
   w.field("bytestringCostPerByte",
           std::to_string(model.kBytestringCostPerByte));
@@ -226,7 +226,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{3});
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
     w.field("protocol", protocol_text(version::kHogdProtocol()));
@@ -246,8 +246,8 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.object([&](json::Writer &w) {
           w.field("index", static_cast<std::int64_t>(account.index));
           w.field("role", "hosted_dev_account");
-          w.field("publicKey", hex_string(account.public_key));
-          w.field("walletAddress", hex_string(account.address));
+          w.field("publicKey", encode_base58(account.public_key));
+          w.field("walletAddress", encode_base58(account.address));
           w.field("initialStorageTokens",
                   std::to_string(account.initial_storage_tokens));
         });
@@ -256,8 +256,9 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
     if (artifact.faucet.has_value()) {
       w.object_field("faucet", [&](json::Writer &w) {
         w.field("role", "faucet");
-        w.field("publicKey", hex_string(artifact.faucet->public_key));
-        w.field("walletAddress", hex_string(artifact.faucet->wallet_address));
+        w.field("publicKey", encode_base58(artifact.faucet->public_key));
+        w.field("walletAddress",
+                encode_base58(artifact.faucet->wallet_address));
         w.field("initialStorageTokens",
                 std::to_string(artifact.faucet->initial_storage_tokens));
       });
@@ -268,7 +269,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
           x23::Buf tx_xdr = x23::serialize(artifact.initialization_txs[i]);
           w.field("index", static_cast<std::int64_t>(i));
           w.field("hash",
-                  hex_string(sha256(artifact.initialization_txs[i].tx)));
+                  encode_base58(sha256(artifact.initialization_txs[i].tx)));
           w.field("xdr", xdr_hex(std::as_bytes(
                              std::span(tx_xdr.data(), tx_xdr.size()))));
         });

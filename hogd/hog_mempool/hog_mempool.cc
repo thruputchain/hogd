@@ -147,7 +147,7 @@ print_usage(char *argv[])
 {
   std::println(
       "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
-      "--network-hash <64 hex digits> [--db-port <port>] [--event-port <port>] "
+      "--network-hash <base58> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
       "[--metrics-port <port>] [-h|--help] [--version]",

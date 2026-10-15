@@ -534,7 +534,7 @@ parse_readiness(std::string line)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", line);
-  if (schema_version != 3) {
+  if (schema_version != 4) {
     throw std::runtime_error(
         std::format("unexpected readiness schemaVersion {}: {}", schema_version,
                     line));
@@ -551,7 +551,7 @@ parse_readiness(std::string line)
   std::filesystem::path manifest_path(
       std::string(require_string_field(*parsed, "manifestPath", line)));
   std::string manifest_bytes = read_file(manifest_path);
-  std::string actual_hash = format_hex_hash(hash_string(manifest_bytes));
+  std::string actual_hash = format_manifest_hash(hash_string(manifest_bytes));
   if (actual_hash != manifest_hash) {
     throw std::runtime_error(
         std::format("manifest hash mismatch: expected {}, got {}",
@@ -570,7 +570,7 @@ parse_readiness(std::string line)
 
   const std::int64_t manifest_schema_version =
       require_integer_field(*manifest, "schemaVersion", manifest_bytes);
-  if (manifest_schema_version != 4) {
+  if (manifest_schema_version != 5) {
     throw std::runtime_error(std::format("unexpected manifest schemaVersion {}",
                                          manifest_schema_version));
   }
@@ -1212,17 +1212,16 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{4});
+    w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "groundhog-bootstrap");
-    w.field("networkHash",
-            "00000000000000000000000000000000000000000000000000000000000000aa");
+    w.field("networkHash", std::string(31, '1') + "3w");
     w.field("profile", "local-dev");
     if (include_protocol) {
       w.field("protocol", protocol_text(version::kHogdProtocol()));
     }
     w.object_field("bootstrapFaucet", [&](json::Writer &w) {
       w.field("publicKey",
-              hex_string(derive_bootstrap_account_keypair(seed, 0).first));
+              encode_base58(derive_bootstrap_account_keypair(seed, 0).first));
       w.field("initialStorageTokens",
               std::to_string(kLocalFaucetStorageTokens));
     });
@@ -1232,7 +1231,7 @@ bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
           w.field("publicKey",
                   seed.empty()
                       ? "invalid"
-                      : hex_string(
+                      : encode_base58(
                             derive_bootstrap_account_keypair(seed, i).first));
           w.field("initialStorageTokens", initial_storage_tokens);
         });
@@ -1437,7 +1436,7 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
 void
 write_test_data_dir_metadata(
     std::filesystem::path const &data_dir, LocalBootstrapConfig const &config,
-    std::int64_t schema_version = 4,
+    std::int64_t schema_version = 5,
     std::uint64_t faucet_tokens = kLocalFaucetStorageTokens)
 {
   std::string buffer;
@@ -1446,13 +1445,13 @@ write_test_data_dir_metadata(
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.object_field("bootstrapFaucet", [&](json::Writer &w) {
-        w.field("publicKey", hex_string(config.faucet_public_key));
+        w.field("publicKey", encode_base58(config.faucet_public_key));
         w.field("initialStorageTokens", std::to_string(faucet_tokens));
       });
       w.array_field("bootstrapAccounts", [&](json::Writer &w) {
         for (auto const &account : config.accounts) {
           w.object([&](json::Writer &w) {
-            w.field("publicKey", hex_string(account.public_key));
+            w.field("publicKey", encode_base58(account.public_key));
             w.field("initialStorageTokens",
                     std::to_string(account.storage_tokens));
           });
@@ -1519,7 +1518,7 @@ TEST(HogDevnode, EmitsOneReadinessLineAndStopsOnSigterm)
       std::format("{}{}", readiness.manifest_path.filename().string(),
                   ".tmp")));
   EXPECT_EQ(readiness.manifest_hash,
-            hex_string(hash_string(read_file(readiness.manifest_path))));
+            encode_base58(hash_string(read_file(readiness.manifest_path))));
   EXPECT_EQ(require_string_field(readiness.manifest, "protocol", ""),
             protocol_text(version::kHogdProtocol()));
   const json::Value *producer = readiness.manifest.find("producer");
@@ -1961,14 +1960,14 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
       std::format("hog-devnode-test-manifest-{}.json", getpid());
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
   std::string manifest =
-      R"({"schemaVersion":4,"kind":"hogd-dev-runtime","chainState":"fresh",)"
-      R"("networkHash":"0000000000000000000000000000000000000000000000000000000000000000","protocol":"hogp/test",)"
+      R"({"schemaVersion":5,"kind":"hogd-dev-runtime","chainState":"fresh",)"
+      R"("networkHash":"11111111111111111111111111111111","protocol":"hogp/test",)"
       R"("producer":{"binary":"hog-devnode","version":"test"},)"
       R"("endpoints":{"scheduler":"[::1]:12345",)"
       R"("schedulerGateway":"[::1]:22345","indexer":"[::1]:23456",)"
       R"("dbGateway":"[::1]:34567","viewGateway":"[::1]:45678"},)"
       R"("bootstrapAccounts":[],"bootstrap":{)"
-      R"("storageCostModel":{"hash":"0x0000000000000000000000000000000000000000000000000000000000000000",)"
+      R"("storageCostModel":{"hash":"11111111111111111111111111111111",)"
       R"("baseDataItemCost":"12000","bytestringCostPerByte":"10",)"
       R"("baseContractDeploymentCost":"12000","contractDeploymentCostPerByte":"10",)"
       R"("authPerKeyCost":"1111","rcqCostPerEntry":"8",)"
@@ -1978,9 +1977,10 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
     output << manifest;
   }
   Readiness readiness = parse_readiness(
-      std::format(R"({{"schemaVersion":3,"status":"ready",)"
+      std::format(R"({{"schemaVersion":4,"status":"ready",)"
                   R"("manifestPath":"{}","manifestHash":"{}"}})",
-                  manifest_path.string(), hex_string(hash_string(manifest))));
+                  manifest_path.string(),
+                  encode_base58(hash_string(manifest))));
   EXPECT_EQ(readiness.scheduler_gateway.host, "::1");
   EXPECT_EQ(readiness.scheduler_gateway.port, 22345);
 
@@ -2143,10 +2143,11 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
     EXPECT_EQ(readiness.bootstrap_accounts[i].role,
               i == 0 ? "faucet" : "local_user");
     EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
-              hex_string(keypair.first));
+              encode_base58(keypair.first));
     EXPECT_EQ(readiness.bootstrap_accounts[i].address,
-              hex_string(derive_bootstrap_account_address(keypair.first)));
-    EXPECT_EQ(readiness.bootstrap_accounts[i].address.size(), 66UL);
+              encode_base58(derive_bootstrap_account_address(keypair.first)));
+    EXPECT_TRUE(decode_base58_fixed<32>(readiness.bootstrap_accounts[i].address)
+                    .has_value());
     EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
               i == 0 ? "10000000000000" : "1000000000");
   }
@@ -2179,7 +2180,7 @@ TEST(HogDevnode, BootstrapManifestInputWithoutProtocolAdvertisesAccountMetadata)
     EXPECT_EQ(readiness.bootstrap_accounts[i].role,
               i == 0 ? "faucet" : "local_user");
     EXPECT_EQ(readiness.bootstrap_accounts[i].public_key,
-              hex_string(keypair.first));
+              encode_base58(keypair.first));
     EXPECT_EQ(readiness.bootstrap_accounts[i].initial_storage_tokens,
               i == 0 ? "10000000000000" : "1000000000");
   }
@@ -2451,7 +2452,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
-    EXPECT_EQ(hex_string(wallet_address),
+    EXPECT_EQ(encode_base58(wallet_address),
               readiness.bootstrap_accounts[1].address);
 
     TransactionViewQuery query{
@@ -3690,7 +3691,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
         build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[1]
             .address;
-    EXPECT_EQ(hex_string(wallet_address),
+    EXPECT_EQ(encode_base58(wallet_address),
               readiness.bootstrap_accounts[1].address);
     const SHA256Hash deploy_nonce = make_nonce(7);
     const SHA256Hash contract_hash = sha256(large_contract);
@@ -3827,7 +3828,7 @@ TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
         build_local_bootstrap_account_artifact(fixture_config(1))
             .accounts[0]
             .address;
-    EXPECT_EQ(hex_string(sponsor_wallet_address),
+    EXPECT_EQ(encode_base58(sponsor_wallet_address),
               readiness.bootstrap_accounts[0].address);
 
     const SHA256Hash wallet_hash = sha256(*wallet_contract);
@@ -4415,11 +4416,11 @@ TEST(HogDevnode, DataDirRejectsMetadataFromANewerSchemaVersion)
 {
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/5);
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/6);
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
-      "unsupported hog-devnode data metadata schemaVersion 5, expected 4");
+      "unsupported hog-devnode data metadata schemaVersion 6, expected 5");
 }
 
 TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
@@ -4427,7 +4428,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithUnexpectedKind)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":4,"kind":"hog-hosted-data"})");
+      data_dir, R"({"schemaVersion":5,"kind":"hog-hosted-data"})");
 
   expect_startup_failure({"--data-dir", data_dir.string()},
                          "unsupported hog-devnode data metadata kind "
@@ -4439,7 +4440,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithoutBootstrapConfig)
   std::filesystem::path data_dir = make_test_data_dir();
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   write_raw_test_data_dir_metadata(
-      data_dir, R"({"schemaVersion":4,"kind":"hog-devnode-data"})");
+      data_dir, R"({"schemaVersion":5,"kind":"hog-devnode-data"})");
 
   expect_startup_failure(
       {"--data-dir", data_dir.string()},
@@ -4463,7 +4464,7 @@ TEST(HogDevnode, DataDirRejectsMetadataWithForeignFaucetTokens)
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
   // The faucet allocation is fixed by the local bootstrap profile, so a data
   // dir claiming a different one was not written by this bootstrap.
-  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/4,
+  write_test_data_dir_metadata(data_dir, {}, /*schema_version=*/5,
                                /*faucet_tokens=*/1);
 
   expect_startup_failure(

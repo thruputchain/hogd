@@ -39,13 +39,12 @@ namespace {
 // manifest. Tests tweak only the field(s) under test.
 struct ManifestBuilder {
   bool include_schema_version = true;
-  std::int64_t schema_version = 4;
+  std::int64_t schema_version = 5;
 
   std::string kind = "groundhog-bootstrap";
 
   bool include_network_hash = true;
-  std::string network_hash =
-      "00000000000000000000000000000000000000000000000000000000000000aa";
+  std::string network_hash = std::string(31, '1') + "3w";
 
   std::string profile = "local-dev";
 
@@ -55,8 +54,8 @@ struct ManifestBuilder {
   bool include_dev_wallet = false;
 
   bool include_bootstrap_faucet = true;
-  std::string faucet_public_key =
-      hex_string(derive_bootstrap_account_keypair("parser-fixture", 0).first);
+  std::string faucet_public_key = encode_base58(
+      derive_bootstrap_account_keypair("parser-fixture", 0).first);
   std::string faucet_storage_tokens = "10000000000000";
   bool include_bootstrap_accounts = true;
   std::uint32_t bootstrap_count = 2;
@@ -101,10 +100,10 @@ struct ManifestBuilder {
               if (include_public_key) {
                 auto key = !user_public_key.empty()
                                ? user_public_key
-                               : hex_string(derive_bootstrap_account_keypair(
-                                                "parser-fixture",
-                                                duplicate_user ? 1 : i + 1)
-                                                .first);
+                               : encode_base58(derive_bootstrap_account_keypair(
+                                                   "parser-fixture",
+                                                   duplicate_user ? 1 : i + 1)
+                                                   .first);
                 w.field("publicKey",
                         duplicate_faucet ? faucet_public_key : key);
               }
@@ -190,8 +189,7 @@ expect_ok(std::filesystem::path const &path)
 TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
 {
   ManifestBuilder builder;
-  builder.network_hash =
-      "00000000000000000000000000000000000000000000000000000000000000aa";
+  builder.network_hash = std::string(31, '1') + "3w";
   builder.bootstrap_count = 2;
   builder.initial_storage_tokens = "1000000000";
   CleanupDefer cleanup;
@@ -203,7 +201,7 @@ TEST(BootstrapManifest, LoadBootstrapManifestHappyPath)
   ASSERT_TRUE(result.has_value()) << result.error();
   const BootstrapManifestConfig &config = *result;
   EXPECT_EQ(format_network_hash(config.network_hash),
-            "00000000000000000000000000000000000000000000000000000000000000aa");
+            std::string(31, '1') + "3w");
   ASSERT_EQ(config.bootstrap_config.accounts.size(), 2U);
   EXPECT_EQ(config.bootstrap_config.faucet_public_key,
             derive_bootstrap_account_keypair("parser-fixture", 0).first);
@@ -236,7 +234,7 @@ TEST(BootstrapManifest, RejectsWrongSchemaVersion)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "expected 4");
+  expect_error_with(path, "expected 5");
 }
 
 TEST(BootstrapManifest, RejectsMissingSchemaVersion)
@@ -296,8 +294,8 @@ TEST(BootstrapManifest, RejectsEmptyNetworkHash)
   CleanupDefer cleanup;
   std::filesystem::path path =
       write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(
-      path, "networkHash must be exactly 64 lowercase hexadecimal characters");
+  expect_error_with(path,
+                    "networkHash must be base58 encoding of exactly 32 bytes");
 }
 
 TEST(BootstrapManifest, RejectsMissingNetworkHash)
@@ -325,7 +323,7 @@ TEST(BootstrapManifest, RejectsLegacySchemaTwo)
   builder.schema_version = 2;
   CleanupDefer cleanup;
   auto path = write_temp_manifest_with_cleanup(builder.build(), cleanup);
-  expect_error_with(path, "expected 4");
+  expect_error_with(path, "expected 5");
 }
 
 TEST(BootstrapManifest, RejectsMissingBootstrapAccounts)
