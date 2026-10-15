@@ -33,6 +33,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/rpc_common.h"
+#include "x23/rpc_msg.hh"
 #include "x23/vec.h"
 
 #ifndef HOG_INDEXER_BINARY
