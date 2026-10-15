@@ -111,7 +111,7 @@ IndexDB::read_block_query_record(BlockHeight height) const
             height);
       return IndexerError(IndexerErrorCode::kInternal);
     }
-    return VerifiedBlockQueryRecord{std::move(record), hash};
+    return VerifiedBlockQueryRecord{.record = std::move(record), .hash = hash};
   } catch (const std::exception &e) {
     error("cannot decode block query metadata at {}: {}", height, e.what());
     return IndexerError(IndexerErrorCode::kInternal);

@@ -962,7 +962,7 @@ TEST_F(StrictIndexerTest, BlockPageIteratorWorkIgnoresUnrelatedHistory)
     ProposedTransactionBatch bodies;
     const uint64_t count = height == 2 ? 4 : 1024;
     for (uint64_t i = 0; i < count; ++i) {
-      bodies.push_back(make_body(static_cast<uint64_t>(height) * 10000 + i,
+      bodies.push_back(make_body((static_cast<uint64_t>(height) * 10000) + i,
                                  static_cast<uint8_t>(height)));
     }
     const auto block = make_block(height, previous, bodies);
