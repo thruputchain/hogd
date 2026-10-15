@@ -396,7 +396,7 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 	// transactions rather than repeatedly scanning millions of future/completed
 	// rows under the same mutex used by the arrival scheduler.
 	pending, head := []int{}, 0
-	deployments := []int{}
+	deployments, deploymentHead := []int{}, 0
 	for ctx.Err() == nil {
 		requests := make([]rpcRequest, 0, 128)
 		mu.Lock()
@@ -414,18 +414,20 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 			}
 			next += stride
 		}
-		// Deployments are dependencies and must not wait behind a large poll sweep.
-		remainingDeployments := deployments[:0]
-		for _, i := range deployments {
-			r := &results[i]
-			if needsReceipt(*r) {
-				remainingDeployments = append(remainingDeployments, i)
-				if len(requests) < 128 {
-					requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
-				}
+		// Prioritize dependencies, rotating through them and reserving half the
+		// batch for other transactions so unresolved deployments cannot starve it.
+		for deploymentHead < len(deployments) && len(requests) < 64 {
+			i := deployments[deploymentHead]
+			deploymentHead++
+			if r := results[i]; needsReceipt(r) {
+				requests = append(requests, request(i, "getTransactionReceipt", r.Hash))
 			}
 		}
-		deployments = remainingDeployments
+		if deploymentHead >= 4096 && deploymentHead >= len(deployments)/2 {
+			copy(deployments, deployments[deploymentHead:])
+			deployments = deployments[:len(deployments)-deploymentHead]
+			deploymentHead = 0
+		}
 		for head < len(pending) && len(requests) < 128 {
 			i := pending[head]
 			head++
@@ -476,8 +478,12 @@ func pollReceiptShard(ctx context.Context, client *http.Client, url string, star
 		mu.Lock()
 		for _, req := range requests {
 			r := &results[req.ID]
-			if r.Kind != "deploy" && needsReceipt(*r) {
-				pending = append(pending, req.ID)
+			if needsReceipt(*r) {
+				if r.Kind == "deploy" {
+					deployments = append(deployments, req.ID)
+				} else {
+					pending = append(pending, req.ID)
+				}
 			}
 		}
 		mu.Unlock()

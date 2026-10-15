@@ -143,8 +143,8 @@ class Cluster:
                 for source, suffix in ((stdout, "stdout"), (stderr, "stderr")):
                     subprocess.run(["scp", "-q", "-oBatchMode=yes", f"{host}:{source}", str(self.directory / f"{name}.{suffix}.log")], check=False)
 
-    def signal_remote_groups(self, host, sig):
-        files = [self.directory / f"{name}.pid" for name, (running_host, *_) in self.logs.items() if running_host == host]
+    def signal_remote_groups(self, host, sig, names=None):
+        files = [self.directory / f"{name}.pid" for name, (running_host, *_) in self.logs.items() if running_host == host and (names is None or name in names)]
         if files:
             self.remote(host, ["bash", "-c", 'sig=$1; shift; for file do if read -r pid < "$file" && [[ "$pid" =~ ^[1-9][0-9]*$ ]]; then kill -"$sig" -- -"$pid" 2>/dev/null || true; fi; done', "bash", sig, *files], timeout=15)
 
@@ -237,12 +237,22 @@ class Cluster:
             self.check_services()
         finally:
             if not a.local:
-                if waiter.poll() is None:
-                    waiter.terminate()
-                    waiter.wait(timeout=10)
-                # Preserve partial metrics and results even when a service
-                # crash or deadline interrupts the replay.
-                subprocess.run(["scp", "-q", "-r", "-oBatchMode=yes", f"{self.hosts['replay']}:{shlex.quote(str(d / 'replay'))}", str(d)], check=False)
+                try:
+                    if waiter.poll() is None:
+                        # Let Run cancel submissions and flush results before
+                        # collecting them or stopping the remaining services.
+                        self.signal_remote_groups(self.hosts["replay"], "TERM", names=("replay",))
+                        try:
+                            waiter.wait(timeout=30)
+                        except subprocess.TimeoutExpired:
+                            self.signal_remote_groups(self.hosts["replay"], "KILL", names=("replay",))
+                            waiter.wait(timeout=10)
+                finally:
+                    if waiter.poll() is None:
+                        waiter.terminate()
+                        waiter.wait(timeout=10)
+                    # Preserve partial metrics even if graceful shutdown fails.
+                    subprocess.run(["scp", "-q", "-r", "-oBatchMode=yes", f"{self.hosts['replay']}:{shlex.quote(str(d / 'replay'))}", str(d)], check=False)
         if status:
             raise RuntimeError(f"replay failed with exit status {status}; inspect replay logs")
         if not (d / "replay/results.jsonl").exists():

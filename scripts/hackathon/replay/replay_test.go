@@ -260,6 +260,67 @@ func TestDependencyBlockedArrivalsAreAccounted(t *testing.T) {
 	}
 }
 
+func TestPendingDeploymentsDoNotStarveLaterReceipts(t *testing.T) {
+	const deployments = 260
+	results := make([]Result, deployments+1)
+	for i := range results {
+		kind := "deploy"
+		if i == deployments {
+			kind = "call"
+		}
+		results[i] = Result{Operation: Operation{Hash: fmt.Sprintf("0x%04x", i), Kind: kind, App: i}, StartNs: 1, Outcome: "admitted"}
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	firstBatch := true
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		var batch []rpcRequest
+		if err := json.NewDecoder(r.Body).Decode(&batch); err != nil {
+			t.Error(err)
+			return
+		}
+		responses := make([]rpcResponse, 0, len(batch))
+		includesCall := false
+		for _, req := range batch {
+			includesCall = includesCall || req.ID == deployments
+			result := json.RawMessage("null")
+			// Leave the first 128 deployments unresolved forever.
+			if req.ID >= 128 {
+				result = json.RawMessage(fmt.Sprintf(`{"txHash":%q,"height":"3","status":{"result":"ok"}}`, req.Params[0]))
+			}
+			responses = append(responses, rpcResponse{ID: req.ID, Result: result})
+		}
+		if firstBatch && !includesCall {
+			t.Error("deployment polling did not reserve space for calls")
+		}
+		firstBatch = false
+		json.NewEncoder(w).Encode(responses)
+	}))
+	defer server.Close()
+	var mu sync.Mutex
+	deployed := map[int]bool{}
+	done := make(chan struct{})
+	go func() {
+		pollReceipts(ctx, server.Client(), server.URL, time.Now(), results, &mu, deployed, 1)
+		close(done)
+	}()
+	defer func() { cancel(); <-done }()
+	for {
+		mu.Lock()
+		callComplete := results[deployments].ReceiptNs > 0
+		deployComplete := len(deployed) == deployments-128
+		mu.Unlock()
+		if callComplete && deployComplete {
+			break
+		}
+		select {
+		case <-ctx.Done():
+			t.Fatalf("receipts starved: call complete=%v, later deployments complete=%v", callComplete, deployComplete)
+		case <-time.After(time.Millisecond):
+		}
+	}
+}
+
 func TestReceiptWorkersPollDisjointBatchesConcurrently(t *testing.T) {
 	const workers = 4
 	results := make([]Result, workers*128+1)
