@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <future>
 #include <latch>
@@ -12,14 +13,18 @@
 #include <optional>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/options.h>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
 
+#include "block_query_internal.hh"
 #include "consensus.hh"
 #include "event.hh"
+#include "event_cursor_internal.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -28,6 +33,7 @@
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
+#include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
@@ -819,8 +825,14 @@ TEST_F(StrictIndexerTest, BlockQueriesRequireCompleteHistory)
   ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   auto found = db_->get_block_by_height(1);
-  ASSERT_TRUE(found && *found);
-  EXPECT_EQ(sha256(**found), block.identity.consensus_hash);
+  ASSERT_TRUE(found);
+  const auto &value = *found;
+  if (value) {
+    EXPECT_EQ(sha256(*value), block.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "committed block metadata is missing";
+  }
   auto empty = db_->get_transactions_by_block(query);
   ASSERT_TRUE(empty);
   EXPECT_TRUE(empty->refs.empty());
@@ -1075,8 +1087,14 @@ TEST_F(StrictIndexerTest, OldStrictIndexRequiresRebuildAndSourceCanReplay)
   EXPECT_EQ(rebuilt->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockDuplicate);
   auto metadata = rebuilt->get_block_by_height(1);
-  ASSERT_TRUE(metadata && *metadata);
-  EXPECT_EQ(sha256(**metadata), block.identity.consensus_hash);
+  ASSERT_TRUE(metadata);
+  const auto &value = *metadata;
+  if (value) {
+    EXPECT_EQ(sha256(*value), block.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "rebuilt block metadata is missing";
+  }
   EXPECT_TRUE(std::filesystem::exists(path_ / "CURRENT"));
 }
 

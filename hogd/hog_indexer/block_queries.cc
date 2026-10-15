@@ -2,19 +2,28 @@
 
 #include <bit>
 #include <cstring>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/iterator.h>
+#include <span>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include "block_query_internal.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/key_format.h"
+#include "hogd/hog_indexer/status.h"
 #include "hogd/version.h"
+#include "indexer.hh"
+#include "pagination.hh"
+#include "types.hh"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 namespace {
@@ -259,7 +268,7 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
       iter->Prev();
     }
   }
-  if (!iter->status().ok() || (!iter->Valid() && remaining)) {
+  if (!iter->status().ok() || (!iter->Valid() && remaining != 0)) {
     return IndexerError(IndexerErrorCode::kInternal);
   }
   if (remaining) {

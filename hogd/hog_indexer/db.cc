@@ -1,4 +1,5 @@
 #include "hogd/hog_indexer/db.h"
+#include "block_query_internal.hh"
 
 #include <algorithm>
 #include <atomic>
