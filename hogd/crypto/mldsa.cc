@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "mldsa_native.h"
+#include "types.hh"
 #include "x23/vec.h"
 
 namespace hogd {

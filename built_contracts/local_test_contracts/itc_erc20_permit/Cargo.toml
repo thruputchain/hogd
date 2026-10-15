@@ -12,9 +12,9 @@ categories.workspace = true
 edition.workspace = true
 
 [dependencies]
-sdk = { workspace = true }
-groundhog-erc20-if = { workspace = true }
-groundhog-erc20-permit-if = { workspace = true }
+thruput-sdk = { workspace = true }
+thruput-erc20-if = { workspace = true }
+thruput-erc20-permit-if = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]
@@ -22,7 +22,7 @@ doctest = false
 
 [features]
 entrypoints = []
-dev = ["sdk/dev", "groundhog-erc20-if/dev", "groundhog-erc20-permit-if/dev"]
+dev = ["thruput-sdk/dev", "thruput-erc20-if/dev", "thruput-erc20-permit-if/dev"]
 
 [[bin]]
 name = "itc_erc20_permit"

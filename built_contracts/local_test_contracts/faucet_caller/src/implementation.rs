@@ -1,5 +1,5 @@
 use crate::FaucetCaller;
-use sdk::*;
+use thruput_sdk::*;
 
 pub struct FaucetCallerContract;
 

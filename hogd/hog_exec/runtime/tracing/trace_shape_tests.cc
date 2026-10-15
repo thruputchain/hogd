@@ -527,14 +527,14 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'904, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'815, 99'728, 99'636,
-                                                  99'549, 99'462, 99'346};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'814, 99'727, 99'634,
+                                                  99'547, 99'460, 99'344};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'076, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'074, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'558, storage_key,
+      bytestring_get_entry(61'556, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -562,10 +562,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(61'214, 60'554, std::move(body), ok_status()));
+        make_entry(61'212, 60'552, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(60'521, inner_calldata));
-  expected.push_back(return_entry(60'301, {}));
+  expected.push_back(get_returned_buffer_entry(60'525, inner_calldata));
+  expected.push_back(return_entry(60'303, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -621,14 +621,14 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'872, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'783, 99'696, 99'604,
-                                                  99'517, 99'430, 99'314};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'782, 99'695, 99'602,
+                                                  99'515, 99'428, 99'312};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'046, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'044, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'528, storage_key,
+      bytestring_get_entry(61'526, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -654,9 +654,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(61'186, 60'136, std::move(body), ok_status()));
+        make_entry(61'184, 60'134, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(60'038, {}));
+  expected.push_back(return_entry(60'036, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

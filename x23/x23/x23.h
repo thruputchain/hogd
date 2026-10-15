@@ -310,18 +310,28 @@ template<typename T> struct Box : private std::unique_ptr<T> {
       this->reset(new T{});
   }
 
-  T *get() noexcept
+  // An empty Box holds a value-initialized T: reading one gives T{}, and
+  // writing through one allocates it first. A union arm or field that is
+  // selected but never written is empty.
+  T *get()
   {
-    x23assert(has_value());
+    ensure();
     return super::get();
   }
   const T *get() const noexcept
   {
-    x23assert(has_value());
+    if (!has_value()) [[unlikely]]
+      return &empty_value();
     return super::get();
   }
   decltype(auto) operator*(this auto &&self) { return *self.get(); }
-  auto operator->(this auto &&self) noexcept { return self.get(); }
+  auto operator->(this auto &&self) { return self.get(); }
+
+  static const T &empty_value() noexcept
+  {
+    static const T value{};
+    return value;
+  }
 };
 template<typename T> Box(T &&) -> Box<T>;
 
@@ -369,19 +379,36 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  static const T da{}, db{};
-  return (a.has_value() ? *a : da) == (b.has_value() ? *b : db);
+  return *a == *b;
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  static const T da{}, db{};
-  return (a.has_value() ? *a : da) <=> (b.has_value() ? *b : db);
+  return *a <=> *b;
 }
 
 template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
+
+// A Box of anything but a struct or union (an opaque, a string, a vector, a
+// primitive...) has its contents' category but none of its interface, so the
+// serializers unwrap it explicitly. Primitives have no xdr_meta to inherit, so
+// the category is spelled out. Boxed structs and unions need no unwrapping:
+// the serializers reach their fields through get<I>.
+template<typename T> requires (category<T> != XdrCategory::kStruct &&
+                               category<T> != XdrCategory::kUnion)
+struct xdr_meta<Box<T>> {
+  static constexpr XdrCategory category = x23::category<T>;
+};
+
+template<typename X>
+concept is_boxed_leaf =
+    requires { typename std::remove_cvref_t<X>::value_type; } &&
+    std::same_as<std::remove_cvref_t<X>,
+                 Box<typename std::remove_cvref_t<X>::value_type>> &&
+    !is_xdr_cat<typename std::remove_cvref_t<X>::value_type,
+                XdrCategory::kStruct, XdrCategory::kUnion>;
 
 } // namespace x23
 
@@ -404,7 +431,6 @@ template<size_t I, typename T> requires requires(const T &t) { get<I>(t); }
 decltype(auto)
 get(const x23::Box<T> &b)
 {
-  x23assert(b.has_value());
   return get<I>(*b);
 }
 
@@ -412,7 +438,6 @@ template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &&b)
 {
-  x23assert(b.has_value());
   return get<I>(*std::move(b));
 }
 
@@ -624,6 +649,27 @@ private:
   }
 
   friend T;
+};
+
+// A union field declared #[cpp(box)] is a Box of the union, which is that
+// union to the union protocol: arms are reached through get<I>, which Box
+// forwards, and the discriminant through the boxed value.
+template<is_xdr_union T> struct union_ops<Box<T>> : union_ops<T> {
+  using base = union_ops<T>;
+  using base::get_discriminant;
+  using base::index;
+  using base::set_discriminant;
+  using typename base::discriminant_type;
+
+  static constexpr int index(const Box<T> &u) { return base::index(*u); }
+  static constexpr discriminant_type get_discriminant(const Box<T> &u)
+  {
+    return base::get_discriminant(*u);
+  }
+  static constexpr void set_discriminant(Box<T> &u, discriminant_type d)
+  {
+    base::set_discriminant(*u, d);
+  }
 };
 
 // Set the discriminant of a union.  Note:  you can always get the

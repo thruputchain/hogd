@@ -91,6 +91,70 @@ check_contains "report names the failed step and signal" \
 check_contains "report replays the failed step's log" "needle-in-the-log" \
   "$report"
 
+# A step killed by an x23 panic has its report replayed. The panic's own debug
+# dump is thousands of lines long, so the tail is entirely dump; without the
+# report the job log says "SIGABRT" and nothing about what tripped it. The
+# dying process's lines are also interleaved with the node that is still
+# running, so the report has to follow one prefix rather than take whatever
+# came next.
+CI_FAILED_BENCH_STEPS=()
+ci_run_bench_step panicked bash -c '
+  echo "[hog11 node1_mempool stderr] hog-mempool:PANIC: x23assert failure: !*oldwi"
+  echo "[hog7 node0_mempool stderr] submit_unvetted rejected txs"
+  echo "[hog11 node1_mempool stderr]   at  x23/x23/event_impl_epoll.cc:78"
+  seq 1 600 | sed "s/^/[hog11 node1_mempool stderr]   fd /;s/\$/, mode 1, ready 4/"
+  exit 134' >/dev/null
+report=$(ci_report_failed_bench_steps) || true
+check_contains "panic report has its own header" "===== panic reports in" "$report"
+check_contains "panic report names the assertion" \
+  "x23assert failure: !*oldwi" "$report"
+check_contains "panic report keeps the source line" \
+  "event_impl_epoll.cc:78" "$report"
+# The cap is what keeps the report a report: the dump that follows the panic is
+# longer than the tail, so an uncapped replay would print the whole log twice.
+panic_section=${report#*===== panic reports in}
+check_eq "panic report is capped" "$CI_PANIC_REPORT_LINES" \
+  "$(printf '%s\n' "$panic_section" | grep -c '^\[hog11 ')"
+# Only the panicking process's lines: the node that was still running has
+# nothing to do with the report, and counting its chatter against the cap would
+# truncate the report that much sooner.
+check_eq "panic report follows one process" "0" \
+  "$(printf '%s\n' "$panic_section" | grep -c '^\[hog7 ')"
+
+# Both nodes panicking at once is the ordinary case rather than the exotic one:
+# whatever trips one node's assertion is as likely as not to trip its peer's.
+# Each report is tracked against its own prefix, so neither swallows the other.
+CI_FAILED_BENCH_STEPS=()
+ci_run_bench_step both bash -c '
+  echo "[hog7 node0_mempool stderr] hog-mempool:PANIC: x23assert failure: node0 tripped"
+  echo "[hog11 node1_mempool stderr] hog-mempool:PANIC: x23assert failure: node1 tripped"
+  echo "[hog7 node0_mempool stderr]   at  rpc_from_coord.cc:287"
+  echo "[hog11 node1_mempool stderr]   at  event_impl_epoll.cc:78"
+  exit 134' >/dev/null
+report=$(ci_report_failed_bench_steps) || true
+panic_section=${report#*===== panic reports in}
+check_contains "first panic reported" "x23assert failure: node0 tripped" \
+  "$panic_section"
+check_contains "second panic reported" "x23assert failure: node1 tripped" \
+  "$panic_section"
+check_contains "first panic keeps its source line" "rpc_from_coord.cc:287" \
+  "$panic_section"
+check_contains "second panic keeps its source line" "event_impl_epoll.cc:78" \
+  "$panic_section"
+
+# A step that failed without panicking reads exactly as it did before.
+CI_FAILED_BENCH_STEPS=()
+ci_run_bench_step quiet bash -c 'echo no-panic-here; exit 1' >/dev/null
+report=$(ci_report_failed_bench_steps) || true
+check_contains "non-panicking step still replays its log" "no-panic-here" \
+  "$report"
+if [[ "$report" == *"panic reports in"* ]]; then
+  echo "FAIL non-panicking step should add no panic section"
+  fail=1
+else
+  echo "ok   non-panicking step adds no panic section"
+fi
+
 # A step whose log went missing must still be named rather than silently
 # dropping the only record of the failure.
 CI_FAILED_BENCH_STEPS=("ghost:1")

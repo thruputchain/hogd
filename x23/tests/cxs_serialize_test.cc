@@ -6,6 +6,7 @@
 #include <random>
 #include <vector>
 
+#include "x23/format.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "xdrtest.hh"
@@ -284,6 +285,116 @@ TEST(Vec, SelfMoveAssignPreservesData)
   EXPECT_EQ(v[0], 1U);
   EXPECT_EQ(v[1], 2U);
   EXPECT_EQ(v[2], 3U);
+}
+
+namespace {
+
+box_arms_plain
+plain_arm(const box_arms &u)
+{
+  using enum box_arm_type;
+  box_arms_plain p(u.t());
+  switch (u.t()) {
+  case kBoxArmSmall:
+    p.small() = u.small();
+    break;
+  case kBoxArmBig:
+    p.big() = *u.big();
+    break;
+  case kBoxArmStruct:
+    p.st() = *u.st();
+    break;
+  case kBoxArmBytes:
+    p.bytes() = *u.bytes();
+    break;
+  case kBoxArmInts:
+    p.ints() = *u.ints();
+    break;
+  }
+  return p;
+}
+
+} // namespace
+
+// A boxed union arm or field encodes exactly as its unboxed twin, including an
+// arm that was selected but never written.
+TEST(CxsSerialize, BoxedLeavesMatchPlain)
+{
+  using enum box_arm_type;
+  std::vector<box_arms> arms;
+  for (auto t :
+       {kBoxArmSmall, kBoxArmBig, kBoxArmStruct, kBoxArmBytes, kBoxArmInts})
+    arms.emplace_back(t);
+  box_arms big(kBoxArmBig);
+  big.big()->fill(0x5a);
+  arms.push_back(big);
+  box_arms st(kBoxArmStruct);
+  *st.st() = fix_12{.i = -7, .d = 2.5};
+  arms.push_back(st);
+  box_arms bytes(kBoxArmBytes);
+  bytes.bytes() = box_bytes{1, 2, 3};
+  arms.push_back(bytes);
+  box_arms ints(kBoxArmInts);
+  ints.ints()->push_back(-1);
+  ints.ints()->push_back(300);
+  arms.push_back(ints);
+
+  for (const box_arms &u : arms) {
+    box_arms_plain p = plain_arm(u);
+    auto boxed = serialize_cxs(u);
+    auto plain = serialize_cxs(p);
+    ASSERT_TRUE(boxed.has_value());
+    ASSERT_TRUE(plain.has_value());
+    EXPECT_EQ(*boxed, *plain);
+    EXPECT_EQ(cxs_size(u), boxed->size());
+
+    box_arms back;
+    ASSERT_TRUE(deserialize_cxs(&back, *boxed));
+    EXPECT_EQ(back, u);
+  }
+
+  box_leaves leaves{};
+  box_leaves_plain leaves_plain{};
+  *leaves.n = 0x0102030405060708;
+  leaves_plain.n = 0x0102030405060708;
+  leaves.bytes = box_bytes{9, 8};
+  leaves_plain.bytes = box_bytes{9, 8};
+  leaves.arm = big;
+  leaves_plain.arm = plain_arm(big);
+  auto boxed = serialize_cxs(leaves);
+  ASSERT_TRUE(boxed.has_value());
+  EXPECT_EQ(*boxed, *serialize_cxs(leaves_plain));
+  EXPECT_EQ(cxs_size(leaves), boxed->size());
+  box_leaves back;
+  ASSERT_TRUE(deserialize_cxs(&back, *boxed));
+  EXPECT_EQ(back, leaves);
+
+  EXPECT_EQ(show(leaves), show(leaves_plain));
+}
+
+// A boxed union field encodes exactly as its unboxed twin.
+TEST(CxsSerialize, BoxedUnionFieldMatchesPlain)
+{
+  using enum box_arm_type;
+  box_union_field f{};
+  box_union_field_plain p{};
+  EXPECT_EQ(*serialize_cxs(f), *serialize_cxs(p));
+
+  f.u->t(kBoxArmStruct);
+  f.u->st() = fix_12{.i = -7, .d = 2.5};
+  f.tail = 3;
+  p.u.t(kBoxArmStruct);
+  p.u.st() = fix_12{.i = -7, .d = 2.5};
+  p.tail = 3;
+
+  auto boxed = serialize_cxs(f);
+  ASSERT_TRUE(boxed.has_value());
+  EXPECT_EQ(*boxed, *serialize_cxs(p));
+  EXPECT_EQ(cxs_size(f), boxed->size());
+  box_union_field back;
+  ASSERT_TRUE(deserialize_cxs(&back, *boxed));
+  EXPECT_EQ(back, f);
+  EXPECT_EQ(show(f), show(p));
 }
 
 } // namespace x23

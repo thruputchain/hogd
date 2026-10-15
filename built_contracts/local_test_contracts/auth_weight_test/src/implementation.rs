@@ -1,7 +1,7 @@
 use crate::AuthWeightTest;
-use sdk::sys::{self, SyscallErrorCode};
-use sdk::transaction::InvocationFrameStatusCode;
-use sdk::*;
+use thruput_sdk::sys::{self, SyscallErrorCode};
+use thruput_sdk::transaction::InvocationFrameStatusCode;
+use thruput_sdk::*;
 
 pub struct AuthWeightTestContract;
 
@@ -14,11 +14,11 @@ const UNWRITTEN_FRAME_STATUS: InvocationFrameStatusCode =
 #[contract]
 impl AuthWeightTest for AuthWeightTestContract {
     fn test_write_weight(weight: u32) {
-        sdk::set_address_required_weight(weight).unwrap();
+        thruput_sdk::set_address_required_weight(weight).unwrap();
     }
 
     fn test_get_auth_claim() {
-        let claim = sdk::get_auth_claim().unwrap();
+        let claim = thruput_sdk::get_auth_claim().unwrap();
         match claim {
             AuthClaim::kSourceAddressAuthData {
                 source_address_claim,
@@ -31,7 +31,7 @@ impl AuthWeightTest for AuthWeightTestContract {
     }
 
     fn internal_write_weight_expect_readonly_reject() {
-        match sdk::set_address_required_weight(7) {
+        match thruput_sdk::set_address_required_weight(7) {
             Ok(()) => panic!("weight write succeeded in read-only frame"),
             Err(e) => assert!(
                 e == SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput
