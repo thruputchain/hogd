@@ -1,7 +1,7 @@
 #pragma once
 
-// Accessors for RetrocausalQueueDelta::consume, the boxed (#[cpp(box)])
-// RetrocausalQueueConsume union.
+// Accessors for RetrocausalQueueDelta::consume, the RetrocausalQueueConsume
+// union. Its status is inline; the kRcqConsume arm is boxed (#[cpp(box)]).
 
 #include <utility>
 
@@ -19,7 +19,7 @@ using RcqConsumedEntries =
 inline RetrocausalQueueConsumeStatus
 rcq_consume_status(RetrocausalQueueDelta const &delta)
 {
-  return delta.consume->status();
+  return delta.consume.status();
 }
 
 // Whether the transaction deleted or overwrote the key before using it as a
@@ -47,7 +47,7 @@ rcq_consume_delta(RetrocausalQueueDelta const &delta)
   if (rcq_consume_status(delta) != kRcqConsume) {
     return nullptr;
   }
-  return &delta.consume->delta();
+  return &*delta.consume.delta();
 }
 
 inline RetrocausalQueueConsumeDelta *
@@ -56,7 +56,7 @@ rcq_consume_delta(RetrocausalQueueDelta &delta)
   if (rcq_consume_status(delta) != kRcqConsume) {
     return nullptr;
   }
-  return &delta.consume->delta();
+  return &*delta.consume.delta();
 }
 
 // The current-block entries an explicit consume carries, or empty.
@@ -66,9 +66,9 @@ rcq_current_block_consumed(RetrocausalQueueDelta const &delta)
   static const RcqConsumedEntries kNone;
   switch (rcq_consume_status(delta)) {
   case kRcqConsume:
-    return delta.consume->delta().current_block_consumed;
+    return delta.consume.delta()->current_block_consumed;
   case kRcqReplaceConsume:
-    return delta.consume->current_block_consumed();
+    return delta.consume.current_block_consumed();
   default:
     return kNone;
   }
@@ -80,9 +80,9 @@ rcq_mutable_current_block_consumed(RetrocausalQueueDelta &delta)
 {
   switch (rcq_consume_status(delta)) {
   case kRcqConsume:
-    return delta.consume->delta().current_block_consumed;
+    return delta.consume.delta()->current_block_consumed;
   case kRcqReplaceConsume:
-    return delta.consume->current_block_consumed();
+    return delta.consume.current_block_consumed();
   default:
     panic("rcq_mutable_current_block_consumed: delta has no explicit consume");
   }
@@ -94,32 +94,32 @@ inline RetrocausalQueueConsume &
 rcq_set_consume_status(RetrocausalQueueDelta &delta,
                        RetrocausalQueueConsumeStatus status)
 {
-  auto old_status = delta.consume->status();
+  auto old_status = delta.consume.status();
   if (old_status == status) {
-    return *delta.consume;
+    return delta.consume;
   }
   RcqConsumedEntries carried;
   if (old_status == kRcqConsume) {
-    carried = std::move(delta.consume->delta().current_block_consumed);
+    carried = std::move(delta.consume.delta()->current_block_consumed);
   }
   else if (old_status == kRcqReplaceConsume) {
-    carried = std::move(delta.consume->current_block_consumed());
+    carried = std::move(delta.consume.current_block_consumed());
   }
-  delta.consume->status(status);
+  delta.consume.status(status);
   if (status == kRcqConsume) {
-    delta.consume->delta().current_block_consumed = std::move(carried);
+    delta.consume.delta()->current_block_consumed = std::move(carried);
   }
   else if (status == kRcqReplaceConsume) {
-    delta.consume->current_block_consumed() = std::move(carried);
+    delta.consume.current_block_consumed() = std::move(carried);
   }
-  return *delta.consume;
+  return delta.consume;
 }
 
 // Makes the delta an ordinary explicit consume and returns it.
 inline RetrocausalQueueConsumeDelta &
 rcq_set_consume(RetrocausalQueueDelta &delta)
 {
-  return rcq_set_consume_status(delta, kRcqConsume).delta();
+  return *rcq_set_consume_status(delta, kRcqConsume).delta();
 }
 
 } // namespace hogd
