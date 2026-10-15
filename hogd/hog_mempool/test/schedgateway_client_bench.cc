@@ -30,19 +30,18 @@
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "hogd/auth_claim/signature_preimage.h"
+#include "hogd/base/base58.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
-#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/init.h"
@@ -114,20 +113,12 @@ number(const char *s, int max)
 
 template<typename T>
 T
-hex_value(const json::Value &v)
+identifier_value(const json::Value &v)
 {
-  auto s = str(v);
-  if (s.starts_with("0x"))
-    s.erase(0, 2);
-  T result{};
-  require(s.size() == result.size() * 2 &&
-              s.find_first_not_of("0123456789abcdefABCDEF") ==
-                  std::string::npos,
-          "invalid manifest hex field");
-  auto bytes = decode_hex(s);
-  std::transform(bytes.begin(), bytes.end(), result.begin(),
-                 [](std::byte b) { return std::to_integer<uint8_t>(b); });
-  return result;
+  auto result = decode_base58_fixed<T{}.size()>(str(v));
+  if (!result)
+    throw std::runtime_error("invalid manifest base58 identifier");
+  return *result;
 }
 
 template<typename Service>
@@ -164,13 +155,13 @@ emit_manifest(const char *path, std::uint32_t accounts)
   require(accounts >= 2, "a run needs at least two accounts");
   std::string output;
   json::Writer(output).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{4});
+    w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "groundhog-bootstrap");
-    w.field("networkHash", std::string(64, '0'));
+    w.field("networkHash", format_network_hash(NetworkHash{}));
     w.field("profile", "local-dev");
     w.object_field("bootstrapFaucet", [&](json::Writer &w) {
       w.field("publicKey",
-              hex_string(
+              encode_base58(
                   derive_bootstrap_account_keypair(kBootstrapSeed, 0).first));
       w.field("initialStorageTokens",
               std::to_string(kLocalFaucetStorageTokens));
@@ -178,9 +169,10 @@ emit_manifest(const char *path, std::uint32_t accounts)
     w.array_field("bootstrapAccounts", [&](json::Writer &w) {
       for (std::uint32_t i = 1; i <= accounts; ++i) {
         w.object([&](json::Writer &w) {
-          w.field("publicKey",
-                  hex_string(derive_bootstrap_account_keypair(kBootstrapSeed, i)
-                                 .first));
+          w.field(
+              "publicKey",
+              encode_base58(
+                  derive_bootstrap_account_keypair(kBootstrapSeed, i).first));
           w.field("initialStorageTokens",
                   std::to_string(kDefaultLocalUserStorageTokens));
         });
@@ -217,13 +209,14 @@ accounts_from_manifest(const json::Value &manifest)
   for (const auto &account : allocations) {
     if (!is_local_user(account))
       continue;
-    auto public_key = hex_value<Ed25519PublicKey>(field(account, "publicKey"));
+    auto public_key =
+        identifier_value<Ed25519PublicKey>(field(account, "publicKey"));
     auto signer = signers.find(public_key);
     require(signer != signers.end(), "bootstrap account is not ours to sign");
-    accounts.push_back(
-        {.address = hex_value<ContractAddress>(field(account, "walletAddress")),
-         .public_key = public_key,
-         .secret = signer->second});
+    accounts.push_back({.address = identifier_value<ContractAddress>(
+                            field(account, "walletAddress")),
+                        .public_key = public_key,
+                        .secret = signer->second});
   }
   require(accounts.size() >= 2,
           "devnode must be bootstrapped from an emitted manifest of >= 2 "
@@ -497,7 +490,7 @@ run_benchmark(int argc, char **argv)
     if (hogd_init(argc, argv, false, LogLevel::kError))
       return 2;
     auto manifest = read_manifest(argv[1]);
-    require(field(manifest, "schemaVersion").as_integer() == 4 &&
+    require(field(manifest, "schemaVersion").as_integer() == 5 &&
                 str(field(manifest, "kind")) == "hogd-dev-runtime" &&
                 str(field(manifest, "chainState")) == "fresh",
             "requires a fresh hog-devnode runtime manifest");
