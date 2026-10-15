@@ -454,7 +454,7 @@ private:
   // Returns with [commit_guard] held, so results stay valid through admission.
   x23::Async<AuthErrorCodeBatch>
   verify_submission(const SignedTransactionBatch &txs,
-                    IngestionLockGuard &commit_guard);
+                    InstrumentedCoroGuard &commit_guard);
 
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,

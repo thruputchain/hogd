@@ -315,7 +315,7 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
 
 x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
-                                         IngestionLockGuard &commit_guard)
+                                         InstrumentedCoroGuard &commit_guard)
 {
   auto pending = std::make_shared<SubmissionAuth>();
   for (size_t i = 0; i < txs.size(); i++) {
@@ -407,7 +407,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
   auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
-  auto commit_guard = std::make_shared<IngestionLockGuard>(
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
@@ -689,7 +689,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    free up capacity.
   auto txs = std::make_shared<SignedTransactionBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
-  auto commit_guard = std::make_shared<IngestionLockGuard>(
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_vetted", default_threadpool());
@@ -1223,7 +1223,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
                                   cache.tx_hashes.end());
         {
-          IngestionLockGuard scheduler_guard(
+          InstrumentedCoroGuard scheduler_guard(
               MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
               MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
           co_await scheduler_guard(scheduler_->global_lock_);
@@ -1237,7 +1237,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
   nodes.start_nomination = dag.async<void>(
       "start scheduler nomination", std::move(scheduling_deps),
       [&, nomination_cleanup]() -> x23::Async<void> {
-        IngestionLockGuard scheduler_guard(
+        InstrumentedCoroGuard scheduler_guard(
             MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
             MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
         co_await scheduler_guard(scheduler_->global_lock_);
@@ -1257,7 +1257,7 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             co_return;
           }
           {
-            IngestionLockGuard scheduler_guard(
+            InstrumentedCoroGuard scheduler_guard(
                 MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
                 MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
             co_await scheduler_guard(scheduler_->global_lock_);
@@ -1934,7 +1934,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
 
     block_id = BlockIdGenerator::generate(BlockIdLane::kMempool);
     {
-      IngestionLockGuard scheduler_guard(
+      InstrumentedCoroGuard scheduler_guard(
           MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
           MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
       co_await scheduler_guard(scheduler_->global_lock_);
@@ -1957,7 +1957,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
                  DbSchedResult::DbSchedResultOK);
       }
       {
-        IngestionLockGuard scheduler_guard(
+        InstrumentedCoroGuard scheduler_guard(
             MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
             MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
         co_await scheduler_guard(scheduler_->global_lock_);
@@ -2945,7 +2945,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   auto nominated_guard = std::make_shared<x23::CoroGuard>();
   auto validated_guard = std::make_shared<x23::CoroGuard>();
-  auto commit_guard = std::make_shared<IngestionLockGuard>(
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().block_commit_lock_wait_seconds,
       MempoolMetrics::instance().block_commit_lock_hold_seconds);
   auto hog_age_guard = std::make_shared<x23::CoroGuard>();
@@ -3242,7 +3242,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
         if (commit_plan.committed_nominated) {
-          IngestionLockGuard cg(
+          InstrumentedCoroGuard cg(
               MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
               MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
           co_await cg(scheduler_->global_lock_);
@@ -3250,7 +3250,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         else {
           if (nominated_block_cache_.block_id) {
-            IngestionLockGuard cg(
+            InstrumentedCoroGuard cg(
                 MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
                 MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
             co_await cg(scheduler_->global_lock_);

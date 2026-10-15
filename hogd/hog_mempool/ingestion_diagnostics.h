@@ -26,18 +26,18 @@ ingestion_diagnostics_enabled()
   return enabled;
 }
 
-class IngestionLockGuard {
+class InstrumentedCoroGuard {
 public:
-  IngestionLockGuard(Metrics::Histogram &wait, Metrics::Histogram &hold)
+  InstrumentedCoroGuard(Metrics::Histogram &wait, Metrics::Histogram &hold)
     : wait_(wait), hold_(hold)
   {}
-  IngestionLockGuard(const IngestionLockGuard &) = delete;
-  IngestionLockGuard &operator=(const IngestionLockGuard &) = delete;
-  ~IngestionLockGuard() { reset(); }
+  InstrumentedCoroGuard(const InstrumentedCoroGuard &) = delete;
+  InstrumentedCoroGuard &operator=(const InstrumentedCoroGuard &) = delete;
+  ~InstrumentedCoroGuard() { reset(); }
   struct AwaitAcquire {
     decltype(std::declval<x23::CoroGuard &>()(
         std::declval<x23::CoroLock &>())) inner;
-    IngestionLockGuard &owner;
+    InstrumentedCoroGuard &owner;
     std::optional<ElapsedTimer> timer;
     bool await_ready() noexcept
     {
