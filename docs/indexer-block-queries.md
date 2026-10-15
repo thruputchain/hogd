@@ -67,4 +67,4 @@ There is no automatic in-place backfill or protocol migration in this change. Th
 
 ## Public API coordination
 
-The current public RPC maps block-lookup system errors to backend-unavailable, never not-found. Its zero limit selects the default. The separate native API proposal (thruput-tools #555) proposes rejecting zero before dispatch; adopting that rule requires an explicit public contract change. Cursor error improvements tracked by GH-428 must include this method as well as existing history methods. This implementation retains terminal empty pages for malformed cursors until that protocol change is adopted.
+The public RPC implementation in thruput-tools #557 maps block-lookup system errors to backend-unavailable, never not-found. Its new block-transaction method rejects zero before dispatch, aligning with the native API proposal (#555). The internal node method retains its zero-limit default; existing public pagination methods are unchanged. Cursor error improvements tracked by GH-428 must include this method as well as existing history methods. This implementation retains terminal empty pages for malformed cursors until that protocol change is adopted.
