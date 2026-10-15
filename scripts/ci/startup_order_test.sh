@@ -197,7 +197,7 @@ launch() {
     ;;
   hog-exec)
     spawn hog-exec "$HOG_EXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
-      --bind-ip "$IP" --nthreads 64 --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
+      --bind-ip "$IP" --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
       --metrics-port "$EXECUTOR_HTTP_PORT"
     ;;
   event)
