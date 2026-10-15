@@ -25,12 +25,8 @@ public:
     decltype(std::declval<x23::CoroGuard &>()(
         std::declval<x23::CoroLock &>())) inner;
     InstrumentedCoroGuard &owner;
-    std::optional<ElapsedTimer> timer;
-    bool await_ready() noexcept
-    {
-      timer.emplace();
-      return inner.await_ready();
-    }
+    ElapsedTimer timer;
+    bool await_ready() noexcept { return inner.await_ready(); }
     void await_suspend(x23::CoroHandle handle) const noexcept
     {
       inner.await_suspend(handle);
@@ -39,14 +35,14 @@ public:
     {
       inner.await_resume();
       owner.held_.emplace();
-      owner.wait_.record(timer->elapsed());
+      owner.wait_.record(timer.elapsed());
     }
   };
   // Forward the native awaiter instead of allocating an extra coroutine frame
   // on every lock acquisition.
   AwaitAcquire operator()(x23::CoroLock &lock)
   {
-    return {.inner = guard_(lock), .owner = *this, .timer = std::nullopt};
+    return {.inner = guard_(lock), .owner = *this, .timer = {}};
   }
   void reset()
   {
@@ -71,7 +67,7 @@ private:
 class IngestionInterval {
 public:
   explicit IngestionInterval(std::string_view phase, bool sample = false)
-    : phase_(phase), enabled_(true)
+    : phase_(phase)
   {
     if (sample) {
       static std::atomic<uint64_t> sequence{0};
@@ -99,7 +95,7 @@ private:
         .count();
   }
   std::string_view phase_;
-  bool enabled_;
+  bool enabled_ = true;
   int64_t start_ = 0;
   int64_t unix_start_ = 0;
 };
