@@ -849,6 +849,93 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   EXPECT_EQ(scheduler->size(), 0UL);
 }
 
+// Nothing compares [block_expiry_height] to [current_block()] on admission --
+// it appears only in the [TxKey] constructions -- so a tx that is already past
+// its expiry height is admitted like any other. It can never be scheduled,
+// because [schedule()] starts at [lower_bound{current_block()}] and the entry
+// sorts below that, so it sits on the runqueue occupying capacity until a sweep
+// reaches it.
+//
+// EXPECTED TO FAIL until expired txs are rejected on admission. This is the
+// first half of the run #2385 panic;
+// [ExpiredTxSweptOutOfTheCacheStrandsACommit] below is the half that aborts.
+TEST(Scheduler, ExpiredTxIsNotAdmitted)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+  const auto balance =
+      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit) * 2;
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/balance);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  // [lower_bound] is keyed on [current_block()], so 11 puts the tx strictly
+  // behind it. At 10 the tx is still live.
+  scheduler->set_current_block(11);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_NE(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
+// What the admitted expired tx above leads to, and the shape of the abort in
+// Combined Metrics run #2385:
+//
+//   CHECK FAILED: static_cast<const void *>(tx_value_ptr) != nullptr
+//   at .../hogd/hog_mempool/scheduler.cc:1454
+//
+// The sweep takes the runqueue entry and the cache entry together, so by the
+// time a block that still names the tx commits, the lookup at the top of
+// [remove_from_scheduler()]'s chunk loop finds nothing and panics.
+//
+// EXPECTED TO ABORT until the fix. No nomination, no resubmission and no
+// concurrency are involved.
+TEST(Scheduler, ExpiredTxSweptOutOfTheCacheStrandsACommit)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+  const auto balance =
+      static_cast<uint128_t>(txs[0].tx.invocation.gas_limit) * 2;
+
+  MempoolTestInfra server;
+  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
+                  /*num_hogs=*/balance);
+  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
+                  /*num_hogs=*/0);
+  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(11);
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+
+  // [schedule()] sweeps the expired entry: both the runqueue entry and the
+  // cache entry go, and [tx_cache_size_] is decremented for it.
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->find_tx(tx_hash), nullptr);
+
+  // A block naming the tx now commits. Today this aborts.
+  const TransactionHashBatch committed{tx_hash};
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+}
+
 // Same commit sequence as above, but the unaffordable tx is the account's
 // first: nomination schedules nothing for the account, excludes it, and leaves
 // the later affordable tx on the runqueue for a competing block to commit.
