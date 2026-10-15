@@ -383,9 +383,8 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     const AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                                retry_txs);
-    if (ingestion_diagnostics_enabled())
-      MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
-          auth_timer.elapsed());
+    MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
+        auth_timer.elapsed());
     if (submission_auth_test_hook_) {
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/true);

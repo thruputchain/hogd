@@ -214,9 +214,8 @@ transactions. Receipt latency includes polling and indexer delay.
 Service exits, setup faults, committed execution faults, and missing required
 diagnostics fail the run; overload outcomes remain recorded benchmark data.
 
-`HOGD_INGESTION_DIAGNOSTICS=1` enables lock wait/hold histograms and sampled
-same-host ingestion/block intervals. The runner enables it for every replay.
-Keep this setting identical in comparisons; logging and measurement have a cost.
+Lock wait/hold histograms, authentication timings, and sampled same-host
+ingestion/block intervals are always enabled. Logging and measurement have a cost.
 A single validator may not exercise validation RPCs, which the report marks as
 unexercised. Block overlap is correlation: inspect auth duration/retries and
 commit/scheduler lock wait distributions before attributing latency to locks.

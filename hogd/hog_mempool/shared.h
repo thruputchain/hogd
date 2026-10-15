@@ -341,37 +341,37 @@ MempoolMetrics::init()
 
   ingestion_commit_lock_wait_seconds =
       metrics.histogram(kComponent, "ingestion_commit_lock_wait_seconds",
-                        "Opt-in ingestion diagnostics: ingestion commit lock "
+                        "Ingestion diagnostics: ingestion commit lock "
                         "wait seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   ingestion_commit_lock_hold_seconds =
       metrics.histogram(kComponent, "ingestion_commit_lock_hold_seconds",
-                        "Opt-in ingestion diagnostics: ingestion commit lock "
+                        "Ingestion diagnostics: ingestion commit lock "
                         "hold seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   block_commit_lock_wait_seconds =
       metrics.histogram(kComponent, "block_commit_lock_wait_seconds",
-                        "Opt-in ingestion diagnostics: block commit lock wait "
+                        "Ingestion diagnostics: block commit lock wait "
                         "seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   block_commit_lock_hold_seconds =
       metrics.histogram(kComponent, "block_commit_lock_hold_seconds",
-                        "Opt-in ingestion diagnostics: block commit lock hold "
+                        "Ingestion diagnostics: block commit lock hold "
                         "seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   scheduler_global_lock_wait_seconds =
       metrics.histogram(kComponent, "scheduler_global_lock_wait_seconds",
-                        "Opt-in ingestion diagnostics: scheduler global lock "
+                        "Ingestion diagnostics: scheduler global lock "
                         "wait seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   scheduler_global_lock_hold_seconds =
       metrics.histogram(kComponent, "scheduler_global_lock_hold_seconds",
-                        "Opt-in ingestion diagnostics: scheduler global lock "
+                        "Ingestion diagnostics: scheduler global lock "
                         "hold seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   ingestion_auth_rpc_seconds =
       metrics.histogram(kComponent, "ingestion_auth_rpc_seconds",
-                        "Opt-in ingestion diagnostics: ingestion auth rpc "
+                        "Ingestion diagnostics: ingestion auth rpc "
                         "seconds. Aggregate across callers.",
                         latency_bounds(kMempoolWorkLatencyBounds));
   ingestion_auth_retry_count = metrics.per_thread_counter(

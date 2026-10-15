@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstdlib>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -14,18 +13,6 @@
 #include "x23/corosync.h"
 
 namespace hogd {
-// Opt-in: timestamps and extra histogram updates affect benchmark overhead.
-// Keep the setting identical for paired runs and record it with the artifacts.
-inline bool
-ingestion_diagnostics_enabled()
-{
-  static const bool enabled = [] {
-    const char *value = std::getenv("HOGD_INGESTION_DIAGNOSTICS");
-    return value && std::string_view(value) == "1";
-  }();
-  return enabled;
-}
-
 class InstrumentedCoroGuard {
 public:
   InstrumentedCoroGuard(Metrics::Histogram &wait, Metrics::Histogram &hold)
@@ -41,8 +28,7 @@ public:
     std::optional<ElapsedTimer> timer;
     bool await_ready() noexcept
     {
-      if (ingestion_diagnostics_enabled())
-        timer.emplace();
+      timer.emplace();
       return inner.await_ready();
     }
     void await_suspend(x23::CoroHandle handle) const noexcept
@@ -52,14 +38,12 @@ public:
     void await_resume()
     {
       inner.await_resume();
-      if (timer) {
-        owner.held_.emplace();
-        owner.wait_.record(timer->elapsed());
-      }
+      owner.held_.emplace();
+      owner.wait_.record(timer->elapsed());
     }
   };
   // Forward the native awaiter instead of allocating an extra coroutine frame
-  // on every lock acquisition when diagnostics are disabled.
+  // on every lock acquisition.
   AwaitAcquire operator()(x23::CoroLock &lock)
   {
     return {.inner = guard_(lock), .owner = *this, .timer = std::nullopt};
@@ -87,9 +71,9 @@ private:
 class IngestionInterval {
 public:
   explicit IngestionInterval(std::string_view phase, bool sample = false)
-    : phase_(phase), enabled_(ingestion_diagnostics_enabled())
+    : phase_(phase), enabled_(true)
   {
-    if (enabled_ && sample) {
+    if (sample) {
       static std::atomic<uint64_t> sequence{0};
       enabled_ = sequence.fetch_add(1, std::memory_order_relaxed) % 64 == 0;
     }

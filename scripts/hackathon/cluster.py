@@ -169,7 +169,7 @@ class Cluster:
         self.stage(config, self.hosts["coordinator"], config)
         binary = lambda name: a.build / BINS[name]
         network = "0" * 63 + "1"
-        self.start("mempool", ["env", "HOGD_INGESTION_DIAGNOSTICS=1", binary("mempool"), "--bind-ip", self.ips[self.hosts["mempool"]], "--network-hash", network, "--num-db-shards", "1", "--num-exec-shards", "2", "--coordinator-port", "8070", "--executor-port", "8071", "--db-port", "8072", "--event-port", "8073", "--auth-port", "8074", "--metrics-port", "8075", "--gateway-port", "8076"])
+        self.start("mempool", [binary("mempool"), "--bind-ip", self.ips[self.hosts["mempool"]], "--network-hash", network, "--num-db-shards", "1", "--num-exec-shards", "2", "--coordinator-port", "8070", "--executor-port", "8071", "--db-port", "8072", "--event-port", "8073", "--auth-port", "8074", "--metrics-port", "8075", "--gateway-port", "8076"])
         self.wait_log("mempool", "PORT mempool.db=8072")
         self.start("db", [binary("db"), "--db-path", d / "state/db", "--ram-bytes", "10000000000", "--bind-ip", self.ips[self.hosts["db"]], "--coordinator-addr", addr("mempool",8072), "--executor-port", "8080", "--mempool-port", "8081", "--auth-port", "8082", "--metrics-port", "8083", "--gateway-port", "8084"])
         self.wait_log("mempool", "PORT mempool.auth=8074")
