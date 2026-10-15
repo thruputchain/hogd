@@ -667,37 +667,31 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // delete a newly published cache entry while this submission waits for the
   // account lock, leaving the caller with an admitted outcome for an absent tx.
   //
-  // The tx may already exist in [txs_] because it is okay to add a tx back
-  // into the scheduler again. This can happen if the tx was originally added
-  // to the scheduler, then removed during nomination by [schedule()], and a
-  // different validated block was committed instead.
+  // A cached tx may already have been scheduled by the pending nomination.
+  // Resubmission must not put it back on the runqueue: another scheduling
+  // chunk could otherwise attempt it again and append its hash twice to the
+  // nomination's commit cleanup. Abandoned nominations explicitly restore
+  // their transactions through [reenqueue_txs()].
   const auto [tx_ptr, txs_lock, inserted] =
       txs_.find_or_insert(tx_hash,
                           std::make_shared<TxValue>(TxValue{.tx = tx}));
   CHECK_PTR(tx_ptr);
-  if (inserted) {
-    // [txs_.find_or_insert()] acquires a lock, so the increment to
-    // [tx_cache_size_] happens after the tx is added to [txs_] from the
-    // perspective of anyone accessing the tx in [txs_].
-    tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
+  if (!inserted) {
+    return false;
   }
+  // [txs_.find_or_insert()] acquires a lock, so the increment to
+  // [tx_cache_size_] happens after the tx is added to [txs_] from the
+  // perspective of anyone accessing the tx in [txs_].
+  tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
-Scheduler::is_pending(const SignedTransaction &tx,
+Scheduler::is_pending(const SignedTransaction & /*tx*/,
                       const TransactionHash &tx_hash)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{
-      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-      .tx_hash = tx_hash,
-  };
-  const auto [account_state, lock] = accounts_.find(account);
-  if (account_state == nullptr) {
-    return false;
-  }
-  return account_state->txs.contains(key);
+  const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+  return tx_value_ptr != nullptr;
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
@@ -1439,19 +1433,16 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
           size_t num_removed_from_runqueue = 0;
           for (const TransactionHash &tx_hash : hash_chunk) {
-            // Even if the *nominated* block is being committed and thus the txs
-            // have been removed from the runqueue, it is possible that the
-            // coordinator called [submit_unvetted()/submit_vetted()] and passed
-            // the same txs to the mempool again, resulting in the txs being
-            // added back onto the runqueue. Thus, we need to check if the txs
-            // are on the runqueue and remove them. We cannot skip this step and
-            // just remove txs from [txs_], even if the *nominated* block is
-            // being committed rather than a *validated* block.
+            // Cleanup may repeat a hash or refer to a transaction already
+            // evicted locally. A validated block owns its transaction data
+            // independently of this cache.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
                   scheduler.txs_.find(tx_hash);
-              CHECK_PTR(tx_value_ptr);
+              if (!tx_value_ptr) {
+                continue;
+              }
               tx_value = *tx_value_ptr;
             }
 
@@ -1463,6 +1454,14 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             {
               auto [account_state, account_lock] =
                   scheduler.get_account_state(account);
+              // Two removal workers can both complete the first lookup before
+              // either acquires the account lock. Recheck in account-then-cache
+              // order and retain both locks through the counter update/erase.
+              const auto [cached_value, txs_lock] =
+                  scheduler.txs_.find(tx_hash);
+              if (!cached_value) {
+                continue;
+              }
               std::map<TxKey, std::shared_ptr<TxValue>> &txs =
                   account_state->txs;
               // The tx may or may not be on the runqueue. If the tx is included
@@ -1473,14 +1472,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
-              // Keep the account locked until the cache entry is gone, so a
-              // concurrent resubmit cannot restore only the runqueue entry.
-              //
-              // [txs_.remove()] acquires a lock, so the subtraction from
-              // [tx_cache_size_] happens before the tx is removed from [txs_]
-              // from the perspective of anyone accessing the tx in [txs_].
+              // Update the counter while the cache is locked, and erase with
+              // that same lock so a duplicate removal cannot decrement twice.
               scheduler.tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+              CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
             }
           }
 
