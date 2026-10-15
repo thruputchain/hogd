@@ -7,7 +7,8 @@ namespace hogd
 // clang-format on
 
 // Private indexer storage. The database's block-query format marker gates
-// decoding by format version and exact protocol token.
+// decoding by storage format version, including ConsensusValue encoding.
+// Wire protocol pin changes alone do not change this storage version.
 struct BlockQueryRecord {
   ConsensusValue value;
   unsigned hyper transaction_count;
