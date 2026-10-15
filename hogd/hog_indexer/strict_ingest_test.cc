@@ -13,6 +13,8 @@
 #include <optional>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/perf_level.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -948,6 +950,56 @@ TEST_F(StrictIndexerTest, BlockPagesResumeAcrossRestartAndChainAdvance)
   }
   EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockDuplicate);
+}
+
+TEST_F(StrictIndexerTest, BlockPageIteratorWorkIgnoresUnrelatedHistory)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  auto previous = origin.first_prev_hash;
+  for (int64_t height = 1; height <= 3; ++height) {
+    ProposedTransactionBatch bodies;
+    const uint64_t count = height == 2 ? 4 : 1024;
+    for (uint64_t i = 0; i < count; ++i) {
+      bodies.push_back(make_body(static_cast<uint64_t>(height) * 10000 + i,
+                                 static_cast<uint8_t>(height)));
+    }
+    const auto block = make_block(height, previous, bodies);
+    ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockApplied);
+    previous = block.identity.consensus_hash;
+  }
+
+  struct RestorePerfLevel {
+    rocksdb::PerfLevel previous = rocksdb::GetPerfLevel();
+    ~RestorePerfLevel() { rocksdb::SetPerfLevel(previous); }
+  } restore;
+  rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    BlockTransactionQuery query{};
+    query.height = 2;
+    query.order = order;
+    query.limit = 1;
+    for (unsigned i = 0; i < 4; ++i) {
+      auto *perf = rocksdb::get_perf_context();
+      perf->Reset();
+      const auto page = db_->get_transactions_by_block(query);
+      const auto iterator_steps =
+          perf->iter_seek_count + perf->iter_next_count + perf->iter_prev_count;
+      ASSERT_TRUE(page);
+      ASSERT_EQ(page->refs.size(), 1);
+      EXPECT_EQ(page->refs.front().height, 2);
+      // Count iterator movement, not elapsed time. A page seeks to its row or
+      // anchor and advances only to its row and lookahead. Scanning either
+      // adjacent block's 1024 references would exceed this fixed budget.
+      EXPECT_GT(iterator_steps, 0);
+      EXPECT_LE(iterator_steps, 3);
+      query.cursor = page->cursor;
+      EXPECT_EQ(query.cursor.empty(), i == 3);
+    }
+  }
 }
 
 TEST_F(StrictIndexerTest, ContinuationWaitsForReplacementIndexToCatchUp)
