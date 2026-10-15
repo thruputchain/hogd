@@ -4,7 +4,11 @@
 # what was launched on that host, and still fail.
 set -euo pipefail
 
-HELPERS="$(dirname "$(readlink -f "$0")")/wait_port_report.sh"
+HELPER_DIR="$(dirname "$(readlink -f "$0")")"
+HELPERS="$HELPER_DIR/wait_port_report.sh"
+# wait_port_report.sh replays panic reports through [ci_panic_report_program],
+# which its callers get from the harness; the stubs below stand in for the rest.
+HARNESS="$HELPER_DIR/bench_harness.sh"
 fail=0
 
 expect_status() {
@@ -45,6 +49,7 @@ run_case() {
   bash -c "
 set -Eeuo pipefail
 declare -a CONTROL_LOG_RECORDS=()
+. '$HARNESS'
 . '$HELPERS'
 hog_ip() { printf '10.100.0.%s\n' \"\${1#hog}\"; }
 ci_wait_port() {
@@ -52,6 +57,10 @@ ci_wait_port() {
 }
 remote_run() {
   [ \"\${REMOTE_RUN_FAILS:-0}\" != 1 ] || { echo 'ssh: closed' >&2; return 255; }
+  # Naming the command is enough for the cases that only check what was asked
+  # of the host. The panic replay has to read a real file to mean anything, so
+  # those cases run the command instead.
+  [ \"\${REMOTE_RUN_EXEC:-0}\" != 1 ] || { bash -c \"\$2\"; return; }
   echo \"REMOTE(\$1): \$2\"
 }
 record() { CONTROL_LOG_RECORDS+=(\"\$1|\$2|\$3|\$4\"); }
@@ -155,5 +164,45 @@ expect_contains 'log milestone timeout names the process' \
   'waiting for node0_mempool to report: PORT mempool.executor=8071' "$out"
 expect_contains 'log milestone timeout replays logs' \
   'node0_mempool on hog7' "$out"
+
+# An x23 panic prints its report and then dumps every live file descriptor and
+# thread, so the tail of a crashed process's log is all dump and no reason.
+# The replay names the assertion anyway.
+crash_log="$(mktemp)"
+trap 'rm -f "$crash_log"' EXIT
+{
+  echo 'I[1015 00:12:00 mempool.cc:12] mempool initialization complete.'
+  echo 'hog-mempool:PANIC: x23assert failure: !*oldwi'
+  echo '  in /tmp/hogjob-hogci/release/hogd/hog_mempool/hog-mempool'
+  echo '  function docb'
+  echo '  at  x23/x23/event_impl_epoll.cc:78'
+  seq 1 500 | sed 's/^/  fd /;s/$/, mode 1, ready 4/'
+} >"$crash_log"
+
+out=$(REMOTE_RUN_EXEC=1 CRASH_LOG="$crash_log" run_case '
+record hog11 node1_mempool /tmp/mempool.out "$CRASH_LOG"
+replay_control_log_for_label node1_mempool
+echo REACHED
+') && status=0 || status=$?
+expect_status 'panic replay' 0 "$status"
+expect_contains 'panic replay has its own header' \
+  'panic report from node1_mempool on hog11' "$out"
+expect_contains 'panic replay names the assertion' \
+  'x23assert failure: !*oldwi' "$out"
+expect_contains 'panic replay names the source line' \
+  'event_impl_epoll.cc:78' "$out"
+expect_contains 'panic replay runs on' 'REACHED' "$out"
+
+# A process that died without panicking must read exactly as it did before.
+quiet_log="$(mktemp)"
+printf 'I[1015 00:12:00 mempool.cc:12] mempool initialization complete.\n' \
+  >"$quiet_log"
+out=$(REMOTE_RUN_EXEC=1 QUIET_LOG="$quiet_log" run_case '
+record hog11 node1_mempool /tmp/mempool.out "$QUIET_LOG"
+replay_control_log_for_label node1_mempool
+') && status=0 || status=$?
+rm -f "$quiet_log"
+expect_status 'replay without a panic' 0 "$status"
+expect_lacks 'replay without a panic adds no header' 'panic report from' "$out"
 
 exit "$fail"

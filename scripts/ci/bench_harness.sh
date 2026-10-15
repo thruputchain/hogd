@@ -13,6 +13,11 @@ CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 CI_BENCH_LOG_DIR=${CI_BENCH_LOG_DIR:-bench_logs}
 CI_BENCH_FAIL_TAIL_LINES=${CI_BENCH_FAIL_TAIL_LINES:-400}
 
+# How much of an x23 panic report to replay. The report is the message, the
+# source location, the command line and the stack trace -- tens of lines, not
+# hundreds -- and the cap is what keeps the dump that follows it out.
+CI_PANIC_REPORT_LINES=${CI_PANIC_REPORT_LINES:-40}
+
 # "<step name>:<exit status>" for each step that [ci_run_bench_step] saw fail.
 declare -a CI_FAILED_BENCH_STEPS=()
 
@@ -74,6 +79,69 @@ ci_run_bench_step() {
   return 0
 }
 
+# Emits a program that prints the x23 panic reports in the log at $1, each
+# capped at $2 lines. Written as a program rather than run directly because the
+# log it has to read is as often on a remote host as it is on this one.
+#
+# A panic prints its report and then raises SIGUSR1, whose handlers dump every
+# live file descriptor and every thread before the process aborts. On a mempool
+# under load that dump runs to thousands of lines, so any tail of the log lands
+# wholly inside it: the step is reported as "killed by signal 6: SIGABRT" and
+# the report that says which assertion failed is nowhere in the job log. Pull
+# it back out by name instead of tailing harder, which only trades one
+# arbitrary window for another.
+#
+# A log that merges several processes prefixes each line with
+# "[host label stream] ", and the report's lines are interleaved with whatever
+# the processes that are still alive were saying at the time. A report is
+# therefore continued by the lines that share the prefix of its first line;
+# lines carrying any other prefix are stepped over rather than counted against
+# the cap. The cap is a line count rather than the start of the dump, which has
+# no marker that holds across binaries, so a few lines of dump ride along at
+# the end of each report.
+ci_panic_report_program() {
+  cat <<EOF
+awk -v limit=$2 '
+{
+  if (match(\$0, /^\[[^]]*\] /))
+    prefix = substr(\$0, 1, RLENGTH)
+  else
+    prefix = ""
+}
+in_report && prefix == want {
+  if (++n > limit)
+    in_report = 0
+  else
+    print
+  next
+}
+!in_report && index(\$0, ":PANIC: ") {
+  in_report = 1
+  want = prefix
+  n = 1
+  print
+}
+' $1
+EOF
+}
+
+# Replays the x23 panic reports in the local log at $1, if it has any, under a
+# header of their own. Silent for a log without a panic in it, so that a step
+# that failed some other way reads exactly as it did before.
+ci_replay_panic_reports() {
+  local log=$1
+  local quoted_log reports
+
+  printf -v quoted_log '%q' "$log"
+  reports=$(bash -c \
+    "$(ci_panic_report_program "$quoted_log" "$CI_PANIC_REPORT_LINES")" \
+    2>/dev/null) || true
+  [ -n "$reports" ] || return 0
+
+  echo "===== panic reports in $log ====="
+  printf '%s\n' "$reports"
+}
+
 # Names every failed step with its exit status and replays the tail of each
 # failed step's captured log, so the failure lands in the part of the job log
 # that survives. Returns 0 when every step passed and 1 otherwise.
@@ -103,6 +171,9 @@ ci_report_failed_bench_steps() {
     echo "===== last $CI_BENCH_FAIL_TAIL_LINES lines of $log ====="
     if [ -f "$log" ]; then
       tail -n "$CI_BENCH_FAIL_TAIL_LINES" "$log" || true
+      # After the tail, so that the one thing a crashed step has to say is the
+      # last thing the job log says about it.
+      ci_replay_panic_reports "$log"
     else
       echo "(no captured log at $log)"
     fi
