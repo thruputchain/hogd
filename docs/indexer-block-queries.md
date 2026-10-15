@@ -45,7 +45,7 @@ The query index does not prune history today. Any future pruning must update met
 
 ## Existing databases and protocol changes
 
-The format marker is first written during strict epoch initialization. Older strict-ingestion databases have no marker and cannot prove that the new stores contain their earlier history. Opening one with this binary fails with a migration-required error. No new projection is silently created above an old watermark.
+The format marker is first written during fresh strict epoch initialization. Older strict-ingestion databases have no marker and cannot prove that the new stores contain their earlier history. They remain available for existing reads and ingestion, but block queries report not-ready until a separate rebuild completes. Continued ingestion does not add the missing marker or claim complete block coverage. An incompatible marker still requires migration before opening.
 
 The marker versions the stored layout and consensus-value encoding, independently of the wire protocol token. A protocol pin change alone does not require a rebuild. An incompatible storage or consensus-value encoding change must bump this marker and provide a verified rebuild or migration. Per-row hash checks detect corruption; they do not replace storage compatibility review.
 

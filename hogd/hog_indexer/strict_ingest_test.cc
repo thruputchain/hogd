@@ -331,6 +331,12 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   IndexerCommittedBlock second = make_block(2, first.identity.consensus_hash);
   EXPECT_EQ(reopened->apply_committed_block(second_origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto historical = reopened->get_block_by_height(1);
+  ASSERT_TRUE(historical && historical->has_value());
+  EXPECT_EQ(sha256(**historical), first.identity.consensus_hash);
+  auto current = reopened->get_block_by_height(2);
+  ASSERT_TRUE(current && current->has_value());
+  EXPECT_EQ(sha256(**current), second.identity.consensus_hash);
 }
 
 TEST_F(StrictIndexerTest, DifferentOriginCannotSupersedeUnusedEpochAcrossReopen)
@@ -1056,7 +1062,7 @@ TEST_F(StrictIndexerTest, BlockQueryFormatChangeRequiresExplicitRebuild)
   EXPECT_EQ(incompatible.error().code(), IndexerErrorCode::kMigrationRequired);
 }
 
-TEST_F(StrictIndexerTest, OldStrictIndexRequiresRebuildAndSourceCanReplay)
+TEST_F(StrictIndexerTest, OldStrictIndexRemainsAvailableWhileSourceCanReplay)
 {
   const auto origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
@@ -1071,8 +1077,20 @@ TEST_F(StrictIndexerTest, OldStrictIndexRequiresRebuildAndSourceCanReplay)
   overwrite_column_family(path_, rocksdb::kDefaultColumnFamilyName,
                           IndexerKeyFormat::kBlockQueryFormatKey, std::nullopt);
   auto old = IndexDB::open(path_);
-  ASSERT_FALSE(old);
-  EXPECT_EQ(old.error().code(), IndexerErrorCode::kMigrationRequired);
+  ASSERT_TRUE(old);
+  ASSERT_TRUE(old->latest_block());
+  EXPECT_EQ(*old->latest_block(), 1);
+  auto unavailable = old->get_block_by_height(1);
+  ASSERT_FALSE(unavailable);
+  EXPECT_EQ(unavailable.error().code(), IndexerErrorCode::kQueryNotReady);
+  const auto next = make_block(2, block.identity.consensus_hash);
+  EXPECT_EQ(old->apply_committed_block(origin, next)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_TRUE(old->latest_block());
+  EXPECT_EQ(*old->latest_block(), 2);
+  unavailable = old->get_block_by_height(2);
+  ASSERT_FALSE(unavailable);
+  EXPECT_EQ(unavailable.error().code(), IndexerErrorCode::kQueryNotReady);
   const auto rebuilt_path = path_.parent_path() / "rebuilt";
   {
     auto rebuilt = IndexDB::make_new(rebuilt_path);

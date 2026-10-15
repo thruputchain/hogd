@@ -1668,13 +1668,12 @@ IndexDB::initialize_progress_from_db()
       db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
                std::string(IndexerKeyFormat::kBlockQueryFormatKey),
                &query_format);
-  if (format_status.IsNotFound() ||
-      (format_status.ok() && query_format != block_query_format())) {
+  if (format_status.ok() && query_format != block_query_format()) {
     error("indexer block query format requires a rebuild into a separate "
           "directory; keep the existing database intact");
     return IndexerError(IndexerErrorCode::kMigrationRequired);
   }
-  if (!format_status.ok()) {
+  if (!format_status.ok() && !format_status.IsNotFound()) {
     error("failed to read indexer block query format: {}",
           format_status.ToString());
     return IndexerError(IndexerErrorCode::kInternal);
