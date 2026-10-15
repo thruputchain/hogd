@@ -1,5 +1,6 @@
 #include "hogd/hog_indexer/db.h"
 
+#include <atomic>
 #include <bit>
 #include <cstring>
 #include <exception>

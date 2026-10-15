@@ -332,11 +332,21 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   EXPECT_EQ(reopened->apply_committed_block(second_origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   auto historical = reopened->get_block_by_height(1);
-  ASSERT_TRUE(historical && historical->has_value());
-  EXPECT_EQ(sha256(**historical), first.identity.consensus_hash);
+  ASSERT_TRUE(historical);
+  if (const auto &value = *historical; value.has_value()) {
+    EXPECT_EQ(sha256(*value), first.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "historical block is missing after protocol transition";
+  }
   auto current = reopened->get_block_by_height(2);
-  ASSERT_TRUE(current && current->has_value());
-  EXPECT_EQ(sha256(**current), second.identity.consensus_hash);
+  ASSERT_TRUE(current);
+  if (const auto &value = *current; value.has_value()) {
+    EXPECT_EQ(sha256(*value), second.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "current block is missing after protocol transition";
+  }
 }
 
 TEST_F(StrictIndexerTest, DifferentOriginCannotSupersedeUnusedEpochAcrossReopen)
