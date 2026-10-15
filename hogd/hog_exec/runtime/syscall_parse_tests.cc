@@ -266,8 +266,7 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   }
 
   AuthClaim claim(AuthClaimType::kPubkeySignature);
-  claim.pubkey_preimage().pubkey.scheme(CryptographicScheme::Ed25519);
-  claim.pubkey_preimage().pubkey.ed25519().fill(0x11);
+  claim.pubkey_preimage().pubkey_hash.fill(0x11);
   claim.pubkey_preimage().nonce = 0x2222222222222222ULL;
 
   {
@@ -280,15 +279,11 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   for (size_t i = sizeof(generated::AuthClaim::Tag); i < 8; i++) {
     EXPECT_EQ(memory[i], 0) << "reserved byte " << i << " reached the contract";
   }
-  // The payload itself survives.
-  EXPECT_EQ(memory[8], 0); // nested PublicKey tag: Ed25519
-  EXPECT_EQ(memory[12], 0x11);
-  EXPECT_EQ(memory[43], 0x11);
-  // The reserved gap before nonce.
-  for (size_t i = 44; i < 48; i++) {
-    EXPECT_EQ(memory[i], 0) << "reserved byte " << i << " reached the contract";
-  }
-  EXPECT_EQ(memory[48], 0x22);
+  // The payload itself survives: the 32-byte key hash, then the nonce.
+  EXPECT_EQ(memory[8], 0x11);
+  EXPECT_EQ(memory[39], 0x11);
+  EXPECT_EQ(memory[40], 0x22);
+  EXPECT_EQ(memory[47], 0x22);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

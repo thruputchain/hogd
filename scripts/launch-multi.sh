@@ -242,7 +242,7 @@ remote_launch "$loadgen_server" "$LOADGEN_BINARY" --bind-ip "$(hog_ip "$loadgen_
 # Start hog-exec.
 echo "Start hog-exec..."
 for s in "${hog_exec_servers[@]}"; do
-  remote_launch "$s" "$HOG_EXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+  remote_launch "$s" "$HOG_EXEC_BINARY" --coordinator-addr "$(hog_ip "$mempool_server")":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip "$s")" --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 done
 
 # Start event.

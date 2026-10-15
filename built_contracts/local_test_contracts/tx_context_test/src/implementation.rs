@@ -1,14 +1,14 @@
 use crate::TxContextTest;
-use sdk::sys;
-use sdk::transaction::TransactionStatistic;
-use sdk::*;
+use thruput_sdk::sys;
+use thruput_sdk::transaction::TransactionStatistic;
+use thruput_sdk::*;
 
 pub struct TxContextTestContract;
 
 #[contract]
 impl TxContextTest for TxContextTestContract {
     fn get_source_tx_hash() -> SHA256Hash {
-        sdk::get_source_transaction_hash()
+        thruput_sdk::get_source_transaction_hash()
     }
 
     fn get_block_height() -> i64 {
@@ -28,11 +28,11 @@ impl TxContextTest for TxContextTestContract {
     }
 
     fn internal_get_source_tx_hash() -> SHA256Hash {
-        sdk::get_source_transaction_hash()
+        thruput_sdk::get_source_transaction_hash()
     }
 
     fn test_source_tx_hash_in_child(target: &ContractAddress) {
-        let root_view = sdk::get_source_transaction_hash();
+        let root_view = thruput_sdk::get_source_transaction_hash();
         let child_view = crate::Client::new(target).internal_get_source_tx_hash();
         assert!(root_view == child_view);
         assert!(root_view != SHA256Hash::from([0u8; 32]));

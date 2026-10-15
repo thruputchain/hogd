@@ -3,8 +3,8 @@
 
 #![no_std]
 
-pub use groundhog_erc20_if as interface;
-pub use groundhog_erc20_permit_if as permit_interface;
+pub use thruput_erc20_if as interface;
+pub use thruput_erc20_permit_if as permit_interface;
 
 pub use interface::{ERC20, ERC20Client};
 pub use permit_interface::{ERC20Permit, ERC20PermitClient};

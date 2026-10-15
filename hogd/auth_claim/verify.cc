@@ -16,6 +16,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/crypto/mldsa.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -83,6 +84,47 @@ has_public_key(const AddressAuthData &auth_data, size_t idx)
   return idx < auth_data.public_keys.size() && auth_data.public_keys[idx];
 }
 
+// Verifies sig on signature_preimage under key. Ed25519 signatures go to
+// signature_verifier, when there is one, to be checked as a batch later;
+// ML-DSA has no batch verification, so ML-DSA signatures are checked here.
+// A signature of a different scheme than the key never verifies.
+AuthVerifyStatus<void>
+verify_signature(const PublicKey &key, const Signature &sig,
+                 x23::BufView signature_preimage,
+                 Ed25519SignatureVerifier *signature_verifier)
+{
+  if (key.scheme() != sig.scheme()) {
+    trace("Signature verification failed: signature scheme {} does not match "
+          "key scheme {}",
+          sig.scheme(), key.scheme());
+    return AuthVerifyError{AuthVerifyErrorCode::kSignatureVerificationFailed};
+  }
+
+  bool ok = false;
+  switch (key.scheme()) {
+  case CryptographicScheme::Ed25519:
+    if (signature_verifier) {
+      signature_verifier->add_signature(key.ed25519(), sig.ed25519(),
+                                        signature_preimage);
+      return {};
+    }
+    ok = ed25519_verify(key.ed25519(), sig.ed25519(), signature_preimage);
+    break;
+  case CryptographicScheme::MlDsa65:
+    // The preimage is already domain-separated, so the context is empty.
+    ok = mldsa65_verify(*key.mldsa65(), *sig.mldsa65(), signature_preimage);
+    break;
+  default:
+    warn("Unsupported cryptographic scheme: {}", key.scheme());
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (!ok) {
+    trace("Signature verification failed");
+    return AuthVerifyError{AuthVerifyErrorCode::kSignatureVerificationFailed};
+  }
+  return {};
+}
+
 AuthVerifyStatus<void>
 verify_decorated_signature(const DecoratedSignature &dec_sig,
                            const AddressAuthData &auth_data,
@@ -94,28 +136,8 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
   const PublicKeyConfigOpt &pk = auth_data.public_keys[dec_sig.public_key_id];
   assert(pk);
 
-  switch (pk->key.scheme()) {
-  case CryptographicScheme::Ed25519:
-  {
-    if (signature_verifier) {
-      signature_verifier->add_signature(pk->key.ed25519(),
-                                        dec_sig.signature.ed25519(),
-                                        signature_preimage);
-      return {};
-    }
-    auto r = ed25519_verify(pk->key.ed25519(), dec_sig.signature.ed25519(),
-                            signature_preimage);
-    if (!r) {
-      trace("Signature verification failed");
-    }
-    return r ? AuthVerifyStatus<void>{}
-             : AuthVerifyError{
-                   AuthVerifyErrorCode::kSignatureVerificationFailed};
-  }
-  default:
-    warn("Unsupported cryptographic scheme: {}", pk->key.scheme());
-    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
-  }
+  return verify_signature(pk->key, dec_sig.signature, signature_preimage,
+                          signature_verifier);
 }
 
 enum class VerificationType {
@@ -192,9 +214,14 @@ verify_weight_key_claim_internal(
 // public key, for an account whose address is the hash of the pubkey
 // preimage and which has no AddressAuthData registered onchain (that
 // precondition is enforced by the caller, which has the DB data).
+//
+// The preimage names the key by its hash; key is the one the signed
+// transaction attaches (SignedTransaction::pubkey_claim_key), or nullptr if
+// it attaches none.
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
+                             const PublicKey *key,
                              const ContractAddress &invoked_address,
                              const x23::Vec<const DecoratedSignature *> &sigs,
                              x23::BufView signature_preimage,
@@ -210,9 +237,24 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
           kDefaultNewAddressKeyID);
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  if (preimage.pubkey.scheme() != CryptographicScheme::Ed25519 ||
-      sig.signature.scheme() != CryptographicScheme::Ed25519) {
-    warn("Unsupported cryptographic scheme: {}", preimage.pubkey.scheme());
+  if (key == nullptr) {
+    trace("Auth malformed: pubkey claim without its public key");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (key->scheme() != sig.signature.scheme()) {
+    trace("Auth malformed: pubkey claim signature scheme {} does not match "
+          "key scheme {}",
+          sig.signature.scheme(), key->scheme());
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  std::optional<PublicKeyHash> key_hash = public_key_hash(*key);
+  if (!key_hash.has_value()) {
+    trace("Auth malformed: failed to serialize pubkey claim key");
+    return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+  }
+  if (*key_hash != preimage.pubkey_hash) {
+    trace("Auth malformed: pubkey claim key does not match the claimed "
+          "pubkey hash");
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
   std::optional<ContractAddress> derived_address =
@@ -228,17 +270,8 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
   }
 
   if constexpr (verify_signatures(VerfType)) {
-    if (signature_verifier) {
-      signature_verifier->add_signature(preimage.pubkey.ed25519(),
-                                        sig.signature.ed25519(),
-                                        signature_preimage);
-      return {};
-    }
-    if (!ed25519_verify(preimage.pubkey.ed25519(), sig.signature.ed25519(),
-                        signature_preimage)) {
-      trace("Signature verification failed");
-      return AuthVerifyError{AuthVerifyErrorCode::kSignatureVerificationFailed};
-    }
+    return verify_signature(*key, sig.signature, signature_preimage,
+                            signature_verifier);
   }
   return {};
 }
@@ -246,6 +279,7 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
+                           PublicKey const *pubkey_claim_key,
                            ContractAddress const &invoked_address,
                            x23::Vec<DecoratedSignature const *> const &sigs,
                            const AddressAuthData *auth_data,
@@ -254,6 +288,10 @@ verify_auth_claim_internal(AuthClaim const &claim,
 {
   switch (claim.claim_type()) {
   case AuthClaimType::kSourceAddressAuthData:
+    if (pubkey_claim_key != nullptr) {
+      trace("Auth malformed: pubkey claim key on a source address claim");
+      return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
+    }
     if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
       assert(!auth_data);
     }
@@ -267,6 +305,7 @@ verify_auth_claim_internal(AuthClaim const &claim,
     // The no-auth-entry precondition is checked by the caller (it owns the
     // DB data); everything here is derivable from the transaction alone.
     return verify_pubkey_claim_internal<VerfType>(claim.pubkey_preimage(),
+                                                  pubkey_claim_key,
                                                   invoked_address, sigs,
                                                   signature_preimage,
                                                   signature_verifier);
@@ -335,7 +374,8 @@ verify_auth_claims_internal(const SignedTransaction &stx,
   }
 
   if (auto r = verify_auth_claim_internal<VerfType>(
-          auth_claim, stx.tx.invocation.invoked_address, sigs, auth_data,
+          auth_claim, stx.pubkey_claim_key.get(),
+          stx.tx.invocation.invoked_address, sigs, auth_data,
           signature_preimage, signature_verifier);
       !r) {
     return r;

@@ -419,6 +419,10 @@ template<size_t I, typename T>
 requires requires { typename std::tuple_element<I, T>::type; }
 struct std::tuple_element<I, x23::Box<T>> : std::tuple_element<I, T> {};
 
+namespace x23 {
+
+// In namespace x23 so argument-dependent lookup finds them for a Box of any
+// type, including one declared in another namespace.
 template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &b)
@@ -440,6 +444,8 @@ get(x23::Box<T> &&b)
 {
   return get<I>(*std::move(b));
 }
+
+} // namespace x23
 
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {
@@ -649,6 +655,27 @@ private:
   }
 
   friend T;
+};
+
+// A union field declared #[cpp(box)] is a Box of the union, which is that
+// union to the union protocol: arms are reached through get<I>, which Box
+// forwards, and the discriminant through the boxed value.
+template<is_xdr_union T> struct union_ops<Box<T>> : union_ops<T> {
+  using base = union_ops<T>;
+  using base::get_discriminant;
+  using base::index;
+  using base::set_discriminant;
+  using typename base::discriminant_type;
+
+  static constexpr int index(const Box<T> &u) { return base::index(*u); }
+  static constexpr discriminant_type get_discriminant(const Box<T> &u)
+  {
+    return base::get_discriminant(*u);
+  }
+  static constexpr void set_discriminant(Box<T> &u, discriminant_type d)
+  {
+    base::set_discriminant(*u, d);
+  }
 };
 
 // Set the discriminant of a union.  Note:  you can always get the

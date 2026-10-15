@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 #[contract_exception]
 #[derive(Copy, Clone)]

@@ -59,12 +59,12 @@ categories = ["blockchain"]
 edition = "2024"
 
 [workspace.dependencies]
-sdk = { registry = "groundhog", version = "0.50.0" }
-groundhog-rv32-runtime = { registry = "groundhog", version = "0.50.0" }
+thruput-sdk = { registry = "groundhog", version = "0.51.3" }
+thruput-rv32-runtime = { registry = "groundhog", version = "0.51.3" }
 # default features include std, which cannot build for the on-chain targets
-groundhog-domain-separator = { registry = "groundhog", version = "0.50.0", default-features = false }
-groundhog-xdr = { registry = "groundhog", version = "0.52.0", features = ["xdrs", "syscalls"] }
-groundhog-syscall = { registry = "groundhog", version = "0.52.0" }
+thruput-domain-separator = { registry = "groundhog", version = "0.51.3", default-features = false }
+thruput-xdr = { registry = "groundhog", version = "0.55.0", features = ["xdrs", "syscalls"] }
+thruput-syscall = { registry = "groundhog", version = "0.55.0" }
 xdrs = { registry = "groundhog", version = "0.10.3", features = ["int128", "heapless"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
@@ -72,15 +72,15 @@ hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
 # Standard interface crates.
-groundhog-erc20-if = { registry = "groundhog", version = "0.1.53" }
-groundhog-erc20-permit-if = { registry = "groundhog", version = "0.1.53" }
+thruput-erc20-if = { registry = "groundhog", version = "0.1.58" }
+thruput-erc20-permit-if = { registry = "groundhog", version = "0.1.58" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
-bottle-test-if = { registry = "groundhog", version = "0.50.0" }
-erc20-test = { registry = "groundhog", version = "0.50.0" }
-erc20-bottle-test = { registry = "groundhog", version = "0.50.0" }
-erc20-native-test = { registry = "groundhog", version = "0.50.0" }
+bottle-test-if = { registry = "groundhog", version = "0.51.3" }
+erc20-test = { registry = "groundhog", version = "0.51.3" }
+erc20-bottle-test = { registry = "groundhog", version = "0.51.3" }
+erc20-native-test = { registry = "groundhog", version = "0.51.3" }
 
 [profile.release]
 trim-paths = "all" # unstable

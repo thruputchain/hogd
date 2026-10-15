@@ -651,7 +651,7 @@ TEST(TestBindingsTest, VerifyAuthWithSourceAddressClaim)
 TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
 
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
@@ -665,8 +665,9 @@ TEST(TestBindingsTest, VerifyPubkeyAuthDirect)
   tx.auth_claim = claim;
 
   SignedTransaction stx{.tx = tx,
-                        .signatures = {
-                            make_signature(sk, tx, /*public_key_id=*/0)}};
+                        .signatures = {make_signature(sk, tx,
+                                                      /*public_key_id=*/0)},
+                        .pubkey_claim_key = pk};
   AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
                                 new PublicKeyConfig{.key = pk,
                                                     .max_weight = Weight{1}})},
@@ -779,7 +780,7 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   auto [pk, sk] = make_key_pair();
   auto [wrong_pk, wrong_sk] = make_key_pair();
 
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = preimage;
 
@@ -792,8 +793,9 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
   tx.auth_claim = claim;
 
   SignedTransaction stx{.tx = tx,
-                        .signatures = {
-                            make_signature(sk, tx, /*public_key_id=*/0)}};
+                        .signatures = {make_signature(sk, tx,
+                                                      /*public_key_id=*/0)},
+                        .pubkey_claim_key = pk};
 
   // Leave the derived address absent from the database. Pubkey claims are the
   // only claim type authorized without registered AddressAuthData.
@@ -813,7 +815,8 @@ TEST(TestBindingsTest, VerifyPubkeyAuthFromDB)
 
   SignedTransaction wrong_stx{
       .tx = tx,
-      .signatures = {make_signature(wrong_sk, tx, /*public_key_id=*/0)}};
+      .signatures = {make_signature(wrong_sk, tx, /*public_key_id=*/0)},
+      .pubkey_claim_key = pk};
   auto serialized_wrong_stx = x23::serialize(wrong_stx);
   VerifyAuthResultFromDBResult wrong_result =
       verify_signed_transaction_auth_from_db(

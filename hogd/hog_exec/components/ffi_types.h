@@ -68,50 +68,20 @@ namespace hogd::generated {
 
 // NOLINTBEGIN(readability-identifier-naming)
 
-union PublicKey {
-  enum Tag : int32_t {
-    PublicKey_Ed25519 = std::to_underlying(hogd::PublicKey::Ed25519)
-  };
-
-  struct PublicKey_Ed25519_Body {
-    Tag tag;
-    Ed25519PublicKey ed25519;
-    static_assert(std::is_trivially_copyable_v<Ed25519PublicKey>);
-  };
-
-  PublicKey_Ed25519_Body ed25519;
-
-  Tag tag() const noexcept
-  {
-    Tag out;
-    std::memcpy(&out, this, sizeof(out));
-    return out;
-  }
-};
-
-static_assert(std::is_trivially_copyable_v<PublicKey>);
-static_assert(std::is_standard_layout_v<PublicKey>);
-static_assert(std::has_unique_object_representations_v<PublicKey>);
-static_assert(sizeof(PublicKey) == sizeof(hogd::PublicKey));
-static_assert(alignof(PublicKey) == alignof(hogd::PublicKey));
-static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, tag) == 0);
-static_assert(offsetof(PublicKey::PublicKey_Ed25519_Body, ed25519) ==
-              sizeof(PublicKey::Tag));
-
+// PubkeyAccountPreimage names its key by hash, so the auth claim is the same
+// size whatever the key's scheme.
 struct PubkeyAccountPreimage {
-  PublicKey pubkey;
-  // PublicKey is 36 bytes and nonce is 8-aligned, leaving a 4-byte gap.
-  uint32_t reserved;
+  PublicKeyHash pubkey_hash;
   uint64_t nonce;
 };
 
+static_assert(std::is_trivially_copyable_v<PublicKeyHash>);
 static_assert(std::is_trivially_copyable_v<PubkeyAccountPreimage>);
 static_assert(std::is_standard_layout_v<PubkeyAccountPreimage>);
 static_assert(std::has_unique_object_representations_v<PubkeyAccountPreimage>);
 static_assert(sizeof(PubkeyAccountPreimage) ==
               sizeof(hogd::PubkeyAccountPreimage));
-static_assert(offsetof(PubkeyAccountPreimage, pubkey) == 0);
-static_assert(offsetof(PubkeyAccountPreimage, reserved) == sizeof(PublicKey));
+static_assert(offsetof(PubkeyAccountPreimage, pubkey_hash) == 0);
 static_assert(offsetof(PubkeyAccountPreimage, nonce) ==
               offsetof(hogd::PubkeyAccountPreimage, nonce));
 
@@ -133,7 +103,7 @@ union AuthClaim {
     // This variant is shorter than the pubkey-signature one, so it would
     // otherwise leave the tail of the union unwritten. Name that tail too: the
     // whole union is copied into contract memory, not just the active variant.
-    std::array<uint8_t, 44> reserved_tail;
+    std::array<uint8_t, 36> reserved_tail;
   };
 
   struct AuthClaim_kPubkeySignature_Body {

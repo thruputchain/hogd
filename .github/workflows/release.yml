@@ -15,8 +15,11 @@ env:
   CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
   CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.6"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.7"
 
 permissions:
   contents: write
@@ -41,7 +44,10 @@ jobs:
             rust_build_cpu: neoverse-n1
             # 16 vCPU / 32 GB runner; leave memory headroom for -O3 -g TUs.
             nproc: 12
-    runs-on: ${{ matrix.runner }}
+    # Each architecture gets its own cache volume. On the shared profile
+    # volumes, CI jobs on main committed last and the release jobs' ccache,
+    # toolchains and cargo installs were lost, so every release built cold.
+    runs-on: ${{ matrix.runner }};overrides.cache-tag=hogd-release-${{ matrix.architecture }}
     permissions:
       contents: read
       actions: read
@@ -68,9 +74,18 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
         with:
           cache: rust
+          # ~/.cargo keeps the groundhog-cli and groundhog-rv32-lower installs
+          # (fetch.sh compiled them from source every run, 3.5 min on arm64);
+          # ~/.cache/rustup keeps the pinned toolchains (see
+          # .github/actions/cached-rustup-home).
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -123,6 +138,9 @@ jobs:
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-release-${{ matrix.architecture }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -281,6 +299,8 @@ jobs:
           path: |
             ~/.cache/ccache
             ~/.cache/hogcache
+            ~/.cache/cargo-install
+            ~/.cache/rustup
 
       - name: Configure ccache
         run: |
@@ -288,6 +308,16 @@ jobs:
           # the cache volume. Point it at the cached path, as the Linux jobs do.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
           echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
+
+          # cargo install writes to ~/.cargo/bin, which the cache volume does not
+          # cover. Install into a cached root instead; ~/.cargo/bin itself is
+          # left alone because rustup's proxies live there.
+          echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
+          echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.cache/cargo-install/bin"
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       - name: Configure Git for Submodule Caching
         run: |

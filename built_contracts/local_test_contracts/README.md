@@ -60,7 +60,7 @@ directories.
   reach a child frame once the span is well-formed. Driven by
   `hogd/hog_exec/runtime/invoke_malformed_tokens_rv32_test.cc`.
 - `itc_erc20_permit`: `itc_erc20` with the `ERC20Permit` interface
-  (`groundhog-erc20-permit-if`) implemented on top: the same storage keys,
+  (`thruput-erc20-permit-if`) implemented on top: the same storage keys,
   strict updates and events, so it is the RV32 reference the native token's
   `permit` and `transfer_from_signed` are held byte-identical to. Driven by
   `hogd/hog_exec/runtime/erc20_permit_parity_test.cc`.

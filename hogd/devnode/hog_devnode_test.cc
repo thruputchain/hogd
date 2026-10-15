@@ -67,6 +67,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/domain_separators.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -642,15 +643,23 @@ hex_string(std::array<std::uint8_t, N> const &bytes)
   return std::format("0x{}", encode_hex(std::as_bytes(std::span(bytes))));
 }
 
+PublicKey
+ed25519_public_key(Ed25519PublicKey const &raw)
+{
+  PublicKey key(CryptographicScheme::Ed25519);
+  key.ed25519() = raw;
+  return key;
+}
+
 AuthClaim
 native_account_auth_claim(std::uint32_t index = 1)
 {
   AuthClaim claim(AuthClaimType::kPubkeySignature);
-  auto &preimage = claim.pubkey_preimage();
-  preimage.pubkey.scheme(CryptographicScheme::Ed25519);
-  preimage.pubkey.ed25519() =
-      derive_bootstrap_account_keypair("groundhog-dev-accounts", index).first;
-  preimage.nonce = 0;
+  claim.pubkey_preimage() = make_pubkey_account_preimage(
+      ed25519_public_key(
+          derive_bootstrap_account_keypair("groundhog-dev-accounts", index)
+              .first),
+      /*nonce=*/0);
   return claim;
 }
 
@@ -669,12 +678,13 @@ readiness_network_hash(Readiness const &readiness)
 }
 
 SignedTransaction
-sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key,
+sign_transaction(Transaction tx,
+                 std::pair<Ed25519PublicKey, Ed25519SecretKey> const &keypair,
                  NetworkHash const &network_hash)
 {
   Signature signature(CryptographicScheme::Ed25519);
   auto signed_bytes =
-      ed25519_sign(secret_key,
+      ed25519_sign(keypair.second,
                    transaction_signature_preimage(network_hash, tx));
   if (!signed_bytes.has_value()) {
     throw std::runtime_error("failed to sign test transaction");
@@ -686,6 +696,7 @@ sign_transaction(Transaction tx, Ed25519SecretKey const &secret_key,
           .public_key_id = 0,
           .signature = signature,
       }},
+      .pubkey_claim_key = ed25519_public_key(keypair.first),
   };
 }
 
@@ -2574,6 +2585,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
             .public_key_id = 0,
             .signature = signature,
         }},
+        .pubkey_claim_key = ed25519_public_key(keypair.first),
     };
     const TransactionHash tx_hash = sha256(signed_tx.tx);
     ASSERT_EQ(
@@ -2707,6 +2719,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
             .public_key_id = 0,
             .signature = signature,
         }},
+        .pubkey_claim_key = ed25519_public_key(keypair.first),
     };
     expected_signed_tx = signed_tx;
     tx_hash = sha256(signed_tx.tx);
@@ -3725,6 +3738,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
             .public_key_id = 0,
             .signature = signature,
         }},
+        .pubkey_claim_key = ed25519_public_key(keypair.first),
     };
 
     const TransactionHash tx_hash = sha256(signed_tx.tx);
@@ -3862,7 +3876,7 @@ TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
         .auth_claim = native_account_auth_claim(0),
     };
     SignedTransaction signed_prefund_wallet_tx =
-        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair.second,
+        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair,
                          readiness_network_hash(readiness));
     const TransactionHash prefund_wallet_tx_hash =
         sha256(signed_prefund_wallet_tx.tx);
@@ -3906,7 +3920,7 @@ TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
         .auth_claim = native_account_auth_claim(0),
     };
     SignedTransaction signed_create_wallet_tx =
-        sign_transaction(std::move(create_wallet_tx), sponsor_keypair.second,
+        sign_transaction(std::move(create_wallet_tx), sponsor_keypair,
                          readiness_network_hash(readiness));
     const TransactionHash create_wallet_tx_hash =
         sha256(signed_create_wallet_tx.tx);
@@ -4039,7 +4053,7 @@ make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
       .contracts_to_deploy = {*fibonacci_contract},
       .auth_claim = native_account_auth_claim(),
   };
-  return sign_transaction(std::move(tx), keypair.second,
+  return sign_transaction(std::move(tx), keypair,
                           readiness_network_hash(readiness));
 }
 
