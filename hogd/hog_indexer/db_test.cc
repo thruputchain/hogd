@@ -19,6 +19,7 @@
 #include "hogd/hog_indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "transaction.hh"
 #include "types.hh"
 #include "x23/tests/death_test.h"
 #include "x23/vec.h"
@@ -979,6 +980,85 @@ TEST_F(IndexDBTest, GetEventsCursorSeeksDirectlyWithinDenseBlock)
   rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
   ASSERT_TRUE(page.has_value());
   EXPECT_TRUE(page->events.empty());
+  EXPECT_LE(keys_read, 2);
+}
+
+// Same as above for get_transactions_by_address, which walks the
+// address's ROOT_TX rows (#4457).
+TEST_F(IndexDBTest, GetTransactionsByAddressCursorSeeksDirectlyWithinDenseBlock)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db.has_value());
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+  constexpr uint8_t kTxCount = 64;
+  std::vector<TxEventLog> logs;
+  std::vector<ProposedTransaction> bodies(kTxCount);
+  for (uint8_t fill = 1; fill <= kTxCount; ++fill) {
+    logs.push_back(log_with_tx(addr, fill));
+    bodies[fill - 1].signed_tx.tx.invocation.invoked_address = addr;
+  }
+  ASSERT_TRUE(db->consume_events(10, logs, bodies));
+
+  auto query = [&](IterationOrder order, BlockAnchorKind anchor) {
+    AddressTransactionQuery q{};
+    q.address = addr;
+    q.order = order;
+    q.anchor = BlockAnchor(anchor);
+    q.limit = 1;
+    return q;
+  };
+
+  for (auto [order, anchor] :
+       {std::pair{IterationOrder::IterationOrderAscending,
+                  BlockAnchorKind::AnchorAtBeginning},
+        std::pair{IterationOrder::IterationOrderDescending,
+                  BlockAnchorKind::AnchorAtEnd}}) {
+    AddressTransactionQuery q = query(order, anchor);
+    std::vector<uint8_t> seen;
+    while (true) {
+      auto page = db->get_transactions_by_address(q);
+      ASSERT_TRUE(page.has_value());
+      ASSERT_LE(page->refs.size(), 1);
+      if (!page->refs.empty()) {
+        seen.push_back(page->refs[0].tx_hash[0]);
+      }
+      if (page->cursor.empty()) {
+        break;
+      }
+      q.cursor = page->cursor;
+    }
+    std::vector<uint8_t> expected(kTxCount);
+    std::ranges::iota(expected, 1);
+    if (order == IterationOrder::IterationOrderDescending) {
+      std::ranges::reverse(expected);
+    }
+    EXPECT_EQ(seen, expected);
+  }
+
+  EventCursorPayload payload;
+  payload.schema_version = cursor::kCursorVersion;
+  payload.order = IterationOrder::IterationOrderAscending;
+  payload.block_height = 10;
+  std::ranges::fill(payload.tx_hash, 0xFF);
+  payload.sequence_number = 0;
+  payload.max_block_height = 10;
+  const std::string encoded = cursor::encode(payload);
+  AddressTransactionQuery forged =
+      query(IterationOrder::IterationOrderAscending,
+            BlockAnchorKind::AnchorAtBeginning);
+  forged.cursor.append_range(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+
+  rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
+  rocksdb::get_perf_context()->Reset();
+  auto page = db->get_transactions_by_address(forged);
+  const uint64_t keys_read =
+      rocksdb::get_perf_context()->internal_key_skipped_count;
+  rocksdb::SetPerfLevel(rocksdb::PerfLevel::kDisable);
+  ASSERT_TRUE(page.has_value());
+  EXPECT_TRUE(page->refs.empty());
   EXPECT_LE(keys_read, 2);
 }
 
