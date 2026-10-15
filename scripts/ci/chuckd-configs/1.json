@@ -4,7 +4,7 @@
             "public_info": {
                 "public_key": {
                     "Ed25519": {
-                        "ed25519": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
+                        "ed25519": "CTVKacy1Jerv82VJymcRuTjHhkwzZq13Q2KqpJ3M2yBX"
                     }
                 },
                 "address": "10.100.0.108:50000"
@@ -19,7 +19,7 @@
             {
                 "public_key": {
                     "Ed25519": {
-                        "ed25519": "be87fef9c9d49869601aba731ddaafbc74bd7f78eb36b3e618d02e6ac0b89032"
+                        "ed25519": "Dpkjp49j1Kw2qnympA246LzvuUN4wQURADnWZHrrhAP3"
                     }
                 },
                 "address": "10.100.0.104:50000"
@@ -27,7 +27,7 @@
             {
                 "public_key": {
                     "Ed25519": {
-                        "ed25519": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
+                        "ed25519": "CTVKacy1Jerv82VJymcRuTjHhkwzZq13Q2KqpJ3M2yBX"
                     }
                 },
                 "address": "10.100.0.108:50000"
@@ -88,12 +88,12 @@
             "validators": [
                 {
                     "Ed25519": {
-                        "ed25519": "be87fef9c9d49869601aba731ddaafbc74bd7f78eb36b3e618d02e6ac0b89032"
+                        "ed25519": "Dpkjp49j1Kw2qnympA246LzvuUN4wQURADnWZHrrhAP3"
                     }
                 },
                 {
                     "Ed25519": {
-                        "ed25519": "aa39addbcca00868909d6ac48699a1c1a19ca93ea430e53db68d720cfecfc4aa"
+                        "ed25519": "CTVKacy1Jerv82VJymcRuTjHhkwzZq13Q2KqpJ3M2yBX"
                     }
                 }
             ],
