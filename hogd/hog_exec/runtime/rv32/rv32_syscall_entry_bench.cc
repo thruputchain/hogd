@@ -1494,13 +1494,15 @@ register_benchmarks()
                                bm_syscall_vm,
                                bytestring_get_len_call(vm_bytes));
 
-  // Depth counts frames above the fixture's two. Include the fixture's own
-  // maximum to measure the full parent walk it admits: the stock chain's or
-  // kBenchMinCrossInvokeDepth, whichever is deeper (see bench_network_config).
-  const uint32_t max_depth = bench_max_cross_invoke_depth() - 2;
-  std::vector<uint32_t> depths = {1, 8, 16};
-  if (std::ranges::find(depths, max_depth) == depths.end()) {
-    depths.push_back(max_depth);
+  // Depth counts frames above the fixture's two. The floor's depth is always
+  // swept: it is the row the committed reference guards, and a chain raising
+  // its limit past the floor adds the deeper row rather than moving this one.
+  // Then the fixture's own maximum when it is deeper, to measure the full
+  // parent walk such a chain admits (see bench_network_config).
+  std::vector<uint32_t> depths = {1, 8, 16, kBenchMinCrossInvokeDepth - 2};
+  const uint32_t fixture_max_depth = bench_max_cross_invoke_depth() - 2;
+  if (std::ranges::find(depths, fixture_max_depth) == depths.end()) {
+    depths.push_back(fixture_max_depth);
   }
   // Sweep the short key range at every depth, then the long range at depth 1.
   // Register increasing K so smaller rows do not inherit a larger cache.
