@@ -87,7 +87,10 @@ TEST(NetworkHashTest, ParsesAndFormatsCanonicalBase58)
 TEST(NetworkHashTest, RejectsWrongLengthsAndLegacyHex)
 {
   EXPECT_FALSE(parse_network_hash("1").has_value());
-  EXPECT_FALSE(parse_network_hash(std::string(64, 'g')).has_value());
+  EXPECT_FALSE(
+      parse_network_hash(
+          "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f")
+          .has_value());
   EXPECT_FALSE(parse_network_hash(std::string(66, '0')).has_value());
 }
 
