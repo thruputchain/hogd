@@ -206,6 +206,138 @@ TEST(Scheduler, AddVettedTxDuplicate)
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
+TEST(Scheduler, ResubmittedNominationTxIsScheduledOnce)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHashBatch hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  const BlockHeight height = scheduler->current_block();
+
+  scheduler->add_txs(txs, hashes)();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->is_pending(txs[0], hashes[0]));
+
+  // Submissions can arrive between scheduling chunks of the same nomination.
+  // The duplicate remains admitted, but must not be scheduled a second time.
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs(txs, hashes)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+
+  // Commit cleanup uses all attempted hashes, including failed executions.
+  // Before the fix, scheduled_hashes contains the same hash twice and this
+  // panics when the second removal finds that the cache entry is already gone.
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduled_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(hashes[0]));
+  EXPECT_FALSE(scheduler->is_pending(txs[0], hashes[0]));
+  EXPECT_EQ(scheduler->current_block(), height);
+}
+
+TEST(Scheduler, ResubmittedNominationTxIsReenqueuedAfterAbandon)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHashBatch hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs(txs, hashes)();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  scheduler->add_txs(txs, hashes)();
+  EXPECT_EQ(scheduler->size(), 0);
+
+  // The coordinator explicitly restores the losing nomination's transactions.
+  // Suppressing duplicate admission must not suppress this reenqueue.
+  scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
+  scheduler->abandon_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->start_pending_nomination(/*block_id=*/3);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/3)();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, RemoveFromSchedulerHandlesDuplicateAndMissingHashes)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 4);
+  const TransactionHashBatch hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({txs[0], txs[1]}, {hashes[0], hashes[1]})();
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  // Keep an unrelated transaction queued to detect incorrect counter updates.
+  scheduler->add_txs({txs[2]}, {hashes[2]})();
+
+  TransactionHashBatch to_remove;
+  // Both cached hashes repeat across the parallel removal chunks. One is on
+  // the runqueue and the other was nominated. hashes[3] was never admitted.
+  for (size_t i = 0; i < 480; i++) {
+    to_remove.push_back(hashes[0]);
+    to_remove.push_back(hashes[1]);
+    to_remove.push_back(hashes[3]);
+  }
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(to_remove))();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_FALSE(scheduler->find_tx(hashes[0]));
+  EXPECT_FALSE(scheduler->find_tx(hashes[1]));
+  EXPECT_TRUE(scheduler->find_tx(hashes[2]));
+
+  // Repeating the completed cleanup must also leave the survivor untouched.
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(to_remove))();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
 TEST(Scheduler, LatestFailedTransactionOutcomeWins)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
