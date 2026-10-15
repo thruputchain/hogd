@@ -650,6 +650,8 @@ IndexDB::IndexDB(IndexDB &&other) noexcept // NOLINT(bugprone-exception-escape)
     pending_heights_(std::move(other.pending_heights_)),
     durable_progress_(std::move(other.durable_progress_)),
     legacy_mode_(other.legacy_mode_),
+    block_queries_ready_(
+        other.block_queries_ready_.load(std::memory_order_acquire)),
     legacy_ingest_test_hook_(std::move(other.legacy_ingest_test_hook_)),
     initialize_epoch_test_hook_(std::move(other.initialize_epoch_test_hook_)),
     apply_validation_test_hook_(std::move(other.apply_validation_test_hook_)),
@@ -688,6 +690,9 @@ IndexDB::operator=(IndexDB &&other) noexcept
     pending_heights_ = std::move(other.pending_heights_);
     durable_progress_ = std::move(other.durable_progress_);
     legacy_mode_ = other.legacy_mode_;
+    block_queries_ready_.store(other.block_queries_ready_.load(
+                                   std::memory_order_acquire),
+                               std::memory_order_release);
     legacy_ingest_test_hook_ = std::move(other.legacy_ingest_test_hook_);
     initialize_epoch_test_hook_ = std::move(other.initialize_epoch_test_hook_);
     apply_validation_test_hook_ = std::move(other.apply_validation_test_hook_);
@@ -1230,6 +1235,9 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
                          "failed to persist outbox epoch");
   }
 
+  if (!durable_progress_) {
+    block_queries_ready_.store(true, std::memory_order_release);
+  }
   durable_progress_ = progress;
   highest_indexed_block_.store(progress.contiguous_height,
                                std::memory_order_release);
@@ -1678,6 +1686,7 @@ IndexDB::initialize_progress_from_db()
           format_status.ToString());
     return IndexerError(IndexerErrorCode::kInternal);
   }
+  block_queries_ready_.store(format_status.ok(), std::memory_order_release);
 
   IndexerInitializedProgress progress;
   try {

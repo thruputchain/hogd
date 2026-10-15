@@ -68,19 +68,9 @@ IndexDB::block_query_tip() const
   if (tip < kFirstOutboxBlockHeight) {
     return IndexerError(IndexerErrorCode::kQueryNotReady);
   }
-  std::string format;
-  const auto status =
-      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
-               std::string(IndexerKeyFormat::kBlockQueryFormatKey), &format);
-  if (status.IsNotFound()) {
-    // Legacy consume_events databases have no complete block projection.
+  if (!block_queries_ready_.load(std::memory_order_acquire)) {
+    // Existing indexes without a complete projection remain unavailable.
     return IndexerError(IndexerErrorCode::kQueryNotReady);
-  }
-  if (!status.ok()) {
-    return IndexerError(IndexerErrorCode::kInternal);
-  }
-  if (format != block_query_format()) {
-    return IndexerError(IndexerErrorCode::kMigrationRequired);
   }
   return tip;
 }

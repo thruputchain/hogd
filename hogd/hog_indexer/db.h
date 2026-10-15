@@ -269,6 +269,7 @@ private:
   // must fail with an explicit migration-required outcome while legacy storage
   // remains restart-compatible.
   bool legacy_mode_ = false;
+  std::atomic<bool> block_queries_ready_{false};
   std::function<void()> legacy_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
   std::function<void()> apply_validation_test_hook_;
