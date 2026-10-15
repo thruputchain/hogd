@@ -96,9 +96,14 @@ ci_run_bench_step() {
 # the processes that are still alive were saying at the time. A report is
 # therefore continued by the lines that share the prefix of its first line;
 # lines carrying any other prefix are stepped over rather than counted against
-# the cap. The cap is a line count rather than the start of the dump, which has
-# no marker that holds across binaries, so a few lines of dump ride along at
-# the end of each report.
+# the cap. Each prefix is counted on its own, because the condition that trips
+# one node's assertion is as likely as not to trip its peer's in the same
+# second: one report in progress must not swallow the panic header of another,
+# which would leave the second crash with no trace in the job log at all.
+#
+# The cap is a line count rather than the start of the dump, which has no
+# marker that holds across binaries, so a few lines of dump ride along at the
+# end of each report.
 ci_panic_report_program() {
   cat <<EOF
 awk -v limit=$2 '
@@ -108,18 +113,15 @@ awk -v limit=$2 '
   else
     prefix = ""
 }
-in_report && prefix == want {
-  if (++n > limit)
-    in_report = 0
-  else
-    print
+index(\$0, ":PANIC: ") && !(prefix in shown) {
+  shown[prefix] = 1
+  print
   next
 }
-!in_report && index(\$0, ":PANIC: ") {
-  in_report = 1
-  want = prefix
-  n = 1
-  print
+prefix in shown {
+  if (++shown[prefix] <= limit)
+    print
+  next
 }
 ' $1
 EOF

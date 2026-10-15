@@ -121,6 +121,27 @@ check_eq "panic report is capped" "$CI_PANIC_REPORT_LINES" \
 check_eq "panic report follows one process" "0" \
   "$(printf '%s\n' "$panic_section" | grep -c '^\[hog7 ')"
 
+# Both nodes panicking at once is the ordinary case rather than the exotic one:
+# whatever trips one node's assertion is as likely as not to trip its peer's.
+# Each report is tracked against its own prefix, so neither swallows the other.
+CI_FAILED_BENCH_STEPS=()
+ci_run_bench_step both bash -c '
+  echo "[hog7 node0_mempool stderr] hog-mempool:PANIC: x23assert failure: node0 tripped"
+  echo "[hog11 node1_mempool stderr] hog-mempool:PANIC: x23assert failure: node1 tripped"
+  echo "[hog7 node0_mempool stderr]   at  rpc_from_coord.cc:287"
+  echo "[hog11 node1_mempool stderr]   at  event_impl_epoll.cc:78"
+  exit 134' >/dev/null
+report=$(ci_report_failed_bench_steps) || true
+panic_section=${report#*===== panic reports in}
+check_contains "first panic reported" "x23assert failure: node0 tripped" \
+  "$panic_section"
+check_contains "second panic reported" "x23assert failure: node1 tripped" \
+  "$panic_section"
+check_contains "first panic keeps its source line" "rpc_from_coord.cc:287" \
+  "$panic_section"
+check_contains "second panic keeps its source line" "event_impl_epoll.cc:78" \
+  "$panic_section"
+
 # A step that failed without panicking reads exactly as it did before.
 CI_FAILED_BENCH_STEPS=()
 ci_run_bench_step quiet bash -c 'echo no-panic-here; exit 1' >/dev/null
