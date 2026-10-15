@@ -1433,6 +1433,14 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
           size_t num_removed_from_runqueue = 0;
           for (const TransactionHash &tx_hash : hash_chunk) {
+            // Even if the *nominated* block is being committed and thus the txs
+            // have been removed from the runqueue, it is possible that the
+            // coordinator called [submit_unvetted()/submit_vetted()] and passed
+            // the same txs to the mempool again, resulting in the txs being
+            // added back onto the runqueue. Thus, we need to check if the txs
+            // are on the runqueue and remove them. We cannot skip this step and
+            // just remove txs from [txs_], even if the *nominated* block is
+            // being committed rather than a *validated* block.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
