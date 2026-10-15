@@ -15,7 +15,7 @@ The new records use separate prefixes in the existing default column family:
 
 | Record | Key suffix | Value |
 | --- | --- | --- |
-| Format | `queries:format` | Format version and exact protocol token |
+| Format | `queries:format` | Storage format version (`block-query-v1`) |
 | Block metadata | `queries:blocks:` + height | XDR consensus value and transaction count |
 | Transaction reference | `queries:refs:` + height + transaction hash | Zero-based ordinal in ascending hash order |
 
@@ -47,7 +47,7 @@ The query index does not prune history today. Any future pruning must update met
 
 The format marker is first written during strict epoch initialization. Older strict-ingestion databases have no marker and cannot prove that the new stores contain their earlier history. Opening one with this binary fails with a migration-required error. No new projection is silently created above an old watermark.
 
-The marker includes the exact protocol token. Opening the index under a different token also requires a verified rebuild or a separately implemented migration. This intentionally prevents decoding stored consensus values with an unverified schema. Epoch transitions accepted by the same binary retain their immutable query records; this is not a guarantee that a future binary can decode old epochs.
+The marker versions the stored layout and consensus-value encoding, independently of the wire protocol token. A protocol pin change alone does not require a rebuild. An incompatible storage or consensus-value encoding change must bump this marker and provide a verified rebuild or migration. Per-row hash checks detect corruption; they do not replace storage compatibility review.
 
 Legacy `consume_events` databases retain their existing reopen behavior for other queries. They have no complete block projection and cannot serve the new queries.
 

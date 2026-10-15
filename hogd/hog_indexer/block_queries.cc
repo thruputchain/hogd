@@ -18,7 +18,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/key_format.h"
 #include "hogd/hog_indexer/status.h"
-#include "hogd/version.h"
 #include "indexer.hh"
 #include "pagination.hh"
 #include "types.hh"
@@ -54,13 +53,9 @@ read_ordinal(std::string_view value)
 std::string
 IndexDB::block_query_format()
 {
-  // Never decode a stored ConsensusValue using a different protocol schema.
-  // An upgrade needs a verified rebuild/migration, not guessed compatibility.
-  std::string format("block-query-v1:");
-  const auto protocol = version::kHogdProtocol();
-  format.append(reinterpret_cast<const char *>(protocol.data()),
-                protocol.size());
-  return format;
+  // Bump when the stored layout or ConsensusValue encoding becomes
+  // incompatible. Wire protocol identity alone is not a storage version.
+  return "block-query-v1";
 }
 
 IndexerStatus<BlockHeight>
