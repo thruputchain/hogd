@@ -1,5 +1,5 @@
 #![no_std]
-use sdk::*;
+use thruput_sdk::*;
 
 // The corpus builder replaces these constants before compiling each artifact.
 const VARIANT: u64 = 1;
@@ -44,12 +44,12 @@ impl HackathonApp for App {
                 for _ in 0..(16 + VARIANT % 64) {
                     digest = digest.hash();
                 }
-                sdk::sys::raw_LogEvent(None, None, None, digest.as_ref())
+                thruput_sdk::sys::raw_LogEvent(None, None, None, digest.as_ref())
                     .unwrap();
             }
             _ => {
                 Client::new(peer).receive(VARIANT % 17 + 1);
-                sdk::sys::raw_LogEvent(
+                thruput_sdk::sys::raw_LogEvent(
                     None,
                     None,
                     None,

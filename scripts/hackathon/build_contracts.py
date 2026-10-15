@@ -31,13 +31,13 @@ name = "hackathon_{kind}"
 version = "0.1.0"
 edition = "2024"
 [dependencies]
-sdk = {{ workspace = true }}
-groundhog-erc20-if = {{ workspace = true }}
+thruput-sdk = {{ workspace = true }}
+thruput-erc20-if = {{ workspace = true }}
 [lib]
 crate-type = ["cdylib", "rlib"]
 [features]
 entrypoints = []
-dev = ["sdk/dev"]
+dev = ["thruput-sdk/dev"]
 [[bin]]
 name = "hackathon_{kind}"
 path = "src/main.rs"
