@@ -27,6 +27,8 @@ Each query seeks directly to the requested height or cursor key. It reads at mos
 
 This version serves heights 1 through the indexer's highest contiguous committed height. The outbox starts at height 1 and supplies only the genesis hash as its initial boundary. It does not supply the full genesis value, so height 0 is outside block-query coverage.
 
+Coverage bounds are method-specific. Event and address history retain their genesis-inclusive lower bound of 0; block metadata and block transaction pages start at 1. Consumers must use the bounds returned by the method they call.
+
 Before the first block is indexed, transaction pages report `IndexerQueryNotReady`. Block lookup fails with a system RPC error because `BlockLookupResult` has no unavailable arm. Once ready, block lookup returns `BlockNotFound` outside coverage. Transaction pages outside coverage are empty and include the actual oldest/latest heights.
 
 An empty transaction page alone does not prove a block exists. Clients must also obtain its metadata and check coverage. The consensus tip can be ahead of the indexer's query boundary.
@@ -62,3 +64,7 @@ Legacy `consume_events` databases retain their existing reopen behavior for othe
 6. Switch the gateway to the verified listener under the normal deployment procedure. Keep the old index intact. A switch back requires the matching old binary and compatible source protocol; the old binary does not gain block-query support.
 
 There is no automatic in-place backfill or protocol migration in this change. The stored transaction rows and block hashes cannot reconstruct missing consensus values.
+
+## Public API coordination
+
+The current public RPC maps block-lookup system errors to backend-unavailable, never not-found. Its zero limit selects the default. The separate native API proposal (thruput-tools #555) proposes rejecting zero before dispatch; adopting that rule requires an explicit public contract change. Cursor error improvements tracked by GH-428 must include this method as well as existing history methods. This implementation retains terminal empty pages for malformed cursors until that protocol change is adopted.

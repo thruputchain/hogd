@@ -18,7 +18,6 @@ protected:
   void SetUp() override {}
 };
 
-// Test transaction key format
 TEST_F(IndexerKeyFormatTest, BlockReferenceKeysSortByHeightThenUnsignedHash)
 {
   TransactionHash low{};
