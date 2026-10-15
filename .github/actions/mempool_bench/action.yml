@@ -44,17 +44,17 @@ runs:
       shell: bash
     - name: launch first hog-exec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog1 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
       # can't wait for hog-exec: that's waiting on the coordinator
       shell: bash
     - name: launch second hog-exec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog6 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
       # can't wait for hog-exec: that's waiting on the coordinator
       shell: bash
     - name: launch third hog-exec
       # the mempool runs on hog10
-      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }} -n 1024
+      run: ./${{ inputs.build-dir }}/hogd/hog_exec/bench/control_cli hog8 ${{ env.CI_CONTROL_PORT }} start hogd/hog_exec/hog-exec hog10:${{ env.MEMPOOL_EXECUTOR_PORT }}
       # can't wait for hog-exec: that's waiting on the coordinator
       shell: bash
     - name: check hog-exec is running
