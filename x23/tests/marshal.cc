@@ -333,6 +333,46 @@ check_box_arms()
   assert(leaves_back == leaves);
 }
 
+// A boxed union field serializes, sizes and compares exactly as its unboxed
+// twin. Its discriminant and arms are set through the box.
+void
+check_box_union_field()
+{
+  using namespace x23;
+  using enum box_arm_type;
+
+  static_assert(sizeof(box_union_field) < sizeof(box_union_field_plain));
+
+  box_union_field fresh{};
+  box_union_field_plain fresh_plain{};
+  assert(serialize(fresh) == serialize(fresh_plain));
+  assert(fresh == box_union_field{});
+
+  box_union_field f{};
+  f.u->t(kBoxArmInts);
+  f.u->ints().push_back(-1);
+  f.u->ints().push_back(9);
+  f.tail = 42;
+  box_union_field_plain p{};
+  p.u.t(kBoxArmInts);
+  p.u.ints().push_back(-1);
+  p.u.ints().push_back(9);
+  p.tail = 42;
+
+  assert(xdr_size(f) == xdr_size(p));
+  Buf buf = serialize(f);
+  assert(buf == serialize(p));
+
+  box_union_field back;
+  deserialize(&back, buf);
+  assert(back == f);
+  assert(back.u->t() == kBoxArmInts);
+  assert(back != fresh);
+
+  box_union_field copied = f;
+  assert(copied == f);
+}
+
 int
 main()
 {
@@ -341,4 +381,5 @@ main()
   projected_view();
   check_box();
   check_box_arms();
+  check_box_union_field();
 }

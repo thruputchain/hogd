@@ -372,4 +372,29 @@ TEST(CxsSerialize, BoxedLeavesMatchPlain)
   EXPECT_EQ(show(leaves), show(leaves_plain));
 }
 
+// A boxed union field encodes exactly as its unboxed twin.
+TEST(CxsSerialize, BoxedUnionFieldMatchesPlain)
+{
+  using enum box_arm_type;
+  box_union_field f{};
+  box_union_field_plain p{};
+  EXPECT_EQ(*serialize_cxs(f), *serialize_cxs(p));
+
+  f.u->t(kBoxArmStruct);
+  f.u->st() = fix_12{.i = -7, .d = 2.5};
+  f.tail = 3;
+  p.u.t(kBoxArmStruct);
+  p.u.st() = fix_12{.i = -7, .d = 2.5};
+  p.tail = 3;
+
+  auto boxed = serialize_cxs(f);
+  ASSERT_TRUE(boxed.has_value());
+  EXPECT_EQ(*boxed, *serialize_cxs(p));
+  EXPECT_EQ(cxs_size(f), boxed->size());
+  box_union_field back;
+  ASSERT_TRUE(deserialize_cxs(&back, *boxed));
+  EXPECT_EQ(back, f);
+  EXPECT_EQ(show(f), show(p));
+}
+
 } // namespace x23
