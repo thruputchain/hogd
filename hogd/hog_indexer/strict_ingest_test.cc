@@ -940,6 +940,46 @@ TEST_F(StrictIndexerTest, BlockPagesResumeAcrossRestartAndChainAdvance)
             IndexerBlockApplyOutcome::IndexerBlockDuplicate);
 }
 
+TEST_F(StrictIndexerTest, ContinuationWaitsForReplacementIndexToCatchUp)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto first = make_block(1, origin.first_prev_hash);
+  const auto second =
+      make_block(2, first.identity.consensus_hash,
+                 ProposedTransactionBatch{make_body(1, 1), make_body(2, 2)});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_EQ(db_->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  BlockTransactionQuery query{};
+  query.height = 2;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.limit = 1;
+  auto page = db_->get_transactions_by_block(query);
+  ASSERT_TRUE(page && !page->cursor.empty());
+  auto replacement = IndexDB::make_new(path_.parent_path() / "replacement");
+  ASSERT_TRUE(replacement);
+  ASSERT_EQ(replacement->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ASSERT_EQ(replacement->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto initial = replacement->get_transactions_by_block(query);
+  ASSERT_TRUE(initial);
+  EXPECT_TRUE(initial->refs.empty());
+  query.cursor = page->cursor;
+  auto waiting = replacement->get_transactions_by_block(query);
+  ASSERT_FALSE(waiting);
+  EXPECT_EQ(waiting.error().code(), IndexerErrorCode::kQueryNotReady);
+  ASSERT_EQ(replacement->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto resumed = replacement->get_transactions_by_block(query);
+  ASSERT_TRUE(resumed);
+  EXPECT_EQ(resumed->refs.size(), 1);
+  EXPECT_TRUE(resumed->cursor.empty());
+}
+
 TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
 {
   const auto origin = make_origin();

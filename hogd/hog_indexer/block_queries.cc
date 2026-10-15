@@ -153,14 +153,6 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
   TransactionRefPage page;
   page.latest_block = *tip;
   page.oldest_block = kFirstOutboxBlockHeight;
-  if (query.height < page.oldest_block || query.height > page.latest_block) {
-    return page;
-  }
-  auto record = read_block_query_record(query.height);
-  if (!record) {
-    return record.error();
-  }
-  const auto block_hash = sha256(record->value);
   IterationOrder order = query.order;
   std::optional<BlockQueryCursor> cursor;
   if (!query.cursor.empty()) {
@@ -175,12 +167,26 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
       return page;
     }
     if (cursor->format != kBlockCursorFormat ||
-        cursor->height != query.height || cursor->block_hash != block_hash) {
+        cursor->height != query.height) {
       return page;
     }
     order = cursor->order;
   }
   if (!is_valid_iteration_order(order)) {
+    return page;
+  }
+  if (cursor && query.height > page.latest_block) {
+    return IndexerError(IndexerErrorCode::kQueryNotReady);
+  }
+  if (query.height < page.oldest_block || query.height > page.latest_block) {
+    return page;
+  }
+  auto record = read_block_query_record(query.height);
+  if (!record) {
+    return record.error();
+  }
+  const auto block_hash = sha256(record->value);
+  if (cursor && cursor->block_hash != block_hash) {
     return page;
   }
   const bool ascending = order == IterationOrder::IterationOrderAscending;

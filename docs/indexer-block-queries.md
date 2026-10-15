@@ -40,6 +40,7 @@ The query index does not prune history today. Any future pruning must update met
 - An empty cursor starts a walk. A returned empty cursor ends it.
 - A continuation cursor carries the height, block hash, order, and last returned transaction hash. The cursor's order takes precedence over the request field.
 - A valid cursor resumes after its last reference, including after restart and while the chain advances.
+- A matching, structurally valid continuation above the current indexed tip reports not-ready, not exhaustion. Retry after the replacement index catches up; its block identity is checked once that height is available.
 - Malformed, oversized, foreign-query, wrong-height, or wrong-block cursors return an empty terminal page, as the current internal protocol specifies. This behavior is not a promise of durable bulk-feed recovery.
 - Clients must retain the cursor bytes unchanged. There is no execution-order meaning in this traversal.
 
