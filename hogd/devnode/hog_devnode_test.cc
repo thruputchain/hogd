@@ -1,3 +1,5 @@
+#include "hogd/base/base58.h"
+
 #include <fcntl.h>
 #include <poll.h>
 #include <sys/file.h>
@@ -762,9 +764,10 @@ fixture_config(std::uint32_t count = 0,
   return config;
 }
 
-std::string bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
-                                    std::string_view initial_storage_tokens,
-                                    bool include_protocol = false);
+std::string bootstrap_manifest_json(
+    std::uint32_t count, std::string_view seed,
+    std::string_view initial_storage_tokens, bool include_protocol = false,
+    const std::string &network_hash = std::string(31, '1') + "3w");
 std::filesystem::path write_test_bootstrap_manifest(std::string_view contents);
 
 class HogDevnodeProcess {
@@ -802,10 +805,8 @@ public:
         std::ranges::find(extra_args, "--bootstrap-manifest") ==
             extra_args.end()) {
       auto intent =
-          bootstrap_manifest_json(fixture_count, fixture_seed, fixture_tokens);
-      const auto network_pos = intent.find(
-          "00000000000000000000000000000000000000000000000000000000000000aa");
-      intent.replace(network_pos, 64, std::string(64, '0'));
+          bootstrap_manifest_json(fixture_count, fixture_seed, fixture_tokens,
+                                  false, std::string(32, '1'));
       fixture_manifest = write_test_bootstrap_manifest(intent);
       extra_args.insert(extra_args.end(),
                         {"--bootstrap-manifest", fixture_manifest->string()});
@@ -1219,13 +1220,13 @@ expect_killed_exit(HogDevnodeProcess &process)
 std::string
 bootstrap_manifest_json(std::uint32_t count, std::string_view seed,
                         std::string_view initial_storage_tokens,
-                        bool include_protocol)
+                        bool include_protocol, const std::string &network_hash)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
     w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "groundhog-bootstrap");
-    w.field("networkHash", std::string(31, '1') + "3w");
+    w.field("networkHash", network_hash);
     w.field("profile", "local-dev");
     if (include_protocol) {
       w.field("protocol", protocol_text(version::kHogdProtocol()));

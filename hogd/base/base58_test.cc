@@ -1,6 +1,7 @@
 #include "hogd/base/base58.h"
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 
@@ -20,9 +21,9 @@ TEST(Base58, FixedIdentifiersPreserveBytes)
   EXPECT_EQ(decode_base58_fixed<32>(encode_base58(ones)), ones);
   std::array<std::uint8_t, 32> ff{};
   ff.fill(255);
-  constexpr auto text = "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG";
-  EXPECT_EQ(encode_base58(ff), text);
-  EXPECT_EQ(decode_base58_fixed<32>(text), ff);
+  constexpr auto kText = "JEKNVnkbo3jma5nREBBJCDoXFVeKkD56V3xKrvRmWxFG";
+  EXPECT_EQ(encode_base58(ff), kText);
+  EXPECT_EQ(decode_base58_fixed<32>(kText), ff);
 }
 
 TEST(Base58, RejectsInvalidAndWrongWidthText)
@@ -51,9 +52,9 @@ TEST(Base58, SharedProtocolVectors)
   for (std::size_t i = 0; i < increasing.size(); ++i) {
     increasing[i] = static_cast<std::uint8_t>(i);
   }
-  constexpr auto text = "1thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE";
-  EXPECT_EQ(encode_base58(increasing), text);
-  EXPECT_EQ(decode_base58_fixed<32>(text), increasing);
+  constexpr auto kText = "1thX6LZfHDZZKUs92febYZhYRcXddmzfzF2NvTkPNE";
+  EXPECT_EQ(encode_base58(increasing), kText);
+  EXPECT_EQ(decode_base58_fixed<32>(kText), increasing);
 }
 
 } // namespace

@@ -21,12 +21,12 @@
 #include <string_view>
 #include <system_error>
 
+#include "hogd/base/base58.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/json.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"

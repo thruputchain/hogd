@@ -1,5 +1,6 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 
+#include "hogd/base/base58.h"
 #include "hogd/base/network_hash.h"
 
 #include <fcntl.h>

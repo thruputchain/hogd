@@ -26,6 +26,7 @@
 
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/base58.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
@@ -35,7 +36,6 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"

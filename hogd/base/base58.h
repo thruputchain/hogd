@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <optional>
+#include <ranges>
 #include <span>
 #include <string>
 #include <string_view>
@@ -38,8 +39,8 @@ encode_base58(std::span<const std::uint8_t> bytes)
     }
   }
   std::string result(zeros, '1');
-  for (auto it = digits.rbegin(); it != digits.rend(); ++it) {
-    result.push_back(kBase58Alphabet[*it]);
+  for (auto digit : digits | std::views::reverse) {
+    result.push_back(kBase58Alphabet[digit]);
   }
   return result;
 }
@@ -50,7 +51,7 @@ template<std::size_t N>
 std::optional<std::array<std::uint8_t, N>>
 decode_base58_fixed(std::string_view text)
 {
-  if (text.size() > N * 138 / 100 + (N == 0 ? 0 : 1)) {
+  if (text.size() > ((N * 138) / 100) + (N == 0 ? 0 : 1)) {
     return std::nullopt;
   }
   std::size_t zeros = 0;
@@ -67,7 +68,7 @@ decode_base58_fixed(std::string_view text)
     if (digit == std::string_view::npos) {
       return std::nullopt;
     }
-    unsigned carry = static_cast<unsigned>(digit);
+    auto carry = static_cast<unsigned>(digit);
     for (std::size_t i = 0; i < length; ++i) {
       carry += static_cast<unsigned>(bytes[i]) * 58;
       bytes[i] = static_cast<std::uint8_t>(carry % 256);
