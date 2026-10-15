@@ -520,7 +520,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     control_server_handles[server_idx].ci_client.start_server(
         "hogd/hog_exec/hog-exec",
         {"--bind-ip", hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-         std::format("{}:{}", mempool_ip, sched_exec_port), "-n", "1024"});
+         std::format("{}:{}", mempool_ip, sched_exec_port)});
   }
 
   auto db_cards = sched_db_test->impl()->await_shard_cards(1);

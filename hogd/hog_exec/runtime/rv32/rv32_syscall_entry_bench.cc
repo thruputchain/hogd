@@ -164,8 +164,29 @@ static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=
 static_assert(kMaxBytestringBytes <= kBytestringCeilingLen,
               "the sweep must stay inside the wire format's ceiling");
 
+// The cross-invoke depth the fixture admits, and so the deepest parent walk
+// the frame sweeps can measure. The stock chain caps a transaction at
+// kDefaultMaxCrossInvokeDepth frames, but the walk's per-frame cost is a
+// property of the frame map and not of what a chain admits, and the committed
+// syscall_reference.txt guards it at depth 254 -- measured when the stock
+// config still stated 256. Pinning the floor here keeps the deepest row where
+// the reference expects it whatever the chain's default is, so lowering that
+// default is not reported as a cost that stopped being measured. A chain that
+// admits more than this still gets its full walk swept.
+constexpr uint32_t kBenchMinCrossInvokeDepth = 256;
+
+uint32_t
+bench_max_cross_invoke_depth()
+{
+  return std::max(
+      kBenchMinCrossInvokeDepth,
+      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth);
+}
+
 // Raise the fixture's bytestring limit to cover the sweep. Otherwise the large
-// write rows would time input rejection instead of copying.
+// write rows would time input rejection instead of copying. The cross-invoke
+// depth is raised for the same reason: under the stock limit the deep frame
+// sweeps would time admission refusing a frame instead of the walk.
 NetworkConfig
 bench_network_config()
 {
@@ -173,6 +194,9 @@ bench_network_config()
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  kMaxBytestringBytes);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxCrossInvokeDepth,
+                                 bench_max_cross_invoke_depth());
   return config;
 }
 
@@ -1470,14 +1494,15 @@ register_benchmarks()
                                bm_syscall_vm,
                                bytestring_get_len_call(vm_bytes));
 
-  // Depth counts frames above the fixture's two. Include the configured
-  // maximum to measure the full admitted parent walk.
-  const uint32_t stock_max_depth =
-      NetworkConfigParams(stock_network_config().v0()).max_cross_invoke_depth -
-      2;
-  std::vector<uint32_t> depths = {1, 8, 16};
-  if (std::ranges::find(depths, stock_max_depth) == depths.end()) {
-    depths.push_back(stock_max_depth);
+  // Depth counts frames above the fixture's two. The floor's depth is always
+  // swept: it is the row the committed reference guards, and a chain raising
+  // its limit past the floor adds the deeper row rather than moving this one.
+  // Then the fixture's own maximum when it is deeper, to measure the full
+  // parent walk such a chain admits (see bench_network_config).
+  std::vector<uint32_t> depths = {1, 8, 16, kBenchMinCrossInvokeDepth - 2};
+  const uint32_t fixture_max_depth = bench_max_cross_invoke_depth() - 2;
+  if (std::ranges::find(depths, fixture_max_depth) == depths.end()) {
+    depths.push_back(fixture_max_depth);
   }
   // Sweep the short key range at every depth, then the long range at depth 1.
   // Register increasing K so smaller rows do not inherit a larger cache.

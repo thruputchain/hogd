@@ -115,7 +115,7 @@ void
 print_usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
-               "[--nthreads <nthreads> (ignored)] [--mempool-port <port>] "
+               "[--mempool-port <port>] "
                "[--metrics-port <port>] "
                "[--db-executor-addr <host:port> "
                "--event-executor-addr <host:port> "
@@ -128,28 +128,6 @@ usage(char *argv[])
 {
   print_usage(argv);
   exit(EXIT_FAILURE);
-}
-
-int
-parse_nthreads(char *argv[], const std::string &value)
-{
-  const std::optional<int> nthreads = hogd::try_parse_integer<int>(value);
-  if (!nthreads || *nthreads <= 0) {
-    std::println(stderr, "Invalid --nthreads: {}", value);
-    usage(argv);
-  }
-  return *nthreads;
-}
-
-// --nthreads/-n no longer sizes anything: contract execution is coroutinized
-// and runs on the x23 ThreadPool.  The flag is still accepted so existing
-// launch scripts keep working, but it is reported as ignored rather than
-// silently dropped.
-void
-warn_ignored_nthreads(int value)
-{
-  hogd::warn("--nthreads {} ignored: execution runs on the x23 thread pool",
-             value);
 }
 
 } // namespace
@@ -192,10 +170,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       bind_ip = argv[++i];
       continue;
     }
-    if (arg == "--nthreads" && i + 1 < argc) {
-      warn_ignored_nthreads(parse_nthreads(argv, argv[++i]));
-      continue;
-    }
     if (arg == "--mempool-port" && i + 1 < argc) {
       mempool_port =
           hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
@@ -212,10 +186,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (arg == "--view-gateway-port" && i + 1 < argc) {
       view_gateway_port =
           hogd::parse_port_arg("--view-gateway-port", argv[++i], argv, usage);
-      continue;
-    }
-    if (arg == "-n" && i + 1 < argc) {
-      warn_ignored_nthreads(parse_nthreads(argv, argv[++i]));
       continue;
     }
     if (arg == "-p" && i + 1 < argc) {
