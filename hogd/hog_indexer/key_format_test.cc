@@ -18,6 +18,26 @@ protected:
 };
 
 // Test transaction key format
+TEST_F(IndexerKeyFormatTest, BlockReferenceKeysSortByHeightThenUnsignedHash)
+{
+  TransactionHash low{};
+  TransactionHash high{};
+  low[0] = 0x7F;
+  high[0] = 0x80;
+  const auto prefix = IndexerKeyFormat::make_block_query_key(
+      IndexerKeyFormat::kBlockQueryRefPrefix, 0x0102030405060708);
+  ASSERT_EQ(prefix.size(), IndexerKeyFormat::kBlockQueryRefPrefix.size() + 8);
+  for (size_t i = 0; i < 8; ++i) {
+    EXPECT_EQ(static_cast<uint8_t>(prefix[prefix.size() - 8 + i]), i + 1);
+  }
+  const auto first = IndexerKeyFormat::make_block_ref_key(255, low);
+  const auto second = IndexerKeyFormat::make_block_ref_key(255, high);
+  const auto next = IndexerKeyFormat::make_block_ref_key(256, low);
+  EXPECT_LT(std::memcmp(first.data(), second.data(), first.size()), 0);
+  EXPECT_LT(std::memcmp(second.data(), next.data(), second.size()), 0);
+}
+
+// Test transaction key format
 TEST_F(IndexerKeyFormatTest, TxKeyByteOrder)
 {
   SHA256Hash tx_hash;

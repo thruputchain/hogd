@@ -16,6 +16,25 @@
 namespace hogd {
 
 std::string
+IndexerKeyFormat::make_block_query_key(std::string_view prefix,
+                                       BlockHeight height)
+{
+  std::string key(prefix);
+  const uint64_t encoded = std::byteswap(static_cast<uint64_t>(height));
+  key.append(reinterpret_cast<const char *>(&encoded), sizeof(encoded));
+  return key;
+}
+
+std::string
+IndexerKeyFormat::make_block_ref_key(BlockHeight height,
+                                     const TransactionHash &hash)
+{
+  std::string key = make_block_query_key(kBlockQueryRefPrefix, height);
+  key.append(reinterpret_cast<const char *>(hash.data()), hash.size());
+  return key;
+}
+
+std::string
 IndexerKeyFormat::make_block_identity_meta_key(BlockHeight block_height)
 {
   std::string key(kBlockIdentityMetaKeyPrefix);

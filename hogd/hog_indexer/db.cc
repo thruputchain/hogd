@@ -1203,6 +1203,11 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
   const uint64_t encoded_watermark =
       std::byteswap(static_cast<uint64_t>(progress.contiguous_height));
   rocksdb::WriteBatch batch;
+  if (!durable_progress_) {
+    batch.Put(db_->DefaultColumnFamily(),
+              std::string(IndexerKeyFormat::kBlockQueryFormatKey),
+              block_query_format());
+  }
   batch.Put(db_->DefaultColumnFamily(),
             rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
             rocksdb::Slice(reinterpret_cast<const char *>(
@@ -1387,6 +1392,36 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
           key, body.signed_tx.tx.invocation.invoked_address,
           IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
       batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+    }
+
+    // The query projection is committed with rows and progress. It copies
+    // consensus metadata only; bodies and logs remain in tx_index.
+    BlockQueryRecord record{.value = block.payload.consensus_value,
+                            .transaction_count = events.size()};
+    const x23::Buf record_bytes = x23::serialize(record);
+    batch.Put(db_->DefaultColumnFamily(),
+              IndexerKeyFormat::make_block_query_key(
+                  IndexerKeyFormat::kBlockQueryRecordPrefix, height),
+              rocksdb::Slice(reinterpret_cast<const char *>(
+                                 record_bytes.data()),
+                             record_bytes.size()));
+    std::vector<TransactionHash> hashes;
+    hashes.reserve(events.size());
+    for (const auto &event : events) {
+      hashes.push_back(event.tx_hash);
+    }
+    std::ranges::sort(hashes);
+    if (std::ranges::adjacent_find(hashes) != hashes.end()) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block repeats a transaction hash");
+    }
+    for (size_t i = 0; i < hashes.size(); ++i) {
+      const uint64_t ordinal = std::byteswap(static_cast<uint64_t>(i));
+      batch.Put(db_->DefaultColumnFamily(),
+                IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
+                rocksdb::Slice(reinterpret_cast<const char *>(&ordinal),
+                               sizeof(ordinal)));
     }
 
     IndexerInitializedProgress progress = *durable_progress_;
@@ -1625,6 +1660,23 @@ IndexDB::initialize_progress_from_db()
       }
     }
     return {};
+  }
+
+  std::string query_format;
+  const auto format_status =
+      db_->Get(rocksdb::ReadOptions(), db_->DefaultColumnFamily(),
+               std::string(IndexerKeyFormat::kBlockQueryFormatKey),
+               &query_format);
+  if (format_status.IsNotFound() ||
+      (format_status.ok() && query_format != block_query_format())) {
+    error("indexer block query format requires a rebuild into a separate "
+          "directory; keep the existing database intact");
+    return IndexerError(IndexerErrorCode::kMigrationRequired);
+  }
+  if (!format_status.ok()) {
+    error("failed to read indexer block query format: {}",
+          format_status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
   }
 
   IndexerInitializedProgress progress;

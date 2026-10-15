@@ -1,5 +1,6 @@
 add_library(hog_indexer STATIC
     db.cc
+    block_queries.cc
     event_cursor.cc
     key_format.cc
     pull_controller.cc

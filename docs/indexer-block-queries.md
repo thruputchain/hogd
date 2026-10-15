@@ -1,0 +1,63 @@
+# Indexer block queries
+
+The `IndexerBlockExplorer1` service supports two exact-height reads:
+
+- `get_block_by_height`: the canonical committed `ConsensusValue`.
+- `get_transactions_by_block`: transaction hash and height references, with bounded pagination.
+
+The event service remains the committed-block source. The indexer stores a query copy of consensus metadata. It does not copy transaction bodies or execution logs into another block archive.
+
+## Storage and consistency
+
+Strict ingestion writes block metadata, transaction references, transaction rows, committed identity, and progress in one synchronous RocksDB batch. The public query boundary advances only after that write succeeds. Empty blocks have metadata even though they have no references. Transactions without emitted events still have references.
+
+The new records use separate prefixes in the existing default column family:
+
+| Record | Key suffix | Value |
+| --- | --- | --- |
+| Format | `queries:format` | Format version and exact protocol token |
+| Block metadata | `queries:blocks:` + height | XDR consensus value and transaction count |
+| Transaction reference | `queries:refs:` + height + transaction hash | Zero-based ordinal in ascending hash order |
+
+These suffixes follow `meta:indexer_durable:`. Heights and ordinals are eight-byte big-endian values. Hashes are the 32 unsigned transaction-hash bytes. Reference ordinals detect missing rows during a page walk without reading the whole block. They are index positions, not execution positions.
+
+Each query seeks directly to the requested height or cursor key. It reads at most the page limit plus one reference for continuation. Metadata lookup verifies the stored height and canonical hash against the committed identity. Database, decode, and iterator failures remain errors.
+
+## Coverage and genesis
+
+This version serves heights 1 through the indexer's highest contiguous committed height. The outbox starts at height 1 and supplies only the genesis hash as its initial boundary. It does not supply the full genesis value, so height 0 is outside block-query coverage.
+
+Before the first block is indexed, transaction pages report `IndexerQueryNotReady`. Block lookup fails with a system RPC error because `BlockLookupResult` has no unavailable arm. Once ready, block lookup returns `BlockNotFound` outside coverage. Transaction pages outside coverage are empty and include the actual oldest/latest heights.
+
+An empty transaction page alone does not prove a block exists. Clients must also obtain its metadata and check coverage. The consensus tip can be ahead of the indexer's query boundary.
+
+The query index does not prune history today. Any future pruning must update metadata, references, transaction records, coverage, and cursor validity together.
+
+## Pagination
+
+- References are sorted lexicographically by unsigned transaction-hash bytes, ascending or descending.
+- A zero limit selects 50. Larger limits are capped at 200.
+- An empty cursor starts a walk. A returned empty cursor ends it.
+- A continuation cursor carries the height, block hash, order, and last returned transaction hash. The cursor's order takes precedence over the request field.
+- A valid cursor resumes after its last reference, including after restart and while the chain advances.
+- Malformed, oversized, foreign-query, wrong-height, or wrong-block cursors return an empty terminal page, as the current internal protocol specifies. This behavior is not a promise of durable bulk-feed recovery.
+- Clients must retain the cursor bytes unchanged. There is no execution-order meaning in this traversal.
+
+## Existing databases and protocol changes
+
+The format marker is first written during strict epoch initialization. Older strict-ingestion databases have no marker and cannot prove that the new stores contain their earlier history. Opening one with this binary fails with a migration-required error. No new projection is silently created above an old watermark.
+
+The marker includes the exact protocol token. Opening the index under a different token also requires a verified rebuild or a separately implemented migration. This intentionally prevents decoding stored consensus values with an unverified schema. Epoch transitions accepted by the same binary retain their immutable query records; this is not a guarantee that a future binary can decode old epochs.
+
+Legacy `consume_events` databases retain their existing reopen behavior for other queries. They have no complete block projection and cannot serve the new queries.
+
+### Initial rebuild procedure
+
+1. Record the existing binary, protocol token, database directory, and indexed tip. Keep the original directory and binary.
+2. Confirm that the authoritative event source can replay every required height from 1, with compatible schemas. If it cannot, stop and resolve the history gap. Do not claim a partial rebuild is complete.
+3. Start a separate indexer using the reviewed binary, the same authoritative event endpoint, a new empty `--db-path`, and distinct listener ports. Use the existing `--event-addr`, `--block-explorer-port`, and `--metrics-port` options.
+4. Wait for replay to catch up. Verify metadata hashes, page membership against known receipts, empty blocks, and reported bounds through the new listener.
+5. Restart the new indexer and repeat the checks. An interrupted rebuild resumes from its own committed progress; repeated delivery is idempotent.
+6. Switch the gateway to the verified listener under the normal deployment procedure. Keep the old index intact. A switch back requires the matching old binary and compatible source protocol; the old binary does not gain block-query support.
+
+There is no automatic in-place backfill or protocol migration in this change. The stored transaction rows and block hashes cannot reconstruct missing consensus values.

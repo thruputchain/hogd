@@ -1,5 +1,6 @@
 #pragma once
 
+#include <stdexcept>
 #include <string_view>
 #include <utility>
 
@@ -57,12 +58,20 @@ public:
     co_return ret;
   }
 
-  static x23::Async<BlockLookupResult>
-  get_block_by_height(BlockHeight /*height*/)
+  x23::Async<BlockLookupResult> get_block_by_height(BlockHeight height)
   {
-    // The indexer is not a block store. Keep the protocol RPC conformant
-    // without persisting a second copy of each ConsensusValue.
-    co_return BlockLookupResult(BlockLookupOutcome::BlockNotFound);
+    auto status = db_.get_block_by_height(height);
+    if (!status) {
+      // BlockLookupResult has no failure arm. x23 maps exceptions to a
+      // system RPC error, preserving the distinction from an ordinary miss.
+      throw std::runtime_error(status.error().error_code().message());
+    }
+    if (!*status) {
+      co_return BlockLookupResult(BlockLookupOutcome::BlockNotFound);
+    }
+    BlockLookupResult result(BlockLookupOutcome::BlockFound);
+    result.value() = std::move(**status);
+    co_return result;
   }
 
   x23::Async<EventPageResult> get_events(EventQuery query)
@@ -102,19 +111,15 @@ public:
   }
 
   x23::Async<TransactionRefPageResult>
-  get_transactions_by_block(BlockTransactionQuery /*query*/)
+  get_transactions_by_block(BlockTransactionQuery query)
   {
-    // The transaction index is keyed by transaction hash and has no
-    // block-height index yet.  Report the current serving bounds while
-    // returning no refs until that index is added.
-    auto watermark = db_.latest_block();
-    if (!watermark) {
+    auto status = db_.get_transactions_by_block(query);
+    if (!status) {
       co_return query_failure<TransactionRefPageResult>(
-          "get_transactions_by_block", watermark.error());
+          "get_transactions_by_block", status.error());
     }
     TransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
-    ret.page().latest_block = *watermark;
-    ret.page().oldest_block = IndexDB::oldest_block();
+    ret.page() = std::move(*status);
     co_return ret;
   }
 
@@ -128,7 +133,8 @@ private:
   static Result query_failure(std::string_view rpc, const IndexerError &err)
   {
     error("indexer {} query failed: {}", rpc, err.error_code().message());
-    const auto outcome = err.code() == IndexerErrorCode::kDBNotOpen
+    const auto outcome = (err.code() == IndexerErrorCode::kDBNotOpen ||
+                          err.code() == IndexerErrorCode::kQueryNotReady)
                              ? IndexerQueryOutcome::IndexerQueryNotReady
                              : IndexerQueryOutcome::IndexerQueryInternalFailure;
     return Result(outcome);
