@@ -32,6 +32,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/rpc_common.h"
 #include "x23/vec.h"
 
 #ifndef HOG_INDEXER_BINARY
@@ -103,6 +104,43 @@ query_latest_block(std::uint16_t port)
                     static_cast<int>(result.outcome())));
   }
   return result.page().latest_block;
+}
+
+TEST(HogIndexerProcess, BlockLookupNotReadyIsATransportError)
+{
+  TmpDir event_dir;
+  TmpDir indexer_dir;
+  ConsensusValue genesis{};
+  EventRPCContext event(event_dir.directory());
+  ASSERT_TRUE(event.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerServer event_server(event);
+  const auto port = event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+  const std::string address =
+      std::string(x23::HostPort{"127.0.0.1", port}.show());
+  auto indexer = DaemonProcess::start(
+      HOG_INDEXER_BINARY,
+      {"--event-addr", address, "--db-path",
+       (std::filesystem::path(indexer_dir.directory()) / "indexer-db").string(),
+       "--bind-ip", "127.0.0.1", "--block-explorer-port", "0", "--metrics-port",
+       "0"});
+  indexer.wait_until_log_contains("indexer initialization complete.");
+  auto client = make_rpc_client<IndexerBlockExplorer1>(
+      x23::HostPort{"127.0.0.1",
+                    indexer.require_port("indexer.block_explorer")},
+      true)();
+  ASSERT_TRUE(client);
+  try {
+    client->get_block_by_height(1)();
+    FAIL() << "not-ready lookup returned a successful RPC reply";
+  } catch (const x23::XdrCallFailed &error) {
+    ASSERT_EQ(error.m_.body.rbody().stat(), x23::reply_stat::MSG_ACCEPTED);
+    EXPECT_EQ(error.m_.body.rbody().areply().reply_data.stat(),
+              x23::accept_stat::SYSTEM_ERR);
+  }
+  BlockTransactionQuery query{};
+  query.height = 1;
+  EXPECT_EQ(client->get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryNotReady);
 }
 
 TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
