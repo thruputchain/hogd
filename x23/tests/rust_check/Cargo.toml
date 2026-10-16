@@ -13,8 +13,8 @@ serde = ["dep:serde", "xdrs/serde"]
 
 [dependencies]
 async-trait = "0.1.89"
-rpc_api = { version = "0.2.0", registry = "groundhog" }
+rpc_api = { version = "0.3.0", registry = "groundhog" }
 schemars = "1"
 serde = { version = "1", features = ["derive"], optional = true }
-xdr-common = { version = "0.10.3", registry = "groundhog" }
-xdrs = { version = "0.10.3", registry = "groundhog", features = ["alloc", "derive", "schemars"] }
+xdr-common = { version = "0.11.0", registry = "groundhog" }
+xdrs = { version = "0.11.0", registry = "groundhog", features = ["alloc", "derive", "schemars"] }
