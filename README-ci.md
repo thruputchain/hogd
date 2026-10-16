@@ -34,6 +34,9 @@ entries. Absolute paths intentionally embedded in generated code, including
 Scheduled cache warmup uses the host's default `gcc`/`g++`. It overrides the
 compiler selection in `prepare_env.sh` with `HOGD_CI_GCC_CC` and
 `HOGD_CI_GCC_CXX`; benchmark jobs retain their default GCC 15 pin.
+Every warmup run sets `CCACHE_RESHARE=1` so results used by the build are uploaded
+to remote storage even on local cache hits. This also backfills entries whose
+earlier remote uploads failed.
 Warmup and developer builds must use matching compiler versions and locale
 settings to share entries. GCC 15 and GCC 16 still have separate entries. After
 changing the launcher, warm the desired toolchain again; builds can reuse their
