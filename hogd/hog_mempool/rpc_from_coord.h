@@ -40,6 +40,7 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -453,7 +454,7 @@ private:
   // Returns with [commit_guard] held, so results stay valid through admission.
   x23::Async<AuthErrorCodeBatch>
   verify_submission(const SignedTransactionBatch &txs,
-                    x23::CoroGuard &commit_guard);
+                    InstrumentedCoroGuard &commit_guard);
 
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,

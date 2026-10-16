@@ -87,3 +87,148 @@ to the appropriate values for that machine.
 	- The CI scripts will, where relevant, fetch any dependencies or toolchain components
 - Allow services to run after the shell closes.  From a sudoer account, `sudo loginctl enable-linger hogci`
 - `./svc_nosudo.sh start`
+
+## Hackathon workload: one validator
+
+The manual **Hackathon workload (single validator)** workflow runs the existing
+single-validator topology on hog4–hog11. It adds the public JSON-RPC gateway on
+hog4 and a concurrent replay client on hog7. Supply an absolute compatible
+`hog-gateway` path on hog4 and its SHA256 as workflow inputs. The gateway is an
+explicit, pinned dependency from `groundhog-rpc`; protocol handshakes must pass.
+Use exclusively allocated benchmark hosts with matching control servers.
+Launch it from **Actions → Hackathon workload (single validator) → Run workflow**
+after the workflow has been added to the default branch. Set `gateway_binary` to the installed gateway path
+on hog4 and `gateway_sha256` to its lowercase SHA256 digest.
+The job prints reports in its logs and uploads a `hackathon-results-<attempt>`
+artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with
+results and signed corpora retained even after a replay fails. A copy also stays
+under `WORK_DIR` and, when set, the worker's `HOG_DUMP_DIR`; the exact paths
+appear in the job log.
+This job does not publish to `metrics_history` and does not load its deploy key.
+If the protocol fingerprint changed only for non-wire files, verify the protocol
+source diff before explicitly supplying `gateway_protocol` in the workflow,
+`HACKATHON_GATEWAY_PROTOCOL` in the shell wrapper, or `--gateway-protocol` in the
+Python runner. The override is retained in the run identity; mismatches are
+rejected by default. Protocol 0.53 bindings differ from this checkout's
+`hogp/2f5211766e8a878` only in CI notification files; 0.52 bindings are incompatible.
+
+The CI workload is synthetic: 1,000 signed users, 500 distinct application artifacts,
+five wallet artifacts, one/two-signature accounts, deployments, and auth-data
+updates. Application families exercise token-like distributions, counters,
+records, hashing, and cross-contract calls/events. These are benchmark fixtures,
+not implementations of complete production applications. 400 apps are deployed
+before measurement; 100 arrive during traffic. Unready deployment dependencies
+are counted as blocked arrivals. The shared-code control retains the application
+families and arrival schedule but reuses five app artifacts and one wallet
+artifact; variant-specific operation costs can differ, so this control alone
+cannot prove a cache effect.
+
+Compilation and signing happen before replay. The saved corpus contains the
+wallet-only genesis ceremony, setup transactions, contract identities, signed
+transactions, and a deterministic arrival schedule. Fixture keys are disposable
+and deterministically derived, never devnet keys. The corpus is for a **fresh**
+benchmark chain; replaying it on an existing chain is unsupported.
+
+The CI schedule warms up for 30 seconds at 1,000 calls/second, then runs
+60-second stages at 1,000, 5,000, 10,000 and 25,000 calls/second. Each stage
+contains a five-second fivefold burst (up to 125,000 calls/second). Deployments
+are additional traffic. The client allows 16,384 concurrent submissions and uses
+16 receipt-polling workers. The harness writes and retains `gateway.toml`,
+setting the gateway connection cap to submission slots + receipt workers + 128
+(16,528 by default), so its default 2,000-connection cap does not stop the
+load before ingestion. HTTP errors are counted separately from transport errors;
+HTTP 429 rejections are not repeatedly polled for nonexistent receipts.
+It records arrivals more than 100 ms late and drains
+receipts for 120 seconds.
+It does not automatically retry ambiguous submissions. Each corpus runs through
+the RPC gateway three times, with fresh state. The workflow repeats those runs
+for the shared-code control, giving six measured runs in total.
+
+Workflow inputs `users`, `rate_multiplier`, `outstanding`, `receipt_workers`,
+and `repeats` override these defaults. The shell wrapper accepts the corresponding
+`HACKATHON_USERS`, `HACKATHON_RATE_MULTIPLIER`, `HACKATHON_OUTSTANDING`,
+`HACKATHON_RECEIPT_WORKERS`, and `HACKATHON_REPEATS` environment variables.
+Use `users=100` and `rate_multiplier=1` for the earlier low-load corpus; the
+standalone corpus builder retains these lower defaults for local use. The
+multiplier applies before `--rate-divisor` and is saved in the manifest.
+
+Reports show offered, submitted, admitted and observed-successful TX/s separately,
+plus client drops and admitted transactions without observed receipts at each
+stage boundary. Completion throughput includes receipts for earlier-stage
+transactions. A plateau with missed arrivals or exhausted submission slots can
+be a client limit; a run that keeps up with all offered traffic does not establish
+maximum capacity. Inspect service metrics and receipt lag alongside throughput.
+
+The benchmark implementation lives in `hogd/loadgen/hackathon`: the corpus builder,
+contract fixtures, Python harness and reports, tests, and standalone Go replay tool.
+The CI launcher and host schedule remain in `scripts/ci` and `scripts/schedules`.
+The standalone `hackathon-replay` tool lives in `hogd/loadgen/hackathon/replay`.
+Its `bootstrap` command supplies only the saved genesis configuration and ceremony
+over chuckd's existing loadgen interface, keeping the internal work stream open
+without supplying application transactions. The stock `bench coordinator_loadgen`
+command runs consensus. The tool's `run` command submits all application setup,
+deployments, calls, and authentication updates through the RPC gateway. Setup
+batches must commit successfully before the measured arrival clock starts.
+This requires no chuckd changes or submodule updates.
+
+Run with the CI services already built and their control servers ready:
+
+```sh
+export BUILD_DIR=/absolute/path/to/release
+export WORK_DIR=/absolute/path/to/new-work-directory
+export HACKATHON_GATEWAY_BINARY=/absolute/path/on/hog4/to/hog-gateway
+export HACKATHON_GATEWAY_SHA256=<expected-sha256>
+scripts/ci/hackathon_bench.sh
+```
+
+For a local correctness smoke, build the normal service targets with
+`scripts/build.sh`, build `chuckd.dev` and `scpd.dev` using the repository scripts,
+and build the standalone replay tool and a smaller corpus:
+
+```sh
+GOWORK=off go -C hogd/loadgen/hackathon/replay build -o /tmp/codex-build/hackathon-replay .
+python3 hogd/loadgen/hackathon/build_contracts.py --output /tmp/hackathon-artifacts --apps 5 --wallets 5
+scripts/build.sh -d /tmp/codex-build -t Release \
+  -x -DHACKATHON_ARTIFACT_DIR=/tmp/hackathon-artifacts hackathon_corpus
+/tmp/codex-build/hogd/loadgen/hackathon/hackathon_corpus \
+  --artifacts /tmp/hackathon-artifacts --out /tmp/hackathon-corpus \
+  --apps 5 --users 10 --wallets 5 --stage-seconds 2 --warmup-seconds 1 --rate-divisor 100
+python3 hogd/loadgen/hackathon/cluster.py --local --build /tmp/codex-build \
+  --scpd /absolute/path/to/scpd.dev --gateway /absolute/path/to/hog-gateway \
+  --gateway-sha256 <expected-sha256> --corpus /tmp/hackathon-corpus \
+  --output /tmp/hackathon-results --repeats 1
+```
+
+The corpus builder requires the same installed Groundhog CLI (0.26.0), Rust
+compiler and cached Cargo dependencies as `built_contracts/build_risc.sh`.
+It creates its build workspace beneath `--output`, never in the source tree.
+Normal builds do not compile the synthetic corpus. `--shared-code 1` on the C++
+generator selects the control; preserve the same seed and schedule options.
+Local mode still runs coordinator/SCP and the individual services with exactly
+one validator; it is a correctness smoke, not a capacity comparison with CI.
+Ports match the single-validator CI setup, so they must be available locally.
+
+Each `gateway-N` repeat directory retains service logs, `replay/results.jsonl`,
+metric snapshots, generator resource use, `summary.json`, and `report.md`.
+`replay/setup.jsonl` records application setup submissions through the gateway.
+The full signed corpus remains in the input directory. Results distinguish
+admission, execution outcomes, dependency-blocked work, missed arrivals, and unresolved
+transactions. Receipt latency includes polling and indexer delay.
+Service exits, setup faults, committed execution faults, and missing required
+diagnostics fail the run; overload outcomes remain recorded benchmark data.
+
+Lock wait/hold histograms, authentication timings, and sampled same-host
+ingestion/block intervals are always enabled. Logging and measurement have a cost.
+A single validator may not exercise validation RPCs, which the report marks as
+unexercised. Block overlap is correlation: inspect auth duration/retries and
+commit/scheduler lock wait distributions before attributing latency to locks.
+No latency regression threshold or automatic recurring schedule is installed.
+
+Focused checks:
+
+```sh
+HACKATHON_CORPUS_BINARY=/tmp/codex-build/hogd/loadgen/hackathon/hackathon_corpus \
+HACKATHON_ARTIFACTS=/tmp/hackathon-artifacts \
+python3 -m unittest discover -s hogd/loadgen/hackathon -p 'test_*.py'
+GOWORK=off go -C hogd/loadgen/hackathon/replay test -race ./...
+```

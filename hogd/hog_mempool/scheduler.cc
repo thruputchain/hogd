@@ -1,4 +1,5 @@
 #include "hogd/hog_mempool/scheduler.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 
 #include <algorithm>
 #include <array>
@@ -202,7 +203,9 @@ Scheduler::apply_committed_block_hog_ages(
 {
   ReadAverageHogAgesResult read_result = co_await read_average_hog_ages(txs);
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
 
   std::unordered_map<ContractAddress, HogAge, SipHash24Hasher>
@@ -306,7 +309,9 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -343,7 +348,9 @@ Scheduler::read_average_hog_ages(const BlockTransfers &transfers)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -778,7 +785,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   account_keys.reserve(found.size());
   // [get_account_key()] accesses [ready_accounts_], so we need to protect it
   // with the lock.
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : found) {
     if (account_excluded_from_block(account)) {
@@ -1067,7 +1076,9 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
 
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
@@ -1421,7 +1432,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   // [accounts] is static and therefore used by multiple threads, so we wait to
   // call [clear()] on it until after we have acquired the lock.
