@@ -30,6 +30,7 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/format.h"
 
 namespace hogd {
 
@@ -91,7 +92,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   // function is noexcept, so translate that the same way an instantiation
   // failure is translated above.
   try {
-    return run_ecall_loop(std::move(*machine_noexcept), gas_limit);
+    return run_ecall_loop(std::move(*machine_noexcept), method_id, gas_limit);
   } catch (std::exception const &e) {
     error("Unrecoverable: could not start rv32 ecall loop: {}", e.what());
     return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
@@ -101,12 +102,65 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   }
 }
 
+#if HOGD_RV32_STACK_USAGE_ENABLED
+namespace {
+
+// Logs the guest's stack extremes when the invocation's coroutine frame goes
+// away, whichever exit it took: a Return, a host error, a trap, or a frame
+// abandoned before completion. Debug-only; see HOGD_RV32_STACK_USAGE in
+// threaded_machine.h. The address is copied at entry, while this invocation's
+// frame is the handler's active one.
+class StackUsageReport {
+public:
+  StackUsageReport(rv32::ThreadedMachine const &machine,
+                   ContractAddress address, Runtime::MethodID method_id)
+    : machine_(machine), address_(address), method_id_(method_id)
+  {}
+  StackUsageReport(StackUsageReport const &) = delete;
+  StackUsageReport &operator=(StackUsageReport const &) = delete;
+
+  ~StackUsageReport()
+  {
+    // Logging allocates, and nothing may escape a destructor.
+    try {
+      const rv32::StackUsage &usage = machine_.stack_usage();
+      if (usage.writes == 0) {
+        info("rv32 stack usage: contract={} method={:#018x}: sp never written",
+             x23::show(address_), method_id_);
+        return;
+      }
+      info("rv32 stack usage: contract={} method={:#018x} sp_min={:#010x} "
+           "sp_max={:#010x} max_depth={} sp_writes={}",
+           x23::show(address_), method_id_, usage.sp_min, usage.sp_max,
+           usage.sp_max - usage.sp_min, usage.writes);
+    } catch (...) {
+      report_dropped_log("rv32 stack usage report");
+    }
+  }
+
+private:
+  rv32::ThreadedMachine const &machine_;
+  ContractAddress address_;
+  Runtime::MethodID method_id_;
+};
+
+} // namespace
+#endif
+
 // The machine is moved into this coroutine's frame: syscalls suspend the loop,
 // so it cannot live on the caller's stack.
 x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
-Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
+Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine,
+                            [[maybe_unused]] MethodID method_id,
+                            uint64_t gas_limit)
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  // A local of the coroutine body: destroyed on every exit path, after the
+  // last co_return and before `machine`, which as a parameter outlives it.
+  const StackUsageReport stack_usage_report(
+      machine, syscall_handler_->get_current_address(), method_id);
+#endif
   rv32::StepResult result = machine.start();
 
   while (result == rv32::StepResult::kEcall) {

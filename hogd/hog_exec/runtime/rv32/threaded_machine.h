@@ -48,6 +48,40 @@ inline constexpr uint32_t kMaxRunGas = 10000;
 static_assert(kMaxInstructionGas <= kMaxRunGas);
 static_assert(kMaxRunGas <= UINT16_MAX);
 
+// Debug-only guest stack-usage diagnostic. CMake defines HOGD_RV32_STACK_USAGE
+// (option of the same name, on by default with ENABLE_TEST_FFI) for Debug
+// configurations only; the NDEBUG check keeps a stray definition out of an
+// optimized interpreter, whose handlers must not carry the per-write compare.
+// Every translation unit that includes this header must see the same value:
+// the diagnostic adds members to ThreadedMachine, so a per-target definition
+// would be an ODR violation. That is why CMake sets it globally.
+#if defined(HOGD_RV32_STACK_USAGE) && !defined(NDEBUG)
+#define HOGD_RV32_STACK_USAGE_ENABLED 1
+#else
+#define HOGD_RV32_STACK_USAGE_ENABLED 0
+#endif
+
+// x2 is sp in the RISC-V calling convention; the guest's _start establishes it
+// (entry ABI v3 seeds it with zero) and the stack grows down from there.
+inline constexpr uint8_t kStackPointerReg = 2;
+
+#if HOGD_RV32_STACK_USAGE_ENABLED
+// Extremes of every value the guest wrote to sp over a machine's execution,
+// recorded by write_rd. sp_min is the deepest point the stack reached and
+// sp_max the highest, in practice the top _start established, so
+// sp_max - sp_min is the invocation's maximum stack depth. writes counts the
+// sp writes; when it is zero the guest never touched sp and the extremes are
+// their initial sentinels. Fused handlers write sp once per architectural
+// write on the traced path and may collapse a pair (lui;addi) into one write
+// on the untraced path, so writes and sp_max can differ between the two;
+// sp_min cannot, since the collapsed value is the pair's final one.
+struct StackUsage {
+  uint32_t sp_min = std::numeric_limits<uint32_t>::max();
+  uint32_t sp_max = 0;
+  uint64_t writes = 0;
+};
+#endif
+
 // Named outside the anonymous union because ISO C++ forbids defining a type
 // inside one. Instructions using rs2 need at most a 16-bit immediate.
 struct RbOperands {
@@ -248,6 +282,9 @@ public:
     halted_ = false;
     halt_code_ = 0;
     pending_ecall_.reset();
+#if HOGD_RV32_STACK_USAGE_ENABLED
+    stack_usage_ = {};
+#endif
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
   }
@@ -286,6 +323,9 @@ public:
   [[nodiscard]] bool halted() const { return halted_; }
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<uint8_t> memory() { return memory_.bytes(); }
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  [[nodiscard]] const StackUsage &stack_usage() const { return stack_usage_; }
+#endif
 
   [[nodiscard]] bool consume_gas(uint64_t amount)
   {
@@ -334,14 +374,27 @@ public:
   // budgets); bounded by the lowering's kMaxRunGas chunk cap. Cold: written
   // only on the deficit path, read at seams.
   uint32_t gas_deficit_ = 0;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  // Written by write_rd on every sp write; read once the machine has stopped.
+  // Debug-only, so its cost on the dispatch path is not a concern.
+  StackUsage stack_usage_;
+#endif
 };
 
 // MemorySlot must remain the size of a vector to preserve this layout.
 static_assert(offsetof(ThreadedMachine, gas_remaining_) == 192,
               "gas_remaining_ must stay on its own cache line (offset 3 * 64); "
               "check the memory_ member width and field order above");
+#if HOGD_RV32_STACK_USAGE_ENABLED
+// The diagnostic's counters extend the cold tail past the 256-byte layout by
+// one alignment unit. The lines above it, the register file and the gas
+// balance, keep their offsets.
+static_assert(sizeof(ThreadedMachine) == 320,
+              "ThreadedMachine size changed -- check the cache-line layout");
+#else
 static_assert(sizeof(ThreadedMachine) == 256,
               "ThreadedMachine size changed -- check the cache-line layout");
+#endif
 
 // Passed by value: both pointers fit in argument registers on AArch64.
 struct Ctx {
@@ -355,6 +408,25 @@ inline uint32_t
 pc_of(const Ctx c, const Slot *ip)
 {
   return static_cast<uint32_t>(ip - c.base) * kInstructionBytes;
+}
+
+// Every guest-visible register write in the handlers goes through here, with
+// `rd` already remapped by the lowering (x0 -> the regs_[0] trash sink). In
+// ordinary builds this is the bare store. Under the stack-usage diagnostic it
+// also records writes to sp; always_inline keeps the store in the handler
+// body either way, so the musttail chain is unaffected.
+[[gnu::always_inline]] inline void
+write_rd(const Ctx c, uint8_t rd, uint32_t value)
+{
+  c.m->regs_[rd] = value;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  if (rd == kStackPointerReg) {
+    StackUsage &usage = c.m->stack_usage_;
+    usage.sp_min = std::min(usage.sp_min, value);
+    usage.sp_max = std::max(usage.sp_max, value);
+    ++usage.writes;
+  }
+#endif
 }
 
 inline ArchState
@@ -595,7 +667,7 @@ template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2]);
+  write_rd(c, ip->rd, Fn(c.m->regs_[ip->rs1], c.m->regs_[ip->rb.rs2]));
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
@@ -603,7 +675,7 @@ template<bool Trace, uint32_t (*Fn)(uint32_t, uint32_t), bool Brk = false>
 StepResult
 op_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  c.m->regs_[ip->rd] = Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm));
+  write_rd(c, ip->rd, Fn(c.m->regs_[ip->rs1], bits_from_i32(ip->imm)));
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
@@ -611,7 +683,7 @@ template<bool Trace, bool Brk = false>
 StepResult
 op_lui(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  c.m->regs_[ip->rd] = bits_from_i32(ip->imm);
+  write_rd(c, ip->rd, bits_from_i32(ip->imm));
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
@@ -619,7 +691,7 @@ template<bool Trace, bool Brk = false>
 StepResult
 op_auipc(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  c.m->regs_[ip->rd] = pc_of(c, ip) + bits_from_i32(ip->imm);
+  write_rd(c, ip->rd, pc_of(c, ip) + bits_from_i32(ip->imm));
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
@@ -718,7 +790,7 @@ template<bool Trace>
 StepResult
 op_jal(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
-  c.m->regs_[ip->rd] = pc_of(c, ip) + kInstructionBytes;
+  write_rd(c, ip->rd, pc_of(c, ip) + kInstructionBytes);
   const Slot *next = ip + ip->imm; // imm == precomputed target slot delta
   HOGD_ENTER_RUN(c, next);
 }
@@ -733,7 +805,7 @@ op_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   if (!valid_target(c, target)) {
     HOGD_MUSTTAIL return trap_at<Trace, Trap::kBadPc>(c, ip, mem, memsize, gas);
   }
-  c.m->regs_[ip->rd] = pc + kInstructionBytes;
+  write_rd(c, ip->rd, pc + kInstructionBytes);
   const Slot *next = c.base + (target / kInstructionBytes);
   HOGD_ENTER_RUN(c, next);
 }
@@ -814,7 +886,7 @@ op_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
                                    v)) {
     HOGD_MUSTTAIL return trap_bad_memory<Trace, Brk>(c, ip, mem, memsize, gas);
   }
-  c.m->regs_[ip->rd] = v;
+  write_rd(c, ip->rd, v);
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
@@ -851,16 +923,16 @@ op_load_rr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
                                    v)) {
     HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
-  c.m->regs_[ip->rd] = v;
+  write_rd(c, ip->rd, v);
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *rr = ip + 1;
   if constexpr (LoadedIsRs1) {
-    c.m->regs_[rr->rd] = Fn(v, c.m->regs_[rr->rb.rs2]);
+    write_rd(c, rr->rd, Fn(v, c.m->regs_[rr->rb.rs2]));
   }
   else {
-    c.m->regs_[rr->rd] = Fn(c.m->regs_[rr->rs1], v);
+    write_rd(c, rr->rd, Fn(c.m->regs_[rr->rs1], v));
   }
   HOGD_THREAD_NEXT(c, ip + 2);
 }
@@ -876,12 +948,12 @@ op_load_ri(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
                                    v)) {
     HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
-  c.m->regs_[ip->rd] = v;
+  write_rd(c, ip->rd, v);
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *ri = ip + 1;
-  c.m->regs_[ri->rd] = Fn(v, bits_from_i32(ri->imm));
+  write_rd(c, ri->rd, Fn(v, bits_from_i32(ri->imm)));
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -895,10 +967,10 @@ op_lui_addi(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
     // Retire the lui as its own step so the trace is byte-identical to the
     // unfused pair: lui writes the upper immediate (the full constant minus the
     // addi's, recovered from the preserved addi slot at ip+1).
-    c.m->regs_[ip->rd] = bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm);
+    write_rd(c, ip->rd, bits_from_i32(ip->imm) - bits_from_i32((ip + 1)->imm));
     HOGD_RETIRE_OP1(c, ip);
   }
-  c.m->regs_[ip->rd] = bits_from_i32(ip->imm); // full 32-bit constant
+  write_rd(c, ip->rd, bits_from_i32(ip->imm)); // full 32-bit constant
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -912,14 +984,14 @@ op_auipc_jalr(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 {
   const uint32_t auipc_val = bits_from_i32(ip->imm); // head_pc + %hi, static
   // auipc dest == jalr base; visible to the callee, so write it.
-  c.m->regs_[ip->rs1] = auipc_val;
+  write_rd(c, ip->rs1, auipc_val);
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
   const uint32_t target =
       (auipc_val + bits_from_i32((ip + 1)->imm)) & ~uint32_t{1};
-  c.m->regs_[ip->rd] =
-      pc_of(c, ip) + (2 * kInstructionBytes); // link == pc_jalr + 4
+  write_rd(c, ip->rd,
+           pc_of(c, ip) + (2 * kInstructionBytes)); // link == pc_jalr + 4
   const Slot *next = c.base + (target / kInstructionBytes);
   HOGD_ENTER_RUN(c, next);
 }
@@ -944,13 +1016,13 @@ StepResult
 op_alu_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
-  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  write_rd(c, ip->rd, Fn1(c.m->regs_[ip->rs1], b1));
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
   const Slot *op2 = ip + 1;
   const uint32_t b2 = Imm2 ? bits_from_i32(op2->imm) : c.m->regs_[op2->rb.rs2];
-  c.m->regs_[op2->rd] = Fn2(c.m->regs_[op2->rs1], b2);
+  write_rd(c, op2->rd, Fn2(c.m->regs_[op2->rs1], b2));
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -963,7 +1035,7 @@ op_alu_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
              uint64_t gas)
 {
   const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
-  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  write_rd(c, ip->rd, Fn1(c.m->regs_[ip->rs1], b1));
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
@@ -983,7 +1055,7 @@ StepResult
 op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
-  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  write_rd(c, ip->rd, Fn1(c.m->regs_[ip->rs1], b1));
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
@@ -993,7 +1065,7 @@ op_alu_load(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
                                    v)) {
     HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ld, mem, memsize, gas);
   }
-  c.m->regs_[ld->rd] = v;
+  write_rd(c, ld->rd, v);
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -1014,7 +1086,7 @@ op_store_alu(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   }
   const Slot *op2 = ip + 1;
   const uint32_t b2 = Imm2 ? bits_from_i32(op2->imm) : c.m->regs_[op2->rb.rs2];
-  c.m->regs_[op2->rd] = Fn2(c.m->regs_[op2->rs1], b2);
+  write_rd(c, op2->rd, Fn2(c.m->regs_[op2->rs1], b2));
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
@@ -1031,7 +1103,7 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
                                      v)) {
     HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
   }
-  c.m->regs_[ip->rd] = v;
+  write_rd(c, ip->rd, v);
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }
@@ -1054,7 +1126,7 @@ op_alu_branch(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
               uint64_t gas)
 {
   const uint32_t b1 = Imm1 ? bits_from_i32(ip->imm) : c.m->regs_[ip->rb.rs2];
-  c.m->regs_[ip->rd] = Fn1(c.m->regs_[ip->rs1], b1);
+  write_rd(c, ip->rd, Fn1(c.m->regs_[ip->rs1], b1));
   if constexpr (Trace) {
     HOGD_RETIRE_OP1(c, ip);
   }

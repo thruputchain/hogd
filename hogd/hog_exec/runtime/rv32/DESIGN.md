@@ -161,6 +161,30 @@ writeback. Its rollback behavior does not describe production syscall output.
 Production resolves host errors in `Rv32Runtime`; it does not pass
 `HostStatus::kTrap` back into the threaded engine.
 
+## Stack-usage diagnostic
+
+Debug builds configured with `HOGD_RV32_STACK_USAGE=ON` (the default when
+`ENABLE_TEST_FFI` is on) record every value the guest writes to `sp` (x2).
+Each handler store goes through `write_rd` in
+[threaded_machine.h](threaded_machine.h), which keeps the minimum, the maximum
+and the write count on the `ThreadedMachine`. `Rv32Runtime` logs that record
+once per invocation, at `info` level, when the invocation finishes:
+
+```
+rv32 stack usage: contract=... method=... sp_min=... sp_max=... max_depth=... sp_writes=...
+```
+
+`max_depth` is `sp_max - sp_min`: how far the stack reached below the top
+`_start` established. Untraced execution collapses a fused `lui;addi` into one
+store, so `sp_writes` and `sp_max` describe the lowered program; `sp_min` is
+the same either way. A guest that never writes `sp` is reported as such.
+
+The define is global because it adds members to `ThreadedMachine`, and CMake
+applies it to the Debug configuration only, so optimized interpreters never
+carry the per-write check. The canonical `Machine` and the test-only adapters
+are not instrumented. `Rv32ThreadedStackUsage` in
+[rv32_threaded_test.cc](rv32_threaded_test.cc) covers the record.
+
 ## Verification
 
 Run commands from the repository root, using a configured build with the
