@@ -674,37 +674,31 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // delete a newly published cache entry while this submission waits for the
   // account lock, leaving the caller with an admitted outcome for an absent tx.
   //
-  // The tx may already exist in [txs_] because it is okay to add a tx back
-  // into the scheduler again. This can happen if the tx was originally added
-  // to the scheduler, then removed during nomination by [schedule()], and a
-  // different validated block was committed instead.
+  // A cached tx may already have been scheduled by the pending nomination.
+  // Resubmission must not put it back on the runqueue: another scheduling
+  // chunk could otherwise attempt it again and append its hash twice to the
+  // nomination's commit cleanup. Abandoned nominations explicitly restore
+  // their transactions through [reenqueue_txs()].
   const auto [tx_ptr, txs_lock, inserted] =
       txs_.find_or_insert(tx_hash,
                           std::make_shared<TxValue>(TxValue{.tx = tx}));
   CHECK_PTR(tx_ptr);
-  if (inserted) {
-    // [txs_.find_or_insert()] acquires a lock, so the increment to
-    // [tx_cache_size_] happens after the tx is added to [txs_] from the
-    // perspective of anyone accessing the tx in [txs_].
-    tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
+  if (!inserted) {
+    return false;
   }
+  // [txs_.find_or_insert()] acquires a lock, so the increment to
+  // [tx_cache_size_] happens after the tx is added to [txs_] from the
+  // perspective of anyone accessing the tx in [txs_].
+  tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
-Scheduler::is_pending(const SignedTransaction &tx,
+Scheduler::is_pending(const SignedTransaction & /*tx*/,
                       const TransactionHash &tx_hash)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{
-      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-      .tx_hash = tx_hash,
-  };
-  const auto [account_state, lock] = accounts_.find(account);
-  if (account_state == nullptr) {
-    return false;
-  }
-  return account_state->txs.contains(key);
+  const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+  return tx_value_ptr != nullptr;
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
