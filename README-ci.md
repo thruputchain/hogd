@@ -5,6 +5,36 @@
 
 # CI runner setup instructions
 
+## Portable C/C++ compilation cache
+
+`scripts/build.sh` configures a persistent compiler launcher when ccache is
+available. Reconfigure existing build trees once with the wrapper to enable it;
+subsequent Ninja, Make, IDE, and `cmake --build` invocations use it automatically.
+Pass `-h` to the wrapper to remove the cache launcher from a build tree.
+
+The launcher creates `.hogd-cache/source` and `.hogd-cache/build` symlinks in each
+compilation directory. Source and include arguments use these stable relative
+paths, so checkout location, build location, directory depth, and spaces do not
+partition the cache. `-ffile-prefix-map` also normalizes the compilation directory
+in debug information. Dependency files retain paths relative to their original
+working directory, including when a cached object is reused on another machine.
+Builds can run concurrently in separate build trees.
+
+The launcher sets `CCACHE_COMPILERCHECK=content` unless explicitly overridden and
+clears `CCACHE_BASEDIR` because the compiler arguments already use stable paths.
+Other ccache configuration, including remote storage and namespaces, is retained.
+Compiler/toolchain, flags, architecture, and file contents still distinguish cache
+entries. Absolute paths intentionally embedded in generated code, including
+`kBuildRoot`, still cause misses for affected translation units.
+
+Diagnostics and `__FILE__` use the relative aliases. To locate sources when
+debugging from elsewhere, GDB can map them with
+`set substitute-path .hogd-cache/source /absolute/path/to/checkout` and
+`set substitute-path .hogd-cache/build /absolute/path/to/build`.
+
+Run `python3 scripts/test_ccache_launcher.py` for isolated GCC/Clang cache and
+dependency checks, including Ninja and Make integration when installed.
+
 ## Private source authentication
 
 CI calls `.github/actions/private-sources` after checking out hogd with
