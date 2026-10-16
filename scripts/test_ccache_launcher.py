@@ -20,6 +20,161 @@ LAUNCHER = Path(__file__).with_name("ccache_launcher.py").resolve()
 
 @unittest.skipUnless(shutil.which("ccache"), "ccache is required")
 class CachePathsTest(unittest.TestCase):
+    def test_compiler_alias_cache_sharing(self):
+        for compiler, alias in (
+            ("gcc", "cc"),
+            ("g++", "c++"),
+            ("clang", "cc"),
+            ("clang++", "c++"),
+        ):
+            # Clang chooses its C++ driver behavior from argv[0], including
+            # installations where clang and clang++ are the same executable.
+            executable = shutil.which("clang" if compiler == "clang++" else compiler)
+            if not executable:
+                continue
+            compiler_arguments = []
+            if compiler in ("gcc", "g++"):
+                frontend = subprocess.check_output(
+                    [
+                        executable,
+                        "-print-prog-name=" + ("cc1plus" if compiler == "g++" else "cc1"),
+                    ],
+                    text=True,
+                ).strip()
+                # Relocated GCC drivers still need their installed frontend.
+                compiler_arguments.append("-B" + str(Path(frontend).parent) + os.sep)
+            for link_type in ("symlink", "hardlink"):
+                with self.subTest(
+                    compiler=compiler, link_type=link_type
+                ), tempfile.TemporaryDirectory(prefix="hogd compiler alias ") as temporary:
+                    root = Path(temporary)
+                    source, build, binaries = (
+                        root / "source",
+                        root / "build",
+                        root / "bin",
+                    )
+                    for directory in (source, build, binaries):
+                        directory.mkdir()
+                    # Copy first so the hardlink test works even when /tmp and
+                    # the installed compiler are on different filesystems.
+                    canonical = binaries / compiler
+                    shutil.copy2(Path(executable).resolve(), canonical)
+                    selected = binaries / alias
+                    if link_type == "symlink":
+                        selected.symlink_to(canonical)
+                    else:
+                        selected.hardlink_to(canonical)
+                    if compiler.startswith("clang"):
+                        other_driver = binaries / (
+                            "clang" if compiler == "clang++" else "clang++"
+                        )
+                        other_driver.symlink_to(canonical)
+                    config = root / "ccache.conf"
+                    config.write_text("compiler_check = content\n")
+                    env = {
+                        key: value
+                        for key, value in os.environ.items()
+                        if not key.startswith("CCACHE_")
+                    }
+                    env.update(
+                        CCACHE_CONFIGPATH=str(config),
+                        CCACHE_DIR=str(root / "cache"),
+                        PATH=str(binaries) + os.pathsep + os.environ.get("PATH", ""),
+                    )
+                    # Deliberately keep a .c suffix for C++: resolving a
+                    # clang++ symlink to clang would silently select C mode.
+                    (source / "probe.c").write_text(
+                        "#ifndef __cplusplus\n#error C++ driver required\n#endif\n"
+                        "template <int Value> int answer() { return Value; }\n"
+                        "int main() { return answer<42>(); }\n"
+                        if alias == "c++"
+                        else "int main(void) { return 42; }\n"
+                    )
+                    command = [
+                        sys.executable,
+                        str(LAUNCHER),
+                        str(source),
+                        str(build),
+                        shutil.which("ccache"),
+                    ]
+                    for driver in (selected, alias, canonical):
+                        subprocess.run(
+                            [
+                                *command,
+                                str(driver),
+                                *compiler_arguments,
+                                "-c",
+                                str(source / "probe.c"),
+                                "-o",
+                                "probe.o",
+                            ],
+                            cwd=build,
+                            env=env,
+                            check=True,
+                            capture_output=True,
+                        )
+                        self.assertTrue((build / "probe.o").is_file())
+                        (build / "probe.o").unlink()
+                    self.assertEqual(self.stats(env)["cache_miss"], 1)
+                    self.assertEqual(self.stats(env)["direct_cache_hit"], 2)
+
+    def test_compiler_wrappers_are_preserved(self):
+        for alias, candidates, masquerade in (
+            ("cc", ("gcc", "clang"), False),
+            ("c++", ("g++", "clang++"), False),
+            ("custom-cc", ("gcc", "clang"), False),
+            ("cc", ("gcc", "clang"), True),
+            ("c++", ("g++", "clang++"), True),
+        ):
+            with self.subTest(
+                alias=alias, masquerade=masquerade
+            ), tempfile.TemporaryDirectory(prefix="hogd compiler wrapper ") as temporary:
+                root = Path(temporary)
+                source, build = root / "source", root / "build"
+                source.mkdir()
+                build.mkdir()
+                recorder = root / "record-compiler"
+                recorder.write_text(
+                    f"#!{sys.executable}\n"
+                    "import json, pathlib, sys\n"
+                    "pathlib.Path('compiler.json').write_text(json.dumps(sys.argv[1]))\n"
+                )
+                recorder.chmod(0o755)
+                selected = root / alias
+                if masquerade:
+                    # ccache masquerade aliases dispatch by the original name.
+                    selected.hardlink_to(recorder)
+                else:
+                    selected.write_text("#!/bin/sh\nexit 0\n")
+                    selected.chmod(0o755)
+                for candidate in candidates:
+                    path = root / candidate
+                    if alias == "custom-cc" or masquerade:
+                        # These names are preserved even for the same file.
+                        path.hardlink_to(selected)
+                    else:
+                        # Identical contents do not establish executable identity:
+                        # a separate wrapper can behave differently by location.
+                        shutil.copy2(selected, path)
+                subprocess.run(
+                    [
+                        sys.executable,
+                        str(LAUNCHER),
+                        str(source),
+                        str(build),
+                        str(recorder),
+                        str(selected),
+                        "-c",
+                        "probe.c",
+                    ],
+                    cwd=build,
+                    check=True,
+                    capture_output=True,
+                )
+                self.assertEqual(
+                    json.loads((build / "compiler.json").read_text()), str(selected)
+                )
+
     def test_response_macro_escapes(self):
         for compiler in ("gcc", "g++", "clang", "clang++"):
             if not shutil.which(compiler):

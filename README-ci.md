@@ -22,10 +22,23 @@ Builds can run concurrently in separate build trees.
 
 The launcher sets `CCACHE_COMPILERCHECK=content` unless explicitly overridden and
 clears `CCACHE_BASEDIR` because the compiler arguments already use stable paths.
+Generic `cc`/`c++` drivers use the corresponding `gcc`/`g++` or `clang`/`clang++`
+name when it is the same executable in the same directory. This lets default
+CMake builds share cache entries with explicitly selected compilers while
+preserving distinct wrappers and C++ driver behavior.
 Other ccache configuration, including remote storage and namespaces, is retained.
 Compiler/toolchain, flags, architecture, and file contents still distinguish cache
 entries. Absolute paths intentionally embedded in generated code, including
 `kBuildRoot`, still cause misses for affected translation units.
+
+Scheduled cache warmup uses the host's default `gcc`/`g++`. It overrides the
+compiler selection in `prepare_env.sh` with `HOGD_CI_GCC_CC` and
+`HOGD_CI_GCC_CXX`; benchmark jobs retain their default GCC 15 pin.
+Warmup and developer builds must use matching compiler versions and locale
+settings to share entries. GCC 15 and GCC 16 still have separate entries. After
+changing the launcher, warm the desired toolchain again; builds can reuse their
+own local entries before consulting shared storage, so local hits need not
+increase the remote hit counter.
 
 Diagnostics and `__FILE__` use the relative aliases. To locate sources when
 debugging from elsewhere, GDB can map them with
