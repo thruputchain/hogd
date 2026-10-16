@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/dbauth_client.h"
 
+#include <algorithm>
 #include <optional>
 #include <utility>
 #include <vector>
@@ -13,16 +14,11 @@
 #include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/rpc.h"
 #include "x23/serialize.h"
 
 namespace hogd {
 namespace {
-
-// Leave ample room for the RPC reply envelope and vector length under the
-// default 16 MiB record cap, including fully populated ML-DSA key sets.
-static_assert(DBAuthClient::kMaxLookupBatchSize <=
-              ((16U << 20) - 1024) /
-                  x23::detail::xdr_size_bounds<DBAuthResult>().max_);
 
 AuthStatus<std::optional<AddressAuthData>>
 decode_auth_data(DBAuthResult res)
@@ -44,6 +40,22 @@ decode_auth_data(DBAuthResult res)
 
 } // namespace
 
+DBAuthClient::DBAuthClient(dbauth_client_t &&client)
+  : client_(std::move(client))
+{
+  // Use the cap enforced by this connection's reader, including clients
+  // configured below the default. Allow room for the reply envelope and
+  // vector length, and budget for fully populated ML-DSA key sets.
+  constexpr size_t kReplyOverhead = 1024;
+  const size_t cap = client_.__send_call->max_message_size;
+  CHECK_GT(cap, kReplyOverhead);
+  max_lookup_batch_size_ =
+      std::min(kMaxLookupBatchSize,
+               (cap - kReplyOverhead) /
+                   x23::detail::xdr_size_bounds<DBAuthResult>().max_);
+  CHECK_GT(max_lookup_batch_size_, 0UL);
+}
+
 x23::Async<AuthStatus<std::optional<AddressAuthData>>>
 DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
@@ -55,7 +67,7 @@ x23::Async<std::vector<AuthStatus<std::optional<AddressAuthData>>>>
 DBAuthClient::lookup_auth_data_batch(BlockHeight height,
                                      const ContractAddressBatch &addresses)
 {
-  CHECK_LE(addresses.size(), kMaxLookupBatchSize);
+  CHECK_LE(addresses.size(), max_lookup_batch_size_);
   std::vector<AuthStatus<std::optional<AddressAuthData>>> result;
   if (addresses.empty()) {
     co_return result;

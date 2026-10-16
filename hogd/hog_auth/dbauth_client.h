@@ -36,7 +36,9 @@ public:
   // Bound replies too: an account may have kMaxSigners ML-DSA keys.
   static constexpr size_t kMaxLookupBatchSize = 256;
 
-  DBAuthClient(dbauth_client_t &&client) : client_(std::move(client)) {}
+  DBAuthClient(dbauth_client_t &&client);
+
+  size_t max_lookup_batch_size() const { return max_lookup_batch_size_; }
 
   x23::Async<AuthStatus<std::optional<AddressAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
@@ -50,6 +52,7 @@ public:
 private:
   // Sharded DB is not yet implemented.
   dbauth_client_t client_;
+  size_t max_lookup_batch_size_;
 };
 
 } // namespace hogd
