@@ -77,8 +77,7 @@ public:
   }
 
 private:
-  x23::Async<AuthStatus<AuthCacheEntry>>
-  populate_auth_data(BlockHeight height, ContractAddress const &address);
+  x23::Async<BlockHeight> wait_for_height(BlockHeight height);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
