@@ -143,29 +143,19 @@ verify_decorated_signature(const DecoratedSignature &dec_sig,
 enum class VerificationType {
   kLightweightClaimedOnly,
   kLightweightClaimsValid,
-  kSignaturesValid,
 };
 
 constexpr bool
 verify_weights_against_auth_data(VerificationType VerfType)
 {
-  return VerfType == VerificationType::kLightweightClaimsValid ||
-         VerfType == VerificationType::kSignaturesValid;
-}
-
-constexpr bool
-verify_signatures(VerificationType VerfType)
-{
-  return VerfType == VerificationType::kSignaturesValid;
+  return VerfType == VerificationType::kLightweightClaimsValid;
 }
 
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
     BitMap accepted_keys, const AddressAuthData *auth_data,
-    std::span<const DecoratedSignature> sigs,
-    x23::BufView signature_preimage,
-    Ed25519SignatureVerifier *signature_verifier)
+    std::span<const DecoratedSignature> sigs)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
@@ -195,18 +185,6 @@ verify_weight_key_claim_internal(
     }
   }
 
-  if constexpr (verify_signatures(VerfType)) {
-    assert(auth_data);
-
-    for (const DecoratedSignature &sig : sigs) {
-      if (auto r =
-              verify_decorated_signature(sig, *auth_data, signature_preimage,
-                                         signature_verifier);
-          !r) {
-        return r;
-      }
-    }
-  }
   return {};
 }
 
@@ -218,14 +196,11 @@ verify_weight_key_claim_internal(
 // The preimage names the key by its hash; key is the one the signed
 // transaction attaches (SignedTransaction::pubkey_claim_key), or nullptr if
 // it attaches none.
-template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
                              const PublicKey *key,
                              const ContractAddress &invoked_address,
-                             std::span<const DecoratedSignature> sigs,
-                             x23::BufView signature_preimage,
-                             Ed25519SignatureVerifier *signature_verifier)
+                             std::span<const DecoratedSignature> sigs)
 {
   if (sigs.size() != 1) {
     trace("Auth malformed: pubkey claim requires exactly one signature");
@@ -269,10 +244,6 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
 
-  if constexpr (verify_signatures(VerfType)) {
-    return verify_signature(*key, sig.signature, signature_preimage,
-                            signature_verifier);
-  }
   return {};
 }
 
@@ -282,9 +253,7 @@ verify_auth_claim_internal(AuthClaim const &claim,
                            PublicKey const *pubkey_claim_key,
                            ContractAddress const &invoked_address,
                            std::span<const DecoratedSignature> sigs,
-                           const AddressAuthData *auth_data,
-                           x23::BufView signature_preimage,
-                           Ed25519SignatureVerifier *signature_verifier)
+                           const AddressAuthData *auth_data)
 {
   switch (claim.claim_type()) {
   case AuthClaimType::kSourceAddressAuthData:
@@ -299,16 +268,13 @@ verify_auth_claim_internal(AuthClaim const &claim,
       assert(auth_data);
     }
     return verify_weight_key_claim_internal<VerfType>(
-        claim.source_address_claim().allowed_keys, auth_data, sigs,
-        signature_preimage, signature_verifier);
+        claim.source_address_claim().allowed_keys, auth_data, sigs);
   case AuthClaimType::kPubkeySignature:
     // The no-auth-entry precondition is checked by the caller (it owns the
     // DB data); everything here is derivable from the transaction alone.
-    return verify_pubkey_claim_internal<VerfType>(claim.pubkey_preimage(),
-                                                  pubkey_claim_key,
-                                                  invoked_address, sigs,
-                                                  signature_preimage,
-                                                  signature_verifier);
+    return verify_pubkey_claim_internal(claim.pubkey_preimage(),
+                                        pubkey_claim_key, invoked_address,
+                                        sigs);
   default:
     // This kind of claim should not have been parseable
     panic("Unsupported auth claim type: {}", claim.claim_type());
@@ -318,27 +284,10 @@ verify_auth_claim_internal(AuthClaim const &claim,
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claims_internal(const SignedTransaction &stx,
-                            const AddressAuthData *source_auth_data,
-                            const NetworkHash *network_hash,
-                            Ed25519SignatureVerifier *signature_verifier)
+                            const AddressAuthData *source_auth_data)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
     assert(!source_auth_data);
-  }
-
-  if constexpr (VerfType != VerificationType::kSignaturesValid) {
-    assert(signature_verifier == nullptr);
-  }
-
-  // Only the signature-checking path needs the preimage, and only that path
-  // is given a network to bind it to.
-  x23::Buf signature_preimage;
-  if constexpr (verify_signatures(VerfType)) {
-    assert(network_hash);
-    signature_preimage = transaction_signature_preimage(*network_hash, stx.tx);
-  }
-  else {
-    assert(!network_hash);
   }
 
   const AuthClaim &auth_claim = stx.tx.auth_claim;
@@ -372,8 +321,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 
   if (auto r = verify_auth_claim_internal<VerfType>(
           auth_claim, stx.pubkey_claim_key.get(),
-          stx.tx.invocation.invoked_address, sigs, auth_data,
-          signature_preimage, signature_verifier);
+          stx.tx.invocation.invoked_address, sigs, auth_data);
       !r) {
     return r;
   }
@@ -410,8 +358,34 @@ verify_auth(const SignedTransaction &stx,
             const NetworkHash &network_hash,
             Ed25519SignatureVerifier *signature_verifier)
 {
-  return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
-      stx, source_auth_data, &network_hash, signature_verifier);
+  // Reject malformed claims, missing keys, and insufficient weight before
+  // serializing the transaction or verifying/queuing any signatures.
+  if (auto r = lightweight_validate_auth_claims(stx, source_auth_data); !r) {
+    return r;
+  }
+  if (stx.signatures.empty()) {
+    // The checks above allow this only for a zero-threshold source claim.
+    return {};
+  }
+
+  const x23::Buf signature_preimage =
+      transaction_signature_preimage(network_hash, stx.tx);
+  if (stx.tx.auth_claim.claim_type() == AuthClaimType::kPubkeySignature) {
+    return verify_signature(*stx.pubkey_claim_key,
+                            stx.signatures.front().signature,
+                            signature_preimage, signature_verifier);
+  }
+  // Check every supplied signature, even after the required weight is met.
+  assert(source_auth_data);
+  for (const DecoratedSignature &sig : stx.signatures) {
+    if (auto r = verify_decorated_signature(sig, *source_auth_data,
+                                            signature_preimage,
+                                            signature_verifier);
+        !r) {
+      return r;
+    }
+  }
+  return {};
 }
 
 AuthVerifyStatus<void>
@@ -419,14 +393,14 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
                                  const AddressAuthData *source_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
-      stx, source_auth_data, nullptr, nullptr);
+      stx, source_auth_data);
 }
 
 AuthVerifyStatus<void>
 auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
-      stx, nullptr, nullptr, nullptr);
+      stx, nullptr);
 }
 
 } // namespace hogd

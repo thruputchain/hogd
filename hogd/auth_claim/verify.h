@@ -61,7 +61,9 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
 // Verifies that the signatures on the transaction match the claims about the
 // transaction in the auth claims field.
 // Equivalent to lightweight_validate_auth_claims + the actual signature
-// verification.
+// verification. Lightweight checks run first; if both weight and signatures
+// are invalid, the weight error takes precedence. No signatures are queued in
+// signature_verifier when lightweight validation fails.
 // network_hash identifies the network the transaction is being verified for;
 // it is part of every signature preimage, so a transaction signed against a
 // different network fails here. See transaction_signature_preimage.

@@ -456,6 +456,62 @@ TEST_F(AuthClaimTests, InsufficientTotalWeight)
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 }
 
+TEST_F(AuthClaimTests, InsufficientWeightRejectsBeforeSignatureVerification)
+{
+  auto [pk, sk] = make_key_pair();
+  Transaction tx = make_transaction(make_claim(1, /*required_weight=*/2));
+  DecoratedSignature sig = make_signature(sk, tx, 0);
+  sig.signature.ed25519().fill(0);
+  SignedTransaction stx{.tx = tx, .signatures = {sig}};
+  AddressAuthData auth_data{
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+          new PublicKeyConfig{.key = pk, .max_weight = 1})},
+      .required_weight = 1,
+  };
+
+  const auto result = verify_auth(stx, &auth_data, kTestNetworkHash);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+
+  Ed25519SignatureVerifier verifier;
+  const auto batched = verify_auth(stx, &auth_data, kTestNetworkHash, &verifier);
+  ASSERT_FALSE(batched.has_value());
+  EXPECT_EQ(batched.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
+  // The bad signature must not have been queued before rejecting the weight.
+  EXPECT_TRUE(verifier.verify());
+}
+
+TEST_F(AuthClaimTests, ChecksSignaturesBeyondTheRequiredWeight)
+{
+  auto [pk0, sk0] = make_key_pair();
+  auto [pk1, sk1] = make_key_pair();
+  Transaction tx = make_transaction(make_claim(3, /*required_weight=*/1));
+  SignedTransaction stx{
+      .tx = tx,
+      .signatures = {make_signature(sk0, tx, 0), make_signature(sk1, tx, 1)},
+  };
+  AddressAuthData auth_data{
+      .public_keys =
+          {x23::Ptr<PublicKeyConfig>(
+               new PublicKeyConfig{.key = pk0, .max_weight = 1}),
+           x23::Ptr<PublicKeyConfig>(
+               new PublicKeyConfig{.key = pk1, .max_weight = 1})},
+      .required_weight = 1,
+  };
+  ASSERT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash).has_value());
+  stx.signatures[1].signature.ed25519().fill(0);
+
+  const auto result = verify_auth(stx, &auth_data, kTestNetworkHash);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(),
+            AuthVerifyErrorCode::kSignatureVerificationFailed);
+
+  Ed25519SignatureVerifier verifier;
+  ASSERT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash, &verifier)
+                  .has_value());
+  EXPECT_FALSE(verifier.verify());
+}
+
 TEST_F(AuthClaimTests, InvalidBitmapRejected)
 {
   // Bitmap with bit 21 set (beyond kMaxSigners)
