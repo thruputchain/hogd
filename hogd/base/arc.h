@@ -128,20 +128,20 @@ make_arc(Args &&...args)
   return Arc<T>(std::make_shared<T>(std::forward<Args>(args)...));
 }
 
-// Arcs compare by value, as x23::Box does, with sharing as a fast path.
+// Arcs compare by value, as x23::Box does. Sharing is no shortcut: a value
+// need not equal itself (a NaN), and two Arcs of one must agree with two Arcs
+// of equal copies of it.
 template<typename T>
 inline bool
 operator==(const Arc<T> &a, const Arc<T> &b)
 {
-  return a.get() == b.get() || *a == *b;
+  return *a == *b;
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Arc<T> &a, const Arc<T> &b)
 {
-  if (a.get() == b.get())
-    return std::compare_three_way_result_t<T>::equivalent;
   return *a <=> *b;
 }
 
@@ -157,7 +157,10 @@ operator<=>(const Arc<T> &a, const Arc<T> &b)
 template<x23::is_xdr_cat<x23::XdrCategory::kStruct, x23::XdrCategory::kUnion> T>
 struct x23::xdr_meta<hogd::Arc<T>> : x23::xdr_meta<T> {};
 
+// Only for the T an Arc can read and write: an Arc of anything else must fail
+// an RPC's type check rather than pass it and fail when written.
 template<typename X, x23::serializes_like<X> T>
+requires x23::is_xdr_cat<T, x23::XdrCategory::kStruct, x23::XdrCategory::kUnion>
 struct x23::serialize_equiv<X, hogd::Arc<T>> : std::true_type {};
 
 // An Arc of a union is that union to the union protocol, as a Box of one is:
@@ -204,6 +207,16 @@ template<size_t I, typename T> requires requires(const T &t) { get<I>(t); }
 decltype(auto)
 get(const Arc<T> &a)
 {
+  return get<I>(*a);
+}
+
+// For a structured binding of an Arc by value, which reaches its fields
+// through an rvalue of the hidden copy that shares the value.
+template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
+decltype(auto)
+get(Arc<T> &&a)
+{
+  a.ensure();
   return get<I>(*a);
 }
 

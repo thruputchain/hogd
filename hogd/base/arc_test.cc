@@ -1,8 +1,10 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <compare>
 #include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <string_view>
 #include <tuple>
@@ -214,6 +216,32 @@ TEST_F(ArcTest, ComparesByValue)
   EXPECT_EQ(empty, Arc<ArcTestPoint>());
 }
 
+TEST_F(ArcTest, ComparesSharedValuesByValueToo)
+{
+  // Sharing must not change the answer: a NaN is not equal to itself, even
+  // through two Arcs that hold the same one.
+  auto a = make_arc<double>(std::numeric_limits<double>::quiet_NaN());
+  Arc<double> b = a; // NOLINT(performance-unnecessary-copy-initialization)
+  EXPECT_FALSE(a == b);
+  EXPECT_TRUE((a <=> b) == std::partial_ordering::unordered);
+}
+
+TEST_F(ArcTest, UnpacksWithStructuredBindings)
+{
+  Arc<ArcTestPoint> a = ArcTestPoint{.x = 3, .payload = {1, 2}};
+  auto [x, payload] = a;
+  EXPECT_EQ(x, 3);
+  EXPECT_EQ(payload.size(), 2U);
+
+  auto &[rx, rpayload] = a;
+  rx = 4;
+  EXPECT_EQ(a->x, 4);
+
+  const Arc<ArcTestPoint> &c = a;
+  const auto &[cx, cpayload] = c;
+  EXPECT_EQ(cx, 4);
+}
+
 TEST(ArcXdr, HasTheWireFormatOfItsValue)
 {
   const ArcTestPoint point{.x = 42, .payload = {0xaa, 0xbb, 0xcc}};
@@ -310,6 +338,9 @@ TEST(ArcXdr, StandsInForItsValueWhereAnRpcExpectsIt)
                                      x23::Vec<ArcTestPoint>>);
   static_assert(x23::serializes_like<x23::span<const Arc<ArcTestPoint>>,
                                      x23::Vec<ArcTestPoint>>);
+  // An Arc of anything x23 cannot read or write through it must fail the type
+  // check too, rather than pass it and fail when written.
+  static_assert(!x23::serializes_like<Arc<int32_t>, int32_t>);
 
   const x23::Vec<ArcTestPoint> plain{
       ArcTestPoint{.x = 1, .payload = {1}},
