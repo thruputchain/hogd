@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "block_query_internal.hh"
 #include "event.hh"
 #include "event_outbox_internal.hh"
 #include "hogd/hog_indexer/status.h"
@@ -139,6 +140,13 @@ public:
   IndexerStatus<TransactionRefPage>
   get_transactions_by_address(AddressTransactionQuery const &query) const;
 
+  // Exact-height reads over the complete strict-ingestion projection.
+  // Genesis is outside coverage: the event outbox starts at height 1.
+  IndexerStatus<std::optional<ConsensusValue>>
+  get_block_by_height(BlockHeight height) const;
+  IndexerStatus<TransactionRefPage>
+  get_transactions_by_block(const BlockTransactionQuery &query) const;
+
   // Highest block height through which the index is CONTIGUOUS:
   // every block from the first-ever ingested height up to this value
   // is fully ingested.  Out-of-order blocks above a gap are ingested
@@ -219,6 +227,14 @@ private:
                                   const IndexerCommittedBlock &block);
 
   IndexerStatus<void> initialize_progress_from_db();
+  static std::string block_query_format();
+  IndexerStatus<BlockHeight> block_query_tip() const;
+  struct VerifiedBlockQueryRecord {
+    BlockQueryRecord record;
+    ConsensusValueHash hash;
+  };
+  IndexerStatus<VerifiedBlockQueryRecord>
+  read_block_query_record(BlockHeight height) const;
 
   // True iff `h` is at or below the contiguous watermark or buffered
   // in pending_heights_.  The guard evidences ingest_mutex_ is held.
@@ -257,6 +273,7 @@ private:
   // must fail with an explicit migration-required outcome while legacy storage
   // remains restart-compatible.
   bool legacy_mode_ = false;
+  std::atomic<bool> block_queries_ready_{false};
   std::function<void()> legacy_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
   std::function<void()> apply_validation_test_hook_;
