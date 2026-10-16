@@ -571,7 +571,8 @@ impl {0}_{1}_Client {{
           join(call_args, ", "));
     prtop("             *buf = w.into();\n");
     prtop("             r\n");
-    prtop("         }}).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;\n");
+    prtop(
+        "         }}).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;\n");
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
           "call).await?;\n",
           proc.val);
@@ -803,7 +804,8 @@ impl {0} {{
         }
         */
 
-        auto xdrs_read = std::format(R"(unsafe impl<'r> ReadXDR<'r> for &'r {1} {{
+        auto xdrs_read =
+            std::format(R"(unsafe impl<'r> ReadXDR<'r> for &'r {1} {{
   fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{
       let arr: &[u8; {0}] = xdrs::read_xdr(r)?;
       let val = Self::from(arr);
@@ -811,7 +813,7 @@ impl {0} {{
   }}
 }}
 )",
-                                     *array_size, outer_id);
+                        *array_size, outer_id);
         prtop("{}", cfg("xdrs", xdrs_read));
 
         auto schema_impl = std::format(
