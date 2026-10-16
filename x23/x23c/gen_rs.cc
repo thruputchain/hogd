@@ -796,7 +796,7 @@ impl {0} {{
         prtop("}}\n");
 
         /*
-        unsafe impl<'r> ReadXDR<'r> for &'r ContractAddress {
+        impl<'r> ReadXDR<'r> for &'r ContractAddress {
             fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) ->
         xdrs::ReadResult<Self> { let arr: &[u8; 32] = xdrs::read_xdr(r)?; let
         val = Self::from(arr); Ok(val)
@@ -804,8 +804,7 @@ impl {0} {{
         }
         */
 
-        auto xdrs_read =
-            std::format(R"(unsafe impl<'r> ReadXDR<'r> for &'r {1} {{
+        auto xdrs_read = std::format(R"(impl<'r> ReadXDR<'r> for &'r {1} {{
   fn read_xdr<R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{
       let arr: &[u8; {0}] = xdrs::read_xdr(r)?;
       let val = Self::from(arr);
@@ -813,7 +812,7 @@ impl {0} {{
   }}
 }}
 )",
-                        *array_size, outer_id);
+                                     *array_size, outer_id);
         prtop("{}", cfg("xdrs", xdrs_read));
 
         auto schema_impl = std::format(

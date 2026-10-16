@@ -85,9 +85,13 @@ if(NOT encode_pos EQUAL -1)
   message(FATAL_ERROR "generated client still calls the removed CallBuf::encode")
 endif()
 require_text("${rust}" "let buf = self.handle.send_call(Self::prog_vers(), 2, call).await?;")
-# ReadXDR is an unsafe trait since xdrs 0.11, so the borrowed read x23c
-# writes out for a newtype fixed-opaque typedef must be an unsafe impl.
-require_text("${rust}" "unsafe impl<'r> ReadXDR<'r> for &'r Fingerprint {")
+# The borrowed read x23c writes out for a newtype fixed-opaque typedef is a
+# plain impl: ReadXDR is a safe trait again as of xdrs 0.12.
+require_text("${rust}" "impl<'r> ReadXDR<'r> for &'r Fingerprint {")
+string(FIND "${rust}" "unsafe impl" unsafe_impl_pos)
+if(NOT unsafe_impl_pos EQUAL -1)
+  message(FATAL_ERROR "generated Rust contains an unsafe impl")
+endif()
 string(FIND "${rust}" "::serde::" serde_pos)
 if(NOT serde_pos EQUAL -1)
   message(FATAL_ERROR "--rust-no-feature serde did not disable serde")
