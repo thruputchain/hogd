@@ -87,7 +87,7 @@ endif()
 require_text("${rust}" "let buf = self.handle.send_call(Self::prog_vers(), 2, call).await?;")
 # The borrowed read x23c writes out for a newtype fixed-opaque typedef is a
 # plain impl: ReadXDR is a safe trait again as of xdrs 0.12.
-require_text("${rust}" "impl<'r> ReadXDR<'r> for &'r Fingerprint {")
+require_text("${rust}" "impl<'r: 'a, 'a> ReadXDR<'r> for &'a Fingerprint {")
 string(FIND "${rust}" "unsafe impl" unsafe_impl_pos)
 if(NOT unsafe_impl_pos EQUAL -1)
   message(FATAL_ERROR "generated Rust contains an unsafe impl")
