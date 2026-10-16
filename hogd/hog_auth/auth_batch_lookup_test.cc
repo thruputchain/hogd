@@ -282,7 +282,7 @@ TEST_F(AuthBatchLookupTest, OverlapsBoundedLookupsAndPreservesReplyOrder)
 {
   constexpr size_t kWindow = AuthServer::kMaxLookupBatchesInFlight;
   constexpr size_t kAddresses =
-      DBAuthClient::kMaxLookupBatchSize * (kWindow + 1) + 3;
+      (DBAuthClient::kMaxLookupBatchSize * (kWindow + 1)) + 3;
   SignedTransactionBatch txs;
   AuthErrorCodeBatch expected;
   for (size_t i = 0; i < kAddresses; ++i) {
@@ -361,7 +361,7 @@ TEST_F(AuthBatchLookupTest, RespectsConfiguredReplySizeLimit)
     key->key.mldsa65()->fill(0x5a);
   }
   // This reader can fit two worst-case accounts, but not three.
-  const size_t cap = 1024 + 2 * x23::xdr_size(full);
+  const size_t cap = 1024 + (2 * x23::xdr_size(full));
   x23::HostPort host_port;
   ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port_)));
   auto client = make_rpc_client<DBAuth1>(host_port, false, cap)();
