@@ -39,6 +39,49 @@ GOWORK=off go -C hogd/loadgen/hackathon/replay mod download
 
 source ./scripts/ci/prepare_env.sh
 
+# Build only on the host that serves public RPC, before the long C++ build.
+if [[ "{{ .hog_host }}" == "hog4" ]]; then
+  echo 'fetch and build the pinned RPC gateway'
+  gateway_revision=110e8f1f13d1f987f5556f1faf6b31d97033229f
+  # thruput-xdr 0.55.0 has the same wire definitions as this protocol revision.
+  gateway_protocol_revision=af043b5c1983c0c8b44683975a3c389369844e09
+  if [[ "$(git -C protocol rev-parse HEAD)" != "$gateway_protocol_revision" ]]; then
+    echo 'Update the gateway pin after qualifying the new hogd protocol' >&2
+    exit 1
+  fi
+  mkdir -p release/gateway-source
+  git -C release/gateway-source init --quiet
+  git -C release/gateway-source remote add origin https://github.com/thruputchain/thruput-tools.git
+  git -C release/gateway-source fetch --quiet --depth 1 origin "$gateway_revision"
+  git -C release/gateway-source checkout --quiet --detach FETCH_HEAD
+  gateway_target="$PWD/release/gateway-target"
+  (
+    cd release/gateway-source
+    export GROUNDHOG_SOURCE_COMMIT="$gateway_revision"
+    cargo build --locked --release --target-dir "$gateway_target" \
+      -p thruput-json-rpc-gateway --bin hog-gateway --features heap-profiling
+  ) > gateway-build.log 2>&1 || (cat gateway-build.log && exit 1)
+  cp "$gateway_target/release/hog-gateway" release/hog-gateway
+  python3 - "$gateway_revision" "$gateway_protocol_revision" <<'PYGATEWAY'
+import hashlib, json, pathlib, subprocess, sys
+binary = pathlib.Path('release/hog-gateway')
+source = pathlib.Path('release/gateway-source')
+identity = {
+    'repository': 'https://github.com/thruputchain/thruput-tools.git',
+    'revision': sys.argv[1],
+    'protocolRevision': sys.argv[2],
+    'protocol': 'hogp/' + sys.argv[2][:15],
+    'sha256': hashlib.sha256(binary.read_bytes()).hexdigest(),
+    'cargoLockSha256': hashlib.sha256((source / 'Cargo.lock').read_bytes()).hexdigest(),
+    'rustc': subprocess.check_output(['rustc', '--version'], cwd=source, text=True).strip(),
+    'profile': 'release',
+    'features': ['heap-profiling'],
+}
+pathlib.Path('release/hackathon-gateway.json').write_text(json.dumps(identity, indent=2))
+print(json.dumps(identity, indent=2))
+PYGATEWAY
+fi
+
 echo 'build'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1
 # These build scripts place the binaries in the current working directory, so we
@@ -64,9 +107,6 @@ echo 'run bench server'
 """
 
 [jobs.env]
-HACKATHON_GATEWAY_BINARY = "{{ .hackathon_gateway_binary }}"
-HACKATHON_GATEWAY_SHA256 = "{{ .hackathon_gateway_sha256 }}"
-HACKATHON_GATEWAY_PROTOCOL = "{{ .hackathon_gateway_protocol }}"
 HACKATHON_USERS = "{{ .hackathon_users }}"
 HACKATHON_RATE_MULTIPLIER = "{{ .hackathon_rate_multiplier }}"
 HACKATHON_OUTSTANDING = "{{ .hackathon_outstanding }}"
@@ -76,6 +116,7 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_THRUPUT_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
@@ -172,9 +213,6 @@ ci_control_shutdown_hosts ./release/hogd/hog_exec/bench/control_cli "$CI_CONTROL
 """
 
 [jobs.env]
-HACKATHON_GATEWAY_BINARY = "{{ .hackathon_gateway_binary }}"
-HACKATHON_GATEWAY_SHA256 = "{{ .hackathon_gateway_sha256 }}"
-HACKATHON_GATEWAY_PROTOCOL = "{{ .hackathon_gateway_protocol }}"
 HACKATHON_USERS = "{{ .hackathon_users }}"
 HACKATHON_RATE_MULTIPLIER = "{{ .hackathon_rate_multiplier }}"
 HACKATHON_OUTSTANDING = "{{ .hackathon_outstanding }}"
@@ -184,6 +222,7 @@ GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
 CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_THRUPUT_TOKEN = "{{ .cargo_registry_token }}"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
 CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"

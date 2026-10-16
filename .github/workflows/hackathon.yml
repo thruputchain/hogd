@@ -5,19 +5,6 @@ name: Hackathon workload (single validator)
 on:
     workflow_dispatch:
         inputs:
-            gateway_binary:
-                description: Absolute compatible hog-gateway binary path on hog4
-                required: true
-                type: string
-            gateway_sha256:
-                description: Expected SHA256 of that gateway binary
-                required: true
-                type: string
-            gateway_protocol:
-                description: Optional handshake token (only for verified wire-compatible bindings)
-                required: false
-                default: ''
-                type: string
             users:
                 description: Number of funded signing accounts (2 to 10000)
                 required: true
@@ -75,6 +62,7 @@ jobs:
               with:
                 app-id: ${{ vars.COMPONENT_READER_APP_ID }}
                 private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+                extra-repositories: thruput-tools
                 ssh-private-key: |
                   ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
                   ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
@@ -86,23 +74,12 @@ jobs:
             - name: Run hog schedule
               env:
                   BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-                  HACKATHON_GATEWAY_BINARY: ${{ inputs.gateway_binary }}
-                  HACKATHON_GATEWAY_SHA256: ${{ inputs.gateway_sha256 }}
-                  HACKATHON_GATEWAY_PROTOCOL: ${{ inputs.gateway_protocol }}
                   HACKATHON_USERS: ${{ inputs.users }}
                   HACKATHON_RATE_MULTIPLIER: ${{ inputs.rate_multiplier }}
                   HACKATHON_OUTSTANDING: ${{ inputs.outstanding }}
                   HACKATHON_RECEIPT_WORKERS: ${{ inputs.receipt_workers }}
                   HACKATHON_REPEATS: ${{ inputs.repeats }}
               run: |
-                  if [[ "$HACKATHON_GATEWAY_BINARY" != /* ]]; then
-                    echo "gateway_binary must be an absolute path on hog4" >&2
-                    exit 1
-                  fi
-                  if [[ ! "$HACKATHON_GATEWAY_SHA256" =~ ^[0-9a-f]{64}$ ]]; then
-                    echo "gateway_sha256 must be a lowercase SHA256 digest" >&2
-                    exit 1
-                  fi
                   for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10; do
                     IFS=: read -r name minimum maximum <<< "$setting"
                     value=${!name}
@@ -120,9 +97,6 @@ jobs:
                     --key=git_branch --value="$BRANCH_NAME" \
                     --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
                     --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                    --key=hackathon_gateway_binary --value="$HACKATHON_GATEWAY_BINARY" \
-                    --key=hackathon_gateway_sha256 --value="$HACKATHON_GATEWAY_SHA256" \
-                    --key=hackathon_gateway_protocol --value="$HACKATHON_GATEWAY_PROTOCOL" \
                     --key=hackathon_users --value="$HACKATHON_USERS" \
                     --key=hackathon_rate_multiplier --value="$HACKATHON_RATE_MULTIPLIER" \
                     --key=hackathon_outstanding --value="$HACKATHON_OUTSTANDING" \
