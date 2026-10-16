@@ -75,7 +75,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
   auto entry =
       std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
-          current_height, std::move(db_auth_data.value()));
+          current_height, std::move(*db_auth_data));
 
   auth_data_cache_.put(address, entry);
 
@@ -195,12 +195,12 @@ AuthServer::populate_auth_data(BlockHeight height,
     co_return entry.error();
   }
 
-  CHECK_PTR(entry.value().get());
+  CHECK_PTR(entry->get());
 
   // A missing auth entry (nullopt) is returned as-is: whether that is
   // acceptable depends on the transaction's claim type (pubkey claims
   // require it), so the policy lives in verify_auth.
-  co_return std::move(entry.value());
+  co_return std::move(*entry);
 }
 
 namespace {
@@ -258,7 +258,7 @@ AuthServer::verify_transactions(BlockHeight height,
         auth_data.erase(it);
         continue;
       }
-      it->second = std::move(entry.value());
+      it->second = std::move(*entry);
     }
     const auto &source_auth_data = it->second->second;
     tx_auth_data[i] = source_auth_data ? &*source_auth_data : nullptr;
@@ -313,9 +313,9 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (!source_addr.has_value()) {
       co_return source_addr.error().code();
     }
-    CHECK_PTR(source_addr.value().get());
+    CHECK_PTR(source_addr->get());
     const std::optional<AddressAuthData> &source_auth_data =
-        source_addr.value()->second;
+        (*source_addr)->second;
 
     auto verify_result =
         verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
