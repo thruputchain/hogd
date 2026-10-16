@@ -20,6 +20,114 @@ LAUNCHER = Path(__file__).with_name("ccache_launcher.py").resolve()
 
 @unittest.skipUnless(shutil.which("ccache"), "ccache is required")
 class CachePathsTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux locale normalization")
+    def test_locale_remote_cache_sharing(self):
+        for compiler in ("gcc", "g++", "clang", "clang++"):
+            if not shutil.which(compiler):
+                continue
+            for response in (False, True):
+                with self.subTest(
+                    compiler=compiler, response=response
+                ), tempfile.TemporaryDirectory(prefix="hogd-cache-locale-") as temporary:
+                    root = Path(temporary)
+                    source, build = root / "source-é", root / "build-é"
+                    source.mkdir()
+                    build.mkdir()
+                    (source / "probe-é.c").write_text(
+                        "#warning locale cache probe\nint probe(void) { return 42; }\n"
+                    )
+                    config = root / "ccache.conf"
+                    config.write_text(
+                        "compiler_check = content\n"
+                        f"remote_storage = {(root / 'remote').as_uri()}\n"
+                    )
+                    env = {
+                        key: value
+                        for key, value in os.environ.items()
+                        if not key.startswith(("CCACHE_", "LC_"))
+                        and key not in ("LANG", "LANGUAGE")
+                    }
+                    env["CCACHE_CONFIGPATH"] = str(config)
+                    arguments = [
+                        "-x",
+                        "c++" if compiler.endswith("++") else "c",
+                        "-c",
+                        str(source / "probe-é.c"),
+                        "-o",
+                        "probe.o",
+                    ]
+                    if response:
+                        (build / "input-é.rsp").write_text(
+                            " ".join(shlex.quote(argument) for argument in arguments),
+                            encoding="utf-8",
+                        )
+                        arguments = ["@input-é.rsp"]
+                    command = [
+                        sys.executable,
+                        str(LAUNCHER),
+                        str(source),
+                        str(build),
+                        shutil.which("ccache"),
+                        shutil.which(compiler),
+                        *arguments,
+                    ]
+                    # CI and login shells supply different locale variables.
+                    # Each pass starts with an empty local cache, so subsequent
+                    # hits must come from the isolated file-backed remote cache.
+                    for index, locale in enumerate(
+                        (
+                            {"LC_CTYPE": "C.UTF-8"},
+                            {"LANG": "en_US.UTF-8"},
+                            {
+                                "LANG": "en_US.UTF-8",
+                                "LC_ALL": "C",
+                                "LC_CTYPE": "POSIX",
+                                "LC_MESSAGES": "C",
+                                "LC_TIME": "en_US.UTF-8",
+                                "LANGUAGE": "de:fr",
+                            },
+                            {
+                                # Normalizing the child environment does not
+                                # change Python's startup filesystem encoding.
+                                "LC_ALL": "C",
+                                "PYTHONUTF8": "0",
+                                "PYTHONCOERCECLOCALE": "0",
+                            },
+                        )
+                    ):
+                        with self.subTest(locale=locale):
+                            cache_env = {
+                                **env,
+                                **locale,
+                                "CCACHE_DIR": str(root / f"local-{index}"),
+                            }
+                            result = subprocess.run(
+                                command,
+                                cwd=build,
+                                env=cache_env,
+                                check=True,
+                                capture_output=True,
+                            )
+                            stats = self.stats(cache_env)
+                            output = (build / "probe.o").read_bytes()
+                            (build / "probe.o").unlink()
+                            self.assertEqual(stats["remote_storage_error"], 0)
+                            if index == 0:
+                                self.assertEqual(stats["cache_miss"], 1)
+                                self.assertGreater(stats["remote_storage_write"], 0)
+                                self.assertIn(b"locale cache probe", result.stderr)
+                                expected_output, expected_stderr = output, result.stderr
+                            else:
+                                self.assertEqual(stats["cache_miss"], 0)
+                                self.assertEqual(
+                                    stats["direct_cache_hit"]
+                                    + stats["preprocessed_cache_hit"],
+                                    1,
+                                )
+                                self.assertGreater(stats["remote_storage_hit"], 0)
+                                self.assertEqual(output, expected_output)
+                                self.assertEqual(result.stderr, expected_stderr)
+
     def test_compiler_alias_cache_sharing(self):
         for compiler, alias in (
             ("gcc", "cc"),

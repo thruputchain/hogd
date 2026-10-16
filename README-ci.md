@@ -27,6 +27,10 @@ name when it is the same executable in the same directory. This lets default
 CMake builds share cache entries with explicitly selected compilers while
 preserving distinct wrappers and C++ driver behavior.
 Other ccache configuration, including remote storage and namespaces, is retained.
+On Linux, the launcher gives ccache and the compiler a consistent `C.UTF-8` locale by
+setting `LANG` and `LC_ALL` and removing inherited `LANGUAGE` and other `LC_*`
+variables. This keeps diagnostics and cache keys consistent between developer
+shells and CI without changing the calling shell's locale.
 Compiler/toolchain, flags, architecture, and file contents still distinguish cache
 entries. Absolute paths intentionally embedded in generated code, including
 `kBuildRoot`, still cause misses for affected translation units.
@@ -37,8 +41,8 @@ compiler selection in `prepare_env.sh` with `HOGD_CI_GCC_CC` and
 Every warmup run sets `CCACHE_RESHARE=1` so results used by the build are uploaded
 to remote storage even on local cache hits. This also backfills entries whose
 earlier remote uploads failed.
-Warmup and developer builds must use matching compiler versions and locale
-settings to share entries. GCC 15 and GCC 16 still have separate entries. After
+Warmup and developer builds must use matching compiler versions to share
+entries. GCC 15 and GCC 16 still have separate entries. After
 changing the launcher, warm the desired toolchain again; builds can reuse their
 own local entries before consulting shared storage, so local hits need not
 increase the remote hit counter.

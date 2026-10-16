@@ -77,7 +77,11 @@ def expand_response_files(arguments, depth=0):
     result = []
     for argument in arguments:
         if argument.startswith("@"):
-            with open(argument[1:]) as response:
+            # Match argv's decoding so paths compare correctly even when Python
+            # started in an ASCII locale. Preserve the compiler's argument bytes.
+            with open(
+                argument[1:], encoding=sys.getfilesystemencoding(), errors="surrogateescape"
+            ) as response:
                 result.extend(
                     expand_response_files(shlex.split(response.read()), depth + 1)
                 )
@@ -132,6 +136,17 @@ def normalize(arguments, roots):
 def main():
     source, build, ccache, compiler, *arguments = sys.argv[1:]
     compiler = canonical_compiler(compiler, ccache)
+
+    if sys.platform.startswith("linux"):
+        # ccache hashes locale variables individually, even when LC_ALL makes
+        # another setting ineffective. Give local and CI builds identical UTF-8
+        # diagnostics without changing the environment of the calling shell.
+        for variable in tuple(os.environ):
+            if variable == "LANGUAGE" or variable.startswith("LC_"):
+                del os.environ[variable]
+        os.environ["LANG"] = "C.UTF-8"
+        os.environ["LC_ALL"] = "C.UTF-8"
+
     cwd = os.getcwd()
     alias_dir = Path(ALIAS_DIR)
     alias_dir.mkdir(exist_ok=True)
@@ -157,7 +172,11 @@ def main():
     if use_response:
         # Keep response-file builds below ARG_MAX after normalization too.
         with tempfile.NamedTemporaryFile(
-            mode="w", dir=alias_dir, suffix=".rsp"
+            mode="w",
+            encoding=sys.getfilesystemencoding(),
+            errors="surrogateescape",
+            dir=alias_dir,
+            suffix=".rsp",
         ) as response:
             response.write(
                 "\n".join(quote_response_argument(argument) for argument in arguments)
