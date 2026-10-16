@@ -560,11 +560,19 @@ impl {0}_{1}_Client {{
     prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
     // Encode the arguments straight into a CallBuf so the driver frames the
-    // call in place instead of copying the payload behind its header.
+    // call in place instead of copying the payload behind its header. The
+    // serializer call is emitted here rather than offered by rpc_api, which
+    // has no xdrs dependency, so an xdrs release never forces an rpc_api one.
     prtop("         let mut call = self.handle.call_buf();\n");
-    prtop("         call.encode(&({})).map_err(|_| "
-          "::rpc_api::RpcError::GarbageArguments)?;\n",
+    prtop("         call.append_with(|buf| {{\n");
+    prtop("             let mut w = xdrs::txs::buf_writer::BufWriter::from("
+          "::core::mem::take(buf));\n");
+    prtop("             let r = xdrs::write_xdr(&({}), &mut w);\n",
           join(call_args, ", "));
+    prtop("             *buf = w.into();\n");
+    prtop("             r\n");
+    prtop(
+        "         }}).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;\n");
     prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
           "call).await?;\n",
           proc.val);
