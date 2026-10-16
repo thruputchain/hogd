@@ -46,6 +46,7 @@
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -268,6 +269,7 @@ x23::Async<void>
 MempoolCoordinatorRpc::schedulercoord_submit_unvetted(
     ParallelSignedTransactionBatch batch)
 {
+  IngestionInterval ingestion_interval("submit_coordinator", true);
   if (!ready()) {
     co_return;
   }
@@ -296,6 +298,7 @@ x23::Async<SchedGatewaySubmitOutcomeBatch>
 MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
     ParallelSignedTransactionBatch batch)
 {
+  IngestionInterval ingestion_interval("submit_gateway", true);
   ElapsedTimer timer;
   x23::Defer record_duration([&] {
     record_metric_cleanup([&] {
@@ -312,7 +315,7 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
 
 x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
-                                         x23::CoroGuard &commit_guard)
+                                         InstrumentedCoroGuard &commit_guard)
 {
   auto pending = std::make_shared<SubmissionAuth>();
   for (size_t i = 0; i < txs.size(); i++) {
@@ -331,6 +334,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                   return entry.expired();
                 });
   submission_auth_.push_back(pending);
+  bool repeated_auth = false;
   BlockHeight verify_height = scheduler_->current_block();
   while (true) {
     const BlockHeight height = scheduler_->current_block();
@@ -372,9 +376,15 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/false);
     }
+    ElapsedTimer auth_timer;
+    if (repeated_auth)
+      MempoolMetrics::instance().ingestion_auth_retry_count.increment();
+    repeated_auth = true;
     const AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                                retry_txs);
+    MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
+        auth_timer.elapsed());
     if (submission_auth_test_hook_) {
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/true);
@@ -396,7 +406,9 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
   auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
-  auto commit_guard = std::make_shared<x23::CoroGuard>();
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
+      MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
+      MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
 
   auto decode_node =
@@ -676,7 +688,9 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    free up capacity.
   auto txs = std::make_shared<SignedTransactionBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
-  auto commit_guard = std::make_shared<x23::CoroGuard>();
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
+      MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
+      MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_vetted", default_threadpool());
 
   auto decode_node =
@@ -1208,7 +1222,9 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         scheduler_->reenqueue_txs(cache.tx_hashes.begin(),
                                   cache.tx_hashes.end());
         {
-          x23::CoroGuard scheduler_guard;
+          InstrumentedCoroGuard scheduler_guard(
+              MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+              MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
           co_await scheduler_guard(scheduler_->global_lock_);
           co_await scheduler_->abandon_pending_nomination(cache.block_id);
         }
@@ -1217,47 +1233,51 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
       });
   const x23::DagCleanup nomination_cleanup = nodes.nomination_cleanup;
 
-  nodes.start_nomination =
-      dag.async<void>("start scheduler nomination", std::move(scheduling_deps),
-                      [&, nomination_cleanup]() -> x23::Async<void> {
-                        x23::CoroGuard scheduler_guard;
-                        co_await scheduler_guard(scheduler_->global_lock_);
-                        scheduler_->start_pending_nomination(cache.block_id);
-                        nomination_cleanup.arm();
-                        co_return;
-                      });
+  nodes.start_nomination = dag.async<void>(
+      "start scheduler nomination", std::move(scheduling_deps),
+      [&, nomination_cleanup]() -> x23::Async<void> {
+        InstrumentedCoroGuard scheduler_guard(
+            MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+            MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
+        co_await scheduler_guard(scheduler_->global_lock_);
+        scheduler_->start_pending_nomination(cache.block_id);
+        nomination_cleanup.arm();
+        co_return;
+      });
 
   x23::DagNode<void> previous_schedule_node;
   for (size_t i = 0; i < kNumSchedulerIterations; i++) {
     x23::DagDeps deps = i == 0 ? dag.after(nodes.start_nomination)
                                : dag.after(previous_schedule_node);
-    auto schedule_node =
-        dag.async<void>("schedule nomination chunk", std::move(deps),
-                        [&, state, i]() -> x23::Async<void> {
-                          if (state->stopped) {
-                            co_return;
-                          }
-                          {
-                            x23::CoroGuard scheduler_guard;
-                            co_await scheduler_guard(scheduler_->global_lock_);
-                            co_await scheduler_->schedule(
-                                kMaxBlockSize / kNumSchedulerIterations,
-                                cache.tx_hashes, cache.txs);
-                          }
-                          const size_t start = state->num_scheduled;
-                          const size_t end = cache.tx_hashes.size();
-                          if (end == start) {
-                            state->stopped = true;
-                            co_return;
-                          }
-                          state->scheduled_chunks[i] = ScheduledChunk{
-                              .start = start,
-                              .end = end,
-                              .active = true,
-                          };
-                          state->handle_end_indices.push_back(end);
-                          state->num_scheduled = end;
-                        });
+    auto schedule_node = dag.async<void>(
+        "schedule nomination chunk", std::move(deps),
+        [&, state, i]() -> x23::Async<void> {
+          if (state->stopped) {
+            co_return;
+          }
+          {
+            InstrumentedCoroGuard scheduler_guard(
+                MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+                MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
+            co_await scheduler_guard(scheduler_->global_lock_);
+            co_await scheduler_->schedule(kMaxBlockSize /
+                                              kNumSchedulerIterations,
+                                          cache.tx_hashes, cache.txs);
+          }
+          const size_t start = state->num_scheduled;
+          const size_t end = cache.tx_hashes.size();
+          if (end == start) {
+            state->stopped = true;
+            co_return;
+          }
+          state->scheduled_chunks[i] = ScheduledChunk{
+              .start = start,
+              .end = end,
+              .active = true,
+          };
+          state->handle_end_indices.push_back(end);
+          state->num_scheduled = end;
+        });
     nodes.schedule_chunks.push_back(schedule_node);
     auto propose_node = dag.async<void>(
         "propose nomination chunk",
@@ -1588,6 +1608,7 @@ x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
 {
+  IngestionInterval ingestion_interval("propose", false);
   while (!ready()) {
     co_await ready_waiters_.wait(false);
   }
@@ -1912,7 +1933,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
 
     block_id = BlockIdGenerator::generate(BlockIdLane::kMempool);
     {
-      x23::CoroGuard scheduler_guard;
+      InstrumentedCoroGuard scheduler_guard(
+          MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+          MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
       co_await scheduler_guard(scheduler_->global_lock_);
       scheduler_->start_pending_nomination(block_id);
     }
@@ -1933,7 +1956,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
                  DbSchedResult::DbSchedResultOK);
       }
       {
-        x23::CoroGuard scheduler_guard;
+        InstrumentedCoroGuard scheduler_guard(
+            MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+            MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
         co_await scheduler_guard(scheduler_->global_lock_);
         co_await scheduler_->abandon_pending_nomination(block_id);
       }
@@ -2278,6 +2303,7 @@ x23::Async<SchedulerValidationResult>
 MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                                      Proposal proposal)
 {
+  IngestionInterval ingestion_interval("validate", false);
   if (!ready()) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
@@ -2829,6 +2855,7 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(
     BlockID block_id, ConsensusValue expected_value)
 {
+  IngestionInterval ingestion_interval("commit", false);
   if (!ready()) {
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
@@ -2917,7 +2944,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   auto nominated_guard = std::make_shared<x23::CoroGuard>();
   auto validated_guard = std::make_shared<x23::CoroGuard>();
-  auto commit_guard = std::make_shared<x23::CoroGuard>();
+  auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
+      MempoolMetrics::instance().block_commit_lock_wait_seconds,
+      MempoolMetrics::instance().block_commit_lock_hold_seconds);
   auto hog_age_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag commit_dag("schedulercoord_commit_block", default_threadpool());
   x23::DagCleanup fatal_commit_cleanup = commit_dag.cleanup(
@@ -3212,13 +3241,17 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
         if (commit_plan.committed_nominated) {
-          x23::CoroGuard cg;
+          InstrumentedCoroGuard cg(
+              MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+              MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
           co_await cg(scheduler_->global_lock_);
           co_await scheduler_->commit_pending_nomination(block_id);
         }
         else {
           if (nominated_block_cache_.block_id) {
-            x23::CoroGuard cg;
+            InstrumentedCoroGuard cg(
+                MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+                MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
             co_await cg(scheduler_->global_lock_);
             co_await scheduler_->abandon_pending_nomination(
                 nominated_block_cache_.block_id);
