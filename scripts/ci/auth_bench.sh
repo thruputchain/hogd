@@ -1,12 +1,12 @@
 #!/usr/bin/env bash
 # Runs the auth server benchmark sweep (hogd/hog_auth/auth_server_bench.cc)
-# and summarizes it. Takes about two minutes on a CI runner. The nightly
-# schedule (scripts/schedules/auth_bench.toml) files the JSON to
+# and summarizes it. Takes about two minutes. Combined Metrics runs it on hog9
+# alongside [metrics.sh] through auth_bench_remote.sh, which files the JSON to
 # metrics_history as auth_server_bench.
 #
 #   scripts/ci/auth_bench.sh [BUILD_DIR] [OUT_DIR]
 #
-# BUILD_DIR defaults to build/gcc_release and must be a Release build with
+# BUILD_DIR defaults to release and must be a Release build with
 # BUILD_BENCHMARKS on; OUT_DIR (default auth-bench) receives
 # auth_bench.json and auth_bench.md.
 #
@@ -25,7 +25,7 @@
 set -Eeuo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-BUILD_DIR="${1:-build/gcc_release}"
+BUILD_DIR="${1:-release}"
 OUT_DIR="${2:-auth-bench}"
 BENCH="$BUILD_DIR/hogd/hog_auth/hog_auth_bench"
 
@@ -132,8 +132,5 @@ if [[ -n "${AUTH_BENCH_BASELINE:-}" && -f "$AUTH_BENCH_BASELINE" ]]; then
   } >>"$SUMMARY"
 fi
 
-if [[ -n "${GITHUB_STEP_SUMMARY:-}" ]]; then
-  cat "$SUMMARY" >>"$GITHUB_STEP_SUMMARY"
-fi
 cat "$SUMMARY"
 exit "$status"

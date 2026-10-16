@@ -480,13 +480,6 @@ jobs:
       - name: Build GCC Release
         run: ./scripts/build.sh -d build/gcc_release -t Release -c gcc
 
-      # About two minutes. Prints throughput to the job summary as a quick
-      # check on the PR; fails only when a transaction fails to verify, not on
-      # the numbers. The time series is the nightly run on hog10
-      # (auth_bench.yml), which files its JSON to metrics_history.
-      - name: Auth Server Bench
-        run: ./scripts/ci/auth_bench.sh build/gcc_release auth-bench
-
       - name: Show ccache stats
         if: always()
         run: |
