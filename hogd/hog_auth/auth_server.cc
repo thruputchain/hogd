@@ -227,6 +227,9 @@ AuthServer::verify_transactions(BlockHeight height,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
+  if (txs.empty()) {
+    co_return AuthErrorCodeBatch{};
+  }
   co_await default_coropoll().pool_.bg();
 
   AuthErrorCodeBatch results;
@@ -234,64 +237,63 @@ AuthServer::verify_transactions(BlockHeight height,
 
   std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>
       auth_data;
+  // The map owns each snapshot until all workers finish. These pointers avoid
+  // hashing the address again in every worker, including repeated addresses.
+  std::vector<const AddressAuthData *> tx_auth_data(txs.size());
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (wrapper_over_cap(tx)) {
       results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
-    if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
+    auto [it, inserted] =
+        auth_data.try_emplace(tx.tx.invocation.invoked_address);
+    if (inserted) {
       auto entry =
           co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
       if (!entry.has_value()) {
         trace("Populate auth data error: {}",
               std::to_underlying(entry.error().code()));
         results[i] = entry.error().code();
+        auth_data.erase(it);
         continue;
       }
-      auth_data[tx.tx.invocation.invoked_address] = std::move(entry.value());
+      it->second = std::move(entry.value());
     }
+    const auto &source_auth_data = it->second->second;
+    tx_auth_data[i] = source_auth_data ? &*source_auth_data : nullptr;
+  }
+
+  auto verify_chunk = [&](ChunkRange chunk) {
+    for (size_t i = chunk.start; i < chunk.end; i++) {
+      if (results[i] != AuthErrorCode::kAuthSuccess) {
+        continue;
+      }
+      if (!verify_auth(txs[i], tx_auth_data[i], network_hash_)) {
+        results[i] = AuthErrorCode::kAuthFailed;
+      }
+    }
+  };
+
+  if (max_parallelism == 1 || txs.size() == 1) {
+    verify_chunk(ChunkRange{.start = 0, .end = txs.size()});
+    co_return results;
   }
 
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), max_parallelism);
   std::vector<x23::Async<void>> handles;
-  handles.reserve(chunks.size());
-  for (const ChunkRange &chunk : chunks) {
+  handles.reserve(chunks.size() - 1);
+  for (size_t i = 1; i < chunks.size(); ++i) {
     handles.push_back(
-        [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AuthCacheEntry,
-                                    SipHash24Hasher> &auth_data,
-           NetworkHash network_hash,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
+        [](ChunkRange chunk, const auto &verify) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
-
-          for (size_t i = chunk.start; i < chunk.end; i++) {
-            const SignedTransaction &tx = txs[i];
-            if (results[i] != AuthErrorCode::kAuthSuccess) {
-              continue;
-            }
-
-            const ContractAddress &account = tx.tx.invocation.invoked_address;
-            const auto account_it = auth_data.find(account);
-            CHECK(account_it != auth_data.end());
-            const std::optional<AddressAuthData> &source_auth_data =
-                account_it->second->second;
-
-            AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash);
-            if (!verify_result.has_value()) {
-              results[i] = AuthErrorCode::kAuthFailed;
-              continue;
-            }
-            // [results] is initialized with all of its members as
-            // [AuthErrorCode::kAuthSuccess], so there is no need for us to
-            // write this result to [results] again.
-          }
+          verify(chunk);
           co_return;
-        }(chunk, txs, auth_data, network_hash_, results));
+        }(chunks[i], verify_chunk));
   }
+  // Preparation already runs on the pool; use its worker for the first chunk.
+  verify_chunk(chunks.front());
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
