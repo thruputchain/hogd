@@ -96,7 +96,9 @@ struct std::tuple_element<I, hogd::ArcTestPoint> {
 template<> struct x23::xdr_meta<hogd::ArcTestPoint> {
   static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
   static constexpr const char *type_name = "ArcTestPoint";
-  static constexpr std::array<std::string_view, 2> field_names{"x", "payload"};
+  // Part of the struct protocol, though nothing in this test reads it.
+  [[maybe_unused]] static constexpr std::array<std::string_view, 2> field_names{
+      "x", "payload"};
 };
 // NOLINTEND(readability-identifier-naming)
 
