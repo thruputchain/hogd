@@ -169,6 +169,9 @@ make_corpus()
     workers.emplace_back(sign_accounts, std::ref(corpus), begin,
                          std::min(kAccounts, begin + per_thread));
   }
+  // Join before returning: without copy elision the return moves [corpus]
+  // out from under threads still writing to it.
+  workers.clear();
   return corpus;
 }
 
@@ -217,14 +220,24 @@ public:
     CHECK_EQ(db.get_current_height(), kHeight);
 
     warm_server_ = make_server(cache_buckets);
-    // Every account into the cache; the warm benchmarks then never reach
-    // the DB.
+    // Every account into the cache, then a second pass to prove they all
+    // stayed: a cache too small for the corpus evicts, and the "warm"
+    // benchmarks would quietly measure DB lookups.
     const SignedTransactionBatch all =
         make_batch(corpus_, kAccounts, /*txs_per_account=*/1);
-    CHECK(all_succeeded(warm_server_->verify_transactions(
-                            kHeight, std::span(all.data(), all.size()),
-                            available_parallelism())(),
-                        all.size()));
+    for (int pass = 0; pass < 2; ++pass) {
+      const size_t lookups_before = db_lookups();
+      CHECK(all_succeeded(warm_server_->verify_transactions(
+                              kHeight, std::span(all.data(), all.size()),
+                              available_parallelism())(),
+                          all.size()));
+      if (pass == 1 && db_lookups() != lookups_before) {
+        panic("auth bench: {} cache buckets cannot hold all {} accounts "
+              "({} DB lookups on a warm pass); raise "
+              "--auth_bench_cache_buckets",
+              cache_buckets, kAccounts, db_lookups() - lookups_before);
+      }
+    }
 
     mempool_rpc_->max_message_size_ = kBulkRpcMaxMessageSize;
     mempool_rpc_->impl()->set_auth_server(*warm_server_);
@@ -255,6 +268,7 @@ public:
   }
 
   const Corpus &corpus() const { return corpus_; }
+  size_t db_lookups() { return db_server_.impl()->lookup_count(); }
   AuthServer &warm_server() { return *warm_server_; }
   AuthMempoolClient &mempool_client() { return *mempool_client_; }
 
@@ -272,9 +286,17 @@ private:
 
 BenchEnv *g_env = nullptr;
 
+// Reports throughput, and the DB lookups per iteration since [lookups_before]
+// so a "warm" result that reached the DB shows it.
 void
-report_txs(benchmark::State &state, size_t txs_per_iteration)
+report_txs(benchmark::State &state, size_t txs_per_iteration,
+           size_t lookups_before)
 {
+  if (state.iterations() > 0) {
+    state.counters["db_lookups_per_iter"] =
+        static_cast<double>(g_env->db_lookups() - lookups_before) /
+        static_cast<double>(state.iterations());
+  }
   state.SetItemsProcessed(static_cast<int64_t>(state.iterations()) *
                           static_cast<int64_t>(txs_per_iteration));
   state.counters["txs_per_s"] =
@@ -291,6 +313,7 @@ bm_verify_warm(benchmark::State &state, size_t batch_size, size_t parallelism)
   const SignedTransactionBatch batch =
       make_batch(g_env->corpus(), batch_size, /*txs_per_account=*/1);
   const std::span<const SignedTransaction> txs(batch.data(), batch.size());
+  const size_t lookups_before = g_env->db_lookups();
   for (auto _ : state) {
     AuthErrorCodeBatch results =
         g_env->warm_server().verify_transactions(kHeight, txs, parallelism)();
@@ -300,7 +323,7 @@ bm_verify_warm(benchmark::State &state, size_t batch_size, size_t parallelism)
     }
     benchmark::DoNotOptimize(results);
   }
-  report_txs(state, batch_size);
+  report_txs(state, batch_size, lookups_before);
 }
 
 // As bm_verify_warm, but each iteration starts from an empty cache, so every
@@ -312,6 +335,7 @@ bm_verify_cold(benchmark::State &state, size_t batch_size,
   const SignedTransactionBatch batch =
       make_batch(g_env->corpus(), batch_size, txs_per_account);
   const std::span<const SignedTransaction> txs(batch.data(), batch.size());
+  const size_t lookups_before = g_env->db_lookups();
   for (auto _ : state) {
     state.PauseTiming();
     std::unique_ptr<AuthServer> server = g_env->make_server(kColdCacheBuckets);
@@ -327,7 +351,7 @@ bm_verify_cold(benchmark::State &state, size_t batch_size,
       return;
     }
   }
-  report_txs(state, batch_size);
+  report_txs(state, batch_size, lookups_before);
   state.counters["accounts"] = static_cast<double>(
       std::min(kAccounts,
                (batch_size + txs_per_account - 1) / txs_per_account));
@@ -394,6 +418,7 @@ bm_verify_rpc(benchmark::State &state, size_t batch_size, size_t in_flight)
       make_batch(g_env->corpus(), batch_size, /*txs_per_account=*/1);
   std::vector<std::vector<double>> latencies_us(in_flight);
   std::atomic<bool> failed{false};
+  const size_t lookups_before = g_env->db_lookups();
   for (auto _ : state) {
     run_in_flight(g_env->mempool_client(), batch, latencies_us, failed)();
     if (failed.load(std::memory_order_relaxed)) {
@@ -401,7 +426,7 @@ bm_verify_rpc(benchmark::State &state, size_t batch_size, size_t in_flight)
       return;
     }
   }
-  report_txs(state, batch_size * in_flight * kCallsPerWorker);
+  report_txs(state, batch_size * in_flight * kCallsPerWorker, lookups_before);
 
   std::vector<double> all;
   for (const std::vector<double> &worker_latencies : latencies_us) {
