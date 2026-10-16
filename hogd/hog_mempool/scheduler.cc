@@ -1,5 +1,5 @@
 #include "hogd/hog_mempool/scheduler.h"
-#include "hogd/hog_mempool/ingestion_diagnostics.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 
 #include <algorithm>
 #include <array>
