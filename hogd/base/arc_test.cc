@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "hogd/base/arc.h"
+#include "types.hh"
 #include "x23/serialize.h"
 #include "x23/utility.h"
 #include "x23/vec.h"
@@ -315,6 +316,55 @@ TEST(ArcXdr, StandsInForItsValueWhereAnRpcExpectsIt)
   x23::Vec<Arc<ArcTestPoint>> shared{plain[0], plain[1]};
   x23::span<const Arc<ArcTestPoint>> view(shared);
   EXPECT_EQ(x23::serialize(view), x23::serialize(plain));
+}
+
+// The union tests use a generated union, since the union protocol is too
+// involved to write by hand.
+TEST(ArcXdr, DecodesAUnion)
+{
+  static_assert(x23::is_xdr_union<Arc<Signature>>);
+
+  Signature sig(CryptographicScheme::Ed25519);
+  sig.ed25519().fill(0x5a);
+  const x23::Buf bytes = x23::serialize(sig);
+
+  Arc<Signature> decoded;
+  x23::deserialize(&decoded, bytes);
+  EXPECT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, sig);
+  EXPECT_EQ(decoded->scheme(), CryptographicScheme::Ed25519);
+  EXPECT_EQ(get<0>(decoded), CryptographicScheme::Ed25519);
+  EXPECT_EQ(x23::serialize(decoded), bytes);
+}
+
+TEST(ArcXdr, DecodesAVectorOfUnionsWithEveryArm)
+{
+  x23::Vec<Signature> plain(2);
+  plain[0] = Signature(CryptographicScheme::Ed25519);
+  plain[0].ed25519().fill(0x11);
+  plain[1] = Signature(CryptographicScheme::MlDsa65);
+  plain[1].mldsa65()->fill(0x22);
+  const x23::Buf bytes = x23::serialize(plain);
+
+  x23::Vec<Arc<Signature>> shared;
+  x23::deserialize(&shared, bytes);
+  ASSERT_EQ(shared.size(), 2U);
+  EXPECT_EQ(*shared[0], plain[0]);
+  EXPECT_EQ(*shared[1], plain[1]);
+  EXPECT_EQ(shared[1]->scheme(), CryptographicScheme::MlDsa65);
+  EXPECT_EQ(x23::serialize(shared), bytes);
+}
+
+TEST(ArcXdr, SettingAUnionDiscriminantAllocatesAnEmptyArc)
+{
+  Arc<Signature> a;
+  EXPECT_EQ(std::as_const(a)->scheme(), CryptographicScheme::Ed25519);
+  EXPECT_FALSE(a.has_value());
+
+  x23::union_set_discriminant(a, CryptographicScheme::MlDsa65);
+  EXPECT_TRUE(a.has_value());
+  EXPECT_EQ(a->scheme(), CryptographicScheme::MlDsa65);
+  EXPECT_TRUE(x23::union_valid(a));
 }
 
 } // namespace hogd

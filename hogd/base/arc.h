@@ -34,8 +34,7 @@ namespace hogd {
 // Decoding into an Arc writes its T in place, shared or not. Decode into a
 // fresh Arc unless every holder should see the new value.
 //
-// Unlike Rc, Arc has x23's and std::tuple's protocols only for struct T:
-// decoding a union needs union_ops, which only Box forwards.
+// An Arc has x23's protocols for a struct or union T, as Box does.
 template<typename T> class Arc {
 public:
   using element_type = T;
@@ -150,16 +149,39 @@ operator<=>(const Arc<T> &a, const Arc<T> &b)
 
 // x23 treats an Arc<T> as the T it holds, as it does an x23::Box<T> and an
 // Rc<T>: an Arc field has T's wire format, and decoding into an empty Arc
-// allocates its T first. So an XDR struct can hold its nested structs by Arc,
-// a vector of Arcs decodes straight from a vector of T, and either stands in
-// for the T wherever an RPC argument or return expects one.
+// allocates its T first. So an XDR struct can hold its nested structs and
+// unions by Arc, a vector of Arcs decodes straight from a vector of T, and
+// either stands in for the T wherever an RPC argument or return expects one.
 
 // NOLINTNEXTLINE(readability-identifier-naming)
-template<x23::is_xdr_struct T>
+template<x23::is_xdr_cat<x23::XdrCategory::kStruct, x23::XdrCategory::kUnion> T>
 struct x23::xdr_meta<hogd::Arc<T>> : x23::xdr_meta<T> {};
 
 template<typename X, x23::serializes_like<X> T>
 struct x23::serialize_equiv<X, hogd::Arc<T>> : std::true_type {};
+
+// An Arc of a union is that union to the union protocol, as a Box of one is:
+// arms are reached through get<I>, which Arc forwards, and the discriminant
+// through the held value. Setting the discriminant of an empty Arc allocates
+// its union first.
+template<x23::is_xdr_union T>
+struct x23::union_ops<hogd::Arc<T>> : x23::union_ops<T> {
+  using base = x23::union_ops<T>;
+  using base::get_discriminant;
+  using base::index;
+  using base::set_discriminant;
+  using typename base::discriminant_type;
+
+  static constexpr int index(const hogd::Arc<T> &u) { return base::index(*u); }
+  static constexpr discriminant_type get_discriminant(const hogd::Arc<T> &u)
+  {
+    return base::get_discriminant(*u);
+  }
+  static constexpr void set_discriminant(hogd::Arc<T> &u, discriminant_type d)
+  {
+    base::set_discriminant(*u, d);
+  }
+};
 
 template<typename T> requires requires { typename std::tuple_size<T>::type; }
 struct std::tuple_size<hogd::Arc<T>> : std::tuple_size<T> {};
