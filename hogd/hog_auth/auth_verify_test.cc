@@ -178,8 +178,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   x23::span<SignedTransaction> stx_span(stx_vec);
   // Exercise the inline chunk and concurrent workers with mixed outcomes.
   for (size_t parallelism : {1U, 2U, 8U}) {
-    auto result =
-        auth_server().verify_transactions(0, stx_span, parallelism)();
+    auto result = auth_server().verify_transactions(0, stx_span, parallelism)();
     ASSERT_EQ(result.size(), 3);
     EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
     EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);

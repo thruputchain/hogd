@@ -161,11 +161,11 @@ verify_signatures(VerificationType VerfType)
 
 template<VerificationType VerfType>
 AuthVerifyStatus<void>
-verify_weight_key_claim_internal(
-    BitMap accepted_keys, const AddressAuthData *auth_data,
-    std::span<const DecoratedSignature> sigs,
-    x23::BufView signature_preimage,
-    Ed25519SignatureVerifier *signature_verifier)
+verify_weight_key_claim_internal(BitMap accepted_keys,
+                                 const AddressAuthData *auth_data,
+                                 std::span<const DecoratedSignature> sigs,
+                                 x23::BufView signature_preimage,
+                                 Ed25519SignatureVerifier *signature_verifier)
 {
   if (!valid_pk_bitmap(accepted_keys)) {
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
@@ -344,7 +344,7 @@ verify_auth_claims_internal(const SignedTransaction &stx,
   const AuthClaim &auth_claim = stx.tx.auth_claim;
 
   const std::span<const DecoratedSignature> sigs(stx.signatures.data(),
-                                                stx.signatures.size());
+                                                 stx.signatures.size());
 
   const AddressAuthData *auth_data = nullptr;
   if constexpr (verify_weights_against_auth_data(VerfType)) {

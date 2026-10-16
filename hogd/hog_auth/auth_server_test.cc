@@ -24,6 +24,8 @@
 #include <utility>
 
 #include "auth_card.hh"
+#include "hogd/base/chunked_vector.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
@@ -32,6 +34,7 @@
 #include "integration.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -618,18 +621,18 @@ TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
   auth_data.public_keys[1]->key = PublicKey(CryptographicScheme::MlDsa65);
   auth_data.public_keys[1]->key.mldsa65()->fill(0x5a);
   KeyChangeBatch expected;
-  expected.push_back(KeyChange{.address = make_test_address(1),
-                                .auth_data =
-                                    x23::Ptr<AddressAuthData>(auth_data)});
-  expected.push_back(KeyChange{.address = make_test_address(2),
-                                .auth_data = nullptr});
+  expected.push_back(
+      KeyChange{.address = make_test_address(1),
+                .auth_data = x23::Ptr<AddressAuthData>(auth_data)});
+  expected.push_back(
+      KeyChange{.address = make_test_address(2), .auth_data = nullptr});
 
   std::vector<KeyChangeBatch> chunks;
   chunks.push_back({expected[0]});
   chunks.emplace_back();
   chunks.push_back({expected[1]});
-  auth_server().register_auth_data_updates(
-      0, ChunkedVector<KeyChangeBatch>(std::move(chunks)))();
+  auth_server().register_auth_data_updates(0, ChunkedVector<KeyChangeBatch>(
+                                                  std::move(chunks)))();
 
   const auto [height, changes] = mempool->impl()->received();
   ASSERT_EQ(height, 0);
