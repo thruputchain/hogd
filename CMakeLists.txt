@@ -74,6 +74,7 @@ if(ENABLE_TEST_FFI)
 endif()
 
 # Set up compiler flags for release and debug build types
+include(cmake/compiler_cache.cmake)
 set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
 set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wall -march=${BUILD_ARCHITECTURE}")
 if (CMAKE_CXX_COMPILER_ID STREQUAL "Clang")
