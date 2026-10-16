@@ -474,7 +474,8 @@ TEST_F(AuthClaimTests, InsufficientWeightRejectsBeforeSignatureVerification)
   EXPECT_EQ(result.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
 
   Ed25519SignatureVerifier verifier;
-  const auto batched = verify_auth(stx, &auth_data, kTestNetworkHash, &verifier);
+  const auto batched =
+      verify_auth(stx, &auth_data, kTestNetworkHash, &verifier);
   ASSERT_FALSE(batched.has_value());
   EXPECT_EQ(batched.error().code(), AuthVerifyErrorCode::kAuthDataMismatch);
   // The bad signature must not have been queued before rejecting the weight.
@@ -491,11 +492,10 @@ TEST_F(AuthClaimTests, ChecksSignaturesBeyondTheRequiredWeight)
       .signatures = {make_signature(sk0, tx, 0), make_signature(sk1, tx, 1)},
   };
   AddressAuthData auth_data{
-      .public_keys =
-          {x23::Ptr<PublicKeyConfig>(
-               new PublicKeyConfig{.key = pk0, .max_weight = 1}),
-           x23::Ptr<PublicKeyConfig>(
-               new PublicKeyConfig{.key = pk1, .max_weight = 1})},
+      .public_keys = {x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk0, .max_weight = 1}),
+                      x23::Ptr<PublicKeyConfig>(
+                          new PublicKeyConfig{.key = pk1, .max_weight = 1})},
       .required_weight = 1,
   };
   ASSERT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash).has_value());
@@ -507,8 +507,8 @@ TEST_F(AuthClaimTests, ChecksSignaturesBeyondTheRequiredWeight)
             AuthVerifyErrorCode::kSignatureVerificationFailed);
 
   Ed25519SignatureVerifier verifier;
-  ASSERT_TRUE(verify_auth(stx, &auth_data, kTestNetworkHash, &verifier)
-                  .has_value());
+  ASSERT_TRUE(
+      verify_auth(stx, &auth_data, kTestNetworkHash, &verifier).has_value());
   EXPECT_FALSE(verifier.verify());
 }
 
