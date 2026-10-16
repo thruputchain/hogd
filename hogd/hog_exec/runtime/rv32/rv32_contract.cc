@@ -105,9 +105,9 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 #if HOGD_RV32_STACK_USAGE_ENABLED
 namespace {
 
-// Logs the guest's stack extremes when the invocation's coroutine frame goes
-// away, whichever exit it took: a Return, a host error, a trap, or a frame
-// abandoned before completion. Debug-only; see HOGD_RV32_STACK_USAGE in
+// Logs the lowest sp the guest reached when the invocation's coroutine frame
+// goes away, whichever exit it took: a Return, a host error, a trap, or a
+// frame abandoned before completion. Debug-only; see HOGD_RV32_STACK_USAGE in
 // threaded_machine.h. The address is copied at entry, while this invocation's
 // frame is the handler's active one.
 class StackUsageReport {
@@ -123,16 +123,14 @@ public:
   {
     // Logging allocates, and nothing may escape a destructor.
     try {
-      const rv32::StackUsage &usage = machine_.stack_usage();
-      if (usage.writes == 0) {
+      const uint32_t sp_min = machine_.sp_min();
+      if (sp_min == rv32::kSpUnwritten) {
         info("rv32 stack usage: contract={} method={:#018x}: sp never written",
              x23::show(address_), method_id_);
         return;
       }
-      info("rv32 stack usage: contract={} method={:#018x} sp_min={:#010x} "
-           "sp_max={:#010x} max_depth={} sp_writes={}",
-           x23::show(address_), method_id_, usage.sp_min, usage.sp_max,
-           usage.sp_max - usage.sp_min, usage.writes);
+      info("rv32 stack usage: contract={} method={:#018x} sp_min={:#010x}",
+           x23::show(address_), method_id_, sp_min);
     } catch (...) {
       report_dropped_log("rv32 stack usage report");
     }

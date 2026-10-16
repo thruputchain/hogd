@@ -2769,20 +2769,21 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
 
 // --- Guest stack-usage diagnostic (HOGD_RV32_STACK_USAGE, Debug only) --------
 //
-// write_rd records every value the handlers store to sp (x2). These pin what
-// the per-invocation report in rv32_contract.cc relies on: the extremes cover
-// every architectural sp write, other registers never count, and the record
-// starts empty.
+// write_rd lowers sp_min to every value the handlers store to sp (x2). These
+// pin what the per-invocation report in rv32_contract.cc relies on: the
+// minimum covers every architectural sp write, other registers never count,
+// and the record starts at kSpUnwritten.
 
-TEST(Rv32ThreadedStackUsage, recordsExtremesOfEverySpWrite)
+TEST(Rv32ThreadedStackUsage, recordsMinimumOfEverySpWrite)
 {
   using test_program::store;
   using test_program::u_type;
   // Establish sp at 4096, push two frames (16 then 32 bytes), pop both, then
-  // push 8 bytes and stop. The addi x1 between lui and the first addi sp keeps
-  // them from lowering to op_lui_addi, so every architectural sp write is one
-  // write_rd call whatever else the lowering fuses: the alu;alu, alu;store and
-  // store;alu handlers all write their members' rd individually.
+  // push 8 bytes and stop. The deepest point, 4048, is reached mid-run and
+  // restored before any barrier, so only a per-write record can see it. The
+  // addi x1 between lui and the first addi sp keeps them from lowering to
+  // op_lui_addi; the alu;alu, alu;store and store;alu pairs the lowering does
+  // form all write their members' rd individually.
   const std::vector<uint32_t> words = {
       u_type(0x37U, 2, 0x1000U), // lui  sp, 1       -> 4096
       addi(1, 0, 5),             // addi x1, x0, 5   (not sp)
@@ -2799,57 +2800,47 @@ TEST(Rv32ThreadedStackUsage, recordsExtremesOfEverySpWrite)
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
   EXPECT_EQ(machine.reg(2), 4088U);
-
-  const StackUsage &usage = machine.stack_usage();
-  EXPECT_EQ(usage.sp_min, 4048U);
-  EXPECT_EQ(usage.sp_max, 4096U);
-  EXPECT_EQ(usage.writes, 5U);
+  EXPECT_EQ(machine.sp_min(), 4048U);
 }
 
 TEST(Rv32ThreadedStackUsage, loadsIntoSpAreRecorded)
 {
   using test_program::load;
   using test_program::store;
-  // Save sp to memory, lower it, then restore it with lw sp, 0(x1): the load
+  // Save sp to memory, then restore a lower value with lw sp, 0(x1): the load
   // handlers (plain and fused) write rd through the same hook as the ALU ones.
   const std::vector<uint32_t> words = {
       addi(2, 0, 128),   // sp = 128
       addi(1, 0, 8),     // x1 = 8
-      store(1, 2, 0, 2), // sw sp, 0(x1)
-      addi(2, 2, -64),   // sp = 64 (deepest)
-      load(2, 2, 1, 0),  // lw sp, 0(x1) -> 128
+      addi(3, 0, 64),    // x3 = 64
+      store(1, 3, 0, 2), // sw x3, 0(x1)
+      load(2, 2, 1, 0),  // lw sp, 0(x1) -> 64 (deepest)
+      addi(2, 2, 32),    // sp = 96
       kEbreakWord,
   };
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, /*gas=*/100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
-  EXPECT_EQ(machine.reg(2), 128U);
-
-  const StackUsage &usage = machine.stack_usage();
-  EXPECT_EQ(usage.sp_min, 64U);
-  EXPECT_EQ(usage.sp_max, 128U);
-  EXPECT_EQ(usage.writes, 3U);
+  EXPECT_EQ(machine.reg(2), 96U);
+  EXPECT_EQ(machine.sp_min(), 64U);
 }
 
-TEST(Rv32ThreadedStackUsage, ignoresOtherRegistersAndStartsEmpty)
+TEST(Rv32ThreadedStackUsage, ignoresOtherRegistersAndStartsUnwritten)
 {
   // Writes to x1, x3, x4 and x0 (the regs_[0] trash sink) leave the record at
-  // its sentinels: writes == 0 is how the report tells "never wrote sp" apart
-  // from a genuine extreme.
+  // kSpUnwritten, which is how the report tells "never wrote sp" apart from a
+  // genuine minimum.
   const std::vector<uint32_t> words = {addi(1, 0, 5), addi(3, 1, 7),
                                        addi(0, 1, 1), op(4, 1, 3, 0, 0),
                                        kEbreakWord};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, /*gas=*/100);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(4), 17U);
-
-  const StackUsage &usage = machine.stack_usage();
-  EXPECT_EQ(usage.writes, 0U);
-  EXPECT_EQ(usage.sp_min, std::numeric_limits<uint32_t>::max());
-  EXPECT_EQ(usage.sp_max, 0U);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
 }
 
 TEST(Rv32ThreadedStackUsage, resetClearsTheRecord)
@@ -2860,23 +2851,19 @@ TEST(Rv32ThreadedStackUsage, resetClearsTheRecord)
   ThreadedMachine machine(*program, /*gas=*/100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
-  EXPECT_EQ(machine.stack_usage().writes, 2U);
-  EXPECT_EQ(machine.stack_usage().sp_min, 48U);
-  EXPECT_EQ(machine.stack_usage().sp_max, 64U);
+  EXPECT_EQ(machine.sp_min(), 48U);
 
   machine.reset(/*gas=*/100);
-  EXPECT_EQ(machine.stack_usage().writes, 0U);
-  EXPECT_EQ(machine.stack_usage().sp_min, std::numeric_limits<uint32_t>::max());
-  EXPECT_EQ(machine.stack_usage().sp_max, 0U);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
 }
 
-TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsItsCollapsedWriteOnce)
+TEST(Rv32ThreadedStackUsage, fusedLuiAddiKeepsTheMinimum)
 {
   using test_program::u_type;
-  // lui sp ; addi sp, sp, -16 lowers to op_lui_addi. Untraced (production) it
-  // stores the pair's final value once, so the lui's intermediate never
-  // reaches the record; traced, both architectural writes retire and are
-  // recorded. sp_min agrees either way, which is what the report relies on.
+  // lui sp ; addi sp, sp, -16 lowers to op_lui_addi, which on the untraced
+  // (production) path stores only the pair's final value. That skips the lui's
+  // higher intermediate, so the minimum is the same as on the traced path,
+  // where both architectural writes retire.
   const std::vector<uint32_t> words = {u_type(0x37U, 2, 0x1000U),
                                        addi(2, 2, -16), kEbreakWord};
   {
@@ -2886,9 +2873,7 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsItsCollapsedWriteOnce)
     ThreadedMachine machine(*program, /*gas=*/100);
     RecordingHost host;
     EXPECT_EQ(machine.run(host), StepResult::kTrap);
-    EXPECT_EQ(machine.stack_usage().writes, 1U);
-    EXPECT_EQ(machine.stack_usage().sp_min, 4080U);
-    EXPECT_EQ(machine.stack_usage().sp_max, 4080U);
+    EXPECT_EQ(machine.sp_min(), 4080U);
   }
   {
     auto program = threaded_from_words(words, /*total_memory_size=*/256,
@@ -2897,9 +2882,7 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsItsCollapsedWriteOnce)
     RecordingHost host;
     TraceObserver obs;
     EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
-    EXPECT_EQ(machine.stack_usage().writes, 2U);
-    EXPECT_EQ(machine.stack_usage().sp_min, 4080U);
-    EXPECT_EQ(machine.stack_usage().sp_max, 4096U);
+    EXPECT_EQ(machine.sp_min(), 4080U);
   }
 }
 

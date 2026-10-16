@@ -164,22 +164,24 @@ Production resolves host errors in `Rv32Runtime`; it does not pass
 ## Stack-usage diagnostic
 
 Debug builds configured with `HOGD_RV32_STACK_USAGE=ON` (the default when
-`ENABLE_TEST_FFI` is on) record every value the guest writes to `sp` (x2).
-Each handler store goes through `write_rd` in
-[threaded_machine.h](threaded_machine.h), which keeps the minimum, the maximum
-and the write count on the `ThreadedMachine`. `Rv32Runtime` logs that record
-once per invocation, at `info` level, when the invocation finishes:
+`ENABLE_TEST_FFI` is on) record the lowest value the guest writes to `sp`
+(x2). Each handler store goes through `write_rd` in
+[threaded_machine.h](threaded_machine.h), which lowers the `ThreadedMachine`'s
+minimum on every `sp` write. The stack grows down from the top `_start`
+establishes, so the minimum is the deepest point the stack reached, and a
+per-write record sees a leaf frame that is pushed and popped within one run.
+`Rv32Runtime` logs it once per invocation, at `info` level, when the
+invocation finishes:
 
 ```
-rv32 stack usage: contract=... method=... sp_min=... sp_max=... max_depth=... sp_writes=...
+rv32 stack usage: contract=... method=... sp_min=...
 ```
 
-`max_depth` is `sp_max - sp_min`: how far the stack reached below the top
-`_start` established. Untraced execution collapses a fused `lui;addi` into one
-store, so `sp_writes` and `sp_max` describe the lowered program; `sp_min` is
-the same either way. A guest that never writes `sp` is reported as such.
+A guest that never writes `sp` is reported as such. A fused `lui;addi` stores
+only the pair's final value on the untraced path; that skips the `lui`'s
+higher intermediate and cannot raise the minimum.
 
-The define is global because it adds members to `ThreadedMachine`, and CMake
+The define is global because it adds a member to `ThreadedMachine`, and CMake
 applies it to the Debug configuration only, so optimized interpreters never
 carry the per-write check. The canonical `Machine` and the test-only adapters
 are not instrumented. `Rv32ThreadedStackUsage` in

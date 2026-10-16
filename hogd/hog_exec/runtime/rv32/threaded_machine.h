@@ -65,22 +65,10 @@ static_assert(kMaxRunGas <= UINT16_MAX);
 // (entry ABI v3 seeds it with zero) and the stack grows down from there.
 inline constexpr uint8_t kStackPointerReg = 2;
 
-#if HOGD_RV32_STACK_USAGE_ENABLED
-// Extremes of every value the guest wrote to sp over a machine's execution,
-// recorded by write_rd. sp_min is the deepest point the stack reached and
-// sp_max the highest, in practice the top _start established, so
-// sp_max - sp_min is the invocation's maximum stack depth. writes counts the
-// sp writes; when it is zero the guest never touched sp and the extremes are
-// their initial sentinels. Fused handlers write sp once per architectural
-// write on the traced path and may collapse a pair (lui;addi) into one write
-// on the untraced path, so writes and sp_max can differ between the two;
-// sp_min cannot, since the collapsed value is the pair's final one.
-struct StackUsage {
-  uint32_t sp_min = std::numeric_limits<uint32_t>::max();
-  uint32_t sp_max = 0;
-  uint64_t writes = 0;
-};
-#endif
+// ThreadedMachine::sp_min() reads this until the guest first writes sp. No
+// real stack pointer takes the value: sp addresses guest memory, which is
+// bounded by kMemoryCeilingBytes.
+inline constexpr uint32_t kSpUnwritten = std::numeric_limits<uint32_t>::max();
 
 // Named outside the anonymous union because ISO C++ forbids defining a type
 // inside one. Instructions using rs2 need at most a 16-bit immediate.
@@ -283,7 +271,7 @@ public:
     halt_code_ = 0;
     pending_ecall_.reset();
 #if HOGD_RV32_STACK_USAGE_ENABLED
-    stack_usage_ = {};
+    sp_min_ = kSpUnwritten;
 #endif
     // exec_ intentionally preserved across reset(): the program is immutable,
     // so the baked handler array stays valid and is reused.
@@ -324,7 +312,11 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<uint8_t> memory() { return memory_.bytes(); }
 #if HOGD_RV32_STACK_USAGE_ENABLED
-  [[nodiscard]] const StackUsage &stack_usage() const { return stack_usage_; }
+  // Lowest value the guest has written to sp (x2), or kSpUnwritten. The stack
+  // grows down, so this is the deepest point it reached: a fused lui;addi
+  // stores only the pair's final value on the untraced path, which cannot
+  // raise the minimum.
+  [[nodiscard]] uint32_t sp_min() const { return sp_min_; }
 #endif
 
   [[nodiscard]] bool consume_gas(uint64_t amount)
@@ -375,9 +367,9 @@ public:
   // only on the deficit path, read at seams.
   uint32_t gas_deficit_ = 0;
 #if HOGD_RV32_STACK_USAGE_ENABLED
-  // Written by write_rd on every sp write; read once the machine has stopped.
+  // Lowered by write_rd on every sp write; read once the machine has stopped.
   // Debug-only, so its cost on the dispatch path is not a concern.
-  StackUsage stack_usage_;
+  uint32_t sp_min_ = kSpUnwritten;
 #endif
 };
 
@@ -386,9 +378,11 @@ static_assert(offsetof(ThreadedMachine, gas_remaining_) == 192,
               "gas_remaining_ must stay on its own cache line (offset 3 * 64); "
               "check the memory_ member width and field order above");
 #if HOGD_RV32_STACK_USAGE_ENABLED
-// The diagnostic's counters extend the cold tail past the 256-byte layout by
-// one alignment unit. The lines above it, the register file and the gas
-// balance, keep their offsets.
+// The 256-byte layout has no 4-byte hole (its only padding is the two bytes
+// after exec_traced_), so sp_min_ lands at offset 256 and alignas(64) rounds
+// the machine up to 320. The lines above it, the register file and the gas
+// balance, keep their offsets. Debug-only, so the extra line is not paid by
+// the node.
 static_assert(sizeof(ThreadedMachine) == 320,
               "ThreadedMachine size changed -- check the cache-line layout");
 #else
@@ -421,10 +415,7 @@ write_rd(const Ctx c, uint8_t rd, uint32_t value)
   c.m->regs_[rd] = value;
 #if HOGD_RV32_STACK_USAGE_ENABLED
   if (rd == kStackPointerReg) {
-    StackUsage &usage = c.m->stack_usage_;
-    usage.sp_min = std::min(usage.sp_min, value);
-    usage.sp_max = std::max(usage.sp_max, value);
-    ++usage.writes;
+    c.m->sp_min_ = std::min(c.m->sp_min_, value);
   }
 #endif
 }
