@@ -20,6 +20,11 @@ in debug information. Dependency files retain paths relative to their original
 working directory, including when a cached object is reused on another machine.
 Builds can run concurrently in separate build trees.
 
+CMake adds `-fno-canonical-system-headers` to GCC C/C++ compilations so system
+headers, including GoogleTest, retain these aliases. Otherwise GCC can resolve
+them to absolute paths in short CI checkouts, causing misses in longer developer
+checkouts. CMake selects this option by compiler ID; Clang does not accept it.
+
 The launcher sets `CCACHE_COMPILERCHECK=content` unless explicitly overridden and
 clears `CCACHE_BASEDIR` because the compiler arguments already use stable paths.
 Generic `cc`/`c++` drivers use the corresponding `gcc`/`g++` or `clang`/`clang++`
@@ -42,10 +47,10 @@ Every warmup run sets `CCACHE_RESHARE=1` so results used by the build are upload
 to remote storage even on local cache hits. This also backfills entries whose
 earlier remote uploads failed.
 Warmup and developer builds must use matching compiler versions to share
-entries. GCC 15 and GCC 16 still have separate entries. After
-changing the launcher, warm the desired toolchain again; builds can reuse their
-own local entries before consulting shared storage, so local hits need not
-increase the remote hit counter.
+entries. GCC 15 and GCC 16 still have separate entries. After changing the
+launcher or cache-related compiler flags, warm the desired toolchain again;
+builds can reuse their own local entries before consulting shared storage, so
+local hits need not increase the remote hit counter.
 
 Diagnostics and `__FILE__` use the relative aliases. To locate sources when
 debugging from elsewhere, GDB can map them with
