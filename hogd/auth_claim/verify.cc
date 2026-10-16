@@ -163,7 +163,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_weight_key_claim_internal(
     BitMap accepted_keys, const AddressAuthData *auth_data,
-    const x23::Vec<const DecoratedSignature *> &sigs,
+    std::span<const DecoratedSignature> sigs,
     x23::BufView signature_preimage,
     Ed25519SignatureVerifier *signature_verifier)
 {
@@ -173,23 +173,23 @@ verify_weight_key_claim_internal(
 
   uint32_t prev_key_id = 0;
   bool have_prev_key_id = false;
-  for (const DecoratedSignature *sig : sigs) {
-    if (!bitmap_accepts_key(accepted_keys, sig->public_key_id)) {
+  for (const DecoratedSignature &sig : sigs) {
+    if (!bitmap_accepts_key(accepted_keys, sig.public_key_id)) {
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
-    if (have_prev_key_id && sig->public_key_id <= prev_key_id) {
+    if (have_prev_key_id && sig.public_key_id <= prev_key_id) {
       trace("Auth malformed: weighted-claim signer ids must be strictly "
             "increasing");
       return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
     }
-    prev_key_id = sig->public_key_id;
+    prev_key_id = sig.public_key_id;
     have_prev_key_id = true;
   }
 
   if constexpr (verify_weights_against_auth_data(VerfType)) {
     assert(auth_data);
-    for (const DecoratedSignature *sig : sigs) {
-      if (!has_public_key(*auth_data, sig->public_key_id)) {
+    for (const DecoratedSignature &sig : sigs) {
+      if (!has_public_key(*auth_data, sig.public_key_id)) {
         return AuthVerifyError{AuthVerifyErrorCode::kAuthDataMismatch};
       }
     }
@@ -198,9 +198,9 @@ verify_weight_key_claim_internal(
   if constexpr (verify_signatures(VerfType)) {
     assert(auth_data);
 
-    for (const DecoratedSignature *sig : sigs) {
+    for (const DecoratedSignature &sig : sigs) {
       if (auto r =
-              verify_decorated_signature(*sig, *auth_data, signature_preimage,
+              verify_decorated_signature(sig, *auth_data, signature_preimage,
                                          signature_verifier);
           !r) {
         return r;
@@ -223,7 +223,7 @@ AuthVerifyStatus<void>
 verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
                              const PublicKey *key,
                              const ContractAddress &invoked_address,
-                             const x23::Vec<const DecoratedSignature *> &sigs,
+                             std::span<const DecoratedSignature> sigs,
                              x23::BufView signature_preimage,
                              Ed25519SignatureVerifier *signature_verifier)
 {
@@ -231,7 +231,7 @@ verify_pubkey_claim_internal(const PubkeyAccountPreimage &preimage,
     trace("Auth malformed: pubkey claim requires exactly one signature");
     return AuthVerifyError{AuthVerifyErrorCode::kAuthMalformed};
   }
-  const DecoratedSignature &sig = *sigs[0];
+  const DecoratedSignature &sig = sigs[0];
   if (sig.public_key_id != kDefaultNewAddressKeyID) {
     trace("Auth malformed: pubkey claim signature must use key id {}",
           kDefaultNewAddressKeyID);
@@ -281,7 +281,7 @@ AuthVerifyStatus<void>
 verify_auth_claim_internal(AuthClaim const &claim,
                            PublicKey const *pubkey_claim_key,
                            ContractAddress const &invoked_address,
-                           x23::Vec<DecoratedSignature const *> const &sigs,
+                           std::span<const DecoratedSignature> sigs,
                            const AddressAuthData *auth_data,
                            x23::BufView signature_preimage,
                            Ed25519SignatureVerifier *signature_verifier)
@@ -343,11 +343,8 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 
   const AuthClaim &auth_claim = stx.tx.auth_claim;
 
-  // Collect all signatures into a vec for the single claim.
-  x23::Vec<const DecoratedSignature *> sigs;
-  for (const DecoratedSignature &sig : stx.signatures) {
-    sigs.push_back(&sig);
-  }
+  const std::span<const DecoratedSignature> sigs(stx.signatures.data(),
+                                                stx.signatures.size());
 
   const AddressAuthData *auth_data = nullptr;
   if constexpr (verify_weights_against_auth_data(VerfType)) {

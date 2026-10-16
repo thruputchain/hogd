@@ -12,6 +12,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/chunk_items.h"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -74,7 +75,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
   auto entry =
       std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
-          current_height, db_auth_data.value());
+          current_height, std::move(db_auth_data.value()));
 
   auth_data_cache_.put(address, entry);
 
@@ -144,12 +145,13 @@ AuthServer::register_auth_data_updates(
 
   if (mempool_client_) {
     // The mempool's proc still takes the height as one batch.
-    KeyChangeBatch batch;
-    batch.reserve(key_changes.size());
-    for (const KeyChange &key_change : key_changes) {
-      batch.push_back(key_change);
+    std::vector<std::span<const KeyChange>> pieces;
+    pieces.reserve(key_changes.chunks().size());
+    for (const KeyChangeBatch &chunk : key_changes.chunks()) {
+      pieces.emplace_back(chunk.data(), chunk.size());
     }
-    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
+    co_await mempool_client_->mempoolauth_auth_data_changed(
+        height, ChunkItems<KeyChange>(pieces));
   }
 }
 

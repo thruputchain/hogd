@@ -1,5 +1,7 @@
 #include "hogd/hog_db/rpc_from_auth.h"
 
+#include <utility>
+
 #include "address_auth.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
@@ -48,7 +50,7 @@ HogDbAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
   }
 
   DBAuthResult result(DBAuthError::kDBAuthSuccess);
-  result.auth_data() = status.value();
+  result.auth_data() = std::move(status.value());
   co_return result;
 }
 
@@ -84,7 +86,7 @@ HogDbAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
       result.back().error(DBAuthError::kDBAuthStaleBlockHeight);
       continue;
     }
-    result.back().auth_data() = status.value();
+    result.back().auth_data() = std::move(status.value());
   }
   co_return result;
 }
