@@ -2,8 +2,6 @@
 set -Eeuo pipefail
 : "${BUILD_DIR:?BUILD_DIR must point to the CI build}"
 : "${WORK_DIR:?WORK_DIR must point to a fresh benchmark work directory}"
-: "${HACKATHON_GATEWAY_BINARY:?absolute compatible hog-gateway path on hog4 required}"
-: "${HACKATHON_GATEWAY_SHA256:?pinned gateway sha256 required}"
 : "${HACKATHON_USERS:=1000}"
 : "${HACKATHON_RATE_MULTIPLIER:=10}"
 : "${HACKATHON_OUTSTANDING:=16384}"
@@ -62,17 +60,29 @@ CONTROL_PORT=$("$BUILD_DIR/hogd/utils/get_port" kCIControlServerPort)
 source "$ROOT/scripts/ci/bench_harness.sh"
 export CI_WAIT_CONTROL_TIMEOUT_SEC=${CI_WAIT_CONTROL_TIMEOUT_SEC:-1800}
 ci_wait_control_server_hosts "$BUILD_DIR/hogd/hog_exec/bench/control_cli" "$CONTROL_PORT" hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11
-GATEWAY_ARGS=()
-if [[ -n "${HACKATHON_GATEWAY_PROTOCOL:-}" ]]; then
-  GATEWAY_ARGS+=(--gateway-protocol "$HACKATHON_GATEWAY_PROTOCOL")
-fi
+GATEWAY_BINARY="$BUILD_DIR/hog-gateway"
+printf -v gateway_manifest '%q' "$BUILD_DIR/hackathon-gateway.json"
+ssh "${CI_SSH_OPTS[@]}" hog4 "cat -- $gateway_manifest" >"$RESULTS/gateway-build.json"
+gateway_info=$(
+  python3 - "$RESULTS/gateway-build.json" "$ROOT/protocol" <<'PYGATEWAY'
+import json, re, subprocess, sys
+identity = json.load(open(sys.argv[1]))
+protocol = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=sys.argv[2], text=True).strip()
+if identity['protocolRevision'] != protocol or identity['protocol'] != 'hogp/' + protocol[:15]:
+    raise ValueError('gateway build was not qualified for this hogd protocol')
+if not re.fullmatch('[0-9a-f]{64}', identity['sha256']):
+    raise ValueError('invalid gateway build checksum')
+print(identity['sha256'], identity['protocol'])
+PYGATEWAY
+)
+read -r GATEWAY_SHA256 GATEWAY_PROTOCOL <<<"$gateway_info"
 for shared in 0 1; do
   CORPUS="$WORK_DIR/hackathon-corpus-$shared"
   "$BUILD_DIR/hogd/loadgen/hackathon/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
     --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
   python3 "$ROOT/hogd/loadgen/hackathon/cluster.py" \
     --build "$BUILD_DIR" --scpd "$BUILD_DIR/scpd.dev" \
-    --gateway "$HACKATHON_GATEWAY_BINARY" --gateway-sha256 "$HACKATHON_GATEWAY_SHA256" \
-    "${GATEWAY_ARGS[@]}" --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared" \
+    --gateway "$GATEWAY_BINARY" --gateway-sha256 "$GATEWAY_SHA256" --gateway-protocol "$GATEWAY_PROTOCOL" \
+    --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared" \
     --outstanding "$HACKATHON_OUTSTANDING" --receipt-workers "$HACKATHON_RECEIPT_WORKERS" --repeats "$HACKATHON_REPEATS"
 done

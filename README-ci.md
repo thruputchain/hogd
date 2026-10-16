@@ -13,9 +13,9 @@ dependencies. Set repository variable `COMPONENT_READER_APP_ID` and secret
 `COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
 Its installation needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
 thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
-thruput-integration-test-contracts, scp, and thruput-sdk-rs. No thruput-tools
-source reference is present in this tree, so it is outside the requested token
-scope.
+thruput-integration-test-contracts, scp, and thruput-sdk-rs. The hackathon
+workflow additionally requests Contents: read on thruput-tools to build its
+RPC gateway; other callers keep the base repository scope.
 
 The action maps legacy and canonical repository URLs to authenticated HTTPS.
 It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
@@ -92,25 +92,30 @@ to the appropriate values for that machine.
 
 The manual **Hackathon workload (single validator)** workflow runs the existing
 single-validator topology on hog4–hog11. It adds the public JSON-RPC gateway on
-hog4 and a concurrent replay client on hog7. Supply an absolute compatible
-`hog-gateway` path on hog4 and its SHA256 as workflow inputs. The gateway is an
-explicit, pinned dependency from `groundhog-rpc`; protocol handshakes must pass.
+hog4 and a concurrent replay client on hog7. The schedule fetches a pinned
+`thruput-tools` revision on hog4 and compiles `hog-gateway` in Release mode,
+with heap profiling enabled, before building hogd. Its Rust toolchain and Cargo
+lockfile come from that source checkout. No preinstalled gateway or gateway
+workflow inputs are required. The pins live beside the build commands in
+`scripts/schedules/hackathon.toml`.
 Use exclusively allocated benchmark hosts with matching control servers.
 Launch it from **Actions → Hackathon workload (single validator) → Run workflow**
-after the workflow has been added to the default branch. Set `gateway_binary` to the installed gateway path
-on hog4 and `gateway_sha256` to its lowercase SHA256 digest.
+after the workflow has been added to the default branch.
 The job prints reports in its logs and uploads a `hackathon-results-<attempt>`
 artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with
 results and signed corpora retained even after a replay fails. A copy also stays
 under `WORK_DIR` and, when set, the worker's `HOG_DUMP_DIR`; the exact paths
 appear in the job log.
 This job does not publish to `metrics_history` and does not load its deploy key.
-If the protocol fingerprint changed only for non-wire files, verify the protocol
-source diff before explicitly supplying `gateway_protocol` in the workflow,
-`HACKATHON_GATEWAY_PROTOCOL` in the shell wrapper, or `--gateway-protocol` in the
-Python runner. The override is retained in the run identity; mismatches are
-rejected by default. Protocol 0.53 bindings differ from this checkout's
-`hogp/2f5211766e8a878` only in CI notification files; 0.52 bindings are incompatible.
+The gateway source and qualified hogd protocol revision are pinned together.
+The schedule fails before building if the protocol pin no longer matches hogd;
+update both pins after checking wire compatibility. The qualified pin uses
+`thruput-xdr` 0.55.0 bindings, whose wire definitions match this checkout. CI
+supplies hogd's protocol fingerprint to the gateway automatically, and normal
+backend handshakes still run. The results retain `gateway-build.json` with the
+source revision, binary and Cargo lockfile checksums, Rust compiler, build
+profile, features, and protocol fingerprint. Each replay also verifies the
+actual gateway binary's checksum and records the fingerprint in its identity.
 
 The CI workload is synthetic: 1,000 signed users, 500 distinct application artifacts,
 five wallet artifacts, one/two-signature accounts, deployments, and auth-data
@@ -171,13 +176,12 @@ deployments, calls, and authentication updates through the RPC gateway. Setup
 batches must commit successfully before the measured arrival clock starts.
 This requires no chuckd changes or submodule updates.
 
-Run with the CI services already built and their control servers ready:
+Run with the schedule’s CI services and gateway already built and their control
+servers ready (the gateway build metadata is read from hog4):
 
 ```sh
 export BUILD_DIR=/absolute/path/to/release
 export WORK_DIR=/absolute/path/to/new-work-directory
-export HACKATHON_GATEWAY_BINARY=/absolute/path/on/hog4/to/hog-gateway
-export HACKATHON_GATEWAY_SHA256=<expected-sha256>
 scripts/ci/hackathon_bench.sh
 ```
 

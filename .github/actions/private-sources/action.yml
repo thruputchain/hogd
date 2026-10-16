@@ -10,6 +10,9 @@ inputs:
   ssh-private-key:
     description: Deploy keys for repositories still in groundhogchain
     required: true
+  extra-repositories:
+    description: Additional thruputchain repositories needed by this job
+    default: ''
 outputs:
   token:
     description: Read-only installation token for private source fetches on workers
@@ -36,6 +39,7 @@ runs:
           thruput-integration-test-contracts
           scp
           thruput-sdk-rs
+          ${{ inputs.extra-repositories }}
         permission-contents: read
     - name: Configure job-local Git authentication
       shell: bash
