@@ -71,12 +71,14 @@ template<typename T> struct StorageRead {
 // contract. What's done here is only check well-formedness of the code.
 
 #if HOGD_RV32_STACK_USAGE_ENABLED
-// One rv32 invocation's stack record: the lowest value its guest wrote to sp
-// (x2), the deepest point its stack reached, or rv32::kSpUnwritten if it
-// never wrote sp.
+// One rv32 invocation's stack record: the first value its guest wrote to sp
+// (x2), the stack top it established, and the lowest, the deepest point the
+// stack reached, so sp_initial - sp_min is the invocation's stack usage. Both
+// are rv32::kSpUnwritten if the guest never wrote sp.
 struct Rv32StackUsageRecord {
   ContractAddress address;
   Runtime::MethodID method_id;
+  uint32_t sp_initial;
   uint32_t sp_min;
 };
 #endif

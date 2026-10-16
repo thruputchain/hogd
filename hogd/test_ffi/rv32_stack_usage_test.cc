@@ -1,8 +1,8 @@
 // get_rv32_stack_usage(): the Debug-only rv32 stack diagnostic
 // (HOGD_RV32_STACK_USAGE, see hogd/hog_exec/runtime/rv32/stack_usage.h)
-// reaches the FFI as one record per rv32 invocation, carrying the lowest sp the
-// guest wrote. Built without the diagnostic, the entry point exists and
-// reports no records.
+// reaches the FFI as one record per rv32 invocation, carrying the first and
+// the lowest sp the guest wrote. Built without the diagnostic, the entry point
+// exists and reports no records.
 
 #include <cstdint>
 #include <cstring>
@@ -19,7 +19,6 @@
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"
-#include "invoke_args.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/cleanup.h"
@@ -116,13 +115,15 @@ single_record(GetRv32StackUsageResult const &result)
 
 } // namespace
 
-TEST(Rv32StackUsageTest, ReportsTheLowestSpTheGuestWrote)
+TEST(Rv32StackUsageTest, ReportsTheInitialAndLowestSpTheGuestWrote)
 {
   // Establish sp at 4096, push 32 then 64 bytes, pop both, then Return. The
   // deepest point, 4000, is restored before the ecall, so only a per-write
-  // record can see it.
+  // record can see it. The addi x1 between lui and the first push keeps the
+  // pair from lowering to op_lui_addi, so the initial value is the lui's.
   std::vector<uint32_t> words = {
       rv32::test_program::u_type(0x37U, 2, 0x1000U), // lui  sp, 1 -> 4096
+      rv32::test_program::addi(1, 0, 7),             // not sp
       rv32::test_program::addi(2, 2, -32),           // -> 4064
       rv32::test_program::addi(2, 2, -64),           // -> 4000 (deepest)
       rv32::test_program::addi(2, 2, 96),            // -> 4096
@@ -138,7 +139,9 @@ TEST(Rv32StackUsageTest, ReportsTheLowestSpTheGuestWrote)
                         sizeof(record.contract_address)),
             0);
   EXPECT_EQ(record.method_id, kMethodId);
+  EXPECT_EQ(record.sp_initial, 4096U);
   EXPECT_EQ(record.sp_min, 4000U);
+  EXPECT_EQ(record.sp_initial - record.sp_min, 96U); // the usage
 #else
   EXPECT_EQ(result.ffi_error_code, kTestFFIErrorCodeNone);
   EXPECT_EQ(result.records.data, nullptr);
@@ -156,6 +159,7 @@ TEST(Rv32StackUsageTest, GuestThatNeverWritesSpReportsTheSentinel)
 #if HOGD_RV32_STACK_USAGE_ENABLED
   const FFIRv32StackUsage record = single_record(result);
   EXPECT_EQ(record.method_id, kMethodId);
+  EXPECT_EQ(record.sp_initial, rv32::kSpUnwritten);
   EXPECT_EQ(record.sp_min, rv32::kSpUnwritten);
   EXPECT_EQ(record.sp_min, 0xFFFFFFFFU); // the value test_bindings.h documents
 #else

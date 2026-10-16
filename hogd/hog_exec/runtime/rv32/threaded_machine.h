@@ -254,6 +254,7 @@ public:
     halt_code_ = 0;
     pending_ecall_.reset();
 #if HOGD_RV32_STACK_USAGE_ENABLED
+    sp_initial_ = kSpUnwritten;
     sp_min_ = kSpUnwritten;
 #endif
     // exec_ intentionally preserved across reset(): the program is immutable,
@@ -295,10 +296,14 @@ public:
   [[nodiscard]] uint32_t halt_code() const { return halt_code_; }
   [[nodiscard]] std::span<uint8_t> memory() { return memory_.bytes(); }
 #if HOGD_RV32_STACK_USAGE_ENABLED
-  // Lowest value the guest has written to sp (x2), or kSpUnwritten. The stack
-  // grows down, so this is the deepest point it reached: a fused lui;addi
-  // stores only the pair's final value on the untraced path, which cannot
-  // raise the minimum.
+  // First value the guest wrote to sp (x2), or kSpUnwritten: the stack top
+  // _start established, so sp_initial() - sp_min() is the invocation's stack
+  // usage. A fused lui;addi stores only the pair's final value on the untraced
+  // path, so this is the materialized constant, not the lui's intermediate.
+  [[nodiscard]] uint32_t sp_initial() const { return sp_initial_; }
+  // Lowest value the guest has written to sp, or kSpUnwritten. The stack
+  // grows down, so this is the deepest point it reached; the lui;addi
+  // collapse above cannot raise it.
   [[nodiscard]] uint32_t sp_min() const { return sp_min_; }
 #endif
 
@@ -350,8 +355,10 @@ public:
   // only on the deficit path, read at seams.
   uint32_t gas_deficit_ = 0;
 #if HOGD_RV32_STACK_USAGE_ENABLED
-  // Lowered by write_rd on every sp write; read once the machine has stopped.
-  // Debug-only, so its cost on the dispatch path is not a concern.
+  // Set by write_rd on the first sp write and lowered on every one; read once
+  // the machine has stopped. Debug-only, so the cost on the dispatch path is
+  // not a concern.
+  uint32_t sp_initial_ = kSpUnwritten;
   uint32_t sp_min_ = kSpUnwritten;
 #endif
 };
@@ -362,10 +369,10 @@ static_assert(offsetof(ThreadedMachine, gas_remaining_) == 192,
               "check the memory_ member width and field order above");
 #if HOGD_RV32_STACK_USAGE_ENABLED
 // The 256-byte layout has no 4-byte hole (its only padding is the two bytes
-// after exec_traced_), so sp_min_ lands at offset 256 and alignas(64) rounds
-// the machine up to 320. The lines above it, the register file and the gas
-// balance, keep their offsets. Debug-only, so the extra line is not paid by
-// the node.
+// after exec_traced_), so the two counters land at offset 256 and alignas(64)
+// rounds the machine up to 320. The lines above them, the register file and
+// the gas balance, keep their offsets. Debug-only, so the extra line is not
+// paid by the node.
 static_assert(sizeof(ThreadedMachine) == 320,
               "ThreadedMachine size changed -- check the cache-line layout");
 #else
@@ -398,6 +405,9 @@ write_rd(const Ctx c, uint8_t rd, uint32_t value)
   c.m->regs_[rd] = value;
 #if HOGD_RV32_STACK_USAGE_ENABLED
   if (rd == kStackPointerReg) {
+    if (c.m->sp_initial_ == kSpUnwritten) {
+      c.m->sp_initial_ = value;
+    }
     c.m->sp_min_ = std::min(c.m->sp_min_, value);
   }
 #endif

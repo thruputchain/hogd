@@ -1150,6 +1150,7 @@ get_rv32_stack_usage(void *syscall_handler) noexcept
       std::memcpy(entry.contract_address, record.address.data(),
                   sizeof(entry.contract_address));
       entry.method_id = record.method_id;
+      entry.sp_initial = record.sp_initial;
       entry.sp_min = record.sp_min;
       std::memcpy(out, &entry, sizeof(entry));
       out += sizeof(entry);

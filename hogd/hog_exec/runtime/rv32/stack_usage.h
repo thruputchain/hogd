@@ -27,9 +27,9 @@ namespace hogd::rv32 {
 // (entry ABI v3 seeds it with zero) and the stack grows down from there.
 inline constexpr uint8_t kStackPointerReg = 2;
 
-// The recorded minimum until the guest first writes sp. No real stack pointer
-// takes the value: sp addresses guest memory, which is bounded by
-// kMemoryCeilingBytes.
+// The recorded initial value and minimum until the guest first writes sp. No
+// real stack pointer takes the value: sp addresses guest memory, which is
+// bounded by kMemoryCeilingBytes.
 inline constexpr uint32_t kSpUnwritten = std::numeric_limits<uint32_t>::max();
 
 } // namespace hogd::rv32

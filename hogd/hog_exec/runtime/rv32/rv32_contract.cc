@@ -105,7 +105,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 #if HOGD_RV32_STACK_USAGE_ENABLED
 namespace {
 
-// Hands the lowest sp the guest reached to the syscall handler when the
+// Hands the guest's initial and lowest sp to the syscall handler when the
 // invocation's coroutine frame goes away, whichever exit it took: a Return, a
 // host error, a trap, or a frame abandoned before completion. The handler's
 // record outlives the machine; the test FFI reads it after root_invoke().
@@ -128,6 +128,7 @@ public:
     try {
       handler_.record_rv32_stack_usage({.address = address_,
                                         .method_id = method_id_,
+                                        .sp_initial = machine_.sp_initial(),
                                         .sp_min = machine_.sp_min()});
     } catch (...) {
       report_dropped_log("rv32 stack usage record");

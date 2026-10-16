@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/musttail.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/rv32/test_corpus.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
@@ -2769,10 +2770,11 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
 
 // --- Guest stack-usage diagnostic (HOGD_RV32_STACK_USAGE, Debug only) --------
 //
-// write_rd lowers sp_min to every value the handlers store to sp (x2). These
-// pin what the per-invocation report in rv32_contract.cc relies on: the
+// write_rd records the first value the handlers store to sp (x2) and lowers
+// sp_min to every one. These pin what the per-invocation record in
+// rv32_contract.cc relies on: the initial value is the first store, the
 // minimum covers every architectural sp write, other registers never count,
-// and the record starts at kSpUnwritten.
+// and both start at kSpUnwritten.
 
 TEST(Rv32ThreadedStackUsage, recordsMinimumOfEverySpWrite)
 {
@@ -2800,6 +2802,7 @@ TEST(Rv32ThreadedStackUsage, recordsMinimumOfEverySpWrite)
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
   EXPECT_EQ(machine.reg(2), 4088U);
+  EXPECT_EQ(machine.sp_initial(), 4096U);
   EXPECT_EQ(machine.sp_min(), 4048U);
 }
 
@@ -2823,6 +2826,7 @@ TEST(Rv32ThreadedStackUsage, loadsIntoSpAreRecorded)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(2), 96U);
+  EXPECT_EQ(machine.sp_initial(), 128U);
   EXPECT_EQ(machine.sp_min(), 64U);
 }
 
@@ -2836,10 +2840,12 @@ TEST(Rv32ThreadedStackUsage, ignoresOtherRegistersAndStartsUnwritten)
                                        kEbreakWord};
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, /*gas=*/100);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
   EXPECT_EQ(machine.sp_min(), kSpUnwritten);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.reg(4), 17U);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
   EXPECT_EQ(machine.sp_min(), kSpUnwritten);
 }
 
@@ -2851,19 +2857,22 @@ TEST(Rv32ThreadedStackUsage, resetClearsTheRecord)
   ThreadedMachine machine(*program, /*gas=*/100);
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.sp_initial(), 64U);
   EXPECT_EQ(machine.sp_min(), 48U);
 
   machine.reset(/*gas=*/100);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
   EXPECT_EQ(machine.sp_min(), kSpUnwritten);
 }
 
-TEST(Rv32ThreadedStackUsage, fusedLuiAddiKeepsTheMinimum)
+TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsTheMaterializedConstant)
 {
   using test_program::u_type;
   // lui sp ; addi sp, sp, -16 lowers to op_lui_addi, which on the untraced
   // (production) path stores only the pair's final value. That skips the lui's
-  // higher intermediate, so the minimum is the same as on the traced path,
-  // where both architectural writes retire.
+  // higher intermediate: the initial value is the constant the pair
+  // materializes, and the minimum is the same as on the traced path, where
+  // both architectural writes retire and the initial value is the lui's.
   const std::vector<uint32_t> words = {u_type(0x37U, 2, 0x1000U),
                                        addi(2, 2, -16), kEbreakWord};
   {
@@ -2873,6 +2882,7 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiKeepsTheMinimum)
     ThreadedMachine machine(*program, /*gas=*/100);
     RecordingHost host;
     EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(machine.sp_initial(), 4080U);
     EXPECT_EQ(machine.sp_min(), 4080U);
   }
   {
@@ -2882,6 +2892,7 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiKeepsTheMinimum)
     RecordingHost host;
     TraceObserver obs;
     EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+    EXPECT_EQ(machine.sp_initial(), 4096U);
     EXPECT_EQ(machine.sp_min(), 4080U);
   }
 }

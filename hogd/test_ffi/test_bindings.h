@@ -172,8 +172,12 @@ struct CreateDBResult {
 struct FFIRv32StackUsage {
   uint8_t contract_address[32];
   uint64_t method_id;
-  // Lowest value the guest wrote to sp (x2): the deepest point its stack
-  // reached. 0xFFFFFFFF if the guest never wrote sp.
+  // First value the guest wrote to sp (x2): the stack top its _start
+  // established. 0xFFFFFFFF if the guest never wrote sp.
+  uint32_t sp_initial;
+  // Lowest value the guest wrote to sp: the deepest point its stack reached,
+  // so sp_initial - sp_min is the invocation's stack usage. 0xFFFFFFFF if the
+  // guest never wrote sp.
   uint32_t sp_min;
 };
 
