@@ -56,6 +56,10 @@ if ! command -v ccache >/dev/null 2>&1; then
   exit 1
 fi
 
+# Populate remote storage even when a result is already cached locally. This
+# also retries uploads that failed during an earlier warmup.
+export CCACHE_RESHARE=1
+
 exec 9>"$LOCK_FILE"
 echo "waiting for warmup lock: $LOCK_FILE"
 flock 9
