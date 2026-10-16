@@ -210,26 +210,31 @@ ci_run_bench_step mempool_multi_node_bench \
   env MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 \
   ./scripts/ci/mempool_multi_node_bench.sh
 
-echo 'release hog4, hog5, hog6, and hog9'
-# hog7 stays up to run the schedgateway benchmark alongside [metrics.sh].
-ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6 hog9
+echo 'release hog4, hog5, and hog6'
+# hog7 and hog9 stay up to run the schedgateway and auth server benchmarks
+# alongside [metrics.sh].
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog4 hog5 hog6
 
 echo 'run event server benchmarks'
 kill_stale_benchmark_processes
 ci_run_bench_step event_bench ./scripts/ci/event_bench.sh
 
-echo 'run metrics, with the schedgateway benchmark on otherwise idle hog7'
-# [metrics.sh] runs on hog10, hog11, and hog8 only, so hog7 is free. The
-# benchmark stays on hog7's loopback and touches none of those hosts.
+echo 'run metrics, with the schedgateway and auth server benchmarks on otherwise idle hog7 and hog9'
+# [metrics.sh] runs on hog10, hog11, and hog8 only, so hog7 and hog9 are free.
+# Each benchmark stays on its host's loopback and touches none of those hosts.
 kill_stale_benchmark_processes
 ci_run_bench_step schedgateway_bench_start \
   ./scripts/ci/schedgateway_bench_remote.sh start hog7
+ci_run_bench_step auth_bench_start \
+  ./scripts/ci/auth_bench_remote.sh start hog9
 ci_run_bench_step metrics ./scripts/ci/metrics.sh
 ci_run_bench_step schedgateway_bench \
   ./scripts/ci/schedgateway_bench_remote.sh collect hog7
+ci_run_bench_step auth_bench \
+  ./scripts/ci/auth_bench_remote.sh collect hog9
 
-echo 'release hog7'
-ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog7
+echo 'release hog7 and hog9'
+ci_control_shutdown_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" hog7 hog9
 
 echo 'commit metrics'
 (./scripts/commit_metrics.sh) || true
