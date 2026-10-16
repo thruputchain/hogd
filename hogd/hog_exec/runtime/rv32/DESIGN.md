@@ -161,6 +161,35 @@ writeback. Its rollback behavior does not describe production syscall output.
 Production resolves host errors in `Rv32Runtime`; it does not pass
 `HostStatus::kTrap` back into the threaded engine.
 
+## Stack-usage diagnostic
+
+Debug builds configured with `HOGD_RV32_STACK_USAGE=ON` (the default when
+`ENABLE_TEST_FFI` is on) record the first and the lowest value the guest
+writes to `sp` (x2). Each handler store goes through `write_rd` in
+[threaded_machine.h](threaded_machine.h), which keeps the first `sp` store and
+lowers the `ThreadedMachine`'s minimum on every one. The first store is the
+stack top `_start` establishes and the stack grows down from it, so the
+minimum is the deepest point the stack reached and their difference is the
+invocation's stack usage; a per-write record sees a leaf frame that is pushed
+and popped within one run. When an invocation finishes, `Rv32Runtime` appends
+both values, with the contract address and method id, to its
+`SystemCallHandler`; the test FFI returns those records through
+`get_rv32_stack_usage()` ([test_bindings.h](../../../test_ffi/test_bindings.h)).
+Nothing is logged and nothing in the executor reads the records back.
+
+A guest that never writes `sp` is recorded as `kSpUnwritten` for both. A fused
+`lui;addi` stores only the pair's final value on the untraced path, so the
+initial value is the constant the pair materializes rather than the `lui`'s
+higher intermediate, and the minimum cannot be raised by it.
+
+[stack_usage.h](stack_usage.h) owns the flag and constants. The define is
+global because it adds members to `ThreadedMachine` and `SystemCallHandler`,
+and CMake applies it to the Debug configuration only, so optimized
+interpreters never carry the per-write check. The canonical `Machine` and the
+test-only adapters are not instrumented. `Rv32ThreadedStackUsage` in
+[rv32_threaded_test.cc](rv32_threaded_test.cc) covers the record and
+`Rv32StackUsageTest` in the test FFI covers the round trip.
+
 ## Verification
 
 Run commands from the repository root, using a configured build with the

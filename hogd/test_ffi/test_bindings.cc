@@ -30,6 +30,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -1124,6 +1125,51 @@ abort_transaction(void *syscall_handler) noexcept
   }
 }
 
+GetRv32StackUsageResult
+get_rv32_stack_usage(void *syscall_handler) noexcept
+{
+  // No guard diagnostic here: like the other query entry points, this can be
+  // the first test_ffi call in a process, before any stateful entry point has
+  // installed the process logger, and error() would dereference the null
+  // logger (the structured error code is the whole report).
+  if (!syscall_handler) {
+    return {.records = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  try {
+    auto const &records = context->to_handler().rv32_stack_usage();
+    auto buffer =
+        make_new_data_buffer(records.size() * sizeof(FFIRv32StackUsage));
+    if (!buffer.has_value()) {
+      return {.records = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    uint8_t *out = buffer.value().data;
+    for (auto const &record : records) {
+      FFIRv32StackUsage entry{};
+      assert(record.address.size() == sizeof(entry.contract_address));
+      std::memcpy(entry.contract_address, record.address.data(),
+                  sizeof(entry.contract_address));
+      entry.method_id = record.method_id;
+      entry.sp_initial = record.sp_initial;
+      entry.sp_min = record.sp_min;
+      std::memcpy(out, &entry, sizeof(entry));
+      out += sizeof(entry);
+    }
+    return {.records = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error copying rv32 stack usage records: {}", e);
+    return {.records = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+#else
+  // Built without the diagnostic: the entry point exists so consumers link
+  // against one API, and it reports no records.
+  return {.records = kNullBuffer, .ffi_error_code = kTestFFIErrorCodeNone};
+#endif
+}
+
 constexpr StorageCostModel kCostModel(12000, 1, 5, 5, 1234);
 
 TestFFIErrorCode
@@ -1827,6 +1873,18 @@ try_commit_transaction(void *syscall_handler)
   auto result = hogd::try_commit_transaction(syscall_handler);
   hogd::do_ffi_trace(
       "FFI (end): try_commit_transaction(syscall_handler={}) -> {}",
+      syscall_handler, result);
+  return result;
+}
+
+GetRv32StackUsageResult
+get_rv32_stack_usage(void *syscall_handler)
+{
+  hogd::do_ffi_trace("FFI (start): get_rv32_stack_usage(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::get_rv32_stack_usage(syscall_handler);
+  hogd::do_ffi_trace(
+      "FFI (end): get_rv32_stack_usage(syscall_handler={}) -> {}",
       syscall_handler, result);
   return result;
 }

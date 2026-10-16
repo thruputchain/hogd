@@ -12,6 +12,7 @@ _free_db
 _free_ffi_data_buffer
 _get_cost_model
 _get_network_config
+_get_rv32_stack_usage
 _get_snapshot_storage_item
 _mock_syscall_entrypoint
 _open_mock_invocation_frame
