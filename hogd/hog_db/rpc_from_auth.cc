@@ -33,7 +33,7 @@ HogDbAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
 
   HogDbDAO &db = ctx_.get_db();
   HogDbStatus<AddressAuthData> status = db.read_address_auth_data(address);
-  if (!status) {
+  if (!status.has_value()) {
     if (status.error().code() == HogDbCode::kNotFound) {
       co_return DBAuthResult(DBAuthError::kDBAuthNotFound);
     }
@@ -45,12 +45,12 @@ HogDbAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
   // the live DAO. In that window the row read here can already belong to
   // height+1, even though the query was accepted for [height]. Reject rather
   // than return a not-yet-published auth row (issue #1725).
-  if (status.value().last_written_height > height) {
+  if (status->last_written_height > height) {
     co_return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
   }
 
   DBAuthResult result(DBAuthError::kDBAuthSuccess);
-  result.auth_data() = std::move(status.value());
+  result.auth_data() = std::move(*status);
   co_return result;
 }
 
@@ -72,7 +72,7 @@ HogDbAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
   for (const ContractAddress &address : addresses) {
     result.emplace_back(DBAuthError::kDBAuthSuccess);
     HogDbStatus<AddressAuthData> status = db.read_address_auth_data(address);
-    if (!status) {
+    if (!status.has_value()) {
       if (status.error().code() == HogDbCode::kNotFound) {
         result.back().error(DBAuthError::kDBAuthNotFound);
         continue;
@@ -82,11 +82,11 @@ HogDbAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
     }
     // Reject any row already written by a height newer than the accepted query
     // height; see authdb_get_auth_data above and issue #1725.
-    if (status.value().last_written_height > height) {
+    if (status->last_written_height > height) {
       result.back().error(DBAuthError::kDBAuthStaleBlockHeight);
       continue;
     }
-    result.back().auth_data() = std::move(status.value());
+    result.back().auth_data() = std::move(*status);
   }
   co_return result;
 }
