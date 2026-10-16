@@ -1,0 +1,320 @@
+#include <gtest/gtest.h>
+
+#include <array>
+#include <cstddef>
+#include <cstdint>
+#include <memory>
+#include <string_view>
+#include <tuple>
+#include <type_traits>
+#include <utility>
+
+#include "hogd/base/arc.h"
+#include "x23/serialize.h"
+#include "x23/utility.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
+
+namespace hogd {
+
+namespace {
+
+// Live Tracked instances, and copies made, to check when Arc frees a value and
+// that sharing one never copies it.
+int live = 0;
+int copies = 0;
+
+struct Tracked {
+  Tracked() { ++live; }
+  explicit Tracked(int v) : value(v) { ++live; }
+  Tracked(Tracked const &other) : value(other.value)
+  {
+    ++live;
+    ++copies;
+  }
+  Tracked(Tracked &&other) noexcept : value(other.value) { ++live; }
+  Tracked &operator=(Tracked const &) = delete;
+  Tracked &operator=(Tracked &&) = delete;
+  ~Tracked() { --live; }
+
+  int value = 0;
+};
+
+// For reads of an empty Arc, which touch a static T{} that lives on past the
+// test and so cannot be a Tracked.
+struct Plain {
+  int value = 0;
+};
+
+class ArcTest : public ::testing::Test {
+protected:
+  void SetUp() override
+  {
+    live = 0;
+    copies = 0;
+  }
+  void TearDown() override
+  {
+    EXPECT_EQ(live, 0);
+    EXPECT_EQ(copies, 0);
+  }
+};
+
+// A small XDR struct, with the tuple protocol x23c would generate for it, to
+// check that x23 reads and writes an Arc of it as the struct itself.
+struct ArcTestPoint {
+  int32_t x = 0;
+  x23::Vec<uint8_t, 16> payload;
+
+  bool operator==(const ArcTestPoint &) const noexcept = default;
+  auto operator<=>(const ArcTestPoint &) const noexcept = default;
+};
+
+template<size_t I, x23::references<ArcTestPoint> T> requires (I < 2)
+constexpr decltype(auto)
+get(T &&t)
+{
+  if constexpr (I == 0)
+    return (std::forward<T>(t).x);
+  if constexpr (I == 1)
+    return (std::forward<T>(t).payload);
+}
+
+} // namespace
+
+} // namespace hogd
+
+template<>
+struct std::tuple_size<hogd::ArcTestPoint>
+  : std::integral_constant<std::size_t, 2> {};
+template<std::size_t I> requires (I < 2)
+struct std::tuple_element<I, hogd::ArcTestPoint> {
+  using type = decltype(auto(get<I>(hogd::ArcTestPoint{})));
+};
+// NOLINTBEGIN(readability-identifier-naming)
+template<> struct x23::xdr_meta<hogd::ArcTestPoint> {
+  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr const char *type_name = "ArcTestPoint";
+  static constexpr std::array<std::string_view, 2> field_names{"x", "payload"};
+};
+// NOLINTEND(readability-identifier-naming)
+
+namespace hogd {
+
+TEST_F(ArcTest, CopiesShareTheValue)
+{
+  auto a = make_arc<Tracked>(7);
+  EXPECT_EQ(a.use_count(), 1U);
+
+  Arc<Tracked> b = a; // NOLINT(performance-unnecessary-copy-initialization)
+  EXPECT_EQ(a.get(), b.get());
+  EXPECT_EQ(a.use_count(), 2U);
+  EXPECT_EQ(live, 1);
+
+  // A change through one copy is seen through the other: shared_ptr
+  // semantics, not copy-on-write.
+  b->value = 8;
+  EXPECT_EQ(a->value, 8);
+  (*a).value = 9;
+  EXPECT_EQ(b->value, 9);
+}
+
+TEST_F(ArcTest, EmptyReadsAsAValueInitializedValue)
+{
+  Arc<Plain> a;
+  EXPECT_FALSE(a.has_value());
+  EXPECT_EQ(a.use_count(), 0U);
+
+  // Reading through a const Arc never allocates: every empty Arc reads the
+  // same static value.
+  EXPECT_EQ(std::as_const(a)->value, 0);
+  EXPECT_EQ((*std::as_const(a)).value, 0);
+  EXPECT_EQ(std::as_const(a).get(), &Arc<Plain>::empty_value());
+  EXPECT_FALSE(a.has_value());
+
+  // Writing through an empty Arc allocates its value first.
+  a->value = 1;
+  EXPECT_TRUE(a.has_value());
+  EXPECT_EQ(a.use_count(), 1U);
+  EXPECT_EQ(std::as_const(a)->value, 1);
+}
+
+TEST_F(ArcTest, LastReleaseFreesTheValue)
+{
+  {
+    auto a = make_arc<Tracked>(1);
+    {
+      Arc<Tracked> b = a; // NOLINT(performance-unnecessary-copy-initialization)
+      EXPECT_EQ(live, 1);
+    }
+    EXPECT_EQ(a.use_count(), 1U);
+    EXPECT_EQ(live, 1);
+  }
+  EXPECT_EQ(live, 0);
+}
+
+TEST_F(ArcTest, MoveTransfersWithoutCounting)
+{
+  auto a = make_arc<Tracked>(3);
+  Tracked const *value = a.get();
+
+  Arc<Tracked> b = std::move(a);
+  EXPECT_EQ(b.get(), value);
+  EXPECT_EQ(b.use_count(), 1U);
+  // NOLINTNEXTLINE(bugprone-use-after-move)
+  EXPECT_FALSE(a.has_value());
+
+  a = b;
+  EXPECT_EQ(a.get(), value);
+  EXPECT_EQ(b.use_count(), 2U);
+}
+
+TEST_F(ArcTest, WrapsAValueWithoutCopying)
+{
+  Arc<Tracked> a = Tracked(4);
+  EXPECT_TRUE(a.has_value());
+  EXPECT_EQ(a->value, 4);
+  EXPECT_EQ(live, 1);
+}
+
+TEST_F(ArcTest, SharesAsAStdSharedPtr)
+{
+  auto a = make_arc<Tracked>(5);
+  std::shared_ptr<Tracked> p = a.share();
+  EXPECT_EQ(p.get(), a.get());
+  EXPECT_EQ(a.use_count(), 2U);
+
+  std::shared_ptr<const Tracked> q = std::as_const(a).share();
+  EXPECT_EQ(q.get(), a.get());
+  EXPECT_EQ(a.use_count(), 3U);
+
+  // An empty Arc shares its value-initialized value without allocating.
+  Arc<Plain> empty;
+  std::shared_ptr<const Plain> e = std::as_const(empty).share();
+  ASSERT_NE(e, nullptr);
+  EXPECT_EQ(e->value, 0);
+  EXPECT_FALSE(empty.has_value());
+}
+
+TEST_F(ArcTest, ComparesByValue)
+{
+  Arc<ArcTestPoint> a = ArcTestPoint{.x = 1, .payload = {1, 2}};
+  Arc<ArcTestPoint> b = ArcTestPoint{.x = 1, .payload = {1, 2}};
+  Arc<ArcTestPoint> c = ArcTestPoint{.x = 2, .payload = {1, 2}};
+  EXPECT_NE(a.get(), b.get());
+  EXPECT_EQ(a, b);
+  EXPECT_NE(a, c);
+  EXPECT_LT(a, c);
+
+  Arc<ArcTestPoint> empty;
+  EXPECT_EQ(empty, Arc<ArcTestPoint>(ArcTestPoint{}));
+  EXPECT_EQ(empty, Arc<ArcTestPoint>());
+}
+
+TEST(ArcXdr, HasTheWireFormatOfItsValue)
+{
+  const ArcTestPoint point{.x = 42, .payload = {0xaa, 0xbb, 0xcc}};
+  const x23::Buf bytes = x23::serialize(point);
+
+  Arc<ArcTestPoint> shared = point;
+  EXPECT_EQ(x23::serialize(shared), bytes);
+
+  // An empty Arc writes a value-initialized value.
+  EXPECT_EQ(x23::serialize(Arc<ArcTestPoint>()),
+            x23::serialize(ArcTestPoint{}));
+}
+
+TEST(ArcXdr, DecodesStraightIntoAnEmptyArc)
+{
+  const ArcTestPoint point{.x = 42, .payload = {0xaa, 0xbb, 0xcc}};
+  const x23::Buf bytes = x23::serialize(point);
+
+  Arc<ArcTestPoint> decoded;
+  x23::deserialize(&decoded, bytes);
+  EXPECT_TRUE(decoded.has_value());
+  EXPECT_EQ(*decoded, point);
+}
+
+TEST(ArcXdr, DecodesAVectorIntoDistinctValues)
+{
+  const x23::Vec<ArcTestPoint> plain{
+      ArcTestPoint{.x = 1, .payload = {1}},
+      ArcTestPoint{.x = 2, .payload = {2, 2}},
+      ArcTestPoint{.x = 3, .payload = {}},
+  };
+  const x23::Buf bytes = x23::serialize(plain);
+
+  x23::Vec<Arc<ArcTestPoint>> shared;
+  x23::deserialize(&shared, bytes);
+  ASSERT_EQ(shared.size(), plain.size());
+  for (size_t i = 0; i < plain.size(); i++) {
+    EXPECT_TRUE(shared[i].has_value());
+    EXPECT_EQ(*shared[i], plain[i]);
+  }
+  EXPECT_NE(shared[0].get(), shared[1].get());
+  EXPECT_NE(shared[1].get(), shared[2].get());
+
+  EXPECT_EQ(x23::serialize(shared), bytes);
+}
+
+TEST(ArcXdr, DecodesAsAStructField)
+{
+  const std::tuple<ArcTestPoint, uint32_t> plain{
+      ArcTestPoint{.x = 9, .payload = {9, 9, 9, 9, 9}}, 7};
+  const x23::Buf bytes = x23::serialize(plain);
+
+  std::tuple<Arc<ArcTestPoint>, uint32_t> shared;
+  x23::deserialize(&shared, bytes);
+  EXPECT_TRUE(std::get<0>(shared).has_value());
+  EXPECT_EQ(*std::get<0>(shared), std::get<0>(plain));
+  EXPECT_EQ(std::get<1>(shared), 7U);
+
+  EXPECT_EQ(x23::serialize(shared), bytes);
+}
+
+TEST(ArcXdr, DecodingIntoASharedArcWritesTheSharedValue)
+{
+  const ArcTestPoint point{.x = 5, .payload = {5}};
+  const x23::Buf bytes = x23::serialize(point);
+
+  Arc<ArcTestPoint> a = ArcTestPoint{};
+  Arc<ArcTestPoint> b =
+      a; // NOLINT(performance-unnecessary-copy-initialization)
+  x23::deserialize(&a, bytes);
+  EXPECT_EQ(a.get(), b.get());
+  EXPECT_EQ(*b, point);
+}
+
+TEST(ArcXdr, ResizingWithAValueGivesIndependentElements)
+{
+  // A Vec resized from one value copies that value into every slot. Empty
+  // Arcs copy as empty handles, so each element allocates its own value when
+  // it is first written, as a batch decode does.
+  x23::Vec<Arc<ArcTestPoint>> v;
+  v.resize(3, {});
+  get<0>(v[0]) = 1;
+  EXPECT_TRUE(v[0].has_value());
+  EXPECT_FALSE(v[1].has_value());
+  EXPECT_FALSE(v[2].has_value());
+  EXPECT_EQ(std::as_const(v[1])->x, 0);
+  EXPECT_NE(v[0].get(), std::as_const(v[1]).get());
+}
+
+TEST(ArcXdr, StandsInForItsValueWhereAnRpcExpectsIt)
+{
+  static_assert(x23::serializes_like<Arc<ArcTestPoint>, ArcTestPoint>);
+  static_assert(x23::serializes_like<x23::Vec<Arc<ArcTestPoint>>,
+                                     x23::Vec<ArcTestPoint>>);
+  static_assert(x23::serializes_like<x23::span<const Arc<ArcTestPoint>>,
+                                     x23::Vec<ArcTestPoint>>);
+
+  const x23::Vec<ArcTestPoint> plain{
+      ArcTestPoint{.x = 1, .payload = {1}},
+      ArcTestPoint{.x = 2, .payload = {2, 2}},
+  };
+  x23::Vec<Arc<ArcTestPoint>> shared{plain[0], plain[1]};
+  x23::span<const Arc<ArcTestPoint>> view(shared);
+  EXPECT_EQ(x23::serialize(view), x23::serialize(plain));
+}
+
+} // namespace hogd
