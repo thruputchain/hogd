@@ -58,6 +58,7 @@ add_xdr(
   ../../protocol/view_gateway.x
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x
+  block_query_internal.x
   event_cursor_internal.x
   event_outbox_internal.x
   syscall.x

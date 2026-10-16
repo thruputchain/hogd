@@ -696,9 +696,7 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
       block_explorer_->get_transactions_by_address(addr_query)();
   EXPECT_EQ(refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
 
-  // get_transactions_by_block reports its serving bounds from a watermark
-  // that is readable without the db handle, so it needs its own guard: a
-  // closed db must not look like a healthy chain sitting at height 0.
+  // Block queries must also distinguish an unavailable database from a miss.
   BlockTransactionQuery block_query{};
   block_query.height = 10;
   block_query.order = IterationOrder::IterationOrderAscending;
