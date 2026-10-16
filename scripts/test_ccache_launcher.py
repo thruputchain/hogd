@@ -20,6 +20,71 @@ LAUNCHER = Path(__file__).with_name("ccache_launcher.py").resolve()
 
 @unittest.skipUnless(shutil.which("ccache"), "ccache is required")
 class CachePathsTest(unittest.TestCase):
+    def test_response_macro_escapes(self):
+        for compiler in ("gcc", "g++", "clang", "clang++"):
+            if not shutil.which(compiler):
+                continue
+            with self.subTest(compiler=compiler), tempfile.TemporaryDirectory(
+                prefix="hogd response escapes "
+            ) as temporary:
+                root = Path(temporary)
+                source, build = root / "source", root / "build"
+                source.mkdir()
+                build.mkdir()
+                config = root / "ccache.conf"
+                config.write_text("compiler_check = content\n")
+                env = {
+                    key: value
+                    for key, value in os.environ.items()
+                    if not key.startswith("CCACHE_")
+                }
+                env.update(
+                    CCACHE_CONFIGPATH=str(config), CCACHE_DIR=str(root / "cache")
+                )
+                (source / "probe.c").write_text(
+                    "#include <stdio.h>\nint main(void) { fputs(MSG, stdout); }\n"
+                )
+                # Compiler response syntax, independent of the launcher's writer:
+                # preserve newline/tab escapes, literal backslashes, both quote
+                # characters, spaces, and a backslash at the end of the string.
+                (build / "input.rsp").write_text(
+                    r'''"-DMSG=\"a\\nb\\tC:\\\\tmp\\\\file\\\"it's quoted\\\" \\\\\""'''
+                    + '\n-c\n"'
+                    + str(source / "probe.c")
+                    + '"\n-o\nprobe.o\n'
+                )
+                expected = b'a\nb\tC:\\tmp\\file"it\'s quoted" \\'
+
+                def output():
+                    subprocess.run(
+                        [compiler, "probe.o", "-o", "probe"],
+                        cwd=build,
+                        check=True,
+                        capture_output=True,
+                    )
+                    return subprocess.check_output([str(build / "probe")])
+
+                # Confirm the input's meaning with the compiler itself first.
+                subprocess.run(
+                    [compiler, "@input.rsp"], cwd=build, check=True, capture_output=True
+                )
+                self.assertEqual(output(), expected)
+                command = [
+                    sys.executable,
+                    str(LAUNCHER),
+                    str(source),
+                    str(build),
+                    shutil.which("ccache"),
+                    shutil.which(compiler),
+                    "@input.rsp",
+                ]
+                for _ in range(2):
+                    subprocess.run(
+                        command, cwd=build, env=env, check=True, capture_output=True
+                    )
+                    self.assertEqual(output(), expected)
+                self.assertEqual(self.stats(env)["direct_cache_hit"], 1)
+
     @unittest.skipUnless(
         shutil.which("cmake") and shutil.which("gcc"), "CMake and GCC are required"
     )

@@ -31,6 +31,12 @@ PATH_OPTIONS = (
 OUTPUT_OPTIONS = ("-o", "-MF", "-MT", "-MQ", "-MJ")
 
 
+def quote_response_argument(argument):
+    # Response files are parsed by the compiler, not a shell. In particular,
+    # single quotes do not reliably protect backslashes as shlex.quote assumes.
+    return '"' + argument.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
 def ensure_alias(path, target):
     try:
         path.symlink_to(target, target_is_directory=True)
@@ -126,7 +132,9 @@ def main():
         with tempfile.NamedTemporaryFile(
             mode="w", dir=alias_dir, suffix=".rsp"
         ) as response:
-            response.write("\n".join(shlex.quote(argument) for argument in arguments))
+            response.write(
+                "\n".join(quote_response_argument(argument) for argument in arguments)
+            )
             response.flush()
             status = subprocess.call([ccache, compiler, "@" + response.name])
         return status if status >= 0 else 128 - status
