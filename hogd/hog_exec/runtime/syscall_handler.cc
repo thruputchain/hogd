@@ -1221,6 +1221,14 @@ SystemCallHandler::last_commit_conflict() const
   return db_proxy_.last_push_conflict();
 }
 
+#if HOGD_RV32_STACK_USAGE_ENABLED
+void
+SystemCallHandler::record_rv32_stack_usage(Rv32StackUsageRecord record)
+{
+  rv32_stack_usage_.push_back(record);
+}
+#endif
+
 void
 SystemCallHandler::report_db_conflict_diagnostic() const
 {

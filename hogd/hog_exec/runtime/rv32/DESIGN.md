@@ -170,22 +170,23 @@ Debug builds configured with `HOGD_RV32_STACK_USAGE=ON` (the default when
 minimum on every `sp` write. The stack grows down from the top `_start`
 establishes, so the minimum is the deepest point the stack reached, and a
 per-write record sees a leaf frame that is pushed and popped within one run.
-`Rv32Runtime` logs it once per invocation, at `info` level, when the
-invocation finishes:
+When an invocation finishes, `Rv32Runtime` appends the minimum, with the
+contract address and method id, to its `SystemCallHandler`; the test FFI
+returns those records through `get_rv32_stack_usage()`
+([test_bindings.h](../../../test_ffi/test_bindings.h)). Nothing is logged and
+nothing in the executor reads the records back.
 
-```
-rv32 stack usage: contract=... method=... sp_min=...
-```
+A guest that never writes `sp` is recorded as `kSpUnwritten`. A fused
+`lui;addi` stores only the pair's final value on the untraced path; that skips
+the `lui`'s higher intermediate and cannot raise the minimum.
 
-A guest that never writes `sp` is reported as such. A fused `lui;addi` stores
-only the pair's final value on the untraced path; that skips the `lui`'s
-higher intermediate and cannot raise the minimum.
-
-The define is global because it adds a member to `ThreadedMachine`, and CMake
-applies it to the Debug configuration only, so optimized interpreters never
-carry the per-write check. The canonical `Machine` and the test-only adapters
-are not instrumented. `Rv32ThreadedStackUsage` in
-[rv32_threaded_test.cc](rv32_threaded_test.cc) covers the record.
+[stack_usage.h](stack_usage.h) owns the flag and constants. The define is
+global because it adds members to `ThreadedMachine` and `SystemCallHandler`,
+and CMake applies it to the Debug configuration only, so optimized
+interpreters never carry the per-write check. The canonical `Machine` and the
+test-only adapters are not instrumented. `Rv32ThreadedStackUsage` in
+[rv32_threaded_test.cc](rv32_threaded_test.cc) covers the record and
+`Rv32StackUsageTest` in the test FFI covers the round trip.
 
 ## Verification
 

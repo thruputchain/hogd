@@ -19,6 +19,7 @@
 #include "hogd/hog_exec/runtime/rv32/isa_ops.h"
 #include "hogd/hog_exec/runtime/rv32/musttail.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
 
 // Direct-threaded RV32IM interpreter. Handlers tail-call the next Slot; the
@@ -48,27 +49,9 @@ inline constexpr uint32_t kMaxRunGas = 10000;
 static_assert(kMaxInstructionGas <= kMaxRunGas);
 static_assert(kMaxRunGas <= UINT16_MAX);
 
-// Debug-only guest stack-usage diagnostic. CMake defines HOGD_RV32_STACK_USAGE
-// (option of the same name, on by default with ENABLE_TEST_FFI) for Debug
-// configurations only; the NDEBUG check keeps a stray definition out of an
-// optimized interpreter, whose handlers must not carry the per-write compare.
-// Every translation unit that includes this header must see the same value:
-// the diagnostic adds members to ThreadedMachine, so a per-target definition
-// would be an ODR violation. That is why CMake sets it globally.
-#if defined(HOGD_RV32_STACK_USAGE) && !defined(NDEBUG)
-#define HOGD_RV32_STACK_USAGE_ENABLED 1
-#else
-#define HOGD_RV32_STACK_USAGE_ENABLED 0
-#endif
-
-// x2 is sp in the RISC-V calling convention; the guest's _start establishes it
-// (entry ABI v3 seeds it with zero) and the stack grows down from there.
-inline constexpr uint8_t kStackPointerReg = 2;
-
-// ThreadedMachine::sp_min() reads this until the guest first writes sp. No
-// real stack pointer takes the value: sp addresses guest memory, which is
-// bounded by kMemoryCeilingBytes.
-inline constexpr uint32_t kSpUnwritten = std::numeric_limits<uint32_t>::max();
+// The Debug-only guest stack-usage diagnostic (HOGD_RV32_STACK_USAGE_ENABLED,
+// kStackPointerReg, kSpUnwritten) is declared in stack_usage.h; write_rd below
+// records it and ThreadedMachine::sp_min() exposes it.
 
 // Named outside the anonymous union because ISO C++ forbids defining a type
 // inside one. Instructions using rs2 need at most a 16-bit immediate.

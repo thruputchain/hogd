@@ -22,16 +22,17 @@ option(BUILD_FUZZERS "Build fuzz targets" OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
-# Debug-only diagnostic: log each rv32 invocation's guest stack extremes (see
-# hogd/hog_exec/runtime/rv32/threaded_machine.h). Defaults to ON with the test
-# FFI, where contract authors measure their stack; inactive outside Debug.
+# Debug-only diagnostic: record the lowest sp each rv32 invocation's guest
+# reached, read back through the test FFI's get_rv32_stack_usage() (see
+# hogd/hog_exec/runtime/rv32/stack_usage.h). Defaults to ON with the test FFI,
+# where contract authors measure their stack; inactive outside Debug.
 if(ENABLE_TEST_FFI)
   set(HOGD_RV32_STACK_USAGE_DEFAULT ON)
 else()
   set(HOGD_RV32_STACK_USAGE_DEFAULT OFF)
 endif()
 option(HOGD_RV32_STACK_USAGE
-  "Log rv32 guest stack usage per invocation (Debug builds only)"
+  "Record rv32 guest stack usage per invocation (Debug builds only)"
   ${HOGD_RV32_STACK_USAGE_DEFAULT})
 option(HOGD_FRAME_POINTERS "Keep frame pointers in Release builds for continuous profiling" ON)
 option(HOGD_RELEASE_DEBUGINFO "Emit debug info in Release builds for split debuginfo packaging" OFF)

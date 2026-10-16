@@ -33,6 +33,7 @@
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/transaction_stats.h"
 #include "invoke_flag.hh"
@@ -68,6 +69,17 @@ template<typename T> struct StorageRead {
 // We may also wish to add checks to make sure that a contract that's created
 // is actually deployed, and/or put limits on the size of an individual
 // contract. What's done here is only check well-formedness of the code.
+
+#if HOGD_RV32_STACK_USAGE_ENABLED
+// One rv32 invocation's stack record: the lowest value its guest wrote to sp
+// (x2), the deepest point its stack reached, or rv32::kSpUnwritten if it
+// never wrote sp.
+struct Rv32StackUsageRecord {
+  ContractAddress address;
+  Runtime::MethodID method_id;
+  uint32_t sp_min;
+};
+#endif
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -245,6 +257,19 @@ public:
   // should key on the returned ExecResult (a genuine commit conflict is
   // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
+
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  // Debug-only rv32 stack diagnostic (HOGD_RV32_STACK_USAGE; see
+  // rv32/stack_usage.h). Rv32Runtime appends one record as each of its
+  // invocations ends, in the order they finish, so a callee precedes its
+  // caller. The test FFI reads them through get_rv32_stack_usage(); nothing in
+  // the executor reads them back.
+  void record_rv32_stack_usage(Rv32StackUsageRecord record);
+  std::vector<Rv32StackUsageRecord> const &rv32_stack_usage() const
+  {
+    return rv32_stack_usage_;
+  }
+#endif
 
   [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction();
 
@@ -484,6 +509,9 @@ private:
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
   std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  std::vector<Rv32StackUsageRecord> rv32_stack_usage_;
+#endif
 
   const SHA256Hash source_tx_hash_;
   const AuthClaim auth_claim_;

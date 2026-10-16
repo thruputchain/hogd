@@ -25,12 +25,12 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/format.h"
 
 namespace hogd {
 
@@ -105,39 +105,38 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
 #if HOGD_RV32_STACK_USAGE_ENABLED
 namespace {
 
-// Logs the lowest sp the guest reached when the invocation's coroutine frame
-// goes away, whichever exit it took: a Return, a host error, a trap, or a
-// frame abandoned before completion. Debug-only; see HOGD_RV32_STACK_USAGE in
-// threaded_machine.h. The address is copied at entry, while this invocation's
-// frame is the handler's active one.
+// Hands the lowest sp the guest reached to the syscall handler when the
+// invocation's coroutine frame goes away, whichever exit it took: a Return, a
+// host error, a trap, or a frame abandoned before completion. The handler's
+// record outlives the machine; the test FFI reads it after root_invoke().
+// Debug-only; see HOGD_RV32_STACK_USAGE in rv32/stack_usage.h. The address is
+// copied at entry, while this invocation's frame is the handler's active one.
 class StackUsageReport {
 public:
   StackUsageReport(rv32::ThreadedMachine const &machine,
-                   ContractAddress address, Runtime::MethodID method_id)
-    : machine_(machine), address_(address), method_id_(method_id)
+                   SystemCallHandler &handler, ContractAddress address,
+                   Runtime::MethodID method_id)
+    : machine_(machine), handler_(handler), address_(address),
+      method_id_(method_id)
   {}
   StackUsageReport(StackUsageReport const &) = delete;
   StackUsageReport &operator=(StackUsageReport const &) = delete;
 
   ~StackUsageReport()
   {
-    // Logging allocates, and nothing may escape a destructor.
+    // Appending allocates, and nothing may escape a destructor.
     try {
-      const uint32_t sp_min = machine_.sp_min();
-      if (sp_min == rv32::kSpUnwritten) {
-        info("rv32 stack usage: contract={} method={:#018x}: sp never written",
-             x23::show(address_), method_id_);
-        return;
-      }
-      info("rv32 stack usage: contract={} method={:#018x} sp_min={:#010x}",
-           x23::show(address_), method_id_, sp_min);
+      handler_.record_rv32_stack_usage({.address = address_,
+                                        .method_id = method_id_,
+                                        .sp_min = machine_.sp_min()});
     } catch (...) {
-      report_dropped_log("rv32 stack usage report");
+      report_dropped_log("rv32 stack usage record");
     }
   }
 
 private:
   rv32::ThreadedMachine const &machine_;
+  SystemCallHandler &handler_;
   ContractAddress address_;
   Runtime::MethodID method_id_;
 };
@@ -157,7 +156,8 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine,
   // A local of the coroutine body: destroyed on every exit path, after the
   // last co_return and before `machine`, which as a parameter outlives it.
   const StackUsageReport stack_usage_report(
-      machine, syscall_handler_->get_current_address(), method_id);
+      machine, *syscall_handler_, syscall_handler_->get_current_address(),
+      method_id);
 #endif
   rv32::StepResult result = machine.start();
 
