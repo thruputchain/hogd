@@ -29,6 +29,7 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "header.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/block_id.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -88,7 +89,7 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 }
 
 x23::Async<void>
-hash_transactions(const SignedTransactionBatch &txs,
+hash_transactions(const SharedSignedTransactionBatch &txs,
                   TransactionHashBatch &tx_hashes)
 {
   tx_hashes.resize(txs.size());
@@ -98,11 +99,11 @@ hash_transactions(const SignedTransactionBatch &txs,
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
-        [](const ChunkRange *chunk, const SignedTransactionBatch &txs,
+        [](const ChunkRange *chunk, const SharedSignedTransactionBatch &txs,
            TransactionHashBatch &tx_hashes) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
           for (size_t i = chunk->start; i < chunk->end; i++) {
-            tx_hashes[i] = sha256(txs[i].tx);
+            tx_hashes[i] = sha256(txs[i]->tx);
           }
           co_return;
         }(&chunk, txs, tx_hashes));
@@ -314,12 +315,13 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
 }
 
 x23::Async<AuthErrorCodeBatch>
-MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
-                                         InstrumentedCoroGuard &commit_guard)
+MempoolCoordinatorRpc::verify_submission(
+    const SharedSignedTransactionBatch &txs,
+    InstrumentedCoroGuard &commit_guard)
 {
   auto pending = std::make_shared<SubmissionAuth>();
   for (size_t i = 0; i < txs.size(); i++) {
-    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
+    const ContractAddress &account = txs[i]->tx.invocation.invoked_address;
     pending->accounts[account].push_back(i);
     pending->dirty.insert(account);
   }
@@ -351,7 +353,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     if (verify_height != height) {
       for (size_t i = 0; i < results.size(); i++) {
         if (results[i] == AuthErrorCode::kAuthStaleBlockHeight) {
-          pending->dirty.insert(txs[i].tx.invocation.invoked_address);
+          pending->dirty.insert(txs[i]->tx.invocation.invoked_address);
         }
       }
     }
@@ -364,7 +366,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     verify_height = height;
     commit_guard.reset();
 
-    SignedTransactionBatch retry_txs;
+    SharedSignedTransactionBatch retry_txs;
     x23::Vec<size_t> indices;
     for (const ContractAddress &account : dirty) {
       for (size_t i : pending->accounts.at(account)) {
@@ -402,7 +404,7 @@ x23::Async<SchedGatewaySubmitOutcomeBatch>
 MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
                                        bool malformed_is_protocol_error)
 {
-  auto txs = std::make_shared<SignedTransactionBatch>();
+  auto txs = std::make_shared<SharedSignedTransactionBatch>();
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
   auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
@@ -470,7 +472,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           throw std::runtime_error(
               "authentication returned the wrong number of outcomes");
         }
-        SignedTransactionBatch authenticated_txs;
+        SharedSignedTransactionBatch authenticated_txs;
         x23::Vec<size_t> authenticated_indices;
         TransactionHashBatch authenticated_hashes;
         authenticated_txs.reserve(txs->size());
@@ -524,7 +526,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           co_return;
         }
 
-        SignedTransactionBatch capacity_txs;
+        SharedSignedTransactionBatch capacity_txs;
         x23::Vec<size_t> capacity_indices;
         TransactionHashBatch capacity_hashes;
         capacity_txs.reserve(txs->size());
@@ -537,7 +539,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           const TransactionHash &tx_hash = (*tx_hashes)[i];
           const bool already_pending =
               selected_new_hashes.contains(tx_hash) ||
-              scheduler_->is_pending((*txs)[i], tx_hash);
+              scheduler_->is_pending(*(*txs)[i], tx_hash);
           if (already_pending || num_slots_left > 0) {
             // Keep an already-pending duplicate in both vectors so they remain
             // aligned and [add_txs()] can report it as admitted. It does not
@@ -598,7 +600,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             co_await scheduler_->add_txs(*txs, *tx_hashes);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
-        SignedTransactionBatch admitted_txs;
+        SharedSignedTransactionBatch admitted_txs;
         admitted_txs.reserve(txs->size());
         for (size_t i = 0; i < add_outcomes.size(); i++) {
           const SchedGatewaySubmitOutcome outcome = add_outcomes[i];
@@ -624,7 +626,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
       [&, txs]() -> x23::Async<void> {
         pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
         [](MempoolCoordinatorRpc &coord,
-           std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+           std::shared_ptr<SharedSignedTransactionBatch> txs) -> x23::Detached {
           // We serialize and send the response in a detached coroutine so that
           // the admission RPC does not wait on the coordinator notification.
           ParallelBatch response;
@@ -686,7 +688,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    this mempool will never be asked to nominate a block, so it will be
   //    unable to process and erase the currently enqueued txs, so it will never
   //    free up capacity.
-  auto txs = std::make_shared<SignedTransactionBatch>();
+  auto txs = std::make_shared<SharedSignedTransactionBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
   auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
@@ -947,7 +949,7 @@ MempoolCoordinatorRpc::get_txset_hash(
 
 x23::Async<void>
 MempoolCoordinatorRpc::propose_batch(
-    BlockID block_id, x23::span<const SignedTransaction> txs,
+    BlockID block_id, x23::span<const Arc<SignedTransaction>> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
     x23::span<ExecResult> ret_chunk, size_t executor_idx)
 {
@@ -976,7 +978,7 @@ MempoolCoordinatorRpc::propose_batch(
 // executing txs without having to wait for *all* txs to arrive first.
 x23::Async<void>
 MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
-    BlockID block_id, x23::span<const SignedTransaction> txs,
+    BlockID block_id, x23::span<const Arc<SignedTransaction>> txs,
     x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
     x23::span<ExecResult> ret)
 {
@@ -995,8 +997,8 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
   // executor via [propose_batch()].
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
-    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
-                                                txs.begin() + chunk.end);
+    x23::span<const Arc<SignedTransaction>> tx_chunk(txs.begin() + chunk.start,
+                                                     txs.begin() + chunk.end);
     x23::span<ExecResult> ret_chunk(ret.begin() + chunk.start,
                                     ret.begin() + chunk.end);
 
@@ -1026,7 +1028,7 @@ MempoolCoordinatorRpc::multiplex_large_chunk_across_executors(
 
 x23::Async<void>
 MempoolCoordinatorRpc::propose_batch_in_chunks(
-    BlockID block_id, x23::span<SignedTransaction> txs,
+    BlockID block_id, x23::span<Arc<SignedTransaction>> txs,
     x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
     x23::span<ExecResult> ret)
 {
@@ -1051,8 +1053,8 @@ MempoolCoordinatorRpc::propose_batch_in_chunks(
   CHECK_EQ(ret.size(), txs.size());
   for (size_t i = 0; i < large_chunks.size(); i++) {
     const ChunkRange &chunk = large_chunks[i];
-    x23::span<const SignedTransaction> tx_chunk(txs.begin() + chunk.start,
-                                                txs.begin() + chunk.end);
+    x23::span<const Arc<SignedTransaction>> tx_chunk(txs.begin() + chunk.start,
+                                                     txs.begin() + chunk.end);
     // The executor outcome for each tx is written into this span.
     x23::span<ExecResult> status_chunk(ret.begin() + chunk.start,
                                        ret.begin() + chunk.end);
@@ -1293,8 +1295,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           // [schedule()] appends transactions to the end of [txs]. We reserve
           // [txs] up front in [schedulercoord_propose_block()], so spans into
           // it do not become invalid when later schedule nodes append more txs.
-          x23::span<SignedTransaction> txs_span(cache.txs.begin() + start,
-                                                cache.txs.begin() + end);
+          x23::span<Arc<SignedTransaction>> txs_span(cache.txs.begin() + start,
+                                                     cache.txs.begin() + end);
           co_await propose_batch_in_chunks(
               cache.block_id, txs_span, cache.transaction_nomination_chunks[i],
               ret_span);
@@ -1467,8 +1469,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
           }
           const size_t start = state->summarized_chunks[i].start;
           const size_t end = state->summarized_chunks[i].end;
-          x23::span<const SignedTransaction> txs_span(cache.txs.begin() + start,
-                                                      cache.txs.begin() + end);
+          x23::span<const Arc<SignedTransaction>> txs_span(
+              cache.txs.begin() + start, cache.txs.begin() + end);
           co_await append_to_parallel_batch(
               txs_span, cache.proposal_result.proposed_block().txs);
           co_return;
@@ -1720,9 +1722,9 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         // We place the block txs and tx hashes into these vectors. We mark
         // these vectors static and clear them on each call to [nominate()] so
         // to avoid memory allocation/free overhead.
-        x23::XdrVec<SignedTransaction> tmp =
+        SharedSignedTransactionBatch tmp =
             std::move(nominated_block_cache_.txs);
-        [](x23::XdrVec<SignedTransaction> to_clear) -> x23::Detached {
+        [](SharedSignedTransactionBatch to_clear) -> x23::Detached {
           co_await default_coropoll().pool_.bg();
           to_clear.clear();
         }(std::move(tmp));
@@ -1865,13 +1867,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   if (request.context.protocol != 0 || request.expected_parent_height != 0) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyBatchMismatch);
   }
-  x23::XdrVec<SignedTransaction> txs;
+  SharedSignedTransactionBatch txs;
   if (!(co_await parallel_batch_to_t(request.transactions, txs,
                                      kMaxBlockSize))) {
     co_return result(GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
   }
-  for (const SignedTransaction &tx : txs) {
-    if (tx.tx.invocation.invoked_address != kGenesisRootContractAddress) {
+  for (const Arc<SignedTransaction> &tx : txs) {
+    if (tx->tx.invocation.invoked_address != kGenesisRootContractAddress) {
       co_return result(
           GenesisCeremonyOutcome::GenesisCeremonyInvalidTransaction);
     }
@@ -2000,8 +2002,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     cache.txs = std::move(txs);
     cache.tx_hashes.clear();
     cache.tx_hashes.reserve(cache.txs.size());
-    for (const SignedTransaction &tx : cache.txs) {
-      cache.tx_hashes.push_back(sha256(tx.tx));
+    for (const Arc<SignedTransaction> &tx : cache.txs) {
+      cache.tx_hashes.push_back(sha256(tx->tx));
     }
     cache.result_tx_hashes = cache.tx_hashes;
     cache.result_tx_nominations.clear();
@@ -3416,14 +3418,14 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   }
 
   static TransactionHashBatch tx_hashes;
-  static SignedTransactionBatch txs;
+  static SharedSignedTransactionBatch txs;
   tx_hashes.clear();
   txs.clear();
   for (const KeyChange &change : key_changes) {
     // Get all txs for [change.address] and re-verify them. Remove any that fail
     // verification.
     static TransactionHashBatch change_tx_hashes;
-    static SignedTransactionBatch change_txs;
+    static SharedSignedTransactionBatch change_txs;
     change_tx_hashes.clear();
     change_txs.clear();
     scheduler_->get_txs_for_account(change.address, change_tx_hashes,

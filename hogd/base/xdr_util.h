@@ -330,6 +330,21 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
   co_return ret;
 }
 
+// A guess at an object's encoded size, to reserve an encoding buffer. A handle
+// such as an Arc or Box encodes as its pointee, so it is sized by that.
+template<typename T>
+constexpr size_t
+encoded_size_guess()
+{
+  using U = std::remove_cv_t<T>;
+  if constexpr (requires { typename U::element_type; }) {
+    return sizeof(typename U::element_type) * 3;
+  }
+  else {
+    return sizeof(U) * 3;
+  }
+}
+
 template<typename T>
 inline x23::Async<void>
 append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
@@ -357,7 +372,8 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
       parallel.segment_tokens[segment_idx] = chunk.end - chunk.start;
       // This is just an educated guess, but hopefully it lowers/eliminates the
       // resize overhead of the vector.
-      xdrs[i].reserve(parallel.segment_tokens[segment_idx] * sizeof(T) * 3);
+      xdrs[i].reserve(parallel.segment_tokens[segment_idx] *
+                      encoded_size_guess<T>());
       for (size_t j = chunk.start; j < chunk.end; j++) {
         xdrs[i] += x23::serialize(objs[j]);
       }
@@ -367,7 +383,8 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   }
   // This is just an educated guess, but hopefully it lowers/eliminates the
   // resize overhead of the vector.
-  parallel.xdr.reserve(parallel.xdr.size() + (objs.size() * sizeof(T) * 3));
+  parallel.xdr.reserve(parallel.xdr.size() +
+                       (objs.size() * encoded_size_guess<T>()));
   for (size_t i = 0; i < chunks.size(); i++) {
     co_await handles[i];
     parallel.xdr += xdrs[i];

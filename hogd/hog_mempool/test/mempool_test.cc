@@ -33,6 +33,7 @@
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
@@ -2933,22 +2934,22 @@ TEST_P(MempoolSubmissionAuthTest, StaleHeightRetriesUnchangedAccounts)
   SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
   std::vector<BlockHeight> heights;
 
-  coord.set_submission_auth_test_hook([&](BlockHeight height,
-                                          const SignedTransactionBatch &batch,
-                                          bool after_auth) -> x23::Async<void> {
-    EXPECT_EQ(batch.size(), 1UL);
-    EXPECT_EQ(batch[0], txs[0]);
+  coord.set_submission_auth_test_hook(
+      [&](BlockHeight height, const SharedSignedTransactionBatch &batch,
+          bool after_auth) -> x23::Async<void> {
+        EXPECT_EQ(batch.size(), 1UL);
+        EXPECT_EQ(*batch[0], txs[0]);
 
-    if (after_auth) {
-      co_return;
-    }
+        if (after_auth) {
+          co_return;
+        }
 
-    heights.push_back(height);
-    EXPECT_EQ(coord.scheduler()->size(), 0);
-    if (heights.size() == 1) {
-      co_await commit_empty_block(server);
-    }
-  });
+        heights.push_back(height);
+        EXPECT_EQ(coord.scheduler()->size(), 0);
+        if (heights.size() == 1) {
+          co_await commit_empty_block(server);
+        }
+      });
 
   SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
@@ -2976,25 +2977,25 @@ TEST_P(MempoolSubmissionAuthTest, CommitKeepsVerifiedUnchangedAccounts)
   SignedTransactionBatch txs = generate_unsigned_txs(client, 1);
   size_t calls = 0;
 
-  coord.set_submission_auth_test_hook([&](BlockHeight height,
-                                          const SignedTransactionBatch &batch,
-                                          bool after_auth) -> x23::Async<void> {
-    EXPECT_EQ(batch.size(), 1UL);
-    EXPECT_EQ(batch[0], txs[0]);
+  coord.set_submission_auth_test_hook(
+      [&](BlockHeight height, const SharedSignedTransactionBatch &batch,
+          bool after_auth) -> x23::Async<void> {
+        EXPECT_EQ(batch.size(), 1UL);
+        EXPECT_EQ(*batch[0], txs[0]);
 
-    if (!after_auth) {
-      co_return;
-    }
+        if (!after_auth) {
+          co_return;
+        }
 
-    ++calls;
-    EXPECT_EQ(calls, 1UL);
-    EXPECT_EQ(height, 1);
-    EXPECT_EQ(coord.scheduler()->size(), 0);
+        ++calls;
+        EXPECT_EQ(calls, 1UL);
+        EXPECT_EQ(height, 1);
+        EXPECT_EQ(coord.scheduler()->size(), 0);
 
-    // We enforce above that [calls == 1], so we do not need to worry about
-    // calling [commit_empty_block()] multiple times.
-    co_await commit_empty_block(server);
-  });
+        // We enforce above that [calls == 1], so we do not need to worry about
+        // calling [commit_empty_block()] multiple times.
+        co_await commit_empty_block(server);
+      });
 
   SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});
@@ -3064,44 +3065,44 @@ TEST_P(MempoolSubmissionAuthTest,
   };
   std::vector<BlockHeight> heights;
   std::vector<std::multiset<ContractAddress>> accounts;
-  coord.set_submission_auth_test_hook([&](BlockHeight height,
-                                          const SignedTransactionBatch &batch,
-                                          bool after_auth) -> x23::Async<void> {
-    if (!after_auth) {
-      co_return;
-    }
+  coord.set_submission_auth_test_hook(
+      [&](BlockHeight height, const SharedSignedTransactionBatch &batch,
+          bool after_auth) -> x23::Async<void> {
+        if (!after_auth) {
+          co_return;
+        }
 
-    heights.push_back(height);
-    accounts.emplace_back();
-    for (const SignedTransaction &tx : batch) {
-      accounts.back().insert(tx.tx.invocation.invoked_address);
-    }
-    EXPECT_EQ(coord.scheduler()->size(), 0);
+        heights.push_back(height);
+        accounts.emplace_back();
+        for (const Arc<SignedTransaction> &tx : batch) {
+          accounts.back().insert(tx->tx.invocation.invoked_address);
+        }
+        EXPECT_EQ(coord.scheduler()->size(), 0);
 
-    if (heights.size() == 1) {
-      EXPECT_EQ(heights, (std::vector<BlockHeight>{1}));
+        if (heights.size() == 1) {
+          EXPECT_EQ(heights, (std::vector<BlockHeight>{1}));
 
-      // Account A goes from valid to invalid.
-      co_await change(/*height=*/2, /*account_idx=*/0, auth_a,
-                      /*required_weight=*/2);
-      co_await change(/*height=*/3, /*account_idx=*/0, auth_a,
-                      /*required_weight=*/3);
-      // Account B goes from invalid to valid.
-      co_await change(/*height=*/4, /*account_idx=*/1, auth_b,
-                      /*required_weight=*/1);
-      // Account C stays unchanged.
-    }
-    else if (heights.size() == 2) {
-      EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4}));
+          // Account A goes from valid to invalid.
+          co_await change(/*height=*/2, /*account_idx=*/0, auth_a,
+                          /*required_weight=*/2);
+          co_await change(/*height=*/3, /*account_idx=*/0, auth_a,
+                          /*required_weight=*/3);
+          // Account B goes from invalid to valid.
+          co_await change(/*height=*/4, /*account_idx=*/1, auth_b,
+                          /*required_weight=*/1);
+          // Account C stays unchanged.
+        }
+        else if (heights.size() == 2) {
+          EXPECT_EQ(heights, (std::vector<BlockHeight>{1, 4}));
 
-      // Change the auth data for account A again while we are already retrying
-      // the authentication for its txs. Account A now goes from invalid to
-      // still invalid, though we still need to re-authenticate A's txs against
-      // the new auth data.
-      co_await change(/*height=*/5, /*account_idx=*/0, auth_a,
-                      /*required_weight=*/4);
-    }
-  });
+          // Change the auth data for account A again while we are already
+          // retrying the authentication for its txs. Account A now goes from
+          // invalid to still invalid, though we still need to re-authenticate
+          // A's txs against the new auth data.
+          co_await change(/*height=*/5, /*account_idx=*/0, auth_a,
+                          /*required_weight=*/4);
+        }
+      });
 
   SchedGatewaySubmitOutcomeBatch outcomes = submit(server, txs);
   coord.set_submission_auth_test_hook({});

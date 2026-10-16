@@ -136,7 +136,7 @@ bm_scheduler_add_txs(benchmark::State &state)
     }
 
     ElapsedTimer timer;
-    scheduler->add_txs(txs, tx_hashes)();
+    scheduler->add_txs(share_txs(txs), tx_hashes)();
     state.SetIterationTime(timer.elapsed());
     benchmark::DoNotOptimize(scheduler->size());
   }
@@ -259,7 +259,7 @@ bm_scheduler_admit_large_batch(benchmark::State &state)
   }
   for (auto _ : state) {
     ElapsedTimer timer;
-    const auto outcomes = scheduler->add_txs(txs, hashes)();
+    const auto outcomes = scheduler->add_txs(share_txs(txs), hashes)();
     state.SetIterationTime(timer.elapsed());
     benchmark::DoNotOptimize(outcomes);
     scheduler->remove_from_scheduler(
