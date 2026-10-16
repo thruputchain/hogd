@@ -7,6 +7,13 @@ pub use generated::*;
 use rpc_api::{ProgramError, RpcError};
 use std::sync::Arc;
 
+// In-place decoding fixes the field's lifetime behind a mutable pointer.
+// Generated borrowed newtypes must accept a reader that outlives that field.
+#[derive(xdrs::ReadXDR, xdrs::WriteXDR)]
+pub struct BorrowedHash<'a> {
+    pub hash: &'a Hash,
+}
+
 struct Server;
 
 #[async_trait::async_trait]
