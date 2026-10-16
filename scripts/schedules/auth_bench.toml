@@ -1,0 +1,124 @@
+name = "auth_bench"
+
+[[jobs]]
+name = "{{ .hog_schedule }}_{{ .hog_host }}"
+script = """
+
+set -x
+
+echo 'cloning hogd'
+# Keep credentials out of tracing and the repository's stored remote URL.
+set +x
+umask 077
+config_path="$(mktemp)"
+for original_config in "${XDG_CONFIG_HOME:-$HOME/.config}/git/config" "$HOME/.gitconfig"; do
+  if [ -f "$original_config" ]; then
+    git config --file "$config_path" --add include.path "$original_config"
+  fi
+done
+export GIT_CONFIG_GLOBAL="$config_path"
+trap 'rm -f -- "$GIT_CONFIG_GLOBAL"' EXIT
+export CARGO_NET_GIT_FETCH_WITH_CLI=true
+git_token="{{ .git_token }}"
+if [ -n "$git_token" ] && [ "$git_token" != '<no value>' ]; then
+  git config --global --add "url.https://x-access-token:${git_token}@github.com/{{ .github_repo }}.git.insteadOf" "git@github.com:{{ .github_repo }}.git"
+fi
+set -x
+git init -q .
+git remote add origin git@github.com:{{ .github_repo }}.git
+git fetch --depth 1 origin {{ .git_commit }} --no-progress --quiet
+git checkout -q {{ .git_commit }}
+set +x
+bash .github/actions/private-sources/git-config.sh "$git_token" "$GIT_CONFIG_GLOBAL"
+set -x
+
+source ./scripts/ci/configure_git_cache.sh
+
+# Only what a configure needs; hog_auth_bench itself links hog_auth and the
+# benchmark library.
+git submodule update --init --recursive \
+   protocol \
+   external/rocksdb \
+   external/model-checker \
+   external/googletest \
+   external/benchmark \
+   external/crc32c \
+   external/blake3 \
+   external/corrosion \
+   external/mldsa-native \
+   built_contracts/integration_test_contracts
+
+source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+
+# Release with a pinned compiler, so successive nights compare the auth code
+# rather than the toolchain.
+echo 'configure release'
+./scripts/build.sh -d build/release -t Release -c gcc -x "-DBUILD_BENCHMARKS=ON" -n \
+  > configure.log 2>&1 || (cat configure.log && exit 1)
+
+echo 'build hog_auth_bench'
+cmake --build build/release --parallel "$(nproc)" --target hog_auth_bench \
+  > build.log 2>&1 || (cat build.log && exit 1)
+
+# A dispatch's extra flags; a scheduled run has none, which the template
+# renders as '<no value>'.
+if [ "${AUTH_BENCH_ARGS:-}" = '<no value>' ]; then
+  unset AUTH_BENCH_ARGS
+fi
+
+OUT_DIR=${HOG_DUMP_DIR}/auth-bench
+BENCH_RESULT=0
+echo 'run auth server bench'
+./scripts/ci/auth_bench.sh build/release "$OUT_DIR" || BENCH_RESULT=$?
+
+file_measurement() {
+  # Absent when the bench never got to write it: nothing to file.
+  if [ ! -s "$OUT_DIR/auth_bench.json" ]; then
+    echo 'no auth bench output to file'
+    return 0
+  fi
+
+  echo 'clone metrics history'
+  ./scripts/clone_metrics_history.sh || return $?
+
+  echo 'log the auth bench'
+  ./scripts/log_metric.sh auth_server_bench "$OUT_DIR/auth_bench.json" || return $?
+
+  # Its own repo token: this run commits only the auth bench, which
+  # metrics_history's missing-metrics checks would otherwise flag as a hogd
+  # main commit with every other expected metric missing.
+  echo 'commit metrics'
+  METRICS_COMMIT_REPO=hogd-auth-bench ./scripts/commit_metrics.sh
+}
+
+METRICS_RESULT=0
+file_measurement || METRICS_RESULT=$?
+
+# A transaction that failed to verify outranks a filing failure, but a filing
+# failure still fails the job: a green run that pushed nothing is the one
+# failure nobody would notice.
+if [ $BENCH_RESULT -ne 0 ]; then
+  exit $BENCH_RESULT
+fi
+exit $METRICS_RESULT
+
+"""
+
+[jobs.env]
+GIT_REPO = "{{ .github_repo }}"
+GIT_COMMIT = "{{ .git_commit }}"
+GIT_BRANCH = "{{ .git_branch }}"
+AUTH_BENCH_ARGS = "{{ .auth_bench_args }}"
+CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
+CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
+# Published crates and pinned submodules retain the legacy registry identity.
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
+
+# hog10, like every other job that commits to metrics_history: the push
+# credentials live there, and a time series wants the same silicon every run.
+[jobs.host]
+metrics_1 = "hog10"

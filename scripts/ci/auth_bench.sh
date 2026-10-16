@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # Runs the auth server benchmark sweep (hogd/hog_auth/auth_server_bench.cc)
-# and summarizes it. Takes about two minutes on a CI runner.
+# and summarizes it. Takes about two minutes on a CI runner. The nightly
+# schedule (scripts/schedules/auth_bench.toml) files the JSON to
+# metrics_history as auth_server_bench.
 #
 #   scripts/ci/auth_bench.sh [BUILD_DIR] [OUT_DIR]
 #

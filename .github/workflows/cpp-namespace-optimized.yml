@@ -8,13 +8,6 @@ name: C++ CI (Namespace)
 
 on:
   workflow_dispatch:
-    inputs:
-      auth_bench_args:
-        description: >-
-          Extra hog_auth_bench flags for the gcc-release auth bench, e.g.
-          --auth_bench_in_flight=1,8,32 --auth_bench_batch_sizes=1024
-        required: false
-        default: ""
   push:
     branches: ["main"]
   pull_request:
@@ -487,20 +480,12 @@ jobs:
       - name: Build GCC Release
         run: ./scripts/build.sh -d build/gcc_release -t Release -c gcc
 
-      # About two minutes. Reports throughput to the job summary; fails only
-      # when a transaction fails to verify, not on the numbers.
+      # About two minutes. Prints throughput to the job summary as a quick
+      # check on the PR; fails only when a transaction fails to verify, not on
+      # the numbers. The time series is the nightly run on hog10
+      # (auth_bench.yml), which files its JSON to metrics_history.
       - name: Auth Server Bench
-        env:
-          AUTH_BENCH_ARGS: ${{ inputs.auth_bench_args }}
         run: ./scripts/ci/auth_bench.sh build/gcc_release auth-bench
-
-      - name: Upload Auth Server Bench Results
-        if: always()
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-        with:
-          name: auth-bench-${{ github.run_attempt }}
-          path: auth-bench/
-          if-no-files-found: ignore
 
       - name: Show ccache stats
         if: always()
