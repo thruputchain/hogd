@@ -43,7 +43,9 @@ git clean -ffd -e .ssh/ -e .gitconfig
 
 git submodule update --init --recursive --depth 1 --jobs 8 --quiet
 
-source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+# Warm developer builds with the host's default GCC as the system toolchain moves.
+HOGD_CI_GCC_CC=gcc HOGD_CI_GCC_CXX=g++ \
+  source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 # Both variants share this checkout and the prefetched Cargo cache. Neither
 # warm_ccache.sh nor build.sh clones again between builds.

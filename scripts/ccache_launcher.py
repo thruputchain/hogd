@@ -9,6 +9,7 @@ working directory unchanged lets compiler depfiles work with both Make and Ninja
 import os
 from pathlib import Path
 import shlex
+import shutil
 import subprocess
 import sys
 import tempfile
@@ -29,6 +30,31 @@ PATH_OPTIONS = (
     "-B",
 )
 OUTPUT_OPTIONS = ("-o", "-MF", "-MT", "-MQ", "-MJ")
+
+
+def canonical_compiler(compiler, ccache):
+    # ccache hashes the driver name even when compiler_check=content. CMake's
+    # generic cc/c++ drivers should share entries with explicit GCC/Clang builds.
+    # Check identity instead of resolving every symlink: clang++ may resolve to
+    # clang, but its name selects C++ semantics. Preserve distinct wrappers and
+    # toolchains that do not provide an identical sibling driver.
+    path = Path(shutil.which(compiler) or compiler)
+    try:
+        # In ccache's masquerade mode, cc and gcc can both be links to ccache
+        # while dispatching to different compilers according to their names.
+        if path.samefile(shutil.which(ccache) or ccache):
+            return compiler
+    except OSError:
+        return compiler
+    candidates = {"cc": ("gcc", "clang"), "c++": ("g++", "clang++")}
+    for name in candidates.get(path.name, ()):
+        candidate = path.with_name(name)
+        try:
+            if path.samefile(candidate):
+                return str(candidate)
+        except OSError:
+            continue
+    return compiler
 
 
 def quote_response_argument(argument):
@@ -105,6 +131,7 @@ def normalize(arguments, roots):
 
 def main():
     source, build, ccache, compiler, *arguments = sys.argv[1:]
+    compiler = canonical_compiler(compiler, ccache)
     cwd = os.getcwd()
     alias_dir = Path(ALIAS_DIR)
     alias_dir.mkdir(exist_ok=True)
