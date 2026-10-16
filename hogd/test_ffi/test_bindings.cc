@@ -1128,9 +1128,11 @@ abort_transaction(void *syscall_handler) noexcept
 GetRv32StackUsageResult
 get_rv32_stack_usage(void *syscall_handler) noexcept
 {
+  // No guard diagnostic here: like the other query entry points, this can be
+  // the first test_ffi call in a process, before any stateful entry point has
+  // installed the process logger, and error() would dereference the null
+  // logger (the structured error code is the whole report).
   if (!syscall_handler) {
-    best_effort_log(
-        [] { error("get_rv32_stack_usage error: no syscall handler!"); });
     return {.records = kNullBuffer,
             .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
   }
