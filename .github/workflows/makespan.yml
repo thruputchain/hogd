@@ -3,6 +3,12 @@ name: Makespan Benchmark (hog_sched)
 # Manual only: an experiment harness for executor scheduling, not a tracked
 # metric. See hogd/hog_exec/bench/makespan_runner.cc.
 on:
+    # TEMPORARY: run on pushes to the PR branch that adds this workflow, since
+    # workflow_dispatch only works once the file is on the default branch.
+    # Remove before merging.
+    push:
+        branches:
+            - geoph/sleepy-cerf-6idyvh
     workflow_dispatch:
         inputs:
             executors:
@@ -45,6 +51,12 @@ env:
     CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
     CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
+# The benchmark owns its hosts, so pushes queue behind a running benchmark
+# rather than overlapping it.
+concurrency:
+    group: makespan-bench
+    cancel-in-progress: false
+
 jobs:
     build:
         runs-on: self-hosted
@@ -75,14 +87,16 @@ jobs:
                   ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
             - name: Run hog schedule
+              # `inputs` is empty on a push; the fallbacks match the defaults
+              # above.
               env:
-                  EXECUTORS: ${{ inputs.executors }}
-                  FIB_N: ${{ inputs.fib_n }}
-                  HEAVY_READS: ${{ inputs.heavy_reads }}
-                  N_LIGHT: ${{ inputs.n_light }}
-                  N_HEAVY: ${{ inputs.n_heavy }}
-                  LIGHT_BATCH: ${{ inputs.light_batch }}
-                  TRIALS: ${{ inputs.trials }}
+                  EXECUTORS: ${{ inputs.executors || '3' }}
+                  FIB_N: ${{ inputs.fib_n || '25' }}
+                  HEAVY_READS: ${{ inputs.heavy_reads || '1000' }}
+                  N_LIGHT: ${{ inputs.n_light || '100000' }}
+                  N_HEAVY: ${{ inputs.n_heavy || '32' }}
+                  LIGHT_BATCH: ${{ inputs.light_batch || '5' }}
+                  TRIALS: ${{ inputs.trials || '5' }}
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
                   echo "Branch name: $BRANCH_NAME"
