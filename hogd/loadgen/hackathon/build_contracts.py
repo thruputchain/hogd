@@ -28,7 +28,7 @@ def build(output, apps, wallets):
         + manifest[manifest.index("[workspace.package]"):]
     )
     (project / "Cargo.toml").write_text(manifest)
-    for name in ("Cargo.lock", "rust-toolchain.toml", "groundhog.toml"):
+    for name in ("Cargo.lock", "rust-toolchain.toml", "thruput.toml"):
         shutil.copyfile(ROOT / "built_contracts" / name, project / name)
     shutil.copytree(
         ROOT / "built_contracts/.cargo", project / ".cargo", dirs_exist_ok=True
@@ -67,10 +67,10 @@ required-features = ["entrypoints"]
         check=True,
     )
     version = subprocess.check_output(
-        ["groundhog", "--version"], text=True
+        ["thruput", "--version"], text=True
     ).strip()
-    if not version.startswith("groundhog 0.26.0"):
-        raise ValueError(f"expected groundhog 0.26.0, got {version}")
+    if not version.startswith("thruput 0.30.0"):
+        raise ValueError(f"expected thruput 0.30.0, got {version}")
     records = []
     for kind, count in (("app", apps), ("wallet", wallets)):
         template = (BENCHMARK_DIR / f"contracts/{kind}/src/lib.rs").read_text()
@@ -84,7 +84,7 @@ required-features = ["entrypoints"]
             (project / kind / "src/lib.rs").write_text(source)
             result = subprocess.run(
                 [
-                    "groundhog",
+                    "thruput",
                     "build",
                     "-p",
                     f"hackathon_{kind}",
