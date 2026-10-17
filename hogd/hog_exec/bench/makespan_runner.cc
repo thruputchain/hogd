@@ -118,7 +118,7 @@ heavy_order_name(HeavyOrder o)
 }
 
 struct Params {
-  uint32_t fib_n = 25;
+  uint32_t fib_n = 31;
   uint32_t heavy_reads = 1000;
   uint32_t light_reads = 2;
   uint32_t n_light = 100'000;

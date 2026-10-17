@@ -22,7 +22,7 @@ on:
             fib_n:
                 description: slow_fibonacci(n) for the fib heavy transactions
                 type: string
-                default: "25"
+                default: "31"
             heavy_reads:
                 description: Sequential storage reads per reads heavy transaction
                 type: string
@@ -92,7 +92,7 @@ jobs:
               # above.
               env:
                   EXECUTORS: ${{ inputs.executors || '3' }}
-                  FIB_N: ${{ inputs.fib_n || '25' }}
+                  FIB_N: ${{ inputs.fib_n || '31' }}
                   HEAVY_READS: ${{ inputs.heavy_reads || '1000' }}
                   N_LIGHT: ${{ inputs.n_light || '100000' }}
                   N_HEAVY: ${{ inputs.n_heavy || '32' }}
