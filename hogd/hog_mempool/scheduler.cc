@@ -1,4 +1,5 @@
 #include "hogd/hog_mempool/scheduler.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 
 #include <algorithm>
 #include <array>
@@ -202,7 +203,9 @@ Scheduler::apply_committed_block_hog_ages(
 {
   ReadAverageHogAgesResult read_result = co_await read_average_hog_ages(txs);
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
 
   std::unordered_map<ContractAddress, HogAge, SipHash24Hasher>
@@ -306,7 +309,9 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -343,7 +348,9 @@ Scheduler::read_average_hog_ages(const BlockTransfers &transfers)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -667,37 +674,31 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // delete a newly published cache entry while this submission waits for the
   // account lock, leaving the caller with an admitted outcome for an absent tx.
   //
-  // The tx may already exist in [txs_] because it is okay to add a tx back
-  // into the scheduler again. This can happen if the tx was originally added
-  // to the scheduler, then removed during nomination by [schedule()], and a
-  // different validated block was committed instead.
+  // A cached tx may already have been scheduled by the pending nomination.
+  // Resubmission must not put it back on the runqueue: another scheduling
+  // chunk could otherwise attempt it again and append its hash twice to the
+  // nomination's commit cleanup. Abandoned nominations explicitly restore
+  // their transactions through [reenqueue_txs()].
   const auto [tx_ptr, txs_lock, inserted] =
       txs_.find_or_insert(tx_hash,
                           std::make_shared<TxValue>(TxValue{.tx = tx}));
   CHECK_PTR(tx_ptr);
-  if (inserted) {
-    // [txs_.find_or_insert()] acquires a lock, so the increment to
-    // [tx_cache_size_] happens after the tx is added to [txs_] from the
-    // perspective of anyone accessing the tx in [txs_].
-    tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
+  if (!inserted) {
+    return false;
   }
+  // [txs_.find_or_insert()] acquires a lock, so the increment to
+  // [tx_cache_size_] happens after the tx is added to [txs_] from the
+  // perspective of anyone accessing the tx in [txs_].
+  tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
 bool
-Scheduler::is_pending(const SignedTransaction &tx,
+Scheduler::is_pending(const SignedTransaction & /*tx*/,
                       const TransactionHash &tx_hash)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{
-      .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
-      .tx_hash = tx_hash,
-  };
-  const auto [account_state, lock] = accounts_.find(account);
-  if (account_state == nullptr) {
-    return false;
-  }
-  return account_state->txs.contains(key);
+  const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+  return tx_value_ptr != nullptr;
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
@@ -778,7 +779,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   account_keys.reserve(found.size());
   // [get_account_key()] accesses [ready_accounts_], so we need to protect it
   // with the lock.
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : found) {
     if (account_excluded_from_block(account)) {
@@ -1067,7 +1070,9 @@ Scheduler::process_transfers(const BlockTransfers &transfers)
 
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
@@ -1421,7 +1426,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   // [accounts] is static and therefore used by multiple threads, so we wait to
   // call [clear()] on it until after we have acquired the lock.

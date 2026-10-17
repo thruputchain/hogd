@@ -52,4 +52,5 @@ groundhog-go thruput-go
 integration_test_contracts thruput-integration-test-contracts
 scp scp
 sdk_rs thruput-sdk-rs
+groundhog-rpc thruput-tools
 REPOSITORIES

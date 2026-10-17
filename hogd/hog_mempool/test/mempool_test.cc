@@ -991,6 +991,71 @@ TEST(Mempool, SubmitUnvettedCapacityCountsSameRequestDuplicateOnce)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+// A nominated tx leaves the runqueue but stays cached until its block commits,
+// so it no longer counts toward the capacity check's [Scheduler::size()].
+// Resubmitting it once the runqueue is full must still find it pending: the
+// duplicate is admitted without being requeued or consuming a slot, while a
+// new tx is retryable.
+TEST(Mempool, SubmitUnvettedCapacityAdmitsNominatedDuplicate)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  // Nominate txs[0]: scheduling takes it off the runqueue but keeps it cached.
+  SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // Fill the runqueue slot that the nomination freed.
+  outcomes = gateway.schedgateway_submit_tx_batch(
+      t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  // No slots remain. The nominated duplicate is still pending, so it is
+  // admitted without being requeued; the new tx is retryable.
+  outcomes = gateway.schedgateway_submit_tx_batch(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[2]})())();
+  ASSERT_EQ(outcomes.size(), 2UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+  EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+
+  // Commit cleanup removes the nominated tx from the cache once and leaves
+  // txs[1] queued.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+}
+
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1412,18 +1477,15 @@ TEST(Mempool, NominateTxWithError)
             kNumBlocks + 1);
 }
 
-// This test does the following to exercise a failed CHECK that was later fixed:
+// Resubmission must not requeue a nominated tx from an excluded account:
 //   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
 //      account's balance (txs[1]).
 //   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
 //      account is removed from [ready_accounts_] while the nomination is
 //      pending.
-//   3. The client resubmits txs[0]. It is added back to the scheduler runqueue;
-//      the account is *not* added back to [ready_accounts_].
-//   4. Commit the nominated block. [remove_from_scheduler()] removes the
-//      account's txs from the runqueue. In that function, [account_is_ready()]
-//      returns false and [ready_accounts_.erase()] returns 0. Before the fix,
-//      [ready_accounts_.erase()] would trigger a CHECK.
+//   3. The client resubmits txs[0]. It remains cached for the nomination and
+//      stays off the runqueue.
+//   4. Commit the nominated block and remove txs[0] from the cache.
 TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1454,10 +1516,10 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
 
   // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
-  // from the runqueue and attempts to remove the account from
-  // [ready_accounts_].
+  // from the cache.
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
   const SchedulerTransactionOutcome outcome =
@@ -1498,10 +1560,11 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
 
-  // The resubmit lands on the excluded account's runqueue.
+  // The resubmitted tx remains cached for the nomination, off the runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 
   // Commit the validated block, not the nominated one.
   auto res_validate =

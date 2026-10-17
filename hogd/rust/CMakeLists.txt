@@ -11,25 +11,40 @@ else()
         "(nightly toolchain override is intentional)")
 endif()
 
-# Check for sccache and configure it if available
-find_program(SCCACHE_EXECUTABLE sccache)
-if(SCCACHE_EXECUTABLE)
+option(HOGD_USE_SCCACHE "Cache native Rust compilation with sccache when installed" ON)
+if(HOGD_USE_SCCACHE)
+    find_program(SCCACHE_EXECUTABLE sccache)
+endif()
+set(HOGD_RUST_ENV CARGO_NET_OFFLINE=true)
+if(HOGD_USE_SCCACHE AND SCCACHE_EXECUTABLE)
     message(STATUS "sccache found: ${SCCACHE_EXECUTABLE}")
+    execute_process(
+        COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/sccache-env.sh" --print-env
+        RESULT_VARIABLE sccache_env_status
+        OUTPUT_VARIABLE sccache_env
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT sccache_env_status EQUAL 0)
+        message(FATAL_ERROR "Could not configure the Rust compiler cache")
+    endif()
+    string(REPLACE ";" "\\;" sccache_env "${sccache_env}")
+    string(REPLACE "\n" ";" sccache_env "${sccache_env}")
+    list(APPEND HOGD_RUST_ENV
+        "RUSTC_WRAPPER=${SCCACHE_EXECUTABLE}"
+        CARGO_INCREMENTAL=0
+        ${sccache_env}
+    )
 else()
-    message(STATUS "sccache not found - Rust builds will not use caching")
+    message(STATUS "sccache disabled or not installed - Rust builds will not use caching")
+    if(NOT HOGD_USE_SCCACHE)
+        list(APPEND HOGD_RUST_ENV "RUSTC_WRAPPER=")
+    endif()
 endif()
 
 # Import targets defined in the workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
-if(SCCACHE_EXECUTABLE)
-    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true RUSTC_WRAPPER=${SCCACHE_EXECUTABLE})
-else()
-    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
-endif()
-
-
-
+corrosion_set_env_vars(unified_lib ${HOGD_RUST_ENV})
 set(HOGD_RUST_FLAGS "-C target-cpu=${RUST_BUILD_CPU}")
 if(HOGD_RELEASE_DEBUGINFO)
     list(APPEND HOGD_RUST_FLAGS "-C debuginfo=line-tables-only")
@@ -106,5 +121,5 @@ add_test(
 
 # Set environment variables for the test
 set_tests_properties(rust_workspace_tests PROPERTIES
-  ENVIRONMENT "CARGO_NET_OFFLINE=true"
+  ENVIRONMENT "${HOGD_RUST_ENV}"
 )

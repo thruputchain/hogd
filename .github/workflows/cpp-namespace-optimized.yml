@@ -48,6 +48,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -89,7 +90,9 @@ jobs:
         run: git submodule update --init --recursive groundhog-go protocol
 
       - name: Format Check
-        run: ./scripts/format.sh -c
+        run: |
+          ./scripts/format.sh -c
+          python3 scripts/test_sccache_env.py
 
       - name: Protocol Check
         run : ./scripts/check-protocol.sh
@@ -127,6 +130,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -142,12 +146,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -247,6 +254,9 @@ jobs:
         if: always()
         run: |
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build/gcc
 
       - name: Print Log Download Instructions
@@ -277,6 +287,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -292,12 +303,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -368,6 +382,9 @@ jobs:
         if: always()
         run: |
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build/llvm
 
       - name: Print Log Download Instructions
@@ -398,6 +415,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -413,12 +431,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -484,6 +505,9 @@ jobs:
         if: always()
         run: |
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build/gcc_release
 
       - name: Print Log Download Instructions

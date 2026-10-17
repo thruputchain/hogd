@@ -30,6 +30,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
@@ -1124,6 +1125,51 @@ abort_transaction(void *syscall_handler) noexcept
   }
 }
 
+GetRv32StackUsageResult
+get_rv32_stack_usage(void *syscall_handler) noexcept
+{
+  // No guard diagnostic here: like the other query entry points, this can be
+  // the first test_ffi call in a process, before any stateful entry point has
+  // installed the process logger, and error() would dereference the null
+  // logger (the structured error code is the whole report).
+  if (!syscall_handler) {
+    return {.records = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeInvalidPointer};
+  }
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  auto *context = static_cast<SyscallHandlerContext *>(syscall_handler);
+  try {
+    auto const &records = context->to_handler().rv32_stack_usage();
+    auto buffer =
+        make_new_data_buffer(records.size() * sizeof(FFIRv32StackUsage));
+    if (!buffer.has_value()) {
+      return {.records = kNullBuffer, .ffi_error_code = buffer.error()};
+    }
+    uint8_t *out = buffer.value().data;
+    for (auto const &record : records) {
+      FFIRv32StackUsage entry{};
+      assert(record.address.size() == sizeof(entry.contract_address));
+      std::memcpy(entry.contract_address, record.address.data(),
+                  sizeof(entry.contract_address));
+      entry.method_id = record.method_id;
+      entry.sp_initial = record.sp_initial;
+      entry.sp_min = record.sp_min;
+      std::memcpy(out, &entry, sizeof(entry));
+      out += sizeof(entry);
+    }
+    return {.records = buffer.value(), .ffi_error_code = kTestFFIErrorCodeNone};
+  } catch (std::exception const &e) {
+    log_error("error copying rv32 stack usage records: {}", e);
+    return {.records = kNullBuffer,
+            .ffi_error_code = kTestFFIErrorCodeUnrecoverableError};
+  }
+#else
+  // Built without the diagnostic: the entry point exists so consumers link
+  // against one API, and it reports no records.
+  return {.records = kNullBuffer, .ffi_error_code = kTestFFIErrorCodeNone};
+#endif
+}
+
 constexpr StorageCostModel kCostModel(12000, 1, 5, 5, 1234);
 
 TestFFIErrorCode
@@ -1199,6 +1245,15 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
       }
     }
 
+    // write_contract() is a base-DB put(); see DBContext::Borrow (issue #2727).
+    // Taken before verification too, so the config read off the tip below is
+    // not raced by an advance.
+    DBContext::Borrow borrow(*db_cast);
+    if (!borrow.held()) {
+      log_lifecycle_transition_refusal("setup_create_contract");
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+
     // Verify runtime-backed contracts before storing — reject contracts that
     // would fail during instantiation (e.g., an RV32 artifact that cannot be
     // translated, or an unknown native id).
@@ -1206,10 +1261,11 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     // against (the base context only registers the real runtimes); its
     // registration is checked above via has_mock_contract().
     if (contract.contract_type() != ContractType::kMockTest) {
-      // No chain is in hand here: verify under the protocol defaults, the
-      // bounds a test environment runs under unless it states otherwise.
-      auto verify_result =
-          (*context_cast)->verify_contract(contract, NetworkConfigParams{});
+      // Verify under the bounds this database's chain puts in force, as a
+      // transaction attaching the contract would be: a test environment that
+      // raises or lowers max_rv32_memory_bytes must see that here too.
+      const NetworkConfigParams params(db_cast->get_network_config().v0());
+      auto verify_result = (*context_cast)->verify_contract(contract, params);
       if (verify_result == InvokeErrorCode::Unrecoverable) {
         return kTestFFIErrorCodeUnrecoverableError;
       }
@@ -1219,13 +1275,6 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
 
     auto h = sha256(contract);
-
-    // write_contract() is a base-DB put(); see DBContext::Borrow (issue #2727).
-    DBContext::Borrow borrow(*db_cast);
-    if (!borrow.held()) {
-      log_lifecycle_transition_refusal("setup_create_contract");
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
     db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
                                                  std::move(contract)));
   } catch (std::exception const &e) {
@@ -1472,7 +1521,9 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     Contract contract;
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
-    // As above: the protocol defaults stand in for a chain's configuration.
+    // No database is in hand here, so the protocol defaults stand in for a
+    // chain's configuration; setup_create_contract verifies under the
+    // database's own.
     auto result = rc->verify_contract(contract, NetworkConfigParams{});
     if (result == InvokeErrorCode::Unrecoverable) {
       return VerifyContractResult{.success = 0,
@@ -1827,6 +1878,18 @@ try_commit_transaction(void *syscall_handler)
   auto result = hogd::try_commit_transaction(syscall_handler);
   hogd::do_ffi_trace(
       "FFI (end): try_commit_transaction(syscall_handler={}) -> {}",
+      syscall_handler, result);
+  return result;
+}
+
+GetRv32StackUsageResult
+get_rv32_stack_usage(void *syscall_handler)
+{
+  hogd::do_ffi_trace("FFI (start): get_rv32_stack_usage(syscall_handler={})",
+                     syscall_handler);
+  auto result = hogd::get_rv32_stack_usage(syscall_handler);
+  hogd::do_ffi_trace(
+      "FFI (end): get_rv32_stack_usage(syscall_handler={}) -> {}",
       syscall_handler, result);
   return result;
 }

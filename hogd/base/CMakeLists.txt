@@ -24,6 +24,7 @@ target_link_libraries(
 )
 
 add_library(base_test_objects OBJECT
+  arc_test.cc
   atomic_test.cc
   base_test.cc
   base58_test.cc

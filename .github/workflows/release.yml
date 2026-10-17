@@ -19,7 +19,7 @@ env:
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.7"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.9"
 
 permissions:
   contents: write
@@ -61,6 +61,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -74,18 +75,21 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
         with:
           cache: rust
-          # ~/.cargo keeps the groundhog-cli and groundhog-rv32-lower installs
-          # (fetch.sh compiled them from source every run, 3.5 min on arm64);
+          # ~/.cargo keeps the thruput-cli install (fetch.sh compiled it
+          # from source every run, 3.5 min on arm64);
           # ~/.cache/rustup keeps the pinned toolchains (see
           # .github/actions/cached-rustup-home).
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -254,7 +258,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()
@@ -283,6 +289,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -298,6 +305,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
             ~/.cache/rustup
@@ -318,6 +326,8 @@ jobs:
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -583,7 +593,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()

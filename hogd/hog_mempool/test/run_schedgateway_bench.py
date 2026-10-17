@@ -18,10 +18,12 @@ def interrupt(signum, frame):
 
 
 def corpus_timeout(args):
-    # The client signs its whole corpus before the measured window opens, so
-    # the allowance has to scale with the corpus and not just the window. A
-    # millisecond per transaction is roughly twice what the bench hosts need.
-    return args.seconds + args.warmup + 180 + args.transactions // 1000
+    # The client signs its whole corpus on every core before the measured
+    # window opens, and afterwards waits for every admitted transaction to
+    # commit, allowing 50 us each; so the allowance scales with the corpus and
+    # not just the window. 60 us a transaction covers both.
+    return (args.seconds + args.warmup + 180 +
+            args.transactions * 60 // 1_000_000)
 
 
 def main():
@@ -37,12 +39,19 @@ def main():
     parser.add_argument("--block-ms", type=int, default=500)
     parser.add_argument("--workers", type=int, default=8)
     parser.add_argument("--accounts", type=int, default=100)
+    parser.add_argument("--outstanding", type=int, default=1,
+                        help="calls each connection keeps in flight")
+    parser.add_argument("--batch", type=int, default=1,
+                        help="transactions per call")
+    parser.add_argument("--client-workers", type=int, default=8)
     args = parser.parse_args()
     for key, low, limit in (("connections", 1, 64), ("seconds", 1, 60),
-                            ("warmup", 1, 10), ("transactions", 1, 1000000),
+                            ("warmup", 1, 10), ("transactions", 1, 20000000),
                             ("block_ms", 1, 10000), ("workers", 1, 256),
                             # A transfer needs a distinct sender and recipient.
-                            ("accounts", 2, 1000)):
+                            ("accounts", 2, 1000), ("outstanding", 1, 1024),
+                            ("batch", 1, 100000),
+                            ("client_workers", 1, 1024)):
         if not low <= getattr(args, key) <= limit:
             parser.error(f"{key} must be between {low} and {limit}")
     build = args.build.resolve()
@@ -57,7 +66,8 @@ def main():
     env["DEFAULT_THREADPOOL_SIZE"] = str(args.workers)
     # The program-specific override takes precedence over the general setting.
     env["DEFAULT_THREADPOOL_SIZE_hog-devnode"] = str(args.workers)
-    env["DEFAULT_THREADPOOL_SIZE_schedgateway_client_bench"] = "8"
+    env["DEFAULT_THREADPOOL_SIZE_schedgateway_client_bench"] = str(
+        args.client_workers)
     metadata = {"host": platform.node(), "platform": platform.platform(),
                 "cpuCount": os.cpu_count(), "backendWorkers": args.workers,
                 "accounts": args.accounts, "ramdbBytes": 2147483648}
@@ -92,6 +102,8 @@ def main():
                 str(bench_bin), str(manifest), str(output / "result.json"),
                 str(args.connections), str(args.seconds), str(args.warmup),
                 str(args.transactions), str(args.block_ms),
+                str(args.outstanding), str(args.batch),
+                str(args.client_workers),
             ], env=env, stdout=client_log, stderr=client_log, check=True,
                 timeout=corpus_timeout(args))
             result = json.loads((output / "result.json").read_text())
@@ -102,9 +114,12 @@ def main():
                     result["committedTransactions"] != admitted:
                 raise RuntimeError(
                     "benchmark did not reconcile admitted transactions")
-            print(f"{result['measuredSuccess'] / result['seconds']:.1f} tx/s; "
+            seconds = result["measuredMicros"] / 1e6
+            print(f"{result['measuredSuccess'] / seconds:.1f} tx/s; "
+                  f"{result['measuredCalls'] / seconds:.1f} calls/s; "
                   f"p50 {result['latencyP50Us']} us; "
-                  f"p99 {result['latencyP99Us']} us")
+                  f"p99 {result['latencyP99Us']} us; "
+                  f"{result['retryable']} retryable")
             print(output / "result.json")
         finally:
             if node.poll() is None:

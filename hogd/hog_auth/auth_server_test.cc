@@ -3,8 +3,10 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <optional>
 #include <thread>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -22,6 +24,8 @@
 #include <utility>
 
 #include "auth_card.hh"
+#include "hogd/base/chunked_vector.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
@@ -30,6 +34,7 @@
 #include "integration.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -580,18 +585,67 @@ public:
   x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
                                                  KeyChangeBatch key_changes)
   {
+    std::lock_guard lock(mutex_);
     height_ = height;
-    batch_size_ = key_changes.size();
+    changes_ = std::move(key_changes);
     co_return;
   }
 
+  std::pair<std::optional<BlockHeight>, KeyChangeBatch> received()
+  {
+    std::lock_guard lock(mutex_);
+    return {height_, changes_};
+  }
+
+private:
+  std::mutex mutex_;
   std::optional<BlockHeight> height_;
-  std::optional<size_t> batch_size_;
+  KeyChangeBatch changes_;
 };
 
 static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
 
 } // namespace
+
+TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
+{
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  auth_server().set_mempool_client(std::move(*client));
+
+  AddressAuthData auth_data = make_test_auth_data(1);
+  auth_data.public_keys[1]->key = PublicKey(CryptographicScheme::MlDsa65);
+  auth_data.public_keys[1]->key.mldsa65()->fill(0x5a);
+  KeyChangeBatch expected;
+  expected.push_back(
+      KeyChange{.address = make_test_address(1),
+                .auth_data = x23::Ptr<AddressAuthData>(auth_data)});
+  expected.push_back(
+      KeyChange{.address = make_test_address(2), .auth_data = nullptr});
+
+  std::vector<KeyChangeBatch> chunks;
+  chunks.push_back({expected[0]});
+  chunks.emplace_back();
+  chunks.push_back({expected[1]});
+  auth_server().register_auth_data_updates(0, ChunkedVector<KeyChangeBatch>(
+                                                  std::move(chunks)))();
+
+  const auto [height, changes] = mempool->impl()->received();
+  ASSERT_EQ(height, 0);
+  EXPECT_EQ(changes, expected);
+  auto cached = auth_server().lookup_auth_data(0, expected[0].address)();
+  ASSERT_TRUE(cached.has_value());
+  EXPECT_EQ(cached.value()->second, auth_data);
+
+  auth_server().register_auth_data_updates(1, KeyChangeBatch{})();
+  const auto [empty_height, empty_changes] = mempool->impl()->received();
+  EXPECT_EQ(empty_height, 1);
+  EXPECT_TRUE(empty_changes.empty());
+}
 
 // Regression test for #1448: lookup_auth_data waiters stranded when
 // subscribe_to_auth_data_changes stores the initial height without broadcast.

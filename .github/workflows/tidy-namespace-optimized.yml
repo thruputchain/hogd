@@ -48,6 +48,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -63,12 +64,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Tidy Scope
         run: |
@@ -216,7 +220,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()

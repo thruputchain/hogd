@@ -49,7 +49,8 @@ public:
 
   // Adds txs to the scheduler and returns one admission outcome per tx, in
   // input order. Adding the same tx multiple times is okay; a duplicate that
-  // is already pending is reported as admitted rather than enqueued again.
+  // is queued or in a pending nomination is reported as admitted rather than
+  // enqueued again.
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
@@ -215,9 +216,9 @@ public:
     current_block_.store(height, std::memory_order_relaxed);
   }
 
-  // Returns whether this transaction body is already pending in the account's
-  // runqueue or stranded set. Callers must authenticate the submitted signed
-  // encoding before treating an existing body as admitted.
+  // Returns whether this transaction body is cached, including transactions
+  // scheduled by a pending nomination. Callers must authenticate the submitted
+  // signed encoding before treating an existing body as admitted.
   bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
 
   // The number of txs in the scheduler, including both those of the runqueue

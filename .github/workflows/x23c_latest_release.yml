@@ -60,6 +60,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -75,6 +76,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
 
       - name: Configure Git for Submodule Caching
@@ -127,6 +129,8 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
+      - uses: ./.github/actions/setup-sccache
+
       - name: Build x23c
         run: |
           ./scripts/build.sh \
@@ -149,7 +153,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()
@@ -180,6 +186,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -195,6 +202,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
 
       - name: Configure ccache
@@ -250,6 +258,8 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
+      - uses: ./.github/actions/setup-sccache
+
       - name: Build x23c
         run: |
           ./scripts/build.sh \
@@ -271,7 +281,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()

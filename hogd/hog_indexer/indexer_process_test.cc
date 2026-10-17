@@ -32,6 +32,8 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/rpc_common.h"
+#include "x23/rpc_msg.hh"
 #include "x23/vec.h"
 
 #ifndef HOG_INDEXER_BINARY
@@ -105,6 +107,43 @@ query_latest_block(std::uint16_t port)
   return result.page().latest_block;
 }
 
+TEST(HogIndexerProcess, BlockLookupNotReadyIsATransportError)
+{
+  TmpDir event_dir;
+  TmpDir indexer_dir;
+  ConsensusValue genesis{};
+  EventRPCContext event(event_dir.directory());
+  ASSERT_TRUE(event.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerServer event_server(event);
+  const auto port = event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+  const std::string address =
+      std::string(x23::HostPort{"127.0.0.1", port}.show());
+  auto indexer = DaemonProcess::start(
+      HOG_INDEXER_BINARY,
+      {"--event-addr", address, "--db-path",
+       (std::filesystem::path(indexer_dir.directory()) / "indexer-db").string(),
+       "--bind-ip", "127.0.0.1", "--block-explorer-port", "0", "--metrics-port",
+       "0"});
+  indexer.wait_until_log_contains("indexer initialization complete.");
+  auto client = make_rpc_client<IndexerBlockExplorer1>(
+      x23::HostPort{"127.0.0.1",
+                    indexer.require_port("indexer.block_explorer")},
+      true)();
+  ASSERT_TRUE(client);
+  try {
+    client->get_block_by_height(1)();
+    FAIL() << "not-ready lookup returned a successful RPC reply";
+  } catch (const x23::XdrCallFailed &error) {
+    ASSERT_EQ(error.m_.body.rbody().stat(), x23::reply_stat::MSG_ACCEPTED);
+    EXPECT_EQ(error.m_.body.rbody().areply().reply_data.stat(),
+              x23::accept_stat::SYSTEM_ERR);
+  }
+  BlockTransactionQuery query{};
+  query.height = 1;
+  EXPECT_EQ(client->get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryNotReady);
+}
+
 TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
 {
   TmpDir event_dir;
@@ -135,6 +174,13 @@ TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
     explorer_port = indexer.require_port("indexer.block_explorer");
     EXPECT_EQ(query_latest_block(explorer_port), 1);
 
+    auto client = make_rpc_client<IndexerBlockExplorer1>(
+        x23::HostPort{"127.0.0.1", explorer_port}, true)();
+    ASSERT_TRUE(client);
+    auto found = client->get_block_by_height(1)();
+    ASSERT_EQ(found.outcome(), BlockLookupOutcome::BlockFound);
+    EXPECT_EQ(sha256(found.value()), sha256(block_one));
+
     EXPECT_EQ(indexer.kill_unclean(), SIGKILL);
   }
 
@@ -162,6 +208,24 @@ TEST(HogIndexerProcess, RecoversAfterUncleanKillAndResumesPull)
   restarted.wait_until_log_contains("indexer initialization complete.");
   explorer_port = restarted.require_port("indexer.block_explorer");
   EXPECT_EQ(query_latest_block(explorer_port), 2);
+
+  auto client = make_rpc_client<IndexerBlockExplorer1>(
+      x23::HostPort{"127.0.0.1", explorer_port}, true)();
+  ASSERT_TRUE(client);
+  auto found = client->get_block_by_height(1)();
+  ASSERT_EQ(found.outcome(), BlockLookupOutcome::BlockFound);
+  EXPECT_EQ(sha256(found.value()), sha256(block_one));
+  EXPECT_EQ(client->get_block_by_height(0)().outcome(),
+            BlockLookupOutcome::BlockNotFound);
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  auto refs = client->get_transactions_by_block(query)();
+  ASSERT_EQ(refs.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+  EXPECT_TRUE(refs.page().refs.empty());
+  EXPECT_TRUE(refs.page().cursor.empty());
+  EXPECT_EQ(refs.page().oldest_block, 1);
+  EXPECT_EQ(refs.page().latest_block, 2);
 
   EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
 }
