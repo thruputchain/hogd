@@ -60,12 +60,15 @@ jobs:
           # toolchains (~/.cache/rustup) on the cache volume.
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -159,6 +162,9 @@ jobs:
         if: always()
         run: |
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build
 
       - name: Print Log Download Instructions
