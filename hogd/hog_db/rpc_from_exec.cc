@@ -15,6 +15,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/block_id.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/debug/delta_validity_checks.h"
 #include "hogd/debug/key_type_check.h"
@@ -155,9 +156,17 @@ HogDbExecutorRpc::request_one(InvokeTX &tx, AddressAndKey const &addrkey,
   }
 }
 
-RPCError
+x23::Async<RPCError>
 HogDbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
                                      NewContractBatch new_contracts)
+{
+  co_await default_threadpool().bg();
+  co_return run_commit_transaction(block, tx, std::move(new_contracts));
+}
+
+RPCError
+HogDbExecutorRpc::run_commit_transaction(BlockID block, TransactionID tx,
+                                         NewContractBatch new_contracts)
 {
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
@@ -225,9 +234,18 @@ HogDbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
   return RPCError::kRPCNone;
 }
 
-TryPushSubtransactionResult
+x23::Async<TryPushSubtransactionResult>
 HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch batch)
+{
+  co_await default_threadpool().bg();
+  co_return run_try_push_new_subtransaction(block, tx, std::move(batch));
+}
+
+TryPushSubtransactionResult
+HogDbExecutorRpc::run_try_push_new_subtransaction(BlockID block,
+                                                  TransactionID tx,
+                                                  StorageDeltaBatch batch)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -367,8 +385,16 @@ HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
   return RPCError::kRPCNone;
 }
 
+x23::Async<ExpectedStorageItem>
+HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey addrkey)
+{
+  co_await default_threadpool().bg();
+  co_return run_get_snapshot_item(block, addrkey);
+}
+
 ExpectedStorageItem
-HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
+HogDbExecutorRpc::run_get_snapshot_item(BlockID block,
+                                        AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot

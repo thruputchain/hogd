@@ -150,7 +150,7 @@ protected:
   {
     StorageDeltaBatch batch;
     batch.push_back(make_bytes_delta(key, 0xAA));
-    auto r = rpc_->try_push_new_subtransaction(block, tx, batch);
+    auto r = rpc_->run_try_push_new_subtransaction(block, tx, batch);
     ASSERT_EQ(r.error(), RPCError::kRPCNone);
   }
 
@@ -170,8 +170,8 @@ TEST_F(RpcFromExecDiagnosticsTest, ValidationModeReturnsNoDiagnostics)
 
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key, 0xBB));
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{2}, TransactionID{2}, batch);
+  auto r = rpc_->run_try_push_new_subtransaction(BlockID{2}, TransactionID{2},
+                                                 batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
   EXPECT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticNone);
 }
@@ -185,16 +185,16 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsConflicts)
     // Second winner, separate tx, second key.
     StorageDeltaBatch batch;
     batch.push_back(make_bytes_delta(key_b, 0xAA));
-    auto r =
-        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, batch);
+    auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{2},
+                                                   batch);
     ASSERT_EQ(r.error(), RPCError::kRPCNone);
   }
 
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key_a, 0xBB));
   batch.push_back(make_bytes_delta(key_b, 0xBB));
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
+  auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{3},
+                                                 batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
   if constexpr (is_debug_build()) {
     ASSERT_EQ(r.conflict().level(), DbDiagnosticLevel::kDbDiagnosticAll);
@@ -234,8 +234,8 @@ TEST_F(RpcFromExecDiagnosticsTest, ProposalModeReportsAllBalanceConflicts)
   batch.push_back(make_consume_uniquifier_delta(
       addr_b, Uniquifier{.block_expiry_height = BlockHeight{100}, .nonce = 2}));
 
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{5}, batch);
+  auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{5},
+                                                 batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
 
   if constexpr (is_debug_build()) {
@@ -271,16 +271,16 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedPushRollsBackRegardlessOfLevel)
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key_b, 0xCC));
   batch.push_back(make_bytes_delta(key_a, 0xBB));
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
+  auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{3},
+                                                 batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
 
   // The whole subtransaction rolled back: tx 4 can now claim key_b with
   // different bytes (no residue from tx 3's successful key_b delta).
   StorageDeltaBatch retry;
   retry.push_back(make_bytes_delta(key_b, 0xDD));
-  auto r2 =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{4}, retry);
+  auto r2 = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{4},
+                                                  retry);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 
@@ -311,8 +311,8 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedBalancePushRetainsNoEntries)
     batch.push_back(make_balance_delta(addr_, -kTransferAmount));
     batch.push_back(make_balance_delta(receiver, kTransferAmount));
 
-    auto r =
-        rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{9}, batch);
+    auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{9},
+                                                   batch);
     ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed) << i;
 
     InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{9});
@@ -335,8 +335,8 @@ TEST_F(RpcFromExecDiagnosticsTest, FailedDataPushRetainsNoEntries)
   StorageDeltaBatch batch;
   batch.push_back(make_bytes_delta(key_b, 0xCC));
   batch.push_back(make_bytes_delta(key_a, 0xBB));
-  auto r =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{3}, batch);
+  auto r = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{3},
+                                                 batch);
   ASSERT_EQ(r.error(), RPCError::kRPCStorageWriteFailed);
 
   InvokeTX *itx = ctx_->get_invoke_tx(BlockID{1}, TransactionID{3});
@@ -359,8 +359,8 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
   exclusive.push_back(
       make_deploy_delta(addr_, 0xD1,
                         std::to_underlying(StorageDeltaFlags::ExclusiveLock)));
-  auto r1 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1},
-                                              exclusive);
+  auto r1 = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{1},
+                                                  exclusive);
   ASSERT_EQ(r1.error(), RPCError::kRPCNone);
 
   // Same address, same contract hash: without the exclusive lock this would
@@ -369,8 +369,8 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractExclusiveFlagBlocksConcurrent)
   concurrent.push_back(
       make_deploy_delta(addr_, 0xD1,
                         std::to_underlying(StorageDeltaFlags::None)));
-  auto r2 = rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2},
-                                              concurrent);
+  auto r2 = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{2},
+                                                  concurrent);
   ASSERT_EQ(r2.error(), RPCError::kRPCStorageWriteFailed);
 
   if constexpr (is_debug_build()) {
@@ -395,16 +395,16 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
   first.push_back(
       make_deploy_delta(addr_, 0xD2,
                         std::to_underlying(StorageDeltaFlags::None)));
-  auto r1 =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{1}, first);
+  auto r1 = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{1},
+                                                  first);
   ASSERT_EQ(r1.error(), RPCError::kRPCNone);
 
   StorageDeltaBatch second;
   second.push_back(
       make_deploy_delta(addr_, 0xD2,
                         std::to_underlying(StorageDeltaFlags::None)));
-  auto r2 =
-      rpc_->try_push_new_subtransaction(BlockID{1}, TransactionID{2}, second);
+  auto r2 = rpc_->run_try_push_new_subtransaction(BlockID{1}, TransactionID{2},
+                                                  second);
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 
