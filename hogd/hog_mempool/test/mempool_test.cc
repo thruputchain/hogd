@@ -5228,11 +5228,16 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
     Proposal proposal{};
     proposal.header.network_hash = MempoolTestInfra::kNetworkHash;
     proposal.header.block_height = height;
-    EXPECT_EQ(server.mempool_coord_rpc()
-                  .schedulercoord_validate_block(parent.db_tip().id,
-                                                 std::move(proposal))()
-                  .outcome(),
-              SchedulerValidationOutcome::SchedulerValidationInvalid);
+    // Height 0 is committed, so a block at it is too late to validate, as at
+    // any committed height; height 1 is the ceremony's.
+    EXPECT_EQ(
+        server.mempool_coord_rpc()
+            .schedulercoord_validate_block(parent.db_tip().id,
+                                           std::move(proposal))()
+            .outcome(),
+        height == 0
+            ? SchedulerValidationOutcome::SchedulerValidationTooLateToValidate
+            : SchedulerValidationOutcome::SchedulerValidationInvalid);
 
     ConsensusValue value{};
     value.proposal_header.block_height = height;
