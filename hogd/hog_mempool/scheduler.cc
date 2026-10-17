@@ -29,6 +29,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/xdr/signed_transaction_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
@@ -662,7 +663,9 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
 Scheduler::add_txs_helper(const SignedTransaction &tx,
-                          const TransactionHash &tx_hash)
+                          const TransactionHash &tx_hash,
+                          const SignedTransactionHash &signed_tx_hash,
+                          CachedVariant on_variant)
 {
   const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -679,18 +682,59 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // chunk could otherwise attempt it again and append its hash twice to the
   // nomination's commit cleanup. Abandoned nominations explicitly restore
   // their transactions through [reenqueue_txs()].
-  const auto [tx_ptr, txs_lock, inserted] =
-      txs_.find_or_insert(tx_hash,
-                          std::make_shared<TxValue>(TxValue{.tx = tx}));
+  //
+  // The index lock nests inside the cache lock here. Lookups by signed hash
+  // release the index lock before taking the cache lock, so this cannot
+  // deadlock.
+  const auto [tx_ptr, txs_lock, inserted] = txs_.find_or_insert(
+      tx_hash, std::make_shared<TxValue>(
+                   TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash}));
   CHECK_PTR(tx_ptr);
   if (!inserted) {
+    const SignedTransactionHash cached_signed_tx_hash =
+        (*tx_ptr)->signed_tx_hash;
+    if (on_variant == CachedVariant::kKeep ||
+        cached_signed_tx_hash == signed_tx_hash) {
+      return false;
+    }
+    // Swap in the submitted encoding wherever the cached one is held. A
+    // pending nomination keeps its own copy of the tx, and [reenqueue_txs()]
+    // re-reads this cache, so an abandoned nomination restores this encoding.
+    std::shared_ptr<TxValue> replacement = std::make_shared<TxValue>(
+        TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash});
+    *tx_ptr = replacement;
+    if (auto it = account_state->txs.find(key);
+        it != account_state->txs.end()) {
+      it->second = std::move(replacement);
+    }
+    signed_tx_hashes_.remove(cached_signed_tx_hash);
+    signed_tx_hashes_.insert_or_assign(signed_tx_hash,
+                                       TransactionHash(tx_hash));
     return false;
   }
+  signed_tx_hashes_.insert_or_assign(signed_tx_hash, TransactionHash(tx_hash));
   // [txs_.find_or_insert()] acquires a lock, so the increment to
   // [tx_cache_size_] happens after the tx is added to [txs_] from the
   // perspective of anyone accessing the tx in [txs_].
   tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   return account_state->txs.insert({key, *tx_ptr}).second;
+}
+
+void
+Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
+{
+  SignedTransactionHash signed_tx_hash;
+  {
+    auto [tx_value_ptr, txs_lock] = txs_.find(tx_hash);
+    CHECK_PTR(tx_value_ptr);
+    signed_tx_hash = (*tx_value_ptr)->signed_tx_hash;
+    // Removing under the lock, so the subtraction from [tx_cache_size_]
+    // happens before the tx is removed from [txs_] from the perspective of
+    // anyone accessing the tx in [txs_].
+    tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
+    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
+  }
+  CHECK_EQ(signed_tx_hashes_.remove(signed_tx_hash), 1UL);
 }
 
 bool
@@ -705,7 +749,23 @@ x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes)
 {
+  SignedTransactionHashBatch signed_tx_hashes;
+  signed_tx_hashes.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    signed_tx_hashes.push_back(hash_signed_transaction(tx).signed_tx_hash);
+  }
+  co_return co_await add_txs(txs, tx_hashes, signed_tx_hashes,
+                             CachedVariant::kKeep);
+}
+
+x23::Async<SchedGatewaySubmitOutcomeBatch>
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   const x23::XdrVec<TransactionHash> &tx_hashes,
+                   const SignedTransactionHashBatch &signed_tx_hashes,
+                   CachedVariant on_variant)
+{
   CHECK_EQ(txs.size(), tx_hashes.size());
+  CHECK_EQ(txs.size(), signed_tx_hashes.size());
   SchedGatewaySubmitOutcomeBatch outcomes(
       txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
@@ -723,6 +783,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
     handles.push_back([](const ChunkRange *chunk,
                          const x23::XdrVec<hogd::SignedTransaction> &txs,
                          const x23::XdrVec<TransactionHash> &tx_hashes,
+                         const SignedTransactionHashBatch &signed_tx_hashes,
+                         CachedVariant on_variant,
                          const std::unordered_set<ContractAddress,
                                                   SipHash24Hasher> &missing,
                          SchedGatewaySubmitOutcomeBatch &outcomes,
@@ -763,13 +825,15 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           co_await scheduler.clear_transaction_outcome_if_not_already_committed(
               tx_hash);
         }
-        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash)) {
+        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash,
+                                     signed_tx_hashes[tx_idx], on_variant)) {
           num_added++;
         }
       }
       scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
       co_return;
-    }(&chunk, txs, tx_hashes, missing, outcomes, *this));
+    }(&chunk, txs, tx_hashes, signed_tx_hashes, on_variant, missing, outcomes,
+                                                        *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -1173,11 +1237,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
           current_block(),
           SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
           static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
-      // [txs_.remove()] acquires a lock, so the subtraction from
-      // [tx_cache_size_] happens before the tx is removed from [txs_] from the
-      // perspective of anyone accessing the tx in [txs_].
-      tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-      CHECK_EQ(txs_.remove(tx_hash), 1UL);
+      erase_cached_tx(tx_hash);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
     size_ -= to_remove;
@@ -1276,11 +1336,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
                   SchedulerTransactionErrorScheduler,
               /*error_code=*/
               static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
-          // [txs_.remove()] acquires a lock, so the subtraction from
-          // [tx_cache_size_] happens before the tx is removed from [txs_] from
-          // the perspective of anyone accessing the tx in [txs_].
-          tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
+          erase_cached_tx(tx_hash);
         }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
         size_ -= to_remove;
@@ -1343,11 +1399,6 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           // concurrent resubmit cannot restore only the runqueue entry. The
           // runqueue's shared_ptr keeps [tx] alive while the cache entry is
           // removed.
-          //
-          // [txs_.remove()] acquires a lock, so the subtraction from
-          // [tx_cache_size_] happens before the tx is removed from [txs_] from
-          // the perspective of anyone accessing the tx in [txs_].
-          tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
           co_await record_transaction_outcome(
               tx_hash,
               /*status=*/
@@ -1359,7 +1410,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
               /*error_code=*/
               static_cast<int32_t>(
                   SchedulerErrorCode::SchedulerErrorInsufficientHogs));
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
+          erase_cached_tx(tx_hash);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 
@@ -1482,12 +1533,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               }
               // Keep the account locked until the cache entry is gone, so a
               // concurrent resubmit cannot restore only the runqueue entry.
-              //
-              // [txs_.remove()] acquires a lock, so the subtraction from
-              // [tx_cache_size_] happens before the tx is removed from [txs_]
-              // from the perspective of anyone accessing the tx in [txs_].
-              scheduler.tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-              CHECK_EQ(scheduler.txs_.remove(tx_hash), 1UL);
+              scheduler.erase_cached_tx(tx_hash);
             }
           }
 
