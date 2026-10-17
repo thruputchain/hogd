@@ -191,6 +191,8 @@ connect_to_exec_server(const ExecCard &card)
 // event server's startup log.
 inline constexpr uint16_t kBenchEventIndexerPort = 8092;
 inline constexpr uint16_t kBenchIndexerBlockExplorerPort = 8093;
+// Each executor's Prometheus /metrics endpoint.
+inline constexpr uint16_t kBenchExecMetricsPort = 8041;
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -398,7 +400,9 @@ public:
       control_server_handles_[server_idx].ci_client.start_server(
           "hogd/hog_exec/hog-exec",
           {"--bind-ip", hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-           std::format("{}:{}", mempool_ip, sched_exec_port)});
+           std::format("{}:{}", mempool_ip, sched_exec_port), "--metrics-port",
+           std::to_string(kBenchExecMetricsPort)});
+      exec_ips_.push_back(hog_ip(server_addrs[server_idx]));
     }
 
     auto db_cards = sched_db_test_->impl()->await_shard_cards(1);
@@ -467,6 +471,10 @@ public:
 
   size_t num_executors() const { return exec_cards_.size(); }
 
+  // The executors' /metrics endpoints, as host IPs; each listens on
+  // kBenchExecMetricsPort.
+  const std::vector<std::string> &exec_ips() const { return exec_ips_; }
+
   std::string indexer_block_explorer_addr() const
   {
     return std::format("{}:{}", indexer_ip_, kBenchIndexerBlockExplorerPort);
@@ -488,6 +496,7 @@ private:
   RpcServer<MockSchedEvent> sched_event_test_;
 
   std::string indexer_ip_;
+  std::vector<std::string> exec_ips_;
   std::vector<ExecCard> exec_cards_;
 
   std::unique_ptr<bench_event_sched_client_t> event_sched_client_;

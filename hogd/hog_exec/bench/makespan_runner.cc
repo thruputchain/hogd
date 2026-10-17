@@ -21,11 +21,19 @@
 // single heavy transaction in an otherwise empty block; their latency is the
 // baseline the heavy latencies in the `_mix` scenarios are compared against.
 //
+// Each trial also scrapes the executors' /metrics before and after the block
+// and reports the mean storage-read split: `read_rpc_avg_us`, from issuing the
+// read to its reply being delivered (network, HogDb, and the wait for the
+// executor's RPC reader to run), and `read_hop_avg_us`, the wait to hop back
+// onto the executor's thread pool afterwards. The means are over every read in
+// the block, light and heavy alike.
+//
 // The cluster bring-up is multiexec_runner's (see multiexec_cluster.h): the
 // runner stands in for the mempool, so none of the mempool's own accounting
 // runs.
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <atomic>
 #include <cassert>
 #include <cstdint>
@@ -34,10 +42,15 @@
 #include <format>
 #include <limits>
 #include <memory>
+#include <netinet/in.h>
+#include <optional>
 #include <print>
 #include <random>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
+#include <sys/time.h> // IWYU pragma: keep
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -195,6 +208,113 @@ dispatch_coro(exec_client_t &exec_client, Dispatch *d)
   }
 }
 
+// Storage-read timing an executor exports (hog_exec/shared.h), summed over
+// executors. A delta across a trial splits that trial's reads into the RPC
+// round trip to HogDb and the hop back onto the executor's thread pool.
+struct ReadStats {
+  int64_t count = 0;
+  int64_t rpc_ns = 0;
+  int64_t hop_ns = 0;
+
+  ReadStats operator-(const ReadStats &o) const
+  {
+    return {.count = count - o.count,
+            .rpc_ns = rpc_ns - o.rpc_ns,
+            .hop_ns = hop_ns - o.hop_ns};
+  }
+  double rpc_avg_us() const
+  {
+    return count > 0 ? static_cast<double>(rpc_ns) / 1000.0 /
+                           static_cast<double>(count)
+                     : 0.0;
+  }
+  double hop_avg_us() const
+  {
+    return count > 0 ? static_cast<double>(hop_ns) / 1000.0 /
+                           static_cast<double>(count)
+                     : 0.0;
+  }
+};
+
+// GET http://<ip>:<port>/metrics. Blocking, with a timeout; the runner calls
+// it from its own thread, outside any timed region.
+std::optional<std::string>
+fetch_metrics(const std::string &ip, uint16_t port)
+{
+  const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
+  if (fd < 0) {
+    return std::nullopt;
+  }
+  // NOLINTBEGIN(misc-include-cleaner): glibc defines these in internal headers
+  timeval timeout{.tv_sec = 5, .tv_usec = 0};
+  ::setsockopt(fd, SOL_SOCKET, SO_RCVTIMEO, &timeout, sizeof(timeout));
+  ::setsockopt(fd, SOL_SOCKET, SO_SNDTIMEO, &timeout, sizeof(timeout));
+  // NOLINTEND(misc-include-cleaner)
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_port = htons(port);
+  if (::inet_pton(AF_INET, ip.c_str(), &addr.sin_addr) != 1 ||
+      ::connect(fd, reinterpret_cast<sockaddr *>(&addr), sizeof(addr)) != 0) {
+    ::close(fd);
+    return std::nullopt;
+  }
+  const std::string request = std::format(
+      "GET /metrics HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", ip);
+  if (::send(fd, request.data(), request.size(), MSG_NOSIGNAL) !=
+      static_cast<ssize_t>(request.size())) {
+    ::close(fd);
+    return std::nullopt;
+  }
+  // Read until the body named by Content-Length is in, or the server closes.
+  std::string response;
+  std::optional<size_t> body_end;
+  char buf[16384];
+  for (;;) {
+    const ssize_t n = ::recv(fd, buf, sizeof(buf), 0);
+    if (n <= 0) {
+      break;
+    }
+    response.append(buf, static_cast<size_t>(n));
+    if (!body_end) {
+      const size_t header_end = response.find("\r\n\r\n");
+      if (header_end == std::string::npos) {
+        continue;
+      }
+      const size_t cl = response.find("Content-Length:");
+      if (cl == std::string::npos || cl > header_end) {
+        continue; // no length; read to close
+      }
+      body_end = header_end + 4 +
+                 std::stoul(response.substr(cl + 15, header_end - cl - 15));
+    }
+    if (response.size() >= *body_end) {
+      break;
+    }
+  }
+  ::close(fd);
+  const size_t header_end = response.find("\r\n\r\n");
+  if (header_end == std::string::npos) {
+    return std::nullopt;
+  }
+  return response.substr(header_end + 4);
+}
+
+// The value of a counter line `<name> <value>` in a Prometheus scrape.
+int64_t
+metric_value(std::string_view text, std::string_view name)
+{
+  size_t pos = 0;
+  while ((pos = text.find(name, pos)) != std::string_view::npos) {
+    const bool line_start = pos == 0 || text[pos - 1] == '\n';
+    const size_t after = pos + name.size();
+    if (line_start && after < text.size() && text[after] == ' ') {
+      return std::stoll(std::string(text.substr(after + 1)));
+    }
+    pos = after;
+  }
+  return 0;
+}
+
 // Uniquifiers for every work transaction in the run. A nonce is never reused,
 // and each expiry height gets at most kBenchUniquifiersPerHeight of them, all
 // from one running index, which keeps every invoked address under HogDb's
@@ -282,24 +402,34 @@ public:
     for (const Scenario &s : scenarios) {
       std::vector<uint64_t> makespans;
       std::vector<uint64_t> heavy_maxes;
+      std::vector<double> read_rpc_us;
+      std::vector<double> read_hop_us;
       for (uint32_t trial = 0; trial < params_.n_trials; trial++) {
-        auto [makespan, heavy_max] = run_trial(s, trial);
-        makespans.push_back(makespan);
+        const TrialResult r = run_trial(s, trial);
+        makespans.push_back(r.makespan_ns);
         if (s.n_heavy > 0) {
-          heavy_maxes.push_back(heavy_max);
+          heavy_maxes.push_back(r.heavy_max_ns);
         }
+        read_rpc_us.push_back(r.reads.rpc_avg_us());
+        read_hop_us.push_back(r.reads.hop_avg_us());
       }
       std::ranges::sort(makespans);
       std::ranges::sort(heavy_maxes);
+      std::ranges::sort(read_rpc_us);
+      std::ranges::sort(read_hop_us);
       std::println("makespan_summary: scenario={} trials={} "
                    "makespan_min_us={} makespan_median_us={} "
-                   "makespan_max_us={} heavy_max_median_us={}",
+                   "makespan_max_us={} heavy_max_median_us={} "
+                   "read_rpc_avg_median_us={:.1f} "
+                   "read_hop_avg_median_us={:.1f}",
                    s.name, makespans.size(), makespans.front() / 1000,
                    makespans[makespans.size() / 2] / 1000,
                    makespans.back() / 1000,
                    heavy_maxes.empty()
                        ? 0
-                       : heavy_maxes[heavy_maxes.size() / 2] / 1000);
+                       : heavy_maxes[heavy_maxes.size() / 2] / 1000,
+                   read_rpc_us[read_rpc_us.size() / 2],
+                   read_hop_us[read_hop_us.size() / 2]);
     }
   }
 
@@ -475,11 +605,37 @@ private:
     return std::move(d.timings);
   }
 
-  // Returns {makespan, latest heavy completion}, in ns.
-  std::pair<uint64_t, uint64_t> run_trial(const Scenario &s, uint32_t trial)
+  // Summed over executors. An executor that cannot be scraped is warned
+  // about and left out, so a trial's read stats may be partial.
+  ReadStats scrape_read_stats()
+  {
+    ReadStats total;
+    for (const std::string &ip : cluster_.exec_ips()) {
+      auto text = fetch_metrics(ip, kBenchExecMetricsPort);
+      if (!text) {
+        warn("could not scrape executor metrics from {}:{}", ip,
+             kBenchExecMetricsPort);
+        continue;
+      }
+      total.count += metric_value(*text, "executor_db_read_count");
+      total.rpc_ns += metric_value(*text, "executor_db_read_rpc_ns");
+      total.hop_ns += metric_value(*text, "executor_db_read_hop_ns");
+    }
+    return total;
+  }
+
+  struct TrialResult {
+    uint64_t makespan_ns;
+    uint64_t heavy_max_ns;
+    ReadStats reads;
+  };
+
+  TrialResult run_trial(const Scenario &s, uint32_t trial)
   {
     const Block block = make_block(s, trial);
+    const ReadStats reads_before = scrape_read_stats();
     const std::vector<UnitTiming> timings = run_block(block);
+    const ReadStats reads = scrape_read_stats() - reads_before;
 
     uint64_t makespan = 0;
     uint64_t heavy_done = 0;
@@ -509,14 +665,18 @@ private:
     std::println("makespan: scenario={} trial={} nexec={} txs={} units={} "
                  "makespan_us={} light_batch_p50_us={} light_batch_p99_us={} "
                  "heavy={} heavy_order={} heavy_p50_us={} heavy_max_us={} "
-                 "last_heavy_done_us={}",
+                 "last_heavy_done_us={} reads={} read_rpc_avg_us={:.1f} "
+                 "read_hop_avg_us={:.1f}",
                  s.name, trial, cluster_.num_executors(), block.txs.size(),
                  block.units.size(), makespan / 1000, pct_us(light_lat, 0.5),
                  pct_us(light_lat, 0.99), tx_class_name(s.heavy_class),
                  heavy_order_name(s.order), pct_us(heavy_lat, 0.5),
-                 pct_us(heavy_lat, 1.0), heavy_done / 1000);
+                 pct_us(heavy_lat, 1.0), heavy_done / 1000, reads.count,
+                 reads.rpc_avg_us(), reads.hop_avg_us());
     std::fflush(stdout);
-    return {makespan, heavy_lat.empty() ? 0 : heavy_lat.back()};
+    return {.makespan_ns = makespan,
+            .heavy_max_ns = heavy_lat.empty() ? 0 : heavy_lat.back(),
+            .reads = reads};
   }
 };
 
