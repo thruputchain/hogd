@@ -31,20 +31,6 @@ if [ -n "${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG
 fi
 set -x
 
-# thruput-cli and thruput-rv32-lower replace groundhog-cli and
-# groundhog-rv32-lower. A cached ~/.cargo can still hold the old ones, and
-# cargo install will not take over the `rv32-lower` binary that
-# groundhog-rv32-lower owns there, so remove them first.
-for legacy in groundhog-cli groundhog-rv32-lower; do
-  if cargo "+${TOOL_RUST}" install --list | grep -q "^${legacy} v"; then
-    cargo "+${TOOL_RUST}" uninstall "${legacy}"
-  fi
-done
-
 echo "Installing thruput-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
   cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-cli@0.30.0
-
-echo "Installing thruput-rv32-lower..."
-CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-rv32-lower@0.30.0
