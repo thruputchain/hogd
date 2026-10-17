@@ -105,7 +105,7 @@ public:
   std::shared_ptr<const SignedTransaction>
   find_tx(const TransactionHash &tx_hash)
   {
-    auto [tx_value_ptr, _] = txs_.find(tx_hash);
+    auto [tx_value_ptr, _] = txs_by_body_.find(tx_hash);
     if (tx_value_ptr) {
       return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
                                                       &(*tx_value_ptr)->tx);
@@ -118,18 +118,8 @@ public:
   std::shared_ptr<const SignedTransaction>
   find_signed_tx(const SignedTransactionHash &signed_tx_hash)
   {
-    TransactionHash tx_hash;
-    {
-      const auto [tx_hash_ptr, lock] = signed_tx_hashes_.find(signed_tx_hash);
-      if (!tx_hash_ptr) {
-        return {};
-      }
-      tx_hash = *tx_hash_ptr;
-    }
-    // The index can trail the cache, which is authoritative: check the cached
-    // entry's encoding.
-    auto [tx_value_ptr, _] = txs_.find(tx_hash);
-    if (tx_value_ptr && (*tx_value_ptr)->signed_tx_hash == signed_tx_hash) {
+    auto [tx_value_ptr, _] = txs_.find(signed_tx_hash);
+    if (tx_value_ptr) {
       return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
                                                       &(*tx_value_ptr)->tx);
     }
@@ -182,7 +172,7 @@ public:
       const TransactionHash &tx_hash = *it;
       std::shared_ptr<TxValue> tx_value;
       {
-        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        const auto [tx_value_ptr, lock] = txs_by_body_.find(tx_hash);
         CHECK_PTR(tx_value_ptr);
         tx_value = *tx_value_ptr;
       }
@@ -201,7 +191,7 @@ public:
       // its cache entry. Use the newly cached signed tx value because a
       // replacement signed tx may carry different signatures for the same
       // transaction hash.
-      const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+      const auto [cached_value, txs_lock] = txs_by_body_.find(tx_hash);
       if (cached_value &&
           account_state->txs.insert({key, *cached_value}).second) {
         num_inserted++;
@@ -360,7 +350,7 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
-    // The hash of [tx]'s exact signed encoding.
+    // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
   };
 
@@ -410,9 +400,9 @@ private:
                       const TransactionHash &tx_hash,
                       const SignedTransactionHash &signed_tx_hash,
                       CachedVariant on_variant);
-  // Removes [tx_hash]'s cache entry and its index entry. The caller holds the
-  // lock of the tx's account, as every cache writer does, so the cached entry
-  // read here is current.
+  // Removes the cached tx whose body hash is [tx_hash] from [txs_by_body_] and
+  // [txs_]. The caller holds the lock of the tx's account, as every cache
+  // writer does, so the entry read here is current.
   void erase_cached_tx(const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
@@ -467,18 +457,20 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache. Entries are removed when transactions expire, are discarded, or
-  // appear in a committed/validated block. Shared ownership keeps an entry's
+  // Tx cache, keyed by each tx's exact signed encoding. It holds at most one
+  // encoding per body: [txs_by_body_] indexes the same entries by body hash.
+  // Entries are removed when transactions expire, are discarded, or appear in
+  // a committed/validated block. Shared ownership keeps an entry's
   // transaction alive for in-flight lookups after it is removed from here.
-  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
+  //
+  // Every write to the two maps happens under the tx's account lock, which
+  // keeps them in step for each body. Lookups take no account lock and touch
+  // one map.
+  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>,
+                  SipHash24Hasher>
       txs_;
-  // Index from each cached tx's [TxValue::signed_tx_hash] to its body hash, so
-  // a tx can be found by its exact signed encoding. Every write to [txs_] and
-  // to this index happens under the tx's account lock, which keeps the two in
-  // step for each body; lookups take no account lock and check the cached
-  // entry's encoding, since [txs_] is authoritative.
-  SynchronizedMap<SignedTransactionHash, TransactionHash, SipHash24Hasher>
-      signed_tx_hashes_;
+  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
+      txs_by_body_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
 

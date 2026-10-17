@@ -683,10 +683,10 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // nomination's commit cleanup. Abandoned nominations explicitly restore
   // their transactions through [reenqueue_txs()].
   //
-  // The index lock nests inside the cache lock here. Lookups by signed hash
-  // release the index lock before taking the cache lock, so this cannot
+  // [txs_by_body_] admits one encoding per body. The [txs_] lock nests inside
+  // its lock here; lookups take one map's lock at a time, so this cannot
   // deadlock.
-  const auto [tx_ptr, txs_lock, inserted] = txs_.find_or_insert(
+  const auto [tx_ptr, txs_lock, inserted] = txs_by_body_.find_or_insert(
       tx_hash, std::make_shared<TxValue>(
                    TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash}));
   CHECK_PTR(tx_ptr);
@@ -703,19 +703,18 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     std::shared_ptr<TxValue> replacement = std::make_shared<TxValue>(
         TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash});
     *tx_ptr = replacement;
+    CHECK_EQ(txs_.remove(cached_signed_tx_hash), 1UL);
+    CHECK_PTR(txs_.insert(signed_tx_hash, replacement).first);
     if (auto it = account_state->txs.find(key);
         it != account_state->txs.end()) {
       it->second = std::move(replacement);
     }
-    signed_tx_hashes_.remove(cached_signed_tx_hash);
-    signed_tx_hashes_.insert_or_assign(signed_tx_hash,
-                                       TransactionHash(tx_hash));
     return false;
   }
-  signed_tx_hashes_.insert_or_assign(signed_tx_hash, TransactionHash(tx_hash));
-  // [txs_.find_or_insert()] acquires a lock, so the increment to
-  // [tx_cache_size_] happens after the tx is added to [txs_] from the
-  // perspective of anyone accessing the tx in [txs_].
+  CHECK_PTR(txs_.insert(signed_tx_hash, *tx_ptr).first);
+  // [txs_by_body_.find_or_insert()] acquires a lock, so the increment to
+  // [tx_cache_size_] happens after the tx is added to the cache from the
+  // perspective of anyone accessing the tx in the cache.
   tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
   return account_state->txs.insert({key, *tx_ptr}).second;
 }
@@ -725,23 +724,23 @@ Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
 {
   SignedTransactionHash signed_tx_hash;
   {
-    auto [tx_value_ptr, txs_lock] = txs_.find(tx_hash);
+    auto [tx_value_ptr, txs_lock] = txs_by_body_.find(tx_hash);
     CHECK_PTR(tx_value_ptr);
     signed_tx_hash = (*tx_value_ptr)->signed_tx_hash;
     // Removing under the lock, so the subtraction from [tx_cache_size_]
-    // happens before the tx is removed from [txs_] from the perspective of
-    // anyone accessing the tx in [txs_].
+    // happens before the tx is removed from the cache from the perspective of
+    // anyone accessing the tx in the cache.
     tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
-    CHECK_EQ(txs_.remove(tx_hash, txs_lock), 1UL);
+    CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
   }
-  CHECK_EQ(signed_tx_hashes_.remove(signed_tx_hash), 1UL);
+  CHECK_EQ(txs_.remove(signed_tx_hash), 1UL);
 }
 
 bool
 Scheduler::is_pending(const SignedTransaction & /*tx*/,
                       const TransactionHash &tx_hash)
 {
-  const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+  const auto [tx_value_ptr, lock] = txs_by_body_.find(tx_hash);
   return tx_value_ptr != nullptr;
 }
 
@@ -1503,12 +1502,12 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // the same txs to the mempool again, resulting in the txs being
             // added back onto the runqueue. Thus, we need to check if the txs
             // are on the runqueue and remove them. We cannot skip this step and
-            // just remove txs from [txs_], even if the *nominated* block is
+            // just remove txs from the cache, even if the *nominated* block is
             // being committed rather than a *validated* block.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
-                  scheduler.txs_.find(tx_hash);
+                  scheduler.txs_by_body_.find(tx_hash);
               CHECK_PTR(tx_value_ptr);
               tx_value = *tx_value_ptr;
             }
