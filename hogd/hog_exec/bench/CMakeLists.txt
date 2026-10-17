@@ -125,3 +125,33 @@ target_include_directories(
 )
 
 set_property(TARGET multiexec_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+add_executable(
+  makespan_runner
+  makespan_runner.cc
+)
+target_link_libraries(
+  makespan_runner
+  hogd
+  protocol
+  runtime
+  exec_interface
+  db_interface
+  hog_db
+  runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
+  contract_loader
+)
+
+target_include_directories(
+  makespan_runner
+  PRIVATE
+  ${CMAKE_BINARY_DIR}
+)
+
+add_dependencies(
+  makespan_runner
+  all_riscvs_built # for fibonacci.rv32a / storage_reads.rv32a
+  all_contract_headers # for built_contracts/fibonacci.h / storage_reads.h
+)
+
+set_property(TARGET makespan_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
