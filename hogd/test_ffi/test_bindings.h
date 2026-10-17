@@ -9,7 +9,7 @@ extern "C" {
 // Version constants for test_ffi library
 // These are checked against release tags in CI
 #define TEST_FFI_VERSION_MAJOR 0
-#define TEST_FFI_VERSION_MINOR 38
+#define TEST_FFI_VERSION_MINOR 40
 #define TEST_FFI_VERSION_PATCH 0
 
 // THREADING CONTRACT
@@ -163,6 +163,30 @@ struct ForeignTryCommitResult {
 
 struct CreateDBResult {
   void *db;
+  enum TestFFIErrorCode ffi_error_code;
+};
+
+// Debug-only rv32 stack diagnostic. An executor built with
+// HOGD_RV32_STACK_USAGE (the default for test_ffi Debug builds) records one of
+// these per rv32 invocation; any other build records nothing.
+struct FFIRv32StackUsage {
+  uint8_t contract_address[32];
+  uint64_t method_id;
+  // First value the guest wrote to sp (x2): the stack top its _start
+  // established. 0xFFFFFFFF if the guest never wrote sp.
+  uint32_t sp_initial;
+  // Lowest value the guest wrote to sp: the deepest point its stack reached,
+  // so sp_initial - sp_min is the invocation's stack usage. 0xFFFFFFFF if the
+  // guest never wrote sp.
+  uint32_t sp_min;
+};
+
+struct GetRv32StackUsageResult {
+  // Array of struct FFIRv32StackUsage; len is in bytes, so the count is
+  // len / sizeof(struct FFIRv32StackUsage). Empty (null data, zero len) when
+  // the handler has run no rv32 invocation or the executor was built without
+  // the diagnostic. Must be freed with free_ffi_data_buffer().
+  struct FFIDataBuffer records;
   enum TestFFIErrorCode ffi_error_code;
 };
 
@@ -349,6 +373,12 @@ struct ForeignHostFnResult mock_syscall_entrypoint(int32_t syscall,
 struct ForeignTracedInvokeResult root_invoke(void *syscall_handler,
                                              uint8_t enable_tracing);
 struct ForeignTryCommitResult try_commit_transaction(void *syscall_handler);
+
+// The rv32 stack records `syscall_handler` has accumulated so far, in the
+// order the invocations finished (a callee before its caller). root_invoke()
+// and mock frames that invoked rv32 contracts both contribute. Readable until
+// close_syscall_handler().
+struct GetRv32StackUsageResult get_rv32_stack_usage(void *syscall_handler);
 enum TestFFIErrorCode abort_transaction(void *syscall_handler);
 
 void enable_syscall_logging(int32_t level);

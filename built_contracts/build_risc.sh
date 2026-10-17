@@ -1,5 +1,5 @@
 #!/bin/sh
-# Build an RV32 contract via groundhog-cli
+# Build an RV32 contract via thruput-cli
 # Usage: build_risc.sh [--no-spec] <target_name> <target_dir> [additional cargo flags...]
 #
 # Produces:
@@ -12,8 +12,8 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="groundhog 0.26.0"
-ACTUAL_VERSION="$(groundhog --version 2>/dev/null || true)"
+EXPECTED_VERSION="thruput 0.30.0"
+ACTUAL_VERSION="$(thruput --version 2>/dev/null || true)"
 ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
 if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then
     echo "error: expected '${EXPECTED_VERSION}', got '${ACTUAL_VERSION:-not installed}'. Run scripts/fetch.sh" >&2
@@ -43,11 +43,11 @@ unset CARGO_ENCODED_RUSTFLAGS
 export CARGO_NET_GIT_FETCH_WITH_CLI=true
 
 # Resolve the output directory to an absolute path before cd'ing into the
-# groundhog project.
+# thruput project.
 mkdir -p "${TARGET_DIR}"
 TARGET_DIR="$(CDPATH= cd -- "${TARGET_DIR}" && pwd)"
 
-# Keep cargo/groundhog intermediates in the build tree instead of the source tree.
+# Keep cargo/thruput intermediates in the build tree instead of the source tree.
 INTERNAL_TARGET_DIR="${TARGET_DIR}/cargo-target"
 # CI sets HOGD_RV32_TARGET_DIR to a directory on its cache volume, so that a
 # fresh build tree doesn't recompile the contracts' dependencies and
@@ -62,8 +62,8 @@ if [ -n "${HOGD_RV32_TARGET_DIR:-}" ]; then
     export CARGO_UNSTABLE_CHECKSUM_FRESHNESS=true
 fi
 
-# Build with groundhog-cli (built-in RV32 lowerer). groundhog must run inside
-# the groundhog project, so run from this script's directory regardless of the
+# Build with thruput-cli (built-in RV32 lowerer). thruput must run inside
+# the thruput project, so run from this script's directory regardless of the
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
 
@@ -73,14 +73,14 @@ BUILD_ERR="$(mktemp)"
 trap 'rm -f "${BUILD_ERR}"' EXIT
 
 set +e
-OUTPUT=$(groundhog build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@" 2>"${BUILD_ERR}")
+OUTPUT=$(thruput build -p "${TARGET_NAME}" --json --target-dir "${INTERNAL_TARGET_DIR}" -- --frozen --offline "$@" 2>"${BUILD_ERR}")
 STATUS=$?
 set -e
 
 cat "${BUILD_ERR}" >&2
 
 if [ "${STATUS}" -ne 0 ]; then
-    echo "error: groundhog build failed for ${TARGET_NAME} (exit ${STATUS})" >&2
+    echo "error: thruput build failed for ${TARGET_NAME} (exit ${STATUS})" >&2
     printf '%s' "$OUTPUT" | jq -r '.error.message // empty' >&2
     exit 1
 fi
@@ -91,13 +91,13 @@ METADATA_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.metadata')
 SPEC_PATH=$(printf '%s' "$OUTPUT" | jq -r '.data.specJson')
 
 if [ -z "${RV32_PATH}" ] || [ "${RV32_PATH}" = "null" ]; then
-    echo "error: groundhog build failed for ${TARGET_NAME}" >&2
+    echo "error: thruput build failed for ${TARGET_NAME}" >&2
     printf '%s' "$OUTPUT" | jq -r '.error.message // empty' >&2
     exit 1
 fi
 
 if [ -z "${METADATA_PATH}" ] || [ "${METADATA_PATH}" = "null" ]; then
-    echo "error: groundhog build did not produce metadata for ${TARGET_NAME}" >&2
+    echo "error: thruput build did not produce metadata for ${TARGET_NAME}" >&2
     exit 1
 fi
 
@@ -107,7 +107,7 @@ cp "${METADATA_PATH}" "${TARGET_DIR}/${TARGET_NAME}.rv32.json"
 
 if [ "${EXPECT_SPEC}" = "1" ]; then
     if [ -z "${SPEC_PATH}" ] || [ "${SPEC_PATH}" = "null" ]; then
-        echo "error: groundhog build did not produce a spec for ${TARGET_NAME}" >&2
+        echo "error: thruput build did not produce a spec for ${TARGET_NAME}" >&2
         exit 1
     fi
     cp "${SPEC_PATH}" "${TARGET_DIR}/${TARGET_NAME}_spec.json"

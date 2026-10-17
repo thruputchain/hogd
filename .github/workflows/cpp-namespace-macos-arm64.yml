@@ -43,6 +43,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -73,9 +74,9 @@ jobs:
           echo "CCACHE_MAXSIZE=20G" >> "$GITHUB_ENV"
 
           # cargo install writes to ~/.cargo/bin, which the cache volume does not
-          # cover, so groundhog-cli and groundhog-rv32-lower were compiled from
-          # source on every run. Install into a cached root instead. ~/.cargo/bin
-          # itself is left alone because rustup's proxies live there.
+          # cover, so thruput-cli was compiled from source on every run.
+          # Install into a cached root instead. ~/.cargo/bin itself is left
+          # alone because rustup's proxies live there.
           echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
           echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
           mkdir -p "$HOME/.cache/cargo-install/bin"

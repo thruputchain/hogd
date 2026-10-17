@@ -7,7 +7,7 @@ review, no submodule pointer dance).
 
 Both directories share the cargo workspace rooted at `built_contracts/`
 (`Cargo.toml` / `Cargo.lock`) and the same build pipeline: `build_risc.sh`
-lowers each crate to a `<name>.rv32a` artifact via groundhog-cli, and
+lowers each crate to a `<name>.rv32a` artifact via thruput-cli, and
 `generate_header.py` turns the emitted `<name>_spec.json` into a C++ header
 (`build/built_contracts/<name>.h`). Outputs land flat in
 `build/built_contracts/`, so crate names must be unique across both

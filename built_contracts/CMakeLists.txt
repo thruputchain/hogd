@@ -27,7 +27,7 @@ target_include_directories(contract_loader PRIVATE
 add_custom_target(all_contract_headers)
 add_custom_target(all_riscv_contracts)
 
-# Tell CMake to clean the cargo/groundhog intermediate build directory.
+# Tell CMake to clean the cargo/thruput intermediate build directory.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
   "${CMAKE_CURRENT_BINARY_DIR}/cargo-target"
 )
@@ -60,7 +60,7 @@ add_custom_command(
 )
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
-# Build all RV32 contracts via build_risc.sh (groundhog-cli)
+# Build all RV32 contracts via build_risc.sh (thruput-cli)
 # Usage: add_riscv_builds(SPEC_CONTRACTS d1/c1 d2/c2 ... RAW_CONTRACTS d3/c3 ...)
 # Contracts are named by their crate directory relative to this directory
 # (e.g. integration_test_contracts/fibonacci, local_test_contracts/foo); the

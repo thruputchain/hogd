@@ -22,6 +22,18 @@ option(BUILD_FUZZERS "Build fuzz targets" OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
+# Debug-only diagnostic: record the lowest sp each rv32 invocation's guest
+# reached, read back through the test FFI's get_rv32_stack_usage() (see
+# hogd/hog_exec/runtime/rv32/stack_usage.h). Defaults to ON with the test FFI,
+# where contract authors measure their stack; inactive outside Debug.
+if(ENABLE_TEST_FFI)
+  set(HOGD_RV32_STACK_USAGE_DEFAULT ON)
+else()
+  set(HOGD_RV32_STACK_USAGE_DEFAULT OFF)
+endif()
+option(HOGD_RV32_STACK_USAGE
+  "Record rv32 guest stack usage per invocation (Debug builds only)"
+  ${HOGD_RV32_STACK_USAGE_DEFAULT})
 option(HOGD_FRAME_POINTERS "Keep frame pointers in Release builds for continuous profiling" ON)
 option(HOGD_RELEASE_DEBUGINFO "Emit debug info in Release builds for split debuginfo packaging" OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
@@ -71,6 +83,21 @@ if(CMAKE_BUILD_TYPE STREQUAL "Release")
 endif()
 if(ENABLE_TEST_FFI)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+if(HOGD_RV32_STACK_USAGE)
+  # Global on purpose: the define adds members to ThreadedMachine, so every
+  # translation unit that includes threaded_machine.h must agree on it. The
+  # generator expression keeps it out of optimized configurations, where the
+  # interpreter's handlers must stay free of the per-write check.
+  add_compile_definitions($<$<CONFIG:Debug>:HOGD_RV32_STACK_USAGE=1>)
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "HOGD_RV32_STACK_USAGE: ON")
+  else()
+    message(STATUS "HOGD_RV32_STACK_USAGE: ON (Debug-only; inactive for "
+                   "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})")
+  endif()
+else()
+  message(STATUS "HOGD_RV32_STACK_USAGE: OFF")
 endif()
 
 # Set up compiler flags for release and debug build types
