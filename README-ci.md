@@ -20,6 +20,11 @@ in debug information. Dependency files retain paths relative to their original
 working directory, including when a cached object is reused on another machine.
 Builds can run concurrently in separate build trees.
 
+CMake adds `-fno-canonical-system-headers` to GCC C/C++ compilations so system
+headers, including GoogleTest, retain these aliases. Otherwise GCC can resolve
+them to absolute paths in short CI checkouts, causing misses in longer developer
+checkouts. CMake selects this option by compiler ID; Clang does not accept it.
+
 The launcher sets `CCACHE_COMPILERCHECK=content` unless explicitly overridden and
 clears `CCACHE_BASEDIR` because the compiler arguments already use stable paths.
 Generic `cc`/`c++` drivers use the corresponding `gcc`/`g++` or `clang`/`clang++`
@@ -27,6 +32,10 @@ name when it is the same executable in the same directory. This lets default
 CMake builds share cache entries with explicitly selected compilers while
 preserving distinct wrappers and C++ driver behavior.
 Other ccache configuration, including remote storage and namespaces, is retained.
+On Linux, the launcher gives ccache and the compiler a consistent `C.UTF-8` locale by
+setting `LANG` and `LC_ALL` and removing inherited `LANGUAGE` and other `LC_*`
+variables. This keeps diagnostics and cache keys consistent between developer
+shells and CI without changing the calling shell's locale.
 Compiler/toolchain, flags, architecture, and file contents still distinguish cache
 entries. Absolute paths intentionally embedded in generated code, including
 `kBuildRoot`, still cause misses for affected translation units.
@@ -34,11 +43,14 @@ entries. Absolute paths intentionally embedded in generated code, including
 Scheduled cache warmup uses the host's default `gcc`/`g++`. It overrides the
 compiler selection in `prepare_env.sh` with `HOGD_CI_GCC_CC` and
 `HOGD_CI_GCC_CXX`; benchmark jobs retain their default GCC 15 pin.
-Warmup and developer builds must use matching compiler versions and locale
-settings to share entries. GCC 15 and GCC 16 still have separate entries. After
-changing the launcher, warm the desired toolchain again; builds can reuse their
-own local entries before consulting shared storage, so local hits need not
-increase the remote hit counter.
+Every warmup run sets `CCACHE_RESHARE=1` so results used by the build are uploaded
+to remote storage even on local cache hits. This also backfills entries whose
+earlier remote uploads failed.
+Warmup and developer builds must use matching compiler versions to share
+entries. GCC 15 and GCC 16 still have separate entries. After changing the
+launcher or cache-related compiler flags, warm the desired toolchain again;
+builds can reuse their own local entries before consulting shared storage, so
+local hits need not increase the remote hit counter.
 
 Diagnostics and `__FILE__` use the relative aliases. To locate sources when
 debugging from elsewhere, GDB can map them with
@@ -52,13 +64,17 @@ dependency checks, including Ninja and Make integration when installed.
 
 CI calls `.github/actions/private-sources` after checking out hogd with
 `persist-credentials: false`, before initializing submodules or fetching Cargo
-dependencies. Set repository variable `COMPONENT_READER_APP_ID` and secret
+dependencies. Callers pass secret `READ_ACCESS_PAT`, a fine-grained personal
+access token with Contents: read. App installation tokens always expire after
+one hour, which long or queued hog_sched runs outlive; the PAT is used instead
+whenever it is set. If it is empty, the action falls back to minting a token
+from repository variable `COMPONENT_READER_APP_ID` and secret
 `COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
-Its installation needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
+The PAT, or the App installation, needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
 thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
 thruput-integration-test-contracts, scp, and thruput-sdk-rs. The hackathon
-workflow additionally requests Contents: read on thruput-tools to build its
-RPC gateway; other callers keep the base repository scope.
+workflow additionally needs Contents: read on thruput-tools to build its
+RPC gateway; with the App fallback, other callers keep the base repository scope.
 
 The action maps legacy and canonical repository URLs to authenticated HTTPS.
 It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
@@ -69,8 +85,9 @@ Git chooses the longest matching `insteadOf` prefix regardless of file order.
 Repository-specific token rules beat organization-wide deploy-key rules; an
 included rule with an identical or longer repository prefix can take precedence
 and must be removed or narrowed on the worker/runner for transferred repos.
-Each caller removes the config in an `always()` cleanup step; the token action
-revokes the installation token at job completion. Existing pre-checkout
+Each caller removes the config in an `always()` cleanup step; with the App
+fallback, the token action revokes the installation token at job completion.
+Rotate `READ_ACCESS_PAT` before it expires. Existing pre-checkout
 `.gitconfig` cleanup steps still remove stale runner configuration. Cargo uses
 the Git CLI. Go module paths remain unchanged; this tree has no go.mod/go.work
 or workflow GOPRIVATE/GOFLAGS settings to migrate.
@@ -246,7 +263,7 @@ python3 hogd/loadgen/hackathon/cluster.py --local --build /tmp/codex-build \
   --output /tmp/hackathon-results --repeats 1
 ```
 
-The corpus builder requires the same installed Groundhog CLI (0.26.0), Rust
+The corpus builder requires the same installed Thruput CLI (0.30.0), Rust
 compiler and cached Cargo dependencies as `built_contracts/build_risc.sh`.
 It creates its build workspace beneath `--output`, never in the source tree.
 Normal builds do not compile the synthetic corpus. `--shared-code 1` on the C++

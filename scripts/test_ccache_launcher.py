@@ -16,10 +16,119 @@ import tempfile
 import unittest
 
 LAUNCHER = Path(__file__).with_name("ccache_launcher.py").resolve()
+CACHE_MODULE = LAUNCHER.parent.parent / "cmake/compiler_cache.cmake"
 
 
 @unittest.skipUnless(shutil.which("ccache"), "ccache is required")
 class CachePathsTest(unittest.TestCase):
+    @unittest.skipUnless(sys.platform.startswith("linux"), "Linux locale normalization")
+    def test_locale_remote_cache_sharing(self):
+        for compiler in ("gcc", "g++", "clang", "clang++"):
+            if not shutil.which(compiler):
+                continue
+            for response in (False, True):
+                with self.subTest(
+                    compiler=compiler, response=response
+                ), tempfile.TemporaryDirectory(prefix="hogd-cache-locale-") as temporary:
+                    root = Path(temporary)
+                    source, build = root / "source-é", root / "build-é"
+                    source.mkdir()
+                    build.mkdir()
+                    (source / "probe-é.c").write_text(
+                        "#warning locale cache probe\nint probe(void) { return 42; }\n"
+                    )
+                    config = root / "ccache.conf"
+                    config.write_text(
+                        "compiler_check = content\n"
+                        f"remote_storage = {(root / 'remote').as_uri()}\n"
+                    )
+                    env = {
+                        key: value
+                        for key, value in os.environ.items()
+                        if not key.startswith(("CCACHE_", "LC_"))
+                        and key not in ("LANG", "LANGUAGE")
+                    }
+                    env["CCACHE_CONFIGPATH"] = str(config)
+                    arguments = [
+                        "-x",
+                        "c++" if compiler.endswith("++") else "c",
+                        "-c",
+                        str(source / "probe-é.c"),
+                        "-o",
+                        "probe.o",
+                    ]
+                    if response:
+                        (build / "input-é.rsp").write_text(
+                            " ".join(shlex.quote(argument) for argument in arguments),
+                            encoding="utf-8",
+                        )
+                        arguments = ["@input-é.rsp"]
+                    command = [
+                        sys.executable,
+                        str(LAUNCHER),
+                        str(source),
+                        str(build),
+                        shutil.which("ccache"),
+                        shutil.which(compiler),
+                        *arguments,
+                    ]
+                    # CI and login shells supply different locale variables.
+                    # Each pass starts with an empty local cache, so subsequent
+                    # hits must come from the isolated file-backed remote cache.
+                    for index, locale in enumerate(
+                        (
+                            {"LC_CTYPE": "C.UTF-8"},
+                            {"LANG": "en_US.UTF-8"},
+                            {
+                                "LANG": "en_US.UTF-8",
+                                "LC_ALL": "C",
+                                "LC_CTYPE": "POSIX",
+                                "LC_MESSAGES": "C",
+                                "LC_TIME": "en_US.UTF-8",
+                                "LANGUAGE": "de:fr",
+                            },
+                            {
+                                # Normalizing the child environment does not
+                                # change Python's startup filesystem encoding.
+                                "LC_ALL": "C",
+                                "PYTHONUTF8": "0",
+                                "PYTHONCOERCECLOCALE": "0",
+                            },
+                        )
+                    ):
+                        with self.subTest(locale=locale):
+                            cache_env = {
+                                **env,
+                                **locale,
+                                "CCACHE_DIR": str(root / f"local-{index}"),
+                            }
+                            result = subprocess.run(
+                                command,
+                                cwd=build,
+                                env=cache_env,
+                                check=True,
+                                capture_output=True,
+                            )
+                            stats = self.stats(cache_env)
+                            output = (build / "probe.o").read_bytes()
+                            (build / "probe.o").unlink()
+                            self.assertEqual(stats["remote_storage_error"], 0)
+                            if index == 0:
+                                self.assertEqual(stats["cache_miss"], 1)
+                                self.assertGreater(stats["remote_storage_write"], 0)
+                                self.assertIn(b"locale cache probe", result.stderr)
+                                expected_output, expected_stderr = output, result.stderr
+                            else:
+                                self.assertEqual(stats["cache_miss"], 0)
+                                self.assertEqual(
+                                    stats["direct_cache_hit"]
+                                    + stats["preprocessed_cache_hit"],
+                                    1,
+                                )
+                                self.assertGreater(stats["remote_storage_hit"], 0)
+                                self.assertEqual(output, expected_output)
+                                self.assertEqual(result.stderr, expected_stderr)
+
     def test_compiler_alias_cache_sharing(self):
         for compiler, alias in (
             ("gcc", "cc"),
@@ -239,6 +348,149 @@ class CachePathsTest(unittest.TestCase):
                     )
                     self.assertEqual(output(), expected)
                 self.assertEqual(self.stats(env)["direct_cache_hit"], 1)
+
+    @unittest.skipUnless(
+        sys.platform.startswith("linux")
+        and shutil.which("cmake")
+        and shutil.which("ninja"),
+        "Linux, CMake, and Ninja are required",
+    )
+    def test_system_header_remote_cache_sharing(self):
+        for c_compiler, cxx_compiler in (("gcc", "g++"), ("clang", "clang++")):
+            if not all(
+                shutil.which(compiler) for compiler in (c_compiler, cxx_compiler)
+            ):
+                continue
+            for response in (False, True):
+                with self.subTest(
+                    compiler=c_compiler, response=response
+                ), tempfile.TemporaryDirectory(
+                    prefix="h-", dir="/tmp"
+                ) as short_temporary, tempfile.TemporaryDirectory(
+                    prefix="hogd-system-header-cache-"
+                ) as temporary:
+                    root, short_root = Path(temporary), Path(short_temporary)
+                    config = root / "ccache.conf"
+                    config.write_text(
+                        "compiler_check = content\n"
+                        f"remote_storage = {(root / 'remote').as_uri()}\n"
+                    )
+                    env = {
+                        key: value
+                        for key, value in os.environ.items()
+                        if not key.startswith("CCACHE_")
+                    }
+                    env["CCACHE_CONFIGPATH"] = str(config)
+                    # GCC canonicalizes system headers when resolving an alias
+                    # produces a shorter path, as on CI's short checkout root.
+                    self.assertLess(
+                        len(str(short_root / "s")), len(".hogd-cache/source")
+                    )
+                    for index, (source, build) in enumerate(
+                        (
+                            (short_root / "s", short_root / "b"),
+                            (root / "developer/long/checkout", root / "build"),
+                        )
+                    ):
+                        source.mkdir(parents=True)
+                        (source / "include").mkdir()
+                        header = source / "include/probe.h"
+                        header.write_text(
+                            "static const char *probe_file(void) { return __FILE__; }\n"
+                            "#define PROBE_VALUE 42\n"
+                        )
+                        for suffix in ("c", "cc"):
+                            (source / f"probe.{suffix}").write_text(
+                                "#include <stdio.h>\n#include <probe.h>\n"
+                                "int main(void) { puts(probe_file()); return PROBE_VALUE; }\n"
+                            )
+                        launcher = ";".join(
+                            (
+                                sys.executable,
+                                str(LAUNCHER),
+                                str(source),
+                                str(build),
+                                shutil.which("ccache"),
+                            )
+                        )
+                        (source / "CMakeLists.txt").write_text(
+                            "cmake_minimum_required(VERSION 3.18)\n"
+                            "project(cache_system_headers C CXX)\n"
+                            f'include("{CACHE_MODULE}")\n'
+                            f'set(CMAKE_C_COMPILER_LAUNCHER "{launcher}")\n'
+                            f'set(CMAKE_CXX_COMPILER_LAUNCHER "{launcher}")\n'
+                            "add_executable(probe_c probe.c)\n"
+                            "add_executable(probe_cxx probe.cc)\n"
+                            "foreach(target probe_c probe_cxx)\n"
+                            "  target_include_directories(${target} SYSTEM PRIVATE "
+                            '"${CMAKE_CURRENT_SOURCE_DIR}/include")\n'
+                            "endforeach()\n"
+                        )
+                        cache_env = {
+                            **env, "CCACHE_DIR": str(root / f"local-{index}")
+                        }
+                        subprocess.run(
+                            [
+                                "cmake",
+                                "-S",
+                                str(source),
+                                "-B",
+                                str(build),
+                                "-G",
+                                "Ninja",
+                                f"-DCMAKE_C_COMPILER={c_compiler}",
+                                f"-DCMAKE_CXX_COMPILER={cxx_compiler}",
+                                "-DCMAKE_BUILD_TYPE=Debug",
+                                *(
+                                    ["-DCMAKE_NINJA_FORCE_RESPONSE_FILE=ON"]
+                                    if response else []
+                                ),
+                            ],
+                            env=cache_env,
+                            check=True,
+                            capture_output=True,
+                        )
+                        if response:
+                            self.assertIn(
+                                "RSP_FILE =", (build / "build.ninja").read_text()
+                            )
+                        command = ["cmake", "--build", str(build)]
+                        subprocess.run(
+                            command, env=cache_env, check=True, capture_output=True
+                        )
+                        stats = self.stats(cache_env)
+                        self.assertEqual(stats["remote_storage_error"], 0)
+                        if index == 0:
+                            self.assertEqual(stats["cache_miss"], 2)
+                            self.assertGreater(stats["remote_storage_write"], 0)
+                        else:
+                            self.assertEqual(stats["cache_miss"], 0)
+                            self.assertEqual(stats["direct_cache_hit"], 2)
+                            self.assertEqual(stats["remote_storage_hit"], 2)
+                        for target in ("probe_c", "probe_cxx"):
+                            result = subprocess.run(
+                                [str(build / target)], text=True, capture_output=True
+                            )
+                            self.assertEqual(result.returncode, 42)
+                            self.assertEqual(
+                                result.stdout.strip(),
+                                ".hogd-cache/source/include/probe.h",
+                            )
+                        if index == 0:
+                            # The portable manifest must work even after CI's
+                            # original system headers have disappeared.
+                            shutil.rmtree(source)
+                            shutil.rmtree(build)
+                    header.write_text(header.read_text().replace("42", "43"))
+                    subprocess.run(
+                        command, env=cache_env, check=True, capture_output=True
+                    )
+                    self.assertEqual(self.stats(cache_env)["cache_miss"], 2)
+                    for target in ("probe_c", "probe_cxx"):
+                        result = subprocess.run(
+                            [str(build / target)], capture_output=True
+                        )
+                        self.assertEqual(result.returncode, 43)
 
     @unittest.skipUnless(
         shutil.which("cmake") and shutil.which("gcc"), "CMake and GCC are required"

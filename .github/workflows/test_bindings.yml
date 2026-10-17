@@ -41,6 +41,7 @@ jobs:
       - name: Configure private sources
         uses: ./.github/actions/private-sources
         with:
+          token: ${{ secrets.READ_ACCESS_PAT }}
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
@@ -54,17 +55,20 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
-          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's groundhog-cli and
-          # groundhog-rv32-lower installs, rebuilt from source on every run
-          # without it) and the toolchains (~/.cache/rustup) on the cache volume.
+          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's thruput-cli
+          # install, rebuilt from source on every run without it) and the
+          # toolchains (~/.cache/rustup) on the cache volume.
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -158,6 +162,9 @@ jobs:
         if: always()
         run: |
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build
 
       - name: Print Log Download Instructions

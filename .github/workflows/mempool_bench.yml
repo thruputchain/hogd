@@ -32,6 +32,7 @@ jobs:
               id: private-sources
               uses: ./.github/actions/private-sources
               with:
+                token: ${{ secrets.READ_ACCESS_PAT }}
                 app-id: ${{ vars.COMPONENT_READER_APP_ID }}
                 private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
                 ssh-private-key: |

@@ -166,6 +166,7 @@ file(GLOB TEST_FFI_REGRESSION_TESTS CONFIGURE_DEPENDS
 add_executable(
   test_ffi_test
   test_bindings_test.cc
+  rv32_stack_usage_test.cc
   ${TEST_FFI_REGRESSION_TESTS}
 )
 
