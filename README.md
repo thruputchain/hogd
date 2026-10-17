@@ -123,6 +123,44 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     * flake8 (for python)
     * shfmt
 
+## Compiler caches
+
+Install `ccache` for C/C++ and `sccache` for native Rust builds. On Arch Linux:
+
+```sh
+sudo pacman -S --needed ccache sccache
+```
+
+The build detects sccache automatically and sets `CARGO_INCREMENTAL=0` for native
+Rust compilation and workspace tests. Machines with a `10.100.*` interface use
+the shared WebDAV cache at `http://hog12:9281/`, under `hogd/rust/`. The service
+accepts only clients in `10.100.0.0/16` and requires no password. Outside that
+network, sccache uses its normal configuration/local cache. Explicit sccache
+backend environment settings or `SCCACHE_CONF` take precedence over discovery.
+
+To select a different WebDAV cache, set `SCCACHE_WEBDAV_ENDPOINT` and optionally
+`SCCACHE_WEBDAV_KEY_PREFIX` before configuring. Set
+`HOGD_SCCACHE_REMOTE=0` to skip cluster discovery, or pass
+`-x -DHOGD_USE_SCCACHE=OFF` to `scripts/build.sh` to disable Rust caching.
+After changing storage settings, stop the idle daemon with
+`sccache --stop-server` so its next invocation loads the new configuration.
+
+```sh
+./scripts/build.sh -d /tmp/gcc -x -DBUILD_BENCHMARKS=ON
+ccache --show-stats -vv
+sccache --show-stats
+```
+
+CI installs a checksum-verified sccache 0.18.0 binary when necessary. Namespace
+jobs persist the local Rust cache; private-cluster warmup jobs populate WebDAV
+directly and report both compiler caches even when a build fails. Existing Cargo
+outputs can skip compilation entirely; a fresh output directory is needed to
+measure compiler cache reuse. RV32 contract builds retain their separate Cargo
+cache and currently clear `RUSTC_WRAPPER`.
+
+For standalone Cargo commands, use `RUSTC_WRAPPER=sccache` and source
+`scripts/sccache-env.sh` to apply the same incremental and storage settings.
+
 ## Building `hog-devnode` for contract development
 
 Contract authors normally do not build this repository. The `groundhog` CLI

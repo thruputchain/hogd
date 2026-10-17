@@ -43,6 +43,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     make \
     ninja-build \
     ccache \
+    sccache \
     flex \
     bison \
     git \

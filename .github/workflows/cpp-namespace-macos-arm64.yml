@@ -58,6 +58,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
             ~/.cache/rustup
@@ -84,6 +85,8 @@ jobs:
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -186,6 +189,9 @@ jobs:
           fi
           ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
           ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
           python3 scripts/ci/ninja_build_profile.py build/clang
 
       - name: Print Log Download Instructions

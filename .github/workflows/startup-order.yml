@@ -48,6 +48,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
 
@@ -100,6 +101,8 @@ jobs:
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Build GCC Debug (node binaries only)
         run: |

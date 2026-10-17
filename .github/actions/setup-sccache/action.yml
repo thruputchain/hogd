@@ -1,0 +1,15 @@
+name: Set up Rust compiler cache
+description: Installs sccache and selects shared WebDAV storage on the private cluster
+runs:
+  using: composite
+  steps:
+    - name: Install and configure sccache
+      shell: bash
+      run: |
+        source ./scripts/ci/setup_sccache.sh
+        dirname "$(command -v sccache)" >> "$GITHUB_PATH"
+        ./scripts/sccache-env.sh --print-env >> "$GITHUB_ENV"
+        echo 'CARGO_INCREMENTAL=0' >> "$GITHUB_ENV"
+        if [[ -z "${SCCACHE_WEBDAV_ENDPOINT:-}" && -z "${SCCACHE_CONF:-}" && -z "${SCCACHE_DIR:-}" ]]; then
+          echo "SCCACHE_DIR=$HOME/.cache/sccache" >> "$GITHUB_ENV"
+        fi

@@ -44,6 +44,7 @@ BREW_PACKAGES=(
   "zstd"      # Compression
   "snappy"    # Compression (for RocksDB)
   "ccache"    # CCache (for faster builds)
+  "sccache"   # Native Rust compiler cache
 )
 
 MISSING_PACKAGES=()

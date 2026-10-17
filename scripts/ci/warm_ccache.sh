@@ -60,6 +60,25 @@ fi
 # also retries uploads that failed during an earlier warmup.
 export CCACHE_RESHARE=1
 
+source "$SCRIPT_DIR/../sccache-env.sh"
+if ! command -v sccache >/dev/null 2>&1; then
+  echo "sccache is required for Rust cache warmup; source scripts/ci/setup_sccache.sh first" >&2
+  exit 1
+fi
+if [[ -n "${SCCACHE_WEBDAV_ENDPOINT:-}" ]]; then
+  # Disk hits do not upload to WebDAV. Warm the shared backend directly.
+  export SCCACHE_MULTILEVEL_CHAIN=webdav
+fi
+
+show_cache_stats() {
+  echo "ccache stats"
+  ccache -s || true
+  echo "sccache stats"
+  sccache --show-stats || true
+}
+# Include statistics even when a selected build fails under set -e.
+trap show_cache_stats EXIT
+
 exec 9>"$LOCK_FILE"
 echo "waiting for warmup lock: $LOCK_FILE"
 flock 9
@@ -82,8 +101,8 @@ if [[ "$CURRENT_SHA" != "$TARGET_SHA" ]]; then
   exit 1
 fi
 
-echo "ccache stats before warmup"
-ccache -s || true
+echo "compiler cache stats before warmup"
+show_cache_stats
 
 FAILURES=0
 
@@ -165,9 +184,6 @@ run_variant() {
 if [[ -n "$SELECTED_COMPILER" ]]; then
   run_variant "$SELECTED_COMPILER" "$SELECTED_BUILD_TYPE" "$SELECTED_VARIANT"
 
-  echo
-  echo "ccache stats after warmup"
-  ccache -s || true
   exit 0
 fi
 
@@ -180,10 +196,6 @@ for compiler in gcc clang; do
     done
   done
 done
-
-echo
-echo "ccache stats after warmup"
-ccache -s || true
 
 if ((FAILURES > 0)); then
   echo "$FAILURES ccache warmup build(s) failed" >&2

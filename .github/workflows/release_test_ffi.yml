@@ -146,6 +146,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
 
       - name: Configure Git for Submodule Caching
@@ -192,6 +193,8 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
+      - uses: ./.github/actions/setup-sccache
+
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build \
@@ -230,7 +233,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
@@ -281,6 +286,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
 
       - name: Configure ccache
@@ -338,6 +344,8 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
+      - uses: ./.github/actions/setup-sccache
+
       - name: Configure Build
         run: |
           ./scripts/build.sh \
@@ -378,7 +386,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
