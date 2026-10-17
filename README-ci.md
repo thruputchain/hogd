@@ -64,13 +64,17 @@ dependency checks, including Ninja and Make integration when installed.
 
 CI calls `.github/actions/private-sources` after checking out hogd with
 `persist-credentials: false`, before initializing submodules or fetching Cargo
-dependencies. Set repository variable `COMPONENT_READER_APP_ID` and secret
+dependencies. Callers pass secret `READ_ACCESS_PAT`, a fine-grained personal
+access token with Contents: read. App installation tokens always expire after
+one hour, which long or queued hog_sched runs outlive; the PAT is used instead
+whenever it is set. If it is empty, the action falls back to minting a token
+from repository variable `COMPONENT_READER_APP_ID` and secret
 `COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
-Its installation needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
+The PAT, or the App installation, needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
 thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
 thruput-integration-test-contracts, scp, and thruput-sdk-rs. The hackathon
-workflow additionally requests Contents: read on thruput-tools to build its
-RPC gateway; other callers keep the base repository scope.
+workflow additionally needs Contents: read on thruput-tools to build its
+RPC gateway; with the App fallback, other callers keep the base repository scope.
 
 The action maps legacy and canonical repository URLs to authenticated HTTPS.
 It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
@@ -81,8 +85,9 @@ Git chooses the longest matching `insteadOf` prefix regardless of file order.
 Repository-specific token rules beat organization-wide deploy-key rules; an
 included rule with an identical or longer repository prefix can take precedence
 and must be removed or narrowed on the worker/runner for transferred repos.
-Each caller removes the config in an `always()` cleanup step; the token action
-revokes the installation token at job completion. Existing pre-checkout
+Each caller removes the config in an `always()` cleanup step; with the App
+fallback, the token action revokes the installation token at job completion.
+Rotate `READ_ACCESS_PAT` before it expires. Existing pre-checkout
 `.gitconfig` cleanup steps still remove stale runner configuration. Cargo uses
 the Git CLI. Go module paths remain unchanged; this tree has no go.mod/go.work
 or workflow GOPRIVATE/GOFLAGS settings to migrate.
@@ -258,7 +263,7 @@ python3 hogd/loadgen/hackathon/cluster.py --local --build /tmp/codex-build \
   --output /tmp/hackathon-results --repeats 1
 ```
 
-The corpus builder requires the same installed Groundhog CLI (0.26.0), Rust
+The corpus builder requires the same installed Thruput CLI (0.30.0), Rust
 compiler and cached Cargo dependencies as `built_contracts/build_risc.sh`.
 It creates its build workspace beneath `--output`, never in the source tree.
 Normal builds do not compile the synthetic corpus. `--shared-code 1` on the C++

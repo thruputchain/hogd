@@ -25,6 +25,7 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -91,7 +92,7 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   // function is noexcept, so translate that the same way an instantiation
   // failure is translated above.
   try {
-    return run_ecall_loop(std::move(*machine_noexcept), gas_limit);
+    return run_ecall_loop(std::move(*machine_noexcept), method_id, gas_limit);
   } catch (std::exception const &e) {
     error("Unrecoverable: could not start rv32 ecall loop: {}", e.what());
     return result_t{InvokeError{InvokeErrorCode::Unrecoverable}, 0};
@@ -101,12 +102,64 @@ Rv32Runtime::invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept
   }
 }
 
+#if HOGD_RV32_STACK_USAGE_ENABLED
+namespace {
+
+// Hands the guest's initial and lowest sp to the syscall handler when the
+// invocation's coroutine frame goes away, whichever exit it took: a Return, a
+// host error, a trap, or a frame abandoned before completion. The handler's
+// record outlives the machine; the test FFI reads it after root_invoke().
+// Debug-only; see HOGD_RV32_STACK_USAGE in rv32/stack_usage.h. The address is
+// copied at entry, while this invocation's frame is the handler's active one.
+class StackUsageReport {
+public:
+  StackUsageReport(rv32::ThreadedMachine const &machine,
+                   SystemCallHandler &handler, ContractAddress address,
+                   Runtime::MethodID method_id)
+    : machine_(machine), handler_(handler), address_(address),
+      method_id_(method_id)
+  {}
+  StackUsageReport(StackUsageReport const &) = delete;
+  StackUsageReport &operator=(StackUsageReport const &) = delete;
+
+  ~StackUsageReport()
+  {
+    // Appending allocates, and nothing may escape a destructor.
+    try {
+      handler_.record_rv32_stack_usage({.address = address_,
+                                        .method_id = method_id_,
+                                        .sp_initial = machine_.sp_initial(),
+                                        .sp_min = machine_.sp_min()});
+    } catch (...) {
+      report_dropped_log("rv32 stack usage record");
+    }
+  }
+
+private:
+  rv32::ThreadedMachine const &machine_;
+  SystemCallHandler &handler_;
+  ContractAddress address_;
+  Runtime::MethodID method_id_;
+};
+
+} // namespace
+#endif
+
 // The machine is moved into this coroutine's frame: syscalls suspend the loop,
 // so it cannot live on the caller's stack.
 x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
-Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit)
+Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine,
+                            [[maybe_unused]] MethodID method_id,
+                            uint64_t gas_limit)
 {
   using result_t = std::pair<InvokeStatus<void>, GasAmount>;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  // A local of the coroutine body: destroyed on every exit path, after the
+  // last co_return and before `machine`, which as a parameter outlives it.
+  const StackUsageReport stack_usage_report(
+      machine, *syscall_handler_, syscall_handler_->get_current_address(),
+      method_id);
+#endif
   rv32::StepResult result = machine.start();
 
   while (result == rv32::StepResult::kEcall) {

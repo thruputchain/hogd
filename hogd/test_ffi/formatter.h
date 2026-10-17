@@ -64,6 +64,15 @@ template<> struct formatter<ForeignTryCommitResult> {
   }
 };
 
+template<> struct formatter<GetRv32StackUsageResult> {
+  static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
+  static auto format(const GetRv32StackUsageResult &result, auto &ctx)
+  {
+    return format_to(ctx.out(), "records=[{}], ffi_error_code={}",
+                     result.records, std::to_underlying(result.ffi_error_code));
+  }
+};
+
 template<> struct formatter<CreateDBResult> {
   static constexpr auto parse(format_parse_context &ctx) { return ctx.begin(); }
   static auto format(const CreateDBResult &result, auto &ctx)

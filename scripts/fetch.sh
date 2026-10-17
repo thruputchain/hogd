@@ -20,7 +20,7 @@ set -ex
 TOOL_RUST=1.96.0
 rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
-# groundhog-cli's published deps still resolve from the legacy index, which
+# thruput-cli's published deps still resolve from the legacy index, which
 # needs auth; name it so cargo can match a token to the URL.
 export CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX:-sparse+https://groundhog.dev/crates/api/v1/crates/}"
 # xtrace expands the token into the job log, so drop tracing here.
@@ -31,10 +31,6 @@ if [ -n "${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG
 fi
 set -x
 
-echo "Installing groundhog-cli..."
+echo "Installing thruput-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.26.0
-
-echo "Installing groundhog-rv32-lower..."
-CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.26.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-cli@0.30.0
