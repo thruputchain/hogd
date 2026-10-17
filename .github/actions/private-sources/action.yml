@@ -1,11 +1,16 @@
 name: Private sources
-description: Authenticate transferred private sources with a job-local read-only App token
+description: Authenticate transferred private sources with a job-local read-only token
 inputs:
+  token:
+    description: >-
+      Long-lived read-only token (fine-grained PAT). When set, it is used instead
+      of minting an App token, whose one-hour lifetime cannot outlast long worker runs.
+    default: ''
   app-id:
-    description: Component reader GitHub App ID
+    description: Component reader GitHub App ID, used when token is empty
     required: true
   private-key:
-    description: Component reader GitHub App private key
+    description: Component reader GitHub App private key, used when token is empty
     required: true
   ssh-private-key:
     description: Deploy keys for repositories still in groundhogchain
@@ -15,13 +20,14 @@ inputs:
     default: ''
 outputs:
   token:
-    description: Read-only installation token for private source fetches on workers
-    value: ${{ steps.token.outputs.token }}
+    description: Read-only token for private source fetches on workers
+    value: ${{ inputs.token || steps.token.outputs.token }}
 runs:
   using: composite
   steps:
     - name: Mint component reader token
       id: token
+      if: inputs.token == ''
       uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
       with:
         app-id: ${{ inputs.app-id }}
@@ -44,7 +50,7 @@ runs:
     - name: Configure job-local Git authentication
       shell: bash
       env:
-        COMPONENT_TOKEN: ${{ steps.token.outputs.token }}
+        COMPONENT_TOKEN: ${{ inputs.token || steps.token.outputs.token }}
       run: |
         set +x
         set -euo pipefail

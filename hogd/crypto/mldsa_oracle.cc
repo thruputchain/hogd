@@ -31,6 +31,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/mldsa.h"
 #include "hogd/crypto/mldsa_signer.h"
+#include "types.hh"
 
 namespace hogd {
 namespace {
