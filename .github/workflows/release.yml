@@ -75,8 +75,8 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
         with:
           cache: rust
-          # ~/.cargo keeps the groundhog-cli and groundhog-rv32-lower installs
-          # (fetch.sh compiled them from source every run, 3.5 min on arm64);
+          # ~/.cargo keeps the groundhog-cli install (fetch.sh compiled it
+          # from source every run, 3.5 min on arm64);
           # ~/.cache/rustup keeps the pinned toolchains (see
           # .github/actions/cached-rustup-home).
           path: |
