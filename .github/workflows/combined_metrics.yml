@@ -3,7 +3,7 @@ name: Combined Metrics (hog_sched)
 on:
     workflow_dispatch:
     push:
-        branches: ["main", "codex/auth-warm-path"]
+        branches: ["main"]
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     # Published crates and pinned submodules retain the legacy registry identity.
