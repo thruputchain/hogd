@@ -3,6 +3,8 @@
 #include <chrono>
 #include <format>
 #include <string>
+#include <sys/resource.h>
+#include <sys/time.h> // IWYU pragma: keep
 #include <thread>
 
 #include "hogd/base/coropoll.h"
@@ -19,6 +21,32 @@
 
 namespace hogd {
 
+// The process's total CPU time and how many CPUs it may run on, under the
+// names Prometheus client libraries use, so that two scrapes alone say how
+// many cores the process kept busy in between.
+inline std::string
+process_cpu_metrics()
+{
+  rusage usage{};
+  ::getrusage(RUSAGE_SELF, &usage);
+  // NOLINTBEGIN(misc-include-cleaner): glibc defines timeval internally
+  auto seconds = [](const timeval &tv) {
+    return static_cast<double>(tv.tv_sec) +
+           (static_cast<double>(tv.tv_usec) / 1e6);
+  };
+  // NOLINTEND(misc-include-cleaner)
+  return std::format(
+      "# HELP process_cpu_seconds_total Total user and system CPU time spent "
+      "in seconds.\n"
+      "# TYPE process_cpu_seconds_total counter\n"
+      "process_cpu_seconds_total {:.6f}\n"
+      "# HELP process_available_cpus CPUs this process may run on.\n"
+      "# TYPE process_available_cpus gauge\n"
+      "process_available_cpus {}\n",
+      seconds(usage.ru_utime) + seconds(usage.ru_stime),
+      available_parallelism());
+}
+
 inline void
 add_health_metrics_routes(HttpServer &server)
 {
@@ -33,7 +61,8 @@ add_health_metrics_routes(HttpServer &server)
     return HttpResponse{
         .status = 200,
         .content_type = "text/plain",
-        .body = Metrics::instance().dump_to_prometheus_string(),
+        .body = Metrics::instance().dump_to_prometheus_string() +
+                process_cpu_metrics(),
     };
   });
 }

@@ -26,7 +26,11 @@
 // read to its reply being delivered (network, HogDb, and the wait for the
 // executor's RPC reader to run), and `read_hop_avg_us`, the wait to hop back
 // onto the executor's thread pool afterwards. The means are over every read in
-// the block, light and heavy alike.
+// the block, light and heavy alike. The same scrapes, plus hog-db's, give
+// how many cores each process kept busy over the trial: `db_cores` for hog-db
+// and `exec_cores_max` for the busiest executor, against the `db_ncpu` and
+// `exec_ncpu` CPUs each may use (printed in `makespan_config:`). A process
+// near its CPU count is the one the block is waiting on.
 //
 // The cluster bring-up is multiexec_runner's (see multiexec_cluster.h): the
 // runner stands in for the mempool, so none of the mempool's own accounting
@@ -299,20 +303,67 @@ fetch_metrics(const std::string &ip, uint16_t port)
   return response.substr(header_end + 4);
 }
 
-// The value of a counter line `<name> <value>` in a Prometheus scrape.
-int64_t
-metric_value(std::string_view text, std::string_view name)
+// The value text of a line `<name> <value>` in a Prometheus scrape.
+std::optional<std::string>
+metric_text(std::string_view text, std::string_view name)
 {
   size_t pos = 0;
   while ((pos = text.find(name, pos)) != std::string_view::npos) {
     const bool line_start = pos == 0 || text[pos - 1] == '\n';
     const size_t after = pos + name.size();
     if (line_start && after < text.size() && text[after] == ' ') {
-      return std::stoll(std::string(text.substr(after + 1)));
+      return std::string(text.substr(after + 1));
     }
     pos = after;
   }
-  return 0;
+  return std::nullopt;
+}
+
+// An integer metric, or 0 when the scrape lacks it.
+int64_t
+metric_value(std::string_view text, std::string_view name)
+{
+  const auto value = metric_text(text, name);
+  return value ? std::stoll(*value) : 0;
+}
+
+// A floating-point metric, or 0 when the scrape lacks it.
+double
+metric_double(std::string_view text, std::string_view name)
+{
+  const auto value = metric_text(text, name);
+  return value ? std::stod(*value) : 0.0;
+}
+
+// The CPU time hog-db and each executor had used at one moment
+// (process_cpu_seconds_total, hogd/metrics/shared.h). Two samples, over the
+// wall time between them, say how many cores each process kept busy.
+struct CpuSample {
+  uint64_t wall_ns = 0;
+  double db_s = 0;
+  std::vector<double> exec_s;
+};
+
+struct CpuUse {
+  double db_cores = 0;
+  double exec_cores_max = 0;
+};
+
+CpuUse
+cpu_use(const CpuSample &before, const CpuSample &after)
+{
+  const double wall_s =
+      static_cast<double>(after.wall_ns - before.wall_ns) / 1e9;
+  if (wall_s <= 0) {
+    return {};
+  }
+  CpuUse use{.db_cores = (after.db_s - before.db_s) / wall_s};
+  for (size_t i = 0; i < before.exec_s.size() && i < after.exec_s.size(); i++) {
+    use.exec_cores_max =
+        std::max(use.exec_cores_max,
+                 (after.exec_s[i] - before.exec_s[i]) / wall_s);
+  }
+  return use;
 }
 
 // Uniquifiers for every work transaction in the run. A nonce is never reused,
@@ -392,11 +443,16 @@ public:
     std::println("makespan_config: nexec={} nconnections={} "
                  "ncoros_per_connection={} fib_n={} heavy_reads={} "
                  "light_reads={} n_light={} n_heavy={} light_batch={} "
-                 "trials={}",
+                 "trials={} db_ncpu={} exec_ncpu={}",
                  cluster_.num_executors(), exec_clients_.size(),
                  params_.n_coros_per_connection, params_.fib_n,
                  params_.heavy_reads, params_.light_reads, params_.n_light,
-                 params_.n_heavy, params_.light_batch, params_.n_trials);
+                 params_.n_heavy, params_.light_batch, params_.n_trials,
+                 scrape_available_cpus(cluster_.db_ip(), kBenchDbMetricsPort),
+                 cluster_.exec_ips().empty()
+                     ? 0
+                     : scrape_available_cpus(cluster_.exec_ips().front(),
+                                             kBenchExecMetricsPort));
 
     uniquifiers_ = UniquifierSource(next_block_height());
     for (const Scenario &s : scenarios) {
@@ -404,6 +460,8 @@ public:
       std::vector<uint64_t> heavy_maxes;
       std::vector<double> read_rpc_us;
       std::vector<double> read_hop_us;
+      std::vector<double> db_cores;
+      std::vector<double> exec_cores;
       for (uint32_t trial = 0; trial < params_.n_trials; trial++) {
         const TrialResult r = run_trial(s, trial);
         makespans.push_back(r.makespan_ns);
@@ -412,24 +470,28 @@ public:
         }
         read_rpc_us.push_back(r.reads.rpc_avg_us());
         read_hop_us.push_back(r.reads.hop_avg_us());
+        db_cores.push_back(r.cpu.db_cores);
+        exec_cores.push_back(r.cpu.exec_cores_max);
       }
       std::ranges::sort(makespans);
       std::ranges::sort(heavy_maxes);
       std::ranges::sort(read_rpc_us);
       std::ranges::sort(read_hop_us);
-      std::println("makespan_summary: scenario={} trials={} "
-                   "makespan_min_us={} makespan_median_us={} "
-                   "makespan_max_us={} heavy_max_median_us={} "
-                   "read_rpc_avg_median_us={:.1f} "
-                   "read_hop_avg_median_us={:.1f}",
-                   s.name, makespans.size(), makespans.front() / 1000,
-                   makespans[makespans.size() / 2] / 1000,
-                   makespans.back() / 1000,
-                   heavy_maxes.empty()
-                       ? 0
-                       : heavy_maxes[heavy_maxes.size() / 2] / 1000,
-                   read_rpc_us[read_rpc_us.size() / 2],
-                   read_hop_us[read_hop_us.size() / 2]);
+      std::ranges::sort(db_cores);
+      std::ranges::sort(exec_cores);
+      std::println(
+          "makespan_summary: scenario={} trials={} "
+          "makespan_min_us={} makespan_median_us={} "
+          "makespan_max_us={} heavy_max_median_us={} "
+          "read_rpc_avg_median_us={:.1f} "
+          "read_hop_avg_median_us={:.1f} db_cores_median={:.1f} "
+          "exec_cores_max_median={:.1f}",
+          s.name, makespans.size(), makespans.front() / 1000,
+          makespans[makespans.size() / 2] / 1000, makespans.back() / 1000,
+          heavy_maxes.empty() ? 0 : heavy_maxes[heavy_maxes.size() / 2] / 1000,
+          read_rpc_us[read_rpc_us.size() / 2],
+          read_hop_us[read_hop_us.size() / 2], db_cores[db_cores.size() / 2],
+          exec_cores[exec_cores.size() / 2]);
     }
   }
 
@@ -624,17 +686,49 @@ private:
     return total;
   }
 
+  // A process that cannot be scraped is warned about and reads as zero, so
+  // its cores for the trial come out zero or negative.
+  static double scrape_cpu_seconds(const std::string &ip, uint16_t port)
+  {
+    auto text = fetch_metrics(ip, port);
+    if (!text) {
+      warn("could not scrape process CPU from {}:{}", ip, port);
+      return 0;
+    }
+    return metric_double(*text, "process_cpu_seconds_total");
+  }
+
+  static int64_t scrape_available_cpus(const std::string &ip, uint16_t port)
+  {
+    auto text = fetch_metrics(ip, port);
+    return text ? metric_value(*text, "process_available_cpus") : 0;
+  }
+
+  CpuSample scrape_cpu()
+  {
+    CpuSample sample{.wall_ns = x23::fastclock::get_ns(),
+                     .db_s = scrape_cpu_seconds(cluster_.db_ip(),
+                                                kBenchDbMetricsPort)};
+    for (const std::string &ip : cluster_.exec_ips()) {
+      sample.exec_s.push_back(scrape_cpu_seconds(ip, kBenchExecMetricsPort));
+    }
+    return sample;
+  }
+
   struct TrialResult {
     uint64_t makespan_ns;
     uint64_t heavy_max_ns;
     ReadStats reads;
+    CpuUse cpu;
   };
 
   TrialResult run_trial(const Scenario &s, uint32_t trial)
   {
     const Block block = make_block(s, trial);
     const ReadStats reads_before = scrape_read_stats();
+    const CpuSample cpu_before = scrape_cpu();
     const std::vector<UnitTiming> timings = run_block(block);
+    const CpuUse cpu = cpu_use(cpu_before, scrape_cpu());
     const ReadStats reads = scrape_read_stats() - reads_before;
 
     uint64_t makespan = 0;
@@ -666,17 +760,19 @@ private:
                  "makespan_us={} light_batch_p50_us={} light_batch_p99_us={} "
                  "heavy={} heavy_order={} heavy_p50_us={} heavy_max_us={} "
                  "last_heavy_done_us={} reads={} read_rpc_avg_us={:.1f} "
-                 "read_hop_avg_us={:.1f}",
+                 "read_hop_avg_us={:.1f} db_cores={:.1f} exec_cores_max={:.1f}",
                  s.name, trial, cluster_.num_executors(), block.txs.size(),
                  block.units.size(), makespan / 1000, pct_us(light_lat, 0.5),
                  pct_us(light_lat, 0.99), tx_class_name(s.heavy_class),
                  heavy_order_name(s.order), pct_us(heavy_lat, 0.5),
                  pct_us(heavy_lat, 1.0), heavy_done / 1000, reads.count,
-                 reads.rpc_avg_us(), reads.hop_avg_us());
+                 reads.rpc_avg_us(), reads.hop_avg_us(), cpu.db_cores,
+                 cpu.exec_cores_max);
     std::fflush(stdout);
     return {.makespan_ns = makespan,
             .heavy_max_ns = heavy_lat.empty() ? 0 : heavy_lat.back(),
-            .reads = reads};
+            .reads = reads,
+            .cpu = cpu};
   }
 };
 

@@ -191,8 +191,9 @@ connect_to_exec_server(const ExecCard &card)
 // event server's startup log.
 inline constexpr uint16_t kBenchEventIndexerPort = 8092;
 inline constexpr uint16_t kBenchIndexerBlockExplorerPort = 8093;
-// Each executor's Prometheus /metrics endpoint.
+// Each executor's Prometheus /metrics endpoint, and hog-db's.
 inline constexpr uint16_t kBenchExecMetricsPort = 8041;
+inline constexpr uint16_t kBenchDbMetricsPort = 8042;
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -377,11 +378,13 @@ public:
     EventCard event_card = sched_event_test_->impl()->await_event_card();
     sched_exec_test_->impl()->register_event_card(event_card);
 
+    db_ip_ = hog_ip(server_addrs[server_idx]);
     control_server_handles_[server_idx].ci_client.start_server(
         "hogd/hog_db/hog-db",
         {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
-         hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-         std::format("{}:{}", mempool_ip, sched_db_port)});
+         db_ip_, "--coordinator-addr",
+         std::format("{}:{}", mempool_ip, sched_db_port), "--metrics-port",
+         std::to_string(kBenchDbMetricsPort)});
     server_idx++;
 
     // Started before the executors so it is already draining the outbox by
@@ -474,6 +477,9 @@ public:
   // The executors' /metrics endpoints, as host IPs; each listens on
   // kBenchExecMetricsPort.
   const std::vector<std::string> &exec_ips() const { return exec_ips_; }
+  // hog-db's /metrics endpoint, as a host IP; it listens on
+  // kBenchDbMetricsPort.
+  const std::string &db_ip() const { return db_ip_; }
 
   std::string indexer_block_explorer_addr() const
   {
@@ -495,6 +501,7 @@ private:
   RpcServer<MockSchedDB> sched_db_test_;
   RpcServer<MockSchedEvent> sched_event_test_;
 
+  std::string db_ip_;
   std::string indexer_ip_;
   std::vector<std::string> exec_ips_;
   std::vector<ExecCard> exec_cards_;
