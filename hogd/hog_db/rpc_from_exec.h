@@ -23,7 +23,6 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "retrocausal_queue.hh"
-#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -131,35 +130,17 @@ public:
 
   explicit HogDbExecutorRpc(RPCContext &ctx) : ctx_(ctx) {}
 
-  // commit_transaction, try_push_new_subtransaction and get_snapshot_item
-  // are coroutines that hop to a pool thread before doing any work.  x23's
-  // reader coroutine calls serve() inline, so a synchronous handler runs on
-  // the connection's reader and every request behind it on that connection
-  // waits -- and an executor multiplexes thousands of transactions over a few
-  // dozen connections.  These are the three an executor sends per
-  // transaction or per storage key, so they are the ones worth the hop.
-  //
-  // Arguments are by value: the RPC layer moves them out of a temporary that
-  // dies once the coroutine first suspends.  The run_* bodies do the work
-  // synchronously, on whatever thread calls them.
-  x23::Async<RPCError> commit_transaction(BlockID block, TransactionID tx,
-                                          NewContractBatch new_contracts);
-  RPCError run_commit_transaction(BlockID block, TransactionID tx,
-                                  NewContractBatch new_contracts);
+  RPCError commit_transaction(BlockID block, TransactionID tx,
+                              NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
-  x23::Async<TryPushSubtransactionResult>
+  TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
                               StorageDeltaBatch batch);
-  TryPushSubtransactionResult
-  run_try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                  StorageDeltaBatch batch);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 
-  x23::Async<ExpectedStorageItem> get_snapshot_item(BlockID block,
-                                                    AddressAndKey addrkey);
-  ExpectedStorageItem run_get_snapshot_item(BlockID block,
-                                            AddressAndKey const &addrkey);
+  ExpectedStorageItem get_snapshot_item(BlockID block,
+                                        AddressAndKey const &addrkey);
 
   ExpectedContract get_contract(BlockID block, SHA256Hash const &hash);
   ExpectedDeployment get_deployment(BlockID block,
@@ -197,8 +178,7 @@ private:
 };
 // MaybeAsync rather than type_identity_t: get_db_tip and
 // open_viewing_snapshot are coroutines (they can suspend on a commit
-// publication), as are the handlers that hop off the reader, which is also
-// the transform RpcServer itself validates.
+// publication), which is also the transform RpcServer itself validates.
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, x23::MaybeAsync>);
 
