@@ -36,5 +36,7 @@ CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/cr
   cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-cli@0.26.0
 
 echo "Installing groundhog-rv32-lower..."
+# Shared runner caches can contain the renamed thruput-rv32-lower package,
+# which installs the same binary. Restore this checkout's pinned tool.
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog groundhog-rv32-lower@0.26.0
+  cargo "+${TOOL_RUST}" install --force --locked --registry groundhog groundhog-rv32-lower@0.26.0
