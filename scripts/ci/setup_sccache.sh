@@ -36,7 +36,7 @@ hogd_install_sccache() {
     if ! curl --fail --location --retry 3 --silent --show-error \
       "https://github.com/mozilla/sccache/releases/download/v$version/$archive.tar.gz" \
       --output "$temporary/archive.tar.gz" ||
-      ! python3 - "$temporary/archive.tar.gz" "$checksum" <<'PY'
+      ! python3 -c '
 import hashlib
 import pathlib
 import sys
@@ -44,8 +44,7 @@ import sys
 actual = hashlib.sha256(pathlib.Path(sys.argv[1]).read_bytes()).hexdigest()
 if actual != sys.argv[2]:
     sys.exit("sccache release checksum mismatch")
-PY
-    then
+' "$temporary/archive.tar.gz" "$checksum"; then
       rm -rf -- "$temporary"
       return 1
     fi
