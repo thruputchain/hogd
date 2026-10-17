@@ -258,7 +258,7 @@ python3 hogd/loadgen/hackathon/cluster.py --local --build /tmp/codex-build \
   --output /tmp/hackathon-results --repeats 1
 ```
 
-The corpus builder requires the same installed Groundhog CLI (0.26.0), Rust
+The corpus builder requires the same installed Thruput CLI (0.30.0), Rust
 compiler and cached Cargo dependencies as `built_contracts/build_risc.sh`.
 It creates its build workspace beneath `--output`, never in the source tree.
 Normal builds do not compile the synthetic corpus. `--shared-code 1` on the C++
