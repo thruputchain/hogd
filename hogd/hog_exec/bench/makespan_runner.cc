@@ -75,6 +75,15 @@ namespace {
 using fib_meta_t = ContractTraitMeta<fibonacci::Fibonacci>;
 using reads_meta_t = ContractTraitMeta<storage_reads::StorageReads>;
 
+// Genesis funding for each bench contract. Every transaction reserves the
+// replay-cache storage cost against the contract it invokes, priced from the
+// block's snapshot: in a block where the contract's replay cache does not exist
+// yet, each one reserves the cost of creating it (~12000). A 100k-transaction
+// block therefore needs ~1.2e9, and an underfunded contract fails transactions
+// with ExecResultTxNonDeterministicError. 1e15 covers ~8e10 such transactions,
+// well inside the native supply.
+constexpr int128_t kContractFunding = 1'000'000'000'000'000;
+
 enum class TxClass : uint8_t { kLight, kFib, kReads };
 
 std::string_view
@@ -318,9 +327,11 @@ private:
 
     auto fib_contract = std::make_shared<Contract>(ContractType::kRv32);
     fib_contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
-    builder.add_distribution(
-        fib_contract, SHA256Hash{}, fib_meta_t::entrypoint<u8"fibonacci">(),
-        fib_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}), 1'000'000'000);
+    builder.add_distribution(fib_contract, SHA256Hash{},
+                             fib_meta_t::entrypoint<u8"fibonacci">(),
+                             fib_meta_t::make_calldata<u8"fibonacci">(
+                                 uint32_t{5}),
+                             kContractFunding);
     fib_addr_ = calculate_genesis_deployment_address(sha256(*fib_contract),
                                                      SHA256Hash{});
 
@@ -329,7 +340,7 @@ private:
     builder.add_distribution(reads_contract, SHA256Hash{},
                              reads_meta_t::entrypoint<u8"init">(),
                              reads_meta_t::make_calldata<u8"init">(),
-                             1'000'000'000);
+                             kContractFunding);
     reads_addr_ = calculate_genesis_deployment_address(sha256(*reads_contract),
                                                        SHA256Hash{});
 
