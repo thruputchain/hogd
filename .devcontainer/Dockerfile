@@ -43,7 +43,6 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     make \
     ninja-build \
     ccache \
-    sccache \
     flex \
     bison \
     git \
@@ -77,6 +76,29 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     libbz2-dev \
     libzstd-dev \
     && $SUDO rm -rf /var/lib/apt/lists/*
+
+# Bake the same WebDAV-capable version used by scripts/ci/setup_sccache.sh into
+# Namespace images. Distro package versions may differ and trigger a download
+# in every job. Keep these release checksums in sync with the fallback installer.
+RUN set -eu; \
+    sccache_version=0.18.0; \
+    case "$(uname -m)" in \
+      x86_64) sccache_target=x86_64-unknown-linux-musl; \
+        sccache_checksum=45f1447fbe231e3037bde351ef70677dd212216c8d62ae7ca409fecc4d6acc89 ;; \
+      aarch64) sccache_target=aarch64-unknown-linux-musl; \
+        sccache_checksum=2b3284d5da3b46a47dc4229e75bb7b88ac4aa99c8d754fb7d2f84997e5a4354a ;; \
+      *) echo 'Unsupported sccache image architecture' >&2; exit 1 ;; \
+    esac; \
+    sccache_workdir="$(mktemp -d)"; \
+    trap 'rm -rf "$sccache_workdir"' EXIT; \
+    sccache_archive="sccache-v$sccache_version-$sccache_target"; \
+    wget -q -O "$sccache_workdir/archive.tar.gz" \
+      "https://github.com/mozilla/sccache/releases/download/v$sccache_version/$sccache_archive.tar.gz"; \
+    printf '%s  %s\n' "$sccache_checksum" "$sccache_workdir/archive.tar.gz" | sha256sum -c -; \
+    tar -xzf "$sccache_workdir/archive.tar.gz" -C "$sccache_workdir"; \
+    if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi; \
+    $SUDO install -m 755 "$sccache_workdir/$sccache_archive/sccache" /usr/local/bin/sccache; \
+    /usr/local/bin/sccache --version
 
 # apt.llvm's compiler-rt package stores architecture-suffixed runtimes under
 # lib/linux, while its clang driver searches un-suffixed names under the target

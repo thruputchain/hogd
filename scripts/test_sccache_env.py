@@ -106,7 +106,12 @@ class SccacheEnvironmentTest(unittest.TestCase):
             stubs = {
                 "git": "echo test-commit\n",
                 "ccache": "echo ccache-stub-stats\n",
-                "sccache": "echo sccache-stub-stats\n",
+                "sccache": (
+                    'printf "%s|%s|%s|%s\\n" "$1" "$SCCACHE_SERVER_UDS" '
+                    '"${SCCACHE_SERVER_PORT-unset}" "$SCCACHE_CACHED_CONF" '
+                    '>> "$SCCACHE_TRACE"\n'
+                    'echo sccache-stub-stats\n'
+                ),
             }
             for name, body in stubs.items():
                 executable = commands / name
@@ -129,16 +134,65 @@ class SccacheEnvironmentTest(unittest.TestCase):
                 HOGD_CCACHE_WARMUP_BUILD_TYPE="Release",
                 HOGD_CCACHE_WARMUP_VARIANT="default",
                 HOGD_CCACHE_WARMUP_LOCK=str(root / "warmup.lock"),
+                SCCACHE_SERVER_UDS=str(root / "caller.sock"),
+                SCCACHE_SERVER_PORT="4226",
+                SCCACHE_CACHED_CONF=str(root / "caller-config"),
+                SCCACHE_TRACE=str(root / "calls"),
             )
             env["PATH"] = f"{commands}:{env['PATH']}"
+            sockets = []
+            for _ in range(2):
+                result = subprocess.run(
+                    ["bash", str(ci / warmup.name), "test-commit"],
+                    env=env, text=True, capture_output=True,
+                )
+                self.assertEqual(result.returncode, 7, result.stderr)
+                output = result.stdout.splitlines()
+                self.assertEqual(output.count("ccache-stub-stats"), 2)
+                self.assertEqual(output.count("sccache-stub-stats"), 2)
+                calls = [line.split("|") for line in
+                         (root / "calls").read_text().splitlines()][-3:]
+                self.assertEqual([c[0] for c in calls], [
+                    "--show-stats", "--show-stats", "--stop-server",
+                ])
+                socket = calls[0][1]
+                self.assertNotEqual(socket, env["SCCACHE_SERVER_UDS"])
+                self.assertTrue(all(c[1] == socket for c in calls))
+                self.assertTrue(all(c[2] == "unset" for c in calls))
+                self.assertTrue(all(
+                    Path(c[3]).parent == Path(socket).parent for c in calls
+                ))
+                self.assertFalse(Path(socket).parent.exists())
+                sockets.append(socket)
+            self.assertNotEqual(*sockets)
+
+    def test_ci_uses_image_binary_without_downloading(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            cache = root / "cache"
+            commands = root / "bin"
+            commands.mkdir()
+            stubs = {
+                "sccache": 'echo "sccache 0.18.0"\n',
+                "curl": 'echo unexpected-download >&2\nexit 1\n',
+            }
+            for name, body in stubs.items():
+                executable = commands / name
+                executable.write_text("#!/bin/sh\n" + body)
+                executable.chmod(0o755)
+            env = self.environment(XDG_CACHE_HOME=str(cache))
+            env["PATH"] = f"{commands}:{env['PATH']}"
+            installer = SCRIPT.parent / "ci/setup_sccache.sh"
             result = subprocess.run(
-                ["bash", str(ci / warmup.name), "test-commit"],
+                ["bash", "-c", 'source "$1" && command -v sccache',
+                 "test", str(installer)],
                 env=env, text=True, capture_output=True,
             )
-            self.assertEqual(result.returncode, 7, result.stderr)
-            output = result.stdout.splitlines()
-            self.assertEqual(output.count("ccache-stub-stats"), 2)
-            self.assertEqual(output.count("sccache-stub-stats"), 2)
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(
+                result.stdout.splitlines()[-1], str(commands / "sccache")
+            )
+            self.assertFalse(cache.exists())
 
 
 if __name__ == "__main__":

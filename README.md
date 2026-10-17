@@ -151,9 +151,13 @@ ccache --show-stats -vv
 sccache --show-stats
 ```
 
-CI installs a checksum-verified sccache 0.18.0 binary when necessary. Namespace
-jobs persist the local Rust cache; private-cluster warmup jobs populate WebDAV
-directly and report both compiler caches even when a build fails. Existing Cargo
+The Namespace Linux runner image includes checksum-verified sccache 0.18.0, and
+jobs persist compiled Rust artifacts in `~/.cache/sccache`. Rebuild the runner
+image from `.devcontainer/Dockerfile` when updating the pinned version. CI setup
+downloads the pinned binary only as a fallback for hosts or older images that
+do not already provide it. Private-cluster warmup jobs use an isolated daemon
+to populate WebDAV directly, report both compiler caches even when a build fails,
+and stop their daemon on exit without affecting other builds. Existing Cargo
 outputs can skip compilation entirely; a fresh output directory is needed to
 measure compiler cache reuse. RV32 contract builds retain their separate Cargo
 cache and currently clear `RUSTC_WRAPPER`.

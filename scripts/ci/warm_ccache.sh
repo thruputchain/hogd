@@ -76,12 +76,26 @@ show_cache_stats() {
   echo "sccache stats"
   sccache --show-stats || true
 }
-# Include statistics even when a selected build fails under set -e.
-trap show_cache_stats EXIT
-
 exec 9>"$LOCK_FILE"
 echo "waiting for warmup lock: $LOCK_FILE"
 flock 9
+
+# A running daemon keeps its startup backend settings. Give each warmup a new
+# server so local/disk-first daemons cannot swallow writes intended for WebDAV.
+SCCACHE_WARMUP_RUNTIME="$(mktemp -d /tmp/hogd-sccache-warmup.XXXXXX)"
+export SCCACHE_SERVER_UDS="$SCCACHE_WARMUP_RUNTIME/server.sock"
+export SCCACHE_CACHED_CONF="$SCCACHE_WARMUP_RUNTIME/cached-config"
+unset SCCACHE_SERVER_PORT
+
+finish_warmup() {
+  local status=$?
+  show_cache_stats
+  sccache --stop-server >/dev/null 2>&1 || true
+  rm -rf -- "$SCCACHE_WARMUP_RUNTIME" || true
+  return "$status"
+}
+# Report failures and stop only this warmup's daemon, leaving other builds alone.
+trap finish_warmup EXIT
 
 cd "$ROOT_DIR"
 
