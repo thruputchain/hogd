@@ -16,6 +16,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
+#include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -33,8 +34,10 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
+#include "hogd/hog_db/preserialized_reply.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/storage_item_reply.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -630,7 +633,7 @@ TEST_F(RpcFromExecDiagnosticsTest, ContractRowReachesClientIntact)
 
     auto reply = rpc_->get_contract(BlockID{1}, hash);
     ASSERT_EQ(reply.error(), RPCError::kRPCNone) << "contract " << i;
-    ExpectedContract result = decode_reply<ExpectedContract>(reply);
+    auto result = decode_reply<ExpectedContract>(reply);
     ASSERT_EQ(result.error(), RPCError::kRPCNone);
     EXPECT_TRUE(std::ranges::equal(x23::serialize(result.contract()), row))
         << "contract " << i;

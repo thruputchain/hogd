@@ -21,6 +21,7 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/storage_item_reply.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/version.h"

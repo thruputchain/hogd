@@ -12,7 +12,6 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
-#include "x23/debug.h"
 
 namespace hogd {
 
