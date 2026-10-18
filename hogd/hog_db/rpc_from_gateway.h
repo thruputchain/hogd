@@ -4,6 +4,11 @@
 
 #include <atomic>
 #include <cstddef>
+#include <cstdint>
+#include <span>
+#include <type_traits>
+#include <utility>
+#include <vector>
 
 // generated x23 headers
 #include "db_gateway.hh"
@@ -12,9 +17,84 @@
 #include "storage_item.hh"
 #include "types.hh"
 
+#include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/rpc_context.h"
+#include "hogd/hog_db/storage_item_reply.h"
+#include "x23/serialize.h"
+
+namespace hogd {
+
+// Reply for dbgateway_get_items, standing in for the DbGatewayResult the RPC
+// interface declares.  Its items are StorageItemReplys, so a bytestring goes
+// from the row read out of ramdb straight into the message.
+class DbGatewayItemsReply {
+public:
+  using Item = StorageItemReply<DbGatewayItemResult>;
+
+  // A reply that carries no payload.
+  explicit DbGatewayItemsReply(RPCError error) noexcept : error_(error)
+  {
+    CHECK(error_ != RPCError::kRPCNone);
+  }
+
+  // A kRPCNone reply carrying [items], read at [block_height].
+  DbGatewayItemsReply(BlockHeight block_height,
+                      std::vector<Item> items) noexcept
+    : error_(RPCError::kRPCNone), block_height_(block_height),
+      items_(std::move(items))
+  {}
+
+  RPCError error() const noexcept { return error_; }
+  BlockHeight block_height() const noexcept { return block_height_; }
+  std::span<const Item> items() const noexcept { return items_; }
+
+private:
+  RPCError error_;
+  BlockHeight block_height_ = 0;
+  std::vector<Item> items_;
+};
+
+// As x23 writes the generated union: discriminant, then on kRPCNone the
+// DbGatewayPayload's height and its length-prefixed items.
+inline size_t
+xdr_size(const DbGatewayItemsReply &reply)
+{
+  size_t size = 4; // discriminant
+  if (reply.error() == RPCError::kRPCNone) {
+    size += x23::xdr_size(reply.block_height()) + 4; // height, item count
+    for (auto const &item : reply.items()) {
+      size += xdr_size(item);
+    }
+  }
+  return size;
+}
+
+inline void
+xdr_serialize(auto &serializer, const DbGatewayItemsReply &reply)
+{
+  serializer.put32(static_cast<uint32_t>(reply.error()));
+  if (reply.error() != RPCError::kRPCNone) {
+    return;
+  }
+  serializer(reply.block_height());
+  serializer.put32(static_cast<uint32_t>(reply.items().size()));
+  for (auto const &item : reply.items()) {
+    serializer(item);
+  }
+}
+
+} // namespace hogd
+
+namespace x23 {
+// Declares DbGatewayItemsReply a stand-in for the DbGatewayResult the
+// DbGateway1 interface declares.  Must precede the is_DbGateway1 assertion
+// below, which is what checks it.
+template<>
+struct serialize_equiv<hogd::DbGatewayResult, hogd::DbGatewayItemsReply>
+  : std::true_type {};
+} // namespace x23
 
 namespace hogd {
 
@@ -41,7 +121,7 @@ public:
   // rpc server runs handlers on ThreadPool workers, which must not park.
   // Own the decoded batch because RPC dispatch releases its arguments when
   // a handler suspends.
-  x23::Async<DbGatewayResult> dbgateway_get_items(AddressAndKeyBatch batch);
+  x23::Async<DbGatewayItemsReply> dbgateway_get_items(AddressAndKeyBatch batch);
 
   x23::Async<DbGatewayConfigResult> dbgateway_get_config();
 
