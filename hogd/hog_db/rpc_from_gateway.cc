@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <span>
 #include <utility>
+#include <vector>
 
 // generated x23 headers
 #include "address_auth.hh"
@@ -64,39 +65,40 @@ to_rpc_error(HogDbError err)
 // Read one item at the current committed tip.  Mirrors the logic of
 // HogDbExecutorRpc::get_snapshot_item but is read-only and takes no
 // BlockID (the snapshot is implicitly "latest committed").
-DbGatewayItemResult
+DbGatewayItemsReply::Item
 read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
 {
+  using Reply = DbGatewayItemsReply::Item;
   ItemKey key = make_item_key(addrkey);
 
   if (key.is_address_balance()) {
     HogDbStatus<int128_t> nnint = db.read_address_balance(key.get_address());
     if (!nnint)
-      return DbGatewayItemResult(to_rpc_error(nnint.error()));
+      return Reply(to_rpc_error(nnint.error()));
     WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
     DbGatewayItemResult ret;
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
-    return ret;
+    ret.item() = std::move(out);
+    return Reply(std::move(ret));
   }
 
   if (key.is_address_auth_data()) {
     HogDbStatus<AddressAuthData> auth_data =
         db.read_address_auth_data(key.get_address());
     if (!auth_data)
-      return DbGatewayItemResult(to_rpc_error(auth_data.error()));
+      return Reply(to_rpc_error(auth_data.error()));
     WireStorageItem out(StorageItemType::kItemTypeAuthData);
-    out.auth_data() = *auth_data;
+    out.auth_data() = std::move(*auth_data);
     DbGatewayItemResult ret;
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
-    return ret;
+    ret.item() = std::move(out);
+    return Reply(std::move(ret));
   }
 
   HogDbStatus<DBItem> item = db.read_contract_data_item(key);
   if (!item)
-    return DbGatewayItemResult(to_rpc_error(item.error()));
+    return Reply(to_rpc_error(item.error()));
 
   WireStorageItem out;
   switch (item->type) {
@@ -111,13 +113,14 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
     break;
   }
   case kBytes:
-  {
-    out.type(StorageItemType::kItemTypeBytestring);
-    const auto *cptr = reinterpret_cast<const char *>(item->value.data());
-    out.bytestring().append_range(
-        std::span<const char>(cptr, item->value.size()));
-    break;
-  }
+    // The row already is the Bytestring, so the reply carries it as read.
+    if (item->value.size() > kBytestringCeilingLen) [[unlikely]] {
+      error("dbgateway: bytestring row of {} bytes exceeds the {} byte "
+            "ceiling",
+            item->value.size(), kBytestringCeilingLen);
+      return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+    }
+    return Reply::bytestring(std::move(item->value));
   case kRetrocausalQueue:
   {
     out.type(StorageItemType::kItemTypeRetrocausalQueue);
@@ -125,21 +128,20 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
       x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
     } catch (x23::XdrException &e) {
       error("dbgateway: failed to deserialize rcq metadata: {}", e.what());
-      return DbGatewayItemResult(
-          to_rpc_error(HogDbError(HogDbCode::kInternal)));
+      return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
     }
     break;
   }
   default:
     // Unknown types (e.g. kDeployedContractHash) are intentionally not
     // surfaced via this read path yet; surface as internal.
-    return DbGatewayItemResult(to_rpc_error(HogDbError(HogDbCode::kInternal)));
+    return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
   }
 
   DbGatewayItemResult ret;
   ret.error(RPCError::kRPCNone);
-  ret.item() = out;
-  return ret;
+  ret.item() = std::move(out);
+  return Reply(std::move(ret));
 }
 
 } // namespace
@@ -179,7 +181,7 @@ HogDbGatewayRpc::dbgateway_get_config()
   co_return result;
 }
 
-x23::Async<DbGatewayResult>
+x23::Async<DbGatewayItemsReply>
 HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
 {
   HogDbDAO &db = ctx_.get_db();
@@ -188,7 +190,7 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
   if (batch.size() > kMaxBatchItems) {
     error("dbgateway_get_items: batch of {} items exceeds cap of {}; rejecting",
           batch.size(), kMaxBatchItems);
-    co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+    co_return DbGatewayItemsReply(RPCError::kRPCUnrecoverable);
   }
 
   // Snapshot the committed tip once up-front so every item in the response
@@ -215,36 +217,33 @@ HogDbGatewayRpc::dbgateway_get_items(AddressAndKeyBatch batch)
 
     DbTip tip = ctx_.get_tip();
 
-    DbGatewayPayload payload;
-    payload.block_height = tip.value.proposal_header.block_height;
-    payload.items.reserve(batch.size());
+    std::vector<DbGatewayItemsReply::Item> items;
+    items.reserve(batch.size());
     std::size_t response_bytes = 0;
     for (AddressAndKey const &k : batch) {
-      DbGatewayItemResult item = read_one_item(db, k);
+      DbGatewayItemsReply::Item item = read_one_item(db, k);
       // Items are variable-sized, so bound the cumulative response size too.
-      response_bytes += x23::xdr_size(item);
+      response_bytes += xdr_size(item);
       if (response_bytes > kMaxResponseBytes) [[unlikely]] {
         error("dbgateway_get_items: response exceeds {} bytes; rejecting",
               kMaxResponseBytes);
-        co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+        co_return DbGatewayItemsReply(RPCError::kRPCUnrecoverable);
       }
-      payload.items.push_back(std::move(item));
+      items.push_back(std::move(item));
     }
 
     if (ctx_.is_committed_read_stale(tip)) [[unlikely]] {
       continue;
     }
 
-    DbGatewayResult ret;
-    ret.error(RPCError::kRPCNone);
-    ret.payload() = std::move(payload);
-    co_return ret;
+    co_return DbGatewayItemsReply(tip.value.proposal_header.block_height,
+                                  std::move(items));
   }
 
   error("dbgateway_get_items: committed snapshot kept moving across {} "
         "attempts; giving up",
         kMaxAttempts);
-  co_return DbGatewayResult(RPCError::kRPCUnrecoverable);
+  co_return DbGatewayItemsReply(RPCError::kRPCUnrecoverable);
 }
 
 } // namespace hogd

@@ -29,7 +29,11 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   // but I do not want to mess storage accounting inside ItemChange yet
 
   if (after->is_bytes()) {
-    return ctx.cost_model->get_bytestring_cost(after->to_bytes().size());
+    // Read the size in place rather than via to_bytes(), which would copy
+    // the whole bytestring just to measure it.
+    auto const *bytes = after->get_inner<Bytes>();
+    CHECK_PTR(bytes);
+    return ctx.cost_model->get_bytestring_cost(bytes->value_view().size());
   }
   if (after->is_nnint128()) {
     return ctx.cost_model->get_nnint_cost();
@@ -47,10 +51,11 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
         deployment->deployed_contract_hash());
   }
   if (after->is_auth_data()) {
-    auto const &auth_data = after->to_auth_data();
-    x23assert(auth_data.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    auto const &item = *auth_data;
+    // Read the change in place rather than via to_auth_data(), which would
+    // copy the whole auth table into an optional.
+    auto const *auth_data = after->get_inner<PointerItem<AuthDataItem>>();
+    CHECK_PTR(auth_data);
+    auto const &item = **auth_data;
     // Refused here, at reservation: the AuthLock admission that commit_change
     // runs comes after the transaction's balance changes are committed, and
     // a conflict there poisons the block.

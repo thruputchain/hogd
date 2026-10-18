@@ -2,13 +2,16 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <memory>
 #include <set>
+#include <span>
 #include <utility>
+#include <vector>
 
 #include "contract.hh"
 #include "db_conflict.hh"
@@ -22,11 +25,13 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -421,7 +426,7 @@ TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
                                                            std::byte{0}};
   ASSERT_TRUE(ctx_->get_db().write_contract_code(hash, kTruncatedContractXdr));
 
-  ExpectedContract result = rpc_->get_contract(BlockID{1}, hash);
+  auto result = rpc_->get_contract(BlockID{1}, hash);
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 
@@ -473,6 +478,215 @@ TEST(BorrowedQueueEntryReplyTest, MatchesExpectedQueueEntryOnTheWire)
     ASSERT_EQ(owning_bytes.size(), borrowed_bytes.size());
     EXPECT_EQ(0, memcmp(owning_bytes.data(), borrowed_bytes.data(),
                         owning_bytes.size()));
+  }
+}
+
+// Bytes 0..len-1 in a pattern that makes a misplaced or dropped byte show.
+std::vector<std::byte>
+patterned_bytes(size_t len)
+{
+  std::vector<std::byte> bytes(len);
+  for (size_t i = 0; i < len; i++) {
+    bytes[i] = static_cast<std::byte>((i * 7) + 1);
+  }
+  return bytes;
+}
+
+// An OwningSpan holding a copy of [bytes].
+OwningSpan<const std::byte>
+owning_copy(std::span<const std::byte> bytes)
+{
+  std::vector<std::byte> buf(bytes.begin(), bytes.end());
+  auto span = std::span<const std::byte>(buf);
+  return OwningSpan(span, [ref = std::move(buf)] {});
+}
+
+// Decodes [reply] as the executor does, from the bytes x23 puts on the wire,
+// after checking those bytes are exactly what the [Wire] they decode to
+// encodes as.
+template<typename Wire>
+Wire
+decode_reply(const auto &reply)
+{
+  static_assert(x23::serializes_like<decltype(reply), Wire>);
+  x23::Buf wire = x23::serialize(reply);
+  EXPECT_EQ(wire.size(), xdr_size(reply));
+  Wire decoded;
+  x23::deserialize(&decoded, x23::BufViewEnd(wire));
+  x23::Buf reencoded = x23::serialize(decoded);
+  EXPECT_TRUE(std::ranges::equal(wire, reencoded));
+  return decoded;
+}
+
+// The padding cases (1 and 3 bytes short of a word, and 13 in the interior)
+// and both bounds of a Bytestring.
+constexpr std::array<size_t, 5> kBytestringLengths{0, 1, 3, 13,
+                                                   static_cast<size_t>(
+                                                       kBytestringCeilingLen)};
+
+TEST(StorageItemReplyTest, MatchesExpectedStorageItemOnTheWire)
+{
+  using Reply = StorageItemReply<ExpectedStorageItem>;
+  static_assert(
+      x23::satisfies_rpc_return<Reply, ExpectedStorageItem, x23::MaybeAsync>);
+
+  for (size_t len : kBytestringLengths) {
+    std::vector<std::byte> bytes = patterned_bytes(len);
+    ExpectedStorageItem owning;
+    owning.error(RPCError::kRPCNone);
+    owning.item().type(StorageItemType::kItemTypeBytestring);
+    for (std::byte b : bytes) {
+      owning.item().bytestring().push_back(std::to_integer<uint8_t>(b));
+    }
+
+    Reply borrowed = Reply::bytestring(owning_copy(bytes));
+    EXPECT_EQ(borrowed.error(), RPCError::kRPCNone);
+    EXPECT_EQ(x23::xdr_size(owning), xdr_size(borrowed)) << "length " << len;
+    EXPECT_TRUE(
+        std::ranges::equal(x23::serialize(owning), x23::serialize(borrowed)))
+        << "length " << len;
+  }
+
+  // Anything else travels as the ExpectedStorageItem it is.
+  WireStorageItem nnint(StorageItemType::kItemTypeNonnegativeInt);
+  nnint.nnint() = to_xdr(int128_t{42});
+  ExpectedStorageItem owning(RPCError::kRPCNone);
+  owning.item() = nnint;
+  Reply reply{ExpectedStorageItem(owning)};
+  EXPECT_TRUE(
+      std::ranges::equal(x23::serialize(owning), x23::serialize(reply)));
+
+  for (RPCError error : {RPCError::kRPCNotFound, RPCError::kRPCBadBlockID,
+                         RPCError::kRPCUnrecoverable}) {
+    Reply failed(error);
+    EXPECT_EQ(failed.error(), error);
+    EXPECT_TRUE(std::ranges::equal(x23::serialize(ExpectedStorageItem(error)),
+                                   x23::serialize(failed)));
+  }
+}
+
+TEST_F(RpcFromExecDiagnosticsTest, SnapshotBytestringReachesClientIntact)
+{
+  for (size_t i = 0; i < kBytestringLengths.size(); i++) {
+    size_t len = kBytestringLengths[i];
+    AddressAndKey key = make_data_key(addr_, static_cast<uint8_t>(0x60 + i));
+    std::vector<std::byte> bytes = patterned_bytes(len);
+    ASSERT_TRUE(ctx_->get_db().write_bytes(make_item_key(key), bytes));
+
+    auto reply = rpc_->get_snapshot_item(BlockID{1}, key);
+    ASSERT_NE(reply.bytestring(), nullptr) << "length " << len;
+    auto item = decode_reply<ExpectedStorageItem>(reply);
+    ASSERT_EQ(item.error(), RPCError::kRPCNone);
+    ASSERT_EQ(item.item().type(), StorageItemType::kItemTypeBytestring);
+    EXPECT_TRUE(
+        std::ranges::equal(std::as_bytes(std::span(item.item().bytestring())),
+                           bytes))
+        << "length " << len;
+  }
+
+  auto missing =
+      rpc_->get_snapshot_item(BlockID{1}, make_data_key(addr_, 0x5F));
+  EXPECT_EQ(decode_reply<ExpectedStorageItem>(missing).error(),
+            RPCError::kRPCNotFound);
+
+  auto balance = rpc_->get_snapshot_item(BlockID{1}, make_balance_key(addr_));
+  auto balance_item = decode_reply<ExpectedStorageItem>(balance);
+  ASSERT_EQ(balance_item.error(), RPCError::kRPCNone);
+  EXPECT_EQ(balance_item.item().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+}
+
+Contract
+make_rv32_contract(size_t len)
+{
+  Contract contract(ContractType::kRv32);
+  for (std::byte b : patterned_bytes(len)) {
+    contract.rv32_contract().data.push_back(std::to_integer<uint8_t>(b));
+  }
+  return contract;
+}
+
+// get_contract serves the stored row as is, so whatever is stored must reach
+// the executor as the Contract it encodes: inline and chunked rows, every
+// padding case, and each arm.
+TEST_F(RpcFromExecDiagnosticsTest, ContractRowReachesClientIntact)
+{
+  std::vector<Contract> contracts;
+  for (size_t len :
+       {size_t{0}, size_t{1}, size_t{3}, size_t{13}, size_t{200'000}}) {
+    contracts.push_back(make_rv32_contract(len));
+  }
+  contracts.emplace_back(ContractType::kMockTest);
+  contracts.back().mock_contract_id() = 7;
+  contracts.emplace_back(ContractType::kNative);
+  contracts.back().native_contract_id() =
+      HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet;
+
+  for (size_t i = 0; i < contracts.size(); i++) {
+    SHA256Hash hash{};
+    hash.fill(static_cast<uint8_t>(0x10 + i));
+    x23::Buf row = x23::serialize(contracts[i]);
+    ASSERT_TRUE(ctx_->get_db().write_contract_code(hash, std::as_bytes(
+                                                             std::span(row))));
+
+    auto reply = rpc_->get_contract(BlockID{1}, hash);
+    ASSERT_EQ(reply.error(), RPCError::kRPCNone) << "contract " << i;
+    ExpectedContract result = decode_reply<ExpectedContract>(reply);
+    ASSERT_EQ(result.error(), RPCError::kRPCNone);
+    EXPECT_TRUE(std::ranges::equal(x23::serialize(result.contract()), row))
+        << "contract " << i;
+  }
+
+  SHA256Hash missing{};
+  missing.fill(0x9F);
+  auto reply = rpc_->get_contract(BlockID{1}, missing);
+  EXPECT_EQ(decode_reply<ExpectedContract>(reply).error(),
+            RPCError::kRPCNotFound);
+}
+
+// Each way a stored row can fail to be a Contract encoding is reported as
+// corruption rather than sent to the executor to fail decoding there.
+TEST_F(RpcFromExecDiagnosticsTest, NonContractRowsReportCorruption)
+{
+  x23::Buf valid = x23::serialize(make_rv32_contract(13));
+  std::vector<x23::Buf> rows;
+  // Nonzero padding after the code.
+  rows.push_back(valid);
+  rows.back().back() = 1;
+  // Truncated mid-code, and with the padding cut off.
+  rows.emplace_back(valid.begin(), valid.end() - 8);
+  rows.emplace_back(valid.begin(), valid.end() - 4);
+  // A trailing word after the code.
+  rows.push_back(valid);
+  for (int j = 0; j < 4; j++) {
+    rows.back().push_back(0);
+  }
+  // A code length past the end of the row.
+  rows.push_back(valid);
+  rows.back()[7] = 0xFF;
+  // The retired discriminant 0, and one never assigned.
+  for (uint32_t type : {0U, 99U}) {
+    x23::Buf row = valid;
+    row[3] = static_cast<uint8_t>(type);
+    rows.push_back(std::move(row));
+  }
+  // A one-word arm with a word missing, and with one to spare.
+  Contract mock(ContractType::kMockTest);
+  rows.push_back(x23::serialize(mock));
+  rows.back().resize(4);
+  rows.push_back(x23::serialize(mock));
+  for (int j = 0; j < 4; j++) {
+    rows.back().push_back(0);
+  }
+
+  for (size_t i = 0; i < rows.size(); i++) {
+    SHA256Hash hash{};
+    hash.fill(static_cast<uint8_t>(0xA0 + i));
+    ASSERT_TRUE(
+        ctx_->get_db().write_contract_code(hash,
+                                           std::as_bytes(std::span(rows[i]))));
+    auto reply = rpc_->get_contract(BlockID{1}, hash);
+    EXPECT_EQ(reply.error(), RPCError::kRPCUnrecoverable) << "row " << i;
   }
 }
 
