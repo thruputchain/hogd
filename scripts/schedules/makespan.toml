@@ -148,7 +148,7 @@ set -o pipefail
   | tee makespan_runner_log || exit 1
 
 echo 'summary'
-grep -E '^makespan_(config|summary):' makespan_runner_log
+grep -E '^(makespan_(config|summary)|probe):' makespan_runner_log
 
 """
 after = """

@@ -409,6 +409,7 @@ public:
     }
 
     auto db_cards = sched_db_test_->impl()->await_shard_cards(1);
+    CHECK(db_exec_addr_.parse(db_cards[0].address_for_exec));
     sched_exec_test_->impl()->register_shard_cards(db_cards);
     exec_cards_ =
         sched_exec_test_->impl()->await_executor_cards(server_addrs.size() - 3);
@@ -480,6 +481,9 @@ public:
   // hog-db's /metrics endpoint, as a host IP; it listens on
   // kBenchDbMetricsPort.
   const std::string &db_ip() const { return db_ip_; }
+  // Where executors reach hog-db, for a client that wants to read from it
+  // the way they do.
+  const x23::HostPort &db_exec_addr() const { return db_exec_addr_; }
 
   std::string indexer_block_explorer_addr() const
   {
@@ -502,6 +506,7 @@ private:
   RpcServer<MockSchedEvent> sched_event_test_;
 
   std::string db_ip_;
+  x23::HostPort db_exec_addr_;
   std::string indexer_ip_;
   std::vector<std::string> exec_ips_;
   std::vector<ExecCard> exec_cards_;

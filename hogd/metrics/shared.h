@@ -2,6 +2,8 @@
 
 #include <chrono>
 #include <format>
+#include <fstream>
+#include <sstream>
 #include <string>
 #include <sys/resource.h>
 #include <sys/time.h> // IWYU pragma: keep
@@ -63,6 +65,19 @@ add_health_metrics_routes(HttpServer &server)
         .content_type = "text/plain",
         .body = Metrics::instance().dump_to_prometheus_string() +
                 process_cpu_metrics(),
+    };
+  });
+  // The host's /proc/stat as is, for load generators: per-core busy and
+  // softirq time cover kernel work (network receive processing above all)
+  // that a process's own CPU time does not.
+  server.add_route("/procstat", [] {
+    std::ifstream in("/proc/stat");
+    std::ostringstream body;
+    body << in.rdbuf();
+    return HttpResponse{
+        .status = in ? 200 : 500,
+        .content_type = "text/plain",
+        .body = body.str(),
     };
   });
 }

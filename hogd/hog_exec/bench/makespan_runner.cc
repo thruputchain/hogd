@@ -26,11 +26,16 @@
 // read to its reply being delivered (network, HogDb, and the wait for the
 // executor's RPC reader to run), and `read_hop_avg_us`, the wait to hop back
 // onto the executor's thread pool afterwards. The means are over every read in
-// the block, light and heavy alike. The same scrapes, plus hog-db's, give
-// how many cores each process kept busy over the trial: `db_cores` for hog-db
-// and `exec_cores_max` for the busiest executor, against the `db_ncpu` and
-// `exec_ncpu` CPUs each may use (printed in `makespan_config:`). A process
-// near its CPU count is the one the block is waiting on.
+// the block, light and heavy alike. The same scrapes, plus hog-db's, report
+// the load over the trial (see LoadStats): cores busy in each process and on
+// each host, the busiest core's busy and softirq fractions (from the hosts'
+// /proc/stat), and hog-db's per-RPC handler wall and CPU time. Handlers run
+// inline on the connection's RPC reader, so handler wall time per second
+// (`db_handler_cores`) is how many connection readers were occupied.
+//
+// After the scenarios, `probe:` lines read from hog-db directly, with no
+// executor in the path, at increasing numbers of reads in flight: the RPC
+// path's own latency and throughput, to set against what the executors see.
 //
 // The cluster bring-up is multiexec_runner's (see multiexec_cluster.h): the
 // runner stands in for the mempool, so none of the mempool's own accounting
@@ -38,18 +43,23 @@
 
 #include <algorithm>
 #include <arpa/inet.h>
+#include <array>
 #include <atomic>
 #include <cassert>
+#include <cctype>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 #include <format>
 #include <limits>
 #include <memory>
 #include <netinet/in.h>
+#include <numeric>
 #include <optional>
 #include <print>
 #include <random>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <sys/socket.h>
@@ -65,16 +75,20 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_db/db_metrics.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -82,7 +96,9 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cpumap.h"
 #include "x23/fastclock.h"
+#include "x23/rpc.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -240,10 +256,11 @@ struct ReadStats {
   }
 };
 
-// GET http://<ip>:<port>/metrics. Blocking, with a timeout; the runner calls
+// GET http://<ip>:<port><path>. Blocking, with a timeout; the runner calls
 // it from its own thread, outside any timed region.
 std::optional<std::string>
-fetch_metrics(const std::string &ip, uint16_t port)
+fetch_metrics(const std::string &ip, uint16_t port,
+              std::string_view path = "/metrics")
 {
   const int fd = ::socket(AF_INET, SOCK_STREAM, 0);
   if (fd < 0) {
@@ -262,8 +279,9 @@ fetch_metrics(const std::string &ip, uint16_t port)
     ::close(fd);
     return std::nullopt;
   }
-  const std::string request = std::format(
-      "GET /metrics HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n", ip);
+  const std::string request =
+      std::format("GET {} HTTP/1.1\r\nHost: {}\r\nConnection: close\r\n\r\n",
+                  path, ip);
   if (::send(fd, request.data(), request.size(), MSG_NOSIGNAL) !=
       static_cast<ssize_t>(request.size())) {
     ::close(fd);
@@ -335,35 +353,260 @@ metric_double(std::string_view text, std::string_view name)
   return value ? std::stod(*value) : 0.0;
 }
 
-// The CPU time hog-db and each executor had used at one moment
-// (process_cpu_seconds_total, hogd/metrics/shared.h). Two samples, over the
-// wall time between them, say how many cores each process kept busy.
-struct CpuSample {
-  uint64_t wall_ns = 0;
-  double db_s = 0;
-  std::vector<double> exec_s;
+// Per-core tick counters from one host's /proc/stat, in USER_HZ ticks
+// (10 ms). `busy` is everything but idle and iowait; `softirq` is irq plus
+// softirq, the kernel's interrupt and network receive processing, which a
+// process's own CPU time does not count.
+struct CoreTicks {
+  int64_t busy = 0;
+  int64_t softirq = 0;
+  int64_t total = 0;
 };
 
-struct CpuUse {
+std::vector<CoreTicks>
+parse_procstat(std::string_view text)
+{
+  std::vector<CoreTicks> cores;
+  size_t pos = 0;
+  while (pos < text.size()) {
+    size_t eol = text.find('\n', pos);
+    if (eol == std::string_view::npos) {
+      eol = text.size();
+    }
+    const std::string_view line = text.substr(pos, eol - pos);
+    pos = eol + 1;
+    // Only the per-core "cpuN" lines; the aggregate "cpu " line has no digit.
+    if (line.size() < 4 || !line.starts_with("cpu") ||
+        std::isdigit(static_cast<unsigned char>(line[3])) == 0) {
+      continue;
+    }
+    // user nice system idle iowait irq softirq steal
+    std::array<int64_t, 8> f{};
+    std::istringstream in{std::string(line.substr(line.find(' ')))};
+    for (int64_t &v : f) {
+      in >> v;
+    }
+    const int64_t softirq = f[5] + f[6];
+    const int64_t busy = f[0] + f[1] + f[2] + softirq + f[7];
+    cores.push_back(
+        {.busy = busy, .softirq = softirq, .total = busy + f[3] + f[4]});
+  }
+  return cores;
+}
+
+// One host across a trial: how many cores were busy in all, and the busiest
+// core's busy and softirq fractions.
+struct HostCpu {
+  double cores = 0;
+  double core_busy_max = 0;
+  double core_softirq_max = 0;
+};
+
+HostCpu
+host_cpu(const std::vector<CoreTicks> &before,
+         const std::vector<CoreTicks> &after)
+{
+  HostCpu out;
+  for (size_t i = 0; i < before.size() && i < after.size(); i++) {
+    const int64_t total = after[i].total - before[i].total;
+    if (total <= 0) {
+      continue;
+    }
+    const double busy = static_cast<double>(after[i].busy - before[i].busy) /
+                        static_cast<double>(total);
+    const double softirq =
+        static_cast<double>(after[i].softirq - before[i].softirq) /
+        static_cast<double>(total);
+    out.cores += busy;
+    out.core_busy_max = std::max(out.core_busy_max, busy);
+    out.core_softirq_max = std::max(out.core_softirq_max, softirq);
+  }
+  return out;
+}
+
+constexpr size_t kNumDbRpcKinds = static_cast<size_t>(DbRpcKind::kCount);
+
+// hog-db's executor-RPC handler timing (hog_db/db_metrics.h), by kind.
+struct DbRpcStats {
+  std::array<int64_t, kNumDbRpcKinds> count{};
+  std::array<int64_t, kNumDbRpcKinds> wall_ns{};
+  std::array<int64_t, kNumDbRpcKinds> cpu_ns{};
+
+  DbRpcStats operator-(const DbRpcStats &o) const
+  {
+    DbRpcStats d;
+    for (size_t i = 0; i < kNumDbRpcKinds; i++) {
+      d.count[i] = count[i] - o.count[i];
+      d.wall_ns[i] = wall_ns[i] - o.wall_ns[i];
+      d.cpu_ns[i] = cpu_ns[i] - o.cpu_ns[i];
+    }
+    return d;
+  }
+  double wall_avg_us(DbRpcKind k) const
+  {
+    const auto i = static_cast<size_t>(k);
+    return count[i] > 0 ? static_cast<double>(wall_ns[i]) / 1000.0 /
+                              static_cast<double>(count[i])
+                        : 0.0;
+  }
+  double cpu_avg_us(DbRpcKind k) const
+  {
+    const auto i = static_cast<size_t>(k);
+    return count[i] > 0 ? static_cast<double>(cpu_ns[i]) / 1000.0 /
+                              static_cast<double>(count[i])
+                        : 0.0;
+  }
+  int64_t total_count() const
+  {
+    return std::accumulate(count.begin(), count.end(), int64_t{0});
+  }
+  int64_t total_wall_ns() const
+  {
+    return std::accumulate(wall_ns.begin(), wall_ns.end(), int64_t{0});
+  }
+  int64_t total_cpu_ns() const
+  {
+    return std::accumulate(cpu_ns.begin(), cpu_ns.end(), int64_t{0});
+  }
+};
+
+DbRpcStats
+parse_db_rpc_stats(std::string_view text)
+{
+  DbRpcStats out;
+  for (size_t i = 0; i < kNumDbRpcKinds; i++) {
+    const std::string prefix = std::format("db_rpc_{}_", kDbRpcKindNames[i]);
+    out.count[i] = metric_value(text, prefix + "count");
+    out.wall_ns[i] = metric_value(text, prefix + "wall_ns");
+    out.cpu_ns[i] = metric_value(text, prefix + "cpu_ns");
+  }
+  return out;
+}
+
+// Everything the runner scrapes from hog-db and the executors at one moment.
+struct Sample {
+  uint64_t wall_ns = 0;
+  double db_cpu_s = 0;
+  std::vector<double> exec_cpu_s;
+  std::vector<CoreTicks> db_host;
+  std::vector<std::vector<CoreTicks>> exec_hosts;
+  DbRpcStats db_rpc;
+};
+
+// What two samples say about the window between them. Cores are averages
+// over the window: process CPU time (`db_cores`, `exec_cores_max` for the
+// busiest executor), the hosts' per-core /proc/stat, and hog-db handler time
+// (`db_handler_cores`: wall time inside handlers per second, i.e. how many
+// connection readers were occupied on average).
+struct LoadStats {
   double db_cores = 0;
   double exec_cores_max = 0;
+  HostCpu db_host;
+  HostCpu exec_host; // field-wise max over executor hosts
+  DbRpcStats db_rpc;
+  double db_handler_cores = 0;
+  double db_handler_cpu_cores = 0;
 };
 
-CpuUse
-cpu_use(const CpuSample &before, const CpuSample &after)
+LoadStats
+load_stats(const Sample &before, const Sample &after)
 {
   const double wall_s =
       static_cast<double>(after.wall_ns - before.wall_ns) / 1e9;
   if (wall_s <= 0) {
     return {};
   }
-  CpuUse use{.db_cores = (after.db_s - before.db_s) / wall_s};
-  for (size_t i = 0; i < before.exec_s.size() && i < after.exec_s.size(); i++) {
-    use.exec_cores_max =
-        std::max(use.exec_cores_max,
-                 (after.exec_s[i] - before.exec_s[i]) / wall_s);
+  LoadStats out{.db_cores = (after.db_cpu_s - before.db_cpu_s) / wall_s,
+                .db_host = host_cpu(before.db_host, after.db_host),
+                .db_rpc = after.db_rpc - before.db_rpc};
+  for (size_t i = 0;
+       i < before.exec_cpu_s.size() && i < after.exec_cpu_s.size(); i++) {
+    out.exec_cores_max =
+        std::max(out.exec_cores_max,
+                 (after.exec_cpu_s[i] - before.exec_cpu_s[i]) / wall_s);
   }
-  return use;
+  for (size_t i = 0;
+       i < before.exec_hosts.size() && i < after.exec_hosts.size(); i++) {
+    const HostCpu h = host_cpu(before.exec_hosts[i], after.exec_hosts[i]);
+    out.exec_host.cores = std::max(out.exec_host.cores, h.cores);
+    out.exec_host.core_busy_max =
+        std::max(out.exec_host.core_busy_max, h.core_busy_max);
+    out.exec_host.core_softirq_max =
+        std::max(out.exec_host.core_softirq_max, h.core_softirq_max);
+  }
+  out.db_handler_cores =
+      static_cast<double>(out.db_rpc.total_wall_ns()) / 1e9 / wall_s;
+  out.db_handler_cpu_cores =
+      static_cast<double>(out.db_rpc.total_cpu_ns()) / 1e9 / wall_s;
+  return out;
+}
+
+std::string
+format_load(const LoadStats &l)
+{
+  return std::format(
+      "db_cores={:.1f} exec_cores_max={:.1f} db_host_cores={:.1f} "
+      "db_core_busy_max={:.2f} db_core_si_max={:.2f} "
+      "exec_host_cores_max={:.1f} exec_core_busy_max={:.2f} "
+      "exec_core_si_max={:.2f} db_rpcs={} db_handler_cores={:.2f} "
+      "db_handler_cpu_cores={:.2f} snap_wall_us={:.1f} snap_cpu_us={:.1f} "
+      "push_wall_us={:.1f} push_cpu_us={:.1f} commit_wall_us={:.1f} "
+      "commit_cpu_us={:.1f} other_wall_us={:.1f}",
+      l.db_cores, l.exec_cores_max, l.db_host.cores, l.db_host.core_busy_max,
+      l.db_host.core_softirq_max, l.exec_host.cores, l.exec_host.core_busy_max,
+      l.exec_host.core_softirq_max, l.db_rpc.total_count(), l.db_handler_cores,
+      l.db_handler_cpu_cores, l.db_rpc.wall_avg_us(DbRpcKind::kGetSnapshotItem),
+      l.db_rpc.cpu_avg_us(DbRpcKind::kGetSnapshotItem),
+      l.db_rpc.wall_avg_us(DbRpcKind::kTryPushSubtransaction),
+      l.db_rpc.cpu_avg_us(DbRpcKind::kTryPushSubtransaction),
+      l.db_rpc.wall_avg_us(DbRpcKind::kCommitTransaction),
+      l.db_rpc.cpu_avg_us(DbRpcKind::kCommitTransaction),
+      l.db_rpc.wall_avg_us(DbRpcKind::kOther));
+}
+
+using db_probe_client_t = DatabaseToExecutorInterfaceV1::client<
+    x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
+
+// Shared by every coroutine of one probe level.
+struct Probe {
+  BlockID block;
+  ContractAddress address;
+  std::atomic<int64_t> remaining;
+  std::atomic<size_t> live_coros;
+  std::atomic<uint64_t> unexpected_errors{0};
+  // One per coroutine, which alone appends to it.
+  std::vector<std::vector<uint64_t>> latency_ns;
+  x23::CoroCB<void> *done;
+};
+
+// Reads keys nobody wrote, one at a time, until the probe's budget is spent:
+// the cheapest storage read there is, timed from issue to reply.
+x23::Detached
+probe_coro(db_probe_client_t &client, Probe *p, size_t index)
+{
+  co_await default_threadpool().bg();
+  std::vector<uint64_t> &latency = p->latency_ns[index];
+  for (;;) {
+    const int64_t n = p->remaining.fetch_sub(1, std::memory_order_relaxed);
+    if (n <= 0) {
+      break;
+    }
+    StorageKey key(StorageKeyType::ContractData);
+    const std::array<uint64_t, 2> words = {static_cast<uint64_t>(n), index};
+    std::memcpy(key.contract_data_key().data(), words.data(),
+                std::min(sizeof(words), key.contract_data_key().size()));
+    const AddressAndKey addrkey{.address = p->address, .key = std::move(key)};
+    const uint64_t start_ns = x23::fastclock::get_ns();
+    auto res = co_await client.get_snapshot_item(p->block, addrkey);
+    latency.push_back(x23::fastclock::get_ns() - start_ns);
+    if (res.error() != RPCError::kRPCNone &&
+        res.error() != RPCError::kRPCNotFound) {
+      p->unexpected_errors.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+  if (p->live_coros.fetch_sub(1, std::memory_order_acq_rel) == 1) {
+    (*p->done)();
+  }
 }
 
 // Uniquifiers for every work transaction in the run. A nonce is never reused,
@@ -460,8 +703,7 @@ public:
       std::vector<uint64_t> heavy_maxes;
       std::vector<double> read_rpc_us;
       std::vector<double> read_hop_us;
-      std::vector<double> db_cores;
-      std::vector<double> exec_cores;
+      std::vector<LoadStats> loads;
       for (uint32_t trial = 0; trial < params_.n_trials; trial++) {
         const TrialResult r = run_trial(s, trial);
         makespans.push_back(r.makespan_ns);
@@ -470,29 +712,54 @@ public:
         }
         read_rpc_us.push_back(r.reads.rpc_avg_us());
         read_hop_us.push_back(r.reads.hop_avg_us());
-        db_cores.push_back(r.cpu.db_cores);
-        exec_cores.push_back(r.cpu.exec_cores_max);
+        loads.push_back(r.load);
       }
       std::ranges::sort(makespans);
       std::ranges::sort(heavy_maxes);
       std::ranges::sort(read_rpc_us);
       std::ranges::sort(read_hop_us);
-      std::ranges::sort(db_cores);
-      std::ranges::sort(exec_cores);
+      auto median = [&loads](auto field) {
+        std::vector<double> v;
+        v.reserve(loads.size());
+        for (const LoadStats &l : loads) {
+          v.push_back(field(l));
+        }
+        std::ranges::sort(v);
+        return v[v.size() / 2];
+      };
       std::println(
           "makespan_summary: scenario={} trials={} "
           "makespan_min_us={} makespan_median_us={} "
           "makespan_max_us={} heavy_max_median_us={} "
           "read_rpc_avg_median_us={:.1f} "
           "read_hop_avg_median_us={:.1f} db_cores_median={:.1f} "
-          "exec_cores_max_median={:.1f}",
+          "exec_cores_max_median={:.1f} db_core_si_max_median={:.2f} "
+          "exec_core_si_max_median={:.2f} db_handler_cores_median={:.2f} "
+          "snap_wall_us_median={:.1f} snap_cpu_us_median={:.1f} "
+          "commit_wall_us_median={:.1f}",
           s.name, makespans.size(), makespans.front() / 1000,
           makespans[makespans.size() / 2] / 1000, makespans.back() / 1000,
           heavy_maxes.empty() ? 0 : heavy_maxes[heavy_maxes.size() / 2] / 1000,
           read_rpc_us[read_rpc_us.size() / 2],
-          read_hop_us[read_hop_us.size() / 2], db_cores[db_cores.size() / 2],
-          exec_cores[exec_cores.size() / 2]);
+          read_hop_us[read_hop_us.size() / 2],
+          median([](const LoadStats &l) { return l.db_cores; }),
+          median([](const LoadStats &l) { return l.exec_cores_max; }),
+          median([](const LoadStats &l) { return l.db_host.core_softirq_max; }),
+          median(
+              [](const LoadStats &l) { return l.exec_host.core_softirq_max; }),
+          median([](const LoadStats &l) { return l.db_handler_cores; }),
+          median([](const LoadStats &l) {
+            return l.db_rpc.wall_avg_us(DbRpcKind::kGetSnapshotItem);
+          }),
+          median([](const LoadStats &l) {
+            return l.db_rpc.cpu_avg_us(DbRpcKind::kGetSnapshotItem);
+          }),
+          median([](const LoadStats &l) {
+            return l.db_rpc.wall_avg_us(DbRpcKind::kCommitTransaction);
+          }));
     }
+
+    run_probe();
   }
 
 private:
@@ -686,49 +953,134 @@ private:
     return total;
   }
 
-  // A process that cannot be scraped is warned about and reads as zero, so
-  // its cores for the trial come out zero or negative.
-  static double scrape_cpu_seconds(const std::string &ip, uint16_t port)
+  // Fetches a path from hog-db or an executor, warning when it cannot.
+  static std::optional<std::string> scrape(const std::string &ip, uint16_t port,
+                                           std::string_view path)
   {
-    auto text = fetch_metrics(ip, port);
+    auto text = fetch_metrics(ip, port, path);
     if (!text) {
-      warn("could not scrape process CPU from {}:{}", ip, port);
-      return 0;
+      warn("could not scrape {} from {}:{}", path, ip, port);
     }
-    return metric_double(*text, "process_cpu_seconds_total");
+    return text;
   }
 
   static int64_t scrape_available_cpus(const std::string &ip, uint16_t port)
   {
-    auto text = fetch_metrics(ip, port);
+    auto text = scrape(ip, port, "/metrics");
     return text ? metric_value(*text, "process_available_cpus") : 0;
   }
 
-  CpuSample scrape_cpu()
+  // Whatever cannot be scraped reads as zero, so its share of a trial's
+  // load comes out zero or negative.
+  Sample scrape_sample()
   {
-    CpuSample sample{.wall_ns = x23::fastclock::get_ns(),
-                     .db_s = scrape_cpu_seconds(cluster_.db_ip(),
-                                                kBenchDbMetricsPort)};
+    Sample sample{.wall_ns = x23::fastclock::get_ns()};
+    if (auto text = scrape(cluster_.db_ip(), kBenchDbMetricsPort, "/metrics")) {
+      sample.db_cpu_s = metric_double(*text, "process_cpu_seconds_total");
+      sample.db_rpc = parse_db_rpc_stats(*text);
+    }
+    if (auto text =
+            scrape(cluster_.db_ip(), kBenchDbMetricsPort, "/procstat")) {
+      sample.db_host = parse_procstat(*text);
+    }
     for (const std::string &ip : cluster_.exec_ips()) {
-      sample.exec_s.push_back(scrape_cpu_seconds(ip, kBenchExecMetricsPort));
+      auto metrics = scrape(ip, kBenchExecMetricsPort, "/metrics");
+      sample.exec_cpu_s.push_back(
+          metrics ? metric_double(*metrics, "process_cpu_seconds_total") : 0);
+      auto procstat = scrape(ip, kBenchExecMetricsPort, "/procstat");
+      sample.exec_hosts.push_back(procstat ? parse_procstat(*procstat)
+                                           : std::vector<CoreTicks>{});
     }
     return sample;
+  }
+
+  // Reads from hog-db directly, the way executors do but with nothing else
+  // in the path, at increasing numbers of reads in flight over as many
+  // connections as the executors open between them. Each level prints a
+  // `probe:` line. Run inside its own (empty) block, after the scenarios.
+  void run_probe()
+  {
+    const size_t n_connections =
+        static_cast<size_t>(db_connection_count()) * cluster_.num_executors();
+    std::vector<db_probe_client_t> clients;
+    clients.reserve(n_connections);
+    for (size_t i = 0; i < n_connections; i++) {
+      clients.push_back(make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+          cluster_.db_exec_addr(), false, *x23::single_bucket_map));
+    }
+
+    open_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
+               exec_clients_, parent_block_number_, current_block_number_,
+               next_block_height());
+    const std::array<size_t, 5> levels = {1, n_connections, 10 * n_connections,
+                                          30 * n_connections,
+                                          100 * n_connections};
+    for (const size_t inflight : levels) {
+      const int64_t n_reads = inflight == 1 ? 2000 : 300'000;
+      auto [async, cb] = x23::make_async<void>();
+      Probe p{.block = current_block_number_,
+              .address = reads_addr_,
+              .remaining = n_reads,
+              .live_coros = inflight,
+              .latency_ns = std::vector<std::vector<uint64_t>>(inflight),
+              .done = &cb};
+      const Sample before = scrape_sample();
+      for (size_t i = 0; i < inflight; i++) {
+        probe_coro(clients[i % clients.size()], &p, i);
+      }
+      async();
+      const Sample after = scrape_sample();
+
+      std::vector<uint64_t> latency;
+      latency.reserve(static_cast<size_t>(n_reads));
+      for (const auto &v : p.latency_ns) {
+        latency.insert(latency.end(), v.begin(), v.end());
+      }
+      std::ranges::sort(latency);
+      const double wall_s =
+          static_cast<double>(after.wall_ns - before.wall_ns) / 1e9;
+      const double sum_ns =
+          std::accumulate(latency.begin(), latency.end(), 0.0);
+      auto pct_us = [&latency](double q) {
+        return latency.empty()
+                   ? 0.0
+                   : static_cast<double>(latency[static_cast<size_t>(
+                         q * static_cast<double>(latency.size() - 1))]) /
+                         1000.0;
+      };
+      std::println("probe: inflight={} connections={} reads={} wall_ms={:.1f} "
+                   "reads_per_s={:.0f} lat_avg_us={:.1f} lat_p50_us={:.1f} "
+                   "lat_p99_us={:.1f} unexpected_errors={} {}",
+                   inflight, std::min(inflight, n_connections), latency.size(),
+                   wall_s * 1e3, static_cast<double>(latency.size()) / wall_s,
+                   latency.empty()
+                       ? 0.0
+                       : sum_ns / 1000.0 / static_cast<double>(latency.size()),
+                   pct_us(0.5), pct_us(0.99), p.unexpected_errors.load(),
+                   format_load(load_stats(before, after)));
+      std::fflush(stdout);
+    }
+    close_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
+                exec_clients_, current_block_number_, prev_value_,
+                /*indexer_probe=*/nullptr);
+    parent_block_number_ = current_block_number_;
+    current_block_number_++;
   }
 
   struct TrialResult {
     uint64_t makespan_ns;
     uint64_t heavy_max_ns;
     ReadStats reads;
-    CpuUse cpu;
+    LoadStats load;
   };
 
   TrialResult run_trial(const Scenario &s, uint32_t trial)
   {
     const Block block = make_block(s, trial);
     const ReadStats reads_before = scrape_read_stats();
-    const CpuSample cpu_before = scrape_cpu();
+    const Sample before = scrape_sample();
     const std::vector<UnitTiming> timings = run_block(block);
-    const CpuUse cpu = cpu_use(cpu_before, scrape_cpu());
+    const LoadStats load = load_stats(before, scrape_sample());
     const ReadStats reads = scrape_read_stats() - reads_before;
 
     uint64_t makespan = 0;
@@ -760,19 +1112,18 @@ private:
                  "makespan_us={} light_batch_p50_us={} light_batch_p99_us={} "
                  "heavy={} heavy_order={} heavy_p50_us={} heavy_max_us={} "
                  "last_heavy_done_us={} reads={} read_rpc_avg_us={:.1f} "
-                 "read_hop_avg_us={:.1f} db_cores={:.1f} exec_cores_max={:.1f}",
+                 "read_hop_avg_us={:.1f} {}",
                  s.name, trial, cluster_.num_executors(), block.txs.size(),
                  block.units.size(), makespan / 1000, pct_us(light_lat, 0.5),
                  pct_us(light_lat, 0.99), tx_class_name(s.heavy_class),
                  heavy_order_name(s.order), pct_us(heavy_lat, 0.5),
                  pct_us(heavy_lat, 1.0), heavy_done / 1000, reads.count,
-                 reads.rpc_avg_us(), reads.hop_avg_us(), cpu.db_cores,
-                 cpu.exec_cores_max);
+                 reads.rpc_avg_us(), reads.hop_avg_us(), format_load(load));
     std::fflush(stdout);
     return {.makespan_ns = makespan,
             .heavy_max_ns = heavy_lat.empty() ? 0 : heavy_lat.back(),
             .reads = reads,
-            .cpu = cpu};
+            .load = load};
   }
 };
 
