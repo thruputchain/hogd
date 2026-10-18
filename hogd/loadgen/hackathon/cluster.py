@@ -526,6 +526,8 @@ class Cluster:
         gateway_config = d / "gateway.toml"
         gateway_config.write_text(
             f"max_connections = {a.outstanding + a.receipt_workers + 128}\n"
+            f"[batch]\nshards = {a.gateway_batch_shards}\n"
+            f"max_inflight_batches = {a.gateway_inflight_batches}\n"
         )
         self.stage(gateway_config, self.hosts["gateway"], gateway_config)
         gateway_prefix = [a.gateway, "--config", gateway_config]
@@ -701,7 +703,16 @@ def main():
     p.add_argument("--drain", type=int, default=120)
     p.add_argument("--outstanding", type=int, default=16384)
     p.add_argument("--receipt-workers", type=int, default=16)
+    p.add_argument("--gateway-batch-shards", type=int, default=1)
+    p.add_argument("--gateway-inflight-batches", type=int, default=4)
     args = p.parse_args()
+    if not (
+        1 <= args.gateway_batch_shards <= 128
+        and 1 <= args.gateway_inflight_batches <= 128
+    ):
+        p.error(
+            "gateway batch shards and inflight batches must be between 1 and 128"
+        )
     for name in ("build", "gateway", "scpd", "corpus", "output"):
         setattr(args, name, getattr(args, name).resolve())
     if (
@@ -752,6 +763,8 @@ def main():
         "localSmoke": args.local,
         "diagnostics": True,
         "ingress": "rpc-gateway",
+        "gatewayBatchShards": args.gateway_batch_shards,
+        "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
     }
     identity["binaries"] = {}
     for name, relative in BINS.items():

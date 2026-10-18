@@ -25,6 +25,21 @@ on:
                 required: true
                 default: 16
                 type: number
+            gateway_batch_shards:
+                description: Gateway submission batcher shards (1 to 128)
+                required: true
+                default: 1
+                type: number
+            gateway_inflight_batches:
+                description: Concurrent scheduler batches per gateway shard (1 to 128)
+                required: true
+                default: 4
+                type: number
+            reuse_corpus:
+                description: Reuse hog10's last retained corpora after checking source, users and rates
+                required: true
+                default: false
+                type: boolean
             repeats:
                 description: Replays per variant (unique and shared code)
                 required: true
@@ -78,9 +93,12 @@ jobs:
                   HACKATHON_RATE_MULTIPLIER: ${{ inputs.rate_multiplier }}
                   HACKATHON_OUTSTANDING: ${{ inputs.outstanding }}
                   HACKATHON_RECEIPT_WORKERS: ${{ inputs.receipt_workers }}
+                  HACKATHON_GATEWAY_BATCH_SHARDS: ${{ inputs.gateway_batch_shards }}
+                  HACKATHON_GATEWAY_INFLIGHT_BATCHES: ${{ inputs.gateway_inflight_batches }}
+                  HACKATHON_REUSE_CORPUS: ${{ inputs.reuse_corpus && '1' || '0' }}
                   HACKATHON_REPEATS: ${{ inputs.repeats }}
               run: |
-                  for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10; do
+                  for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
                     IFS=: read -r name minimum maximum <<< "$setting"
                     value=${!name}
                     if [[ ! "$value" =~ ^[1-9][0-9]{0,5}$ ]] || ((value < minimum || value > maximum)); then
@@ -101,6 +119,9 @@ jobs:
                     --key=hackathon_rate_multiplier --value="$HACKATHON_RATE_MULTIPLIER" \
                     --key=hackathon_outstanding --value="$HACKATHON_OUTSTANDING" \
                     --key=hackathon_receipt_workers --value="$HACKATHON_RECEIPT_WORKERS" \
+                    --key=hackathon_gateway_batch_shards --value="$HACKATHON_GATEWAY_BATCH_SHARDS" \
+                    --key=hackathon_gateway_inflight_batches --value="$HACKATHON_GATEWAY_INFLIGHT_BATCHES" \
+                    --key=hackathon_reuse_corpus --value="$HACKATHON_REUSE_CORPUS" \
                     --key=hackathon_repeats --value="$HACKATHON_REPEATS" \
                     ./scripts/schedules/hackathon.toml
             - name: Upload benchmark results

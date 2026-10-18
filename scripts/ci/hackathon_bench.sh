@@ -6,8 +6,11 @@ set -Eeuo pipefail
 : "${HACKATHON_RATE_MULTIPLIER:=10}"
 : "${HACKATHON_OUTSTANDING:=16384}"
 : "${HACKATHON_RECEIPT_WORKERS:=16}"
+: "${HACKATHON_GATEWAY_BATCH_SHARDS:=1}"
+: "${HACKATHON_GATEWAY_INFLIGHT_BATCHES:=4}"
+: "${HACKATHON_REUSE_CORPUS:=0}"
 : "${HACKATHON_REPEATS:=3}"
-for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10; do
+for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
   IFS=: read -r name minimum maximum <<<"$setting"
   value=${!name}
   if [[ ! "$value" =~ ^[1-9][0-9]{0,5}$ ]] || ((value < minimum || value > maximum)); then
@@ -15,6 +18,10 @@ for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON
     exit 1
   fi
 done
+if [[ "$HACKATHON_REUSE_CORPUS" != 0 && "$HACKATHON_REUSE_CORPUS" != 1 ]]; then
+  echo 'HACKATHON_REUSE_CORPUS must be 0 or 1' >&2
+  exit 1
+fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD_DIR=$(realpath "$BUILD_DIR")
 WORK_DIR=$(realpath -m "$WORK_DIR")
@@ -53,9 +60,18 @@ PYREPORT
   fi
   exit "$status"
 }
+# Validate restoration before installing the retention trap, so an incompatible
+# cache cannot be overwritten by an empty failed run.
+if [[ "$HACKATHON_REUSE_CORPUS" == 1 ]]; then
+  python3 "$ROOT/hogd/loadgen/hackathon/reuse_corpus.py" \
+    --archive "${HOG_DUMP_DIR:?HOG_DUMP_DIR must contain the retained archive}/hackathon-results.tar.gz" \
+    --output "$WORK_DIR" --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
+fi
 trap retain_results EXIT
-python3 "$ROOT/hogd/loadgen/hackathon/build_contracts.py" --output "$ARTIFACTS"
-"$ROOT/scripts/build.sh" -d "$BUILD_DIR" -t Release -x "-DHACKATHON_ARTIFACT_DIR=$ARTIFACTS" hackathon_corpus
+if [[ "$HACKATHON_REUSE_CORPUS" == 0 ]]; then
+  python3 "$ROOT/hogd/loadgen/hackathon/build_contracts.py" --output "$ARTIFACTS"
+  "$ROOT/scripts/build.sh" -d "$BUILD_DIR" -t Release -x "-DHACKATHON_ARTIFACT_DIR=$ARTIFACTS" hackathon_corpus
+fi
 CONTROL_PORT=$("$BUILD_DIR/hogd/utils/get_port" kCIControlServerPort)
 source "$ROOT/scripts/ci/bench_harness.sh"
 export CI_WAIT_CONTROL_TIMEOUT_SEC=${CI_WAIT_CONTROL_TIMEOUT_SEC:-1800}
@@ -78,11 +94,15 @@ PYGATEWAY
 read -r GATEWAY_SHA256 GATEWAY_PROTOCOL <<<"$gateway_info"
 for shared in 0 1; do
   CORPUS="$WORK_DIR/hackathon-corpus-$shared"
-  "$BUILD_DIR/hogd/loadgen/hackathon/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
-    --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
+  if [[ "$HACKATHON_REUSE_CORPUS" == 0 ]]; then
+    "$BUILD_DIR/hogd/loadgen/hackathon/hackathon_corpus" --artifacts "$ARTIFACTS" --out "$CORPUS" --shared-code "$shared" \
+      --users "$HACKATHON_USERS" --rate-multiplier "$HACKATHON_RATE_MULTIPLIER"
+  fi
   python3 "$ROOT/hogd/loadgen/hackathon/cluster.py" \
     --build "$BUILD_DIR" --scpd "$BUILD_DIR/scpd.dev" \
     --gateway "$GATEWAY_BINARY" --gateway-sha256 "$GATEWAY_SHA256" --gateway-protocol "$GATEWAY_PROTOCOL" \
     --control-port "$CONTROL_PORT" --corpus "$CORPUS" --output "$RESULTS/code-$shared" \
-    --outstanding "$HACKATHON_OUTSTANDING" --receipt-workers "$HACKATHON_RECEIPT_WORKERS" --repeats "$HACKATHON_REPEATS"
+    --outstanding "$HACKATHON_OUTSTANDING" --receipt-workers "$HACKATHON_RECEIPT_WORKERS" --repeats "$HACKATHON_REPEATS" \
+    --gateway-batch-shards "$HACKATHON_GATEWAY_BATCH_SHARDS" \
+    --gateway-inflight-batches "$HACKATHON_GATEWAY_INFLIGHT_BATCHES"
 done

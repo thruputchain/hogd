@@ -157,6 +157,27 @@ Use `users=100` and `rate_multiplier=1` for the earlier low-load corpus; the
 standalone corpus builder retains these lower defaults for local use. The
 multiplier applies before `--rate-divisor` and is saved in the manifest.
 
+Inputs `gateway_batch_shards` and `gateway_inflight_batches` control submission
+batching inside the RPC gateway. Their defaults (one shard, four concurrent
+scheduler batches per shard) match the pinned gateway. The shell wrapper accepts
+`HACKATHON_GATEWAY_BATCH_SHARDS` and `HACKATHON_GATEWAY_INFLIGHT_BATCHES`;
+the standalone harness accepts `--gateway-batch-shards` and
+`--gateway-inflight-batches`. Both values must be between 1 and 128. Each repeat
+retains the effective `gateway.toml`, and `identity.json` records these settings.
+Compare gateway and backend latency when tuning them: additional client slots
+can increase gateway queueing without increasing validator load.
+
+For subsequent capacity probes with the same workload, `reuse_corpus=true`
+restores hog10's retained `/tmp/hogdump-hogci/hackathon-results.tar.gz` instead of
+recompiling and signing the fixtures. Source changes must be confined to the
+hackathon harness, and the protocol, users, rates and fixture settings must match.
+CI's generated registry-configuration patch must also match exactly.
+Both signed transaction checksums are checked before either corpus is installed.
+Each replay still starts a fresh chain. Results retain `corpus-source.json` with
+the source identities, archive checksum and workload parameters. The shell
+equivalent is `HACKATHON_REUSE_CORPUS=1`; incompatible or missing caches fail
+before replacing the retained archive. Disable reuse to regenerate the workload.
+
 Reports show offered, submitted, admitted and observed-successful TX/s separately,
 plus client drops and admitted transactions without observed receipts at each
 stage boundary. Completion throughput includes receipts for earlier-stage
