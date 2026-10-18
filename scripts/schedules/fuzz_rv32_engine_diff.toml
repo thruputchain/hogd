@@ -43,19 +43,46 @@ cmake --build build --parallel "$(nproc)" --target rv32_fuzz_engine_diff rv32_fu
 
 mkdir -p ${HOG_DUMP_DIR}/core_dumps
 
+# -jobs, not -fork: clang 23's prebuilt libFuzzer crashes the -fork
+# coordinator. Its RunOneMergeJob (compiler-rt FuzzerFork.cpp) zero-fills
+# SIZE_MAX elements whenever a job leaves an input without a feature file,
+# which jobs routinely do. -jobs runs independent fuzzers sharing the corpus
+# directory and never enters that code. Each job logs to fuzz-<n>.log in the
+# working directory and libFuzzer copies every finished log to its own output,
+# far too much for CI at one job per core, so that output goes to a file and
+# only failing jobs' logs are printed. (No backslashes here: this is a TOML
+# basic string.)
+run_fuzzer() {
+  local name="$1" binary="$PWD/$2" corpus="$PWD/$3" seconds="$4"
+  local log_dir="$PWD/build/fuzz_logs/$name"
+  local status=0 failed shown=0
+  mkdir -p "$log_dir"
+  (
+    cd "$log_dir"
+    "$binary" -jobs="$(nproc)" -workers="$(nproc)" -max_total_time="$seconds" -artifact_prefix="${HOG_DUMP_DIR}/core_dumps/${name}_crash_" "$corpus"
+  ) >"$log_dir/main.log" 2>&1 || status=$?
+  echo "$name: exit $status, $(awk '/^Done [0-9]+ runs/ {n += $2} END {print n + 0}' "$log_dir"/fuzz-*.log) runs, $(find "$corpus" -type f | wc -l) corpus inputs"
+  if [ "$status" -ne 0 ]; then
+    failed=$(awk '$2 == "Job" && $4 == "exited" && $7 != "0" {print $3}' "$log_dir/main.log")
+    echo "$name: failing jobs:" $failed
+    for job in $failed; do
+      [ "$shown" -lt 3 ] || break
+      echo "=== $name job $job: last 200 lines of fuzz-$job.log ==="
+      tail -n 200 "$log_dir/fuzz-$job.log"
+      shown=$((shown + 1))
+    done
+    if [ -z "$failed" ]; then
+      tail -n 200 "$log_dir/main.log"
+    fi
+  fi
+  return "$status"
+}
+
 echo 'run rv32_fuzz_engine_diff for 15 minutes'
-./build/hogd/hog_exec/runtime/rv32/rv32_fuzz_engine_diff \
-    -fork=$(nproc) \
-    -max_total_time=900 \
-    -artifact_prefix=${HOG_DUMP_DIR}/core_dumps/engine_diff_crash_ \
-    hogd/hog_exec/runtime/rv32/fuzz/corpus/engine_diff
+run_fuzzer engine_diff build/hogd/hog_exec/runtime/rv32/rv32_fuzz_engine_diff hogd/hog_exec/runtime/rv32/fuzz/corpus/engine_diff 900
 
 echo 'run rv32_fuzz_artifact for 5 minutes'
-./build/hogd/hog_exec/runtime/rv32/rv32_fuzz_artifact \
-    -fork=$(nproc) \
-    -max_total_time=300 \
-    -artifact_prefix=${HOG_DUMP_DIR}/core_dumps/artifact_crash_ \
-    hogd/hog_exec/runtime/rv32/fuzz/corpus/artifact
+run_fuzzer artifact build/hogd/hog_exec/runtime/rv32/rv32_fuzz_artifact hogd/hog_exec/runtime/rv32/fuzz/corpus/artifact 300
 
 """
 after = """
