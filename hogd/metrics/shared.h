@@ -1,12 +1,16 @@
 #pragma once
 
 #include <chrono>
+#include <cstdlib>
+#include <filesystem>
 #include <format>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <sys/resource.h>
 #include <sys/time.h> // IWYU pragma: keep
+#include <system_error>
 #include <thread>
 
 #include "hogd/base/coropoll.h"
@@ -49,6 +53,40 @@ process_cpu_metrics()
       available_parallelism());
 }
 
+// One line per thread of this process: "<tid> <name> <user+system ticks>",
+// from /proc/self/task, for load generators that want to know which thread
+// is busy.  Threads that exit while it is being read are skipped.
+inline std::string
+thread_cpu_ticks()
+{
+  std::ostringstream out;
+  std::error_code ec;
+  for (const auto &entry :
+       std::filesystem::directory_iterator("/proc/self/task", ec)) {
+    std::ifstream in(entry.path() / "stat");
+    std::string stat((std::istreambuf_iterator<char>(in)),
+                     std::istreambuf_iterator<char>());
+    // "tid (name) state ..." with utime and stime the 12th and 13th fields
+    // after the closing parenthesis; the name itself may hold spaces.
+    const size_t open = stat.find('(');
+    const size_t close = stat.rfind(')');
+    if (open == std::string::npos || close == std::string::npos) {
+      continue;
+    }
+    std::istringstream fields(stat.substr(close + 1));
+    std::string field;
+    uint64_t ticks = 0;
+    for (int i = 0; i < 13 && fields >> field; i++) {
+      if (i >= 11) {
+        ticks += std::strtoull(field.c_str(), nullptr, 10);
+      }
+    }
+    out << entry.path().filename().string() << ' '
+        << stat.substr(open + 1, close - open - 1) << ' ' << ticks << '\n';
+  }
+  return out.str();
+}
+
 inline void
 add_health_metrics_routes(HttpServer &server)
 {
@@ -70,6 +108,13 @@ add_health_metrics_routes(HttpServer &server)
   // The host's /proc/stat as is, for load generators: per-core busy and
   // softirq time cover kernel work (network receive processing above all)
   // that a process's own CPU time does not.
+  server.add_route("/threadstat", [] {
+    return HttpResponse{
+        .status = 200,
+        .content_type = "text/plain",
+        .body = thread_cpu_ticks(),
+    };
+  });
   server.add_route("/procstat", [] {
     std::ifstream in("/proc/stat");
     std::ostringstream body;

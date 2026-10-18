@@ -7,6 +7,7 @@
 #include <mutex>
 #include <netdb.h>
 #include <netinet/in.h>
+#include <pthread.h>
 #include <string>
 #include <sys/socket.h>
 #include <sys/uio.h>
@@ -122,6 +123,10 @@ CoroPoll::~CoroPoll()
 void
 CoroPoll::loop()
 {
+#ifdef __linux__
+  // Named so per-thread CPU accounting (/proc/<pid>/task) can tell it apart.
+  pthread_setname_np(pthread_self(), "x23-poll");
+#endif // __linux__
   while (!time_to_stop())
     check();
 }

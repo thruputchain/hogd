@@ -52,7 +52,9 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
+#include <functional>
 #include <limits>
+#include <map>
 #include <memory>
 #include <netinet/in.h>
 #include <numeric>
@@ -483,6 +485,74 @@ parse_db_rpc_stats(std::string_view text)
   return out;
 }
 
+// One process's threads from its /threadstat route: tid -> (name, user plus
+// system ticks).
+using ThreadTicks = std::map<int64_t, std::pair<std::string, int64_t>>;
+
+ThreadTicks
+parse_threadstat(std::string_view text)
+{
+  ThreadTicks out;
+  std::istringstream in{std::string(text)};
+  std::string line;
+  while (std::getline(in, line)) {
+    // "<tid> <name> <ticks>"; the name may hold spaces, the ends do not.
+    const size_t first = line.find(' ');
+    const size_t last = line.rfind(' ');
+    if (first == std::string::npos || last <= first) {
+      continue;
+    }
+    out[std::stoll(line.substr(0, first))] = {
+        line.substr(first + 1, last - first - 1),
+        std::stoll(line.substr(last + 1))};
+  }
+  return out;
+}
+
+// Which threads of one process were busy across a window, as fractions of
+// one core: the x23 poll thread (the busiest, if there are several), the
+// x23 workers summed and at their busiest, and the three busiest threads of
+// any kind as `name:fraction`.
+struct ThreadLoad {
+  double poll_max = 0;
+  size_t n_poll = 0;
+  double workers = 0;
+  double worker_max = 0;
+  std::string top;
+};
+
+ThreadLoad
+thread_load(const ThreadTicks &before, const ThreadTicks &after, double wall_s)
+{
+  ThreadLoad out;
+  if (wall_s <= 0) {
+    return out;
+  }
+  const double ticks_per_s = static_cast<double>(::sysconf(_SC_CLK_TCK));
+  std::vector<std::pair<double, std::string>> busy;
+  for (const auto &[tid, entry] : after) {
+    const auto &[name, ticks] = entry;
+    const auto it = before.find(tid);
+    const int64_t delta = ticks - (it == before.end() ? 0 : it->second.second);
+    const double frac = static_cast<double>(delta) / ticks_per_s / wall_s;
+    busy.emplace_back(frac, name);
+    if (name == "x23-poll") {
+      out.n_poll++;
+      out.poll_max = std::max(out.poll_max, frac);
+    }
+    else if (name == "x23-worker") {
+      out.workers += frac;
+      out.worker_max = std::max(out.worker_max, frac);
+    }
+  }
+  std::ranges::sort(busy, std::greater{});
+  for (size_t i = 0; i < busy.size() && i < 3; i++) {
+    out.top += std::format("{}{}:{:.2f}", i == 0 ? "" : ",", busy[i].second,
+                           busy[i].first);
+  }
+  return out;
+}
+
 // Everything the runner scrapes from hog-db and the executors at one moment.
 struct Sample {
   uint64_t wall_ns = 0;
@@ -491,6 +561,8 @@ struct Sample {
   std::vector<CoreTicks> db_host;
   std::vector<std::vector<CoreTicks>> exec_hosts;
   DbRpcStats db_rpc;
+  ThreadTicks db_threads;
+  std::vector<ThreadTicks> exec_threads;
 };
 
 // What two samples say about the window between them. Cores are averages
@@ -506,6 +578,9 @@ struct LoadStats {
   DbRpcStats db_rpc;
   double db_handler_cores = 0;
   double db_handler_cpu_cores = 0;
+  ThreadLoad db_threads;
+  // The executor whose poll thread was busiest.
+  ThreadLoad exec_threads;
 };
 
 LoadStats
@@ -534,6 +609,15 @@ load_stats(const Sample &before, const Sample &after)
     out.exec_host.core_softirq_max =
         std::max(out.exec_host.core_softirq_max, h.core_softirq_max);
   }
+  out.db_threads = thread_load(before.db_threads, after.db_threads, wall_s);
+  for (size_t i = 0;
+       i < before.exec_threads.size() && i < after.exec_threads.size(); i++) {
+    ThreadLoad t =
+        thread_load(before.exec_threads[i], after.exec_threads[i], wall_s);
+    if (i == 0 || t.poll_max > out.exec_threads.poll_max) {
+      out.exec_threads = std::move(t);
+    }
+  }
   out.db_handler_cores =
       static_cast<double>(out.db_rpc.total_wall_ns()) / 1e9 / wall_s;
   out.db_handler_cpu_cores =
@@ -551,7 +635,10 @@ format_load(const LoadStats &l)
       "exec_core_si_max={:.2f} db_rpcs={} db_handler_cores={:.2f} "
       "db_handler_cpu_cores={:.2f} snap_wall_us={:.1f} snap_cpu_us={:.1f} "
       "push_wall_us={:.1f} push_cpu_us={:.1f} commit_wall_us={:.1f} "
-      "commit_cpu_us={:.1f} other_wall_us={:.1f}",
+      "commit_cpu_us={:.1f} other_wall_us={:.1f} db_poll_busy={:.2f} "
+      "db_n_poll={} db_workers={:.1f} db_worker_max={:.2f} db_top={} "
+      "exec_poll_busy={:.2f} exec_n_poll={} exec_workers={:.1f} "
+      "exec_worker_max={:.2f} exec_top={}",
       l.db_cores, l.exec_cores_max, l.db_host.cores, l.db_host.core_busy_max,
       l.db_host.core_softirq_max, l.exec_host.cores, l.exec_host.core_busy_max,
       l.exec_host.core_softirq_max, l.db_rpc.total_count(), l.db_handler_cores,
@@ -561,7 +648,10 @@ format_load(const LoadStats &l)
       l.db_rpc.cpu_avg_us(DbRpcKind::kTryPushSubtransaction),
       l.db_rpc.wall_avg_us(DbRpcKind::kCommitTransaction),
       l.db_rpc.cpu_avg_us(DbRpcKind::kCommitTransaction),
-      l.db_rpc.wall_avg_us(DbRpcKind::kOther));
+      l.db_rpc.wall_avg_us(DbRpcKind::kOther), l.db_threads.poll_max,
+      l.db_threads.n_poll, l.db_threads.workers, l.db_threads.worker_max,
+      l.db_threads.top, l.exec_threads.poll_max, l.exec_threads.n_poll,
+      l.exec_threads.workers, l.exec_threads.worker_max, l.exec_threads.top);
 }
 
 using db_probe_client_t = DatabaseToExecutorInterfaceV1::client<
@@ -736,7 +826,8 @@ public:
           "exec_cores_max_median={:.1f} db_core_si_max_median={:.2f} "
           "exec_core_si_max_median={:.2f} db_handler_cores_median={:.2f} "
           "snap_wall_us_median={:.1f} snap_cpu_us_median={:.1f} "
-          "commit_wall_us_median={:.1f}",
+          "commit_wall_us_median={:.1f} db_poll_busy_median={:.2f} "
+          "exec_poll_busy_median={:.2f}",
           s.name, makespans.size(), makespans.front() / 1000,
           makespans[makespans.size() / 2] / 1000, makespans.back() / 1000,
           heavy_maxes.empty() ? 0 : heavy_maxes[heavy_maxes.size() / 2] / 1000,
@@ -756,7 +847,9 @@ public:
           }),
           median([](const LoadStats &l) {
             return l.db_rpc.wall_avg_us(DbRpcKind::kCommitTransaction);
-          }));
+          }),
+          median([](const LoadStats &l) { return l.db_threads.poll_max; }),
+          median([](const LoadStats &l) { return l.exec_threads.poll_max; }));
     }
 
     run_probe();
@@ -983,6 +1076,10 @@ private:
             scrape(cluster_.db_ip(), kBenchDbMetricsPort, "/procstat")) {
       sample.db_host = parse_procstat(*text);
     }
+    if (auto text =
+            scrape(cluster_.db_ip(), kBenchDbMetricsPort, "/threadstat")) {
+      sample.db_threads = parse_threadstat(*text);
+    }
     for (const std::string &ip : cluster_.exec_ips()) {
       auto metrics = scrape(ip, kBenchExecMetricsPort, "/metrics");
       sample.exec_cpu_s.push_back(
@@ -990,6 +1087,9 @@ private:
       auto procstat = scrape(ip, kBenchExecMetricsPort, "/procstat");
       sample.exec_hosts.push_back(procstat ? parse_procstat(*procstat)
                                            : std::vector<CoreTicks>{});
+      auto threads = scrape(ip, kBenchExecMetricsPort, "/threadstat");
+      sample.exec_threads.push_back(threads ? parse_threadstat(*threads)
+                                            : ThreadTicks{});
     }
     return sample;
   }
