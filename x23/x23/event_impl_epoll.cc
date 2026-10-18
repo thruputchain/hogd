@@ -1,26 +1,53 @@
 
+#include <algorithm>
 #include <atomic>
+#include <cstdlib>
 #include <signal.h>
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
+#include "x23/cpumap.h"
 #include "x23/event.h"
 #include "x23/sockio.h"
 
 namespace x23::detail {
 
-CoroPollImpl::CoroPollImpl(ThreadPool &pool)
-  : pool_(pool), epollfd_(epoll_create1(EPOLL_CLOEXEC))
+namespace {
+
+// One poll shard per last-level cache unless X23_POLL_SHARDS names a
+// count (clamped to [1, 256]); 0, unset or unparsable mean per-LLC.
+size_t
+poll_shard_count()
 {
-  if (!epollfd_)
-    Errno{}.raise("epoll_create1 failed");
-  eventfd_.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
-  if (!eventfd_)
-    Errno{}.raise("eventfd failed");
-  set_nonblock(eventfd_);
-  epoll_event ev{.events = EPOLLIN, .data = {.fd = eventfd_.get()}};
-  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, eventfd_.get(), &ev))
-    Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
+  init_cpumaps();
+  const size_t per_llc = std::max<size_t>(1, llc_map->nbuckets());
+  const char *s = getenv("X23_POLL_SHARDS");
+  if (!s || !*s)
+    return per_llc;
+  char *end;
+  long n = strtol(s, &end, 10);
+  if (*end || n < 1)
+    return per_llc;
+  return size_t(std::min(n, 256L));
+}
+
+} // namespace
+
+CoroPollImpl::CoroPollImpl(ThreadPool &pool) : pool_(pool)
+{
+  shards_.resize(poll_shard_count());
+  for (PollShard &shard : shards_) {
+    shard.epollfd.reset(epoll_create1(EPOLL_CLOEXEC));
+    if (!shard.epollfd)
+      Errno{}.raise("epoll_create1 failed");
+    shard.eventfd.reset(eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK));
+    if (!shard.eventfd)
+      Errno{}.raise("eventfd failed");
+    set_nonblock(shard.eventfd);
+    epoll_event ev{.events = EPOLLIN, .data = {.fd = shard.eventfd.get()}};
+    if (epoll_ctl(shard.epollfd.get(), EPOLL_CTL_ADD, shard.eventfd.get(), &ev))
+      Errno{}.raise("EPOLL_CTL_ADD(eventfd)");
+  }
   sigcb_ = signal_cb(SIGUSR1, [this] { debug_dump(); });
 };
 
@@ -103,8 +130,9 @@ CoroPollImpl::debug_dump()
 {
   using enum FdState::Mode;
   std::string msg;
-  uformat_to(&msg, "x23::CoroPoll {}, eventfd {}\n",
-             (void *)static_cast<CoroPoll *>(this), eventfd_.get());
+  uformat_to(&msg, "x23::CoroPoll {}, {} poll shard(s), eventfd {}\n",
+             (void *)static_cast<CoroPoll *>(this), shards_.size(),
+             shards_[0].eventfd.get());
   {
     std::unique_lock<SharedLock> lk;
     std::jthread lkthread;
@@ -168,7 +196,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
     struct epoll_event ev;
     ev.events = EPOLLIN | EPOLLOUT | EPOLLET;
     ev.data.fd = fd;
-    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_ADD, fd, &ev) == 0)
+    if (epoll_ctl(epollfd_for(fd), EPOLL_CTL_ADD, fd, &ev) == 0)
       return;
     debug.err("EPOLL_CTL_ADD fd {}: {}", fd, Errno{});
     unlock_mode = mode = kPoisoned;
@@ -176,7 +204,7 @@ CoroPollImpl::setmode(const FdPtr &fdp, FdState::Mode mode) noexcept
 
   fdp->ready_ = 0; // because EPOLLERR is sticky
   if (old_mode == kActive) {
-    if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd, nullptr) == -1)
+    if (epoll_ctl(epollfd_for(fd), EPOLL_CTL_DEL, fd, nullptr) == -1)
       if (errno != ENOENT && errno != EBADF)
         debug.err("EPOLL_CTL_DEL fd {}: {}", fd, Errno{}, stacktrace());
   }
@@ -200,13 +228,14 @@ CoroPollImpl::get_max_fd()
 }
 
 // To wake CoroPoll::check from another thread, we write to an eventfd
-// that we always monitor.
+// that we always monitor -- every shard's, since each has its own waiter.
 void
 CoroPollImpl::wake()
 {
   uint64_t one{1};
-  if (::write(eventfd_.get(), &one, sizeof(one)) == -1) [[unlikely]]
-    panic("write(eventfd): {}", Errno{});
+  for (PollShard &shard : shards_)
+    if (::write(shard.eventfd.get(), &one, sizeof(one)) == -1) [[unlikely]]
+      panic("write(eventfd): {}", Errno{});
 }
 
 CoroPollImpl::FdPtr
@@ -262,8 +291,15 @@ CoroPollImpl::get_rw(BorrowedFd fd)
 void
 CoroPollImpl::check(int timeout)
 {
+  check_shard(0, timeout);
+}
+
+void
+CoroPollImpl::check_shard(size_t shard, int timeout)
+{
+  PollShard &ps = shards_[shard];
   std::array<struct epoll_event, 128> evs;
-  int n = epoll_wait(epollfd_.get(), evs.data(), evs.size(), timeout);
+  int n = epoll_wait(ps.epollfd.get(), evs.data(), evs.size(), timeout);
   if (n == -1) {
     if (errno == EINTR)
       return;
@@ -277,9 +313,9 @@ CoroPollImpl::check(int timeout)
     int fd = evs[i].data.fd;
     if (fd < 0)
       continue;
-    if (fd == eventfd_.get()) {
+    if (fd == ps.eventfd.get()) {
       uint64_t buf;
-      ::read(eventfd_.get(), &buf, sizeof(buf));
+      ::read(ps.eventfd.get(), &buf, sizeof(buf));
       continue;
     }
     uint32_t events = evs[i].events;
@@ -360,7 +396,7 @@ CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
   });
 
   fdp->ready_ = 0; // because EPOLLERR is sticky
-  if (epoll_ctl(epollfd_.get(), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
+  if (epoll_ctl(epollfd_for(fd.get()), EPOLL_CTL_DEL, fd.get(), nullptr) == -1)
     if (errno != ENOENT && errno != EBADF)
       debug.err("EPOLL_CTL_DEL fd {}: {}", fd.get(), Errno{}, stacktrace());
   unlock.reset();
