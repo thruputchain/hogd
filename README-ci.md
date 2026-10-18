@@ -178,6 +178,10 @@ For subsequent capacity probes with the same workload, `reuse_corpus=true`
 restores hog10's retained `/tmp/hogdump-hogci/hackathon-results.tar.gz` instead of
 recompiling and signing the fixtures. Source changes must be confined to the
 hackathon harness, and the protocol, users, rates and fixture settings must match.
+The allowlist includes replay scheduling and transport files so client-capacity
+experiments can use identical signed transactions. Generator, contract, bootstrap,
+validator and dependency changes still require regeneration. Each run records its
+current replay binary hash and protocol setting separately from corpus provenance.
 CI's generated registry-configuration patch must also match exactly.
 Both signed transaction checksums are checked before either corpus is installed.
 Each replay still starts a fresh chain. Results retain `corpus-source.json` with

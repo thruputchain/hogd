@@ -120,6 +120,32 @@ class ReuseCorpusTest(unittest.TestCase):
             with self.assertRaisesRegex(ValueError, "unchanged validator"):
                 reuse_corpus.validate_source("a" * 40, "b" * 40, Path("/checkout"))
 
+    def test_replay_transport_changes_allow_reuse_but_inputs_remain_protected(self):
+        replay_changes = "\n".join(
+            "hogd/loadgen/hackathon/replay/" + name
+            for name in ("main.go", "replay.go", "transport.go", "transport_test.go")
+        )
+        protected = (
+            "hogd/loadgen/hackathon/corpus.cc",
+            "hogd/loadgen/hackathon/build_contracts.py",
+            "hogd/loadgen/hackathon/replay/bootstrap.go",
+            "hogd/loadgen/hackathon/replay/go.mod",
+            "protocol",
+            "groundhog-go",
+        )
+        for extra in ("", *protected):
+            with self.subTest(extra=extra), patch(
+                "reuse_corpus.subprocess.run", return_value=Mock(returncode=0)
+            ), patch(
+                "reuse_corpus.subprocess.check_output",
+                side_effect=[replay_changes + "\n" + extra, "", b"", "b" * 40],
+            ):
+                if extra:
+                    with self.assertRaisesRegex(ValueError, "unchanged validator"):
+                        reuse_corpus.validate_source("a" * 40, "b" * 40, Path("/checkout"))
+                else:
+                    reuse_corpus.validate_source("a" * 40, "b" * 40, Path("/checkout"))
+
     def test_harness_only_change_preserves_protocol_check(self):
         for protocol in ("b" * 40, "c" * 40):
             with self.subTest(protocol=protocol), patch(

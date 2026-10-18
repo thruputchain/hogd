@@ -18,8 +18,17 @@ HARNESS_CHANGES = {
     "scripts/ci/hackathon_bench.sh",
     "scripts/schedules/hackathon.toml",
     "hogd/loadgen/hackathon/cluster.py",
+    "hogd/loadgen/hackathon/test_cluster.py",
     "hogd/loadgen/hackathon/reuse_corpus.py",
     "hogd/loadgen/hackathon/test_reuse_corpus.py",
+    # These consume the signed corpus; the C++ generator, contract fixtures,
+    # bootstrap implementation and dependency pins remain outside the allowlist.
+    # Current replay binaries/settings are recorded independently in run identity.
+    "hogd/loadgen/hackathon/replay/main.go",
+    "hogd/loadgen/hackathon/replay/replay.go",
+    "hogd/loadgen/hackathon/replay/replay_test.go",
+    "hogd/loadgen/hackathon/replay/transport.go",
+    "hogd/loadgen/hackathon/replay/transport_test.go",
 }
 
 
