@@ -1521,7 +1521,9 @@ do_verify_contract_impl(void *context, const uint8_t *contract_bytes,
     Contract contract;
     x23::deserialize(&contract, x23::BufView{contract_bytes, contract_len});
 
-    // As above: the protocol defaults stand in for a chain's configuration.
+    // No database is in hand here, so the protocol defaults stand in for a
+    // chain's configuration; setup_create_contract verifies under the
+    // database's own.
     auto result = rc->verify_contract(contract, NetworkConfigParams{});
     if (result == InvokeErrorCode::Unrecoverable) {
       return VerifyContractResult{.success = 0,
