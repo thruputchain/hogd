@@ -430,6 +430,37 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsBytestringsIntact)
   }
 }
 
+// A stored row longer than any Bytestring is corrupt state: its item carries
+// the error, not an opaque the client's decode would reject.
+TEST(HogDbGatewayRpcTest, GetItemsReportsOversizedBytestringRow)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x55;
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 1;
+  AddressAndKey query{.address = addr, .key = storage_key};
+  std::vector<std::byte> value(static_cast<std::size_t>(kBytestringCeilingLen) +
+                                   4,
+                               std::byte{0xCD});
+  ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+
+  AddressAndKeyBatch batch;
+  batch.push_back(query);
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayItemsReply reply = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(reply.items().size(), 1U);
+  EXPECT_EQ(reply.items()[0].bytestring(), nullptr);
+
+  DbGatewayResult result = decode(reply);
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 1U);
+  EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCUnrecoverable);
+}
+
 // Item count alone doesn't bound response size; an oversized response is
 // rejected even when the item count stays under kMaxBatchItems (#4056).
 TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)

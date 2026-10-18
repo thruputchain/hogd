@@ -598,6 +598,21 @@ TEST_F(RpcFromExecDiagnosticsTest, SnapshotBytestringReachesClientIntact)
             StorageItemType::kItemTypeNonnegativeInt);
 }
 
+// A stored row longer than any Bytestring is corrupt state: the reply carries
+// the error, not an opaque the executor's decode would reject.
+TEST_F(RpcFromExecDiagnosticsTest, OversizedBytestringRowReportsCorruption)
+{
+  AddressAndKey key = make_data_key(addr_, 0x70);
+  std::vector<std::byte> bytes =
+      patterned_bytes(static_cast<size_t>(kBytestringCeilingLen) + 4);
+  ASSERT_TRUE(ctx_->get_db().write_bytes(make_item_key(key), bytes));
+
+  auto reply = rpc_->get_snapshot_item(BlockID{1}, key);
+  EXPECT_EQ(reply.bytestring(), nullptr);
+  EXPECT_EQ(decode_reply<ExpectedStorageItem>(reply).error(),
+            RPCError::kRPCUnrecoverable);
+}
+
 Contract
 make_rv32_contract(size_t len)
 {
