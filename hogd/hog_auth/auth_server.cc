@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <span>
@@ -273,13 +274,19 @@ AuthServer::verify_transactions(BlockHeight height,
     }
   };
 
-  if (max_parallelism == 1 || txs.size() == 1) {
+  // Avoid scheduling tiny verification tasks. Floor division ensures every
+  // chunk has at least this many transactions, unless the whole batch is
+  // smaller. The remainder is balanced by make_chunks().
+  constexpr size_t kMinTransactionsPerChunk = 32;
+  const size_t chunk_count =
+      std::min(max_parallelism,
+               std::max(size_t{1}, txs.size() / kMinTransactionsPerChunk));
+  if (chunk_count == 1) {
     verify_chunk(ChunkRange{.start = 0, .end = txs.size()});
     co_return results;
   }
 
-  const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), max_parallelism);
+  const std::vector<ChunkRange> chunks = make_chunks(txs.size(), chunk_count);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size() - 1);
   for (size_t i = 1; i < chunks.size(); ++i) {
