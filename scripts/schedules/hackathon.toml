@@ -42,7 +42,7 @@ source ./scripts/ci/prepare_env.sh
 # Build only on the host that serves public RPC, before the long C++ build.
 if [[ "{{ .hog_host }}" == "hog4" ]]; then
   echo 'fetch and build the pinned RPC gateway'
-  gateway_revision=110e8f1f13d1f987f5556f1faf6b31d97033229f
+  gateway_revision=408592926fee05bdf58f22230d67ce0a5225159b
   # thruput-xdr 0.55.0 has the same wire definitions as this protocol revision.
   gateway_protocol_revision=af043b5c1983c0c8b44683975a3c389369844e09
   if [[ "$(git -C protocol rev-parse HEAD)" != "$gateway_protocol_revision" ]]; then
