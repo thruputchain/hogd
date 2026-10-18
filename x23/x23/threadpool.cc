@@ -14,6 +14,7 @@
 #include <sys/signal.h>
 #include <thread>
 #include <unistd.h>
+#include <utility>
 #include <vector>
 
 #include "x23/cleanup.h"
@@ -115,6 +116,19 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
+// Wakes one waiting worker per job enqueued.  notify_one finds no waiter
+// cheaply (no syscall), so there is no need to notify only on an empty queue
+// becoming nonempty -- and doing that with notify_all woke every idle worker
+// of the LLC for a single job, most of which found nothing, spun through
+// getq's timed waits and work stealing, and cost the notifier a futex wake
+// apiece.
+static void
+wake_workers(std::condition_variable *nonempty, unsigned njobs)
+{
+  for (; nonempty && njobs > 0; --njobs)
+    nonempty->notify_one();
+}
+
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
@@ -129,20 +143,26 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
+  // The queue jobs were last enqueued on, and how many since its last wake.
   std::condition_variable *nonempty = nullptr;
+  unsigned pending = 0;
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
     if (nonempty && qno(lq) != affinity_queue) {
       lq.reset();
-      nonempty->notify_all();
+      wake_workers(nonempty, std::exchange(pending, 0));
       nonempty = nullptr;
     }
-    if (enqueue_selected(lq, j, now))
+    enqueue_selected(lq, j, now);
+    if (&lq->nonempty != nonempty) {
+      // enqueue_selected moved to another queue; wake the last one's.
+      wake_workers(nonempty, std::exchange(pending, 0));
       nonempty = &lq->nonempty;
+    }
+    ++pending;
   }
   lq.reset();
-  if (nonempty)
-    nonempty->notify_all();
+  wake_workers(nonempty, pending);
 }
 
 void
@@ -155,11 +175,10 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  bool wasempty = enqueue_selected(lq, job, now);
+  enqueue_selected(lq, job, now);
   auto *nonempty = &lq->nonempty;
   lq.reset();
-  if (wasempty)
-    nonempty->notify_all();
+  wake_workers(nonempty, 1);
 }
 
 void
