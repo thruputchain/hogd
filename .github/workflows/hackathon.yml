@@ -16,9 +16,9 @@ on:
                 default: 10
                 type: number
             outstanding:
-                description: Maximum concurrent transaction submissions
+                description: Maximum concurrent transaction submissions (26624 validated without overload)
                 required: true
-                default: 16384
+                default: 26624
                 type: number
             receipt_workers:
                 description: Concurrent receipt polling workers
@@ -28,7 +28,7 @@ on:
             gateway_batch_shards:
                 description: Gateway submission batcher shards (1 to 128)
                 required: true
-                default: 1
+                default: 4
                 type: number
             gateway_inflight_batches:
                 description: Concurrent scheduler batches per gateway shard (1 to 128)
@@ -38,12 +38,12 @@ on:
             gateway_workers:
                 description: Gateway Tokio runtime workers (0 inherits automatic sizing; 1 to 128 overrides)
                 required: true
-                default: 0
+                default: 8
                 type: number
             submission_http2:
-                description: Multiplex measured submissions over HTTP/2 (experimental)
+                description: Multiplex measured submissions over HTTP/2
                 required: true
-                default: false
+                default: true
                 type: boolean
             reuse_corpus:
                 description: Reuse hog10's last retained corpora after checking source, users and rates
