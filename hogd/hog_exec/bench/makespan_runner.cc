@@ -528,7 +528,7 @@ thread_load(const ThreadTicks &before, const ThreadTicks &after, double wall_s)
   if (wall_s <= 0) {
     return out;
   }
-  const double ticks_per_s = static_cast<double>(::sysconf(_SC_CLK_TCK));
+  const auto ticks_per_s = static_cast<double>(::sysconf(_SC_CLK_TCK));
   std::vector<std::pair<double, std::string>> busy;
   for (const auto &[tid, entry] : after) {
     const auto &[name, ticks] = entry;
