@@ -86,27 +86,6 @@ to_span(const Bytestring &bs)
   return {reinterpret_cast<const std::byte *>(bs.data()), bs.size()};
 }
 
-// Checks that [bytes] is the XDR encoding of a Contract, throwing
-// x23::XdrException if it is not.  An RV32 contract's code is checked where
-// it lies rather than copied out, as decoding the whole Contract would.
-void
-check_contract_encoding(std::span<const std::byte> bytes)
-{
-  ContractType type{};
-  size_t used = x23::deserialize_from(&type, x23::BufViewEnd(bytes));
-  if (type == ContractType::kRv32) {
-    // The arm is a ContractBlob, whose only field is the code, so it is
-    // encoded as that opaque<> alone.  A BufView decodes it in place.
-    x23::BufView code;
-    x23::deserialize(&code, x23::BufViewEnd(bytes.subspan(used)));
-    return;
-  }
-  // Every other arm is a single word, and decoding it whole also rejects an
-  // unknown discriminant.
-  Contract contract;
-  x23::deserialize(&contract, x23::BufViewEnd(bytes));
-}
-
 // Diagnostic level for a push, selected from the block's execution mode:
 // proposals report conflicts (everything in debug builds, first-only in
 // release); validation and viewing report nothing.
@@ -496,19 +475,16 @@ HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
   if (!code)
     return Reply(to_rpc_error(code.error()));
 
-  try {
-    check_contract_encoding(*code);
-  } catch (x23::XdrException &e) {
-    // A persistent contract-code row whose inline payload does not decode as a
-    // Contract is corrupt on-disk state. Report it as a structured corruption
-    // error -- the same way the retrocausal-queue metadata path above does --
-    // rather than sending the client a reply it cannot decode, which the
-    // syscall wrapper would translate into an opaque unrecoverable host error.
-    error("failed to deserialize persistent contract row: {}", e.what());
+  // Stored rows are the encodings NewContractLock wrote, so they go out
+  // unparsed and the executor's decode is what rejects a corrupt one.  XDR
+  // pads every encoding to a multiple of four bytes, though, and the reply
+  // relies on that to size the message, so a row that is not is refused here.
+  if (code->size() % 4 != 0) [[unlikely]] {
+    error("persistent contract row of {} bytes is not an XDR encoding",
+          code->size());
     return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
   }
 
-  // The row is the Contract's encoding, so it goes out as is.
   return Reply(std::move(*code));
 }
 

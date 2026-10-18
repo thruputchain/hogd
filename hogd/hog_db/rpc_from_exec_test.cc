@@ -413,10 +413,9 @@ TEST_F(RpcFromExecDiagnosticsTest, DeployContractWithoutFlagAdmitsConcurrent)
   EXPECT_EQ(r2.error(), RPCError::kRPCNone);
 }
 
-// A persistent contract-code row whose inline payload does not decode as a
-// Contract (e.g. tampered on-disk state) must surface as a structured
-// corruption error, not as an XDR decode exception unwinding across the
-// executor RPC boundary. See #3804.
+// A persistent contract-code row that is not even a whole number of XDR
+// words (e.g. tampered on-disk state) must surface as a structured corruption
+// error rather than go out in a reply x23 cannot size. See #3804.
 TEST_F(RpcFromExecDiagnosticsTest, MalformedContractRowReportsCorruption)
 {
   SHA256Hash hash{};
@@ -642,52 +641,6 @@ TEST_F(RpcFromExecDiagnosticsTest, ContractRowReachesClientIntact)
   auto reply = rpc_->get_contract(BlockID{1}, missing);
   EXPECT_EQ(decode_reply<ExpectedContract>(reply).error(),
             RPCError::kRPCNotFound);
-}
-
-// Each way a stored row can fail to be a Contract encoding is reported as
-// corruption rather than sent to the executor to fail decoding there.
-TEST_F(RpcFromExecDiagnosticsTest, NonContractRowsReportCorruption)
-{
-  x23::Buf valid = x23::serialize(make_rv32_contract(13));
-  std::vector<x23::Buf> rows;
-  // Nonzero padding after the code.
-  rows.push_back(valid);
-  rows.back().back() = 1;
-  // Truncated mid-code, and with the padding cut off.
-  rows.emplace_back(valid.begin(), valid.end() - 8);
-  rows.emplace_back(valid.begin(), valid.end() - 4);
-  // A trailing word after the code.
-  rows.push_back(valid);
-  for (int j = 0; j < 4; j++) {
-    rows.back().push_back(0);
-  }
-  // A code length past the end of the row.
-  rows.push_back(valid);
-  rows.back()[7] = 0xFF;
-  // The retired discriminant 0, and one never assigned.
-  for (uint32_t type : {0U, 99U}) {
-    x23::Buf row = valid;
-    row[3] = static_cast<uint8_t>(type);
-    rows.push_back(std::move(row));
-  }
-  // A one-word arm with a word missing, and with one to spare.
-  Contract mock(ContractType::kMockTest);
-  rows.push_back(x23::serialize(mock));
-  rows.back().resize(4);
-  rows.push_back(x23::serialize(mock));
-  for (int j = 0; j < 4; j++) {
-    rows.back().push_back(0);
-  }
-
-  for (size_t i = 0; i < rows.size(); i++) {
-    SHA256Hash hash{};
-    hash.fill(static_cast<uint8_t>(0xA0 + i));
-    ASSERT_TRUE(
-        ctx_->get_db().write_contract_code(hash,
-                                           std::as_bytes(std::span(rows[i]))));
-    auto reply = rpc_->get_contract(BlockID{1}, hash);
-    EXPECT_EQ(reply.error(), RPCError::kRPCUnrecoverable) << "row " << i;
-  }
 }
 
 } // namespace
