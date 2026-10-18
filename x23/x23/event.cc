@@ -89,7 +89,9 @@ WriteBuffer::Service::worker(Service self, BufVec work)
 
 CoroPoll::CoroPoll(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{})
 {
-  pollthread_ = std::thread(&CoroPoll::loop, this);
+  pollthreads_.reserve(nshards());
+  for (size_t shard = 0; shard < nshards(); ++shard)
+    pollthreads_.emplace_back(&CoroPoll::loop, this, shard);
 }
 
 CoroPoll::CoroPoll(ThreadPool &pool, no_loop_thread /*unused*/)
@@ -106,8 +108,9 @@ CoroPoll::~CoroPoll()
   for (int i = 0, e = get_max_fd(); i < e; ++i)
     reset(i);
   wake();
-  if (pollthread_.joinable())
-    pollthread_.join();
+  for (std::thread &t : pollthreads_)
+    if (t.joinable())
+      t.join();
   destroy_wait();
   // It could be that some coroutines were woken up by the reset
   // calls, which cause read_wait/write_wait to return EBADF.  If
@@ -121,14 +124,23 @@ CoroPoll::~CoroPoll()
 }
 
 void
-CoroPoll::loop()
+CoroPoll::loop(size_t shard)
 {
 #ifdef __linux__
   // Named so per-thread CPU accounting (/proc/<pid>/task) can tell it apart.
   pthread_setname_np(pthread_self(), "x23-poll");
 #endif // __linux__
-  while (!time_to_stop())
-    check();
+  if (shard == 0) {
+    while (!time_to_stop())
+      check_shard(0);
+    return;
+  }
+  // Only shard 0 waits out shutdown (time_to_stop drains the pool, which
+  // one caller at a time should do).  The others can stop at the request:
+  // ~CoroPoll resets every fd, which completes any waiter on their shards
+  // without them, and setcb refuses new waiters once a stop is requested.
+  while (!stop_requested())
+    check_shard(shard);
 }
 
 Async<std::expected<size_t, Errno>>

@@ -27,7 +27,9 @@ struct CoroWake : CoroPoll {
 
   CoroWake(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{}), id_(idctr++)
   {
-    pollthread_ = std::thread(&CoroWake::loop, this);
+    // This loop checks shard 0 only, so it drives every fd only with the
+    // default single poll shard.
+    pollthreads_.emplace_back(&CoroWake::loop, this);
     std::println("Created CoroWake {}", id_);
   }
   ~CoroWake() { std::println("Destroying CoroWake {}", id_); }

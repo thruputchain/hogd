@@ -43,6 +43,10 @@ on:
                 description: Trials per scenario
                 type: string
                 default: "5"
+            poll_shards:
+                description: x23 poll threads per process (X23_POLL_SHARDS)
+                type: string
+                default: "8"
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     # Published crates and pinned submodules retain the legacy registry identity.
@@ -98,12 +102,13 @@ jobs:
                   N_HEAVY: ${{ inputs.n_heavy || '32' }}
                   LIGHT_BATCH: ${{ inputs.light_batch || '5' }}
                   TRIALS: ${{ inputs.trials || '5' }}
+                  POLL_SHARDS: ${{ inputs.poll_shards || '8' }}
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
                   echo "Branch name: $BRANCH_NAME"
                   # The inputs are spliced into the schedule's shell script, so
                   # only plain numbers get through.
-                  for name in EXECUTORS FIB_N HEAVY_READS N_LIGHT N_HEAVY LIGHT_BATCH TRIALS; do
+                  for name in EXECUTORS FIB_N HEAVY_READS N_LIGHT N_HEAVY LIGHT_BATCH TRIALS POLL_SHARDS; do
                     if [[ ! "${!name}" =~ ^[0-9]+$ ]]; then
                       echo "input $name must be a non-negative integer, got '${!name}'" >&2
                       exit 1
@@ -124,6 +129,7 @@ jobs:
                   --key=n_heavy --value="$N_HEAVY" \
                   --key=light_batch --value="$LIGHT_BATCH" \
                   --key=trials --value="$TRIALS" \
+                  --key=poll_shards --value="$POLL_SHARDS" \
                   --timeout-sec=3600 \
                   ./scripts/schedules/makespan.toml
             - name: Print Log Download Instructions
