@@ -4,7 +4,7 @@
             "public_info": {
                 "public_key": {
                     "Ed25519": {
-                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                        "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"
                     }
                 },
                 "address": "localhost:50000"
@@ -19,7 +19,7 @@
             {
                 "public_key": {
                     "Ed25519": {
-                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                        "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"
                     }
                 },
                 "address": "localhost:50000"
@@ -76,7 +76,7 @@
             "validators": [
                 {
                     "Ed25519": {
-                        "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                        "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"
                     }
                 }
             ],

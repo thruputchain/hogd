@@ -15,6 +15,7 @@
 #include "hackathon_app.h"
 #include "hackathon_wallet.h"
 #include "hogd/auth_claim/signature_preimage.h"
+#include "hogd/base/base58.h"
 #include "hogd/base/json.h"
 #include "hogd/base/string.h"
 #include "hogd/crypto/crypto.h"
@@ -237,7 +238,7 @@ generate(int argc, char **argv)
       w.field("app", int64_t(app));
       w.field("user", int64_t(user));
       w.field("dependency", int64_t(dependency));
-      w.field("hash", hex(sha256(tx.tx)));
+      w.field("hash", encode_base58(sha256(tx.tx)));
       w.field("raw", hex(bytes));
     });
     txout << json << '\n';
@@ -310,7 +311,7 @@ generate(int argc, char **argv)
   }
   std::string metadata;
   json::Writer(metadata).object([&](json::Writer &w) {
-    w.field("schemaVersion", int64_t(1));
+    w.field("schemaVersion", int64_t(2));
     w.field("seed", int64_t(c.seed));
     w.field("users", int64_t(nusers));
     w.field("apps", int64_t(count));
@@ -323,18 +324,18 @@ generate(int argc, char **argv)
     w.field("stageSeconds", int64_t(stage));
     w.field("rateDivisor", int64_t(divisor));
     w.field("rateMultiplier", int64_t(multiplier));
-    w.field("networkHash", hex(c.network));
+    w.field("networkHash", encode_base58(c.network));
     w.array_field("initializationHashes", [&](json::Writer &a) {
       for (const auto &batch : init.initialization_txs)
         for (const auto &tx : batch)
-          a.value(hex(sha256(tx.tx)));
+          a.value(encode_base58(sha256(tx.tx)));
     });
     w.array_field("contracts", [&](json::Writer &a) {
       for (size_t i = 0; i < count; ++i)
         a.object([&](json::Writer &v) {
           v.field("app", int64_t(i));
-          v.field("hash", hex(sha256(*c.apps[i])));
-          v.field("address", hex(c.addresses[i]));
+          v.field("hash", encode_base58(sha256(*c.apps[i])));
+          v.field("address", encode_base58(c.addresses[i]));
           v.field("family", int64_t(i % 5));
         });
     });

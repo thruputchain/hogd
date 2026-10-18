@@ -3,6 +3,7 @@ module github.com/thruputchain/hogd/hackathon
 go 1.24.4
 
 require (
+	github.com/mr-tron/base58 v1.2.0
 	github.com/thruputchain/lib-go v0.0.0-20261018054045-e56684cd4d86
 	github.com/thruputchain/thruput-protocol-go v0.0.0-20261018052825-8f1017e9496b
 	github.com/xdrpp/goxdr v0.0.0-20260507185951-17b997ee737d

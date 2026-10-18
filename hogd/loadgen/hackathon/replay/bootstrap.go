@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"sync"
 
+	"github.com/mr-tron/base58"
 	"github.com/thruputchain/lib-go/librpc"
 	"github.com/thruputchain/lib-go/libxdr"
 	proto "github.com/thruputchain/thruput-protocol-go"
@@ -133,7 +134,7 @@ func initializeApps(ctx context.Context, client *http.Client, c Config, manifest
 		var ops []Operation
 		for _, tx := range batch {
 			hash := hashTransaction(&tx)
-			op := Operation{Hash: "0x" + hex.EncodeToString(hash[:])}
+			op := Operation{Hash: base58.Encode(hash[:])}
 			if index >= len(manifest.InitializationHashes) || manifest.InitializationHashes[index] != op.Hash {
 				return fmt.Errorf("setup transaction %d does not match manifest", index)
 			}

@@ -27,6 +27,7 @@ add_library(base_test_objects OBJECT
   arc_test.cc
   atomic_test.cc
   base_test.cc
+  base58_test.cc
   bits_test.cc
   block_id_test.cc
   chunk_items_test.cc

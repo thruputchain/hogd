@@ -321,7 +321,7 @@ class Cluster:
         def binary(name):
             return a.build / BINS[name]
 
-        network = "0" * 63 + "1"
+        network = "1" * 31 + "2"
         self.start(
             "mempool",
             [

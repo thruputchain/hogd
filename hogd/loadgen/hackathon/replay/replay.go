@@ -19,6 +19,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mr-tron/base58"
 	"github.com/thruputchain/lib-go/libxdr"
 	proto "github.com/thruputchain/thruput-protocol-go"
 )
@@ -121,7 +122,7 @@ func load(c Config) (Manifest, []Operation, error) {
 	if err = json.Unmarshal(data, &m); err != nil {
 		return m, nil, err
 	}
-	if m.SchemaVersion != 1 || m.Operations <= 0 || m.DurationSeconds <= 0 {
+	if m.SchemaVersion != 2 || m.Operations <= 0 || m.DurationSeconds <= 0 {
 		return m, nil, fmt.Errorf("invalid manifest")
 	}
 	file, err := os.Open(filepath.Join(c.Corpus, "transactions.jsonl"))
@@ -153,7 +154,7 @@ func load(c Config) (Manifest, []Operation, error) {
 			return m, nil, err
 		}
 		hash := hashTransaction(&tx)
-		if op.Hash != "0x"+hex.EncodeToString(hash[:]) || hashes[op.Hash] {
+		if op.Hash != base58.Encode(hash[:]) || hashes[op.Hash] {
 			return m, nil, fmt.Errorf("invalid or duplicate hash")
 		}
 		hashes[op.Hash] = true
