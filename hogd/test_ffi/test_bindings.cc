@@ -1245,6 +1245,15 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
       }
     }
 
+    // write_contract() is a base-DB put(); see DBContext::Borrow (issue #2727).
+    // Taken before verification too, so the config read off the tip below is
+    // not raced by an advance.
+    DBContext::Borrow borrow(*db_cast);
+    if (!borrow.held()) {
+      log_lifecycle_transition_refusal("setup_create_contract");
+      return kTestFFIErrorCodeUnrecoverableError;
+    }
+
     // Verify runtime-backed contracts before storing — reject contracts that
     // would fail during instantiation (e.g., an RV32 artifact that cannot be
     // translated, or an unknown native id).
@@ -1252,10 +1261,11 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     // against (the base context only registers the real runtimes); its
     // registration is checked above via has_mock_contract().
     if (contract.contract_type() != ContractType::kMockTest) {
-      // No chain is in hand here: verify under the protocol defaults, the
-      // bounds a test environment runs under unless it states otherwise.
-      auto verify_result =
-          (*context_cast)->verify_contract(contract, NetworkConfigParams{});
+      // Verify under the bounds this database's chain puts in force, as a
+      // transaction attaching the contract would be: a test environment that
+      // raises or lowers max_rv32_memory_bytes must see that here too.
+      const NetworkConfigParams params(db_cast->get_network_config().v0());
+      auto verify_result = (*context_cast)->verify_contract(contract, params);
       if (verify_result == InvokeErrorCode::Unrecoverable) {
         return kTestFFIErrorCodeUnrecoverableError;
       }
@@ -1265,13 +1275,6 @@ setup_create_contract(void *context, void *db, uint8_t const *contract_bytes,
     }
 
     auto h = sha256(contract);
-
-    // write_contract() is a base-DB put(); see DBContext::Borrow (issue #2727).
-    DBContext::Borrow borrow(*db_cast);
-    if (!borrow.held()) {
-      log_lifecycle_transition_refusal("setup_create_contract");
-      return kTestFFIErrorCodeUnrecoverableError;
-    }
     db_cast->get_base_db().write_contract(h, std::make_shared<Contract>(
                                                  std::move(contract)));
   } catch (std::exception const &e) {
