@@ -81,6 +81,11 @@ protected:
 private:
 };
 
+TEST_F(AuthVerifyTest, EmptyBatchDoesNotWaitForInitialization)
+{
+  EXPECT_TRUE(auth_server().verify_transactions(0, {}, 4)().empty());
+}
+
 TEST_F(AuthVerifyTest, VerifyTransaction)
 {
   ContractAddress address = make_test_address(8);
@@ -171,12 +176,14 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(0, stx_span)();
-
-  ASSERT_EQ(result.size(), 3);
-  EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+  // Exercise the inline chunk and concurrent workers with mixed outcomes.
+  for (size_t parallelism : {1U, 2U, 8U}) {
+    auto result = auth_server().verify_transactions(0, stx_span, parallelism)();
+    ASSERT_EQ(result.size(), 3);
+    EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
+    EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
+    EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+  }
 
   // batch verify
   EXPECT_EQ(auth_server().verify_batch(0, {stx1, stx2, stx3})(),
