@@ -14,8 +14,8 @@ import (
 	"testing"
 	"time"
 
-	"github.com/groundhogchain/lib-go/libxdr"
-	proto "github.com/groundhogchain/protocol-go"
+	"github.com/thruputchain/lib-go/libxdr"
+	proto "github.com/thruputchain/thruput-protocol-go"
 )
 
 func fixture(t *testing.T, n int) (string, []Operation) {
