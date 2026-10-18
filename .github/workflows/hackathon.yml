@@ -35,6 +35,11 @@ on:
                 required: true
                 default: 4
                 type: number
+            gateway_workers:
+                description: Gateway Tokio runtime workers (0 inherits automatic sizing; 1 to 128 overrides)
+                required: true
+                default: 0
+                type: number
             reuse_corpus:
                 description: Reuse hog10's last retained corpora after checking source, users and rates
                 required: true
@@ -95,6 +100,7 @@ jobs:
                   HACKATHON_RECEIPT_WORKERS: ${{ inputs.receipt_workers }}
                   HACKATHON_GATEWAY_BATCH_SHARDS: ${{ inputs.gateway_batch_shards }}
                   HACKATHON_GATEWAY_INFLIGHT_BATCHES: ${{ inputs.gateway_inflight_batches }}
+                  HACKATHON_GATEWAY_WORKERS: ${{ inputs.gateway_workers }}
                   HACKATHON_REUSE_CORPUS: ${{ inputs.reuse_corpus && '1' || '0' }}
                   HACKATHON_REPEATS: ${{ inputs.repeats }}
               run: |
@@ -106,6 +112,10 @@ jobs:
                       exit 1
                     fi
                   done
+                  if [[ ! "$HACKATHON_GATEWAY_WORKERS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((HACKATHON_GATEWAY_WORKERS > 128)); then
+                    echo 'HACKATHON_GATEWAY_WORKERS must be an integer between 0 and 128' >&2
+                    exit 1
+                  fi
                   hog_sched \
                     --timeout-sec=7200 \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
@@ -121,6 +131,7 @@ jobs:
                     --key=hackathon_receipt_workers --value="$HACKATHON_RECEIPT_WORKERS" \
                     --key=hackathon_gateway_batch_shards --value="$HACKATHON_GATEWAY_BATCH_SHARDS" \
                     --key=hackathon_gateway_inflight_batches --value="$HACKATHON_GATEWAY_INFLIGHT_BATCHES" \
+                    --key=hackathon_gateway_workers --value="$HACKATHON_GATEWAY_WORKERS" \
                     --key=hackathon_reuse_corpus --value="$HACKATHON_REUSE_CORPUS" \
                     --key=hackathon_repeats --value="$HACKATHON_REPEATS" \
                     ./scripts/schedules/hackathon.toml

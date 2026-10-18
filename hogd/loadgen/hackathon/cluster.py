@@ -531,6 +531,12 @@ class Cluster:
         )
         self.stage(gateway_config, self.hosts["gateway"], gateway_config)
         gateway_prefix = [a.gateway, "--config", gateway_config]
+        if a.gateway_workers:
+            gateway_prefix = [
+                "/usr/bin/env",
+                f"TOKIO_WORKER_THREADS={a.gateway_workers}",
+                *gateway_prefix,
+            ]
         if a.gateway_protocol:
             gateway_prefix += ["--hogd-protocol", a.gateway_protocol]
         self.start(
@@ -705,6 +711,7 @@ def main():
     p.add_argument("--receipt-workers", type=int, default=16)
     p.add_argument("--gateway-batch-shards", type=int, default=1)
     p.add_argument("--gateway-inflight-batches", type=int, default=4)
+    p.add_argument("--gateway-workers", type=int, default=0)
     args = p.parse_args()
     if not (
         1 <= args.gateway_batch_shards <= 128
@@ -712,6 +719,11 @@ def main():
     ):
         p.error(
             "gateway batch shards and inflight batches must be between 1 and 128"
+        )
+    if not 0 <= args.gateway_workers <= 128:
+        p.error(
+            "gateway runtime workers must be between 0 and 128 "
+            "(0 inherits automatic sizing)"
         )
     for name in ("build", "gateway", "scpd", "corpus", "output"):
         setattr(args, name, getattr(args, name).resolve())
@@ -765,6 +777,7 @@ def main():
         "ingress": "rpc-gateway",
         "gatewayBatchShards": args.gateway_batch_shards,
         "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
+        "gatewayRuntimeWorkers": args.gateway_workers,
     }
     identity["binaries"] = {}
     for name, relative in BINS.items():

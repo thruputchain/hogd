@@ -167,6 +167,13 @@ retains the effective `gateway.toml`, and `identity.json` records these settings
 Compare gateway and backend latency when tuning them: additional client slots
 can increase gateway queueing without increasing validator load.
 
+`gateway_workers` sets the gateway's Tokio runtime worker count through
+`TOKIO_WORKER_THREADS`. Zero (the default) leaves automatic sizing in effect;
+values 1 through 128 set an explicit count. This only configures the gateway,
+and `identity.json` records the requested value as `gatewayRuntimeWorkers`.
+The wrapper accepts `HACKATHON_GATEWAY_WORKERS` and the standalone harness
+accepts `--gateway-workers`.
+
 For subsequent capacity probes with the same workload, `reuse_corpus=true`
 restores hog10's retained `/tmp/hogdump-hogci/hackathon-results.tar.gz` instead of
 recompiling and signing the fixtures. Source changes must be confined to the
