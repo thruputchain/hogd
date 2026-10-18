@@ -137,10 +137,10 @@ benchmark chain; replaying it on an existing chain is unsupported.
 The CI schedule warms up for 30 seconds at 1,000 calls/second, then runs
 60-second stages at 1,000, 5,000, 10,000 and 25,000 calls/second. Each stage
 contains a five-second fivefold burst (up to 125,000 calls/second). Deployments
-are additional traffic. The client allows 16,384 concurrent submissions and uses
+are additional traffic. The workflow allows 26,624 concurrent submissions and uses
 16 receipt-polling workers. The harness writes and retains `gateway.toml`,
 setting the gateway connection cap to submission slots + receipt workers + 128
-(16,528 by default), so its default 2,000-connection cap does not stop the
+(26,768 with the workflow defaults), so its default 2,000-connection cap does not stop the
 load before ingestion. HTTP errors are counted separately from transport errors;
 HTTP 429 rejections are not repeatedly polled for nonexistent receipts.
 It records arrivals more than 100 ms late and drains
@@ -153,13 +153,16 @@ Workflow inputs `users`, `rate_multiplier`, `outstanding`, `receipt_workers`,
 and `repeats` override these defaults. The shell wrapper accepts the corresponding
 `HACKATHON_USERS`, `HACKATHON_RATE_MULTIPLIER`, `HACKATHON_OUTSTANDING`,
 `HACKATHON_RECEIPT_WORKERS`, and `HACKATHON_REPEATS` environment variables.
+Direct shell and standalone harness invocations retain 16,384 submission slots
+unless `HACKATHON_OUTSTANDING` or `--outstanding` is supplied.
 Use `users=100` and `rate_multiplier=1` for the earlier low-load corpus; the
 standalone corpus builder retains these lower defaults for local use. The
 multiplier applies before `--rate-divisor` and is saved in the manifest.
 
 Inputs `gateway_batch_shards` and `gateway_inflight_batches` control submission
-batching inside the RPC gateway. Their defaults (one shard, four concurrent
-scheduler batches per shard) match the pinned gateway. The shell wrapper accepts
+batching inside the RPC gateway. The workflow defaults to four shards and four
+concurrent scheduler batches per shard. The standalone harness and shell wrapper
+retain one shard and four batches per shard unless explicitly configured. The shell wrapper accepts
 `HACKATHON_GATEWAY_BATCH_SHARDS` and `HACKATHON_GATEWAY_INFLIGHT_BATCHES`;
 the standalone harness accepts `--gateway-batch-shards` and
 `--gateway-inflight-batches`. Both values must be between 1 and 128. Each repeat
@@ -168,7 +171,8 @@ Compare gateway and backend latency when tuning them: additional client slots
 can increase gateway queueing without increasing validator load.
 
 `gateway_workers` sets the gateway's Tokio runtime worker count through
-`TOKIO_WORKER_THREADS`. Zero (the default) leaves automatic sizing in effect;
+`TOKIO_WORKER_THREADS`. The workflow defaults to eight workers. Zero leaves
+automatic sizing in effect and remains the standalone harness and wrapper default;
 values 1 through 128 set an explicit count. This only configures the gateway,
 and `identity.json` records the requested value as `gatewayRuntimeWorkers`.
 The wrapper accepts `HACKATHON_GATEWAY_WORKERS` and the standalone harness
@@ -210,9 +214,10 @@ Submissions use up to 16 independent HTTP connection pools to avoid serializing
 connection reuse at large client windows. Their combined connection limit equals
 `outstanding`; receipt polling and telemetry reserve another `receipt_workers + 32`
 connections. The global outstanding limit and offered arrival schedule still apply.
-The experimental `submission_http2` workflow input (or replay's
+The `submission_http2` workflow input (or replay's
 `--submission-http2` flag) multiplexes measured transaction submissions over HTTP/2,
-including cleartext HTTP/2 for the CI gateway URL. It defaults to false. Setup,
+including cleartext HTTP/2 for the CI gateway URL. The workflow enables it by
+default; standalone replay and shell invocations require opting in. Setup,
 receipt polling and telemetry use the separate HTTP/1 pool. The selected protocol
 is recorded in the run configuration and workload identity. HTTP/2 reduces TCP
 connection demand; gateway request limits and bounded ingress queues still apply.
