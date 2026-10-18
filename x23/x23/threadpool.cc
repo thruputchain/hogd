@@ -310,6 +310,13 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
   if (newbucket == bucket_)
     return;
 
+  // go() wakes one waiter per job, and this thread may have been that
+  // waiter for a job still in the queue it is about to leave.  If it does
+  // leave, pass the wakeup on so the job is not stranded until the next
+  // enqueue.
+  pool_->relock(ptr, bucket_);
+  std::condition_variable *handoff = ptr->q.empty() ? nullptr : &ptr->nonempty;
+
   unsigned zero = 0;
   // The last thread in a bucket can only leave if the queue is empty
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
@@ -319,9 +326,12 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
       // servicing the queue.  But if we fail to increase the counter,
       // then it means another thread already did so, meaning it's
       // okay to leave the queue after all.
-      !pool_->queue_nthreads_[bucket_].compare_exchange_strong(zero, 1))
+      !pool_->queue_nthreads_[bucket_].compare_exchange_strong(zero, 1)) {
     pool_->queue_nthreads_[bucket_ = newbucket].fetch_add(
         1, std::memory_order_relaxed);
+    if (handoff)
+      handoff->notify_one();
+  }
 }
 
 ThreadPool::QPtr
