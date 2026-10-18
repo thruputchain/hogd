@@ -341,7 +341,8 @@ protected:
   // The epoll set is sharded: each file descriptor belongs to shard
   // fd % nshards(), and each shard has its own epoll and wake fds so that
   // one poll thread per shard can wait on it.  check() checks shard 0.
-  // X23_POLL_SHARDS sets the count; it defaults to 1, one poll thread.
+  // There is one shard per last-level cache; X23_POLL_SHARDS overrides the
+  // count (0 keeps the per-LLC default).
   size_t nshards() const noexcept { return shards_.size(); }
   void check_shard(size_t shard, int timeout = -1);
 #else  // !USE_EPOLL

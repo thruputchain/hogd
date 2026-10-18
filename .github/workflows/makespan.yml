@@ -44,9 +44,9 @@ on:
                 type: string
                 default: "5"
             poll_shards:
-                description: x23 poll threads per process (X23_POLL_SHARDS)
+                description: x23 poll threads per process (X23_POLL_SHARDS; 0 = one per LLC)
                 type: string
-                default: "8"
+                default: "0"
 env:
     CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
     # Published crates and pinned submodules retain the legacy registry identity.
@@ -102,7 +102,7 @@ jobs:
                   N_HEAVY: ${{ inputs.n_heavy || '32' }}
                   LIGHT_BATCH: ${{ inputs.light_batch || '5' }}
                   TRIALS: ${{ inputs.trials || '5' }}
-                  POLL_SHARDS: ${{ inputs.poll_shards || '8' }}
+                  POLL_SHARDS: ${{ inputs.poll_shards || '0' }}
               run: |
                   BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
                   echo "Branch name: $BRANCH_NAME"

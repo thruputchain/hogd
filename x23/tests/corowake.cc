@@ -27,19 +27,24 @@ struct CoroWake : CoroPoll {
 
   CoroWake(ThreadPool &pool) : CoroPoll(pool, no_loop_thread{}), id_(idctr++)
   {
-    // This loop checks shard 0 only, so it drives every fd only with the
-    // default single poll shard.
-    pollthreads_.emplace_back(&CoroWake::loop, this);
+    // One loop per poll shard, as CoroPoll itself runs, so that every fd
+    // is polled whatever the shard count.
+    for (size_t shard = 0; shard < nshards(); ++shard)
+      pollthreads_.emplace_back(&CoroWake::loop, this, shard);
     std::println("Created CoroWake {}", id_);
   }
   ~CoroWake() { std::println("Destroying CoroWake {}", id_); }
 
   using CoroPoll::wake;
 
-  void loop()
+  // Mirrors CoroPoll::loop: shard 0 waits out shutdown, the rest stop at
+  // the request.
+  void loop(size_t shard)
   {
-    while (!time_to_stop()) {
-      check();
+    for (;;) {
+      if (shard == 0 ? time_to_stop() : stop_requested())
+        return;
+      check_shard(shard);
       loopcnt_.fetch_add(1, std::memory_order_relaxed);
       loopcnt_.notify_all();
     }

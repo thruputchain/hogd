@@ -6,6 +6,7 @@
 #include <sys/epoll.h>
 #include <sys/eventfd.h>
 
+#include "x23/cpumap.h"
 #include "x23/event.h"
 #include "x23/sockio.h"
 
@@ -13,17 +14,20 @@ namespace x23::detail {
 
 namespace {
 
-// X23_POLL_SHARDS, clamped to [1, 256]; 1 if unset or unparsable.
+// One poll shard per last-level cache unless X23_POLL_SHARDS names a
+// count (clamped to [1, 256]); 0, unset or unparsable mean per-LLC.
 size_t
 poll_shard_count()
 {
+  init_cpumaps();
+  const size_t per_llc = std::max<size_t>(1, llc_map->nbuckets());
   const char *s = getenv("X23_POLL_SHARDS");
   if (!s || !*s)
-    return 1;
+    return per_llc;
   char *end;
   long n = strtol(s, &end, 10);
   if (*end || n < 1)
-    return 1;
+    return per_llc;
   return size_t(std::min(n, 256L));
 }
 
