@@ -202,6 +202,10 @@ without supplying application transactions. The stock `bench coordinator_loadgen
 command runs consensus. The tool's `run` command submits all application setup,
 deployments, calls, and authentication updates through the RPC gateway. Setup
 batches must commit successfully before the measured arrival clock starts.
+Submissions use up to 16 independent HTTP connection pools to avoid serializing
+connection reuse at large client windows. Their combined connection limit equals
+`outstanding`; receipt polling and telemetry reserve another `receipt_workers + 32`
+connections. The global outstanding limit and offered arrival schedule still apply.
 This requires no chuckd changes or submodule updates.
 
 Run with the schedule’s CI services and gateway already built and their control

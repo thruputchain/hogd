@@ -185,12 +185,8 @@ func Run(ctx context.Context, c Config) error {
 	if err = os.WriteFile(filepath.Join(c.Output, "config.json"), configFile, 0644); err != nil {
 		return err
 	}
-	// Receipt workers and telemetry must retain connections even when every
-	// submission slot is occupied, including runs configured with many pollers.
-	connections := c.Outstanding + c.ReceiptWorkers + 32
-	transport := &http.Transport{MaxIdleConns: connections, MaxIdleConnsPerHost: connections, MaxConnsPerHost: connections}
-	defer transport.CloseIdleConnections()
-	client := &http.Client{Transport: transport, Timeout: c.Timeout}
+	clients, client, closeClients := replayClients(c)
+	defer closeClients()
 	// Setup uses the same gateway as measured submissions and completes before
 	// the arrival clock starts.
 	if err = initializeApps(ctx, client, c, m); err != nil {
@@ -267,7 +263,7 @@ func Run(ctx context.Context, c Config) error {
 			defer func() { <-permits }()
 			requestCtx, done := context.WithTimeout(ctx, c.Timeout)
 			defer done()
-			outcome, e := submit(requestCtx, client, c.URL, op, i)
+			outcome, e := submit(requestCtx, clients[i%len(clients)], c.URL, op, i)
 			mu.Lock()
 			results[i].EndNs = time.Since(start).Nanoseconds()
 			results[i].Outcome = outcome
