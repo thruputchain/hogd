@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <span>
 #include <utility>
 
 #include "address_auth.hh"
@@ -175,14 +176,25 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   stx3.signatures.push_back(make_signature(sk2, tx3, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
-  x23::span<SignedTransaction> stx_span(stx_vec);
-  // Exercise the inline chunk and concurrent workers with mixed outcomes.
-  for (size_t parallelism : {1U, 2U, 8U}) {
-    auto result = auth_server().verify_transactions(0, stx_span, parallelism)();
-    ASSERT_EQ(result.size(), 3);
-    EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
-    EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
-    EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+  // Exercise small batches, the minimum chunk boundary, and uneven parallel
+  // chunks. Mixed outcomes must remain at the original transaction indexes.
+  for (size_t batch_size : {3U, 31U, 32U, 33U, 63U, 64U, 65U, 97U}) {
+    x23::Vec<SignedTransaction> batch;
+    for (size_t i = 0; i < batch_size; ++i) {
+      batch.push_back(stx_vec[i % stx_vec.size()]);
+    }
+    for (size_t parallelism : {1U, 2U, 8U, 128U}) {
+      SCOPED_TRACE(::testing::Message() << "batch_size=" << batch_size
+                                        << " parallelism=" << parallelism);
+      auto result = auth_server().verify_transactions(
+          0, std::span<const SignedTransaction>(batch.data(), batch.size()),
+          parallelism)();
+      ASSERT_EQ(result.size(), batch_size);
+      for (size_t i = 0; i < batch_size; ++i) {
+        EXPECT_EQ(result[i], i % 3 == 1 ? AuthErrorCode::kAuthSuccess
+                                        : AuthErrorCode::kAuthFailed);
+      }
+    }
   }
 
   // batch verify
@@ -357,7 +369,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 {
   constexpr size_t kNumAddresses = 4;
-  constexpr size_t kTxsPerAddress = 16;
+  constexpr size_t kTxsPerAddress = 32;
   constexpr size_t kTotalTxs = kNumAddresses * kTxsPerAddress;
   constexpr size_t kMaxParallelism = 4;
 
