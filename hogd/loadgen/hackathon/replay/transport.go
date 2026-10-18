@@ -9,11 +9,16 @@ import "net/http"
 // Run's global permits still bound submissions across all transports.
 func replayClients(c Config) ([]*http.Client, *http.Client, func()) {
 	var transports []*http.Transport
-	newClient := func(connections int) *http.Client {
+	newClient := func(connections int, http2 bool) *http.Client {
 		transport := &http.Transport{
 			MaxIdleConns:        connections,
 			MaxIdleConnsPerHost: connections,
 			MaxConnsPerHost:     connections,
+		}
+		if http2 {
+			transport.Protocols = new(http.Protocols)
+			transport.Protocols.SetHTTP2(true)
+			transport.Protocols.SetUnencryptedHTTP2(true)
 		}
 		transports = append(transports, transport)
 		return &http.Client{Transport: transport, Timeout: c.Timeout}
@@ -24,9 +29,10 @@ func replayClients(c Config) ([]*http.Client, *http.Client, func()) {
 		if i < c.Outstanding%len(clients) {
 			connections++
 		}
-		clients[i] = newClient(connections)
+		clients[i] = newClient(connections, c.SubmissionHTTP2)
 	}
-	control := newClient(c.ReceiptWorkers + 32)
+	// Setup, receipts and HTTP/1-only telemetry endpoints use the control pool.
+	control := newClient(c.ReceiptWorkers+32, false)
 	return clients, control, func() {
 		for _, transport := range transports {
 			transport.CloseIdleConnections()

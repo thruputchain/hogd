@@ -40,6 +40,11 @@ on:
                 required: true
                 default: 0
                 type: number
+            submission_http2:
+                description: Multiplex measured submissions over HTTP/2 (experimental)
+                required: true
+                default: false
+                type: boolean
             reuse_corpus:
                 description: Reuse hog10's last retained corpora after checking source, users and rates
                 required: true
@@ -100,6 +105,7 @@ jobs:
                   HACKATHON_RECEIPT_WORKERS: ${{ inputs.receipt_workers }}
                   HACKATHON_GATEWAY_BATCH_SHARDS: ${{ inputs.gateway_batch_shards }}
                   HACKATHON_GATEWAY_INFLIGHT_BATCHES: ${{ inputs.gateway_inflight_batches }}
+                  HACKATHON_SUBMISSION_HTTP2: ${{ inputs.submission_http2 && '1' || '0' }}
                   HACKATHON_GATEWAY_WORKERS: ${{ inputs.gateway_workers }}
                   HACKATHON_REUSE_CORPUS: ${{ inputs.reuse_corpus && '1' || '0' }}
                   HACKATHON_REPEATS: ${{ inputs.repeats }}
@@ -132,6 +138,7 @@ jobs:
                     --key=hackathon_gateway_batch_shards --value="$HACKATHON_GATEWAY_BATCH_SHARDS" \
                     --key=hackathon_gateway_inflight_batches --value="$HACKATHON_GATEWAY_INFLIGHT_BATCHES" \
                     --key=hackathon_gateway_workers --value="$HACKATHON_GATEWAY_WORKERS" \
+                    --key=hackathon_submission_http2 --value="$HACKATHON_SUBMISSION_HTTP2" \
                     --key=hackathon_reuse_corpus --value="$HACKATHON_REUSE_CORPUS" \
                     --key=hackathon_repeats --value="$HACKATHON_REPEATS" \
                     ./scripts/schedules/hackathon.toml

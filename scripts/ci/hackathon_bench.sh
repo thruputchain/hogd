@@ -10,6 +10,7 @@ set -Eeuo pipefail
 : "${HACKATHON_GATEWAY_INFLIGHT_BATCHES:=4}"
 : "${HACKATHON_GATEWAY_WORKERS:=0}"
 : "${HACKATHON_REUSE_CORPUS:=0}"
+: "${HACKATHON_SUBMISSION_HTTP2:=0}"
 : "${HACKATHON_REPEATS:=3}"
 for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
   IFS=: read -r name minimum maximum <<<"$setting"
@@ -26,6 +27,14 @@ fi
 if [[ "$HACKATHON_REUSE_CORPUS" != 0 && "$HACKATHON_REUSE_CORPUS" != 1 ]]; then
   echo 'HACKATHON_REUSE_CORPUS must be 0 or 1' >&2
   exit 1
+fi
+if [[ "$HACKATHON_SUBMISSION_HTTP2" != 0 && "$HACKATHON_SUBMISSION_HTTP2" != 1 ]]; then
+  echo 'HACKATHON_SUBMISSION_HTTP2 must be 0 or 1' >&2
+  exit 1
+fi
+submission_options=()
+if [[ "$HACKATHON_SUBMISSION_HTTP2" == 1 ]]; then
+  submission_options+=(--submission-http2)
 fi
 ROOT=$(cd "$(dirname "$0")/../.." && pwd)
 BUILD_DIR=$(realpath "$BUILD_DIR")
@@ -110,5 +119,5 @@ for shared in 0 1; do
     --outstanding "$HACKATHON_OUTSTANDING" --receipt-workers "$HACKATHON_RECEIPT_WORKERS" --repeats "$HACKATHON_REPEATS" \
     --gateway-batch-shards "$HACKATHON_GATEWAY_BATCH_SHARDS" \
     --gateway-inflight-batches "$HACKATHON_GATEWAY_INFLIGHT_BATCHES" \
-    --gateway-workers "$HACKATHON_GATEWAY_WORKERS"
+    --gateway-workers "$HACKATHON_GATEWAY_WORKERS" "${submission_options[@]}"
 done

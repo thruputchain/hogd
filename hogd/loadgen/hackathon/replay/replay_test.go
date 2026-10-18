@@ -84,76 +84,92 @@ func bytesLines(data []byte) [][]byte {
 }
 
 func TestSlowRPCDoesNotThrottleOfferedArrivals(t *testing.T) {
-	dir, ops := fixture(t, 40)
-	var mu sync.Mutex
-	committed := map[string]bool{}
-	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		var body json.RawMessage
-		json.NewDecoder(r.Body).Decode(&body)
-		reply := func(req rpcRequest) rpcResponse {
-			if req.Method == "groundhog_sendRawTransaction" {
-				var hash string
-				for _, op := range ops {
-					if op.Raw == req.Params[0] {
-						hash = op.Hash
-						break
+	for _, useHTTP2 := range []bool{false, true} {
+		t.Run(fmt.Sprintf("http2=%v", useHTTP2), func(t *testing.T) {
+			dir, ops := fixture(t, 40)
+			var mu sync.Mutex
+			committed := map[string]bool{}
+			server := httptest.NewUnstartedServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+				var body json.RawMessage
+				json.NewDecoder(r.Body).Decode(&body)
+				reply := func(req rpcRequest) rpcResponse {
+					if req.Method == "groundhog_sendRawTransaction" {
+						wantProtocol := 1
+						if useHTTP2 {
+							wantProtocol = 2
+						}
+						if r.ProtoMajor != wantProtocol {
+							t.Errorf("submission protocol=%d, want %d", r.ProtoMajor, wantProtocol)
+						}
+						var hash string
+						for _, op := range ops {
+							if op.Raw == req.Params[0] {
+								hash = op.Hash
+								break
+							}
+						}
+						time.Sleep(80 * time.Millisecond)
+						mu.Lock()
+						committed[hash] = true
+						mu.Unlock()
+						data, _ := json.Marshal(hash)
+						return rpcResponse{ID: req.ID, Result: data}
+					}
+					mu.Lock()
+					ok := committed[req.Params[0]]
+					mu.Unlock()
+					data := json.RawMessage("null")
+					if ok {
+						data = json.RawMessage(fmt.Sprintf(`{"txHash":%q,"height":"2","status":{"result":"ok"},"gasUsed":"100"}`, req.Params[0]))
+					}
+					return rpcResponse{ID: req.ID, Result: data}
+				}
+				if len(body) > 0 && body[0] == '[' {
+					var requests []rpcRequest
+					json.Unmarshal(body, &requests)
+					responses := []rpcResponse{}
+					for _, req := range requests {
+						responses = append(responses, reply(req))
+					}
+					json.NewEncoder(w).Encode(responses)
+				} else {
+					var req rpcRequest
+					json.Unmarshal(body, &req)
+					json.NewEncoder(w).Encode(reply(req))
+				}
+			}))
+			server.Config.Protocols = new(http.Protocols)
+			server.Config.Protocols.SetHTTP1(true)
+			server.Config.Protocols.SetUnencryptedHTTP2(true)
+			server.Start()
+			defer server.Close()
+			out := filepath.Join(t.TempDir(), "run")
+			c := Config{SubmissionHTTP2: useHTTP2, Corpus: dir, Output: out, URL: server.URL, Outstanding: 1, ReceiptWorkers: 4, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
+			if err := Run(context.Background(), c); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := os.ReadFile(filepath.Join(out, "results.jsonl"))
+			blocked, admitted := 0, 0
+			for _, line := range bytesLines(data) {
+				var r Result
+				json.Unmarshal(line, &r)
+				if r.Outcome == "outstanding_limit" {
+					blocked++
+				}
+				if r.Outcome == "admitted" {
+					admitted++
+					if r.Execution != "ok" {
+						t.Fatal("receipt not reconciled")
 					}
 				}
-				time.Sleep(80 * time.Millisecond)
-				mu.Lock()
-				committed[hash] = true
-				mu.Unlock()
-				data, _ := json.Marshal(hash)
-				return rpcResponse{ID: req.ID, Result: data}
 			}
-			mu.Lock()
-			ok := committed[req.Params[0]]
-			mu.Unlock()
-			data := json.RawMessage("null")
-			if ok {
-				data = json.RawMessage(fmt.Sprintf(`{"txHash":%q,"height":"2","status":{"result":"ok"},"gasUsed":"100"}`, req.Params[0]))
+			if blocked == 0 || admitted == 0 || blocked+admitted != len(ops) {
+				t.Fatalf("incomplete accounting: %d blocked %d admitted", blocked, admitted)
 			}
-			return rpcResponse{ID: req.ID, Result: data}
-		}
-		if len(body) > 0 && body[0] == '[' {
-			var requests []rpcRequest
-			json.Unmarshal(body, &requests)
-			responses := []rpcResponse{}
-			for _, req := range requests {
-				responses = append(responses, reply(req))
-			}
-			json.NewEncoder(w).Encode(responses)
-		} else {
-			var req rpcRequest
-			json.Unmarshal(body, &req)
-			json.NewEncoder(w).Encode(reply(req))
-		}
-	}))
-	defer server.Close()
-	out := filepath.Join(t.TempDir(), "run")
-	c := Config{Corpus: dir, Output: out, URL: server.URL, Outstanding: 1, ReceiptWorkers: 4, Drain: time.Second, Timeout: time.Second, MaxLateness: time.Second}
-	if err := Run(context.Background(), c); err != nil {
-		t.Fatal(err)
-	}
-	data, _ := os.ReadFile(filepath.Join(out, "results.jsonl"))
-	blocked, admitted := 0, 0
-	for _, line := range bytesLines(data) {
-		var r Result
-		json.Unmarshal(line, &r)
-		if r.Outcome == "outstanding_limit" {
-			blocked++
-		}
-		if r.Outcome == "admitted" {
-			admitted++
-			if r.Execution != "ok" {
-				t.Fatal("receipt not reconciled")
-			}
-		}
-	}
-	if blocked == 0 || admitted == 0 || blocked+admitted != len(ops) {
-		t.Fatalf("incomplete accounting: %d blocked %d admitted", blocked, admitted)
+		})
 	}
 }
+
 func TestPreflightRejectsCommittedFault(t *testing.T) {
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		fmt.Fprint(w, `{"id":0,"result":{"txHash":"0x01","status":{"result":"deterministicError"}}}`)

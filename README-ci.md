@@ -206,6 +206,12 @@ Submissions use up to 16 independent HTTP connection pools to avoid serializing
 connection reuse at large client windows. Their combined connection limit equals
 `outstanding`; receipt polling and telemetry reserve another `receipt_workers + 32`
 connections. The global outstanding limit and offered arrival schedule still apply.
+The experimental `submission_http2` workflow input (or replay's
+`--submission-http2` flag) multiplexes measured transaction submissions over HTTP/2,
+including cleartext HTTP/2 for the CI gateway URL. It defaults to false. Setup,
+receipt polling and telemetry use the separate HTTP/1 pool. The selected protocol
+is recorded in the run configuration and workload identity. HTTP/2 reduces TCP
+connection demand; gateway request limits and bounded ingress queues still apply.
 This requires no chuckd changes or submodule updates.
 
 Run with the schedule’s CI services and gateway already built and their control

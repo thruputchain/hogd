@@ -24,6 +24,7 @@ import (
 )
 
 type Config struct {
+	SubmissionHTTP2             bool
 	Corpus, Output, URL         string
 	Outstanding                 int
 	ReceiptWorkers              int

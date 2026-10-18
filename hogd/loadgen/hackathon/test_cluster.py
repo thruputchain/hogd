@@ -62,6 +62,7 @@ class ReplayShutdownTest(unittest.TestCase):
                     drain=1,
                     outstanding=1,
                     receipt_workers=1,
+                    submission_http2=False,
                     ready_timeout=1,
                 )
                 cluster.directory, cluster.control, cluster.port = (

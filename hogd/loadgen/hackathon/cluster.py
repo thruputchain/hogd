@@ -615,6 +615,7 @@ class Cluster:
                 str(a.outstanding),
                 "--receipt-workers",
                 str(a.receipt_workers),
+                *(["--submission-http2"] if a.submission_http2 else []),
             ],
         )
         duration = json.loads(
@@ -708,6 +709,7 @@ def main():
     p.add_argument("--ready-timeout", type=int, default=600)
     p.add_argument("--drain", type=int, default=120)
     p.add_argument("--outstanding", type=int, default=16384)
+    p.add_argument("--submission-http2", action="store_true")
     p.add_argument("--receipt-workers", type=int, default=16)
     p.add_argument("--gateway-batch-shards", type=int, default=1)
     p.add_argument("--gateway-inflight-batches", type=int, default=4)
@@ -778,6 +780,7 @@ def main():
         "gatewayBatchShards": args.gateway_batch_shards,
         "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
         "gatewayRuntimeWorkers": args.gateway_workers,
+        "submissionHTTP2": args.submission_http2,
     }
     identity["binaries"] = {}
     for name, relative in BINS.items():
