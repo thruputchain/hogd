@@ -52,6 +52,7 @@
 #include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/event.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
@@ -291,7 +292,7 @@ struct WorkerResult {
   // Turned away for load, as a full mempool answers: counted, not retried.
   int64_t retryable = 0;
   // Completion of the last measured call, for a run that ends early.
-  Clock::time_point last_measured{};
+  Clock::time_point last_measured;
   std::string error;
 };
 
@@ -611,11 +612,12 @@ run_benchmark(int argc, char **argv)
     {
       std::atomic<size_t> next_call{1};
       std::vector<std::jthread> signers;
+      signers.reserve(available_parallelism());
       for (size_t t = 0; t < available_parallelism(); ++t)
         signers.emplace_back([&] {
           for (size_t k = next_call.fetch_add(1); k <= calls;
                k = next_call.fetch_add(1)) {
-            const size_t first = (k - 1) * config.batch + 1;
+            const size_t first = ((k - 1) * config.batch) + 1;
             const size_t last =
                 std::min<size_t>(first + config.batch - 1, config.count);
             SignedTransactionBatch txs;
