@@ -319,7 +319,7 @@ template<VerificationType VerfType>
 AuthVerifyStatus<void>
 verify_auth_claims_internal(const SignedTransaction &stx,
                             const AddressAuthData *source_auth_data,
-                            const NetworkHash *network_hash,
+                            x23::BufView signature_preimage,
                             Ed25519SignatureVerifier *signature_verifier)
 {
   if constexpr (VerfType == VerificationType::kLightweightClaimedOnly) {
@@ -328,17 +328,6 @@ verify_auth_claims_internal(const SignedTransaction &stx,
 
   if constexpr (VerfType != VerificationType::kSignaturesValid) {
     assert(signature_verifier == nullptr);
-  }
-
-  // Only the signature-checking path needs the preimage, and only that path
-  // is given a network to bind it to.
-  x23::Buf signature_preimage;
-  if constexpr (verify_signatures(VerfType)) {
-    assert(network_hash);
-    signature_preimage = transaction_signature_preimage(*network_hash, stx.tx);
-  }
-  else {
-    assert(!network_hash);
   }
 
   const AuthClaim &auth_claim = stx.tx.auth_claim;
@@ -410,8 +399,20 @@ verify_auth(const SignedTransaction &stx,
             const NetworkHash &network_hash,
             Ed25519SignatureVerifier *signature_verifier)
 {
+  x23::Buf signature_preimage;
+  return verify_auth(stx, source_auth_data, network_hash, signature_preimage,
+                     signature_verifier);
+}
+
+AuthVerifyStatus<void>
+verify_auth(const SignedTransaction &stx,
+            const AddressAuthData *source_auth_data,
+            const NetworkHash &network_hash, x23::Buf &signature_preimage,
+            Ed25519SignatureVerifier *signature_verifier)
+{
+  transaction_signature_preimage(network_hash, stx.tx, signature_preimage);
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
-      stx, source_auth_data, &network_hash, signature_verifier);
+      stx, source_auth_data, signature_preimage, signature_verifier);
 }
 
 AuthVerifyStatus<void>
@@ -419,14 +420,14 @@ lightweight_validate_auth_claims(const SignedTransaction &stx,
                                  const AddressAuthData *source_auth_data)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimsValid>(
-      stx, source_auth_data, nullptr, nullptr);
+      stx, source_auth_data, {}, nullptr);
 }
 
 AuthVerifyStatus<void>
 auth_claim_is_well_formed(const SignedTransaction &stx)
 {
   return verify_auth_claims_internal<VerificationType::kLightweightClaimedOnly>(
-      stx, nullptr, nullptr, nullptr);
+      stx, nullptr, {}, nullptr);
 }
 
 } // namespace hogd

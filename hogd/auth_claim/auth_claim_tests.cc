@@ -176,6 +176,61 @@ TEST_F(AuthClaimTests, SignaturePreimageLayout)
                          preimage.end() - payload.size()));
 }
 
+TEST_F(AuthClaimTests, SignaturePreimageReusesStorage)
+{
+  x23::Buf scratch;
+  NetworkHash network_hash = kTestNetworkHash;
+  Transaction tx = make_transaction(make_claim(1 << 0));
+  for (size_t size : {1024U, 0U, 1U, 63U, 2048U, 8U}) {
+    SCOPED_TRACE(size);
+    tx.invocation.calldata.resize(size, 0x42);
+    ++network_hash[0];
+    const auto expected = transaction_signature_preimage(network_hash, tx);
+    const size_t old_capacity = scratch.capacity();
+    const auto *old_data = scratch.data();
+    transaction_signature_preimage(network_hash, tx, scratch);
+    EXPECT_EQ(scratch, expected);
+    if (expected.size() <= old_capacity) {
+      EXPECT_EQ(scratch.capacity(), old_capacity);
+      EXPECT_EQ(scratch.data(), old_data);
+    }
+  }
+}
+
+TEST_F(AuthClaimTests, VerifyWithReusedPreimage)
+{
+  auto [pk, sk] = make_key_pair();
+  AddressAuthData auth_data{.public_keys = {x23::Ptr<PublicKeyConfig>(
+                                new PublicKeyConfig{.key = pk,
+                                                    .max_weight = Weight{1}})},
+                            .required_weight = 1};
+  x23::Buf scratch;
+  Ed25519SignatureVerifier deferred;
+  constexpr NetworkHash kOtherNetworkHash{0xa5};
+  for (size_t size : {1024U, 0U, 1U, 63U, 2048U, 8U}) {
+    SCOPED_TRACE(size);
+    Transaction tx = make_transaction(make_claim(1 << 0));
+    tx.invocation.calldata.resize(size, 0x42);
+    SignedTransaction stx{.tx = tx, .signatures = {make_signature(sk, tx, 0)}};
+    EXPECT_TRUE(
+        verify_auth(stx, &auth_data, kTestNetworkHash, scratch).has_value());
+    EXPECT_TRUE(
+        verify_auth(stx, &auth_data, kTestNetworkHash, scratch, &deferred)
+            .has_value());
+    EXPECT_FALSE(
+        verify_auth(stx, &auth_data, kOtherNetworkHash, scratch).has_value());
+    ++stx.tx.uniquifier.nonce;
+    EXPECT_FALSE(
+        verify_auth(stx, &auth_data, kTestNetworkHash, scratch).has_value());
+    --stx.tx.uniquifier.nonce;
+    EXPECT_TRUE(
+        verify_auth(stx, &auth_data, kTestNetworkHash, scratch).has_value());
+  }
+  // Deferred verification must own its messages after the scratch is reused.
+  std::fill(scratch.begin(), scratch.end(), 0);
+  EXPECT_TRUE(deferred.verify());
+}
+
 TEST_F(AuthClaimTests, SignatureDoesNotVerifyOnAnotherNetwork)
 {
   constexpr NetworkHash kOtherNetworkHash{0xa5};
