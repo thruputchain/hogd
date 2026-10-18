@@ -35,6 +35,8 @@ using AuthCacheEntry =
 
 class AuthServer {
 public:
+  static constexpr size_t kMaxLookupBatchesInFlight = 4;
+
   explicit AuthServer(dbauth_client_t &&dbauth_client, NetworkHash network_hash,
                       int bucket_size = 1'048'576)
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client)),
@@ -77,8 +79,13 @@ public:
   }
 
 private:
-  x23::Async<AuthStatus<AuthCacheEntry>>
-  populate_auth_data(BlockHeight height, ContractAddress const &address);
+  x23::Async<BlockHeight> wait_for_height(BlockHeight height);
+
+  // A successful null pointer means the DB must be queried. A non-null entry
+  // (including a cached missing account) or an error is already conclusive.
+  AuthStatus<AuthCacheEntry> check_auth_cache(BlockHeight height,
+                                              BlockHeight current_height,
+                                              const ContractAddress &address);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.

@@ -1,13 +1,16 @@
 #pragma once
 
 #include <optional>
+#include <vector>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_auth/status.h"
+#include "rpc_types.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
@@ -30,16 +33,26 @@ make_dbauth_client(const std::string &address_for_auth)
 
 class DBAuthClient {
 public:
-  DBAuthClient(dbauth_client_t &&client) : client_(std::move(client)) {}
+  // Bound replies too: an account may have kMaxSigners ML-DSA keys.
+  static constexpr size_t kMaxLookupBatchSize = 256;
+
+  DBAuthClient(dbauth_client_t &&client);
+
+  size_t max_lookup_batch_size() const { return max_lookup_batch_size_; }
 
   x23::Async<AuthStatus<std::optional<AddressAuthData>>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
+
+  x23::Async<std::vector<AuthStatus<std::optional<AddressAuthData>>>>
+  lookup_auth_data_batch(BlockHeight height,
+                         const ContractAddressBatch &addresses);
 
   x23::Async<BlockHeight> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
   // Sharded DB is not yet implemented.
   dbauth_client_t client_;
+  size_t max_lookup_batch_size_;
 };
 
 } // namespace hogd
