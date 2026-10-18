@@ -92,6 +92,7 @@
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "hogd/init.h"
+#include "hogd/metrics/shared.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -563,6 +564,8 @@ struct Sample {
   DbRpcStats db_rpc;
   ThreadTicks db_threads;
   std::vector<ThreadTicks> exec_threads;
+  // This process: the probe's client side.
+  ThreadTicks runner_threads;
 };
 
 // What two samples say about the window between them. Cores are averages
@@ -581,6 +584,7 @@ struct LoadStats {
   ThreadLoad db_threads;
   // The executor whose poll thread was busiest.
   ThreadLoad exec_threads;
+  ThreadLoad runner_threads;
 };
 
 LoadStats
@@ -610,6 +614,8 @@ load_stats(const Sample &before, const Sample &after)
         std::max(out.exec_host.core_softirq_max, h.core_softirq_max);
   }
   out.db_threads = thread_load(before.db_threads, after.db_threads, wall_s);
+  out.runner_threads =
+      thread_load(before.runner_threads, after.runner_threads, wall_s);
   for (size_t i = 0;
        i < before.exec_threads.size() && i < after.exec_threads.size(); i++) {
     ThreadLoad t =
@@ -638,7 +644,8 @@ format_load(const LoadStats &l)
       "commit_cpu_us={:.1f} other_wall_us={:.1f} db_poll_busy={:.2f} "
       "db_n_poll={} db_workers={:.1f} db_worker_max={:.2f} db_top={} "
       "exec_poll_busy={:.2f} exec_n_poll={} exec_workers={:.1f} "
-      "exec_worker_max={:.2f} exec_top={}",
+      "exec_worker_max={:.2f} exec_top={} runner_poll_busy={:.2f} "
+      "runner_workers={:.1f} runner_worker_max={:.2f} runner_top={}",
       l.db_cores, l.exec_cores_max, l.db_host.cores, l.db_host.core_busy_max,
       l.db_host.core_softirq_max, l.exec_host.cores, l.exec_host.core_busy_max,
       l.exec_host.core_softirq_max, l.db_rpc.total_count(), l.db_handler_cores,
@@ -651,7 +658,9 @@ format_load(const LoadStats &l)
       l.db_rpc.wall_avg_us(DbRpcKind::kOther), l.db_threads.poll_max,
       l.db_threads.n_poll, l.db_threads.workers, l.db_threads.worker_max,
       l.db_threads.top, l.exec_threads.poll_max, l.exec_threads.n_poll,
-      l.exec_threads.workers, l.exec_threads.worker_max, l.exec_threads.top);
+      l.exec_threads.workers, l.exec_threads.worker_max, l.exec_threads.top,
+      l.runner_threads.poll_max, l.runner_threads.workers,
+      l.runner_threads.worker_max, l.runner_threads.top);
 }
 
 using db_probe_client_t = DatabaseToExecutorInterfaceV1::client<
@@ -1067,7 +1076,8 @@ private:
   // load comes out zero or negative.
   Sample scrape_sample()
   {
-    Sample sample{.wall_ns = x23::fastclock::get_ns()};
+    Sample sample{.wall_ns = x23::fastclock::get_ns(),
+                  .runner_threads = parse_threadstat(thread_cpu_ticks())};
     if (auto text = scrape(cluster_.db_ip(), kBenchDbMetricsPort, "/metrics")) {
       sample.db_cpu_s = metric_double(*text, "process_cpu_seconds_total");
       sample.db_rpc = parse_db_rpc_stats(*text);
@@ -1102,9 +1112,28 @@ private:
   {
     const size_t n_connections =
         static_cast<size_t>(db_connection_count()) * cluster_.num_executors();
+    // The connection sweep at a fixed, deep in-flight count says whether
+    // throughput under load is capped per connection (it scales with the
+    // count) or process-wide (it stays flat).
+    struct Level {
+      size_t inflight;
+      size_t connections;
+    };
+    const std::array<Level, 9> levels = {{
+        {.inflight = 1, .connections = 1},
+        {.inflight = n_connections, .connections = n_connections},
+        {.inflight = 10 * n_connections, .connections = n_connections},
+        {.inflight = 30 * n_connections, .connections = n_connections},
+        {.inflight = 100 * n_connections, .connections = n_connections},
+        {.inflight = 100 * n_connections, .connections = 2 * n_connections},
+        {.inflight = 100 * n_connections, .connections = 4 * n_connections},
+        {.inflight = 100 * n_connections, .connections = 8 * n_connections},
+        {.inflight = 30 * n_connections, .connections = 4 * n_connections},
+    }};
+    const size_t max_connections = 8 * n_connections;
     std::vector<db_probe_client_t> clients;
-    clients.reserve(n_connections);
-    for (size_t i = 0; i < n_connections; i++) {
+    clients.reserve(max_connections);
+    for (size_t i = 0; i < max_connections; i++) {
       clients.push_back(make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
           cluster_.db_exec_addr(), false, *x23::single_bucket_map));
     }
@@ -1112,11 +1141,14 @@ private:
     open_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
                exec_clients_, parent_block_number_, current_block_number_,
                next_block_height());
-    const std::array<size_t, 5> levels = {1, n_connections, 10 * n_connections,
-                                          30 * n_connections,
-                                          100 * n_connections};
-    for (const size_t inflight : levels) {
-      const int64_t n_reads = inflight == 1 ? 2000 : 300'000;
+    for (const auto [inflight, connections] : levels) {
+      int64_t n_reads = 1'000'000;
+      if (inflight == 1) {
+        n_reads = 2000;
+      }
+      else if (inflight <= n_connections) {
+        n_reads = 300'000;
+      }
       auto [async, cb] = x23::make_async<void>();
       Probe p{.block = current_block_number_,
               .address = reads_addr_,
@@ -1126,7 +1158,7 @@ private:
               .done = &cb};
       const Sample before = scrape_sample();
       for (size_t i = 0; i < inflight; i++) {
-        probe_coro(clients[i % clients.size()], &p, i);
+        probe_coro(clients[i % connections], &p, i);
       }
       async();
       const Sample after = scrape_sample();
@@ -1151,8 +1183,8 @@ private:
       std::println("probe: inflight={} connections={} reads={} wall_ms={:.1f} "
                    "reads_per_s={:.0f} lat_avg_us={:.1f} lat_p50_us={:.1f} "
                    "lat_p99_us={:.1f} unexpected_errors={} {}",
-                   inflight, std::min(inflight, n_connections), latency.size(),
-                   wall_s * 1e3, static_cast<double>(latency.size()) / wall_s,
+                   inflight, connections, latency.size(), wall_s * 1e3,
+                   static_cast<double>(latency.size()) / wall_s,
                    latency.empty()
                        ? 0.0
                        : sum_ns / 1000.0 / static_cast<double>(latency.size()),
