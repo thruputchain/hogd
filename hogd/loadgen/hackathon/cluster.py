@@ -116,6 +116,13 @@ class Cluster:
     def start(self, name, argv):
         host = self.hosts[name]
         command = list(map(str, argv))
+        parallelism = getattr(self.args, "mempool_parallelism", 0)
+        if name == "mempool" and parallelism:
+            command = [
+                "/usr/bin/env",
+                f"DEFAULT_THREADPOOL_SIZE_hog-mempool={parallelism}",
+                *command,
+            ]
         if self.args.local:
             output = self.directory / f"{name}.stdout.log"
             errors = self.directory / f"{name}.stderr.log"
@@ -725,6 +732,10 @@ def main():
     p.add_argument("--gateway-batch-shards", type=int, default=1)
     p.add_argument("--gateway-inflight-batches", type=int, default=4)
     p.add_argument("--gateway-workers", type=int, default=0)
+    p.add_argument(
+        "--mempool-parallelism", type=int, default=0,
+        help="mempool worker/chunk/shard sizing override; 0 inherits host sizing",
+    )
     args = p.parse_args()
     if not (
         1 <= args.gateway_batch_shards <= 128
@@ -737,6 +748,11 @@ def main():
         p.error(
             "gateway runtime workers must be between 0 and 128 "
             "(0 inherits automatic sizing)"
+        )
+    if not 0 <= args.mempool_parallelism <= 128:
+        p.error(
+            "mempool parallelism must be between 0 and 128 "
+            "(0 inherits host sizing)"
         )
     for name in ("build", "gateway", "scpd", "corpus", "output"):
         setattr(args, name, getattr(args, name).resolve())
@@ -791,6 +807,7 @@ def main():
         "gatewayBatchShards": args.gateway_batch_shards,
         "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
         "gatewayRuntimeWorkers": args.gateway_workers,
+        "mempoolParallelismOverride": args.mempool_parallelism,
         "submissionHTTP2": args.submission_http2,
         "profileCPU": args.profile_cpu,
     }

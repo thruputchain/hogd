@@ -9,6 +9,7 @@ set -Eeuo pipefail
 : "${HACKATHON_GATEWAY_BATCH_SHARDS:=1}"
 : "${HACKATHON_GATEWAY_INFLIGHT_BATCHES:=4}"
 : "${HACKATHON_GATEWAY_WORKERS:=0}"
+: "${HACKATHON_MEMPOOL_PARALLELISM:=0}"
 : "${HACKATHON_REUSE_CORPUS:=0}"
 : "${HACKATHON_SUBMISSION_HTTP2:=0}"
 : "${HACKATHON_REPEATS:=3}"
@@ -25,6 +26,10 @@ if [[ ! "$HACKATHON_GATEWAY_WORKERS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((HACKATHON_
   echo 'HACKATHON_GATEWAY_WORKERS must be an integer between 0 and 128' >&2
   exit 1
 fi
+if [[ ! "$HACKATHON_MEMPOOL_PARALLELISM" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((HACKATHON_MEMPOOL_PARALLELISM > 128)); then
+  echo 'HACKATHON_MEMPOOL_PARALLELISM must be an integer between 0 and 128' >&2
+  exit 1
+fi
 if [[ "$HACKATHON_REUSE_CORPUS" != 0 && "$HACKATHON_REUSE_CORPUS" != 1 ]]; then
   echo 'HACKATHON_REUSE_CORPUS must be 0 or 1' >&2
   exit 1
@@ -33,7 +38,7 @@ if [[ "$HACKATHON_SUBMISSION_HTTP2" != 0 && "$HACKATHON_SUBMISSION_HTTP2" != 1 ]
   echo 'HACKATHON_SUBMISSION_HTTP2 must be 0 or 1' >&2
   exit 1
 fi
-submission_options=()
+submission_options=(--mempool-parallelism "$HACKATHON_MEMPOOL_PARALLELISM")
 if [[ "$HACKATHON_PROFILE_CPU" == 1 ]]; then
   submission_options+=(--profile-cpu)
 elif [[ "$HACKATHON_PROFILE_CPU" != 0 ]]; then

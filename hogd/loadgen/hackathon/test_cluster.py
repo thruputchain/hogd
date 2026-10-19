@@ -18,6 +18,40 @@ from unittest.mock import Mock, patch
 from cluster import Cluster, ROOT
 
 
+class MempoolParallelismTest(unittest.TestCase):
+    def test_override_is_applied_only_to_mempool_child(self):
+        variable = "DEFAULT_THREADPOOL_SIZE_hog-mempool"
+        for parallelism in (0, 32):
+            with (
+                self.subTest(parallelism=parallelism),
+                tempfile.TemporaryDirectory() as directory,
+            ):
+                cluster = Cluster.__new__(Cluster)
+                cluster.args = SimpleNamespace(
+                    local=True, mempool_parallelism=parallelism
+                )
+                cluster.directory = Path(directory)
+                cluster.hosts = {"mempool": "localhost", "db": "localhost"}
+                cluster.processes, cluster.logs = {}, {}
+                with patch.dict(os.environ, {variable: "128"}):
+                    for service in ("mempool", "db"):
+                        cluster.start(service, [
+                            sys.executable, "-c",
+                            f"import os; print(os.environ[{variable!r}])",
+                        ])
+                        self.assertEqual(
+                            cluster.processes[service].wait(timeout=10), 0
+                        )
+                        output = cluster.directory / f"{service}.stdout.log"
+                        actual = output.read_text().strip()
+                        expected = (
+                            str(parallelism)
+                            if service == "mempool" and parallelism else "128"
+                        )
+                        self.assertEqual(actual, expected)
+                    self.assertEqual(os.environ[variable], "128")
+
+
 class StartupTest(unittest.TestCase):
     def cluster(self):
         cluster = Cluster.__new__(Cluster)
@@ -181,7 +215,12 @@ class ScheduleStdinTest(unittest.TestCase):
                     completed,
                     "benchmark consumed the scheduler's exit command",
                 )
-                self.assertIn(b"\r\nEXIT_MARKER_REACHED\r\n", output)
+                # Bash may leave its prompt on the marker's line. Require the
+                # actual marker at line end; the echoed printf command does
+                # not match because it ends with a quoted escape sequence.
+                self.assertRegex(
+                    output, rb"(?:^|\r\n)[^\r\n]*EXIT_MARKER_REACHED\r\n"
+                )
             finally:
                 if not completed:
                     os.kill(pid, signal.SIGKILL)

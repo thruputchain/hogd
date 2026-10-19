@@ -297,3 +297,10 @@ HACKATHON_ARTIFACTS=/tmp/hackathon-artifacts \
 python3 -m unittest discover -s hogd/loadgen/hackathon -p 'test_*.py'
 GOWORK=off go -C hogd/loadgen/hackathon/replay test -race ./...
 ```
+
+The experimental `HACKATHON_MEMPOOL_PARALLELISM` setting (cluster option
+`--mempool-parallelism`) applies `DEFAULT_THREADPOOL_SIZE_hog-mempool` only to
+the mempool process. Values 1–128 override its available-parallelism sizing;
+0 leaves host sizing in effect. This affects worker count, task chunking, and
+internal shard sizing together. The run identity records the override as
+`mempoolParallelismOverride`. Other services retain their existing settings.
