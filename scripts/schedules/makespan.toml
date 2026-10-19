@@ -45,8 +45,6 @@ echo 'clear hog-db file directory'
 mkdir -p ci_work_dir/
 
 echo 'run bench server'
-# Inherited by every server the control server starts.
-export X23_POLL_SHARDS="{{ .poll_shards }}"
 ./release/hogd/hog_exec/bench/control_server -p 11111 -w ci_work_dir/
 
 """
@@ -138,8 +136,7 @@ for host in "${EXEC_HOSTS[@]:0:$NEXEC}"; do
   SERVERS+=(-s "$host")
 done
 
-echo "launch makespan runner with $NEXEC executor(s), X23_POLL_SHARDS={{ .poll_shards }}"
-export X23_POLL_SHARDS="{{ .poll_shards }}"
+echo "launch makespan runner with $NEXEC executor(s)"
 set -o pipefail
 ./release/hogd/hog_exec/bench/makespan_runner "${SERVERS[@]}" \
   -f "{{ .fib_n }}" \

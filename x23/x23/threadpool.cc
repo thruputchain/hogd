@@ -9,12 +9,10 @@
 #include <format>
 #include <functional>
 #include <memory>
-#include <pthread.h>
 #include <string>
 #include <sys/signal.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 #include "x23/cleanup.h"
@@ -116,19 +114,6 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
-// Wakes one waiting worker per job enqueued.  notify_one finds no waiter
-// cheaply (no syscall), so there is no need to notify only on an empty queue
-// becoming nonempty -- and doing that with notify_all woke every idle worker
-// of the LLC for a single job, most of which found nothing, spun through
-// getq's timed waits and work stealing, and cost the notifier a futex wake
-// apiece.
-static void
-wake_workers(std::condition_variable *nonempty, unsigned njobs)
-{
-  for (; nonempty && njobs > 0; --njobs)
-    nonempty->notify_one();
-}
-
 void
 ThreadPool::go(std::vector<Job> &&jobs)
 {
@@ -143,26 +128,20 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  // The queue jobs were last enqueued on, and how many since its last wake.
   std::condition_variable *nonempty = nullptr;
-  unsigned pending = 0;
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
     if (nonempty && qno(lq) != affinity_queue) {
       lq.reset();
-      wake_workers(nonempty, std::exchange(pending, 0));
+      nonempty->notify_all();
       nonempty = nullptr;
     }
-    enqueue_selected(lq, j, now);
-    if (&lq->nonempty != nonempty) {
-      // enqueue_selected moved to another queue; wake the last one's.
-      wake_workers(nonempty, std::exchange(pending, 0));
+    if (enqueue_selected(lq, j, now))
       nonempty = &lq->nonempty;
-    }
-    ++pending;
   }
   lq.reset();
-  wake_workers(nonempty, pending);
+  if (nonempty)
+    nonempty->notify_all();
 }
 
 void
@@ -175,10 +154,11 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  enqueue_selected(lq, job, now);
+  bool wasempty = enqueue_selected(lq, job, now);
   auto *nonempty = &lq->nonempty;
   lq.reset();
-  wake_workers(nonempty, 1);
+  if (wasempty)
+    nonempty->notify_all();
 }
 
 void
@@ -310,13 +290,6 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
   if (newbucket == bucket_)
     return;
 
-  // go() wakes one waiter per job, and this thread may have been that
-  // waiter for a job still in the queue it is about to leave.  If it does
-  // leave, pass the wakeup on so the job is not stranded until the next
-  // enqueue.
-  pool_->relock(ptr, bucket_);
-  std::condition_variable *handoff = ptr->q.empty() ? nullptr : &ptr->nonempty;
-
   unsigned zero = 0;
   // The last thread in a bucket can only leave if the queue is empty
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
@@ -326,12 +299,9 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
       // servicing the queue.  But if we fail to increase the counter,
       // then it means another thread already did so, meaning it's
       // okay to leave the queue after all.
-      !pool_->queue_nthreads_[bucket_].compare_exchange_strong(zero, 1)) {
+      !pool_->queue_nthreads_[bucket_].compare_exchange_strong(zero, 1))
     pool_->queue_nthreads_[bucket_ = newbucket].fetch_add(
         1, std::memory_order_relaxed);
-    if (handoff)
-      handoff->notify_one();
-  }
 }
 
 ThreadPool::QPtr
@@ -424,10 +394,6 @@ ThreadPool::Worker::qpop(QPtr &ptr) const
 void
 ThreadPool::Worker::work()
 {
-#ifdef __linux__
-  // Named so per-thread CPU accounting (/proc/<pid>/task) can tell it apart.
-  pthread_setname_np(pthread_self(), "x23-worker");
-#endif // __linux__
   my_thread_pool = pool_;
   my_thread_no = threadno_;
   cpu_ = cpuid();

@@ -513,7 +513,9 @@ parse_threadstat(std::string_view text)
 // Which threads of one process were busy across a window, as fractions of
 // one core: the x23 poll thread (the busiest, if there are several), the
 // x23 workers summed and at their busiest, and the three busiest threads of
-// any kind as `name:fraction`.
+// any kind as `name:fraction`.  The poll and worker fields rely on x23 naming
+// its threads `x23-poll` and `x23-worker`, and read 0 on an x23 that leaves
+// them with the process's name.
 struct ThreadLoad {
   double poll_max = 0;
   size_t n_poll = 0;

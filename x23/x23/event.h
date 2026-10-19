@@ -337,18 +337,6 @@ public:
 
 protected:
   void check(int timeout = -1);
-#if USE_EPOLL
-  // The epoll set is sharded: each file descriptor belongs to shard
-  // fd % nshards(), and each shard has its own epoll and wake fds so that
-  // one poll thread per shard can wait on it.  check() checks shard 0.
-  // There is one shard per last-level cache; X23_POLL_SHARDS overrides the
-  // count (0 keeps the per-LLC default).
-  size_t nshards() const noexcept { return shards_.size(); }
-  void check_shard(size_t shard, int timeout = -1);
-#else  // !USE_EPOLL
-  size_t nshards() const noexcept { return 1; }
-  void check_shard(size_t /*shard*/, int timeout = -1) { check(timeout); }
-#endif // !USE_EPOLL
   bool stop_requested() { return ss_.stop_requested(); }
   void request_stop()
   {
@@ -426,15 +414,8 @@ private:
     }
   };
 
-  struct PollShard {
-    UniqueFd epollfd;
-    UniqueFd eventfd; // written by wake() to interrupt this shard's wait
-  };
-  std::vector<PollShard> shards_;
-  int epollfd_for(int fd) const noexcept
-  {
-    return shards_[size_t(fd) % shards_.size()].epollfd.get();
-  }
+  UniqueFd epollfd_;
+  UniqueFd eventfd_;
 
   SharedLock resize_lock_{*core_map};
   std::atomic<FdState *> state_{nullptr};
@@ -607,13 +588,12 @@ public:
   tcpconnect(std::string host, std::string port SLOC_DECL);
 
 protected:
-  // One per poll shard.
-  std::vector<std::thread> pollthreads_;
+  std::thread pollthread_;
 
   struct no_loop_thread {};
   CoroPoll(ThreadPool &pool, no_loop_thread);
 
-  void loop(size_t shard);
+  void loop();
 };
 
 namespace detail {
