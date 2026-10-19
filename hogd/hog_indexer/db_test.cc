@@ -10,6 +10,9 @@
 #include <utility>
 #include <vector>
 
+#include <rocksdb/perf_context.h>
+#include <rocksdb/perf_level.h>
+
 #include "event.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
@@ -342,6 +345,76 @@ TEST_F(IndexDBTest, GetEventsSingleFilterAscending)
   EXPECT_EQ(page->latest_block, 11);
   // Full exhaustion: cursor is empty.
   EXPECT_TRUE(page->cursor.empty());
+}
+
+// Regression test for #3710: a single committed transaction that emits many
+// events for one contract creates one contract_index row per event, all
+// pointing at one full tx_index record.  get_events must not re-read and
+// re-decode that record once per row.  Because the merge-walk visits same-tx
+// rows contiguously, get_events hydrates the record once and reuses it.
+TEST_F(IndexDBTest, GetEventsMemoizesRepeatedTransactionHydration)
+{
+  constexpr uint32_t kEventCount = 32;
+
+  ContractAddress addr;
+  std::ranges::fill(addr, 0xAA);
+
+  auto query_read_bytes = [&](IndexDB &db) {
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({addr}));
+    rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
+    rocksdb::PerfContext *perf = rocksdb::get_perf_context();
+    perf->Reset();
+    auto page = db.get_events(
+        make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                   BlockAnchor(BlockAnchorKind::AnchorAtBeginning),
+                   kEventCount));
+    EXPECT_TRUE(page.has_value());
+    return std::pair{std::move(page), perf->get_read_bytes};
+  };
+
+  // One transaction emitting kEventCount events for `addr`.
+  TmpDir single_dir;
+  auto single_db = IndexDB::make_new(single_dir.directory());
+  ASSERT_TRUE(single_db.has_value());
+  TxEventLog log;
+  std::ranges::fill(log.tx_hash, 0xFE);
+  for (uint32_t i = 0; i < kEventCount; ++i) {
+    log.events.push_back(make_event(addr, 0, 0));
+  }
+  ASSERT_TRUE(single_db->consume_events(1, std::vector{log}, {}));
+
+  auto [single_page, single_read_bytes] = query_read_bytes(*single_db);
+  ASSERT_TRUE(single_page.has_value());
+  ASSERT_EQ(single_page->events.size(), kEventCount);
+  for (uint32_t i = 0; i < kEventCount; ++i) {
+    EXPECT_EQ(single_page->events[i].tx_hash, log.tx_hash);
+    EXPECT_EQ(single_page->events[i].sequence_number, i);
+  }
+
+  // Control: the same kEventCount events, one per transaction.  Each row
+  // necessarily hydrates a distinct record, so this is the unavoidable cost.
+  TmpDir control_dir;
+  auto control_db = IndexDB::make_new(control_dir.directory());
+  ASSERT_TRUE(control_db.has_value());
+  std::vector<TxEventLog> control_logs;
+  for (uint32_t i = 0; i < kEventCount; ++i) {
+    TxEventLog one;
+    std::ranges::fill(one.tx_hash, static_cast<uint8_t>(i));
+    one.events.push_back(make_event(addr, 0, 0));
+    control_logs.push_back(std::move(one));
+  }
+  ASSERT_TRUE(control_db->consume_events(1, control_logs, {}));
+
+  auto [control_page, control_read_bytes] = query_read_bytes(*control_db);
+  ASSERT_TRUE(control_page.has_value());
+  ASSERT_EQ(control_page->events.size(), kEventCount);
+
+  // The single transaction's record is the larger of the two (it carries all
+  // kEventCount events), yet the memo hydrates it once, so its cumulative read
+  // cost stays below the control's kEventCount distinct-record reads.  Before
+  // the fix it was ~kEventCount times that one record's size.
+  EXPECT_LT(single_read_bytes, control_read_bytes);
 }
 
 TEST_F(IndexDBTest, GetEventsDescendingFromEnd)
