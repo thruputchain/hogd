@@ -631,6 +631,35 @@ TEST_F(StrictIndexerTest, RecognizedLegacyDataReopensAndRefusesStrictMigration)
   EXPECT_EQ(*reopened->latest_block(), 2);
 }
 
+TEST_F(StrictIndexerTest, UndecodableTxRowFailsEventQuery)
+{
+  ProposedTransaction body = make_body(80, 0x80);
+  TxEventLog log = make_log(body, 0x81);
+  ASSERT_TRUE(db_->consume_events(1, TxEventLogBatch{log},
+                                  ProposedTransactionBatch{body})
+                  .has_value());
+  db_.reset();
+
+  // A tx_index value with a height prefix but no payload fails to decode.
+  std::string tx_key;
+  IndexerKeyFormat::make_tx_key(tx_key, log.tx_hash);
+  overwrite_column_family(path_, IndexerKeyFormat::kTxIndexColumnFamily, tx_key,
+                          std::string(sizeof(BlockHeight), '\0'));
+
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+  EventFilter filter;
+  filter.contract_addresses.push_back(log.events[0].contract_address);
+  EventQuery query;
+  query.filters.push_back(std::move(filter));
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor = BlockAnchor(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 50;
+  auto page = reopened->get_events(query);
+  ASSERT_FALSE(page.has_value());
+  EXPECT_EQ(page.error(), IndexerErrorCode::kInternal);
+}
+
 TEST_F(StrictIndexerTest, LegacyWatermarkWithStrictMetadataResidueFailsClosed)
 {
   db_.reset();
