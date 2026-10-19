@@ -78,7 +78,9 @@ PYREPORT
     local archive="$WORK_DIR/hackathon-results.tar.gz"
     if tar -czf "$archive" -C "$WORK_DIR" "${entries[@]}"; then
       echo "Hackathon artifact archive: $archive"
-      if [[ -n "${HOG_DUMP_DIR:-}" ]]; then
+      # Failed runs still upload their partial result archive, but must not
+      # replace the successful archive used to restore both signed corpora.
+      if [[ "$status" == 0 && -n "${HOG_DUMP_DIR:-}" ]]; then
         if mkdir -p "$HOG_DUMP_DIR" && cp "$archive" "$HOG_DUMP_DIR/hackathon-results.tar.gz"; then
           echo "Retained CI artifact: $HOG_DUMP_DIR/hackathon-results.tar.gz"
         else
