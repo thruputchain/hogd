@@ -227,7 +227,7 @@ TEST_F(AuthClaimTests, VerifyWithReusedPreimage)
         verify_auth(stx, &auth_data, kTestNetworkHash, scratch).has_value());
   }
   // Deferred verification must own its messages after the scratch is reused.
-  std::fill(scratch.begin(), scratch.end(), 0);
+  std::ranges::fill(scratch, 0);
   EXPECT_TRUE(deferred.verify());
 }
 
