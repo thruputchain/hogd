@@ -115,16 +115,11 @@ ThreadPool::qselect(ThreadPool::QPtr *lq, unsigned cpuhint)
   }
 }
 
-// Wakes one waiting worker per job enqueued.  notify_one finds no waiter
-// cheaply (no syscall), so there is no need to notify only on an empty queue
-// becoming nonempty -- and doing that with notify_all woke every idle worker
-// of the LLC for a single job, most of which found nothing, spun through
-// getq's timed waits and work stealing, and cost the notifier a futex wake
-// apiece.
+// Sends the notify_one()s owed for waiters claimed with claim_waiters().
 static void
-wake_workers(std::condition_variable *nonempty, unsigned njobs)
+wake_workers(std::condition_variable *nonempty, unsigned nclaimed)
 {
-  for (; nonempty && njobs > 0; --njobs)
+  for (; nclaimed > 0; --nclaimed)
     nonempty->notify_one();
 }
 
@@ -142,26 +137,29 @@ ThreadPool::go(std::vector<Job> &&jobs)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  // The queue jobs were last enqueued on, and how many since its last wake.
+  // The queue jobs were last enqueued on, and the waiters claimed on it,
+  // to notify once its lock is dropped.
   std::condition_variable *nonempty = nullptr;
-  unsigned pending = 0;
+  unsigned nclaimed = 0;
   for (auto &j : jobs) {
     int affinity_queue = llc_map->bucket(j.cpuhint);
     if (nonempty && qno(lq) != affinity_queue) {
       lq.reset();
-      wake_workers(nonempty, std::exchange(pending, 0));
+      wake_workers(nonempty, std::exchange(nclaimed, 0));
       nonempty = nullptr;
     }
     enqueue_selected(lq, j, now);
     if (&lq->nonempty != nonempty) {
       // enqueue_selected moved to another queue; wake the last one's.
-      wake_workers(nonempty, std::exchange(pending, 0));
+      if (nonempty)
+        wake_workers(nonempty, std::exchange(nclaimed, 0));
       nonempty = &lq->nonempty;
     }
-    ++pending;
+    nclaimed += lq->claim_waiters(1);
   }
   lq.reset();
-  wake_workers(nonempty, pending);
+  if (nonempty)
+    wake_workers(nonempty, nclaimed);
 }
 
 void
@@ -176,8 +174,9 @@ ThreadPool::go(Job job)
   QPtr lq;
   enqueue_selected(lq, job, now);
   auto *nonempty = &lq->nonempty;
+  unsigned nclaimed = lq->claim_waiters(1);
   lq.reset();
-  wake_workers(nonempty, 1);
+  wake_workers(nonempty, nclaimed);
 }
 
 void
@@ -309,13 +308,7 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
   if (newbucket == bucket_)
     return;
 
-  // go() wakes one waiter per job, and this thread may have been that
-  // waiter for a job still in the queue it is about to leave.  If it does
-  // leave, pass the wakeup on so the job is not stranded until the next
-  // enqueue.
   pool_->relock(ptr, bucket_);
-  std::condition_variable *handoff = ptr->q.empty() ? nullptr : &ptr->nonempty;
-
   unsigned zero = 0;
   // The last thread in a bucket can only leave if the queue is empty
   if (pool_->queue_nthreads_[bucket_].fetch_sub(1) > 1 ||
@@ -328,8 +321,12 @@ ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
       !pool_->queue_nthreads_[bucket_].compare_exchange_strong(zero, 1)) {
     pool_->queue_nthreads_[bucket_ = newbucket].fetch_add(
         1, std::memory_order_relaxed);
-    if (handoff)
-      handoff->notify_one();
+    // go() wakes only as many waiters as it enqueued jobs, and this
+    // thread may have been woken for a job still in the queue it is
+    // leaving (ptr still holds that queue).  Pass the wakeup on, so the
+    // job does not wait for the next enqueue there.
+    if (!ptr->q.empty() && ptr->claim_waiters(1))
+      ptr->nonempty.notify_one();
   }
 }
 
@@ -352,15 +349,22 @@ ThreadPool::Worker::getq() noexcept
     if (pool_->ss_.stop_requested())
       return {};
     if (count >= kTimeouts.size() || nqueues == 1) {
+      ptr->begin_wait();
       ptr.wait(ptr->nonempty);
+      ptr->end_wait();
       continue;
     }
 
     // Wait a little bit, and if we timeout try work stealing
     auto delay = kTimeouts[count++];
     if (delay.count() != 0 && ptr.with_lock([&ptr, delay](auto &ul) {
-          return ptr->nonempty.wait_for(ul, delay);
-        }) == std::cv_status::no_timeout)
+          ptr->begin_wait();
+          auto status = ptr->nonempty.wait_for(ul, delay);
+          ptr->end_wait();
+          // wait_for judges a timeout by the clock, so a waiter go()
+          // notified can still see one.  Its job is in this queue.
+          return status == std::cv_status::no_timeout || !ptr->q.empty();
+        }))
       continue;
 
     // Pick two random other runqueues

@@ -101,6 +101,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <concepts>
 #include <condition_variable>
@@ -396,6 +397,33 @@ private:
     bool need_consumed_signal{false};
     std::condition_variable nonempty;
     std::condition_variable consumed;
+    // Workers blocked on nonempty, and how many of those an enqueue has
+    // already notified.  Enqueues notify only waiters nobody has woken
+    // yet, so a saturated pool, whose workers never find the queue empty,
+    // sends no notifications at all, while a burst of n jobs on an idle
+    // queue still wakes up to n workers.
+    unsigned nwaiting{0};
+    unsigned nnotified{0};
+
+    // Claims up to n of the waiters nobody has notified yet; the caller
+    // owes nonempty that many notify_one()s, which it may send after
+    // unlocking.  Returns how many it claimed.
+    unsigned claim_waiters(unsigned n)
+    {
+      n = std::min(n, nwaiting - nnotified);
+      nnotified += n;
+      return n;
+    }
+    // Bracket every wait on nonempty.  A waiter that returns on a timeout
+    // or spuriously retires someone else's claim, which only means a
+    // later enqueue may notify one more worker than it needs to.
+    void begin_wait() { ++nwaiting; }
+    void end_wait()
+    {
+      --nwaiting;
+      if (nnotified > 0)
+        --nnotified;
+    }
   };
   using QPtr = MVar<QueueState>::Ptr;
   struct alignas(hardware_destructive_interference_size) RunQueue
