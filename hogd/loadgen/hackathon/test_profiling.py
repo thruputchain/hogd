@@ -10,6 +10,52 @@ from profiling import CPUProfiles, PROFILE_SCRIPT
 
 
 class CPUProfilesTest(unittest.TestCase):
+    def test_profile_follows_traffic_clock_after_slow_startup(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            cluster = SimpleNamespace(
+                directory=directory, args=SimpleNamespace(local=True)
+            )
+            profiles = CPUProfiles(cluster)
+            profiles.start = Mock()
+            # No run.json: loading is still in progress even if process age is large.
+            profiles.maybe_start()
+            profiles.start.assert_not_called()
+            (directory / "replay").mkdir()
+            (directory / "replay/run.json").write_text(
+                '{"startedUnixNs":1000000000000}'
+            )
+            with patch("profiling.time.time_ns", return_value=1219000000000):
+                profiles.maybe_start()
+            profiles.start.assert_not_called()
+            with patch("profiling.time.time_ns", return_value=1221000000000):
+                profiles.maybe_start()
+            profiles.start.assert_called_once()
+            self.assertEqual(profiles.trigger_elapsed, 221)
+
+    def test_missed_window_is_explicit_and_never_profiles_drain(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            directory = Path(tmp)
+            (directory / "replay").mkdir()
+            (directory / "replay/run.json").write_text(
+                '{"startedUnixNs":1000000000000}'
+            )
+            cluster = SimpleNamespace(
+                directory=directory, args=SimpleNamespace(local=True)
+            )
+            profiles = CPUProfiles(cluster)
+            profiles.start = Mock()
+            with patch("profiling.time.time_ns", return_value=1300000000000):
+                profiles.maybe_start()
+            profiles.start.assert_not_called()
+            self.assertTrue(profiles.started)
+            self.assertEqual(
+                json.loads((directory / "profiles/status.json").read_text())[
+                    "error"
+                ],
+                "missed peak profiling window",
+            )
+
     def test_invalid_remote_pid_never_starts_profiler(self):
         with tempfile.TemporaryDirectory() as tmp:
             cluster = SimpleNamespace(

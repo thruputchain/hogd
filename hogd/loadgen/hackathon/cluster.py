@@ -638,17 +638,10 @@ class Cluster:
             time.monotonic() + a.ready_timeout + duration + 2 * a.drain + 120
         )
         profiles = CPUProfiles(self)
-        replay_started = (
-            time.monotonic() if getattr(a, "profile_cpu", False) else 0
-        )
         try:
             while True:
-                if (
-                    getattr(a, "profile_cpu", False)
-                    and not profiles.started
-                    and time.monotonic() - replay_started >= 220
-                ):
-                    profiles.start()
+                if getattr(a, "profile_cpu", False):
+                    profiles.maybe_start()
                 self.check_services()
                 try:
                     status = waiter.wait(timeout=5)

@@ -203,7 +203,9 @@ maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 This profiling branch enables `HACKATHON_PROFILE_CPU=1` in the CI schedule.
 The standalone wrapper defaults it to `0`; `cluster.py --profile-cpu` enables
 35 seconds of 99 Hz CPU-clock sampling on the gateway and mempool, starting
-approximately 220 seconds after replay launch. It requires `perf`, permission
+approximately 220 seconds after the measured traffic start recorded in
+`replay/run.json`, excluding corpus loading and application setup. Capture
+timestamps and the triggering traffic age are retained for stage verification. It requires `perf`, permission
 to attach to the benchmark processes, and DWARF stack unwinding support.
 Profiling adds overhead: compare tuning changes with profiling disabled before
 claiming a throughput improvement. Each service's `profiles/` directory retains

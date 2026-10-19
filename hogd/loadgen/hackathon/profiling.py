@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 import shlex
 import subprocess
+import time
 
 # Attaching avoids changing the service PID monitored by the control server.
 # Software CPU-clock sampling works on hosts without hardware PMU access.
@@ -18,10 +19,12 @@ if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid"; then
 fi
 perf --version > "$output/perf-version.txt" 2>&1 || exit 1
 cat /proc/sys/kernel/perf_event_paranoid > "$output/perf-event-paranoid.txt"
+date +%s%N > "$output/started-unix-ns.txt"
 timeout --signal=INT --kill-after=5s 35s perf record \
   -e cpu-clock -F 99 --call-graph dwarf,8192 -p "$pid" \
   -o "$output/perf.data" > "$output/record.log" 2>&1
 status=$?
+date +%s%N > "$output/finished-unix-ns.txt"
 printf '%s\n' "$status" > "$output/record-status.txt"
 if [[ "$status" != 0 && "$status" != 124 ]]; then exit "$status"; fi
 perf report --stdio --no-children --percent-limit 0.5 --sort symbol,dso \
@@ -36,6 +39,58 @@ class CPUProfiles:
         self.cluster = cluster
         self.jobs = []
         self.started = False
+        self.trigger_elapsed = None
+
+    def maybe_start(self):
+        if self.started:
+            return
+        c = self.cluster
+        metadata = c.directory / "replay/run.json"
+        try:
+            if c.args.local:
+                elapsed = (
+                    time.time_ns()
+                    - json.loads(metadata.read_text())["startedUnixNs"]
+                ) / 1e9
+            else:
+                # Use the replay host's own clock, avoiding cross-host skew.
+                script = """import json,pathlib,sys,time
+try:
+    start=json.loads(pathlib.Path(sys.argv[1]).read_text())["startedUnixNs"]
+    print((time.time_ns()-start)/1e9)
+except (FileNotFoundError,json.JSONDecodeError):
+    print(-1)
+"""
+                elapsed = float(
+                    c.remote(
+                        c.hosts["replay"],
+                        ["python3", "-c", script, metadata],
+                        capture_output=True,
+                        text=True,
+                        timeout=10,
+                    ).stdout
+                )
+        except (OSError, ValueError, KeyError, subprocess.SubprocessError):
+            # Startup can precede run.json. Retry without shifting the target
+            # window to an arbitrary time since process launch.
+            return
+        if elapsed < 220:
+            return
+        self.trigger_elapsed = elapsed
+        if elapsed >= 235:
+            self.started = True
+            output = c.directory / "profiles"
+            output.mkdir(parents=True, exist_ok=True)
+            (output / "status.json").write_text(
+                json.dumps(
+                    {
+                        "error": "missed peak profiling window",
+                        "replayElapsedSeconds": elapsed,
+                    }
+                )
+            )
+            return
+        self.start()
 
     def start(self):
         self.started = True
@@ -129,6 +184,7 @@ class CPUProfiles:
                         "copyStatus": copied,
                         "frequencyHz": 99,
                         "durationSeconds": 35,
+                        "triggerReplayElapsedSeconds": self.trigger_elapsed,
                     }
                 )
             )
