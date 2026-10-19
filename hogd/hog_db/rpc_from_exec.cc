@@ -32,8 +32,10 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
+#include "hogd/hog_db/preserialized_reply.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_db/storage_item_reply.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/async.h"
 #include "x23/format.h"
@@ -367,7 +369,7 @@ HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
   return RPCError::kRPCNone;
 }
 
-ExpectedStorageItem
+StorageItemReply<ExpectedStorageItem>
 HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
@@ -375,6 +377,7 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   // heads for each BlockID, but the database is not currently designed to do
   // this.
 
+  using Reply = StorageItemReply<ExpectedStorageItem>;
   ItemKey key = make_item_key(addrkey);
   ExpectedStorageItem ret;
 
@@ -383,37 +386,37 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
         ctx_.get_db().read_address_balance(key.get_address());
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!nnint)
-      return ExpectedStorageItem(to_rpc_error(nnint.error()));
+      return Reply(to_rpc_error(nnint.error()));
     WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
   else if (key.is_address_auth_data()) {
     HogDbStatus<AddressAuthData> auth_data =
         ctx_.get_db().read_address_auth_data(key.get_address());
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!auth_data)
-      return ExpectedStorageItem(to_rpc_error(auth_data.error()));
+      return Reply(to_rpc_error(auth_data.error()));
     WireStorageItem out(StorageItemType::kItemTypeAuthData);
-    out.auth_data() = *auth_data;
+    out.auth_data() = std::move(*auth_data);
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
   else {
     HogDbStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!item)
-      return ExpectedStorageItem(to_rpc_error(item.error()));
+      return Reply(to_rpc_error(item.error()));
 
     WireStorageItem out;
     switch (item->type) {
@@ -428,13 +431,15 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
       break;
     }
     case kBytes:
-    {
-      out.type(StorageItemType::kItemTypeBytestring);
-      const auto *cptr = reinterpret_cast<const char *>(item->value.data());
-      out.bytestring().append_range(
-          std::span<const char>(cptr, item->value.size()));
-      break;
-    }
+      // The row already is the Bytestring: hand x23 the bytes read out of
+      // ramdb to write into the reply, rather than copying them into a
+      // WireStorageItem on the way.
+      if (item->value.size() > kBytestringCeilingLen) [[unlikely]] {
+        error("bytestring row of {} bytes exceeds the {} byte ceiling",
+              item->value.size(), kBytestringCeilingLen);
+        return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+      }
+      return Reply::bytestring(std::move(item->value));
     case kRetrocausalQueue:
     {
       out.type(StorageItemType::kItemTypeRetrocausalQueue);
@@ -442,54 +447,47 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
         x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
       } catch (x23::XdrException &e) {
         error("failed to deserialize rcq metadata: {}", e.what());
-        return ExpectedStorageItem(
-            to_rpc_error(HogDbError(HogDbCode::kInternal)));
+        return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
       }
       break;
     }
     default:
-      return ExpectedStorageItem(
-          to_rpc_error(HogDbError(HogDbCode::kInternal)));
+      return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
     }
 
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
 
-  return ret;
+  return Reply(std::move(ret));
 }
 
-ExpectedContract
+PreserializedReply<ExpectedContract>
 HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
+  using Reply = PreserializedReply<ExpectedContract>;
   HogDbStatus<OwningSpan<const std::byte>> code =
       ctx_.get_db().read_contract_code(hash);
 
   if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-    return ExpectedContract(RPCError::kRPCBadBlockID);
+    return Reply(RPCError::kRPCBadBlockID);
 
   if (!code)
-    return ExpectedContract(to_rpc_error(code.error()));
+    return Reply(to_rpc_error(code.error()));
 
-  ExpectedContract out;
-  out.error(RPCError::kRPCNone);
-
-  try {
-    x23::deserialize(&out.contract(), x23::BufView{*code});
-  } catch (x23::XdrException &e) {
-    // A persistent contract-code row whose inline payload does not decode as a
-    // Contract is corrupt on-disk state. Report it as a structured corruption
-    // error -- the same way the retrocausal-queue metadata path above does --
-    // rather than letting the decode exception unwind across the executor RPC
-    // boundary, where the syscall wrapper would translate it into an opaque
-    // unrecoverable host error.
-    error("failed to deserialize persistent contract row: {}", e.what());
-    return ExpectedContract(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+  // Stored rows are the encodings NewContractLock wrote, so they go out
+  // unparsed and the executor's decode is what rejects a corrupt one.  XDR
+  // pads every encoding to a multiple of four bytes, though, and the reply
+  // relies on that to size the message, so a row that is not is refused here.
+  if (code->size() % 4 != 0) [[unlikely]] {
+    error("persistent contract row of {} bytes is not an XDR encoding",
+          code->size());
+    return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
   }
 
-  return out;
+  return Reply(std::move(*code));
 }
 
 ExpectedDeployment

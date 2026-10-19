@@ -198,6 +198,11 @@ echo 'run multiexec interface benchmarks'
 kill_stale_benchmark_processes
 ci_run_bench_step exec_scaling ./scripts/ci/exec_scaling.sh
 
+echo 'run makespan benchmark'
+# Same hosts as exec_scaling.
+kill_stale_benchmark_processes
+ci_run_bench_step makespan_bench ./scripts/ci/makespan_bench.sh
+
 echo 'run e2e payment benchmark'
 kill_stale_benchmark_processes
 ci_run_bench_step mempool_bench ./scripts/ci/mempool_bench.sh
