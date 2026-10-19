@@ -71,4 +71,13 @@ verify_auth(const SignedTransaction &stx,
             const NetworkHash &network_hash,
             Ed25519SignatureVerifier *signature_verifier = nullptr);
 
+// Reuses caller-owned storage for the signature preimage. The buffer must not
+// be shared by concurrent calls. Verification does not retain references to
+// it, including when signature_verifier collects signatures for later use.
+AuthVerifyStatus<void>
+verify_auth(const SignedTransaction &stx,
+            const AddressAuthData *source_auth_data,
+            const NetworkHash &network_hash, x23::Buf &signature_preimage,
+            Ed25519SignatureVerifier *signature_verifier = nullptr);
+
 } // namespace hogd

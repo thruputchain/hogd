@@ -266,6 +266,7 @@ AuthServer::verify_transactions(BlockHeight height,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
+          x23::Buf signature_preimage;
           for (size_t i = chunk.start; i < chunk.end; i++) {
             const SignedTransaction &tx = txs[i];
             if (results[i] != AuthErrorCode::kAuthSuccess) {
@@ -280,7 +281,7 @@ AuthServer::verify_transactions(BlockHeight height,
 
             AuthVerifyStatus<void> verify_result =
                 verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash);
+                            network_hash, signature_preimage);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -302,6 +303,7 @@ x23::Async<AuthErrorCode>
 AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
+  x23::Buf signature_preimage;
   for (const auto &tx : txs) {
     if (wrapper_over_cap(tx)) {
       co_return AuthErrorCode::kAuthFailed;
@@ -317,7 +319,7 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 
     auto verify_result =
         verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                    network_hash_);
+                    network_hash_, signature_preimage);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }
