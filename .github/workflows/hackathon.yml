@@ -142,6 +142,14 @@ jobs:
                     --key=hackathon_reuse_corpus --value="$HACKATHON_REUSE_CORPUS" \
                     --key=hackathon_repeats --value="$HACKATHON_REPEATS" \
                     ./scripts/schedules/hackathon.toml
+            - name: Upload benchmark diagnostics
+              if: always()
+              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+              with:
+                  name: hackathon-diagnostics-${{ github.run_attempt }}
+                  path: work_dir/hackathon-diagnostics.tar.gz
+                  if-no-files-found: warn
+                  compression-level: 0
             - name: Upload benchmark results
               if: always()
               uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6

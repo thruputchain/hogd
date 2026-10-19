@@ -12,6 +12,7 @@ set -Eeuo pipefail
 : "${HACKATHON_REUSE_CORPUS:=0}"
 : "${HACKATHON_SUBMISSION_HTTP2:=0}"
 : "${HACKATHON_REPEATS:=3}"
+: "${HACKATHON_PROFILE_CPU:=0}"
 for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
   IFS=: read -r name minimum maximum <<<"$setting"
   value=${!name}
@@ -33,6 +34,12 @@ if [[ "$HACKATHON_SUBMISSION_HTTP2" != 0 && "$HACKATHON_SUBMISSION_HTTP2" != 1 ]
   exit 1
 fi
 submission_options=()
+if [[ "$HACKATHON_PROFILE_CPU" == 1 ]]; then
+  submission_options+=(--profile-cpu)
+elif [[ "$HACKATHON_PROFILE_CPU" != 0 ]]; then
+  echo "HACKATHON_PROFILE_CPU must be 0 or 1" >&2
+  exit 1
+fi
 if [[ "$HACKATHON_SUBMISSION_HTTP2" == 1 ]]; then
   submission_options+=(--submission-http2)
 fi
@@ -58,6 +65,11 @@ PYREPORT
     for corpus in "$WORK_DIR"/hackathon-corpus-*; do
       [[ ! -d "$corpus" ]] || entries+=("$(basename "$corpus")")
     done
+    # Keep metrics and CPU profiles independently downloadable from raw traffic.
+    tar -czf "$WORK_DIR/hackathon-diagnostics.tar.gz" \
+      --exclude=results.jsonl --exclude=corpus --exclude=state \
+      --exclude="*.stdout.log" --exclude="*.stderr.log" \
+      -C "$WORK_DIR" hackathon-results || { [[ "$status" != 0 ]] || status=1; }
     local archive="$WORK_DIR/hackathon-results.tar.gz"
     if tar -czf "$archive" -C "$WORK_DIR" "${entries[@]}"; then
       echo "Hackathon artifact archive: $archive"

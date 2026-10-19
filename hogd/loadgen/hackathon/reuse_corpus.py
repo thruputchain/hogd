@@ -18,6 +18,8 @@ HARNESS_CHANGES = {
     "scripts/ci/hackathon_bench.sh",
     "scripts/schedules/hackathon.toml",
     "hogd/loadgen/hackathon/cluster.py",
+    "hogd/loadgen/hackathon/profiling.py",
+    "hogd/loadgen/hackathon/test_profiling.py",
     "hogd/loadgen/hackathon/test_cluster.py",
     "hogd/loadgen/hackathon/reuse_corpus.py",
     "hogd/loadgen/hackathon/test_reuse_corpus.py",

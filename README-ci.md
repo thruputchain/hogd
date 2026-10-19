@@ -200,6 +200,18 @@ transactions. A plateau with missed arrivals or exhausted submission slots can
 be a client limit; a run that keeps up with all offered traffic does not establish
 maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 
+This profiling branch enables `HACKATHON_PROFILE_CPU=1` in the CI schedule.
+The standalone wrapper defaults it to `0`; `cluster.py --profile-cpu` enables
+35 seconds of 99 Hz CPU-clock sampling on the gateway and mempool, starting
+approximately 220 seconds after replay launch. It requires `perf`, permission
+to attach to the benchmark processes, and DWARF stack unwinding support.
+Profiling adds overhead: compare tuning changes with profiling disabled before
+claiming a throughput improvement. Each service's `profiles/` directory retains
+raw samples, self/caller reports, tool output, and an explicit status record;
+missing permissions or a profiler failure must not be interpreted as an empty
+CPU profile. The separate `hackathon-diagnostics-*` artifact includes profiles,
+metrics, configurations, and reports without raw transaction results or corpora.
+
 The benchmark implementation lives in `hogd/loadgen/hackathon`: the corpus builder,
 contract fixtures, Python harness and reports, tests, and standalone Go replay tool.
 The CI launcher and host schedule remain in `scripts/ci` and `scripts/schedules`.

@@ -15,6 +15,8 @@ import time
 import urllib.request
 import urllib.error
 
+from profiling import CPUProfiles
+
 BENCHMARK_DIR = Path(__file__).resolve().parent
 ROOT = BENCHMARK_DIR.parents[2]
 HOSTS = {
@@ -162,7 +164,7 @@ class Cluster:
                     "bash",
                     "-c",
                     'for ((i=0; i<100; i++)); do [[ -s "$1" ]] && exit 0; '
-                    'sleep 0.05; done; exit 1',
+                    "sleep 0.05; done; exit 1",
                     "bash",
                     pidfile,
                 ],
@@ -194,7 +196,7 @@ class Cluster:
                             'for file do read -r pid < "$file" && '
                             'kill -0 "$pid" 2>/dev/null || '
                             '{ echo "service exited: $file" >&2; exit 1; }; '
-                            'done',
+                            "done",
                             "bash",
                             *files,
                         ],
@@ -635,8 +637,18 @@ class Cluster:
         deadline = (
             time.monotonic() + a.ready_timeout + duration + 2 * a.drain + 120
         )
+        profiles = CPUProfiles(self)
+        replay_started = (
+            time.monotonic() if getattr(a, "profile_cpu", False) else 0
+        )
         try:
             while True:
+                if (
+                    getattr(a, "profile_cpu", False)
+                    and not profiles.started
+                    and time.monotonic() - replay_started >= 220
+                ):
+                    profiles.start()
                 self.check_services()
                 try:
                     status = waiter.wait(timeout=5)
@@ -646,6 +658,7 @@ class Cluster:
                         raise RuntimeError("replay deadline exceeded")
             self.check_services()
         finally:
+            profiles.finish()
             if not a.local:
                 try:
                     if waiter.poll() is None:
@@ -710,6 +723,11 @@ def main():
     p.add_argument("--drain", type=int, default=120)
     p.add_argument("--outstanding", type=int, default=16384)
     p.add_argument("--submission-http2", action="store_true")
+    p.add_argument(
+        "--profile-cpu",
+        action="store_true",
+        help="sample gateway/mempool CPU during peak traffic; adds overhead",
+    )
     p.add_argument("--receipt-workers", type=int, default=16)
     p.add_argument("--gateway-batch-shards", type=int, default=1)
     p.add_argument("--gateway-inflight-batches", type=int, default=4)
@@ -781,6 +799,7 @@ def main():
         "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
         "gatewayRuntimeWorkers": args.gateway_workers,
         "submissionHTTP2": args.submission_http2,
+        "profileCPU": args.profile_cpu,
     }
     identity["binaries"] = {}
     for name, relative in BINS.items():
