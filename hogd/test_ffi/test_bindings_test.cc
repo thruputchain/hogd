@@ -3711,6 +3711,95 @@ TEST(TestBindingsTest, SetupCreateContractRejectsUnknownNative)
   EXPECT_EQ(result, kTestFFIErrorCodeContractVerificationFailed);
 }
 
+namespace {
+
+// A database whose genesis states `max_rv32_memory_bytes`, the cap an
+// attached RV32 artifact's declared memory_bytes is verified against.
+void *
+make_db_with_rv32_memory_cap(uint32_t max_rv32_memory_bytes)
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxRv32MemoryBytes,
+                                 max_rv32_memory_bytes);
+  auto serialized_config = x23::serialize(config);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db = create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                      genesis_root.size(), serialized_config.data(),
+                      static_cast<uint32_t>(serialized_config.size()));
+  EXPECT_EQ(db.ffi_error_code, kTestFFIErrorCodeNone);
+  return db.db;
+}
+
+// A minimal RV32 contract declaring exactly `memory_bytes` of guest memory:
+// a small image placed at the top of that address space, so memory_bytes
+// (stamped as start + image size) lands on the requested value.
+Contract
+rv32_contract_declaring(uint32_t memory_bytes)
+{
+  const std::vector<uint8_t> image(16, 0xA5);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact(
+          {rv32::test_program::addi(10, 0, 6), 0x00000073U}, image,
+          memory_bytes - static_cast<uint32_t>(image.size())));
+  return contract;
+}
+
+} // namespace
+
+// setup_create_contract verifies under the database's own network config, as
+// a transaction attaching the contract would be, not under the protocol
+// defaults: a chain that raises max_rv32_memory_bytes admits an artifact
+// declaring more than the 64 KiB default.
+TEST(TestBindingsTest, SetupCreateContractHonorsRaisedRv32MemoryCap)
+{
+  constexpr uint32_t kMemoryBytes = 128 * 1024;
+  auto bytes = x23::serialize(rv32_contract_declaring(kMemoryBytes));
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  // Precondition: the default cap refuses it.
+  auto *stock_db = make_db();
+  ASSERT_NE(stock_db, nullptr);
+  x23::Defer d2([stock_db] { free_db(stock_db); });
+  ASSERT_EQ(setup_create_contract(rc, stock_db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+
+  auto *db = make_db_with_rv32_memory_cap(kMemoryBytes);
+  ASSERT_NE(db, nullptr);
+  x23::Defer d3([db] { free_db(db); });
+  EXPECT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+}
+
+// The other direction: a chain that lowers the cap refuses an artifact the
+// 64 KiB default would admit.
+TEST(TestBindingsTest, SetupCreateContractHonorsLoweredRv32MemoryCap)
+{
+  constexpr uint32_t kMemoryBytes = 64 * 1024;
+  auto bytes = x23::serialize(rv32_contract_declaring(kMemoryBytes));
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  // Precondition: the default cap admits it.
+  auto *stock_db = make_db();
+  ASSERT_NE(stock_db, nullptr);
+  x23::Defer d2([stock_db] { free_db(stock_db); });
+  ASSERT_EQ(setup_create_contract(rc, stock_db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  auto *db = make_db_with_rv32_memory_cap(32 * 1024);
+  ASSERT_NE(db, nullptr);
+  x23::Defer d3([db] { free_db(db); });
+  EXPECT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+}
+
 // Regression test for #3592: a native precompile (here the default wallet)
 // verifies and stores through setup_create_contract(), but deploying it at an
 // ordinary address must be rejected -- production deploy_contract() bans

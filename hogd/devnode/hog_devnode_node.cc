@@ -28,6 +28,7 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/base58.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -45,7 +46,6 @@
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_db/hog_age_reconciliation.h"
@@ -146,18 +146,18 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{4});
+    w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.object_field("bootstrapFaucet", [&](json::Writer &faucet) {
-        faucet.field("publicKey", hex_string(config.faucet_public_key));
+        faucet.field("publicKey", encode_base58(config.faucet_public_key));
         faucet.field("initialStorageTokens",
                      std::to_string(kLocalFaucetStorageTokens));
       });
       w.array_field("bootstrapAccounts", [&](json::Writer &accounts) {
         for (auto const &account : config.accounts) {
           accounts.object([&](json::Writer &allocation) {
-            allocation.field("publicKey", hex_string(account.public_key));
+            allocation.field("publicKey", encode_base58(account.public_key));
             allocation.field("initialStorageTokens",
                              std::to_string(account.storage_tokens));
           });
@@ -299,15 +299,16 @@ parse_data_dir_metadata(std::string_view bytes)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
-  if (schema_version >= 1 && schema_version <= 3) {
+  if (schema_version >= 1 && schema_version <= 4) {
     throw std::runtime_error(
-        "hog-devnode data metadata uses legacy bootstrap accounts; use the "
+        "hog-devnode data metadata uses legacy bootstrap accounts or "
+        "identifier encoding; use the "
         "original "
         "runtime for this data directory or choose a new data directory");
   }
-  if (schema_version != 4) {
+  if (schema_version != 5) {
     throw std::runtime_error(std::format(
-        "unsupported hog-devnode data metadata schemaVersion {}, expected 4",
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 5",
         schema_version));
   }
   std::set<std::string_view> root_fields;

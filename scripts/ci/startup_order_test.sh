@@ -190,7 +190,7 @@ launch() {
     ;;
   mempool)
     spawn mempool "$MEMPOOL_BIN" --bind-ip "$IP" --metrics-port "$MEMPOOL_HTTP_PORT" \
-      --network-hash 0000000000000000000000000000000000000000000000000000000000000000 --num-db-shards 1 --num-exec-shards 1 \
+      --network-hash 11111111111111111111111111111111 --num-db-shards 1 --num-exec-shards 1 \
       --db-port "$MEMPOOL_DB_PORT" --event-port "$MEMPOOL_EVENT_PORT" \
       --executor-port "$MEMPOOL_EXECUTOR_PORT" --auth-port "$MEMPOOL_AUTH_PORT" \
       --coordinator-port "$MEMPOOL_COORDINATOR_PORT"

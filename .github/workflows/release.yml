@@ -19,7 +19,7 @@ env:
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.8"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.10"
 
 permissions:
   contents: write
@@ -81,12 +81,15 @@ jobs:
           # .github/actions/cached-rustup-home).
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -255,7 +258,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()
@@ -300,6 +305,7 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cache/cargo-install
             ~/.cache/rustup
@@ -320,6 +326,8 @@ jobs:
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -474,16 +482,16 @@ jobs:
           bootstrap_file="$(mktemp)"
           cat >"$bootstrap_file" <<'JSON'
           {
-            "schemaVersion": 4,
+            "schemaVersion": 5,
             "kind": "groundhog-bootstrap",
-            "networkHash": "0000000000000000000000000000000000000000000000000000000000000000",
+            "networkHash": "11111111111111111111111111111111",
             "profile": "local-dev",
             "bootstrapFaucet": {
-              "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+              "publicKey": "FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z",
               "initialStorageTokens": "10000000000000"
             },
             "bootstrapAccounts": [{
-              "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+              "publicKey": "586Z7H2vpX9qNhN2T4e9Utugie3ogjbxzGaMtM3E6HR5",
               "initialStorageTokens": "1000000000"
             }],
             "storageCostModel": {"profile": "hogd-default"}
@@ -540,8 +548,8 @@ jobs:
               raise SystemExit(f"unexpected readiness payload: {readiness}")
           with open(readiness["manifestPath"], encoding="utf-8") as handle:
               manifest = json.load(handle)
-          if readiness.get("schemaVersion") != 3 or manifest.get("schemaVersion") != 4:
-              raise SystemExit("packaged hog-devnode must emit public bootstrap schema 4")
+          if readiness.get("schemaVersion") != 4 or manifest.get("schemaVersion") != 5:
+              raise SystemExit("packaged hog-devnode must emit readiness schema 4 and runtime manifest schema 5")
           if "bootstrapAccountDerivation" in manifest:
               raise SystemExit("packaged hog-devnode still advertises signer derivation")
           if "devWallet" in manifest.get("bootstrap", {}):
@@ -550,11 +558,11 @@ jobs:
           expected = [
               {
                   "role": "faucet", "initialStorageTokens": "10000000000000",
-                  "publicKey": "0xd75a980182b10ab7d54bfed3c964073a0ee172f3daa62325af021a68f707511a",
+                  "publicKey": "FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z",
               },
               {
                   "role": "local_user", "initialStorageTokens": "1000000000",
-                  "publicKey": "0x3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c",
+                  "publicKey": "586Z7H2vpX9qNhN2T4e9Utugie3ogjbxzGaMtM3E6HR5",
               },
           ]
           if not isinstance(accounts, list) or len(accounts) != len(expected):
@@ -585,7 +593,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()

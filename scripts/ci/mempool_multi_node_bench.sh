@@ -355,7 +355,7 @@ node1_mempool_exit_file="$(node_dir 1)/mempool.exit"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -368,7 +368,7 @@ node0_mempool_cmd=(
 node1_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node1_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -478,7 +478,7 @@ for node in "${NODE_IDS[@]}"; do
     "$CHUCKD_BINARY" -l info --stack --config "$CHUCKD_CONFIG_DIR/$node.json" --instance "${CHUCKD_INSTANCES[$node]}" --seed "${CHUCKD_SEEDS[$node]}" \
     --metrics :2223 bench coordinator_loadgen --skip 5 --in-addr "$(hog_ip "${CHUCKD_HOSTS[$node]}")":7888 --debug-port 5500 \
     --num-accts 10000 --txs-per-block 1000000 --num-blocks 1000 \
-    --network-hash 0000000000000000000000000000000000000000000000000000000000000001 --storage-dir "$(node_storage_dir "$node")" \
+    --network-hash 11111111111111111111111111111112 --storage-dir "$(node_storage_dir "$node")" \
     --out-addr :50000 --loadgen-addr "$(hog_ip "${LOADGEN_HOSTS[$node]}"):$LOADGEN_PORT" \
     --sched-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_COORDINATOR_PORT" --scpd-path "$SCPD_BINARY" \
     --scp-handle-addr 127.0.0.1:3300 --scp-control-addr 127.0.0.1:4400
