@@ -1,15 +1,34 @@
 """Profiling must target only owned processes and retain failures explicitly."""
 
 import json
+import os
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
-from profiling import CPUProfiles, PROFILE_SCRIPT
+from profiling import CPUProfiles, PROFILE_SCRIPT, PROFILE_TARGETS
 
 
 class CPUProfilesTest(unittest.TestCase):
+    def test_thread_snapshot_reads_live_process_ticks(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            script = (
+                'pid=$1; output=$2\n'
+                + PROFILE_SCRIPT[PROFILE_SCRIPT.index('snapshot() {'):
+                                 PROFILE_SCRIPT.index('snapshot threads-start')]
+                + '\nsnapshot smoke\n'
+            )
+            subprocess.run(['bash', '-c', script, 'bash', str(os.getpid()), tmp], check=True)
+            snapshot = json.loads((Path(tmp) / 'smoke.json').read_text())
+            self.assertGreater(snapshot['unixNs'], 0)
+            self.assertGreater(snapshot['clockTicksPerSecond'], 0)
+            task = snapshot['tasks'][str(os.getpid())]
+            self.assertGreaterEqual(task['userTicks'], 0)
+            self.assertGreaterEqual(task['systemTicks'], 0)
+            self.assertTrue(task['comm'])
+
     def test_profile_follows_traffic_clock_after_slow_startup(self):
         with tempfile.TemporaryDirectory() as tmp:
             directory = Path(tmp)
@@ -61,7 +80,7 @@ class CPUProfilesTest(unittest.TestCase):
             cluster = SimpleNamespace(
                 directory=Path(tmp),
                 args=SimpleNamespace(local=False),
-                hosts={"gateway": "hog4", "mempool": "hog10"},
+                hosts={"gateway": "hog4", "mempool": "hog10", "replay": "hog7"},
                 remote=Mock(return_value=SimpleNamespace(stdout="0; kill -1")),
             )
             profiles = CPUProfiles(cluster)
@@ -84,10 +103,11 @@ class CPUProfilesTest(unittest.TestCase):
             cluster = SimpleNamespace(
                 directory=Path(tmp),
                 args=SimpleNamespace(local=True),
-                hosts={"gateway": "localhost", "mempool": "localhost"},
+                hosts={name: "localhost" for name in PROFILE_TARGETS},
                 processes={
                     "gateway": SimpleNamespace(pid=123),
                     "mempool": SimpleNamespace(pid=456),
+                    "replay": SimpleNamespace(pid=789),
                 },
             )
             child = Mock()
@@ -99,7 +119,7 @@ class CPUProfilesTest(unittest.TestCase):
                 profiles.start()
                 profiles.finish()
             commands = [call.args[0] for call in start.call_args_list]
-            self.assertEqual([cmd[4] for cmd in commands], ["123", "456"])
+            self.assertEqual([cmd[4] for cmd in commands], ["123", "456", "789"])
             self.assertTrue(all(cmd[2] == PROFILE_SCRIPT for cmd in commands))
             child.terminate.assert_not_called()
             for name in cluster.hosts:

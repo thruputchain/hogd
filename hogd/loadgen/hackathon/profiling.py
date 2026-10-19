@@ -6,6 +6,8 @@ import shlex
 import subprocess
 import time
 
+PROFILE_TARGETS = ("gateway", "mempool", "replay")
+
 # Attaching avoids changing the service PID monitored by the control server.
 # Software CPU-clock sampling works on hosts without hardware PMU access.
 PROFILE_SCRIPT = r"""
@@ -19,12 +21,35 @@ if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid"; then
 fi
 perf --version > "$output/perf-version.txt" 2>&1 || exit 1
 cat /proc/sys/kernel/perf_event_paranoid > "$output/perf-event-paranoid.txt"
+snapshot() {
+  python3 - "$pid" "$output/$1.json" <<'PYSNAPSHOT'
+import json, pathlib, sys, time
+root = pathlib.Path('/proc') / sys.argv[1]
+tasks = {}
+for path in root.glob('task/*/stat'):
+    try:
+        stat = path.read_text()
+        fields = stat[stat.rfind(')') + 2:].split()
+        tasks[path.parent.name] = {
+            'comm': stat[stat.find('(') + 1:stat.rfind(')')],
+            'userTicks': int(fields[11]), 'systemTicks': int(fields[12]),
+        }
+    except (FileNotFoundError, ProcessLookupError):
+        pass
+pathlib.Path(sys.argv[2]).write_text(json.dumps({
+    'unixNs': time.time_ns(), 'clockTicksPerSecond': __import__('os').sysconf('SC_CLK_TCK'),
+    'tasks': tasks,
+}))
+PYSNAPSHOT
+}
+snapshot threads-start
 date +%s%N > "$output/started-unix-ns.txt"
 timeout --signal=INT --kill-after=5s 35s perf record \
   -e cpu-clock -F 99 --call-graph dwarf,8192 -p "$pid" \
   -o "$output/perf.data" > "$output/record.log" 2>&1
 status=$?
 date +%s%N > "$output/finished-unix-ns.txt"
+snapshot threads-finish
 printf '%s\n' "$status" > "$output/record-status.txt"
 if [[ "$status" != 0 && "$status" != 124 ]]; then exit "$status"; fi
 perf report --stdio --no-children --percent-limit 0.5 --sort symbol,dso \
@@ -95,7 +120,7 @@ except (FileNotFoundError,json.JSONDecodeError):
     def start(self):
         self.started = True
         c = self.cluster
-        for name in ("gateway", "mempool"):
+        for name in PROFILE_TARGETS:
             host = c.hosts[name]
             output = c.directory / "profiles" / name
             output.mkdir(parents=True, exist_ok=True)
