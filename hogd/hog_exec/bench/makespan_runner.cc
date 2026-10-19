@@ -33,6 +33,7 @@
 #include <array>
 #include <atomic>
 #include <cassert>
+#include <charconv>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -45,6 +46,7 @@
 #include <random>
 #include <string>
 #include <string_view>
+#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -514,8 +516,12 @@ private:
         .done = &cb,
     };
     const uint64_t start_ns = x23::fastclock::get_ns();
-    for (auto &exec_client : exec_clients_) {
-      for (uint32_t i = 0; i < params_.n_coros_per_connection; i++) {
+    // Round-robin over connections, which alternate executors: each
+    // coroutine claims units as soon as it starts, so launching one
+    // connection's coroutines at a time would hand the first units of the
+    // dispatch order (all the heavy ones, in `_first`) to one executor.
+    for (uint32_t i = 0; i < params_.n_coros_per_connection; i++) {
+      for (auto &exec_client : exec_clients_) {
         dispatch_coro(exec_client, &d);
       }
     }
@@ -694,10 +700,20 @@ usage(char *argv[])
   exit(EXIT_FAILURE);
 }
 
+// All of [s] as a uint32_t. Anything else, a value too large to fit
+// included, is an error rather than a different workload.
 uint32_t
 parse_u32(const char *s)
 {
-  return static_cast<uint32_t>(std::stoul(s));
+  const std::string_view text(s);
+  uint32_t value = 0;
+  const auto [end, ec] =
+      std::from_chars(text.data(), text.data() + text.size(), value);
+  if (ec != std::errc{} || end != text.data() + text.size()) {
+    std::println(stderr, "not a 32-bit unsigned integer: '{}'", text);
+    exit(EXIT_FAILURE);
+  }
+  return value;
 }
 } // namespace
 
