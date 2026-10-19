@@ -67,7 +67,7 @@ jobs:
     benchmark:
         name: Gateway workload (one validator)
         runs-on: self-hosted
-        timeout-minutes: 130
+        timeout-minutes: 240
         permissions:
             contents: read
             actions: read
