@@ -1,0 +1,131 @@
+name: Makespan Benchmark (hog_sched)
+
+# Manual: the makespan bench with every knob exposed, for experiments on a
+# branch. combined_metrics runs it with the defaults below as a tracked metric.
+# See hogd/hog_exec/bench/makespan_runner.cc.
+on:
+    workflow_dispatch:
+        inputs:
+            executors:
+                description: Number of executors
+                type: choice
+                default: "3"
+                options:
+                    - "1"
+                    - "2"
+                    - "3"
+            fib_n:
+                description: slow_fibonacci(n) for the fib heavy transactions
+                type: string
+                default: "31"
+            heavy_reads:
+                description: Sequential storage reads per reads heavy transaction
+                type: string
+                default: "1000"
+            n_light:
+                description: Light transactions per mix block
+                type: string
+                default: "100000"
+            n_heavy:
+                description: Heavy transactions per mix block
+                type: string
+                default: "32"
+            light_batch:
+                description: Light transactions per executor RPC
+                type: string
+                default: "5"
+            trials:
+                description: Trials per scenario
+                type: string
+                default: "5"
+env:
+    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    # Published crates and pinned submodules retain the legacy registry identity.
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
+    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
+    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
+
+# The benchmark owns its hosts, so runs queue behind a running benchmark
+# rather than overlapping it.
+concurrency:
+    group: makespan-bench
+    cancel-in-progress: false
+
+jobs:
+    build:
+        runs-on: self-hosted
+        permissions:
+            contents: read
+            actions: read
+
+        steps:
+            - name: Clean up .gitconfig
+              run: |
+                  echo "Cleaning up .gitconfig"
+                  rm -f /home/hogci/.gitconfig
+            - uses: actions/checkout@v6
+              with:
+                persist-credentials: false
+
+            - name: Configure private sources
+              id: private-sources
+              uses: ./.github/actions/private-sources
+              with:
+                token: ${{ secrets.READ_ACCESS_PAT }}
+                app-id: ${{ vars.COMPONENT_READER_APP_ID }}
+                private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
+                ssh-private-key: |
+                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
+                  ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
+                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
+                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
+
+            - name: Run hog schedule
+              env:
+                  EXECUTORS: ${{ inputs.executors }}
+                  FIB_N: ${{ inputs.fib_n }}
+                  HEAVY_READS: ${{ inputs.heavy_reads }}
+                  N_LIGHT: ${{ inputs.n_light }}
+                  N_HEAVY: ${{ inputs.n_heavy }}
+                  LIGHT_BATCH: ${{ inputs.light_batch }}
+                  TRIALS: ${{ inputs.trials }}
+              run: |
+                  BRANCH_NAME="${{ github.head_ref || github.ref_name }}"
+                  echo "Branch name: $BRANCH_NAME"
+                  # The inputs are spliced into the schedule's shell script, so
+                  # only plain numbers get through.
+                  for name in EXECUTORS FIB_N HEAVY_READS N_LIGHT N_HEAVY LIGHT_BATCH TRIALS; do
+                    if [[ ! "${!name}" =~ ^[0-9]+$ ]]; then
+                      echo "input $name must be a non-negative integer, got '${!name}'" >&2
+                      exit 1
+                    fi
+                  done
+                  hog_sched \
+                  --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
+                  --key=github_repo --value=${{ github.repository }} \
+                  --key=git_token --value=${{ steps.private-sources.outputs.token }} \
+                  --key=git_commit --value=${{ github.sha }} \
+                  --key=git_branch --value=$BRANCH_NAME \
+                  --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
+                  --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
+                  --key=executors --value="$EXECUTORS" \
+                  --key=fib_n --value="$FIB_N" \
+                  --key=heavy_reads --value="$HEAVY_READS" \
+                  --key=n_light --value="$N_LIGHT" \
+                  --key=n_heavy --value="$N_HEAVY" \
+                  --key=light_batch --value="$LIGHT_BATCH" \
+                  --key=trials --value="$TRIALS" \
+                  --timeout-sec=3600 \
+                  ./scripts/schedules/makespan.toml
+            - name: Print Log Download Instructions
+              if: always()
+              uses: ./.github/actions/print-log-instructions
+            - name: Remove job-local Git credentials
+              if: always()
+              shell: bash
+              run: |
+                if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
+                  rm -f -- "$GIT_CONFIG_GLOBAL"
+                fi
