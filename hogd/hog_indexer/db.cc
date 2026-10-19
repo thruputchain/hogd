@@ -2061,6 +2061,15 @@ IndexDB::get_events(EventQuery const &query) const
     if (f.contract_addresses.empty()) {
       return page;
     }
+    // The topic-alternative lists are unbounded in XDR; reject an
+    // over-budget filter cheaply here, before any index walk, rather
+    // than letting the per-event linear topic scan amplify it.
+    const std::size_t topic_alternatives = f.topics.topic0.size() +
+                                           f.topics.topic1.size() +
+                                           f.topics.topic2.size();
+    if (topic_alternatives > kMaxTopicAlternativesPerFilter) {
+      return page;
+    }
   }
 
   // Clamp limit.
