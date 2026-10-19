@@ -120,6 +120,7 @@ class CPUProfilesTest(unittest.TestCase):
                 profiles.finish()
             commands = [call.args[0] for call in start.call_args_list]
             self.assertEqual([cmd[4] for cmd in commands], ["123", "456", "789"])
+            self.assertEqual([cmd[6] for cmd in commands], ["fp", "dwarf,8192", "dwarf,8192"])
             self.assertTrue(all(cmd[2] == PROFILE_SCRIPT for cmd in commands))
             child.terminate.assert_not_called()
             for name in cluster.hosts:

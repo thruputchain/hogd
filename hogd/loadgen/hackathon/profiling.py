@@ -14,6 +14,7 @@ PROFILE_SCRIPT = r"""
 set -u
 pid=$1
 output=$2
+call_graph=${3:-dwarf,8192}
 mkdir -p "$output"
 if ! [[ "$pid" =~ ^[1-9][0-9]*$ ]] || ! kill -0 "$pid"; then
   echo "Invalid or exited profile target" >&2
@@ -44,8 +45,9 @@ PYSNAPSHOT
 }
 snapshot threads-start
 date +%s%N > "$output/started-unix-ns.txt"
+printf '%s\n' "$call_graph" > "$output/call-graph.txt"
 timeout --signal=INT --kill-after=5s 35s perf record \
-  -e cpu-clock -F 99 --call-graph dwarf,8192 -p "$pid" \
+  -e cpu-clock -F 99 --call-graph "$call_graph" -p "$pid" \
   -o "$output/perf.data" > "$output/record.log" 2>&1
 status=$?
 date +%s%N > "$output/finished-unix-ns.txt"
@@ -145,6 +147,7 @@ except (FileNotFoundError,json.JSONDecodeError):
                     "bash",
                     pid,
                     str(output),
+                    "fp" if name == "gateway" else "dwarf,8192",
                 ]
                 if not c.args.local:
                     command = [

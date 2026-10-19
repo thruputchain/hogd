@@ -58,7 +58,8 @@ if [[ "{{ .hog_host }}" == "hog4" ]]; then
   (
     cd release/gateway-source
     export GROUNDHOG_SOURCE_COMMIT="$gateway_revision"
-    cargo build --locked --release --target-dir "$gateway_target" \
+    RUSTFLAGS="${RUSTFLAGS:-} -C force-frame-pointers=yes" \
+      cargo build --locked --release --target-dir "$gateway_target" \
       -p thruput-json-rpc-gateway --bin hog-gateway --features heap-profiling
   ) > gateway-build.log 2>&1 || (cat gateway-build.log && exit 1)
   cp "$gateway_target/release/hog-gateway" release/hog-gateway
@@ -76,6 +77,7 @@ identity = {
     'rustc': subprocess.check_output(['rustc', '--version'], cwd=source, text=True).strip(),
     'profile': 'release',
     'features': ['heap-profiling'],
+    'framePointers': True,
 }
 pathlib.Path('release/hackathon-gateway.json').write_text(json.dumps(identity, indent=2))
 print(json.dumps(identity, indent=2))
