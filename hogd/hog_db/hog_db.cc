@@ -27,7 +27,6 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/hog_db/db_metrics.h"
 #include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
@@ -81,7 +80,6 @@ hog_db_init(std::string_view path, size_t ram_bytes,
             uint16_t exec_port, uint16_t mempool_port, uint16_t auth_port,
             uint16_t gateway_port, uint16_t metrics_port)
 {
-  init_hog_db_metrics();
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =

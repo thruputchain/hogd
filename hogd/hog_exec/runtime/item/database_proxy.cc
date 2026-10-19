@@ -28,7 +28,6 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
-#include "hogd/hog_exec/shared.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_exec.hh"
@@ -36,7 +35,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cpumap.h"
-#include "x23/fastclock.h"
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
@@ -227,11 +225,8 @@ x23::Async<SystemStatus<std::optional<WireStorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
   try {
-    const uint64_t start_ns = x23::fastclock::get_ns();
     auto res = co_await client_.get_snapshot_item(block_id, addrkey);
-    const uint64_t reply_ns = x23::fastclock::get_ns();
     co_await default_threadpool().bg();
-    record_db_read(reply_ns - start_ns, x23::fastclock::get_ns() - reply_ns);
     co_return to_system_error_code<std::nullopt>(
         res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
           return std::make_optional<WireStorageItem>(std::move(x));

@@ -29,7 +29,6 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_db/block_tx.h"
-#include "hogd/hog_db/db_metrics.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
@@ -162,7 +161,6 @@ RPCError
 HogDbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
                                      NewContractBatch new_contracts)
 {
-  DbRpcTimer timer(DbRpcKind::kCommitTransaction);
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
@@ -220,7 +218,6 @@ HogDbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
 RPCError
 HogDbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
@@ -234,7 +231,6 @@ TryPushSubtransactionResult
 HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
                                               StorageDeltaBatch batch)
 {
-  DbRpcTimer timer(DbRpcKind::kTryPushSubtransaction);
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
           block, tx);
@@ -358,7 +354,6 @@ RPCError
 HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
                                       uint32_t popcount)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   InvokeTX *itx = ctx_.get_invoke_tx(block, tx);
   if (!itx)
     return RPCError::kRPCBadBlockID;
@@ -377,7 +372,6 @@ HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
 StorageItemReply<ExpectedStorageItem>
 HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
-  DbRpcTimer timer(DbRpcKind::kGetSnapshotItem);
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot
   // heads for each BlockID, but the database is not currently designed to do
@@ -471,7 +465,6 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 PreserializedReply<ExpectedContract>
 HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
   using Reply = PreserializedReply<ExpectedContract>;
@@ -501,7 +494,6 @@ ExpectedDeployment
 HogDbExecutorRpc::get_deployment(BlockID block,
                                  ContractAddress const &contract_address)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   HogDbStatus<DeployedContractHash> hash =
       ctx_.get_db().read_address_metadata(contract_address);
 
@@ -522,7 +514,6 @@ HogDbExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
                                                    AddressAndKey const &addrkey,
                                                    uint64_t search_start_number)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   // TODO(stutsman): BlockID is ignored because we can only read the latest
   // snapshot state.
 
@@ -549,7 +540,6 @@ BorrowedQueueEntryReply
 HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block);
   // The reply owns the reference from here rather than a scope guard: x23
   // writes the borrowed bytes after this frame is gone, and the reply is
@@ -641,7 +631,6 @@ HogDbExecutorRpc::open_viewing_snapshot()
 RPCError
 HogDbExecutorRpc::close_viewing_snapshot(BlockID block_id)
 {
-  DbRpcTimer timer(DbRpcKind::kOther);
   auto *btx = ctx_.get_block_tx(block_id, false);
   if (!btx) {
     return RPCError::kRPCBadBlockID;

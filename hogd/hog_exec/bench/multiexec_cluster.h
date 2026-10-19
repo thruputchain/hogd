@@ -191,9 +191,6 @@ connect_to_exec_server(const ExecCard &card)
 // event server's startup log.
 inline constexpr uint16_t kBenchEventIndexerPort = 8092;
 inline constexpr uint16_t kBenchIndexerBlockExplorerPort = 8093;
-// Each executor's Prometheus /metrics endpoint, and hog-db's.
-inline constexpr uint16_t kBenchExecMetricsPort = 8041;
-inline constexpr uint16_t kBenchDbMetricsPort = 8042;
 
 using exec_client_t =
     ExecutorSched1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>;
@@ -378,13 +375,11 @@ public:
     EventCard event_card = sched_event_test_->impl()->await_event_card();
     sched_exec_test_->impl()->register_event_card(event_card);
 
-    db_ip_ = hog_ip(server_addrs[server_idx]);
     control_server_handles_[server_idx].ci_client.start_server(
         "hogd/hog_db/hog-db",
         {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
-         db_ip_, "--coordinator-addr",
-         std::format("{}:{}", mempool_ip, sched_db_port), "--metrics-port",
-         std::to_string(kBenchDbMetricsPort)});
+         hog_ip(server_addrs[server_idx]), "--coordinator-addr",
+         std::format("{}:{}", mempool_ip, sched_db_port)});
     server_idx++;
 
     // Started before the executors so it is already draining the outbox by
@@ -403,9 +398,7 @@ public:
       control_server_handles_[server_idx].ci_client.start_server(
           "hogd/hog_exec/hog-exec",
           {"--bind-ip", hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-           std::format("{}:{}", mempool_ip, sched_exec_port), "--metrics-port",
-           std::to_string(kBenchExecMetricsPort)});
-      exec_ips_.push_back(hog_ip(server_addrs[server_idx]));
+           std::format("{}:{}", mempool_ip, sched_exec_port)});
     }
 
     auto db_cards = sched_db_test_->impl()->await_shard_cards(1);
@@ -475,12 +468,6 @@ public:
 
   size_t num_executors() const { return exec_cards_.size(); }
 
-  // The executors' /metrics endpoints, as host IPs; each listens on
-  // kBenchExecMetricsPort.
-  const std::vector<std::string> &exec_ips() const { return exec_ips_; }
-  // hog-db's /metrics endpoint, as a host IP; it listens on
-  // kBenchDbMetricsPort.
-  const std::string &db_ip() const { return db_ip_; }
   // Where executors reach hog-db, for a client that wants to read from it
   // the way they do.
   const x23::HostPort &db_exec_addr() const { return db_exec_addr_; }
@@ -505,10 +492,8 @@ private:
   RpcServer<MockSchedDB> sched_db_test_;
   RpcServer<MockSchedEvent> sched_event_test_;
 
-  std::string db_ip_;
   x23::HostPort db_exec_addr_;
   std::string indexer_ip_;
-  std::vector<std::string> exec_ips_;
   std::vector<ExecCard> exec_cards_;
 
   std::unique_ptr<bench_event_sched_client_t> event_sched_client_;
