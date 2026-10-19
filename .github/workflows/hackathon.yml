@@ -1,170 +1,21 @@
-name: Hackathon workload (single validator)
-
-# Results remain in this run's logs and artifact archive. This workflow has no
-# metrics_history publishing step or deploy key.
+name: Hackathon targeted bootstrap cleanup
 on:
-    workflow_dispatch:
-        inputs:
-            users:
-                description: Number of funded signing accounts (2 to 10000)
-                required: true
-                default: 1000
-                type: number
-            rate_multiplier:
-                description: Multiply base traffic rates (10 gives 1k/5k/10k/25k TX/s, with 5x bursts)
-                required: true
-                default: 10
-                type: number
-            outstanding:
-                description: Maximum concurrent transaction submissions (26624 validated without overload)
-                required: true
-                default: 26624
-                type: number
-            receipt_workers:
-                description: Concurrent receipt polling workers
-                required: true
-                default: 16
-                type: number
-            gateway_batch_shards:
-                description: Gateway submission batcher shards (1 to 128)
-                required: true
-                default: 4
-                type: number
-            gateway_inflight_batches:
-                description: Concurrent scheduler batches per gateway shard (1 to 128)
-                required: true
-                default: 4
-                type: number
-            gateway_workers:
-                description: Gateway Tokio runtime workers (0 inherits automatic sizing; 1 to 128 overrides)
-                required: true
-                default: 8
-                type: number
-            submission_http2:
-                description: Multiplex measured submissions over HTTP/2
-                required: true
-                default: true
-                type: boolean
-            reuse_corpus:
-                description: Reuse hog10's last retained corpora after checking source, users and rates
-                required: true
-                default: false
-                type: boolean
-            repeats:
-                description: Replays per variant (unique and shared code)
-                required: true
-                default: 3
-                type: number
-env:
-    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    # Published crates and pinned submodules retain the legacy registry identity.
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
-
+  workflow_dispatch:
+permissions:
+  contents: read
 jobs:
-    benchmark:
-        name: Gateway workload (one validator)
-        runs-on: self-hosted
-        timeout-minutes: 130
-        permissions:
-            contents: read
-            actions: read
-
-        steps:
-            - name: Clean up .gitconfig
-              run: |
-                  echo "Cleaning up .gitconfig"
-                  rm -f /home/hogci/.gitconfig
-            - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
-              with:
-                persist-credentials: false
-
-            - name: Configure private sources
-              id: private-sources
-              uses: ./.github/actions/private-sources
-              with:
-                app-id: ${{ vars.COMPONENT_READER_APP_ID }}
-                private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
-                extra-repositories: thruput-tools
-                ssh-private-key: |
-                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-                  ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_XDR_RPC }}
-                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-
-            - name: Run hog schedule
-              env:
-                  BRANCH_NAME: ${{ github.head_ref || github.ref_name }}
-                  HACKATHON_USERS: ${{ inputs.users }}
-                  HACKATHON_RATE_MULTIPLIER: ${{ inputs.rate_multiplier }}
-                  HACKATHON_OUTSTANDING: ${{ inputs.outstanding }}
-                  HACKATHON_RECEIPT_WORKERS: ${{ inputs.receipt_workers }}
-                  HACKATHON_GATEWAY_BATCH_SHARDS: ${{ inputs.gateway_batch_shards }}
-                  HACKATHON_GATEWAY_INFLIGHT_BATCHES: ${{ inputs.gateway_inflight_batches }}
-                  HACKATHON_SUBMISSION_HTTP2: ${{ inputs.submission_http2 && '1' || '0' }}
-                  HACKATHON_GATEWAY_WORKERS: ${{ inputs.gateway_workers }}
-                  HACKATHON_REUSE_CORPUS: ${{ inputs.reuse_corpus && '1' || '0' }}
-                  HACKATHON_REPEATS: ${{ inputs.repeats }}
-              run: |
-                  for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
-                    IFS=: read -r name minimum maximum <<< "$setting"
-                    value=${!name}
-                    if [[ ! "$value" =~ ^[1-9][0-9]{0,5}$ ]] || ((value < minimum || value > maximum)); then
-                      echo "$name must be an integer between $minimum and $maximum" >&2
-                      exit 1
-                    fi
-                  done
-                  if [[ ! "$HACKATHON_GATEWAY_WORKERS" =~ ^(0|[1-9][0-9]{0,2})$ ]] || ((HACKATHON_GATEWAY_WORKERS > 128)); then
-                    echo 'HACKATHON_GATEWAY_WORKERS must be an integer between 0 and 128' >&2
-                    exit 1
-                  fi
-                  hog_sched \
-                    --timeout-sec=7200 \
-                    --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
-                    --key=github_repo --value=${{ github.repository }} \
-                    --key=git_token --value=${{ steps.private-sources.outputs.token }} \
-                    --key=git_commit --value=${{ github.sha }} \
-                    --key=git_branch --value="$BRANCH_NAME" \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
-                    --key=hackathon_users --value="$HACKATHON_USERS" \
-                    --key=hackathon_rate_multiplier --value="$HACKATHON_RATE_MULTIPLIER" \
-                    --key=hackathon_outstanding --value="$HACKATHON_OUTSTANDING" \
-                    --key=hackathon_receipt_workers --value="$HACKATHON_RECEIPT_WORKERS" \
-                    --key=hackathon_gateway_batch_shards --value="$HACKATHON_GATEWAY_BATCH_SHARDS" \
-                    --key=hackathon_gateway_inflight_batches --value="$HACKATHON_GATEWAY_INFLIGHT_BATCHES" \
-                    --key=hackathon_gateway_workers --value="$HACKATHON_GATEWAY_WORKERS" \
-                    --key=hackathon_submission_http2 --value="$HACKATHON_SUBMISSION_HTTP2" \
-                    --key=hackathon_reuse_corpus --value="$HACKATHON_REUSE_CORPUS" \
-                    --key=hackathon_repeats --value="$HACKATHON_REPEATS" \
-                    ./scripts/schedules/hackathon.toml
-            - name: Upload benchmark diagnostics
-              if: always()
-              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-              with:
-                  name: hackathon-diagnostics-${{ github.run_attempt }}
-                  path: work_dir/hackathon-diagnostics.tar.gz
-                  if-no-files-found: warn
-                  compression-level: 0
-            - name: Upload benchmark results
-              if: always()
-              uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
-              with:
-                  name: hackathon-results-${{ github.run_attempt }}
-                  path: work_dir/hackathon-results.tar.gz
-                  if-no-files-found: warn
-                  compression-level: 0
-            - name: Print Log Download Instructions
-              if: always()
-              uses: ./.github/actions/print-log-instructions
-            - name: Remove job-local Git credentials
-              if: always()
-              shell: bash
-              run: |
-                if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
-                  rm -f -- "$GIT_CONFIG_GLOBAL"
-                fi
+  cleanup:
+    runs-on: self-hosted
+    timeout-minutes: 5
+    steps:
+      - name: Stop only the verified bootstrap from canceled run 39181095498
+        shell: bash
+        run: |
+          python3 - <<'PYREMOTE'
+          import subprocess
+          allocation=subprocess.check_output(['hog_list'],text=True)
+          owner=next((line.split()[-1] for line in allocation.splitlines() if line.split() and line.split()[0]=='hog7'),None)
+          assert owner=='hogd-39186142499', 'Recovery benchmark must own hog7 before cleanup'
+          remote="\nimport datetime,os,pathlib,select,signal\nexpected=datetime.datetime.fromisoformat('2026-10-19T00:55:14+00:00').timestamp()\nroot=pathlib.Path('/proc')\nbtime=next(int(line.split()[1]) for line in (root/'stat').read_text().splitlines() if line.startswith('btime '))\ncommand=[b'/tmp/hogjob-hogci/release/hackathon-replay',b'bootstrap',b'--corpus',b'/tmp/hogjob-hogci/work_dir/hackathon-results/code-0/gateway-0/corpus',b'--listen',b'10.100.0.107:44400']\nmatched=[]\nfor proc in root.iterdir():\n if not proc.name.isdecimal():continue\n try:\n  if proc.stat().st_uid!=os.getuid():continue\n  if (proc/'cmdline').read_bytes().rstrip(b'\\0').split(b'\\0')!=command:continue\n  fd=os.pidfd_open(int(proc.name))\n  try:\n   assert os.readlink(proc/'exe').removesuffix(' (deleted)')==command[0].decode()\n   fields=(proc/'stat').read_text().rsplit(') ',1)[1].split()\n   started=btime+int(fields[19])/os.sysconf('SC_CLK_TCK')\n   if abs(started-expected)>=3:\n    os.close(fd);continue\n   matched.append(fd)\n  except BaseException:\n   os.close(fd);raise\n except (FileNotFoundError,ProcessLookupError):continue\nassert len(matched)<=1, 'Ambiguous canceled-run process identity; refusing cleanup'\nfor fd in matched:\n signal.pidfd_send_signal(fd,signal.SIGTERM)\n poll=select.poll();poll.register(fd,select.POLLIN)\n assert poll.poll(10000), 'Verified stale bootstrap did not stop within 10 seconds'\n os.close(fd)\nprint('Verified canceled-run bootstrap stopped' if matched else 'Canceled-run bootstrap is absent')\n"
+          subprocess.run(['ssh','-oBatchMode=yes','-oConnectTimeout=5','hog7','python3','-'],input=remote,text=True,check=True,timeout=30)
+          PYREMOTE
