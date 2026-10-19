@@ -13,6 +13,7 @@ set -Eeuo pipefail
 : "${HACKATHON_SUBMISSION_HTTP2:=0}"
 : "${HACKATHON_REPEATS:=3}"
 : "${HACKATHON_PROFILE_CPU:=0}"
+: "${HACKATHON_GATEWAY_LOG_FILTER:=info}"
 for setting in HACKATHON_USERS:2:10000 HACKATHON_RATE_MULTIPLIER:1:100 HACKATHON_OUTSTANDING:1:131072 HACKATHON_RECEIPT_WORKERS:1:128 HACKATHON_REPEATS:1:10 HACKATHON_GATEWAY_BATCH_SHARDS:1:128 HACKATHON_GATEWAY_INFLIGHT_BATCHES:1:128; do
   IFS=: read -r name minimum maximum <<<"$setting"
   value=${!name}
@@ -33,7 +34,11 @@ if [[ "$HACKATHON_SUBMISSION_HTTP2" != 0 && "$HACKATHON_SUBMISSION_HTTP2" != 1 ]
   echo 'HACKATHON_SUBMISSION_HTTP2 must be 0 or 1' >&2
   exit 1
 fi
-submission_options=()
+if [[ "$HACKATHON_GATEWAY_LOG_FILTER" != info && "$HACKATHON_GATEWAY_LOG_FILTER" != warn ]]; then
+  echo "HACKATHON_GATEWAY_LOG_FILTER must be info or warn" >&2
+  exit 1
+fi
+submission_options=(--gateway-log-filter "$HACKATHON_GATEWAY_LOG_FILTER")
 if [[ "$HACKATHON_PROFILE_CPU" == 1 ]]; then
   submission_options+=(--profile-cpu)
 elif [[ "$HACKATHON_PROFILE_CPU" != 0 ]]; then

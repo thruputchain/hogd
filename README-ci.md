@@ -200,7 +200,12 @@ transactions. A plateau with missed arrivals or exhausted submission slots can
 be a client limit; a run that keeps up with all offered traffic does not establish
 maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 
-This profiling branch enables `HACKATHON_PROFILE_CPU=1` in the CI schedule.
+This comparison branch enables `HACKATHON_PROFILE_CPU=1` and
+`HACKATHON_GATEWAY_LOG_FILTER=warn` in the CI schedule. The standalone
+wrapper defaults the gateway filter to `info`; `--gateway-log-filter` accepts
+`info` or `warn` and records the choice in the run identity. WARN suppresses
+INFO-level gateway events and spans, so compare observability as well as
+throughput before adopting it outside the experiment.
 The standalone wrapper defaults it to `0`; `cluster.py --profile-cpu` enables
 35 seconds of 99 Hz CPU-clock sampling on the gateway and mempool, starting
 approximately 220 seconds after the measured traffic start recorded in

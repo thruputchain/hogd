@@ -532,13 +532,10 @@ class Cluster:
             f"max_inflight_batches = {a.gateway_inflight_batches}\n"
         )
         self.stage(gateway_config, self.hosts["gateway"], gateway_config)
-        gateway_prefix = [a.gateway, "--config", gateway_config]
+        gateway_prefix = ["/usr/bin/env", f"RUST_LOG={a.gateway_log_filter}"]
         if a.gateway_workers:
-            gateway_prefix = [
-                "/usr/bin/env",
-                f"TOKIO_WORKER_THREADS={a.gateway_workers}",
-                *gateway_prefix,
-            ]
+            gateway_prefix.append(f"TOKIO_WORKER_THREADS={a.gateway_workers}")
+        gateway_prefix += [a.gateway, "--config", gateway_config]
         if a.gateway_protocol:
             gateway_prefix += ["--hogd-protocol", a.gateway_protocol]
         self.start(
@@ -725,6 +722,9 @@ def main():
     p.add_argument("--gateway-batch-shards", type=int, default=1)
     p.add_argument("--gateway-inflight-batches", type=int, default=4)
     p.add_argument("--gateway-workers", type=int, default=0)
+    p.add_argument(
+        "--gateway-log-filter", choices=("info", "warn"), default="info"
+    )
     args = p.parse_args()
     if not (
         1 <= args.gateway_batch_shards <= 128
@@ -791,6 +791,7 @@ def main():
         "gatewayBatchShards": args.gateway_batch_shards,
         "gatewayInflightBatchesPerShard": args.gateway_inflight_batches,
         "gatewayRuntimeWorkers": args.gateway_workers,
+        "gatewayLogFilter": args.gateway_log_filter,
         "submissionHTTP2": args.submission_http2,
         "profileCPU": args.profile_cpu,
     }
