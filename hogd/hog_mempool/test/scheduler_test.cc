@@ -135,6 +135,55 @@ TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
   EXPECT_FALSE(scheduler->is_pending(txs[0], sha256(txs[0].tx)));
 }
 
+TEST(Scheduler, BatchAdmissionPreservesMixedOutcomesAndDuplicates)
+{
+  // Exercise empty, small, uneven and fully parallel batches. Unknown
+  // accounts and old failure outcomes must retain their original indices.
+  for (const size_t count :
+       {0UL, 1UL, 255UL, 256UL, 257UL, 1023UL, 1024UL, 1025UL, 8193UL}) {
+    SCOPED_TRACE(count);
+    MempoolTestInfra server;
+    auto scheduler = server.mempool_coord_rpc().scheduler();
+    server.mempool_coord_rpc().wait_for_block_commit(1)();
+    fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+    SignedTransactionBatch txs = generate_unsigned_txs(client, count);
+    size_t expected_pending = 0;
+    for (size_t i = 0; i < count; ++i) {
+      if (i % 257 == 1) {
+        txs[i].tx.invocation.invoked_address = make_account_address(99);
+      }
+      else {
+        ++expected_pending;
+      }
+    }
+    const auto hashes = hash_txs(txs);
+    for (const auto &hash : hashes) {
+      scheduler->record_transaction_outcome(
+          hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+          scheduler->current_block())();
+    }
+    for (size_t attempt = 0; attempt < 2; ++attempt) {
+      const auto outcomes = scheduler->add_txs(txs, hashes)();
+      ASSERT_EQ(outcomes.size(), count);
+      EXPECT_EQ(scheduler->size(), static_cast<ssize_t>(expected_pending));
+      EXPECT_EQ(scheduler->tx_cache_size(), expected_pending);
+      for (size_t i = 0; i < count; ++i) {
+        SCOPED_TRACE(i);
+        const bool known = i % 257 != 1;
+        EXPECT_EQ(
+            outcomes[i],
+            known ? SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted
+                  : SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
+        EXPECT_EQ(static_cast<bool>(scheduler->find_tx(hashes[i])), known);
+        EXPECT_EQ(scheduler->lookup_transaction_outcome(hashes[i])().status,
+                  known
+                      ? SchedulerTransactionStatus::SchedulerTransactionPending
+                      : SchedulerTransactionStatus::SchedulerTransactionRetry);
+      }
+    }
+  }
+}
+
 TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
