@@ -2917,7 +2917,84 @@ protected:
     co_await coord.wait_for_block_commit(
         tip.db_tip().value.proposal_header.block_height + 1);
   }
+
+  static void metadata_update_during_verification(bool update_after_auth)
+  {
+    MempoolTestInfra server;
+    auto &coord = server.mempool_coord_rpc();
+    coord.wait_for_block_commit(1)();
+    const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+    fib_client_t client(account);
+    auto txs = generate_unsigned_txs(client, 2);
+    AddressAuthData auth_data = get_default_account();
+    SecretKey key(CryptographicScheme::Ed25519);
+    key.ed25519() = create_key_pair(auth_data, 0, 1);
+    auth_data.required_weight = 1;
+    auth_data.last_written_height = 1;
+    server.set_address_auth_data(account, auth_data);
+    for (auto &tx : txs) {
+      tx.tx.auth_claim = make_sign_claim(0);
+      tx.signatures.push_back(
+          make_signature(key, tx.tx, 0, MempoolTestInfra::kNetworkHash));
+    }
+    // Warm the auth cache and leave a signed transaction queued so the
+    // callback also has pending work it must not unnecessarily reverify.
+    submit(server, SignedTransactionBatch{txs[0]});
+    ASSERT_EQ(coord.scheduler()->size(), 1);
+    auto &metrics = MempoolMetrics::instance();
+    const auto reverified_before =
+        metrics.auth_update_transaction_count.value();
+    std::vector<BlockHeight> heights;
+    coord.set_submission_auth_test_hook(
+        [&](BlockHeight height, const SignedTransactionBatch &batch,
+            bool after_auth) -> x23::Async<void> {
+          if (after_auth != update_after_auth) {
+            co_return;
+          }
+          EXPECT_EQ(batch.size(), 1UL);
+          EXPECT_EQ(batch[0], txs[1]);
+          heights.push_back(height);
+          if (heights.size() == 1) {
+            auth_data.last_written_height = 2;
+            coord.scheduler()->set_current_block(2);
+            co_await server.register_auth_data_updates(
+                2, KeyChangeBatch{
+                       {account, x23::Ptr<AddressAuthData>(auth_data)}});
+          }
+        });
+    const auto outcomes = submit(server, SignedTransactionBatch{txs[1]});
+    coord.set_submission_auth_test_hook({});
+
+    // An update before the auth RPC makes its old-height result stale. An
+    // update after successful verification does not change the signing rules
+    // used by that result, so the result can be kept without a retry.
+    EXPECT_EQ(heights, update_after_auth ? (std::vector<BlockHeight>{1})
+                                         : (std::vector<BlockHeight>{1, 2}));
+    EXPECT_EQ(metrics.auth_update_transaction_count.value(), reverified_before);
+    EXPECT_EQ(coord.auth_data_height(), 2);
+    EXPECT_EQ(coord.scheduler()->size(), 2);
+    for (const auto &tx : txs) {
+      EXPECT_TRUE(coord.scheduler()->is_pending(tx, sha256(tx.tx)));
+    }
+    if (!is_submit_vetted()) {
+      ASSERT_EQ(outcomes.size(), 1UL);
+      EXPECT_EQ(outcomes[0],
+                SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+    }
+  }
 };
+
+TEST_P(MempoolSubmissionAuthTest,
+       MetadataOnlyAuthUpdateRetriesStaleVerification)
+{
+  metadata_update_during_verification(/*update_after_auth=*/false);
+}
+
+TEST_P(MempoolSubmissionAuthTest,
+       MetadataOnlyAuthUpdateKeepsCompletedVerification)
+{
+  metadata_update_during_verification(/*update_after_auth=*/true);
+}
 
 // A block is committed before the tx starts being verified, so the block height
 // advances while the previous block height is what the tx is authenticated
