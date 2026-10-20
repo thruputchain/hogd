@@ -2214,6 +2214,23 @@ IndexDB::get_events(EventQuery const &query,
   Position cursor_pos{.block = cursor_block,
                       .tx = cursor_tx,
                       .seq = cursor_seq};
+  // Served rows are immutable, and merge order keeps a transaction's events
+  // together. Retain one record across cursor validation and candidate checks.
+  std::optional<TxRecord> cached_record;
+  Position cached_position{};
+  auto load_record = [&](const Position &position) -> const TxRecord * {
+    if (cached_record && cached_position.block == position.block &&
+        cached_position.tx == position.tx) {
+      return &*cached_record;
+    }
+    cached_record.reset();
+    auto record = get_tx_record(position.tx);
+    if (!record) {
+      return nullptr;
+    }
+    cached_position = position;
+    return &cached_record.emplace(std::move(*record));
+  };
   if (have_cursor) {
     bool found = false;
     for (const ContractIter &ci : iters) {
@@ -2225,7 +2242,7 @@ IndexDB::get_events(EventQuery const &query,
         return exists.error();
       }
       if (*exists) {
-        auto record = get_tx_record(cursor_pos.tx);
+        const auto *record = load_record(cursor_pos);
         if (!record ||
             !valid_event_position(*record, cursor_pos, ci.contract())) {
           return IndexerError(IndexerErrorCode::kInternal);
@@ -2276,7 +2293,7 @@ IndexDB::get_events(EventQuery const &query,
     Position const win_pos = winner->current();
 
     // Validate before filtering: corrupt nonmatching events cannot be skipped.
-    auto record = get_tx_record(win_pos.tx);
+    const auto *record = load_record(win_pos);
     if (!record ||
         !valid_event_position(*record, win_pos, winner->contract())) {
       error(
