@@ -719,8 +719,12 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   // hide its overhead by removing the [co_await] below, doing other work, and
   // then calling [co_await] on the handle. We instead need to execute
   // [read_average_hog_ages] on a separate thread.
+  ElapsedTimer lookup_timer;
   const auto &[found, missing] = co_await read_average_hog_ages(txs);
+  MempoolMetrics::instance().scheduler_add_lookup_seconds.record(
+      lookup_timer.elapsed());
 
+  ElapsedTimer insert_timer;
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
@@ -780,7 +784,10 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
+  MempoolMetrics::instance().scheduler_add_insert_seconds.record(
+      insert_timer.elapsed());
 
+  ElapsedTimer ready_timer;
   std::vector<AccountKey> account_keys;
   account_keys.reserve(found.size());
   // [get_account_key()] accesses [ready_accounts_], so we need to protect it
@@ -797,6 +804,8 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   }
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  MempoolMetrics::instance().scheduler_add_ready_seconds.record(
+      ready_timer.elapsed());
   co_return outcomes;
 }
 

@@ -274,6 +274,140 @@ BENCHMARK(bm_scheduler_admit_large_batch)
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
 
+// Gateway batches are much smaller than a full block. Include a populated
+// failure cache: one old failure in a shard makes admission probe that shard
+// even when every hash in the incoming batch is new.
+void
+bm_scheduler_admit_gateway_batch(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const size_t num_txs = state.range(0);
+  const auto accounts = make_benchmark_accounts(state.range(1));
+  seed_benchmark_hog_ages(server, accounts);
+  scheduler->read_average_hog_ages(
+      x23::XdrVec<ContractAddress>(accounts.begin(), accounts.end()))();
+
+  fib_client_t fib_client(accounts[0]);
+  const SignedTransaction prototype = generate_unsigned_txs(fib_client, 1)[0];
+  SignedTransactionBatch txs(num_txs, prototype);
+  TransactionHashBatch hashes(num_txs);
+  for (size_t i = 0; i < num_txs; ++i) {
+    txs[i].tx.invocation.invoked_address = accounts[i % accounts.size()];
+    txs[i].tx.uniquifier.nonce = i;
+    hashes[i] = sha256(txs[i].tx);
+  }
+  for (size_t i = 0; i < static_cast<size_t>(state.range(2)); ++i) {
+    TransactionHash hash{};
+    std::memcpy(hash.data(), &i, sizeof(i));
+    scheduler->record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        scheduler->current_block())();
+  }
+  for (auto _ : state) {
+    ElapsedTimer timer;
+    const auto outcomes = scheduler->add_txs(txs, hashes)();
+    state.SetIterationTime(timer.elapsed());
+    benchmark::DoNotOptimize(outcomes);
+    scheduler->remove_from_scheduler(
+        x23::span<const TransactionHash>(hashes))();
+  }
+  state.SetItemsProcessed(state.iterations() * num_txs);
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_scheduler_admit_gateway_batch)
+    ->Args({1024, 1000, 0})
+    ->Args({1024, 1000, 10000})
+    ->Args({1024, 1, 0})
+    ->Args({16384, 1000, 10000})
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
+void
+bm_mempool_admit_gateway_batch(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(1)();
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const size_t batch_size = state.range(0);
+  const size_t concurrent_batches = state.range(2);
+  const size_t num_txs = batch_size * concurrent_batches;
+  const auto accounts = make_benchmark_accounts(state.range(1));
+  seed_benchmark_hog_ages(server, accounts);
+  for (const auto &account : accounts) {
+    server.set_address_auth_data(account, get_default_account());
+  }
+  scheduler->read_average_hog_ages(
+      x23::XdrVec<ContractAddress>(accounts.begin(), accounts.end()))();
+  fib_client_t fib_client(accounts[0]);
+  const SignedTransaction prototype = generate_unsigned_txs(fib_client, 1)[0];
+  SignedTransactionBatch txs(num_txs, prototype);
+  TransactionHashBatch hashes(num_txs);
+  for (size_t i = 0; i < num_txs; ++i) {
+    txs[i].tx.invocation.invoked_address = accounts[i % accounts.size()];
+    txs[i].tx.uniquifier.nonce = i;
+    hashes[i] = sha256(txs[i].tx);
+  }
+  std::vector<ParallelSignedTransactionBatch> packed;
+  for (size_t i = 0; i < concurrent_batches; ++i) {
+    SignedTransactionBatch batch(txs.begin() + (i * batch_size),
+                                 txs.begin() + ((i + 1) * batch_size));
+    packed.push_back(t_to_parallel_batch(batch)());
+  }
+  // CI's saturation phase runs after account and auth caches have warmed.
+  // Cold per-account DB RPCs must not dominate a short measured iteration.
+  for (const auto &batch : packed) {
+    const auto outcomes =
+        server.mempool_coord_rpc().submit_unvetted_with_outcomes(batch)();
+    for (const auto outcome : outcomes) {
+      CHECK_EQ(outcome, SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+    }
+  }
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
+  auto &metrics = MempoolMetrics::instance();
+  const double hold_before = metrics.ingestion_commit_lock_hold_seconds.sum();
+  const double wait_before = metrics.ingestion_commit_lock_wait_seconds.sum();
+  for (auto _ : state) {
+    auto batches = packed;
+    std::vector<x23::Async<SchedGatewaySubmitOutcomeBatch>> handles;
+    handles.reserve(batches.size());
+    ElapsedTimer timer;
+    for (auto &batch : batches) {
+      handles.push_back(
+          server.mempool_coord_rpc().submit_unvetted_with_outcomes(
+              std::move(batch)));
+    }
+    for (auto &handle : handles) {
+      const auto outcomes = handle();
+      CHECK_EQ(outcomes.size(), batch_size);
+      for (const auto outcome : outcomes) {
+        CHECK_EQ(outcome,
+                 SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+      }
+    }
+    state.SetIterationTime(timer.elapsed());
+    CHECK_EQ(scheduler->size(), static_cast<ssize_t>(num_txs));
+    scheduler->remove_from_scheduler(
+        x23::span<const TransactionHash>(hashes))();
+  }
+  state.SetItemsProcessed(state.iterations() * num_txs);
+  const double calls = state.iterations() * concurrent_batches;
+  state.counters["admission_lock_hold_us_per_batch"] =
+      (metrics.ingestion_commit_lock_hold_seconds.sum() - hold_before) *
+      1'000'000 / calls;
+  state.counters["admission_lock_wait_us_per_batch"] =
+      (metrics.ingestion_commit_lock_wait_seconds.sum() - wait_before) *
+      1'000'000 / calls;
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_mempool_admit_gateway_batch)
+    ->Args({1024, 1000, 1})
+    ->Args({1024, 1000, 16})
+    ->Args({1024, 1, 1})
+    ->Args({1024, 1, 16})
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
 } // namespace
 
 } // namespace hogd

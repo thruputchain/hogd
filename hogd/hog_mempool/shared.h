@@ -126,6 +126,17 @@ public:
   Metrics::Histogram scheduler_global_lock_wait_seconds;
   Metrics::Histogram scheduler_global_lock_hold_seconds;
   Metrics::Histogram ingestion_auth_rpc_seconds;
+  Metrics::Histogram ingestion_verify_seconds;
+  Metrics::Histogram scheduler_add_lookup_seconds;
+  Metrics::Histogram scheduler_add_insert_seconds;
+  Metrics::Histogram scheduler_add_ready_seconds;
+  Metrics::Histogram auth_update_commit_lock_wait_seconds;
+  Metrics::Histogram auth_update_commit_lock_hold_seconds;
+  Metrics::Histogram auth_update_verify_seconds;
+  Metrics::Counter auth_update_callback_count;
+  Metrics::Counter auth_update_key_change_count;
+  Metrics::Counter auth_update_transaction_count;
+  Metrics::Counter auth_update_empty_verify_count;
   Metrics::Counter ingestion_auth_retry_count;
   Metrics::Histogram submit_unvetted_duration_seconds;
   Metrics::Histogram submit_vetted_duration_seconds;
@@ -377,6 +388,51 @@ MempoolMetrics::init()
   ingestion_auth_retry_count = metrics.per_thread_counter(
       kComponent, "ingestion_auth_retry_count",
       "Authentication RPC retries across block commits.");
+  ingestion_verify_seconds = metrics.histogram(
+      kComponent, "ingestion_verify_seconds",
+      "Submission verification duration including account tracking, auth RPCs "
+      "and admission lock waits, in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  scheduler_add_lookup_seconds = metrics.histogram(
+      kComponent, "scheduler_add_lookup_seconds",
+      "Scheduler admission account lookup duration, including global lock "
+      "wait, in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  scheduler_add_insert_seconds = metrics.histogram(
+      kComponent, "scheduler_add_insert_seconds",
+      "Scheduler admission insertion duration including worker dispatch and "
+      "join, in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  scheduler_add_ready_seconds = metrics.histogram(
+      kComponent, "scheduler_add_ready_seconds",
+      "Scheduler admission ready-account update duration including global "
+      "lock wait, in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  auth_update_commit_lock_wait_seconds = metrics.histogram(
+      kComponent, "auth_update_commit_lock_wait_seconds",
+      "Auth-data callback admission lock wait duration in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  auth_update_commit_lock_hold_seconds = metrics.histogram(
+      kComponent, "auth_update_commit_lock_hold_seconds",
+      "Auth-data callback admission lock hold duration in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  auth_update_verify_seconds = metrics.histogram(
+      kComponent, "auth_update_verify_seconds",
+      "Authentication RPC duration while an auth-data callback holds the "
+      "admission lock, in seconds.",
+      latency_bounds(kMempoolWorkLatencyBounds));
+  auth_update_callback_count =
+      metrics.per_thread_counter(kComponent, "auth_update_callback_count",
+                                 "Auth-data callbacks applied.");
+  auth_update_key_change_count = metrics.per_thread_counter(
+      kComponent, "auth_update_key_change_count",
+      "Account key changes received by auth-data callbacks.");
+  auth_update_transaction_count = metrics.per_thread_counter(
+      kComponent, "auth_update_transaction_count",
+      "Cached transactions reauthenticated by auth-data callbacks.");
+  auth_update_empty_verify_count = metrics.per_thread_counter(
+      kComponent, "auth_update_empty_verify_count",
+      "Auth-data callbacks with no cached transactions to reauthenticate.");
   submit_unvetted_duration_seconds = metrics.histogram(
       kComponent, "submit_unvetted_duration_seconds",
       "Duration of unvetted transaction submission RPCs in seconds.",

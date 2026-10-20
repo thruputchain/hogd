@@ -317,6 +317,13 @@ x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                                          InstrumentedCoroGuard &commit_guard)
 {
+  ElapsedTimer timer;
+  x23::Defer record_duration([&] {
+    record_metric_cleanup([&] {
+      MempoolMetrics::instance().ingestion_verify_seconds.record(
+          timer.elapsed());
+    });
+  });
   auto pending = std::make_shared<SubmissionAuth>();
   for (size_t i = 0; i < txs.size(); i++) {
     const ContractAddress &account = txs[i].tx.invocation.invoked_address;
@@ -3398,8 +3405,13 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   }
   CHECK_EQ(height, current_height + 1);
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().auth_update_commit_lock_wait_seconds,
+      MempoolMetrics::instance().auth_update_commit_lock_hold_seconds);
   co_await cg(commit_lock_);
+  MempoolMetrics::instance().auth_update_callback_count.increment();
+  MempoolMetrics::instance().auth_update_key_change_count.increment(
+      key_changes.size());
 
   std::erase_if(submission_auth_,
                 [](const std::weak_ptr<SubmissionAuth> &entry) {
@@ -3431,9 +3443,17 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
     tx_hashes += change_tx_hashes;
     txs += change_txs;
   }
+  MempoolMetrics::instance().auth_update_transaction_count.increment(
+      txs.size());
+  if (txs.empty()) {
+    MempoolMetrics::instance().auth_update_empty_verify_count.increment();
+  }
+  ElapsedTimer auth_timer;
   AuthErrorCodeBatch auth_ret =
       co_await auth_client_->authmempool_verify_transactions(
           scheduler_->current_block(), txs);
+  MempoolMetrics::instance().auth_update_verify_seconds.record(
+      auth_timer.elapsed());
   CHECK_EQ(auth_ret.size(), tx_hashes.size());
   x23::Vec<TransactionHash> to_remove;
   for (size_t i = 0; i < auth_ret.size(); i++) {
