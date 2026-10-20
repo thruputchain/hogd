@@ -1169,24 +1169,24 @@ TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
 TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
 {
   enum class Damage {
-    Missing,
-    Short,
-    Undecodable,
-    ExcessiveEvents,
-    LogHash,
-    BodyHash,
-    Height,
-    NegativeHeight,
-    Sequence,
-    Emitter,
-    TopicCount,
-    TopicBytes
+    kMissing,
+    kShort,
+    kUndecodable,
+    kExcessiveEvents,
+    kLogHash,
+    kBodyHash,
+    kHeight,
+    kNegativeHeight,
+    kSequence,
+    kEmitter,
+    kTopicCount,
+    kTopicBytes
   };
   for (const auto damage :
-       {Damage::Missing, Damage::Short, Damage::Undecodable,
-        Damage::ExcessiveEvents, Damage::LogHash, Damage::BodyHash,
-        Damage::Height, Damage::NegativeHeight, Damage::Sequence,
-        Damage::Emitter, Damage::TopicCount, Damage::TopicBytes}) {
+       {Damage::kMissing, Damage::kShort, Damage::kUndecodable,
+        Damage::kExcessiveEvents, Damage::kLogHash, Damage::kBodyHash,
+        Damage::kHeight, Damage::kNegativeHeight, Damage::kSequence,
+        Damage::kEmitter, Damage::kTopicCount, Damage::kTopicBytes}) {
     SCOPED_TRACE(static_cast<int>(damage));
     db_.reset();
     const auto test_path =
@@ -1212,28 +1212,28 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
     auto log = make_log(body, 0xA0);
     BlockHeight stored_height = 2;
     switch (damage) {
-    case Damage::LogHash:
+    case Damage::kLogHash:
       log.tx_hash[0] ^= 1;
       break;
-    case Damage::BodyHash:
+    case Damage::kBodyHash:
       ++body.signed_tx.tx.uniquifier.nonce;
       break;
-    case Damage::Height:
+    case Damage::kHeight:
       stored_height = 1;
       break;
-    case Damage::NegativeHeight:
+    case Damage::kNegativeHeight:
       stored_height = -1;
       break;
-    case Damage::Sequence:
+    case Damage::kSequence:
       log.events.clear();
       break;
-    case Damage::Emitter:
+    case Damage::kEmitter:
       log.events[0].contract_address[0] ^= 1;
       break;
-    case Damage::TopicCount:
+    case Damage::kTopicCount:
       log.events[0].num_topics = kMaxTopics + 1;
       break;
-    case Damage::TopicBytes:
+    case Damage::kTopicBytes:
       log.events[0].num_topics = 1;
       break;
     default:
@@ -1243,13 +1243,13 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
                        sizeof(stored_height));
     const auto encoded_body = x23::serialize(body);
     auto encoded_log = x23::serialize(log);
-    if (damage == Damage::ExcessiveEvents) {
+    if (damage == Damage::kExcessiveEvents) {
       auto empty_log = log;
       empty_log.events.clear();
       const auto count_offset =
           x23::serialize(empty_log).size() - sizeof(uint32_t);
       const auto count = x23::serialize(uint32_t{kMaxEventsPerTransaction + 1});
-      std::copy(count.begin(), count.end(), encoded_log.begin() + count_offset);
+      std::ranges::copy(count, encoded_log.begin() + count_offset);
       TxEventLog decoded;
       EXPECT_THROW(x23::deserialize(&decoded, encoded_log),
                    x23::XdrLengthError);
@@ -1258,16 +1258,16 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
                   encoded_body.size());
     stored.append(reinterpret_cast<const char *>(encoded_log.data()),
                   encoded_log.size());
-    if (damage == Damage::Short)
+    if (damage == Damage::kShort)
       stored = "short";
-    if (damage == Damage::Undecodable)
+    if (damage == Damage::kUndecodable)
       stored.resize(sizeof(BlockHeight) + 1);
     std::string key;
     IndexerKeyFormat::make_tx_key(key, hash);
     db_.reset();
     overwrite_column_family(test_path, IndexerKeyFormat::kTxIndexColumnFamily,
                             key,
-                            damage == Damage::Missing
+                            damage == Damage::kMissing
                                 ? std::nullopt
                                 : std::optional<std::string_view>(stored));
     opened = IndexDB::open(test_path);
@@ -1289,12 +1289,12 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
       events.filters.push_back(
           EventFilter{.contract_addresses = {address}, .topics = {}});
       // Topic corruption must fail even when the requested topic cannot match.
-      if (damage == Damage::TopicCount || damage == Damage::TopicBytes) {
+      if (damage == Damage::kTopicCount || damage == Damage::kTopicBytes) {
         Topic topic{};
         std::ranges::fill(topic, 0xEE);
         events.filters[0].topics.topic0.push_back(topic);
       }
-      if (damage != Damage::BodyHash) {
+      if (damage != Damage::kBodyHash) {
         EXPECT_EQ(rpc.get_events(events)().outcome(),
                   IndexerQueryOutcome::IndexerQueryInternalFailure);
       }
@@ -1306,10 +1306,11 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
         EXPECT_EQ(event_page.page().events.size(), 3);
       }
       const bool common_damage =
-          damage == Damage::Missing || damage == Damage::Short ||
-          damage == Damage::Undecodable || damage == Damage::ExcessiveEvents ||
-          damage == Damage::LogHash || damage == Damage::BodyHash ||
-          damage == Damage::Height || damage == Damage::NegativeHeight;
+          damage == Damage::kMissing || damage == Damage::kShort ||
+          damage == Damage::kUndecodable ||
+          damage == Damage::kExcessiveEvents || damage == Damage::kLogHash ||
+          damage == Damage::kBodyHash || damage == Damage::kHeight ||
+          damage == Damage::kNegativeHeight;
       if (common_damage) {
         AddressTransactionQuery root{};
         root.address = address;
@@ -1320,15 +1321,15 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
       }
       // The full-chain scan has no secondary reference for a deleted row or
       // another authoritative height. Those guarantees need a projection join.
-      if ((common_damage && damage != Damage::Missing &&
-           damage != Damage::Height) ||
-          damage == Damage::TopicCount || damage == Damage::TopicBytes) {
+      if ((common_damage && damage != Damage::kMissing &&
+           damage != Damage::kHeight) ||
+          damage == Damage::kTopicCount || damage == Damage::kTopicBytes) {
         TransactionQuery transactions{};
         transactions.order = order;
         transactions.anchor = anchor;
         EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
                   IndexerQueryOutcome::IndexerQueryInternalFailure);
-        if (damage != Damage::Short && damage != Damage::NegativeHeight) {
+        if (damage != Damage::kShort && damage != Damage::kNegativeHeight) {
           // Only the requested page is hydrated. A later damaged payload
           // cannot prevent the intact first page from being read.
           transactions.limit = 1;
@@ -1505,7 +1506,10 @@ TEST_F(StrictIndexerTest,
           cursor::decode(std::string_view(reinterpret_cast<const char *>(
                                               wrong_height.cursor.data()),
                                           wrong_height.cursor.size()));
-      ASSERT_TRUE(wrong_position);
+      if (!wrong_position) {
+        ADD_FAILURE() << "Could not decode transaction cursor";
+        return;
+      }
       wrong_position->block_height = wrong_position->block_height == 1 ? 2 : 1;
       const auto wrong_encoding = cursor::encode(*wrong_position);
       wrong_height.cursor.clear();
@@ -1526,7 +1530,10 @@ TEST_F(StrictIndexerTest,
           cursor::decode(std::string_view(reinterpret_cast<const char *>(
                                               filtered.cursor.data()),
                                           filtered.cursor.size()));
-      ASSERT_TRUE(candidate);
+      if (!candidate) {
+        ADD_FAILURE() << "Could not decode event cursor";
+        return;
+      }
       candidate->query_hash = cursor::event_query_hash(filtered.filters);
       const auto encoded = cursor::encode(*candidate);
       filtered.cursor.clear();
