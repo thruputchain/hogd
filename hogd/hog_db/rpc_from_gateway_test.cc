@@ -2,11 +2,14 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <memory>
+#include <span>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -73,6 +76,16 @@ make_balance_query(ContractAddress const &addr)
   return query;
 }
 
+// Decodes [reply] as a client does, from the bytes x23 puts on the wire.
+DbGatewayResult
+decode(const DbGatewayItemsReply &reply)
+{
+  x23::Buf wire = x23::serialize(reply);
+  DbGatewayResult result;
+  x23::deserialize(&result, x23::BufViewEnd(wire));
+  return result;
+}
+
 } // namespace
 
 TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
@@ -92,7 +105,7 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult result = decode(gateway.dbgateway_get_items(batch)());
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -224,7 +237,7 @@ TEST(HogDbGatewayRpcTest, GetItemsMissingBalanceIsNotFound)
   batch.push_back(make_balance_query(addr));
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult result = decode(gateway.dbgateway_get_items(batch)());
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -279,7 +292,7 @@ TEST(HogDbGatewayRpcTest, GetItemsContractDataNNIntDecodesCanonicalBytes)
   batch.push_back(query);
 
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult result = decode(gateway.dbgateway_get_items(batch)());
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   ASSERT_EQ(result.payload().items.size(), 1U);
@@ -328,7 +341,7 @@ TEST(HogDbGatewayRpcTest, GetItemsWaitsOutCommitPublication)
     publication_guard.reset(); // finish_commit_publication
   });
 
-  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult result = decode(gateway.dbgateway_get_items(batch)());
   releaser.join();
 
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
@@ -353,14 +366,99 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsBatchesOverCap)
   for (std::size_t i = 0; i < HogDbGatewayRpc::kMaxBatchItems; ++i)
     batch.push_back(make_balance_query(addr));
 
-  DbGatewayResult ok = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult ok = decode(gateway.dbgateway_get_items(batch)());
   ASSERT_EQ(ok.error(), RPCError::kRPCNone);
   EXPECT_EQ(ok.payload().items.size(), HogDbGatewayRpc::kMaxBatchItems);
 
   // One more item exceeds the cap; the call above took its own copy.
   batch.push_back(make_balance_query(addr));
-  DbGatewayResult rejected = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult rejected = decode(gateway.dbgateway_get_items(batch)());
   EXPECT_EQ(rejected.error(), RPCError::kRPCUnrecoverable);
+}
+
+// Bytestrings go out as the rows read (DbGatewayItemsReply), so check they
+// reach the client intact on every padding case and at the ceiling, batched
+// with an item that travels as the DbGatewayItemResult it is, and that the
+// reply's bytes are exactly the DbGatewayResult's encoding.
+TEST(HogDbGatewayRpcTest, GetItemsReturnsBytestringsIntact)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x44;
+  ASSERT_TRUE(dao.write_address_balance(addr, int128_t{777}).has_value());
+
+  constexpr std::array<std::size_t, 5> kLengths{0, 1, 3, 13,
+                                                static_cast<std::size_t>(
+                                                    kBytestringCeilingLen)};
+  std::vector<std::vector<std::byte>> values;
+  AddressAndKeyBatch batch;
+  batch.push_back(make_balance_query(addr));
+  for (std::size_t i = 0; i < kLengths.size(); ++i) {
+    StorageKey storage_key(StorageKeyType::ContractData);
+    storage_key.contract_data_key()[0] = static_cast<std::uint8_t>(i + 1);
+    AddressAndKey query{.address = addr, .key = storage_key};
+    std::vector<std::byte> value(kLengths[i]);
+    for (std::size_t j = 0; j < value.size(); ++j)
+      value[j] = static_cast<std::byte>((j * 7) + 1);
+    ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+    values.push_back(std::move(value));
+    batch.push_back(query);
+  }
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayItemsReply reply = gateway.dbgateway_get_items(batch)();
+  x23::Buf wire = x23::serialize(reply);
+  EXPECT_EQ(wire.size(), xdr_size(reply));
+  DbGatewayResult result = decode(reply);
+  EXPECT_TRUE(std::ranges::equal(x23::serialize(result), wire));
+
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), kLengths.size() + 1);
+  ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.payload().items[0].item().type(),
+            StorageItemType::kItemTypeNonnegativeInt);
+  for (std::size_t i = 0; i < kLengths.size(); ++i) {
+    DbGatewayItemResult const &item = result.payload().items[i + 1];
+    ASSERT_EQ(item.error(), RPCError::kRPCNone);
+    ASSERT_EQ(item.item().type(), StorageItemType::kItemTypeBytestring);
+    EXPECT_TRUE(
+        std::ranges::equal(std::as_bytes(std::span(item.item().bytestring())),
+                           values[i]))
+        << "length " << kLengths[i];
+  }
+}
+
+// A stored row longer than any Bytestring is corrupt state: its item carries
+// the error, not an opaque the client's decode would reject.
+TEST(HogDbGatewayRpcTest, GetItemsReportsOversizedBytestringRow)
+{
+  HogDbDAO dao = make_dao();
+
+  ContractAddress addr{};
+  addr[0] = 0x55;
+  StorageKey storage_key(StorageKeyType::ContractData);
+  storage_key.contract_data_key()[0] = 1;
+  AddressAndKey query{.address = addr, .key = storage_key};
+  std::vector<std::byte> value(static_cast<std::size_t>(kBytestringCeilingLen) +
+                                   4,
+                               std::byte{0xCD});
+  ASSERT_TRUE(dao.write_bytes(make_item_key(query), value).has_value());
+
+  AddressAndKeyBatch batch;
+  batch.push_back(query);
+
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  DbGatewayItemsReply reply = gateway.dbgateway_get_items(batch)();
+  ASSERT_EQ(reply.items().size(), 1U);
+  EXPECT_EQ(reply.items()[0].bytestring(), nullptr);
+
+  DbGatewayResult result = decode(reply);
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 1U);
+  EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCUnrecoverable);
 }
 
 // Item count alone doesn't bound response size; an oversized response is
@@ -391,7 +489,7 @@ TEST(HogDbGatewayRpcTest, GetItemsRejectsResponseOverByteBudget)
 
   RPCContext ctx(std::move(dao), nullptr);
   HogDbGatewayRpc gateway(ctx);
-  DbGatewayResult result = gateway.dbgateway_get_items(batch)();
+  DbGatewayResult result = decode(gateway.dbgateway_get_items(batch)());
   EXPECT_EQ(result.error(), RPCError::kRPCUnrecoverable);
 }
 

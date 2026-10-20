@@ -59,6 +59,9 @@ directories.
   of the host's calldata copy, with a control showing the same calldata does
   reach a child frame once the span is well-formed. Driven by
   `hogd/hog_exec/runtime/invoke_malformed_tokens_rv32_test.cc`.
+- `storage_reads` — a transaction whose cost is HogDb round trips, not
+  compute: `read_keys(seed, count)` reads `count` seed-derived keys one after
+  another. Driven by `hogd/hog_exec/bench/makespan_runner.cc`.
 - `itc_erc20_permit`: `itc_erc20` with the `ERC20Permit` interface
   (`thruput-erc20-permit-if`) implemented on top: the same storage keys,
   strict updates and events, so it is the RV32 reference the native token's
