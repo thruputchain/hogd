@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <filesystem>
@@ -16,6 +17,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
@@ -83,9 +85,10 @@ TxEventLogBatch
 create_event_logs()
 {
   // Create test events
-  SHA256Hash tx_hash0, tx_hash1;
-  std::ranges::fill(tx_hash0, 0x01);
-  std::ranges::fill(tx_hash1, 0x02);
+  ProposedTransaction first{}, second{};
+  second.signed_tx.tx.uniquifier.nonce = 1;
+  const auto tx_hash0 = sha256(first.signed_tx.tx);
+  const auto tx_hash1 = sha256(second.signed_tx.tx);
 
   ContractAddress contract_addr0, contract_addr1;
   std::ranges::fill(contract_addr0, 0xAA);
@@ -105,7 +108,7 @@ create_event_logs()
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
   event1.num_topics = 1;
-  event1.serialized_event.resize(20);
+  event1.serialized_event.resize(32);
   std::ranges::fill(event1.serialized_event, 0x22);
   event_log1.events.push_back(event1);
 
@@ -206,7 +209,7 @@ TEST_F(IndexerTest, FindNonExistentTx)
 TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
 {
   BlockHeight block_height = 100;
-  TxEventLogBatch events = create_event_logs(); // tx hashes 0x01, 0x02
+  TxEventLogBatch events = create_event_logs();
   ProposedTransactionBatch bodies =
       create_tx_bodies(events.size()); // nonces 0, 1
 
@@ -220,16 +223,19 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   TransactionPage page =
       unwrap_page(block_explorer_->get_transactions(query)());
 
-  // Both txs are at block 100; ascending order is by (block, tx_hash), so
-  // 0x01 (index 0) precedes 0x02 (index 1) -- aligned with events/bodies.
+  // Both txs are at block 100; ascending order is by transaction hash.
+  const std::array<size_t, 2> indices = events[0].tx_hash < events[1].tx_hash
+                                            ? std::array<size_t, 2>{0, 1}
+                                            : std::array<size_t, 2>{1, 0};
   ASSERT_EQ(page.transactions.size(), 2);
   for (std::size_t i = 0; i < page.transactions.size(); i++) {
+    const auto source = indices[i];
     EXPECT_EQ(page.transactions[i].height, block_height);
-    EXPECT_EQ(page.transactions[i].tx, bodies[i]);
-    EXPECT_EQ(page.transactions[i].events.tx_hash, events[i].tx_hash);
+    EXPECT_EQ(page.transactions[i].tx, bodies[source]);
+    EXPECT_EQ(page.transactions[i].events.tx_hash, events[source].tx_hash);
     ASSERT_EQ(page.transactions[i].events.events.size(), 1);
     EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
-              events[i].events[0].contract_address);
+              events[source].events[0].contract_address);
   }
 }
 
@@ -261,8 +267,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   body.signed_tx.tx.uniquifier.nonce = 42;
   body.signed_tx.tx.invocation.invoked_address = root_addr;
 
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x33);
+  const auto tx_hash = sha256(body.signed_tx.tx);
 
   TxEventLog event_log{}; // no events emitted
   event_log.tx_hash = tx_hash;
@@ -300,8 +305,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
 
   ProposedTransaction body{};
   body.signed_tx.tx.invocation.invoked_address = root_a;
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x44);
+  const auto tx_hash = sha256(body.signed_tx.tx);
 
   TxEventLog event_log{};
   event_log.tx_hash = tx_hash;
@@ -354,8 +358,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
-    SHA256Hash h;
-    std::ranges::fill(h, static_cast<char>(0x50 + i));
+    const auto h = sha256(body.signed_tx.tx);
     hashes.push_back(h);
     TxEventLog log{};
     log.tx_hash = h;
@@ -399,7 +402,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
     TxEventLog log{};
-    std::ranges::fill(log.tx_hash, fill);
+    log.tx_hash = sha256(body.signed_tx.tx);
     TxEmittedEvent event{};
     event.contract_address = addr;
     log.events.push_back(event);
@@ -475,7 +478,7 @@ TEST_F(IndexerTest, HistoryCursorsBindMethodAndRootAddress)
     body.signed_tx.tx.invocation.invoked_address = root;
     body.signed_tx.tx.uniquifier.nonce = i;
     TxEventLog log{};
-    std::ranges::fill(log.tx_hash, i + 1);
+    log.tx_hash = sha256(body.signed_tx.tx);
     TxEmittedEvent event{};
     event.contract_address = root;
     log.events.push_back(event);
@@ -650,6 +653,7 @@ TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
     // The test event does not carry topics.
     logs[i].events[0].num_topics = 0;
     bodies[i].signed_tx.tx.invocation.invoked_address = addr;
+    logs[i].tx_hash = sha256(bodies[i].signed_tx.tx);
     ingest_legacy_events(static_cast<BlockHeight>(10 + i),
                          TxEventLogBatch{logs[i]},
                          ProposedTransactionBatch{bodies[i]})();
@@ -759,17 +763,14 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     std::ranges::fill(addr, static_cast<char>(0x60 + i));
     addrs.push_back(addr);
 
-    SHA256Hash h;
-    std::ranges::fill(h, static_cast<char>(0x90 + i));
-
     TxEventLog log{};
-    log.tx_hash = h;
-    logs.push_back(log); // present, but emits no events
 
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     bodies.push_back(body);
+    log.tx_hash = sha256(body.signed_tx.tx);
+    logs.push_back(log); // present, but emits no events
   }
 
   // Whole batch ingested in a single call: events.size() == 4, but the total
@@ -824,9 +825,9 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   // watermark. Give each block one distinct committed tx.
   for (BlockHeight h = 100; h <= 105; h++) {
     TxEventLog log{};
-    std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = h;
+    log.tx_hash = sha256(body.signed_tx.tx);
     ingest_legacy_events(h, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
     TxInfoResult result = block_explorer_->get_transaction_info(failed_hash)();
@@ -859,13 +860,8 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
 
-  SHA256Hash tx10, tx12;
-  std::ranges::fill(tx10, 0x10);
-  std::ranges::fill(tx12, 0x12);
-
-  auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
+  auto ingest_at = [&](BlockHeight height) {
     TxEventLog log{};
-    log.tx_hash = tx;
     TxEmittedEvent ev;
     ev.contract_address = addr;
     ev.num_topics = 0;
@@ -874,15 +870,17 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
 
     ProposedTransaction body{};
     body.signed_tx.tx.invocation.invoked_address = addr;
-
+    body.signed_tx.tx.uniquifier.nonce = height;
+    log.tx_hash = sha256(body.signed_tx.tx);
     ingest_legacy_events(height, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
+    return log.tx_hash;
   };
 
   // Block 10 is contiguous; block 12 arrives before block 11, so it is
   // ingested but held behind the watermark at 10.
-  ingest_at(10, tx10);
-  ingest_at(12, tx12);
+  const auto tx10 = ingest_at(10);
+  const auto tx12 = ingest_at(12);
   ASSERT_EQ(*db().latest_block(), 10);
 
   // Point lookup cannot expose a row above the durable serving boundary.
