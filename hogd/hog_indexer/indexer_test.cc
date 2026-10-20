@@ -7,6 +7,7 @@
 #include <filesystem>
 #include <memory>
 #include <span>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -984,6 +985,66 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
   TransactionRefPageResult block_refs =
       block_explorer_->get_transactions_by_block(block_query)();
   EXPECT_EQ(block_refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+}
+
+TEST_F(IndexerTest, EventRpcBoundsNonmatchingCandidatesAndResumes)
+{
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  ProposedTransactionBatch bodies;
+  TxEventLogBatch logs;
+  std::vector<SHA256Hash> hashes;
+  for (uint32_t i = 0; i <= IndexDB::kEventsMaxCandidates; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = address;
+    TxEventLog log{};
+    log.tx_hash = sha256(body.signed_tx.tx);
+    TxEmittedEvent event{};
+    event.contract_address = address;
+    log.events.push_back(event);
+    hashes.push_back(log.tx_hash);
+    bodies.push_back(body);
+    logs.push_back(log);
+  }
+  ingest_legacy_events(10, logs, bodies)();
+  std::ranges::sort(hashes);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    EventQuery query{};
+    query.order = order;
+    query.anchor = BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd);
+    EventFilter filter{};
+    filter.contract_addresses.push_back(address);
+    filter.topics.topic0.push_back(Topic{});
+    query.filters.push_back(filter);
+    const auto first = block_explorer().get_events(query)();
+    ASSERT_EQ(first.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+    EXPECT_TRUE(first.page().events.empty());
+    ASSERT_FALSE(first.page().cursor.empty());
+    const auto &opaque = first.page().cursor;
+    const auto cursor = cursor::decode(
+        std::string_view(reinterpret_cast<const char *>(opaque.data()),
+                         opaque.size()));
+    if (!cursor) {
+      ADD_FAILURE() << "Could not decode event cursor";
+      return;
+    }
+    EXPECT_EQ(cursor->tx_hash,
+              hashes[ascending ? IndexDB::kEventsMaxCandidates - 1 : 1]);
+    // Even an internal caller cannot enlarge the server's hard budget.
+    const auto oversized =
+        db().get_events(query, IndexDB::kEventsMaxCandidates + 1);
+    ASSERT_TRUE(oversized);
+    EXPECT_EQ(oversized->cursor, first.page().cursor);
+    query.cursor = first.page().cursor;
+    const auto last = block_explorer().get_events(query)();
+    ASSERT_EQ(last.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+    EXPECT_TRUE(last.page().events.empty());
+    EXPECT_TRUE(last.page().cursor.empty());
+  }
 }
 
 } // namespace hogd

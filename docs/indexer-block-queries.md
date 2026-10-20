@@ -68,13 +68,15 @@ To rebuild:
 Event, whole-chain and root-address walks use version-3 cursors. Version-2 cursors are invalid after upgrade; clients must not silently restart. The block-cursor format is separate.
 
 - Cursors bind the method and event filters or root address. Event query identity ignores duplicate alternatives and ordering within/across filters, but preserves topic positions and filter grouping. The digest identifies a query; it does not authenticate it.
-- Continuations retain order, position and watermark. Request order/anchor are ignored; page size may change.
+- Continuations retain order, position and watermark. Request order/anchor are ignored; page size may change. Event and root-address continuations seek directly to the saved key.
 - Coverage is checked before position membership. A saved watermark above serving coverage returns `IndexerQueryHistoryUnavailable`; a missing or nonmatching position returns `IndexerQueryInvalidCursor`.
 - An existing secondary reference with a missing or inconsistent transaction record fails internally. Event resume positions may name validated candidates that do not match topics.
 
 Event/root pages fail whole on encountered iterator, key, decode, hydration or projection errors. Events are validated before topic filtering. Root and whole-chain reads verify transaction body hashes; event-only legacy reads may omit bodies.
 
-Whole-chain queries read rows and order candidates by stored height/hash, then decode and validate the returned page and resume position. These checks cannot detect every deleted row or index entry. Block-query behavior is unchanged. Bounded event scanning and broader completeness work are tracked in [GH-428](https://linear.app/grndhg/issue/GH-428).
+Event pages hydrate and validate at most 1,000 new candidates, matching or not. When more remain, the cursor advances past the last validated candidate, even on an empty page. Only an empty cursor ends the walk. This budget excludes continuation membership checks and does not bound storage latency, repeated transaction-log decoding or work after cancellation.
+
+Whole-chain queries read rows and order candidates by stored height/hash, then decode and validate the returned page and resume position. These checks cannot detect every deleted row or index entry. Block-query behavior is unchanged. Broader resource and completeness work remains in [GH-428](https://linear.app/grndhg/issue/GH-428).
 
 ## Public API boundary
 

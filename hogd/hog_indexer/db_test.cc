@@ -6,21 +6,40 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/perf_level.h>
 #include <span>
+#include <string_view>
 #include <utility>
 #include <vector>
 
 #include "event.hh"
 #include "hogd/base/test.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "transaction.hh"
 #include "types.hh"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+struct ScopedPerfCounting {
+  rocksdb::PerfLevel previous = rocksdb::GetPerfLevel();
+  ScopedPerfCounting()
+  {
+    rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
+  }
+  ~ScopedPerfCounting() { rocksdb::SetPerfLevel(previous); }
+};
+
+} // namespace
 
 // basic tests on open/close db ops
 // NOLINTNEXTLINE(misc-use-internal-linkage)
@@ -1162,5 +1181,320 @@ TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchFailsPage)
 }
 
 // NOLINTEND(misc-include-cleaner)
+
+// Real emitted cursors exercise the continuation path, including late pages
+// that would otherwise walk most of the dense block again.
+TEST_F(IndexDBTest, HistoryCursorsSeekDirectlyWithinDenseBlock)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  std::vector<ProposedTransaction> bodies;
+  std::vector<TxEventLog> logs;
+  std::vector<SHA256Hash> hashes;
+  constexpr std::uint64_t kCount = 64;
+  for (std::uint64_t i = 0; i < kCount; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.invocation.invoked_address = address;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    TxEventLog log{};
+    log.tx_hash = sha256(body.signed_tx.tx);
+    log.events.push_back(make_event(address, 0, 0));
+    hashes.push_back(log.tx_hash);
+    bodies.push_back(body);
+    logs.push_back(log);
+  }
+  ASSERT_TRUE(db->consume_events(10, logs, bodies));
+  std::ranges::sort(hashes);
+  ScopedPerfCounting counting;
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    auto expected = hashes;
+    if (!ascending)
+      std::ranges::reverse(expected);
+    EventFilterList filters;
+    filters.push_back(filter_with_contracts_no_topics({address}));
+    auto events =
+        make_query(std::move(filters), order,
+                   BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd),
+                   1);
+    AddressTransactionQuery roots{};
+    roots.address = address;
+    roots.order = order;
+    roots.anchor = events.anchor;
+    roots.limit = 1;
+    for (size_t i = 0; i < expected.size(); ++i) {
+      SCOPED_TRACE(i);
+      auto *perf = rocksdb::get_perf_context();
+      perf->Reset();
+      const auto event_page = db->get_events(events);
+      const auto event_steps =
+          perf->iter_seek_count + perf->iter_next_count + perf->iter_prev_count;
+      ASSERT_TRUE(event_page);
+      ASSERT_EQ(event_page->events.size(), 1);
+      EXPECT_EQ(event_page->events.front().tx_hash, expected[i]);
+      EXPECT_GT(event_steps, 0);
+      EXPECT_LE(event_steps, 4);
+      events.cursor = event_page->cursor;
+      EXPECT_EQ(events.cursor.empty(), i + 1 == expected.size());
+
+      perf->Reset();
+      const auto root_page = db->get_transactions_by_address(roots);
+      const auto root_steps =
+          perf->iter_seek_count + perf->iter_next_count + perf->iter_prev_count;
+      ASSERT_TRUE(root_page);
+      ASSERT_EQ(root_page->refs.size(), 1);
+      EXPECT_EQ(root_page->refs.front().tx_hash, expected[i]);
+      EXPECT_GT(root_steps, 0);
+      EXPECT_LE(root_steps, 4);
+      roots.cursor = root_page->cursor;
+      EXPECT_EQ(roots.cursor.empty(), i + 1 == expected.size());
+    }
+  }
+}
+
+TEST_F(IndexDBTest, EventCandidateBudgetCountsUniquePositionsBeforeTopics)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress first{}, second{};
+  std::ranges::fill(first, 0xAA);
+  std::ranges::fill(second, 0xBB);
+  TxEventLog log{};
+  std::ranges::fill(log.tx_hash, 0x42);
+  constexpr uint32_t kCount = 7;
+  for (uint32_t i = 0; i < kCount; ++i)
+    log.events.push_back(
+        make_event(i % 2 == 0 ? first : second, 1, i % 3 == 0 ? 0x11 : 0x22));
+  ASSERT_TRUE(db->consume_events(10, std::vector{log}, {}));
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    for (const auto topic : {uint8_t{0x11}, uint8_t{0xFF}}) {
+      SCOPED_TRACE(topic);
+      SCOPED_TRACE(static_cast<int>(order));
+      const bool ascending = order == IterationOrder::IterationOrderAscending;
+      EventFilter filter =
+          filter_with_contracts_no_topics({first, second, first});
+      filter.topics.topic0.push_back(topic_filled(topic));
+      EventFilterList filters{filter, filter};
+      filters.push_back(filter_with_contracts_no_topics({second}));
+      filters.back().topics.topic0 = filter.topics.topic0;
+      auto query =
+          make_query(std::move(filters), order,
+                     BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                           : BlockAnchorKind::AnchorAtEnd));
+      for (uint32_t page_index = 0; page_index < kCount; ++page_index) {
+        const uint32_t sequence =
+            ascending ? page_index : kCount - 1 - page_index;
+        const auto page = db->get_events(query, 1);
+        ASSERT_TRUE(page);
+        const bool matches = topic == 0x11 && sequence % 3 == 0;
+        ASSERT_EQ(page->events.size(), matches ? 1 : 0);
+        if (matches) {
+          EXPECT_EQ(page->events.front().sequence_number, sequence);
+        }
+        EXPECT_EQ(page->cursor.empty(), page_index + 1 == kCount);
+        if (!page->cursor.empty()) {
+          EXPECT_NE(page->cursor, query.cursor);
+          const auto decoded =
+              cursor::decode(std::string_view(reinterpret_cast<const char *>(
+                                                  page->cursor.data()),
+                                              page->cursor.size()));
+          if (!decoded) {
+            ADD_FAILURE() << "Could not decode event cursor";
+            return;
+          }
+          EXPECT_EQ(decoded->sequence_number, sequence);
+          EXPECT_EQ(decoded->tx_hash, log.tx_hash);
+        }
+        query.cursor = page->cursor;
+      }
+    }
+  }
+}
+
+TEST_F(IndexDBTest, EventResultLimitStopsBeforeCandidateBudget)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  TxEventLog log{};
+  std::ranges::fill(log.tx_hash, 0x42);
+  for (unsigned i = 0; i < 4; ++i)
+    log.events.push_back(make_event(address, 0, 0));
+  ASSERT_TRUE(db->consume_events(10, std::vector{log}, {}));
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    auto query =
+        make_query(EventFilterList{filter_with_contracts_no_topics({address})},
+                   order,
+                   BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd),
+                   1);
+    for (uint32_t i = 0; i < 4; ++i) {
+      const auto page = db->get_events(query, 3);
+      ASSERT_TRUE(page);
+      ASSERT_EQ(page->events.size(), 1);
+      EXPECT_EQ(page->events.front().sequence_number, ascending ? i : 3 - i);
+      EXPECT_EQ(page->cursor.empty(), i == 3);
+      query.cursor = page->cursor;
+    }
+    query.cursor.clear();
+    query.limit = 50;
+    const auto zero_budget = db->get_events(query, 0);
+    ASSERT_TRUE(zero_budget);
+    ASSERT_EQ(zero_budget->events.size(), 1);
+    EXPECT_FALSE(zero_budget->cursor.empty());
+  }
+}
+
+// Cursor validation and overlapping address streams must share the same
+// decoded record. Crossing a transaction boundary must replace that record.
+TEST_F(IndexDBTest, EventCacheLoadsEachTransactionOncePerPage)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress first{}, second{};
+  std::ranges::fill(first, 0xAA);
+  std::ranges::fill(second, 0xBB);
+  constexpr uint32_t kEvents = 5;
+  constexpr uint32_t kTotal = 2 * kEvents;
+  std::vector<TxEventLog> logs(2);
+  for (size_t tx = 0; tx < logs.size(); ++tx) {
+    std::ranges::fill(logs[tx].tx_hash, static_cast<uint8_t>(0x10 + tx));
+    for (uint32_t seq = 0; seq < kEvents; ++seq) {
+      auto event = make_event(seq % 2 == 0 ? first : second, 1, 0x11);
+      logs[tx].events.push_back(std::move(event));
+    }
+  }
+  ASSERT_TRUE(db->consume_events(10, logs, {}));
+  // Legacy ingestion stores a default body when none was supplied.
+  const auto record_bytes = sizeof(BlockHeight) +
+                            x23::serialize(ProposedTransaction{}).size() +
+                            x23::serialize(logs.front()).size();
+  ScopedPerfCounting counting;
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    for (const bool match : {false, true}) {
+      SCOPED_TRACE(static_cast<int>(order));
+      SCOPED_TRACE(match);
+      const bool ascending = order == IterationOrder::IterationOrderAscending;
+      auto filter = filter_with_contracts_no_topics({first, second, first});
+      filter.topics.topic0.push_back(topic_filled(match ? 0x11 : 0xFF));
+      auto query =
+          make_query(EventFilterList{filter, filter}, order,
+                     BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                           : BlockAnchorKind::AnchorAtEnd),
+                     3);
+      uint32_t offset = 0;
+      while (offset < kTotal) {
+        const uint32_t scanned = std::min(match ? 3U : 4U, kTotal - offset);
+        // Include the previous candidate loaded while checking the cursor.
+        const uint32_t first_record = (offset == 0 ? 0 : offset - 1) / kEvents;
+        const uint32_t last_record = (offset + scanned - 1) / kEvents;
+        auto *perf = rocksdb::get_perf_context();
+        perf->Reset();
+        const auto page = db->get_events(query, 4);
+        ASSERT_TRUE(page);
+        EXPECT_EQ(perf->get_read_bytes,
+                  (last_record - first_record + 1) * record_bytes);
+        ASSERT_EQ(page->events.size(), match ? scanned : 0);
+        for (uint32_t i = 0; i < page->events.size(); ++i) {
+          const uint32_t position =
+              ascending ? offset + i : kTotal - offset - i - 1;
+          EXPECT_EQ(page->events[i].tx_hash, logs[position / kEvents].tx_hash);
+          EXPECT_EQ(page->events[i].sequence_number, position % kEvents);
+          EXPECT_EQ(page->events[i].emitted_event.contract_address,
+                    position % kEvents % 2 == 0 ? first : second);
+        }
+        offset += scanned;
+        EXPECT_EQ(page->cursor.empty(), offset == kTotal);
+        query.cursor = page->cursor;
+      }
+    }
+  }
+}
+
+TEST_F(IndexDBTest, EventCacheLoadsMaximumReceiptOnceForNonmatchingScan)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  TxEventLog log{};
+  std::ranges::fill(log.tx_hash, 0x42);
+  for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+    auto event = make_event(address, 1, 0x11);
+    event.serialized_event.resize(kMaxEventLength);
+    log.events.push_back(std::move(event));
+  }
+  ASSERT_TRUE(db->consume_events(10, std::vector{log}, {}));
+  const auto record_bytes = sizeof(BlockHeight) +
+                            x23::serialize(ProposedTransaction{}).size() +
+                            x23::serialize(log).size();
+  ScopedPerfCounting counting;
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    auto filter = filter_with_contracts_no_topics({address});
+    filter.topics.topic0.push_back(topic_filled(0xFF));
+    const auto query =
+        make_query(EventFilterList{filter}, order,
+                   BlockAnchor(order == IterationOrder::IterationOrderAscending
+                                   ? BlockAnchorKind::AnchorAtBeginning
+                                   : BlockAnchorKind::AnchorAtEnd));
+    auto *perf = rocksdb::get_perf_context();
+    perf->Reset();
+    const auto page = db->get_events(query);
+    ASSERT_TRUE(page);
+    EXPECT_TRUE(page->events.empty());
+    EXPECT_TRUE(page->cursor.empty());
+    EXPECT_EQ(perf->get_read_bytes, record_bytes);
+  }
+}
+
+// A cache hit must still validate the selected event, before topic filtering
+// or cursor advancement. Both directions encounter a valid event first.
+TEST_F(IndexDBTest, EventCacheRejectsCorruptLaterEvent)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  TxEventLog log{};
+  std::ranges::fill(log.tx_hash, 0x42);
+  for (uint32_t i = 0; i < 3; ++i) {
+    log.events.push_back(make_event(address, 1, 0x11));
+  }
+  log.events[1].num_topics = kMaxTopics + 1;
+  ASSERT_TRUE(db->consume_events(10, std::vector{log}, {}));
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    auto filter = filter_with_contracts_no_topics({address});
+    filter.topics.topic0.push_back(topic_filled(0xFF));
+    auto query =
+        make_query(EventFilterList{filter}, order,
+                   BlockAnchor(order == IterationOrder::IterationOrderAscending
+                                   ? BlockAnchorKind::AnchorAtBeginning
+                                   : BlockAnchorKind::AnchorAtEnd));
+    const auto initial = db->get_events(query);
+    ASSERT_FALSE(initial);
+    EXPECT_EQ(initial.error().code(), IndexerErrorCode::kInternal);
+    const auto first = db->get_events(query, 1);
+    ASSERT_TRUE(first);
+    EXPECT_TRUE(first->events.empty());
+    ASSERT_FALSE(first->cursor.empty());
+    query.cursor = first->cursor;
+    const auto continued = db->get_events(query);
+    ASSERT_FALSE(continued);
+    EXPECT_EQ(continued.error().code(), IndexerErrorCode::kInternal);
+  }
+}
 
 } // namespace hogd
