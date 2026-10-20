@@ -140,8 +140,7 @@ create_tx_index_sst_chunk(
         i < bodies_chunk.size() ? bodies_chunk[i] : empty_body;
 
     // Value layout: block_height || serialized ProposedTransaction (the tx
-    // body) || serialized TxEventLog.  The body precedes the event log;
-    // get_tx_events() skips it with deserialize_from().
+    // body) || serialized TxEventLog. parse_tx_value decodes both payloads.
     std::string value(reinterpret_cast<const char *>(&block_height),
                       sizeof(block_height));
 
@@ -278,14 +277,15 @@ create_contract_index_sst_chunk(
 }
 
 // Parse a tx_index value: block_height || ProposedTransaction || TxEventLog.
-// The caller must ensure [value] is at least sizeof(BlockHeight) bytes.
-// Throws x23::XdrBadInput if the body or event log is malformed.
+// Throws x23::XdrException if the body or event log is malformed.
 IndexDB::TxRecord
 parse_tx_value(std::string_view value)
 {
   // TODO(jhumphri): Support different endianness.
   static_assert(std::endian::native == std::endian::little);
-  CHECK_GE(value.size(), sizeof(BlockHeight));
+  if (value.size() < sizeof(BlockHeight)) {
+    throw x23::XdrBadInput("tx_index value has no complete height");
+  }
   IndexDB::TxRecord record;
   // value.data() is not guaranteed to be 8-byte aligned, so we memcpy.
   std::memcpy(&record.height, value.data(), sizeof(BlockHeight));
@@ -297,6 +297,31 @@ parse_tx_value(std::string_view value)
   x23::deserialize(&record.events,
                    x23::BufView{payload + body_len, payload_len - body_len});
   return record;
+}
+
+// A row's key and payload must identify the same transaction. Event-only
+// legacy ingestion may omit the body; transaction queries require it.
+bool
+valid_tx_record(const IndexDB::TxRecord &record, const SHA256Hash &hash,
+                bool require_body)
+{
+  return record.height >= 0 && record.events.tx_hash == hash &&
+         (!require_body || sha256(record.tx.signed_tx.tx) == hash);
+}
+
+bool
+valid_event(const TxEmittedEvent &event)
+{
+  return event.num_topics <= kMaxTopics &&
+         event.serialized_event.size() >= event.num_topics * kTopicSizeBytes;
+}
+
+bool
+valid_transaction_record(const IndexDB::TxRecord &record,
+                         const SHA256Hash &hash)
+{
+  return valid_tx_record(record, hash, true) &&
+         std::ranges::all_of(record.events.events, valid_event);
 }
 
 template<typename T>
@@ -1568,14 +1593,20 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
 
   try {
     TxRecord record = parse_tx_value(value);
+    if (!valid_tx_record(record, tx_hash, false)) {
+      error("tx_index key and receipt identity disagree for {}",
+            HexArray(tx_hash).str());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     const int64_t watermark =
         highest_indexed_block_.load(std::memory_order_acquire);
     if (watermark == kNoBlocksIndexed || record.height > watermark) {
       return IndexerError(IndexerErrorCode::kDBNotFound);
     }
     return record;
-  } catch (const x23::XdrBadInput &e) {
-    error("Failed to deserialize tx_index value: {}", e.what());
+  } catch (const x23::XdrException &e) {
+    error("Failed to deserialize tx_index value for {}: {}",
+          HexArray(tx_hash).str(), e.what());
     return IndexerError(IndexerErrorCode::kInternal);
   }
 }
@@ -1868,6 +1899,7 @@ public:
 
   ContractAddress const &contract() const { return contract_; }
   bool has_current() const { return has_current_; }
+  bool failed() const { return failed_; }
   Position const &current() const { return current_; }
 
   void add_filter(std::size_t fidx) { filter_indices_.push_back(fidx); }
@@ -1905,7 +1937,7 @@ public:
   void advance(IterationOrder order)
   {
     if (!iter_->Valid()) {
-      has_current_ = false;
+      refresh_current();
       return;
     }
     if (order == IterationOrder::IterationOrderAscending) {
@@ -1948,25 +1980,28 @@ public:
   }
 
 private:
-  // Decode the iterator's current key into `current_`.  Stops
-  // (has_current_=false) on iter end, on a key that has left the
-  // contract's prefix range, or on a malformed key.
+  // Crossing the requested prefix or watermark is exhaustion. Malformed
+  // rows within that prefix and RocksDB failures invalidate the entire page.
   void refresh_current()
   {
+    has_current_ = false;
+    if (failed_) {
+      return;
+    }
     if (!iter_->Valid()) {
-      has_current_ = false;
+      failed_ = !iter_->status().ok();
       return;
     }
     rocksdb::Slice key = iter_->key();
     const std::string_view key_sv(key.data(), key.size());
-    if (key_sv.size() < IndexerKeyFormat::kContractKeyPrefixSize ||
-        !key_sv.starts_with(kind_prefix_)) {
-      has_current_ = false;
+    if (!key_sv.starts_with(kind_prefix_)) {
       return;
     }
     auto parsed = IndexerKeyFormat::parse_contract_key(key_sv);
-    if (!parsed) {
-      has_current_ = false;
+    if (!parsed || parsed->block_height < 0 ||
+        (kind_ == IndexerKeyFormat::kRootTx && parsed->sequence_number != 0) ||
+        !iter_->value().empty()) {
+      failed_ = true;
       return;
     }
     current_.block = parsed->block_height;
@@ -1995,7 +2030,48 @@ private:
   std::vector<std::size_t> filter_indices_;
   Position current_{};
   bool has_current_ = false;
+  bool failed_ = false;
 };
+
+IndexerStatus<bool>
+contract_position_exists(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *cf,
+                         const ContractAddress &address,
+                         IndexerKeyFormat::RecordKind kind,
+                         const Position &position)
+{
+  std::string key;
+  IndexerKeyFormat::make_contract_key(key, address, kind, position.block,
+                                      position.tx, position.seq);
+  std::string value;
+  const auto status = db->Get(rocksdb::ReadOptions(), cf, key, &value);
+  if (status.IsNotFound()) {
+    return false;
+  }
+  if (!status.ok() || !value.empty()) {
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  return true;
+}
+
+bool
+valid_event_position(const IndexDB::TxRecord &record, const Position &position,
+                     const ContractAddress &address)
+{
+  return record.height == position.block &&
+         record.events.tx_hash == position.tx &&
+         position.seq < record.events.events.size() &&
+         record.events.events[position.seq].contract_address == address &&
+         valid_event(record.events.events[position.seq]);
+}
+
+bool
+valid_root_position(const IndexDB::TxRecord &record, const Position &position,
+                    const ContractAddress &address)
+{
+  return position.seq == 0 && record.height == position.block &&
+         valid_tx_record(record, position.tx, true) &&
+         record.tx.signed_tx.tx.invocation.invoked_address == address;
+}
 
 // Resolves a query's anchor to the block height a scan starts from, or
 // nullopt when the anchor/order combination selects nothing and the
@@ -2145,10 +2221,36 @@ IndexDB::get_events(EventQuery const &query) const
   Position cursor_pos{.block = cursor_block,
                       .tx = cursor_tx,
                       .seq = cursor_seq};
+  if (have_cursor) {
+    bool found = false;
+    for (const ContractIter &ci : iters) {
+      auto exists =
+          contract_position_exists(db_.get(), contract_cf_handle_,
+                                   ci.contract(), IndexerKeyFormat::kEvent,
+                                   cursor_pos);
+      if (!exists) {
+        return exists.error();
+      }
+      if (*exists) {
+        auto record = get_tx_record(cursor_pos.tx);
+        if (!record ||
+            !valid_event_position(*record, cursor_pos, ci.contract())) {
+          return IndexerError(IndexerErrorCode::kInternal);
+        }
+        found = true;
+      }
+    }
+    if (!found) {
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+  }
   for (ContractIter &ci : iters) {
     ci.seek(anchor_block, order);
     if (have_cursor && ci.has_current()) {
       ci.skip_past(order, cursor_pos);
+    }
+    if (ci.failed()) {
+      return IndexerError(IndexerErrorCode::kInternal);
     }
   }
 
@@ -2180,42 +2282,17 @@ IndexDB::get_events(EventQuery const &query) const
 
     Position const win_pos = winner->current();
 
-    // Hydrate.
-    auto tx_events = get_tx_events(win_pos.tx);
-    if (!tx_events) {
-      error("get_events: tx_index miss for tx {} at block {}",
-            HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block));
-      winner->advance(order);
-      continue;
+    // Validate before filtering: corrupt nonmatching events cannot be skipped.
+    auto record = get_tx_record(win_pos.tx);
+    if (!record ||
+        !valid_event_position(*record, win_pos, winner->contract())) {
+      error(
+          "get_events: inconsistent event projection for {} at block {} seq {}",
+          HexArray(win_pos.tx).str(), static_cast<int64_t>(win_pos.block),
+          win_pos.seq);
+      return IndexerError(IndexerErrorCode::kInternal);
     }
-    // Index-integrity: a contract_index row and the tx_index receipt it
-    // hydrates through are written by the same consume_events() call, so
-    // the row's (block, contract) must agree with the receipt.  The join
-    // between the two column families is by tx hash alone -- tx_index
-    // carries no receipt identity or event-vector digest -- so a second
-    // write under that hash silently re-points every contract_index row
-    // referencing it, and a contract-history query would return one
-    // contract's payload under another contract's filter (#2295).
-    //
-    // Queries are read-only, so no caller can drive the index into this
-    // state; reaching it means the on-disk index is already corrupt, and
-    // serving corrupt history is worse than dying loudly.
-    CHECK_EQ(tx_events->first, win_pos.block);
-
-    const TxEventLog &event_log = tx_events->second;
-    if (win_pos.seq >= event_log.events.size()) {
-      error("get_events: seq {} out of range ({}) for tx {}", win_pos.seq,
-            event_log.events.size(), HexArray(win_pos.tx).str());
-      winner->advance(order);
-      continue;
-    }
-    TxEmittedEvent const &emitted_event = event_log.events[win_pos.seq];
-
-    // The row was created from this very event (see
-    // create_contract_index_sst_chunk), and iterators are bounded to a
-    // single (address, kind) prefix, so the emitter address must match
-    // the contract whose stream we are walking.
-    CHECK_EQ(emitted_event.contract_address, winner->contract());
+    TxEmittedEvent const &emitted_event = record->events.events[win_pos.seq];
 
     // Topic filter: match if ANY filter that includes this contract
     // accepts the event.  One entry in the contract_index = one event
@@ -2241,6 +2318,9 @@ IndexDB::get_events(EventQuery const &query) const
     }
 
     winner->advance(order);
+    if (winner->failed()) {
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
   }
 
   // Cursor for continuation: non-empty iff we emitted something AND
@@ -2343,10 +2423,25 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     anchor_block = max_serve_block;
   }
 
+  if (have_cursor) {
+    auto record = get_tx_record(cursor_pos.tx);
+    if (!record) {
+      if (record.error() == IndexerErrorCode::kDBNotFound) {
+        return IndexerError(IndexerErrorCode::kInvalidCursor);
+      }
+      return record.error();
+    }
+    if (!valid_transaction_record(*record, cursor_pos.tx)) {
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    if (record->height != cursor_pos.block) {
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+  }
+
   struct TransactionRow {
     Position pos;
-    ProposedTransaction tx;
-    TxEventLog events;
+    std::string value;
   };
   std::vector<TransactionRow> rows;
 
@@ -2369,6 +2464,9 @@ IndexDB::get_transactions(TransactionQuery const &query) const
 
     BlockHeight block_height;
     std::memcpy(&block_height, value.data(), sizeof(BlockHeight));
+    if (block_height < 0) {
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     if (block_height < oldest_block() || block_height > max_serve_block) {
       continue;
     }
@@ -2395,18 +2493,9 @@ IndexDB::get_transactions(TransactionQuery const &query) const
       continue;
     }
 
-    TxRecord record;
-    try {
-      record = parse_tx_value(std::string_view{value.data(), value.size()});
-    } catch (const x23::XdrBadInput &e) {
-      error("get_transactions: failed to deserialize tx_index value: {}",
-            e.what());
-      return IndexerError(IndexerErrorCode::kInternal);
-    }
-
-    rows.push_back(TransactionRow{.pos = pos,
-                                  .tx = std::move(record.tx),
-                                  .events = std::move(record.events)});
+    rows.push_back(
+        TransactionRow{.pos = pos,
+                       .value = std::string(value.data(), value.size())});
   }
 
   rocksdb::Status status = iter->status();
@@ -2428,9 +2517,23 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     if (page.transactions.size() >= limit) {
       break;
     }
+    TxRecord record;
+    try {
+      record = parse_tx_value(row.value);
+    } catch (const x23::XdrException &e) {
+      error("get_transactions: failed to deserialize tx_index value for {}: {}",
+            HexArray(row.pos.tx).str(), e.what());
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+    if (!valid_transaction_record(record, row.pos.tx)) {
+      error("get_transactions: inconsistent transaction record for {} at block "
+            "{}",
+            HexArray(row.pos.tx).str(), static_cast<int64_t>(row.pos.block));
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     TxInfo info{.height = row.pos.block,
-                .tx = std::move(row.tx),
-                .events = std::move(row.events)};
+                .tx = std::move(record.tx),
+                .events = std::move(record.events)};
     page.transactions.push_back(std::move(info));
     last_emitted = row.pos;
     any_emitted = true;
@@ -2513,6 +2616,22 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     anchor_block = max_serve_block;
   }
 
+  if (have_cursor) {
+    auto exists =
+        contract_position_exists(db_.get(), contract_cf_handle_, query.address,
+                                 IndexerKeyFormat::kRootTx, cursor_pos);
+    if (!exists) {
+      return exists.error();
+    }
+    if (!*exists) {
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+    auto record = get_tx_record(cursor_pos.tx);
+    if (!record || !valid_root_position(*record, cursor_pos, query.address)) {
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
+  }
+
   ContractIter iter(db_.get(), contract_cf_handle_, query.address, order,
                     max_serve_block, IndexerKeyFormat::kRootTx);
   iter.seek(anchor_block, order);
@@ -2524,6 +2643,13 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   bool any_emitted = false;
   while (page.refs.size() < limit && iter.has_current()) {
     Position const pos = iter.current();
+    auto record = get_tx_record(pos.tx);
+    if (!record || !valid_root_position(*record, pos, query.address)) {
+      error("get_transactions_by_address: inconsistent root projection for {} "
+            "at block {}",
+            HexArray(pos.tx).str(), static_cast<int64_t>(pos.block));
+      return IndexerError(IndexerErrorCode::kInternal);
+    }
     TransactionRef ref;
     ref.tx_hash = pos.tx;
     ref.height = pos.block;
@@ -2531,6 +2657,10 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     last_emitted = pos;
     any_emitted = true;
     iter.advance(order);
+  }
+
+  if (iter.failed()) {
+    return IndexerError(IndexerErrorCode::kInternal);
   }
 
   // More rows remain past the page — emit a continuation cursor.

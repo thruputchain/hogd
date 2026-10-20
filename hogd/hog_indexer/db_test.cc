@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "event.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
@@ -19,7 +18,6 @@
 #include "indexer.hh"
 #include "pagination.hh"
 #include "types.hh"
-#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -189,7 +187,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   TxEmittedEvent event2;
   event2.contract_address = contract_addr2;
   event2.num_topics = 1;
-  event2.serialized_event.resize(20);
+  event2.serialized_event.resize(32);
   std::ranges::fill(event2.serialized_event, 0x22);
   event_log2.events.push_back(event2);
 
@@ -1135,64 +1133,32 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
   }
 }
 
-// tx_index is keyed by tx hash alone, so ingesting the same hash at a
-// second height replaces the receipt while the first height's
-// contract_index row stays durable.  Hydrating that stale row must not
-// splice block 11's payload into a block 10 result.  The DB is opened
-// inside the EXPECT_DEATH block so the fork happens before any RocksDB
-// background threads exist.
-TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
+// A receipt overwritten at a second height must fail the whole page rather
+// than splice the replacement payload into the earlier event-index position.
+TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchFailsPage)
 {
-  if constexpr (!is_debug_build()) {
-    // The "CHECK FAILED" panic message this death test matches is only
-    // produced in debug builds (x23::panic is std::unreachable() under
-    // NDEBUG).  Matches RecoveryTests.RecoveredHighBitRCQLiveEntriesDiesOnLoad.
-    GTEST_SKIP();
-  }
-
-  // consume_events leaves its thread pool and RocksDB's background
-  // threads alive, so the default fork-only death test style forks a
-  // multi-threaded process.  "threadsafe" re-execs instead, which is
-  // what keeps this from flaking under CI.
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-
   ContractAddress addr_c, addr_d;
   std::ranges::fill(addr_c, 0xC0);
   std::ranges::fill(addr_d, 0xD0);
   SHA256Hash tx;
   std::ranges::fill(tx, 0x42);
-
-  {
-    auto db = IndexDB::make_new(tmp_dir_.directory());
-    ASSERT_TRUE(db.has_value());
-
-    TxEventLog at_10{};
-    at_10.tx_hash = tx;
-    at_10.events.push_back(make_event(addr_c, 0, 0));
-
-    TxEventLog at_11{};
-    at_11.tx_hash = tx;
-    at_11.events.push_back(make_event(addr_d, 0, 0));
-
-    ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
-    ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
-  }
-
-  const std::filesystem::path dir = tmp_dir_.directory();
-  X23_EXPECT_DEATH(
-      {
-        auto db = IndexDB::open(dir);
-        ASSERT_TRUE(db.has_value());
-
-        EventFilterList filters;
-        filters.push_back(filter_with_contracts_no_topics({addr_c}));
-        auto page =
-            db->get_events(make_query(std::move(filters),
-                                      IterationOrder::IterationOrderAscending,
-                                      anchor_at_height(10)));
-        (void)page;
-      },
-      "CHECK FAILED");
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  TxEventLog at_10{};
+  at_10.tx_hash = tx;
+  at_10.events.push_back(make_event(addr_c, 0, 0));
+  TxEventLog at_11{};
+  at_11.tx_hash = tx;
+  at_11.events.push_back(make_event(addr_d, 0, 0));
+  ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr_c}));
+  const auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 anchor_at_height(10)));
+  ASSERT_FALSE(page);
+  EXPECT_EQ(page.error().code(), IndexerErrorCode::kInternal);
 }
 
 // NOLINTEND(misc-include-cleaner)
