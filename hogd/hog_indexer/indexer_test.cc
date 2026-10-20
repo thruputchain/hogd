@@ -503,8 +503,8 @@ TEST_F(IndexerTest, MalformedHistoryCursorsHaveTypedOutcomes)
     SCOPED_TRACE(i);
     const auto &bytes = invalid[i];
     events.cursor.clear();
-    events.cursor.append_range(std::span<const uint8_t>(
-        reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+    events.cursor.append_range(std::span<const std::uint8_t>(
+        reinterpret_cast<const std::uint8_t *>(bytes.data()), bytes.size()));
     transactions.cursor = events.cursor;
     address.cursor = events.cursor;
     const auto event_page = db_->get_events(events);
