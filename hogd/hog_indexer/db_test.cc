@@ -1284,8 +1284,9 @@ TEST_F(IndexDBTest, EventCandidateBudgetCountsUniquePositionsBeforeTopics)
         ASSERT_TRUE(page);
         const bool matches = topic == 0x11 && sequence % 3 == 0;
         ASSERT_EQ(page->events.size(), matches ? 1 : 0);
-        if (matches)
+        if (matches) {
           EXPECT_EQ(page->events.front().sequence_number, sequence);
+        }
         EXPECT_EQ(page->cursor.empty(), page_index + 1 == kCount);
         if (!page->cursor.empty()) {
           EXPECT_NE(page->cursor, query.cursor);
