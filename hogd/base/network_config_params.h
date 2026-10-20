@@ -85,8 +85,8 @@ struct NetworkConfigParams {
                         uint64_t value);
 
   // A ConfigParam stating `value` for `id`.
-  // `value` must fit the arm's type (config_param_max_value): narrowing it
-  // silently would state a different value than the caller asked for.
+  // `value` must fit the arm's type: a uint32 arm CHECKs rather than
+  // narrowing, which would state a value the caller never asked for.
   static ConfigParam make_param(ConfigParamID id, uint64_t value);
 
   // A canonical configuration stating every parameter this build knows at its
@@ -103,9 +103,8 @@ private:
   static std::optional<uint64_t> stated_param(NetworkConfigV0 const &config,
                                               ConfigParamID id);
 
-  // A uint32 arm's stated value, which its arm type guarantees fits.
-  static std::optional<uint32_t> stated_param_u32(NetworkConfigV0 const &config,
-                                                  ConfigParamID id);
+  // Narrows a uint32 arm's value, which its arm type guarantees fits.
+  static uint32_t to_u32(uint64_t value);
 
   uint64_t in_force(ConfigParamID id) const;
 };
@@ -247,62 +246,56 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
   return config_param_value(param);
 }
 
-inline std::optional<uint32_t>
-NetworkConfigParams::stated_param_u32(NetworkConfigV0 const &config,
-                                      ConfigParamID id)
+inline uint32_t
+NetworkConfigParams::to_u32(uint64_t value)
 {
-  CHECK_EQ(config_param_max_value(id), std::numeric_limits<uint32_t>::max());
-  return stated_param(config, id).transform([](uint64_t v) {
-    return static_cast<uint32_t>(v);
-  });
+  CHECK_LE(value, std::numeric_limits<uint32_t>::max());
+  return static_cast<uint32_t>(value);
 }
 
 inline ConfigParam
 NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
 {
-  CHECK_LE(value, config_param_max_value(id));
-  // Every uint32 arm below assigns from this; the CHECK makes it exact.
-  const auto narrow = static_cast<uint32_t>(value);
   ConfigParam out(id);
   switch (id) {
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
-    out.max_sha256_buffers() = narrow;
+    out.max_sha256_buffers() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
-    out.max_cross_invoke_depth() = narrow;
+    out.max_cross_invoke_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxNewContractsPerTx:
-    out.max_new_contracts_per_tx() = narrow;
+    out.max_new_contracts_per_tx() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxBytestringLen:
-    out.max_bytestring_len() = narrow;
+    out.max_bytestring_len() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxContractSizeBytes:
-    out.max_contract_size_bytes() = narrow;
+    out.max_contract_size_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxSavepointDepth:
-    out.max_savepoint_depth() = narrow;
+    out.max_savepoint_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
-    out.max_sha256_buffer_bytes() = narrow;
+    out.max_sha256_buffer_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxAuthTokenDepth:
-    out.max_auth_token_depth() = narrow;
+    out.max_auth_token_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxRv32CodeBytes:
-    out.max_rv32_code_bytes() = narrow;
+    out.max_rv32_code_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
-    out.max_rv32_memory_bytes() = narrow;
+    out.max_rv32_memory_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxAuthTokens:
-    out.max_auth_tokens() = narrow;
+    out.max_auth_tokens() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxCalldataLen:
-    out.max_calldata_len() = narrow;
+    out.max_calldata_len() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
-    out.max_return_buffer_len() = narrow;
+    out.max_return_buffer_len() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxTxGas:
     out.max_tx_gas() = value;
@@ -362,47 +355,44 @@ NetworkConfigParams::is_canonical(NetworkConfigV0 const &config)
 
 inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
   : max_sha256_buffers(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
-            .value_or(kDefaultMaxSHA256Buffers)),
-    max_cross_invoke_depth(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth)
-            .value_or(kDefaultMaxCrossInvokeDepth)),
-    max_new_contracts_per_tx(
-        stated_param_u32(config,
-                         ConfigParamID::kConfigParamMaxNewContractsPerTx)
-            .value_or(kDefaultMaxNewContractsPerTx)),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
+                   .value_or(kDefaultMaxSHA256Buffers))),
+    max_cross_invoke_depth(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth)
+            .value_or(kDefaultMaxCrossInvokeDepth))),
+    max_new_contracts_per_tx(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx)
+            .value_or(kDefaultMaxNewContractsPerTx))),
     max_bytestring_len(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxBytestringLen)
-            .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen))),
-    max_contract_size_bytes(
-        stated_param_u32(config,
-                         ConfigParamID::kConfigParamMaxContractSizeBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxContractSizeBytes))),
-    max_savepoint_depth(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxSavepointDepth)
-            .value_or(static_cast<uint32_t>(kMaxSavepointDepth))),
-    max_sha256_buffer_bytes(
-        stated_param_u32(config,
-                         ConfigParamID::kConfigParamMaxSHA256BufferBytes)
-            .value_or(static_cast<uint32_t>(kSHA256BufferMaxSize))),
-    max_auth_token_depth(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxAuthTokenDepth)
-            .value_or(static_cast<uint32_t>(kAuthTokenMaxDepth))),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxBytestringLen)
+                   .value_or(kDefaultMaxBytestringLen))),
+    max_contract_size_bytes(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxContractSizeBytes)
+            .value_or(kDefaultMaxContractSizeBytes))),
+    max_savepoint_depth(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxSavepointDepth)
+            .value_or(kMaxSavepointDepth))),
+    max_sha256_buffer_bytes(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxSHA256BufferBytes)
+            .value_or(kSHA256BufferMaxSize))),
+    max_auth_token_depth(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxAuthTokenDepth)
+            .value_or(kAuthTokenMaxDepth))),
     max_rv32_code_bytes(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxRv32CodeBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32CodeBytes))),
-    max_rv32_memory_bytes(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes))),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxRv32CodeBytes)
+                   .value_or(kDefaultMaxRv32CodeBytes))),
+    max_rv32_memory_bytes(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
+            .value_or(kDefaultMaxRv32MemoryBytes))),
     max_auth_tokens(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxAuthTokens)
-            .value_or(kDefaultMaxAuthTokens)),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxAuthTokens)
+                   .value_or(kDefaultMaxAuthTokens))),
     max_calldata_len(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxCalldataLen)
-            .value_or(kDefaultMaxCalldataLen)),
-    max_return_buffer_len(
-        stated_param_u32(config, ConfigParamID::kConfigParamMaxReturnBufferLen)
-            .value_or(kDefaultMaxReturnBufferLen)),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxCalldataLen)
+                   .value_or(kDefaultMaxCalldataLen))),
+    max_return_buffer_len(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxReturnBufferLen)
+            .value_or(kDefaultMaxReturnBufferLen))),
     max_tx_gas(stated_param(config, ConfigParamID::kConfigParamMaxTxGas)
                    .value_or(kDefaultMaxTxGas))
 {}
