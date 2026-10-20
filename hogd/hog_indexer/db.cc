@@ -1902,33 +1902,45 @@ public:
   bool failed() const { return failed_; }
   Position const &current() const { return current_; }
 
-  void add_filter(std::size_t fidx) { filter_indices_.push_back(fidx); }
+  void add_filter(std::size_t fidx)
+  {
+    // Filters are added in index order; repeated addresses within a filter
+    // must not repeat the topic check.
+    if (filter_indices_.empty() || filter_indices_.back() != fidx) {
+      filter_indices_.push_back(fidx);
+    }
+  }
   std::vector<std::size_t> const &filter_indices() const
   {
     return filter_indices_;
   }
 
-  // Initial seek, treating `anchor` as an inclusive starting
-  // boundary in the requested direction.
-  void seek(BlockHeight anchor, IterationOrder order)
+  // Initial reads include the anchor block. Continuations seek directly to
+  // the cursor key, avoiding a walk through earlier rows in a dense block.
+  void seek(BlockHeight anchor, IterationOrder order,
+            Position const *cursor = nullptr)
   {
-    std::string prefix;
-    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, kind_,
-                                               anchor);
-    if (order == IterationOrder::IterationOrderAscending) {
-      iter_->Seek(prefix);
+    std::string key;
+    if (cursor != nullptr) {
+      IndexerKeyFormat::make_contract_key(key, contract_, kind_, cursor->block,
+                                          cursor->tx, cursor->seq);
     }
     else {
-      // Descending: we want entries at block <= anchor.  `prefix` lands
-      // at the first key with block == anchor; append all-FF for the
-      // (tx_hash, seq) suffix to push past those entries before
-      // SeekForPrev so we land on (or below) the LAST event at
-      // `anchor`.
-      const std::size_t suffix_size = IndexerKeyFormat::kContractKeySize -
-                                      IndexerKeyFormat::kContractKeyPrefixSize;
-      std::string upper_prefix = prefix;
-      upper_prefix.append(suffix_size, static_cast<char>(0xFF));
-      iter_->SeekForPrev(upper_prefix);
+      // Keep the prefix seek for initial reads so a malformed short key in
+      // the requested block is encountered and rejected by refresh_current().
+      IndexerKeyFormat::make_contract_key_prefix(key, contract_, kind_, anchor);
+      if (order == IterationOrder::IterationOrderDescending) {
+        const std::size_t suffix_size =
+            IndexerKeyFormat::kContractKeySize -
+            IndexerKeyFormat::kContractKeyPrefixSize;
+        key.append(suffix_size, static_cast<char>(0xFF));
+      }
+    }
+    if (order == IterationOrder::IterationOrderAscending) {
+      iter_->Seek(key);
+    }
+    else {
+      iter_->SeekForPrev(key);
     }
     refresh_current();
   }
@@ -1949,33 +1961,12 @@ public:
     refresh_current();
   }
 
-  // Advance past the cursor's last-emitted position (exclusive
-  // resume).  After seek(anchor) with a cursor-encoded anchor,
-  // skip the cursor entry itself if we landed on it.
+  // A direct cursor seek already lands on or beyond its position. Resume
+  // exclusively by stepping over an exact match, at most once per iterator.
   void skip_past(IterationOrder order, Position const &cursor)
   {
-    while (has_current_) {
-      const bool at_or_past_cursor =
-          (order == IterationOrder::IterationOrderAscending)
-              ? current_ >= cursor
-              : current_ <= cursor;
-      if (!at_or_past_cursor) {
-        // Iterator is still behind the cursor — shouldn't happen
-        // after a correct seek, but advance defensively.
-        // advance(order) calls Next() ascending and Prev()
-        // descending, so each iteration converges toward (and
-        // eventually past) the cursor; the loop terminates once
-        // the comparison flips or the iterator runs out.
-        advance(order);
-        continue;
-      }
-      if (current_ == cursor) {
-        advance(order);
-      }
-      // Either we're already past the cursor, or we just advanced
-      // past an exact-match entry; either way, current_ is now
-      // strictly past the cursor (or has_current_ is false).
-      return;
+    if (has_current_ && current_ == cursor) {
+      advance(order);
     }
   }
 
@@ -2012,9 +2003,9 @@ private:
       // Rows above the contiguous watermark are not servable: they
       // (or a block below them) may still be ingesting, so they are
       // not yet immutable.  Ascending keys only grow, so this
-      // iterator is exhausted for the current query.  Descending
-      // never gets here — its seek anchor is clamped to the
-      // watermark before iteration starts.
+      // iterator is exhausted for the current query. Descending initial
+      // anchors are clamped to the watermark; decoded cursor positions
+      // cannot exceed their saved watermark.
       has_current_ = false;
       return;
     }
@@ -2114,7 +2105,8 @@ resolve_anchor_block(BlockAnchor const &anchor, IterationOrder order,
 } // namespace
 
 IndexerStatus<EventPage>
-IndexDB::get_events(EventQuery const &query) const
+IndexDB::get_events(EventQuery const &query,
+                    std::uint32_t candidate_limit) const
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
@@ -2148,8 +2140,9 @@ IndexDB::get_events(EventQuery const &query) const
 
   const auto query_hash = cursor::event_query_hash(query.filters);
 
-  // Clamp limit.
   const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
+  const uint32_t budget =
+      std::clamp(candidate_limit, std::uint32_t{1}, kEventsMaxCandidates);
 
   // Decode cursor if present; else use the query's anchor/order.
   IterationOrder order;
@@ -2245,7 +2238,7 @@ IndexDB::get_events(EventQuery const &query) const
     }
   }
   for (ContractIter &ci : iters) {
-    ci.seek(anchor_block, order);
+    ci.seek(anchor_block, order, have_cursor ? &cursor_pos : nullptr);
     if (have_cursor && ci.has_current()) {
       ci.skip_past(order, cursor_pos);
     }
@@ -2256,11 +2249,11 @@ IndexDB::get_events(EventQuery const &query) const
 
   // Merge-walk.  At each step, pick the iterator whose current
   // position is smallest (ascending) or largest (descending) and
-  // consume it.  Stop at `limit` matches or exhaustion.
-  Position last_emitted{};
-  bool any_emitted = false;
+  // consume it. Stop at the result limit, candidate budget, or exhaustion.
+  Position last_scanned{};
+  uint32_t scanned = 0;
 
-  while (page.events.size() < limit) {
+  while (page.events.size() < limit && scanned < budget) {
     // Find the winner — the valid iterator whose current position
     // leads in the requested direction.
     auto leads = [order](Position const &lhs, Position const &rhs) {
@@ -2293,6 +2286,8 @@ IndexDB::get_events(EventQuery const &query) const
       return IndexerError(IndexerErrorCode::kInternal);
     }
     TxEmittedEvent const &emitted_event = record->events.events[win_pos.seq];
+    last_scanned = win_pos;
+    ++scanned;
 
     // Topic filter: match if ANY filter that includes this contract
     // accepts the event.  One entry in the contract_index = one event
@@ -2313,8 +2308,6 @@ IndexDB::get_events(EventQuery const &query) const
       ev.sequence_number = win_pos.seq;
       ev.emitted_event = emitted_event;
       page.events.push_back(std::move(ev));
-      last_emitted = win_pos;
-      any_emitted = true;
     }
 
     winner->advance(order);
@@ -2323,44 +2316,24 @@ IndexDB::get_events(EventQuery const &query) const
     }
   }
 
-  // Cursor for continuation: non-empty iff we emitted something AND
-  // any iterator is still positioned at more data.  If all iterators
-  // are exhausted, we return an empty cursor to signal end-of-stream.
-  //
-  // We signal empty cursor only when truly exhausted, to distinguish
-  // "more-results-to-scan" (selective filter yielded no matches this
-  // window) from "end of data".
+  // Resume after the last validated candidate, including nonmatching ones.
+  // An empty page can carry a cursor; only exhaustion ends the scan.
   const bool any_more = std::ranges::any_of(iters, [](ContractIter const &ci) {
     return ci.has_current();
   });
 
-  if (any_more) {
-    if (any_emitted) {
-      EventCursorPayload payload;
-      payload.method = HistoryCursorMethod::CursorEvents;
-      payload.query_hash = query_hash;
-      payload.order = order;
-      payload.block_height = last_emitted.block;
-      payload.tx_hash = last_emitted.tx;
-      payload.sequence_number = last_emitted.seq;
-      payload.max_block_height = max_serve_block;
-      std::string encoded = cursor::encode(payload);
-      page.cursor.append_range(std::span<const uint8_t>(
-          reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
-    }
-    else {
-      // Scanned without matches but more to check.  Synthesize a
-      // cursor from the "frontier" — the position of the winner at
-      // its last advance.  We don't have that here directly, but
-      // re-seeking to (any iterator's current) would over-skip.  For
-      // simplicity, use the input cursor (if any) or the anchor.
-      // This means empty-match pages in cursor-less mode terminate
-      // prematurely; clients should pass cursors forward even on
-      // empty pages.  Cursor-based re-entry works correctly.
-      if (have_cursor) {
-        page.cursor = query.cursor;
-      }
-    }
+  if (scanned != 0 && any_more) {
+    EventCursorPayload payload;
+    payload.method = HistoryCursorMethod::CursorEvents;
+    payload.query_hash = query_hash;
+    payload.order = order;
+    payload.block_height = last_scanned.block;
+    payload.tx_hash = last_scanned.tx;
+    payload.sequence_number = last_scanned.seq;
+    payload.max_block_height = max_serve_block;
+    std::string encoded = cursor::encode(payload);
+    page.cursor.append_range(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
   }
 
   return page;
@@ -2634,7 +2607,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
 
   ContractIter iter(db_.get(), contract_cf_handle_, query.address, order,
                     max_serve_block, IndexerKeyFormat::kRootTx);
-  iter.seek(anchor_block, order);
+  iter.seek(anchor_block, order, have_cursor ? &cursor_pos : nullptr);
   if (have_cursor && iter.has_current()) {
     iter.skip_past(order, cursor_pos);
   }

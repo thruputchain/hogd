@@ -1297,6 +1297,20 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
       if (damage != Damage::kBodyHash) {
         EXPECT_EQ(rpc.get_events(events)().outcome(),
                   IndexerQueryOutcome::IndexerQueryInternalFailure);
+        // A budget cut before the damaged candidate can return a cursor,
+        // but resuming into corruption must fail without a partial page or a
+        // replacement cursor, even when the topic filter cannot match.
+        const auto first = db_->get_events(events, 1);
+        ASSERT_TRUE(first);
+        ASSERT_FALSE(first->cursor.empty());
+        auto resumed = events;
+        resumed.cursor = first->cursor;
+        const auto failed = db_->get_events(resumed, 1);
+        ASSERT_FALSE(failed);
+        EXPECT_EQ(failed.error().code(), IndexerErrorCode::kInternal);
+        const auto partial = db_->get_events(events, 2);
+        ASSERT_FALSE(partial);
+        EXPECT_EQ(partial.error().code(), IndexerErrorCode::kInternal);
       }
       else {
         // Event-only legacy ingestion has no body; event reads depend on the
@@ -1350,9 +1364,9 @@ TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
 
 TEST_F(StrictIndexerTest, HistoryContractKeysMustBeWellFormedAndMatchRootBody)
 {
-  for (const int damage : {0, 1, 2, 3}) {
+  for (const int damage : {0, 1, 2, 3, 4}) {
     SCOPED_TRACE(damage);
-    const bool malformed = damage == 1;
+    const bool malformed = damage == 1 || damage == 4;
     const bool nonzero_root_sequence = damage == 2;
     db_.reset();
     const auto test_path =
@@ -1377,11 +1391,18 @@ TEST_F(StrictIndexerTest, HistoryContractKeysMustBeWellFormedAndMatchRootBody)
         continue;
       }
       std::string key;
-      IndexerKeyFormat::make_contract_key(key, address, kind, 1,
-                                          sha256(body.signed_tx.tx),
-                                          nonzero_root_sequence ? 1 : 0);
-      if (malformed) {
-        key.push_back('x');
+      if (damage == 4) {
+        // A bare height prefix sorts before its valid full keys. An initial
+        // seek to a full zero-suffix key would silently skip this corruption.
+        IndexerKeyFormat::make_contract_key_prefix(key, address, kind, 1);
+      }
+      else {
+        IndexerKeyFormat::make_contract_key(key, address, kind, 1,
+                                            sha256(body.signed_tx.tx),
+                                            nonzero_root_sequence ? 1 : 0);
+        if (malformed) {
+          key.push_back('x');
+        }
       }
       overwrite_column_family(test_path,
                               IndexerKeyFormat::kContractIndexColumnFamily, key,
@@ -1393,9 +1414,14 @@ TEST_F(StrictIndexerTest, HistoryContractKeysMustBeWellFormedAndMatchRootBody)
     IndexerBlockExplorerRpc rpc(*opened, failures);
     for (const auto order : {IterationOrder::IterationOrderAscending,
                              IterationOrder::IterationOrderDescending}) {
-      const BlockAnchor anchor(order == IterationOrder::IterationOrderAscending
-                                   ? BlockAnchorKind::AnchorAtBeginning
-                                   : BlockAnchorKind::AnchorAtEnd);
+      SCOPED_TRACE(static_cast<int>(order));
+      BlockAnchor anchor(order == IterationOrder::IterationOrderAscending
+                             ? BlockAnchorKind::AnchorAtBeginning
+                             : BlockAnchorKind::AnchorAtEnd);
+      if (damage == 4) {
+        anchor = BlockAnchor(BlockAnchorKind::AnchorAtHeight);
+        anchor.height() = 1;
+      }
       AddressTransactionQuery root{};
       root.address = address;
       root.order = order;

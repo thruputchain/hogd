@@ -116,15 +116,22 @@ public:
   IndexerStatus<std::pair<BlockHeight, TxEventLog>>
   get_tx_events(SHA256Hash const &tx_hash) const;
 
-  // Paginated, filtered events query.  See protocol/indexer.x for
-  // full semantics.
+  // Server-side cap on scanned event candidates per page, matching or not.
+  static constexpr std::uint32_t kEventsMaxCandidates = 1000;
+
+  // Paginated, filtered events query. See protocol/indexer.x for full
+  // semantics.
   //
   // Validates the query (filters non-empty, each filter's
   // contract_addresses non-empty), decodes the cursor (if any),
   // walks the contract_index in the requested direction, hydrates and
   // validates each candidate before topic filtering, and returns up to
-  // `limit` events plus a continuation cursor.
-  IndexerStatus<EventPage> get_events(EventQuery const &query) const;
+  // `limit` events plus a continuation cursor. The internal candidate_limit
+  // is clamped to [1, kEventsMaxCandidates]. Empty pages can have a cursor;
+  // callers must continue until the cursor is empty.
+  IndexerStatus<EventPage>
+  get_events(EventQuery const &query,
+             std::uint32_t candidate_limit = kEventsMaxCandidates) const;
 
   // Paginated transactions query.  See protocol/indexer.x for full
   // semantics.  The current tx_index is keyed by hash rather than by
