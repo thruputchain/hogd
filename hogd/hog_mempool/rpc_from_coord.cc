@@ -486,6 +486,14 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           throw std::runtime_error(
               "authentication returned the wrong number of outcomes");
         }
+        // Preserve the original vectors when every transaction authenticated.
+        // Compact them only when an outcome actually needs to be removed.
+        if (std::ranges::all_of(auth_ret, [](AuthErrorCode code) {
+              return code == AuthErrorCode::kAuthSuccess;
+            })) {
+          MempoolMetrics::instance().auth_failed_tx_count.increment(0);
+          co_return;
+        }
         SignedTransactionBatch authenticated_txs;
         x23::Vec<size_t> authenticated_indices;
         TransactionHashBatch authenticated_hashes;
@@ -614,17 +622,27 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             co_await scheduler_->add_txs(*txs, *tx_hashes);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
-        SignedTransactionBatch admitted_txs;
-        admitted_txs.reserve(txs->size());
+        // Earlier auth/capacity filters can leave an oversized buffer. Keep
+        // their existing compaction behavior even if this stage admits all
+        // remaining transactions.
+        bool all_admitted = txs->size() == outcomes->size();
         for (size_t i = 0; i < add_outcomes.size(); i++) {
           const SchedGatewaySubmitOutcome outcome = add_outcomes[i];
           (*outcomes)[(*original_indices)[i]] = outcome;
-          if (outcome ==
-              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted) {
-            admitted_txs.push_back(std::move((*txs)[i]));
-          }
+          all_admitted &=
+              outcome == SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted;
         }
-        *txs = std::move(admitted_txs);
+        if (!all_admitted) {
+          SignedTransactionBatch admitted_txs;
+          admitted_txs.reserve(txs->size());
+          for (size_t i = 0; i < add_outcomes.size(); i++) {
+            if (add_outcomes[i] ==
+                SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted) {
+              admitted_txs.push_back(std::move((*txs)[i]));
+            }
+          }
+          *txs = std::move(admitted_txs);
+        }
         MempoolMetrics::instance().accepted_unvetted_tx_count.increment(
             txs->size());
         // [commit_guard] is a smart pointer that has a [reset()] method just
