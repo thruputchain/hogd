@@ -367,6 +367,17 @@ bm_mempool_admit_gateway_batch(benchmark::State &state)
   auto &metrics = MempoolMetrics::instance();
   const double hold_before = metrics.ingestion_commit_lock_hold_seconds.sum();
   const double wait_before = metrics.ingestion_commit_lock_wait_seconds.sum();
+  const std::array<std::pair<const char *, Metrics::Histogram *>, 5> stages{{
+      {"account_lookup_us_per_batch", &metrics.scheduler_add_lookup_seconds},
+      {"insertion_us_per_batch", &metrics.scheduler_add_insert_seconds},
+      {"ready_update_us_per_batch", &metrics.scheduler_add_ready_seconds},
+      {"verification_us_per_batch", &metrics.ingestion_verify_seconds},
+      {"auth_rpc_us_per_batch", &metrics.ingestion_auth_rpc_seconds},
+  }};
+  std::array<double, stages.size()> stage_before{};
+  for (size_t i = 0; i < stages.size(); ++i) {
+    stage_before[i] = stages[i].second->sum();
+  }
   for (auto _ : state) {
     auto batches = packed;
     std::vector<x23::Async<SchedGatewaySubmitOutcomeBatch>> handles;
@@ -398,6 +409,10 @@ bm_mempool_admit_gateway_batch(benchmark::State &state)
   state.counters["admission_lock_wait_us_per_batch"] =
       (metrics.ingestion_commit_lock_wait_seconds.sum() - wait_before) *
       1'000'000 / calls;
+  for (size_t i = 0; i < stages.size(); ++i) {
+    state.counters[stages[i].first] =
+        (stages[i].second->sum() - stage_before[i]) * 1'000'000 / calls;
+  }
 }
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 BENCHMARK(bm_mempool_admit_gateway_batch)

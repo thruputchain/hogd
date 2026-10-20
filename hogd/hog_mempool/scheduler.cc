@@ -304,34 +304,47 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   for (const SignedTransaction &tx : txs) {
     accounts.insert(tx.tx.invocation.invoked_address);
   }
+  auto is_cached = [this](const ContractAddress &address) {
+    const auto [state, lock] = accounts_.find(address);
+    return state != nullptr;
+  };
   x23::XdrVec<ContractAddress> accounts_vec;
-  accounts_vec.reserve(accounts.size());
-  std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
-  already_found.reserve(accounts.size());
+  for (const ContractAddress &account : accounts) {
+    if (!is_cached(account)) {
+      accounts_vec.push_back(account);
+    }
+  }
+  // Account entries are never erased. Checking their presence only needs the
+  // bucket locks; a warm batch neither reads hog ages nor initializes state.
+  // Reuse the account set instead of allocating and copying it twice more.
+  if (accounts_vec.empty()) {
+    co_return ReadAverageHogAgesResult{.found = std::move(accounts),
+                                       .missing = {}};
+  }
 
   InstrumentedCoroGuard cg(
       MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
       MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
-  for (const ContractAddress &account : accounts) {
-    bool contains = false;
-    {
-      auto [value_ptr, lock] = accounts_.find(account);
-      contains = (value_ptr != nullptr);
-    }
-    if (contains) {
-      already_found.insert(account);
-    }
-    else {
-      accounts_vec.push_back(account);
+  // Another lock holder may have initialized a miss and applied newer hog
+  // ages while this lookup waited. Recheck under the lock so a redundant DB
+  // read cannot overwrite those newer cached values.
+  size_t missing_count = 0;
+  for (const ContractAddress &account : accounts_vec) {
+    if (!is_cached(account)) {
+      accounts_vec[missing_count++] = account;
     }
   }
-  if (accounts_vec.empty()) {
-    co_return ReadAverageHogAgesResult{.found = already_found, .missing = {}};
+  accounts_vec.resize(missing_count);
+  ReadAverageHogAgesResult ret;
+  if (!accounts_vec.empty()) {
+    ret = co_await read_average_hog_ages(accounts_vec);
+    for (const auto &missing : ret.missing) {
+      accounts.erase(missing);
+    }
   }
-  ReadAverageHogAgesResult ret = co_await read_average_hog_ages(accounts_vec);
-  ret.found.merge(already_found);
-  co_return ret;
+  co_return ReadAverageHogAgesResult{.found = std::move(accounts),
+                                     .missing = std::move(ret.missing)};
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
