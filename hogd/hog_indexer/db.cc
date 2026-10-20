@@ -2055,13 +2055,21 @@ IndexDB::get_events(EventQuery const &query) const
   // non-empty.  Empty contract_addresses is invalid because the
   // indexer has no topic-indexed column family (full-index scan).
   if (query.filters.empty()) {
+    if (!query.cursor.empty()) {
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
     return page;
   }
   for (EventFilter const &f : query.filters) {
     if (f.contract_addresses.empty()) {
+      if (!query.cursor.empty()) {
+        return IndexerError(IndexerErrorCode::kInvalidCursor);
+      }
       return page;
     }
   }
+
+  const auto query_hash = cursor::event_query_hash(query.filters);
 
   // Clamp limit.
   const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
@@ -2078,10 +2086,8 @@ IndexDB::get_events(EventQuery const &query) const
     auto decoded = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
-    if (!decoded) {
-      return IndexerError(IndexerErrorCode::kInvalidCursor);
-    }
-    if (!is_valid_iteration_order(decoded->order)) {
+    if (!decoded || decoded->method != HistoryCursorMethod::CursorEvents ||
+        decoded->query_hash != query_hash) {
       return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (decoded->max_block_height > max_serve_block) {
@@ -2250,6 +2256,8 @@ IndexDB::get_events(EventQuery const &query) const
   if (any_more) {
     if (any_emitted) {
       EventCursorPayload payload;
+      payload.method = HistoryCursorMethod::CursorEvents;
+      payload.query_hash = query_hash;
       payload.order = order;
       payload.block_height = last_emitted.block;
       payload.tx_hash = last_emitted.tx;
@@ -2300,7 +2308,9 @@ IndexDB::get_transactions(TransactionQuery const &query) const
     auto decoded = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
-    if (!decoded || !is_valid_iteration_order(decoded->order)) {
+    if (!decoded ||
+        decoded->method != HistoryCursorMethod::CursorTransactions ||
+        decoded->query_hash != SHA256Hash{}) {
       return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (decoded->max_block_height > max_serve_block) {
@@ -2427,6 +2437,8 @@ IndexDB::get_transactions(TransactionQuery const &query) const
 
   if (any_emitted && page.transactions.size() < rows.size()) {
     EventCursorPayload payload;
+    payload.method = HistoryCursorMethod::CursorTransactions;
+    payload.query_hash = {};
     payload.order = order;
     payload.block_height = last_emitted.block;
     payload.tx_hash = last_emitted.tx;
@@ -2452,6 +2464,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   page.latest_block = max_serve_block;
   page.oldest_block = oldest_block();
 
+  const auto query_hash = cursor::address_query_hash(query.address);
   const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
 
   IterationOrder order;
@@ -2463,7 +2476,9 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     auto decoded = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
-    if (!decoded || !is_valid_iteration_order(decoded->order)) {
+    if (!decoded ||
+        decoded->method != HistoryCursorMethod::CursorAddressTransactions ||
+        decoded->query_hash != query_hash) {
       return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (decoded->max_block_height > max_serve_block) {
@@ -2520,6 +2535,8 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   // More rows remain past the page — emit a continuation cursor.
   if (any_emitted && iter.has_current()) {
     EventCursorPayload payload;
+    payload.method = HistoryCursorMethod::CursorAddressTransactions;
+    payload.query_hash = query_hash;
     payload.order = order;
     payload.block_height = last_emitted.block;
     payload.tx_hash = last_emitted.tx;

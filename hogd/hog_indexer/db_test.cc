@@ -440,6 +440,93 @@ TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
   EXPECT_TRUE(page3->cursor.empty());
 }
 
+TEST_F(IndexDBTest, EventCursorBindsCanonicalFilterSetsAndTopicPositions)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress first{}, second{};
+  std::ranges::fill(first, 0xA1);
+  std::ranges::fill(second, 0xB2);
+  for (uint8_t i = 0; i < 4; ++i) {
+    TxEventLog log{};
+    std::ranges::fill(log.tx_hash, i + 1);
+    log.events.push_back(make_event(i % 2 == 0 ? first : second, 3, 0x10));
+    ASSERT_TRUE(db->consume_events(10 + i, TxEventLogBatch{log}, {}));
+  }
+  EventFilter matching{};
+  matching.contract_addresses = {first, second};
+  matching.topics.topic0 = {topic_filled(0x10), topic_filled(0x20)};
+  matching.topics.topic1 = {topic_filled(0x11), topic_filled(0x21)};
+  matching.topics.topic2 = {topic_filled(0x12), topic_filled(0x22)};
+  EventFilter other{};
+  other.contract_addresses = {second};
+  other.topics.topic0 = {topic_filled(0x30)};
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    auto query =
+        make_query(EventFilterList{matching, other}, order,
+                   BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd),
+                   1);
+    const auto first_page = db->get_events(query);
+    ASSERT_TRUE(first_page && !first_page->cursor.empty());
+    query.cursor = first_page->cursor;
+    query.limit = 2;
+    const auto expected = db->get_events(query);
+    ASSERT_TRUE(expected);
+    ASSERT_EQ(expected->events.size(), 2);
+
+    // Address/topic alternatives and filter groups are sets. Reordering and
+    // duplicates must not invalidate a continuation or change its results.
+    auto equivalent = matching;
+    equivalent.contract_addresses = {second, first, second};
+    equivalent.topics.topic0 = {topic_filled(0x20), topic_filled(0x10),
+                                topic_filled(0x20)};
+    equivalent.topics.topic1 = {topic_filled(0x21), topic_filled(0x11),
+                                topic_filled(0x21)};
+    equivalent.topics.topic2 = {topic_filled(0x22), topic_filled(0x12),
+                                topic_filled(0x22)};
+    auto resumed = query;
+    resumed.filters = {other, equivalent, other};
+    const auto actual = db->get_events(resumed);
+    ASSERT_TRUE(actual);
+    EXPECT_EQ(actual->events, expected->events);
+    EXPECT_EQ(actual->cursor, expected->cursor);
+    EXPECT_EQ(actual->latest_block, expected->latest_block);
+
+    std::vector<EventFilterList> changed;
+    auto different_address = matching;
+    different_address.contract_addresses = {first};
+    changed.push_back({different_address, other});
+    auto different_topic = matching;
+    different_topic.topics.topic2 = {topic_filled(0x22)};
+    changed.push_back({different_topic, other});
+    auto different_position = matching;
+    std::swap(different_position.topics.topic0,
+              different_position.topics.topic1);
+    changed.push_back({different_position, other});
+    auto different_grouping = matching;
+    different_grouping.topics.topic0 = other.topics.topic0;
+    auto regrouped_other = other;
+    regrouped_other.topics.topic0 = matching.topics.topic0;
+    changed.push_back({different_grouping, regrouped_other});
+    changed.push_back({matching});
+    changed.push_back({});
+    auto no_addresses = matching;
+    no_addresses.contract_addresses.clear();
+    changed.push_back({no_addresses, other});
+    for (size_t i = 0; i < changed.size(); ++i) {
+      SCOPED_TRACE(i);
+      resumed.filters = changed[i];
+      const auto invalid = db->get_events(resumed);
+      ASSERT_FALSE(invalid);
+      EXPECT_EQ(invalid.error().code(), IndexerErrorCode::kInvalidCursor);
+    }
+  }
+}
+
 TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
 {
   auto db = IndexDB::make_new(tmp_dir_.directory());
@@ -837,7 +924,10 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsInvalidCursor)
   ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}, {}));
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
 
-  EventCursorPayload payload;
+  EventCursorPayload payload{};
+  payload.method = HistoryCursorMethod::CursorEvents;
+  payload.query_hash = cursor::event_query_hash(
+      EventFilterList{filter_with_contracts_no_topics({addr})});
   payload.schema_version = cursor::kCursorVersion;
   payload.order = static_cast<IterationOrder>(2);
   payload.block_height = 10;
