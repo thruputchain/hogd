@@ -2052,20 +2052,6 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
 
-// The ceremony budgets the chain's own cap, so a chain stating one can still
-// execute its height-1 block.
-TEST(HogDevnode, CeremonyTransactionsBudgetTheConfiguredTxGas)
-{
-  LocalBootstrapConfig config;
-  add_local_network_config_override(config.network_config_overrides,
-                                    "max_tx_gas=1000000000");
-  const auto artifact = build_local_bootstrap_account_artifact(config);
-  ASSERT_FALSE(artifact.initialization_txs.empty());
-  for (auto const &tx : artifact.initialization_txs) {
-    EXPECT_EQ(tx.tx.invocation.gas_limit, 1'000'000'000U);
-  }
-}
-
 // The stock config takes its values from the protocol defaults rather than
 // restating them, so a default change reaches dev and test chains.
 TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
