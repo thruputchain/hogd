@@ -513,7 +513,7 @@ TEST_F(IndexDBTest, EventCursorBindsCanonicalFilterSetsAndTopicPositions)
     regrouped_other.topics.topic0 = matching.topics.topic0;
     changed.push_back({different_grouping, regrouped_other});
     changed.push_back({matching});
-    changed.push_back({});
+    changed.emplace_back();
     auto no_addresses = matching;
     no_addresses.contract_addresses.clear();
     changed.push_back({no_addresses, other});

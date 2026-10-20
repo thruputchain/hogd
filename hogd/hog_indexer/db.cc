@@ -39,6 +39,7 @@
 #include <thread>
 
 #include "event.hh"
+#include "event_cursor_internal.hh"
 #include "hogd/base/bits.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
