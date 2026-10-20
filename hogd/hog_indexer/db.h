@@ -121,9 +121,9 @@ public:
   //
   // Validates the query (filters non-empty, each filter's
   // contract_addresses non-empty), decodes the cursor (if any),
-  // walks the contract_index in the requested direction, applies
-  // topic filters, hydrates matches from tx_index, and returns
-  // up to `limit` events plus a continuation cursor.
+  // walks the contract_index in the requested direction, hydrates and
+  // validates each candidate before topic filtering, and returns up to
+  // `limit` events plus a continuation cursor.
   IndexerStatus<EventPage> get_events(EventQuery const &query) const;
 
   // Paginated transactions query.  See protocol/indexer.x for full
@@ -135,8 +135,8 @@ public:
 
   // Paginated account transaction history: refs to transactions whose ROOT
   // invocation targets `query.address`, in block order.  Reads refs directly
-  // off the address index (kind = ROOT_TX); no tx_index hydration.  Clients
-  // hydrate full bodies via get_transaction_info.
+  // off the address index (kind = ROOT_TX), validating each projection against
+  // its stored transaction. Clients fetch full bodies via get_transaction_info.
   IndexerStatus<TransactionRefPage>
   get_transactions_by_address(AddressTransactionQuery const &query) const;
 

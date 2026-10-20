@@ -11,7 +11,6 @@
 #include <vector>
 
 #include "event.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/test.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
@@ -19,7 +18,6 @@
 #include "indexer.hh"
 #include "pagination.hh"
 #include "types.hh"
-#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -189,7 +187,7 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   TxEmittedEvent event2;
   event2.contract_address = contract_addr2;
   event2.num_topics = 1;
-  event2.serialized_event.resize(20);
+  event2.serialized_event.resize(32);
   std::ranges::fill(event2.serialized_event, 0x22);
   event_log2.events.push_back(event2);
 
@@ -438,6 +436,93 @@ TEST_F(IndexDBTest, GetEventsPaginationWithCursor)
   ASSERT_EQ(page3->events.size(), 1);
   EXPECT_EQ(page3->events[0].block_height, 14);
   EXPECT_TRUE(page3->cursor.empty());
+}
+
+TEST_F(IndexDBTest, EventCursorBindsCanonicalFilterSetsAndTopicPositions)
+{
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  ContractAddress first{}, second{};
+  std::ranges::fill(first, 0xA1);
+  std::ranges::fill(second, 0xB2);
+  for (uint8_t i = 0; i < 4; ++i) {
+    TxEventLog log{};
+    std::ranges::fill(log.tx_hash, i + 1);
+    log.events.push_back(make_event(i % 2 == 0 ? first : second, 3, 0x10));
+    ASSERT_TRUE(db->consume_events(10 + i, TxEventLogBatch{log}, {}));
+  }
+  EventFilter matching{};
+  matching.contract_addresses = {first, second};
+  matching.topics.topic0 = {topic_filled(0x10), topic_filled(0x20)};
+  matching.topics.topic1 = {topic_filled(0x11), topic_filled(0x21)};
+  matching.topics.topic2 = {topic_filled(0x12), topic_filled(0x22)};
+  EventFilter other{};
+  other.contract_addresses = {second};
+  other.topics.topic0 = {topic_filled(0x30)};
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    auto query =
+        make_query(EventFilterList{matching, other}, order,
+                   BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd),
+                   1);
+    const auto first_page = db->get_events(query);
+    ASSERT_TRUE(first_page && !first_page->cursor.empty());
+    query.cursor = first_page->cursor;
+    query.limit = 2;
+    const auto expected = db->get_events(query);
+    ASSERT_TRUE(expected);
+    ASSERT_EQ(expected->events.size(), 2);
+
+    // Address/topic alternatives and filter groups are sets. Reordering and
+    // duplicates must not invalidate a continuation or change its results.
+    auto equivalent = matching;
+    equivalent.contract_addresses = {second, first, second};
+    equivalent.topics.topic0 = {topic_filled(0x20), topic_filled(0x10),
+                                topic_filled(0x20)};
+    equivalent.topics.topic1 = {topic_filled(0x21), topic_filled(0x11),
+                                topic_filled(0x21)};
+    equivalent.topics.topic2 = {topic_filled(0x22), topic_filled(0x12),
+                                topic_filled(0x22)};
+    auto resumed = query;
+    resumed.filters = {other, equivalent, other};
+    const auto actual = db->get_events(resumed);
+    ASSERT_TRUE(actual);
+    EXPECT_EQ(actual->events, expected->events);
+    EXPECT_EQ(actual->cursor, expected->cursor);
+    EXPECT_EQ(actual->latest_block, expected->latest_block);
+
+    std::vector<EventFilterList> changed;
+    auto different_address = matching;
+    different_address.contract_addresses = {first};
+    changed.push_back({different_address, other});
+    auto different_topic = matching;
+    different_topic.topics.topic2 = {topic_filled(0x22)};
+    changed.push_back({different_topic, other});
+    auto different_position = matching;
+    std::swap(different_position.topics.topic0,
+              different_position.topics.topic1);
+    changed.push_back({different_position, other});
+    auto different_grouping = matching;
+    different_grouping.topics.topic0 = other.topics.topic0;
+    auto regrouped_other = other;
+    regrouped_other.topics.topic0 = matching.topics.topic0;
+    changed.push_back({different_grouping, regrouped_other});
+    changed.push_back({matching});
+    changed.emplace_back();
+    auto no_addresses = matching;
+    no_addresses.contract_addresses.clear();
+    changed.push_back({no_addresses, other});
+    for (size_t i = 0; i < changed.size(); ++i) {
+      SCOPED_TRACE(i);
+      resumed.filters = changed[i];
+      const auto invalid = db->get_events(resumed);
+      ASSERT_FALSE(invalid);
+      EXPECT_EQ(invalid.error().code(), IndexerErrorCode::kInvalidCursor);
+    }
+  }
 }
 
 TEST_F(IndexDBTest, GetEventsTopicFilterPartialMatch)
@@ -815,7 +900,7 @@ TEST_F(IndexDBTest, FreshDatabaseReopensUninitialized)
   EXPECT_EQ(*db->latest_block(), 0);
 }
 
-TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
+TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsInvalidCursor)
 {
   auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
@@ -837,7 +922,10 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
   ASSERT_TRUE(db->consume_events(5, std::vector{event_log1}, {}));
   ASSERT_TRUE(db->consume_events(10, std::vector{event_log2}, {}));
 
-  EventCursorPayload payload;
+  EventCursorPayload payload{};
+  payload.method = HistoryCursorMethod::CursorEvents;
+  payload.query_hash = cursor::event_query_hash(
+      EventFilterList{filter_with_contracts_no_topics({addr})});
   payload.schema_version = cursor::kCursorVersion;
   payload.order = static_cast<IterationOrder>(2);
   payload.block_height = 10;
@@ -855,9 +943,8 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
       reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
 
   auto page = db->get_events(query);
-  ASSERT_TRUE(page.has_value());
-  EXPECT_TRUE(page->events.empty());
-  EXPECT_TRUE(page->cursor.empty());
+  ASSERT_FALSE(page.has_value());
+  EXPECT_EQ(page.error().code(), IndexerErrorCode::kInvalidCursor);
 }
 
 TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
@@ -1046,64 +1133,32 @@ TEST_F(IndexDBTest, GetEventsNegativeAnchorIsValidated)
   }
 }
 
-// tx_index is keyed by tx hash alone, so ingesting the same hash at a
-// second height replaces the receipt while the first height's
-// contract_index row stays durable.  Hydrating that stale row must not
-// splice block 11's payload into a block 10 result.  The DB is opened
-// inside the EXPECT_DEATH block so the fork happens before any RocksDB
-// background threads exist.
-TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchIsFatal)
+// A receipt overwritten at a second height must fail the whole page rather
+// than splice the replacement payload into the earlier event-index position.
+TEST_F(IndexDBTest, GetEventsShadowedReceiptBlockMismatchFailsPage)
 {
-  if constexpr (!is_debug_build()) {
-    // The "CHECK FAILED" panic message this death test matches is only
-    // produced in debug builds (x23::panic is std::unreachable() under
-    // NDEBUG).  Matches RecoveryTests.RecoveredHighBitRCQLiveEntriesDiesOnLoad.
-    GTEST_SKIP();
-  }
-
-  // consume_events leaves its thread pool and RocksDB's background
-  // threads alive, so the default fork-only death test style forks a
-  // multi-threaded process.  "threadsafe" re-execs instead, which is
-  // what keeps this from flaking under CI.
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
-
   ContractAddress addr_c, addr_d;
   std::ranges::fill(addr_c, 0xC0);
   std::ranges::fill(addr_d, 0xD0);
   SHA256Hash tx;
   std::ranges::fill(tx, 0x42);
-
-  {
-    auto db = IndexDB::make_new(tmp_dir_.directory());
-    ASSERT_TRUE(db.has_value());
-
-    TxEventLog at_10{};
-    at_10.tx_hash = tx;
-    at_10.events.push_back(make_event(addr_c, 0, 0));
-
-    TxEventLog at_11{};
-    at_11.tx_hash = tx;
-    at_11.events.push_back(make_event(addr_d, 0, 0));
-
-    ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
-    ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
-  }
-
-  const std::filesystem::path dir = tmp_dir_.directory();
-  X23_EXPECT_DEATH(
-      {
-        auto db = IndexDB::open(dir);
-        ASSERT_TRUE(db.has_value());
-
-        EventFilterList filters;
-        filters.push_back(filter_with_contracts_no_topics({addr_c}));
-        auto page =
-            db->get_events(make_query(std::move(filters),
-                                      IterationOrder::IterationOrderAscending,
-                                      anchor_at_height(10)));
-        (void)page;
-      },
-      "CHECK FAILED");
+  auto db = IndexDB::make_new(tmp_dir_.directory());
+  ASSERT_TRUE(db);
+  TxEventLog at_10{};
+  at_10.tx_hash = tx;
+  at_10.events.push_back(make_event(addr_c, 0, 0));
+  TxEventLog at_11{};
+  at_11.tx_hash = tx;
+  at_11.events.push_back(make_event(addr_d, 0, 0));
+  ASSERT_TRUE(db->consume_events(10, std::vector{at_10}, {}));
+  ASSERT_TRUE(db->consume_events(11, std::vector{at_11}, {}));
+  EventFilterList filters;
+  filters.push_back(filter_with_contracts_no_topics({addr_c}));
+  const auto page = db->get_events(
+      make_query(std::move(filters), IterationOrder::IterationOrderAscending,
+                 anchor_at_height(10)));
+  ASSERT_FALSE(page);
+  EXPECT_EQ(page.error().code(), IndexerErrorCode::kInternal);
 }
 
 // NOLINTEND(misc-include-cleaner)
