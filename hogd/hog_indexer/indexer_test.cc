@@ -1028,7 +1028,10 @@ TEST_F(IndexerTest, EventRpcBoundsNonmatchingCandidatesAndResumes)
     const auto cursor = cursor::decode(
         std::string_view(reinterpret_cast<const char *>(opaque.data()),
                          opaque.size()));
-    ASSERT_TRUE(cursor);
+    if (!cursor) {
+      ADD_FAILURE() << "Could not decode event cursor";
+      return;
+    }
     EXPECT_EQ(cursor->tx_hash,
               hashes[ascending ? IndexDB::kEventsMaxCandidates - 1 : 1]);
     // Even an internal caller cannot enlarge the server's hard budget.

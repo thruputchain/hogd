@@ -1304,7 +1304,10 @@ TEST_F(IndexDBTest, EventCandidateBudgetCountsUniquePositionsBeforeTopics)
               cursor::decode(std::string_view(reinterpret_cast<const char *>(
                                                   page->cursor.data()),
                                               page->cursor.size()));
-          ASSERT_TRUE(decoded);
+          if (!decoded) {
+            ADD_FAILURE() << "Could not decode event cursor";
+            return;
+          }
           EXPECT_EQ(decoded->sequence_number, sequence);
           EXPECT_EQ(decoded->tx_hash, log.tx_hash);
         }
