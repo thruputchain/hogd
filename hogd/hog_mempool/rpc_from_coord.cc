@@ -325,14 +325,12 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     });
   });
   auto pending = std::make_shared<SubmissionAuth>();
-  for (size_t i = 0; i < txs.size(); i++) {
-    const ContractAddress &account = txs[i].tx.invocation.invoked_address;
-    pending->accounts[account].push_back(i);
-    pending->dirty.insert(account);
+  pending->accounts.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    pending->accounts.insert(tx.tx.invocation.invoked_address);
   }
 
   AuthErrorCodeBatch results;
-  results.resize(txs.size());
 
   co_await commit_guard(commit_lock_);
 
@@ -341,7 +339,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                   return entry.expired();
                 });
   submission_auth_.push_back(pending);
-  bool repeated_auth = false;
+  bool initial_auth = !txs.empty();
   BlockHeight verify_height = scheduler_->current_block();
   while (true) {
     const BlockHeight height = scheduler_->current_block();
@@ -362,7 +360,7 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
         }
       }
     }
-    if (pending->dirty.empty()) {
+    if (!initial_auth && pending->dirty.empty()) {
       co_return results;
     }
 
@@ -371,34 +369,45 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     verify_height = height;
     commit_guard.reset();
 
+    // Authenticate the original batch directly on the normal first pass.
+    // Copy only the subset invalidated by an intervening auth-data update;
+    // the account set above is sufficient for tracking those updates.
     SignedTransactionBatch retry_txs;
     x23::Vec<size_t> indices;
-    for (const ContractAddress &account : dirty) {
-      for (size_t i : pending->accounts.at(account)) {
-        retry_txs.push_back(txs[i]);
-        indices.push_back(i);
+    if (!initial_auth) {
+      for (size_t i = 0; i < txs.size(); i++) {
+        if (dirty.contains(txs[i].tx.invocation.invoked_address)) {
+          retry_txs.push_back(txs[i]);
+          indices.push_back(i);
+        }
       }
     }
+    const SignedTransactionBatch &verify_txs = initial_auth ? txs : retry_txs;
     if (submission_auth_test_hook_) {
-      co_await submission_auth_test_hook_(verify_height, retry_txs,
+      co_await submission_auth_test_hook_(verify_height, verify_txs,
                                           /*after_auth=*/false);
     }
     ElapsedTimer auth_timer;
-    if (repeated_auth)
+    if (!initial_auth)
       MempoolMetrics::instance().ingestion_auth_retry_count.increment();
-    repeated_auth = true;
-    const AuthErrorCodeBatch verified =
+    AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
-                                                               retry_txs);
+                                                               verify_txs);
     MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
         auth_timer.elapsed());
     if (submission_auth_test_hook_) {
-      co_await submission_auth_test_hook_(verify_height, retry_txs,
+      co_await submission_auth_test_hook_(verify_height, verify_txs,
                                           /*after_auth=*/true);
     }
-    CHECK_EQ(verified.size(), indices.size());
-    for (size_t i = 0; i < indices.size(); i++) {
-      results[indices[i]] = verified[i];
+    CHECK_EQ(verified.size(), verify_txs.size());
+    if (initial_auth) {
+      results = std::move(verified);
+      initial_auth = false;
+    }
+    else {
+      for (size_t i = 0; i < indices.size(); i++) {
+        results[indices[i]] = verified[i];
+      }
     }
     // Changes during this RPC remain in [pending->dirty] for the next pass.
     co_await commit_guard(commit_lock_);

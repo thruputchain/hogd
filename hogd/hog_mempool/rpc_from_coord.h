@@ -446,8 +446,7 @@ public:
 
 private:
   struct SubmissionAuth {
-    std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
-        accounts;
+    std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
     std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
   };
 
