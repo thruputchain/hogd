@@ -815,7 +815,7 @@ TEST_F(IndexDBTest, FreshDatabaseReopensUninitialized)
   EXPECT_EQ(*db->latest_block(), 0);
 }
 
-TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
+TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsInvalidCursor)
 {
   auto db = IndexDB::make_new(tmp_dir_.directory());
   ASSERT_TRUE(db.has_value());
@@ -855,9 +855,8 @@ TEST_F(IndexDBTest, GetEventsInvalidCursorOrderReturnsEmpty)
       reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
 
   auto page = db->get_events(query);
-  ASSERT_TRUE(page.has_value());
-  EXPECT_TRUE(page->events.empty());
-  EXPECT_TRUE(page->cursor.empty());
+  ASSERT_FALSE(page.has_value());
+  EXPECT_EQ(page.error().code(), IndexerErrorCode::kInvalidCursor);
 }
 
 TEST_F(IndexDBTest, GetEventsCursorlessInvalidOrderReturnsEmpty)
