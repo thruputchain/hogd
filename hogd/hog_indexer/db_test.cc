@@ -248,6 +248,42 @@ TEST_F(IndexDBTest, ConsumeAndLookupTxEvents)
   EXPECT_EQ(included3.error(), IndexerErrorCode::kDBNotFound);
 }
 
+// Read an SST-backed record, then check its payloads after the database closes.
+TEST_F(IndexDBTest, TransactionRecordOwnsDecodedPayloads)
+{
+  ProposedTransaction body{};
+  body.signed_tx.tx.uniquifier.nonce = 42;
+  body.signed_tx.tx.invocation.calldata.resize(256);
+  std::ranges::fill(body.signed_tx.tx.invocation.calldata, 0x5A);
+  TxEventLog log{};
+  log.tx_hash = sha256(body.signed_tx.tx);
+  TxEmittedEvent event{};
+  event.serialized_event.resize(1024);
+  std::ranges::fill(event.serialized_event, 0xA5);
+  for (int i = 0; i < 64; ++i) {
+    log.events.push_back(event);
+  }
+
+  auto record = [&] {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    if (!db) {
+      ADD_FAILURE() << "Could not create index database";
+      return IndexerStatus<IndexDB::TxRecord>(db.error());
+    }
+    auto consumed = db->consume_events(10, std::vector{log}, std::vector{body});
+    if (!consumed) {
+      ADD_FAILURE() << "Could not ingest transaction";
+      return IndexerStatus<IndexDB::TxRecord>(consumed.error());
+    }
+    return db->get_tx_record(log.tx_hash);
+  }();
+
+  ASSERT_TRUE(record);
+  EXPECT_EQ(record->height, 10);
+  EXPECT_EQ(record->tx, body);
+  EXPECT_EQ(record->events, log);
+}
+
 // -------------------------------------------------------------------
 // get_events tests
 // -------------------------------------------------------------------

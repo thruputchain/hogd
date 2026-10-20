@@ -1576,7 +1576,7 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
 
   std::string key_buffer;
   IndexerKeyFormat::make_tx_key(key_buffer, tx_hash);
-  std::string value;
+  rocksdb::PinnableSlice value;
 
   rocksdb::ReadOptions read_options;
   rocksdb::Status status =
@@ -1592,7 +1592,7 @@ IndexDB::get_tx_record(SHA256Hash const &tx_hash) const
   }
 
   try {
-    TxRecord record = parse_tx_value(value);
+    TxRecord record = parse_tx_value(value.ToStringView());
     if (!valid_tx_record(record, tx_hash, false)) {
       error("tx_index key and receipt identity disagree for {}",
             HexArray(tx_hash).str());
