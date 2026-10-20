@@ -1065,6 +1065,24 @@ TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
   query.limit = 1;
   auto first = db_->get_transactions_by_block(query);
   ASSERT_TRUE(first && !first->cursor.empty());
+  EventQuery foreign_events{};
+  foreign_events.filters.push_back(
+      EventFilter{.contract_addresses = {ContractAddress{}}, .topics = {}});
+  foreign_events.cursor = first->cursor;
+  TransactionQuery foreign_transactions{};
+  foreign_transactions.cursor = first->cursor;
+  AddressTransactionQuery foreign_address{};
+  foreign_address.cursor = first->cursor;
+  const auto events_result = db_->get_events(foreign_events);
+  ASSERT_FALSE(events_result);
+  EXPECT_EQ(events_result.error().code(), IndexerErrorCode::kInvalidCursor);
+  const auto transactions_result = db_->get_transactions(foreign_transactions);
+  ASSERT_FALSE(transactions_result);
+  EXPECT_EQ(transactions_result.error().code(),
+            IndexerErrorCode::kInvalidCursor);
+  const auto address_result = db_->get_transactions_by_address(foreign_address);
+  ASSERT_FALSE(address_result);
+  EXPECT_EQ(address_result.error().code(), IndexerErrorCode::kInvalidCursor);
   query.cursor = first->cursor;
   query.height = 2;
   auto wrong_height = db_->get_transactions_by_block(query);
@@ -1127,6 +1145,8 @@ TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
   ASSERT_FALSE(oversized);
   EXPECT_EQ(oversized.error().code(), IndexerErrorCode::kInvalidCursor);
   EventCursorPayload event_cursor{};
+  event_cursor.method = HistoryCursorMethod::CursorEvents;
+  event_cursor.query_hash = cursor::event_query_hash(foreign_events.filters);
   event_cursor.order = IterationOrder::IterationOrderAscending;
   event_cursor.block_height = 1;
   event_cursor.max_block_height = 2;
