@@ -28,6 +28,10 @@ IndexerErrorCategory::message(int code) const
   case kMigrationRequired:
     return "Block query format changed; rebuild into a separate index "
            "directory";
+  case kInvalidCursor:
+    return "Invalid history cursor";
+  case kHistoryUnavailable:
+    return "Continuation history is unavailable";
   }
   return "Unknown code: " + std::to_string(code);
 }

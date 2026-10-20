@@ -42,8 +42,8 @@ The query index does not prune history today. Any future pruning must update met
 - An empty cursor starts a walk. A returned empty cursor ends it.
 - A continuation cursor carries the height, block hash, order, and last returned transaction hash. The cursor's order takes precedence over the request field.
 - A valid cursor resumes after its last reference, including after restart and while the chain advances.
-- A matching, structurally valid continuation above the current indexed tip reports not-ready, not exhaustion. Retry after the replacement index catches up; its block identity is checked once that height is available.
-- Malformed, oversized, foreign-query, wrong-height, or wrong-block cursors return an empty terminal page, as the current internal protocol specifies. This behavior is not a promise of durable bulk-feed recovery.
+- Once the block projection is ready, a matching, structurally valid continuation above its indexed tip reports `IndexerQueryHistoryUnavailable`. Retry with the same cursor after the replacement index catches up; its block identity is checked once that height is available.
+- Malformed, oversized, foreign-query, wrong-height, wrong-block, or missing-position cursors report `IndexerQueryInvalidCursor`. These failures are not successful exhaustion or a promise of durable bulk-feed recovery.
 - Clients must retain the cursor bytes unchanged. There is no execution-order meaning in this traversal.
 
 ## Existing databases and protocol changes
@@ -67,4 +67,8 @@ There is no automatic in-place backfill or protocol migration in this change. Th
 
 ## Public API coordination
 
-The public RPC implementation in thruput-tools #557 maps block-lookup system errors to backend-unavailable, never not-found. Its new block-transaction method rejects zero before dispatch, aligning with the native API proposal (#555). The internal node method retains its zero-limit default; existing public pagination methods are unchanged. Cursor error improvements tracked by GH-428 must include this method as well as existing history methods. This implementation retains terminal empty pages for malformed cursors until that protocol change is adopted.
+Public JSON-RPC methods and their wire version are owned by thruput-tools. Block-lookup system errors remain backend-unavailable, never not-found. The internal node retains its zero-limit default; public validation owns its own limit rules.
+
+The internal page-query outcomes distinguish invalid cursors from unavailable continuation history. Event, transaction and address walks also report `IndexerQueryInvalidCursor` for malformed cursors and `IndexerQueryHistoryUnavailable` for a saved watermark above the current serving watermark. Their shared cursor format does not yet bind a cursor to its method or query; further history integrity work remains in [GH-428](https://linear.app/grndhg/issue/GH-428).
+
+Runtime and bindings must use the same protocol commit for RPC introductions. Payload-free outcomes preserve XDR result layouts but do not bypass that identity check. Legacy tools maps unrecognized outcomes to backend-unavailable; native adapters must map invalid cursors to invalid params and unavailable continuation history to history-unavailable. These internal changes do not activate the native public API.

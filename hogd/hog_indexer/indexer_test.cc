@@ -2,18 +2,23 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
+#include <string>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "db_conflict.hh"
 #include "event.hh"
+#include "event_cursor_internal.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
@@ -24,6 +29,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -459,6 +465,156 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   EXPECT_EQ(address_page.refs[0].height, 301);
   EXPECT_EQ(address_page.latest_block, 302);
   EXPECT_TRUE(address_page.cursor.empty());
+}
+
+TEST_F(IndexerTest, MalformedHistoryCursorsHaveTypedOutcomes)
+{
+  const auto logs = create_event_logs();
+  const auto bodies = create_tx_bodies(logs.size());
+  ingest_legacy_events(10, logs, bodies)();
+
+  EventQuery events{};
+  events.filters.push_back(
+      EventFilter{.contract_addresses = {logs[0].events[0].contract_address},
+                  .topics = {}});
+  TransactionQuery transactions{};
+  AddressTransactionQuery address{};
+  address.address = bodies[0].signed_tx.tx.invocation.invoked_address;
+
+  EventCursorPayload payload{};
+  payload.schema_version = cursor::kCursorVersion;
+  payload.order = IterationOrder::IterationOrderAscending;
+  payload.block_height = 10;
+  payload.max_block_height = 10;
+  const auto serialize_cursor = [](const EventCursorPayload &value) {
+    const auto bytes = x23::serialize(value);
+    return std::string(reinterpret_cast<const char *>(bytes.data()),
+                       bytes.size());
+  };
+  std::vector<std::string> invalid{std::string(1, '\0'),
+                                   std::string(cursor::kMaxCursorBytes + 1,
+                                               '\0')};
+  payload.schema_version++;
+  invalid.push_back(serialize_cursor(payload));
+  payload.schema_version = cursor::kCursorVersion;
+  payload.order = static_cast<IterationOrder>(2);
+  invalid.push_back(serialize_cursor(payload));
+  for (size_t i = 0; i < invalid.size(); ++i) {
+    SCOPED_TRACE(i);
+    const auto &bytes = invalid[i];
+    events.cursor.clear();
+    events.cursor.append_range(std::span<const uint8_t>(
+        reinterpret_cast<const uint8_t *>(bytes.data()), bytes.size()));
+    transactions.cursor = events.cursor;
+    address.cursor = events.cursor;
+    const auto event_page = db_->get_events(events);
+    ASSERT_FALSE(event_page);
+    EXPECT_EQ(event_page.error().code(), IndexerErrorCode::kInvalidCursor);
+    const auto tx_page = db_->get_transactions(transactions);
+    ASSERT_FALSE(tx_page);
+    EXPECT_EQ(tx_page.error().code(), IndexerErrorCode::kInvalidCursor);
+    const auto address_page = db_->get_transactions_by_address(address);
+    ASSERT_FALSE(address_page);
+    EXPECT_EQ(address_page.error().code(), IndexerErrorCode::kInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_events(events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_transactions(transactions)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_transactions_by_address(address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+  }
+}
+
+TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
+{
+  ContractAddress addr{};
+  std::ranges::fill(addr, 0xD7);
+  auto logs = create_event_logs();
+  auto bodies = create_tx_bodies(logs.size());
+  for (size_t i = 0; i < logs.size(); ++i) {
+    logs[i].events[0].contract_address = addr;
+    // The test event does not carry topics.
+    logs[i].events[0].num_topics = 0;
+    bodies[i].signed_tx.tx.invocation.invoked_address = addr;
+    ingest_legacy_events(static_cast<BlockHeight>(10 + i),
+                         TxEventLogBatch{logs[i]},
+                         ProposedTransactionBatch{bodies[i]})();
+  }
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    EventQuery events{};
+    events.filters.push_back(
+        EventFilter{.contract_addresses = {addr}, .topics = {}});
+    events.order = order;
+    events.anchor.kind(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                 : BlockAnchorKind::AnchorAtEnd);
+    events.limit = 1;
+    TransactionQuery transactions{};
+    transactions.order = order;
+    transactions.anchor = events.anchor;
+    transactions.limit = 1;
+    AddressTransactionQuery address{};
+    address.address = addr;
+    address.order = order;
+    address.anchor = events.anchor;
+    address.limit = 1;
+    const auto first_events = db_->get_events(events);
+    ASSERT_TRUE(first_events && !first_events->cursor.empty());
+    events.cursor = first_events->cursor;
+    const auto first_txs = db_->get_transactions(transactions);
+    ASSERT_TRUE(first_txs && !first_txs->cursor.empty());
+    transactions.cursor = first_txs->cursor;
+    const auto first_refs = db_->get_transactions_by_address(address);
+    ASSERT_TRUE(first_refs && !first_refs->cursor.empty());
+    address.cursor = first_refs->cursor;
+
+    auto replacement =
+        IndexDB::make_new(std::filesystem::path(tmp_dir_.directory()) /
+                          (ascending ? "ascending" : "descending"));
+    ASSERT_TRUE(replacement);
+    ASSERT_TRUE(
+        replacement->consume_events(10, TxEventLogBatch{logs[0]},
+                                    ProposedTransactionBatch{bodies[0]}));
+    RecentTxFailureCache failures;
+    IndexerBlockExplorerRpc rpc(*replacement, failures);
+    const auto missing_events = replacement->get_events(events);
+    ASSERT_FALSE(missing_events);
+    EXPECT_EQ(missing_events.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    const auto missing_txs = replacement->get_transactions(transactions);
+    ASSERT_FALSE(missing_txs);
+    EXPECT_EQ(missing_txs.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    const auto missing_refs = replacement->get_transactions_by_address(address);
+    ASSERT_FALSE(missing_refs);
+    EXPECT_EQ(missing_refs.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    EXPECT_EQ(rpc.get_events(events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+    EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+    EXPECT_EQ(rpc.get_transactions_by_address(address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+
+    ASSERT_TRUE(
+        replacement->consume_events(11, TxEventLogBatch{logs[1]},
+                                    ProposedTransactionBatch{bodies[1]}));
+    const auto resumed_events = unwrap_page(rpc.get_events(events)());
+    ASSERT_EQ(resumed_events.events.size(), 1);
+    EXPECT_EQ(resumed_events.events[0].block_height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_events.cursor.empty());
+    const auto resumed_txs = unwrap_page(rpc.get_transactions(transactions)());
+    ASSERT_EQ(resumed_txs.transactions.size(), 1);
+    EXPECT_EQ(resumed_txs.transactions[0].height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_txs.cursor.empty());
+    const auto resumed_refs =
+        unwrap_page(rpc.get_transactions_by_address(address)());
+    ASSERT_EQ(resumed_refs.refs.size(), 1);
+    EXPECT_EQ(resumed_refs.refs[0].height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_refs.cursor.empty());
+  }
 }
 
 // Regression: a batch in which NO transaction emits any event (every

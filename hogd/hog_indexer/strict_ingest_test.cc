@@ -1033,7 +1033,11 @@ TEST_F(StrictIndexerTest, ContinuationWaitsForReplacementIndexToCatchUp)
   query.cursor = page->cursor;
   auto waiting = replacement->get_transactions_by_block(query);
   ASSERT_FALSE(waiting);
-  EXPECT_EQ(waiting.error().code(), IndexerErrorCode::kQueryNotReady);
+  EXPECT_EQ(waiting.error().code(), IndexerErrorCode::kHistoryUnavailable);
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*replacement, failures);
+  EXPECT_EQ(rpc.get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
   ASSERT_EQ(replacement->apply_committed_block(origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
   auto resumed = replacement->get_transactions_by_block(query);
@@ -1064,34 +1068,64 @@ TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
   query.cursor = first->cursor;
   query.height = 2;
   auto wrong_height = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(wrong_height);
-  EXPECT_TRUE(wrong_height->refs.empty() && wrong_height->cursor.empty());
+  ASSERT_FALSE(wrong_height);
+  EXPECT_EQ(wrong_height.error().code(), IndexerErrorCode::kInvalidCursor);
   query.height = 1;
   query.cursor.back() ^= 0xFF;
-  auto wrong_hash = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(wrong_hash);
-  EXPECT_TRUE(wrong_hash->refs.empty() && wrong_hash->cursor.empty());
+  auto missing_resume_key = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(missing_resume_key);
+  EXPECT_EQ(missing_resume_key.error().code(),
+            IndexerErrorCode::kInvalidCursor);
   query.cursor = first->cursor;
   BlockQueryCursor decoded;
   x23::deserialize(&decoded,
                    x23::BufView(query.cursor.data(), query.cursor.size()));
+  for (const BlockHeight height : {0, -1}) {
+    SCOPED_TRACE(height);
+    auto impossible = decoded;
+    impossible.height = height;
+    const auto bytes = x23::serialize(impossible);
+    query.height = height;
+    query.cursor.clear();
+    query.cursor.append_range(
+        std::span<const uint8_t>(bytes.data(), bytes.size()));
+    auto invalid_height = db_->get_transactions_by_block(query);
+    ASSERT_FALSE(invalid_height);
+    EXPECT_EQ(invalid_height.error().code(), IndexerErrorCode::kInvalidCursor);
+  }
+  query.height = 1;
   decoded.block_hash[0] ^= 0xFF;
   auto encoded = x23::serialize(decoded);
   query.cursor.clear();
   query.cursor.append_range(
       std::span<const uint8_t>(encoded.data(), encoded.size()));
   auto reset = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(reset);
-  EXPECT_TRUE(reset->refs.empty() && reset->cursor.empty());
+  ASSERT_FALSE(reset);
+  EXPECT_EQ(reset.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor = first->cursor;
+  x23::deserialize(&decoded,
+                   x23::BufView(query.cursor.data(), query.cursor.size()));
+  decoded.order = static_cast<IterationOrder>(2);
+  encoded = x23::serialize(decoded);
+  query.cursor.clear();
+  query.cursor.append_range(
+      std::span<const uint8_t>(encoded.data(), encoded.size()));
+  auto wrong_order = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(wrong_order);
+  EXPECT_EQ(wrong_order.error().code(), IndexerErrorCode::kInvalidCursor);
   query.cursor = first->cursor;
   query.cursor.front() ^= 0xFF;
   auto wrong_format = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(wrong_format);
-  EXPECT_TRUE(wrong_format->refs.empty() && wrong_format->cursor.empty());
+  ASSERT_FALSE(wrong_format);
+  EXPECT_EQ(wrong_format.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor.resize(1);
+  auto truncated = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(truncated);
+  EXPECT_EQ(truncated.error().code(), IndexerErrorCode::kInvalidCursor);
   query.cursor.resize(257);
   auto oversized = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(oversized);
-  EXPECT_TRUE(oversized->refs.empty() && oversized->cursor.empty());
+  ASSERT_FALSE(oversized);
+  EXPECT_EQ(oversized.error().code(), IndexerErrorCode::kInvalidCursor);
   EventCursorPayload event_cursor{};
   event_cursor.order = IterationOrder::IterationOrderAscending;
   event_cursor.block_height = 1;
@@ -1101,8 +1135,12 @@ TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
   query.cursor.append_range(std::span<const uint8_t>(
       reinterpret_cast<const uint8_t *>(foreign.data()), foreign.size()));
   auto cross_query = db_->get_transactions_by_block(query);
-  ASSERT_TRUE(cross_query);
-  EXPECT_TRUE(cross_query->refs.empty() && cross_query->cursor.empty());
+  ASSERT_FALSE(cross_query);
+  EXPECT_EQ(cross_query.error().code(), IndexerErrorCode::kInvalidCursor);
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*db_, failures);
+  EXPECT_EQ(rpc.get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryInvalidCursor);
 }
 
 TEST_F(StrictIndexerTest, BlockQueryCorruptionIsNotAnEmptyResult)

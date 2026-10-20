@@ -149,26 +149,30 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
   std::optional<BlockQueryCursor> cursor;
   if (!query.cursor.empty()) {
     if (query.cursor.size() > kMaxBlockCursorBytes) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     try {
       cursor.emplace();
       x23::deserialize(&*cursor,
                        x23::BufView(query.cursor.data(), query.cursor.size()));
     } catch (const x23::XdrException &) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (cursor->format != kBlockCursorFormat ||
+        cursor->height < kFirstOutboxBlockHeight ||
         cursor->height != query.height) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     order = cursor->order;
   }
   if (!is_valid_iteration_order(order)) {
+    if (cursor) {
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
     return page;
   }
   if (cursor && query.height > page.latest_block) {
-    return IndexerError(IndexerErrorCode::kQueryNotReady);
+    return IndexerError(IndexerErrorCode::kHistoryUnavailable);
   }
   if (query.height < page.oldest_block || query.height > page.latest_block) {
     return page;
@@ -179,7 +183,7 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
   }
   const auto block_hash = record->hash;
   if (cursor && cursor->block_hash != block_hash) {
-    return page;
+    return IndexerError(IndexerErrorCode::kInvalidCursor);
   }
   const bool ascending = order == IterationOrder::IterationOrderAscending;
   const std::string prefix = IndexerKeyFormat::make_block_query_key(
@@ -214,7 +218,7 @@ IndexDB::get_transactions_by_block(const BlockTransactionQuery &query) const
       return IndexerError(IndexerErrorCode::kInternal);
     }
     if (!iter->Valid() || iter->key().ToStringView() != key) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     auto ordinal = read_ordinal(iter->value().ToStringView());
     if (!ordinal || *ordinal >= transaction_count) {

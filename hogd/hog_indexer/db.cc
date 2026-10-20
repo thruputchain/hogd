@@ -2079,16 +2079,16 @@ IndexDB::get_events(EventQuery const &query) const
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
     if (!decoded) {
-      // Unknown version / malformed cursor.  Return empty page with
-      // empty cursor so the client restarts pagination; better than
-      // silently continuing with a misinterpreted position.
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (!is_valid_iteration_order(decoded->order)) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+    if (decoded->max_block_height > max_serve_block) {
+      return IndexerError(IndexerErrorCode::kHistoryUnavailable);
     }
     order = decoded->order;
-    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
+    max_serve_block = decoded->max_block_height;
     cursor_block = decoded->block_height;
     cursor_tx = decoded->tx_hash;
     cursor_seq = decoded->sequence_number;
@@ -2301,10 +2301,13 @@ IndexDB::get_transactions(TransactionQuery const &query) const
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
     if (!decoded || !is_valid_iteration_order(decoded->order)) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+    if (decoded->max_block_height > max_serve_block) {
+      return IndexerError(IndexerErrorCode::kHistoryUnavailable);
     }
     order = decoded->order;
-    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
+    max_serve_block = decoded->max_block_height;
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
     cursor_pos.seq = 0;
@@ -2461,10 +2464,13 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
         std::string_view(reinterpret_cast<const char *>(query.cursor.data()),
                          query.cursor.size()));
     if (!decoded || !is_valid_iteration_order(decoded->order)) {
-      return page;
+      return IndexerError(IndexerErrorCode::kInvalidCursor);
+    }
+    if (decoded->max_block_height > max_serve_block) {
+      return IndexerError(IndexerErrorCode::kHistoryUnavailable);
     }
     order = decoded->order;
-    max_serve_block = std::min(max_serve_block, decoded->max_block_height);
+    max_serve_block = decoded->max_block_height;
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
     // ROOT_TX rows are always written with seq == 0, so the position we
