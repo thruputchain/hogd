@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
 #include <limits>
 #include <optional>
@@ -9,6 +10,7 @@
 
 #include "hogd/base/network_config_params.h"
 #include "network_config.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -83,12 +85,12 @@ TEST(ConfigParamValueTest, ReadsTheArmTheParameterNames)
 // must survive the round trip rather than truncate.
 TEST(ConfigParamValueTest, TheTxGasArmCarriesAFullGasAmount)
 {
-  constexpr uint64_t kValue = (uint64_t{1} << 40) + 7;
+  constexpr std::uint64_t kValue = (std::uint64_t{1} << 40) + 7;
   EXPECT_EQ(config_param_max_value(ConfigParamID::kConfigParamMaxTxGas),
             std::numeric_limits<GasAmount>::max());
   EXPECT_EQ(config_param_max_value(
                 ConfigParamID::kConfigParamMaxReturnBufferLen),
-            std::numeric_limits<uint32_t>::max());
+            std::numeric_limits<std::uint32_t>::max());
 
   const ConfigParam param =
       NetworkConfigParams::make_param(ConfigParamID::kConfigParamMaxTxGas,
@@ -108,7 +110,8 @@ TEST(ConfigParamValueDeathTest, AUint32ArmRefusesAWiderValue)
 {
   EXPECT_DEATH(NetworkConfigParams::make_param(
                    ConfigParamID::kConfigParamMaxCalldataLen,
-                   uint64_t{std::numeric_limits<uint32_t>::max()} + 1),
+                   std::uint64_t{std::numeric_limits<std::uint32_t>::max()} +
+                       1),
                "");
 }
 
@@ -122,7 +125,7 @@ TEST(NetworkConfigParamsTest, AListOmittingTxGasImposesNoBudget)
                                  ConfigParamID::kConfigParamMaxReturnBufferLen,
                                  kDefaultMaxReturnBufferLen);
   ASSERT_EQ(config.v0().params.size(),
-            static_cast<size_t>(std::to_underlying(
+            static_cast<std::size_t>(std::to_underlying(
                 ConfigParamID::kConfigParamMaxReturnBufferLen)) +
                 1);
 
