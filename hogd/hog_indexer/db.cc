@@ -11,6 +11,7 @@
 #include <filesystem>
 #include <format>
 #include <future>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <rocksdb/version.h>
@@ -1876,26 +1877,31 @@ public:
   }
 
   // Initial seek, treating `anchor` as an inclusive starting
-  // boundary in the requested direction.
-  void seek(BlockHeight anchor, IterationOrder order)
+  // boundary in the requested direction.  When resuming from a
+  // `cursor` inside the anchor block, seek straight to the cursor's
+  // key so skip_past() steps over at most the cursor row itself
+  // rather than walking every row of the block that precedes it.
+  void seek(BlockHeight anchor, IterationOrder order,
+            Position const *cursor = nullptr)
   {
-    std::string prefix;
-    IndexerKeyFormat::make_contract_key_prefix(prefix, contract_, kind_,
-                                               anchor);
-    if (order == IterationOrder::IterationOrderAscending) {
-      iter_->Seek(prefix);
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    Position start{.block = anchor, .tx = {}, .seq = 0};
+    if (cursor != nullptr && cursor->block == anchor) {
+      start = *cursor;
+    }
+    else if (!ascending) {
+      // Descending: land on (or below) the LAST row at `anchor`.
+      start.tx.fill(0xFF);
+      start.seq = std::numeric_limits<std::uint32_t>::max();
+    }
+    std::string key;
+    IndexerKeyFormat::make_contract_key(key, contract_, kind_, start.block,
+                                        start.tx, start.seq);
+    if (ascending) {
+      iter_->Seek(key);
     }
     else {
-      // Descending: we want entries at block <= anchor.  `prefix` lands
-      // at the first key with block == anchor; append all-FF for the
-      // (tx_hash, seq) suffix to push past those entries before
-      // SeekForPrev so we land on (or below) the LAST event at
-      // `anchor`.
-      const std::size_t suffix_size = IndexerKeyFormat::kContractKeySize -
-                                      IndexerKeyFormat::kContractKeyPrefixSize;
-      std::string upper_prefix = prefix;
-      upper_prefix.append(suffix_size, static_cast<char>(0xFF));
-      iter_->SeekForPrev(upper_prefix);
+      iter_->SeekForPrev(key);
     }
     refresh_current();
   }
@@ -2139,7 +2145,7 @@ IndexDB::get_events(EventQuery const &query) const
                       .tx = cursor_tx,
                       .seq = cursor_seq};
   for (ContractIter &ci : iters) {
-    ci.seek(anchor_block, order);
+    ci.seek(anchor_block, order, have_cursor ? &cursor_pos : nullptr);
     if (have_cursor && ci.has_current()) {
       ci.skip_past(order, cursor_pos);
     }
@@ -2499,7 +2505,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
 
   ContractIter iter(db_.get(), contract_cf_handle_, query.address, order,
                     max_serve_block, IndexerKeyFormat::kRootTx);
-  iter.seek(anchor_block, order);
+  iter.seek(anchor_block, order, have_cursor ? &cursor_pos : nullptr);
   if (have_cursor && iter.has_current()) {
     iter.skip_past(order, cursor_pos);
   }
