@@ -3,6 +3,7 @@
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -28,6 +29,24 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+namespace {
+
+bool
+same_auth_rules(const AddressAuthData *before, const AddressAuthData *after)
+{
+  // Review this comparison when the protocol adds auth fields. Only the write
+  // height is metadata; row presence, every signing key and its weight, and
+  // the required weight all affect verification.
+  static_assert(std::tuple_size_v<AddressAuthData> == 3);
+  if (before == nullptr || after == nullptr) {
+    return before == after;
+  }
+  return before->public_keys == after->public_keys &&
+         before->required_weight == after->required_weight;
+}
+
+} // namespace
 
 x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
@@ -126,30 +145,47 @@ AuthServer::register_auth_data_updates(
     co_await current_height_futex_.wait(current_height);
   }
 
-  for (const auto &key_change : key_changes) {
-    if (key_change.auth_data == nullptr) {
+  std::vector<std::span<const KeyChange>> pieces;
+  pieces.reserve(key_changes.chunks().size());
+  for (const KeyChangeBatch &chunk : key_changes.chunks()) {
+    size_t first = 0;
+    for (size_t i = 0; i < chunk.size(); ++i) {
+      const KeyChange &key_change = chunk[i];
+      // A normal execution can rewrite an auth row only to stamp its height.
+      // Keep that full cache update, but avoid invalidating pending mempool
+      // transactions when the signing rules are known to be unchanged. A
+      // cache miss or an entry already at this height is not proof of the
+      // previous rules, so conservatively forward those updates.
+      const auto previous =
+          mempool_client_ ? auth_data_cache_.get(key_change.address) : nullptr;
+      const bool unchanged =
+          previous && previous->first < height &&
+          same_auth_rules(previous->second ? &*previous->second : nullptr,
+                          key_change.auth_data.get());
       auto entry = std::make_shared<
-          std::pair<BlockHeight, std::optional<AddressAuthData>>>(height,
-                                                                  std::nullopt);
-      auth_data_cache_.put(key_change.address, entry);
-      continue;
+          std::pair<BlockHeight, std::optional<AddressAuthData>>>(
+          height, key_change.auth_data
+                      ? std::optional<AddressAuthData>(*key_change.auth_data)
+                      : std::nullopt);
+      auth_data_cache_.put(key_change.address, std::move(entry));
+      if (unchanged) {
+        if (first < i) {
+          pieces.emplace_back(chunk.data() + first, i - first);
+        }
+        first = i + 1;
+      }
     }
-    auto entry = std::make_shared<
-        std::pair<BlockHeight, std::optional<AddressAuthData>>>(
-        height, *key_change.auth_data);
-    auth_data_cache_.put(key_change.address, entry);
+    if (first < chunk.size()) {
+      pieces.emplace_back(chunk.data() + first, chunk.size() - first);
+    }
   }
   current_height_futex_.store(height);
   current_height_futex_.broadcast(&default_threadpool());
   co_await Health::instance().set_current_block_height(height);
 
   if (mempool_client_) {
-    // The mempool's proc still takes the height as one batch.
-    std::vector<std::span<const KeyChange>> pieces;
-    pieces.reserve(key_changes.chunks().size());
-    for (const KeyChangeBatch &chunk : key_changes.chunks()) {
-      pieces.emplace_back(chunk.data(), chunk.size());
-    }
+    // Forward every height, even when all row rewrites were metadata-only:
+    // admissions wait for the mempool's auth-data watermark to advance.
     co_await mempool_client_->mempoolauth_auth_data_changed(
         height, ChunkItems<KeyChange>(pieces));
   }

@@ -647,6 +647,143 @@ TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
   EXPECT_TRUE(empty_changes.empty());
 }
 
+TEST_F(AuthServerTest, MetadataOnlyAuthUpdatesStillAdvanceCacheAndMempoolHeight)
+{
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  auth_server().set_mempool_client(std::move(*client));
+
+  const ContractAddress address = make_test_address(1);
+  AddressAuthData auth_data = make_test_auth_data(1);
+  auth_data.required_weight = 1;
+  auth_server().register_auth_data_updates(
+      0, KeyChangeBatch{{address, x23::Ptr<AddressAuthData>(auth_data)}})();
+  ASSERT_EQ(mempool->impl()->received().second.size(), 1UL);
+
+  auth_data.last_written_height = 1;
+  auth_server().register_auth_data_updates(
+      1, KeyChangeBatch{{address, x23::Ptr<AddressAuthData>(auth_data)}})();
+
+  const auto [height, changes] = mempool->impl()->received();
+  EXPECT_EQ(height, 1);
+  EXPECT_TRUE(changes.empty())
+      << "A height-only rewrite must not invalidate pending authentication";
+  auto cached = auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(cached.has_value());
+  EXPECT_EQ(cached.value()->first, 1);
+  EXPECT_EQ(cached.value()->second, auth_data);
+  // Filtering mempool notifications must retain the cache's existing stale
+  // height checks, including for requests already in flight at the rewrite.
+  auto stale = auth_server().lookup_auth_data(0, address)();
+  ASSERT_FALSE(stale.has_value());
+  EXPECT_EQ(stale.error().code(), AuthErrorCode::kAuthStaleBlockHeight);
+}
+
+TEST_F(AuthServerTest, AuthRuleChangesSurviveFilteringAcrossChunkBoundaries)
+{
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  auth_server().set_mempool_client(std::move(*client));
+
+  KeyChangeBatch initial;
+  for (uint8_t i = 0; i < 10; ++i) {
+    initial.push_back(
+        {make_test_address(i),
+         i == 7 ? nullptr : x23::Ptr<AddressAuthData>(make_test_auth_data(1))});
+  }
+  auth_server().register_auth_data_updates(0, initial)();
+
+  KeyChangeBatch updated = initial;
+  for (KeyChange &change : updated) {
+    if (change.auth_data) {
+      change.auth_data->last_written_height = 1;
+    }
+  }
+  // Entries 0 and 8 change only their write height. Every other entry changes
+  // a rule used by verification, including absence versus an empty auth row.
+  updated[1].auth_data->public_keys[1]->key.ed25519().fill(0x42);
+  updated[2].auth_data->public_keys[1]->max_weight++;
+  updated[3].auth_data->required_weight++;
+  updated[4].auth_data->public_keys[1] = nullptr;
+  updated[5].auth_data->public_keys[2] = make_test_pk_config(2);
+  updated[6].auth_data = nullptr;
+  updated[7].auth_data = x23::Ptr<AddressAuthData>(AddressAuthData{});
+  updated[9].auth_data->public_keys[1]->key =
+      PublicKey(CryptographicScheme::MlDsa65);
+  updated[9].auth_data->public_keys[1]->key.mldsa65()->fill(0x5a);
+  // No prior cache entry: conservatively notify even if this could be a
+  // height-only rewrite of a row the auth server has not observed.
+  updated.push_back({make_test_address(10),
+                     x23::Ptr<AddressAuthData>(make_test_auth_data(1))});
+
+  std::vector<KeyChangeBatch> chunks;
+  chunks.emplace_back();
+  chunks.push_back({updated[0], updated[1], updated[2]});
+  chunks.emplace_back();
+  chunks.emplace_back(updated.begin() + 3, updated.end());
+  auth_server().register_auth_data_updates(1, ChunkedVector<KeyChangeBatch>(
+                                                  std::move(chunks)))();
+
+  const auto [height, changes] = mempool->impl()->received();
+  EXPECT_EQ(height, 1);
+  const KeyChangeBatch expected{updated[1], updated[2], updated[3],
+                                updated[4], updated[5], updated[6],
+                                updated[7], updated[9], updated[10]};
+  EXPECT_EQ(changes, expected);
+  for (const KeyChange &change : updated) {
+    auto cached = auth_server().lookup_auth_data(1, change.address)();
+    ASSERT_TRUE(cached.has_value());
+    EXPECT_EQ(cached.value()->first, 1);
+    if (change.auth_data) {
+      EXPECT_EQ(cached.value()->second, *change.auth_data);
+    }
+    else {
+      EXPECT_FALSE(cached.value()->second.has_value());
+    }
+  }
+}
+
+TEST_F(AuthServerTest, EvictedAuthRulesAreConservativelyForwarded)
+{
+  RpcServer<SimpleDBAuthRpc> db(0);
+  const uint16_t db_port = db.start_server(0);
+  auto db_client = make_dbauth_client(std::format("localhost:{}", db_port))();
+  ASSERT_TRUE(db_client.has_value());
+  // One cache bucket holds sixteen entries. The seventeenth update evicts
+  // the first row, so comparing only against the cache must treat it as
+  // unknown on its next update.
+  AuthServer auth(std::move(*db_client), NetworkHash{}, 1);
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  auth.set_mempool_client(std::move(*client));
+
+  KeyChangeBatch initial;
+  for (uint8_t i = 1; i <= 17; ++i) {
+    initial.push_back({make_test_address(i),
+                       x23::Ptr<AddressAuthData>(make_test_auth_data(1))});
+  }
+  auth.register_auth_data_updates(0, initial)();
+  ASSERT_EQ(mempool->impl()->received().second, initial);
+  KeyChangeBatch update{initial[0]};
+  update[0].auth_data->last_written_height = 1;
+  auth.register_auth_data_updates(1, update)();
+  const auto [height, changes] = mempool->impl()->received();
+  EXPECT_EQ(height, 1);
+  EXPECT_EQ(changes, update);
+}
+
 // Regression test for #1448: lookup_auth_data waiters stranded when
 // subscribe_to_auth_data_changes stores the initial height without broadcast.
 TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)

@@ -3184,6 +3184,44 @@ TEST(Mempool, EmptyAuthUpdateAdvancesWatermarkWithoutVerification)
   }
 }
 
+TEST(Mempool,
+     MetadataOnlyAuthUpdatesKeepQueuedTransactionsWithoutReverification)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t client(account);
+  const auto txs = generate_unsigned_txs(client, 2);
+  const auto outcomes =
+      coord.submit_unvetted_with_outcomes(t_to_parallel_batch(txs)())();
+  ASSERT_EQ(outcomes.size(), txs.size());
+  for (const auto outcome : outcomes) {
+    ASSERT_EQ(outcome, SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+
+  auto &metrics = MempoolMetrics::instance();
+  const auto verified_before = metrics.auth_update_transaction_count.value();
+  const auto callbacks_before = metrics.auth_update_callback_count.value();
+  for (BlockHeight height : {2, 3}) {
+    AddressAuthData auth_data = get_default_account();
+    auth_data.last_written_height = height;
+    coord.scheduler()->set_current_block(height);
+    server.register_auth_data_updates(
+        height,
+        KeyChangeBatch{{account, x23::Ptr<AddressAuthData>(auth_data)}})();
+    coord.wait_for_block_commit(height)();
+  }
+
+  EXPECT_EQ(metrics.auth_update_callback_count.value(), callbacks_before + 2);
+  EXPECT_EQ(metrics.auth_update_transaction_count.value(), verified_before);
+  EXPECT_EQ(coord.auth_data_height(), 3);
+  EXPECT_EQ(coord.scheduler()->size(), 2);
+  for (const auto &tx : txs) {
+    EXPECT_TRUE(coord.scheduler()->is_pending(tx, sha256(tx.tx)));
+  }
+}
+
 TEST(Mempool, AuthChangedEvictsInvalidTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
