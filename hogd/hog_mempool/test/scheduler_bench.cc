@@ -403,8 +403,38 @@ bm_mempool_admit_gateway_batch(benchmark::State &state)
 BENCHMARK(bm_mempool_admit_gateway_batch)
     ->Args({1024, 1000, 1})
     ->Args({1024, 1000, 16})
+    // Hold total transactions at 16,384 to measure per-batch coordination.
+    ->Args({4096, 1000, 4})
+    ->Args({8192, 1000, 2})
+    ->Args({16384, 1000, 1})
     ->Args({1024, 1, 1})
     ->Args({1024, 1, 16})
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
+void
+bm_mempool_empty_auth_update(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  BlockHeight height = 1;
+  auto &metrics = MempoolMetrics::instance();
+  const double hold_before = metrics.auth_update_commit_lock_hold_seconds.sum();
+  for (auto _ : state) {
+    coord.scheduler()->set_current_block(++height);
+    ElapsedTimer timer;
+    server.register_auth_data_updates(height, {})();
+    coord.wait_for_block_commit(height)();
+    state.SetIterationTime(timer.elapsed());
+  }
+  state.counters["admission_lock_hold_us_per_callback"] =
+      (metrics.auth_update_commit_lock_hold_seconds.sum() - hold_before) *
+      1'000'000 / state.iterations();
+  state.SetItemsProcessed(state.iterations());
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_mempool_empty_auth_update)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
 

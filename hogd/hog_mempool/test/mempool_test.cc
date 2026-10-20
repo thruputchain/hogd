@@ -3148,6 +3148,42 @@ INSTANTIATE_TEST_SUITE_P(SubmissionPaths, MempoolSubmissionAuthTest,
                            return info.param ? "Vetted" : "Unvetted";
                          });
 
+TEST(Mempool, EmptyAuthUpdateAdvancesWatermarkWithoutVerification)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+  const auto txs = generate_unsigned_txs(client, 2);
+  const auto submit = [&](size_t i) {
+    const auto outcomes = coord.submit_unvetted_with_outcomes(
+        t_to_parallel_batch(SignedTransactionBatch{txs[i]})())();
+    ASSERT_EQ(outcomes.size(), 1UL);
+    EXPECT_EQ(outcomes[0],
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  };
+  submit(0);
+
+  auto &metrics = MempoolMetrics::instance();
+  const auto callbacks_before = metrics.auth_update_callback_count.value();
+  const auto empty_before = metrics.auth_update_empty_verify_count.value();
+  const auto verifies_before = metrics.auth_update_verify_seconds.count();
+  coord.scheduler()->set_current_block(2);
+  server.register_auth_data_updates(2, {})();
+  coord.wait_for_block_commit(2)();
+
+  EXPECT_EQ(metrics.auth_update_callback_count.value(), callbacks_before + 1);
+  EXPECT_EQ(metrics.auth_update_empty_verify_count.value(), empty_before + 1);
+  EXPECT_EQ(metrics.auth_update_verify_seconds.count(), verifies_before);
+  // Advancing the watermark must still unblock admission at the new height,
+  // and unchanged pending transactions must remain available.
+  submit(1);
+  EXPECT_EQ(coord.scheduler()->size(), 2);
+  for (const auto &tx : txs) {
+    EXPECT_TRUE(coord.scheduler()->is_pending(tx, sha256(tx.tx)));
+  }
+}
+
 TEST(Mempool, AuthChangedEvictsInvalidTxs)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
