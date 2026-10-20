@@ -3457,21 +3457,28 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   if (txs.empty()) {
     MempoolMetrics::instance().auth_update_empty_verify_count.increment();
   }
-  ElapsedTimer auth_timer;
-  AuthErrorCodeBatch auth_ret =
-      co_await auth_client_->authmempool_verify_transactions(
-          scheduler_->current_block(), txs);
-  MempoolMetrics::instance().auth_update_verify_seconds.record(
-      auth_timer.elapsed());
-  CHECK_EQ(auth_ret.size(), tx_hashes.size());
-  x23::Vec<TransactionHash> to_remove;
-  for (size_t i = 0; i < auth_ret.size(); i++) {
-    const AuthErrorCode &code = auth_ret[i];
-    if (code != AuthErrorCode::kAuthSuccess) {
-      to_remove.push_back(tx_hashes[i]);
+  else {
+    // Empty callbacks still invalidate in-flight submissions above and advance
+    // the watermark below. With no cached transactions to recheck, they need
+    // no auth round trip while holding the admission lock.
+    ElapsedTimer auth_timer;
+    AuthErrorCodeBatch auth_ret =
+        co_await auth_client_->authmempool_verify_transactions(
+            scheduler_->current_block(), txs);
+    MempoolMetrics::instance().auth_update_verify_seconds.record(
+        auth_timer.elapsed());
+    CHECK_EQ(auth_ret.size(), tx_hashes.size());
+    x23::Vec<TransactionHash> to_remove;
+    for (size_t i = 0; i < auth_ret.size(); i++) {
+      const AuthErrorCode &code = auth_ret[i];
+      if (code != AuthErrorCode::kAuthSuccess) {
+        to_remove.push_back(tx_hashes[i]);
+      }
+    }
+    if (!to_remove.empty()) {
+      co_await scheduler_->remove_from_scheduler(to_remove);
     }
   }
-  co_await scheduler_->remove_from_scheduler(to_remove);
   auth_data_height_.store(height);
   auth_data_height_.broadcast(&default_threadpool());
 }
