@@ -159,9 +159,17 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
     const ConfigParam &param = stated_params[i];
     const auto &body =
         require_field(encoded_params[i], std::format("{}", param.param()));
-    EXPECT_EQ(
-        require_field(body, config_param_name(param.param())).as_integer(),
-        std::int64_t{config_param_value(param)});
+    const json::Value &value =
+        require_field(body, config_param_name(param.param()));
+    // JSON-XDR spells a uint64 arm as a decimal string.
+    if (param.param() == ConfigParamID::kConfigParamMaxTxGas) {
+      EXPECT_EQ(require_string(value),
+                std::to_string(config_param_value(param)));
+    }
+    else {
+      EXPECT_EQ(value.as_integer(),
+                static_cast<std::int64_t>(config_param_value(param)));
+    }
   }
   EXPECT_EQ(network_config.find("max_sha256_buffers"), nullptr);
 

@@ -14,6 +14,7 @@
 #include <fstream>
 #include <ios>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -82,6 +83,21 @@ std::string
 uint64_string(std::uint64_t value)
 {
   return std::to_string(value);
+}
+
+// JSON-XDR carries a uint64 arm as a decimal string, as storage_cost_model
+// does, since a JSON number need not hold one exactly.
+void
+write_config_param_value(json::Writer &w, ConfigParam const &param)
+{
+  const std::uint64_t value = config_param_value(param);
+  if (config_param_max_value(param.param()) >
+      std::numeric_limits<std::uint32_t>::max()) {
+    w.field(config_param_name(param.param()), uint64_string(value));
+  }
+  else {
+    w.field(config_param_name(param.param()), static_cast<std::int64_t>(value));
+  }
 }
 
 std::string
@@ -188,9 +204,7 @@ build_genesis_json(GenesisConfiguration const &genesis)
               w.object([&](json::Writer &w) {
                 w.object_field(std::format("{}", param.param()),
                                [&](json::Writer &w) {
-                                 w.field(config_param_name(param.param()),
-                                         std::int64_t{
-                                             config_param_value(param)});
+                                 write_config_param_value(w, param);
                                });
               });
             }

@@ -2077,6 +2077,20 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
   EXPECT_EQ(overrides.at("max_bytestring_len"), 32768U);
 }
 
+// max_tx_gas is a GasAmount, so it takes values no uint32 parameter does.
+TEST(HogDevnode, NetworkOverridesAcceptAFullGasBudget)
+{
+  LocalNetworkConfigOverrides overrides;
+  EXPECT_THROW(add_local_network_config_override(
+                   overrides, "max_tx_gas=18446744073709551616"),
+               std::runtime_error);
+  add_local_network_config_override(overrides, "max_tx_gas=4294967296");
+  EXPECT_EQ(overrides.at("max_tx_gas"), 4294967296ULL);
+
+  const NetworkConfigParams params(local_network_config(overrides).v0());
+  EXPECT_EQ(params.max_tx_gas, 4294967296ULL);
+}
+
 TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
 {
   LocalBootstrapConfig config = fixture_config(3);

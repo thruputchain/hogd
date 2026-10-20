@@ -261,6 +261,19 @@ SystemCallHandler::perform_initial_validation()
     }
   }
 
+  // The budget is the chain's to bound. Refused rather than clamped: a
+  // transaction executes under the budget it signed or not at all.
+  // root_invocation_ is nullopt only in the test harness.
+  if (root_invocation_.has_value()) {
+    if (const GasAmount permitted = config_params().max_tx_gas;
+        root_invocation_->gas_limit > permitted) {
+      warn("tx {}: budgets {} gas; chain permits {}",
+           show_byte_array(get_source_tx_hash()), root_invocation_->gas_limit,
+           permitted);
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+    }
+  }
+
   // Without this gate an oversized attachment set fails only at commit, where
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
