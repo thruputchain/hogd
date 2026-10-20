@@ -77,6 +77,65 @@ TEST(Scheduler, ReadAge)
   EXPECT_EQ(ret->average_ages[kHogAgeGroupToSchedule], 0);
 }
 
+TEST(Scheduler, CachedAgeLookupDoesNotWaitForGlobalLock)
+{
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(1)();
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const auto &address = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t client(address);
+  const auto txs = generate_unsigned_txs(client, 1);
+  scheduler->read_average_hog_ages(txs)();
+
+  x23::CoroGuard guard;
+  auto acquire = [&]() -> x23::Async<void> {
+    co_await guard(scheduler->global_lock_);
+  };
+  acquire()();
+  auto lookup = scheduler->read_average_hog_ages(txs);
+  // No account state is read or changed here: cached account presence should
+  // remain available while unrelated scheduling work holds the global lock.
+  EXPECT_TRUE(lookup.operator co_await().await_ready());
+  guard.reset();
+  const auto result = lookup();
+  EXPECT_TRUE(result.found.contains(address));
+  EXPECT_TRUE(result.missing.empty());
+}
+
+TEST(Scheduler, ColdAgeLookupRechecksCacheAfterWaitingForGlobalLock)
+{
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(1)();
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const auto address = make_account_address(77);
+  server.set_hogs(address, kHogAgeGroupToSchedule, 0, 100);
+  fib_client_t client(address);
+  const auto txs = generate_unsigned_txs(client, 1);
+
+  x23::CoroGuard guard;
+  auto acquire = [&]() -> x23::Async<void> {
+    co_await guard(scheduler->global_lock_);
+  };
+  acquire()();
+  auto lookup = scheduler->read_average_hog_ages(txs);
+  EXPECT_FALSE(lookup.operator co_await().await_ready());
+
+  // Another lock holder initializes and updates this account while lookup
+  // waits. A cold lookup must recheck presence after acquiring the lock, so
+  // an older database value cannot overwrite the new cached hog age.
+  scheduler->read_average_hog_ages(x23::XdrVec<ContractAddress>{address})();
+  {
+    auto [age, lock] = scheduler->get_cached_hog_age(address);
+    age->num_hogs[kHogAgeGroupToSchedule] = to_xdr(uint128_t{200});
+  }
+  guard.reset();
+  const auto result = lookup();
+  EXPECT_TRUE(result.found.contains(address));
+  EXPECT_TRUE(result.missing.empty());
+  auto [age, lock] = scheduler->get_cached_hog_age(address);
+  EXPECT_EQ(age->num_hogs[kHogAgeGroupToSchedule], to_xdr(uint128_t{200}));
+}
+
 TEST(Scheduler, AddVettedTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
