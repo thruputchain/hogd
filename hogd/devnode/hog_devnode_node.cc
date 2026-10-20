@@ -35,6 +35,7 @@
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_message_size.h"
@@ -165,8 +166,17 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
       });
       if (!config.network_config_overrides.empty()) {
         w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          // A uint64 parameter is a decimal string, as in genesis JSON: a
+          // JSON integer here is an int64 and need not hold one.
           for (auto const &[name, value] : config.network_config_overrides) {
-            fields.field(name, static_cast<std::int64_t>(value));
+            if (const auto id = config_param_id(name);
+                id && config_param_max_value(*id) >
+                          std::numeric_limits<std::uint32_t>::max()) {
+              fields.field(name, std::to_string(value));
+            }
+            else {
+              fields.field(name, static_cast<std::int64_t>(value));
+            }
           }
         });
       }
@@ -346,14 +356,21 @@ parse_data_dir_metadata(std::string_view bytes)
       throw std::runtime_error(
           "data metadata networkConfigOverrides must be an object");
     }
+    // The override parser bounds each value by its parameter's width.
     for (auto const &[name, value] : overrides->as_object()) {
-      const auto number = value.as_integer();
-      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
-        throw std::runtime_error(
-            "data metadata network override must be a uint32 integer");
+      std::string raw;
+      if (const auto number = value.as_integer(); number && *number >= 0) {
+        raw = std::to_string(*number);
+      }
+      else if (const auto text = value.as_string()) {
+        raw = std::string(*text);
+      }
+      else {
+        throw std::runtime_error("data metadata network override must be a "
+                                 "non-negative integer or decimal string");
       }
       add_local_network_config_override(config.network_config_overrides,
-                                        std::format("{}={}", name, *number));
+                                        std::format("{}={}", name, raw));
     }
   }
   return config;

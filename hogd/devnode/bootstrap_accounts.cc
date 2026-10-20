@@ -83,8 +83,8 @@ finish_bootstrap_artifact(GenesisConfigurationBuilder &builder,
                           StorageCostModel const &cost_model,
                           NetworkConfig const &network_config)
 {
-  auto initialization_txs =
-      builder.try_make_genesis_ceremony_transactions(cost_model);
+  auto initialization_txs = builder.try_make_genesis_ceremony_transactions(
+      cost_model, NetworkConfigParams(network_config.v0()).max_tx_gas);
   if (!initialization_txs.has_value()) {
     throw std::runtime_error(
         "bootstrap accounts and ceremony funding exceed the native token "

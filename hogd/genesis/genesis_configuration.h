@@ -13,6 +13,7 @@
 #include "address_auth.hh"
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -62,9 +63,12 @@ public:
 
   // Build the stock distributor root's height-1 invocations. Together they
   // fund every allocation and deploy each fixture in one atomic ceremony.
+  // Each budgets `max_tx_gas`, the chain's per-transaction cap, so a chain
+  // stating one can still execute its own ceremony.
   std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
   try_make_genesis_ceremony_transactions(
-      StorageCostModel const &cost_model) const;
+      StorageCostModel const &cost_model,
+      GasAmount max_tx_gas = kDefaultMaxTxGas) const;
 
   // Panic-style wrapper for trusted callers whose hardcoded allocations are
   // known to fit within the native-token supply.

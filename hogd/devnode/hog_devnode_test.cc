@@ -2052,6 +2052,20 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
 
+// The ceremony budgets the chain's own cap, so a chain stating one can still
+// execute its height-1 block.
+TEST(HogDevnode, CeremonyTransactionsBudgetTheConfiguredTxGas)
+{
+  LocalBootstrapConfig config;
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_tx_gas=1000000000");
+  const auto artifact = build_local_bootstrap_account_artifact(config);
+  ASSERT_FALSE(artifact.initialization_txs.empty());
+  for (auto const &tx : artifact.initialization_txs) {
+    EXPECT_EQ(tx.tx.invocation.gas_limit, 1'000'000'000U);
+  }
+}
+
 // The stock config takes its values from the protocol defaults rather than
 // restating them, so a default change reaches dev and test chains.
 TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
@@ -3350,6 +3364,35 @@ TEST(HogDevnode, NetworkOverridesSurviveRestartAndRejectChangedIntent)
   expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
                           "1", "--network-config", "max_bytestring_len=16384"},
                          "different --network-config");
+}
+
+// A finite gas cap must not refuse the chain's own ceremony, and a cap past
+// int64 must survive the data dir metadata to be matched on restart.
+TEST(HogDevnode, TxGasCapSurvivesStartupAndRestart)
+{
+  for (const std::string_view cap : {"1000000000", "18446744073709551614"}) {
+    const auto data_dir = make_test_data_dir();
+    Defer cleanup([&] { std::filesystem::remove_all(data_dir); });
+    const std::string assignment = std::format("max_tx_gas={}", cap);
+    for (const auto *expected_state : {"fresh", "recovered"}) {
+      auto process = HogDevnodeProcess::start({"--data-dir", data_dir.string(),
+                                               "--fixture-accounts", "1",
+                                               "--network-config", assignment});
+      const auto readiness = process.wait_for_readiness();
+      EXPECT_EQ(readiness.chain_state, expected_state) << cap;
+      auto scheduler = create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                                      readiness.scheduler.port,
+                                                      /*retry=*/true)()
+                           .value();
+      const auto tip = scheduler.schedcoord_get_tip()();
+      ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+      EXPECT_EQ(
+          std::to_string(
+              NetworkConfigParams(tip.db_tip().network_config.v0()).max_tx_gas),
+          cap);
+      expect_clean_exit(process);
+    }
+  }
 }
 
 TEST(HogDevnode, DataDirRejectsRestartWithDifferentPublicKeys)

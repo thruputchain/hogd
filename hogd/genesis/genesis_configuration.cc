@@ -153,12 +153,10 @@ GenesisConfigurationBuilder::build(NetworkHash const &network_hash,
 
 std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
 GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
-    StorageCostModel const &cost_model) const
+    StorageCostModel const &cost_model, GasAmount max_tx_gas) const
 {
   using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
   root_client_t client(kGenesisRootContractAddress);
-  constexpr static GasAmount kDistributionGas =
-      std::numeric_limits<GasAmount>::max();
   // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
   // vector comfortably below that limit, including allocator and contract
   // stack space. A ceremony is one atomic height-1 block, but it may contain
@@ -252,7 +250,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     transactions.push_back(SignedTransaction{
         .tx = Transaction{
             .invocation = client.make_invocation<u8"distribute">(
-                kDistributionGas, distributions, account_allocations,
+                max_tx_gas, distributions, account_allocations,
                 make_contract_i128(static_cast<int128_t>(root_funding)),
                 make_contract_i128(static_cast<int128_t>(token_funding))),
             .uniquifier =
