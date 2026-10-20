@@ -427,6 +427,87 @@ BENCHMARK(bm_mempool_admit_gateway_batch)
     ->UseManualTime()
     ->Unit(benchmark::kMicrosecond);
 
+// Each callback rewrites the cached auth rows at the next block height while
+// retaining their signing rules. Queued transactions carry real Ed25519
+// signatures; unnecessary revalidation therefore includes real crypto and RPC
+// work. This measures the callback, not full-system transaction throughput.
+void
+bm_mempool_metadata_auth_update(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  auto &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(1)();
+  const size_t num_txs = state.range(0);
+  const auto accounts = make_benchmark_accounts(state.range(1));
+  seed_benchmark_hog_ages(server, accounts);
+
+  AddressAuthData auth_data = get_default_account();
+  SecretKey key(CryptographicScheme::Ed25519);
+  key.ed25519() = create_key_pair(auth_data, 0, 1);
+  auth_data.required_weight = 1;
+  auth_data.last_written_height = 2;
+  KeyChangeBatch changes;
+  for (const auto &account : accounts) {
+    server.set_address_auth_data(account, auth_data);
+    changes.push_back({account, x23::Ptr<AddressAuthData>(auth_data)});
+  }
+  BlockHeight height = 2;
+  coord.scheduler()->set_current_block(height);
+  server.register_auth_data_updates(height, changes)();
+  coord.wait_for_block_commit(height)();
+
+  fib_client_t fib_client(accounts[0]);
+  const auto prototype = generate_unsigned_txs(fib_client, 1)[0];
+  SignedTransactionBatch txs(num_txs, prototype);
+  for (size_t i = 0; i < txs.size(); ++i) {
+    txs[i].tx.invocation.invoked_address = accounts[i % accounts.size()];
+    txs[i].tx.uniquifier.nonce = i;
+    txs[i].tx.auth_claim = make_sign_claim(0);
+    txs[i].signatures.push_back(
+        make_signature(key, txs[i].tx, 0, MempoolTestInfra::kNetworkHash));
+  }
+  const auto outcomes =
+      coord.submit_unvetted_with_outcomes(t_to_parallel_batch(txs)())();
+  CHECK_EQ(outcomes.size(), txs.size());
+  for (const auto outcome : outcomes) {
+    CHECK_EQ(outcome, SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  }
+
+  auto &metrics = MempoolMetrics::instance();
+  const double hold_before = metrics.auth_update_commit_lock_hold_seconds.sum();
+  const double verify_before = metrics.auth_update_verify_seconds.sum();
+  const auto txs_before = metrics.auth_update_transaction_count.value();
+  for (auto _ : state) {
+    coord.scheduler()->set_current_block(++height);
+    for (auto &change : changes) {
+      change.auth_data->last_written_height = height;
+    }
+    ElapsedTimer timer;
+    server.register_auth_data_updates(height, changes)();
+    coord.wait_for_block_commit(height)();
+    state.SetIterationTime(timer.elapsed());
+    CHECK_EQ(coord.scheduler()->size(), static_cast<ssize_t>(num_txs));
+  }
+  state.counters["admission_lock_hold_us_per_callback"] =
+      (metrics.auth_update_commit_lock_hold_seconds.sum() - hold_before) *
+      1'000'000 / state.iterations();
+  state.counters["auth_rpc_us_per_callback"] =
+      (metrics.auth_update_verify_seconds.sum() - verify_before) * 1'000'000 /
+      state.iterations();
+  state.counters["reauthenticated_transactions_per_callback"] =
+      static_cast<double>(metrics.auth_update_transaction_count.value() -
+                          txs_before) /
+      state.iterations();
+  state.SetItemsProcessed(state.iterations());
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_mempool_metadata_auth_update)
+    ->Args({1000, 1000})
+    ->Args({16000, 1000})
+    ->Args({32000, 1000})
+    ->UseManualTime()
+    ->Unit(benchmark::kMicrosecond);
+
 void
 bm_mempool_empty_auth_update(benchmark::State &state)
 {
