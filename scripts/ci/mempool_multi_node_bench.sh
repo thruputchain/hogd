@@ -165,29 +165,46 @@ copy_remote_file() {
 MULTI_NODE_LOG_MAX_BYTES=${MULTI_NODE_LOG_MAX_BYTES:-$((32 * 1024 * 1024))}
 
 # Copies one remote log, keeping its last [$MULTI_NODE_LOG_MAX_BYTES] bytes if
-# it is larger than that. The tail is the end a failure is read back from, and
-# a log whose size could not be read is capped rather than trusted: the cap
-# costs the head of one log, while the alternative costs every metric.
+# it is larger than that. The tail is the end a failure is read back from.
+#
+# The cap has to hold against the file as it is copied and not as it was a
+# moment earlier: publishing runs before the processes are killed, so every one
+# of these logs is still being written to, and a size check followed by a whole
+# copy publishes whatever the log grew to in between. So ask for one byte past
+# the cap, which bounds the read and says whether anything was left behind, and
+# trim what came back rather than trusting it: a file still being appended to
+# can hand back more than the bytes it was asked for, and it is the trim below
+# that makes the published file's bound hold either way.
 copy_remote_log_capped() {
   local host=$1
   local remote_path=$2
   local local_path=$3
-  local quoted_path size
+  local quoted_path probe_path probe_bytes
 
   printf -v quoted_path '%q' "$remote_path"
-  size=$(remote_run "$host" "stat -c %s -- $quoted_path") || size=""
-  if [[ $size =~ ^[0-9]+$ ]] && ((size <= MULTI_NODE_LOG_MAX_BYTES)); then
-    copy_remote_file "$host" "$remote_path" "$local_path"
+  probe_path="$local_path.part"
+  if ! remote_run "$host" \
+    "tail -c $((MULTI_NODE_LOG_MAX_BYTES + 1)) -- $quoted_path" \
+    >"$probe_path"; then
+    echo "could not read ${remote_path} on ${host}" >&2
+    rm -f -- "$probe_path"
+    return 1
+  fi
+
+  probe_bytes=$(wc -c <"$probe_path")
+  if ((probe_bytes <= MULTI_NODE_LOG_MAX_BYTES)); then
+    mv -- "$probe_path" "$local_path"
     return
   fi
 
   echo "keeping only the last $MULTI_NODE_LOG_MAX_BYTES bytes of" \
-    "${remote_path} on ${host} (${size:-size unreadable})"
+    "${remote_path} on ${host}"
   {
     printf '===== truncated to the last %s bytes of %s on %s =====\n' \
       "$MULTI_NODE_LOG_MAX_BYTES" "$remote_path" "$host"
-    remote_run "$host" "tail -c $MULTI_NODE_LOG_MAX_BYTES -- $quoted_path"
+    tail -c "$MULTI_NODE_LOG_MAX_BYTES" -- "$probe_path"
   } >"$local_path"
+  rm -f -- "$probe_path"
 }
 
 publish_multi_node_logs() {
