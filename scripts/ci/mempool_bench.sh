@@ -6,6 +6,13 @@ set -Eeuo pipefail
 . "$(dirname "$0")/../hog-ip.sh"
 ci_enable_error_trace
 
+# How much of the coordinator's output to replay when this benchmark fails.
+# Sized to sit inside the [CI_BENCH_FAIL_TAIL_LINES] window that
+# [ci_report_failed_bench_steps] replays at the end of the job: the cleanup
+# below this script's last word spends about sixty of those lines, so a replay
+# much larger than this one is a replay whose first half the job log drops.
+COORDINATOR_OUTPUT_TAIL_LINES=${COORDINATOR_OUTPUT_TAIL_LINES:-300}
+
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
@@ -169,7 +176,31 @@ fi
 
 echo 'copy coordinator output from hog4'
 # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+# Best effort: this output is the only account a failed coordinator leaves, so
+# a copy that fails must not end the script ahead of the statuses below. An
+# errexit on [scp] reports "No such file" in place of "coordinator exit status
+# 2" and buries the failure the run is actually about.
+coordinator_output_copied=1
+scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" \
+  ./coordinator_output.txt || coordinator_output_copied=0
+
+# Replays the coordinator's own output on the way out of a failure.
+#
+# The output we just copied is the only place that says what the coordinator
+# was doing when it reached its exit status, and until now the failure paths
+# below exited without printing it: the copy stayed in the job's working tree
+# on the CI host, where nothing reads it, and the run ended naming a bare
+# "coordinator exit status 2" with no account of it anywhere. The job log is
+# the only record a CI failure can be read back from, so put it there.
+replay_coordinator_output() {
+  echo "===== last $COORDINATOR_OUTPUT_TAIL_LINES lines of coordinator output ====="
+  if [[ $coordinator_output_copied -eq 1 ]]; then
+    tail -n "$COORDINATOR_OUTPUT_TAIL_LINES" ./coordinator_output.txt || true
+  else
+    echo '(coordinator output could not be copied from hog4)'
+  fi
+  echo '===== end of coordinator output ====='
+}
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -177,11 +208,23 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # signal-terminated status is a crash rather than a reported error, so name
   # the signal instead of leaving a bare number in the log.
   echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
+  # The coordinator drives the load this mempool died under, so its output is
+  # part of the account of that death even when the coordinator itself is fine.
+  replay_coordinator_output
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
+  replay_coordinator_output
   exit "$coordinator_status"
+fi
+
+# Both processes reported success, so the output is the benchmark's result and
+# its absence is a failure of this run rather than something to work around:
+# the metric logged below is read straight out of it.
+if [[ $coordinator_output_copied -ne 1 ]]; then
+  echo 'could not copy the coordinator output from hog4' >&2
+  exit 1
 fi
 
 echo 'coordinator benchmark results'

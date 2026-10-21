@@ -154,6 +154,42 @@ copy_remote_file() {
   scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
 }
 
+# The largest log this run files into metrics_history whole.
+#
+# GitHub refuses a push carrying any file over 100 MB, and the push that
+# carries these logs carries every other metric the job produced with it, so
+# one oversized log costs the whole run's metrics rather than just its own.
+# A chuckd stderr under benchmark load reaches a few hundred MB, which is how
+# the combined-metrics job came to retry its metrics push five times and give
+# up with nothing filed.
+MULTI_NODE_LOG_MAX_BYTES=${MULTI_NODE_LOG_MAX_BYTES:-$((32 * 1024 * 1024))}
+
+# Copies one remote log, keeping its last [$MULTI_NODE_LOG_MAX_BYTES] bytes if
+# it is larger than that. The tail is the end a failure is read back from, and
+# a log whose size could not be read is capped rather than trusted: the cap
+# costs the head of one log, while the alternative costs every metric.
+copy_remote_log_capped() {
+  local host=$1
+  local remote_path=$2
+  local local_path=$3
+  local quoted_path size
+
+  printf -v quoted_path '%q' "$remote_path"
+  size=$(remote_run "$host" "stat -c %s -- $quoted_path") || size=""
+  if [[ $size =~ ^[0-9]+$ ]] && ((size <= MULTI_NODE_LOG_MAX_BYTES)); then
+    copy_remote_file "$host" "$remote_path" "$local_path"
+    return
+  fi
+
+  echo "keeping only the last $MULTI_NODE_LOG_MAX_BYTES bytes of" \
+    "${remote_path} on ${host} (${size:-size unreadable})"
+  {
+    printf '===== truncated to the last %s bytes of %s on %s =====\n' \
+      "$MULTI_NODE_LOG_MAX_BYTES" "$remote_path" "$host"
+    remote_run "$host" "tail -c $MULTI_NODE_LOG_MAX_BYTES -- $quoted_path"
+  } >"$local_path"
+}
+
 publish_multi_node_logs() {
   local metrics_branch_dir
   local logs_dir
@@ -170,8 +206,10 @@ publish_multi_node_logs() {
   for record in "${CONTROL_LOG_RECORDS[@]}"; do
     IFS='|' read -r host label stdout_path stderr_path <<<"$record"
     echo "copying ${label} logs from ${host}"
-    copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
-    copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    copy_remote_log_capped "$host" "$stdout_path" \
+      "$logs_dir/${host}_${label}.stdout.log"
+    copy_remote_log_capped "$host" "$stderr_path" \
+      "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 
