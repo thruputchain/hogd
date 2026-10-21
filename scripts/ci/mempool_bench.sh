@@ -22,6 +22,14 @@ COORDINATOR_HOST=hog4
 # room for the rest of the failure to still be in the window.
 CI_COORDINATOR_FAIL_TAIL_LINES=${CI_COORDINATOR_FAIL_TAIL_LINES:-80}
 
+# How long one of those reads gets. A host that has stopped answering rather
+# than refusing blocks for the kernel's TCP timeout, and the [ConnectTimeout]
+# in [CI_SSH_OPTS] bounds only the connection setup, not a read on a session
+# that has already opened. This runs ahead of the stop and kill steps, so an
+# unbounded read would let a wedged coordinator host hold up the cleanup of
+# every other one. The diagnostic is worth a short wait and nothing more.
+CI_COORDINATOR_FETCH_SEC=${CI_COORDINATOR_FETCH_SEC:-15}
+
 # Where the control server put the coordinator's output, as reported by the
 # [start] that launched it.
 COORDINATOR_STDOUT_PATH=""
@@ -46,7 +54,8 @@ replay_coordinator_stream() {
     "$stream on $COORDINATOR_HOST ====="
   if [ -z "$path" ]; then
     echo "(no $stream log path was recorded for the coordinator)"
-  elif ! ssh "${CI_SSH_OPTS[@]}" "$COORDINATOR_HOST" \
+  elif ! timeout "$CI_COORDINATOR_FETCH_SEC" \
+    ssh "${CI_SSH_OPTS[@]}" "$COORDINATOR_HOST" \
     "tail -n $CI_COORDINATOR_FAIL_TAIL_LINES $(printf '%q' "$path")"; then
     echo "(could not read $path from $COORDINATOR_HOST)"
   fi
