@@ -30,6 +30,7 @@ add_health_metrics_routes(HttpServer &server)
     };
   });
   server.add_route("/metrics", [] {
+    Metrics::instance().sample_resident_bytes();
     return HttpResponse{
         .status = 200,
         .content_type = "text/plain",

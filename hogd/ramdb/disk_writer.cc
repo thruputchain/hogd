@@ -281,6 +281,9 @@ DiskWriter::register_metrics()
 void
 DiskWriter::record_metrics()
 {
+  if (!bytes_out_metric_) {
+    return;
+  }
   bytes_out_metric_.record(bytes_out_.load(std::memory_order_relaxed));
 }
 

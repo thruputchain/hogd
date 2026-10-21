@@ -65,11 +65,11 @@ public:
 
   static void mark_successful_validation_tx()
   {
-    // TODO(geoff): unimpl
+    successful_validation_tx_count_metric.increment();
   }
   static void mark_failed_validation_tx()
   {
-    // TODO(geoff): unimpl
+    failed_validation_tx_count_metric.increment();
   }
 
   static void mark_gas_consumed(uint64_t gas)

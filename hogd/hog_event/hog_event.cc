@@ -15,6 +15,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_event/metrics.h"
 #include "hogd/hog_event/rpc_context.h"
 #include "hogd/hog_event/rpc_from_exec.h"
 #include "hogd/hog_event/rpc_from_indexer.h"
@@ -45,6 +46,8 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
            const std::string &work_directory, uint16_t exec_port,
            uint16_t indexer_port, uint16_t mempool_port, uint16_t metrics_port)
 {
+  init_event_metrics();
+
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =

@@ -79,6 +79,9 @@ public:
     kExecutor,
     kDb,
     kMempool,
+    kEvent,
+    kIndexer,
+    kAuth,
     // [kComponentCount] is used to determine the number of members in the enum.
     // It is not a component itself. Always keep this field last.
     kComponentCount
@@ -149,6 +152,12 @@ public:
 
   std::string dump_to_prometheus_string();
 
+  // Registers `{component}_resident_bytes`. Call before mark_done_with_init.
+  // sample_resident_bytes() fills every registered gauge from this process's
+  // RSS; the /metrics handler calls it at scrape time.
+  void register_resident_bytes(ComponentName component_name);
+  void sample_resident_bytes();
+
   bool done_with_init(ComponentName component_name)
   {
     CHECK_LT(static_cast<size_t>(component_name), kNumComponents);
@@ -160,6 +169,10 @@ public:
 
   void clear()
   {
+    // Drop the RSS handles before the metric map frees the implementations.
+    for (Gauge &gauge : resident_gauges_) {
+      gauge = Gauge{};
+    }
     for (size_t i = 0; i < components_.size(); i++) {
       done_with_init_[i].store(false, std::memory_order_release);
 
@@ -251,6 +264,7 @@ private:
 
   std::array<std::atomic<bool>, kNumComponents> done_with_init_{};
   std::array<Component, kNumComponents> components_;
+  std::array<Gauge, kNumComponents> resident_gauges_{};
 };
 
 } // namespace hogd
@@ -269,6 +283,12 @@ struct std::formatter<hogd::Metrics::ComponentName>
       return std::formatter<const char *>::format("db", ctx);
     case hogd::Metrics::ComponentName::kMempool:
       return std::formatter<const char *>::format("mempool", ctx);
+    case hogd::Metrics::ComponentName::kEvent:
+      return std::formatter<const char *>::format("event", ctx);
+    case hogd::Metrics::ComponentName::kIndexer:
+      return std::formatter<const char *>::format("indexer", ctx);
+    case hogd::Metrics::ComponentName::kAuth:
+      return std::formatter<const char *>::format("auth", ctx);
     case hogd::Metrics::ComponentName::kComponentCount:
       CHECK(false);
       return std::formatter<const char *>::format("invalid", ctx);

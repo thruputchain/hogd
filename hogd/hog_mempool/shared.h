@@ -412,6 +412,7 @@ MempoolMetrics::init()
                         "Duration of scheduler removal passes in seconds.",
                         latency_bounds(kMempoolWorkLatencyBounds));
 
+  metrics.register_resident_bytes(kComponent);
   metrics.mark_done_with_init(kComponent);
 }
 

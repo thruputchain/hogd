@@ -16,6 +16,14 @@ TEST(HogexecMetricsTest, LaunchLogWorkerRequiresInitializedMetrics)
   X23_EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
 
   init_hog_exec_metrics();
+  EXPECT_EQ(successful_validation_tx_count_metric.value(), 0);
+  EXPECT_EQ(failed_validation_tx_count_metric.value(), 0);
+  HogexecMetrics::mark_successful_validation_tx();
+  HogexecMetrics::mark_failed_validation_tx();
+  EXPECT_EQ(successful_validation_tx_count_metric.value(), 1);
+  EXPECT_EQ(failed_validation_tx_count_metric.value(), 1);
+  EXPECT_EQ(successful_proposed_tx_count_metric.value(), 0);
+  EXPECT_EQ(failed_proposed_tx_count_metric.value(), 0);
   HogexecMetrics::launch_log_worker();
   // Repeat launch stays an idempotent no-op.
   HogexecMetrics::launch_log_worker();

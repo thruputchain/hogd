@@ -1,9 +1,12 @@
 #include "hogd/metrics/metrics.h"
 
 #include <format>
+#include <limits>
 #include <sstream>
 #include <string>
 
+#include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 
 namespace hogd {
@@ -21,6 +24,38 @@ Metrics::fully_qualified_name(Metrics::ComponentName component_name,
                               const std::string &metric_name)
 {
   return std::format("{}_{}", component_name, metric_name);
+}
+
+void
+Metrics::register_resident_bytes(ComponentName component_name)
+{
+  const auto index = static_cast<size_t>(component_name);
+  CHECK_LT(index, kNumComponents);
+  resident_gauges_[index] =
+      gauge(component_name, "resident_bytes",
+            "Resident set size of this process, in bytes.");
+}
+
+void
+Metrics::sample_resident_bytes()
+{
+  const size_t bytes = resident_memory_bytes();
+  if (bytes == 0) {
+    return;
+  }
+  const auto max = static_cast<size_t>(std::numeric_limits<ssize_t>::max());
+  const ssize_t recorded = bytes > max ? std::numeric_limits<ssize_t>::max()
+                                       : static_cast<ssize_t>(bytes);
+  for (size_t i = 0; i < resident_gauges_.size(); i++) {
+    // Gate access on initialization, as in dump_to_prometheus_string().
+    if (!done_with_init(static_cast<ComponentName>(i))) {
+      continue;
+    }
+    Gauge &gauge = resident_gauges_[i];
+    if (gauge) {
+      gauge.record(recorded);
+    }
+  }
 }
 
 std::string
