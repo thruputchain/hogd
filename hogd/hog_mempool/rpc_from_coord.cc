@@ -3081,6 +3081,26 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return co_await commit_block(*commit_plan.committed_cache);
       });
 
+  // Size the committed block while the commit RPCs are in flight, so
+  // finalize only records it. [committed_cache->txs] is exactly the committed
+  // set in both branches: a nominated block's txs are compacted to the
+  // successful ones (its [tx_hashes] also holds nomination failures), and a
+  // validated block holds every tx of the block.
+  auto measure_block_node =
+      commit_dag.cpu<size_t>("measure committed block",
+                             commit_dag.after(prepare_node), [&] {
+                               size_t tx_bytes = 0;
+                               if (invalid_consensus_value) {
+                                 return tx_bytes;
+                               }
+                               CHECK_PTR(commit_plan.committed_cache);
+                               for (const SignedTransaction &tx :
+                                    commit_plan.committed_cache->txs) {
+                                 tx_bytes += x23::xdr_size(tx);
+                               }
+                               return tx_bytes;
+                             });
+
   auto abandon_snapshots_node = commit_dag.async<void>(
       "abandon snapshots", commit_dag.after(prepare_node),
       [&]() -> x23::Async<void> {
@@ -3282,7 +3302,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   commit_dag.async<void>(
       "finalize commit",
       commit_dag.after(release_hog_age_node, abandon_snapshots_node,
-                       abandon_events_node),
+                       abandon_events_node, measure_block_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {
           co_return;
@@ -3295,6 +3315,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         // [validated_block_cache_].
         CHECK_PTR(commit_plan.committed_cache);
         last_committed_block_ = commit_plan.committed_cache->db_tip;
+        const size_t committed_tx_count =
+            commit_plan.committed_cache->txs.size();
         // Be careful to not do [nominated_block_cache_ = {}]. We pre-allocate
         // elements in the vectors in [nominated_block_cache_], so if we clear
         // those vectors, we will experience segfaults because we will later
@@ -3317,6 +3339,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
+        MempoolMetrics::instance().block_tx_count.record(
+            static_cast<double>(committed_tx_count));
+        MempoolMetrics::instance().block_tx_bytes.record(
+            static_cast<double>(measure_block_node.get()));
         // Skip the first commit after start and the genesis ceremony (height
         // 1): neither is a round.
         if (last_commit_started_) {

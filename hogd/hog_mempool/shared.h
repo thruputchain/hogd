@@ -134,6 +134,8 @@ public:
   Metrics::Histogram commit_duration_seconds;
   Metrics::Histogram commit_interval_seconds;
   Metrics::Histogram block_period_seconds;
+  Metrics::Histogram block_tx_count;
+  Metrics::Histogram block_tx_bytes;
   Metrics::Histogram scheduler_remove_duration_seconds;
 
   Metrics::Counter submitted_unvetted_tx_count;
@@ -187,6 +189,26 @@ inline constexpr std::array<double, 15> kMempoolWorkLatencyBounds = {
 // devnet round so a slowdown shows up within a bucket or two.
 inline constexpr std::array<double, 15> kMempoolRoundLatencyBounds = {
     0.25, 0.5, 1, 1.5, 1.75, 2, 2.25, 2.5, 3, 4, 5, 7.5, 10, 20, 60};
+
+// Upper bounds for transactions per committed block: 1 to 1M, 1-2-5 series.
+inline constexpr std::array<double, 19> kMempoolBlockTxCountBounds = {
+    1,    2,    5,     10,    20,    50,     100,    200,    500,    1000,
+    2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000};
+
+// Upper bounds, in bytes, for the XDR size of a committed block's
+// transactions: powers of two from 1 KiB to 512 MiB. The firehose drops
+// subscribers on records above its 4 MiB default, so 2 MiB and 4 MiB must be
+// exact bucket edges.
+inline constexpr std::array<double, 20> kMempoolBlockTxBytesBounds = [] {
+  std::array<double, 20> bounds{};
+  for (size_t i = 0; i < bounds.size(); ++i) {
+    bounds[i] = static_cast<double>(size_t{1} << (10 + i));
+  }
+  return bounds;
+}();
+static_assert(kMempoolBlockTxBytesBounds[11] == 2.0 * 1024 * 1024);
+static_assert(kMempoolBlockTxBytesBounds[12] == 4.0 * 1024 * 1024);
+static_assert(kMempoolBlockTxBytesBounds.back() == 512.0 * 1024 * 1024);
 
 template<size_t N>
 std::vector<double>
@@ -407,6 +429,16 @@ MempoolMetrics::init()
       "Time from the start of one successful commit to the start of the next, "
       "in seconds: the round time.",
       latency_bounds(kMempoolRoundLatencyBounds));
+  block_tx_count =
+      metrics.histogram(kComponent, "block_tx_count",
+                        "Transactions in each successfully committed block.",
+                        latency_bounds(kMempoolBlockTxCountBounds));
+  block_tx_bytes = metrics.histogram(
+      kComponent, "block_tx_bytes",
+      "XDR size in bytes of the signed transactions in each successfully "
+      "committed block. Transaction bytes only, not the block's firehose "
+      "record, which also carries event logs and the consensus value.",
+      latency_bounds(kMempoolBlockTxBytesBounds));
   scheduler_remove_duration_seconds =
       metrics.histogram(kComponent, "scheduler_remove_duration_seconds",
                         "Duration of scheduler removal passes in seconds.",

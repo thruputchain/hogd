@@ -1762,6 +1762,108 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
 }
 
+// Block size histograms see exactly the committed transactions, whichever
+// cache the committed block came from, and never a nomination failure.
+TEST(Mempool, CommitRecordsBlockSizeHistograms)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  // The fixture clears the metrics registry, then commits the genesis
+  // ceremony through the ordinary commit path.
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  MempoolMetrics &metrics = MempoolMetrics::instance();
+  ASSERT_EQ(metrics.block_tx_count.count(), 1UL);
+  ASSERT_EQ(metrics.block_tx_bytes.count(), 1UL);
+
+  // Dashboards and alerts query these names and edges; 2 MiB and 4 MiB bracket
+  // the firehose record cap.
+  {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    for (const char *series :
+         {"mempool_block_tx_count_bucket{le=\"1\"} ",
+          "mempool_block_tx_count_bucket{le=\"1000000\"} ",
+          "mempool_block_tx_bytes_bucket{le=\"1024\"} ",
+          "mempool_block_tx_bytes_bucket{le=\"2097152\"} ",
+          "mempool_block_tx_bytes_bucket{le=\"4194304\"} ",
+          "mempool_block_tx_bytes_bucket{le=\"536870912\"} ",
+          "# HELP mempool_block_tx_bytes XDR size in bytes of the signed "
+          "transactions in each successfully committed block. Transaction "
+          "bytes only, not the block's firehose record"}) {
+      EXPECT_NE(dump.find(series), std::string::npos) << series;
+    }
+  }
+
+  double tx_count_sum = metrics.block_tx_count.sum();
+  double tx_bytes_sum = metrics.block_tx_bytes.sum();
+  auto expect_recorded = [&](size_t samples, size_t tx_count, size_t tx_bytes) {
+    tx_count_sum += static_cast<double>(tx_count);
+    tx_bytes_sum += static_cast<double>(tx_bytes);
+    EXPECT_EQ(metrics.block_tx_count.count(), samples);
+    EXPECT_EQ(metrics.block_tx_bytes.count(), samples);
+    EXPECT_EQ(metrics.block_tx_count.sum(), tx_count_sum);
+    EXPECT_EQ(metrics.block_tx_bytes.sum(), tx_bytes_sum);
+  };
+
+  ValidatorID validator_id{};
+  // Commit a block we validated, abandoning our own nomination of it.
+  {
+    rpc.schedulercoord_submit_vetted(validator_id,
+                                     t_to_parallel_batch(
+                                         SignedTransactionBatch{txs[0]})())();
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    const Proposal proposal = nomination.proposed_block().proposal;
+    const SchedulerValidationResult validation =
+        rpc.schedulercoord_validate_block(tip.db_tip().id, proposal)();
+    ASSERT_EQ(validation.outcome(),
+              SchedulerValidationResult::SchedulerValidationOK);
+    ASSERT_EQ(commit_block(server, validation.block().block_id, tip.db_tip(),
+                           proposal),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    expect_recorded(2, 1, x23::xdr_size(txs[0]));
+  }
+
+  // Commit blocks we nominated. Resubmitting the committed tx at the next
+  // height makes it fail nomination: it stays in the cache's [tx_hashes] but
+  // is not in the block, so that block records zero.
+  for (size_t i = 0; i < 2; ++i) {
+    const ssize_t failed_before = metrics.nomination_failed_tx_count.value();
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
+    ASSERT_EQ(rpc.scheduler()->size(), 1UL);
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    if (i == 0) {
+      EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before);
+      expect_recorded(3, 1, x23::xdr_size(txs[1]));
+    }
+    else {
+      EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before + 1);
+      expect_recorded(4, 0, 0);
+    }
+  }
+
+  // A failed commit records nothing.
+  ConsensusValue value{};
+  value.proposal_header.block_height = 100;
+  EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
+                                            std::move(value))(),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  expect_recorded(4, 0, 0);
+}
+
 TEST(Mempool, NewlyDeployedContractHogCount)
 {
   constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
