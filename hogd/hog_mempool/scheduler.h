@@ -12,6 +12,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
@@ -27,6 +28,13 @@
 #include "x23/x23/vec.h"
 
 namespace hogd {
+
+// The signed transactions the mempool holds. Each is decoded once, when its
+// batch arrives, and then shared by the submission path, the scheduler's cache
+// and runqueue, and the pending block, rather than copied between them. A
+// batch of them has SignedTransactionBatch's wire format, so it is passed to
+// RPCs that take one as-is.
+using SharedSignedTransactionBatch = x23::XdrVec<Arc<SignedTransaction>>;
 
 class Scheduler {
 public:
@@ -58,7 +66,7 @@ public:
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
-  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+  add_txs(const SharedSignedTransactionBatch &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
 
   x23::Async<void> process_transfers(const BlockTransfers &transfer);
@@ -69,13 +77,13 @@ public:
   // [block_size] may be included.
   x23::Async<void> schedule(size_t num_txs,
                             x23::XdrVec<TransactionHash> &tx_hashes,
-                            x23::XdrVec<SignedTransaction> &txs);
+                            SharedSignedTransactionBatch &txs);
 
   void start_pending_nomination(BlockID block_id);
   x23::Async<void> commit_pending_nomination(BlockID block_id);
   x23::Async<void> abandon_pending_nomination(BlockID block_id);
   x23::Async<void>
-  apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
+  apply_committed_block_hog_ages(const SharedSignedTransactionBatch &txs,
                                  BlockHeight block_height);
 
   std::shared_ptr<const SignedTransaction>
@@ -83,8 +91,7 @@ public:
   {
     auto [tx_value_ptr, _] = txs_.find(tx_hash);
     if (tx_value_ptr) {
-      return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
-                                                      &(*tx_value_ptr)->tx);
+      return std::as_const((*tx_value_ptr)->tx).share();
     }
     return {};
   }
@@ -110,7 +117,7 @@ public:
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,
-                           SignedTransactionBatch &txs)
+                           SharedSignedTransactionBatch &txs)
   {
     // The method is called by [MempoolCoordinatorRpc], which may try to find
     // txs associated with an account that the scheduler does not know about. In
@@ -140,7 +147,7 @@ public:
         tx_value = *tx_value_ptr;
       }
 
-      const SignedTransaction &tx = tx_value->tx;
+      const SignedTransaction &tx = *tx_value->tx;
       const ContractAddress &account = tx.tx.invocation.invoked_address;
       const TxKey key{
           .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -183,7 +190,7 @@ public:
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
   x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
+  read_average_hog_ages(const SharedSignedTransactionBatch &txs);
   x23::Async<ReadAverageHogAgesResult>
   read_average_hog_ages(const BlockTransfers &transfers);
 
@@ -311,8 +318,9 @@ private:
   };
 
   struct TxValue {
-    // The tx itself.
-    SignedTransaction tx;
+    // The tx itself, shared with the batch that submitted it and with any
+    // pending block it is scheduled into rather than copied.
+    Arc<SignedTransaction> tx;
   };
 
   struct AccountState {
@@ -357,7 +365,7 @@ private:
   x23::Async<bool> account_is_ready(const ContractAddress &account,
                                     bool remove_expired_txs);
 
-  bool add_txs_helper(const SignedTransaction &tx,
+  bool add_txs_helper(const Arc<SignedTransaction> &tx,
                       const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(

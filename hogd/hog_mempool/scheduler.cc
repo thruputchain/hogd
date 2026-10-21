@@ -17,6 +17,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -199,7 +200,7 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
 
 x23::Async<void>
 Scheduler::apply_committed_block_hog_ages(
-    const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height)
+    const SharedSignedTransactionBatch &txs, BlockHeight block_height)
 {
   ReadAverageHogAgesResult read_result = co_await read_average_hog_ages(txs);
 
@@ -220,7 +221,8 @@ Scheduler::apply_committed_block_hog_ages(
   skipped_accounts.reserve(txs.size());
   touched_accounts.reserve(txs.size());
 
-  for (const SignedTransaction &tx : txs) {
+  for (const Arc<SignedTransaction> &shared_tx : txs) {
+    const SignedTransaction &tx = *shared_tx;
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     if (skipped_accounts.contains(account)) {
       continue;
@@ -298,11 +300,11 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
 }
 
 x23::Async<Scheduler::ReadAverageHogAgesResult>
-Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
+Scheduler::read_average_hog_ages(const SharedSignedTransactionBatch &txs)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
-  for (const SignedTransaction &tx : txs) {
-    accounts.insert(tx.tx.invocation.invoked_address);
+  for (const Arc<SignedTransaction> &tx : txs) {
+    accounts.insert(tx->tx.invocation.invoked_address);
   }
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
@@ -658,14 +660,12 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
   };
 }
 
-// TODO(jhumphri): I think we are allocating a new decorated signature vec
-// below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx,
+Scheduler::add_txs_helper(const Arc<SignedTransaction> &tx,
                           const TransactionHash &tx_hash)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+  const ContractAddress &account = tx->tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx->tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, account_lock] = get_account_state(account);
 
@@ -702,7 +702,7 @@ Scheduler::is_pending(const SignedTransaction & /*tx*/,
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+Scheduler::add_txs(const SharedSignedTransactionBatch &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes)
 {
   CHECK_EQ(txs.size(), tx_hashes.size());
@@ -721,7 +721,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
     handles.push_back([](const ChunkRange *chunk,
-                         const x23::XdrVec<hogd::SignedTransaction> &txs,
+                         const SharedSignedTransactionBatch &txs,
                          const x23::XdrVec<TransactionHash> &tx_hashes,
                          const std::unordered_set<ContractAddress,
                                                   SipHash24Hasher> &missing,
@@ -731,14 +731,14 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
 
       size_t num_added = 0;
       for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+        if (missing.contains(txs[tx_idx]->tx.invocation.invoked_address)) {
           // The DB RPC currently cannot distinguish an unknown account
           // from a transient or internal read failure. Standalone-pubkey
           // claims can authenticate without an on-chain auth entry and
           // reach this path, so conservatively report the ambiguous
           // scheduler-side failure as internal.
           info("scheduler: dropping tx after hog-age lookup failed for {}",
-               show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+               show_byte_array(txs[tx_idx]->tx.invocation.invoked_address));
           outcomes[tx_idx] =
               SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
           co_await scheduler.record_transaction_outcome(
@@ -1205,7 +1205,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
       if (it == account_state->txs.end()) {
         continue;
       }
-      const SignedTransaction &tx = it->second->tx;
+      const SignedTransaction &tx = *it->second->tx;
       gas_limit = tx.tx.invocation.gas_limit;
     }
 
@@ -1218,7 +1218,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
 
 x23::Async<void>
 Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
-                    x23::XdrVec<SignedTransaction> &txs)
+                    SharedSignedTransactionBatch &txs)
 {
   size_t num_scheduled = 0;
   static std::unordered_set<ContractAddress, SipHash24Hasher> removed_accounts;
@@ -1292,7 +1292,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         break;
       }
       const TransactionHash &tx_hash = it->first.tx_hash;
-      SignedTransaction &tx = it->second->tx;
+      const SignedTransaction &tx = *it->second->tx;
       const uint128_t hogs_available =
           from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= hogs_available) {
@@ -1301,7 +1301,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes.push_back(tx_hash);
-        txs.push_back(tx);
+        txs.push_back(it->second->tx);
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
         // beyond this point!
@@ -1462,7 +1462,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_value = *tx_value_ptr;
             }
 
-            const SignedTransaction &tx = tx_value->tx;
+            const SignedTransaction &tx = *tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
