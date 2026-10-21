@@ -134,8 +134,8 @@ public:
   Metrics::Histogram commit_duration_seconds;
   Metrics::Histogram commit_interval_seconds;
   Metrics::Histogram block_period_seconds;
-  Metrics::Histogram block_tx_count;
-  Metrics::Histogram block_tx_bytes;
+  Metrics::Histogram block_transactions;
+  Metrics::Histogram block_transaction_bytes;
   Metrics::Histogram scheduler_remove_duration_seconds;
 
   Metrics::Counter submitted_unvetted_tx_count;
@@ -191,7 +191,7 @@ inline constexpr std::array<double, 15> kMempoolRoundLatencyBounds = {
     0.25, 0.5, 1, 1.5, 1.75, 2, 2.25, 2.5, 3, 4, 5, 7.5, 10, 20, 60};
 
 // Upper bounds for transactions per committed block: 1 to 1M, 1-2-5 series.
-inline constexpr std::array<double, 19> kMempoolBlockTxCountBounds = {
+inline constexpr std::array<double, 19> kMempoolBlockTransactionsBounds = {
     1,    2,    5,     10,    20,    50,     100,    200,    500,    1000,
     2000, 5000, 10000, 20000, 50000, 100000, 200000, 500000, 1000000};
 
@@ -199,20 +199,22 @@ inline constexpr std::array<double, 19> kMempoolBlockTxCountBounds = {
 // transactions: powers of two from 1 KiB to 512 MiB. The firehose drops
 // subscribers on records above its 4 MiB default, so 2 MiB and 4 MiB must be
 // exact bucket edges.
-inline constexpr std::array<double, 20> kMempoolBlockTxBytesBounds = [] {
-  std::array<double, 20> bounds{};
-  for (size_t i = 0; i < bounds.size(); ++i) {
-    bounds[i] = static_cast<double>(size_t{1} << (10 + i));
-  }
-  return bounds;
-}();
-static_assert(kMempoolBlockTxBytesBounds[11] == 2.0 * 1024 * 1024);
-static_assert(kMempoolBlockTxBytesBounds[12] == 4.0 * 1024 * 1024);
-static_assert(kMempoolBlockTxBytesBounds.back() == 512.0 * 1024 * 1024);
+inline constexpr std::array<double, 20> kMempoolBlockTransactionBytesBounds =
+    [] {
+      std::array<double, 20> bounds{};
+      for (size_t i = 0; i < bounds.size(); ++i) {
+        bounds[i] = static_cast<double>(size_t{1} << (10 + i));
+      }
+      return bounds;
+    }();
+static_assert(kMempoolBlockTransactionBytesBounds[11] == 2.0 * 1024 * 1024);
+static_assert(kMempoolBlockTransactionBytesBounds[12] == 4.0 * 1024 * 1024);
+static_assert(kMempoolBlockTransactionBytesBounds.back() ==
+              512.0 * 1024 * 1024);
 
 template<size_t N>
 std::vector<double>
-latency_bounds(const std::array<double, N> &bounds)
+histogram_bounds(const std::array<double, N> &bounds)
 {
   return {bounds.begin(), bounds.end()};
 }
@@ -365,84 +367,84 @@ MempoolMetrics::init()
       metrics.histogram(kComponent, "ingestion_commit_lock_wait_seconds",
                         "Ingestion diagnostics: ingestion commit lock "
                         "wait seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   ingestion_commit_lock_hold_seconds =
       metrics.histogram(kComponent, "ingestion_commit_lock_hold_seconds",
                         "Ingestion diagnostics: ingestion commit lock "
                         "hold seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   block_commit_lock_wait_seconds =
       metrics.histogram(kComponent, "block_commit_lock_wait_seconds",
                         "Ingestion diagnostics: block commit lock wait "
                         "seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   block_commit_lock_hold_seconds =
       metrics.histogram(kComponent, "block_commit_lock_hold_seconds",
                         "Ingestion diagnostics: block commit lock hold "
                         "seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   scheduler_global_lock_wait_seconds =
       metrics.histogram(kComponent, "scheduler_global_lock_wait_seconds",
                         "Ingestion diagnostics: scheduler global lock "
                         "wait seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   scheduler_global_lock_hold_seconds =
       metrics.histogram(kComponent, "scheduler_global_lock_hold_seconds",
                         "Ingestion diagnostics: scheduler global lock "
                         "hold seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   ingestion_auth_rpc_seconds =
       metrics.histogram(kComponent, "ingestion_auth_rpc_seconds",
                         "Ingestion diagnostics: ingestion auth rpc "
                         "seconds. Aggregate across callers.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   ingestion_auth_retry_count = metrics.per_thread_counter(
       kComponent, "ingestion_auth_retry_count",
       "Authentication RPC retries across block commits.");
   submit_unvetted_duration_seconds = metrics.histogram(
       kComponent, "submit_unvetted_duration_seconds",
       "Duration of unvetted transaction submission RPCs in seconds.",
-      latency_bounds(kMempoolWorkLatencyBounds));
+      histogram_bounds(kMempoolWorkLatencyBounds));
   submit_vetted_duration_seconds = metrics.histogram(
       kComponent, "submit_vetted_duration_seconds",
       "Duration of vetted transaction submission RPCs in seconds.",
-      latency_bounds(kMempoolWorkLatencyBounds));
+      histogram_bounds(kMempoolWorkLatencyBounds));
   nomination_duration_seconds =
       metrics.histogram(kComponent, "nomination_duration_seconds",
                         "Duration of nomination RPCs in seconds.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   validation_duration_seconds =
       metrics.histogram(kComponent, "validation_duration_seconds",
                         "Duration of validation RPCs in seconds.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   commit_duration_seconds =
       metrics.histogram(kComponent, "commit_duration_seconds",
                         "Duration of successful commit RPCs in seconds.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
   commit_interval_seconds = metrics.histogram(
       kComponent, "commit_interval_seconds",
       "Time from the end of one successful commit to the start of the next, "
       "in seconds.",
-      latency_bounds(kMempoolRoundLatencyBounds));
+      histogram_bounds(kMempoolRoundLatencyBounds));
   block_period_seconds = metrics.histogram(
       kComponent, "block_period_seconds",
       "Time from the start of one successful commit to the start of the next, "
       "in seconds: the round time.",
-      latency_bounds(kMempoolRoundLatencyBounds));
-  block_tx_count =
-      metrics.histogram(kComponent, "block_tx_count",
+      histogram_bounds(kMempoolRoundLatencyBounds));
+  block_transactions =
+      metrics.histogram(kComponent, "block_transactions",
                         "Transactions in each successfully committed block.",
-                        latency_bounds(kMempoolBlockTxCountBounds));
-  block_tx_bytes = metrics.histogram(
-      kComponent, "block_tx_bytes",
+                        histogram_bounds(kMempoolBlockTransactionsBounds));
+  block_transaction_bytes = metrics.histogram(
+      kComponent, "block_transaction_bytes",
       "XDR size in bytes of the signed transactions in each successfully "
       "committed block. Transaction bytes only, not the block's firehose "
       "record, which also carries event logs and the consensus value.",
-      latency_bounds(kMempoolBlockTxBytesBounds));
+      histogram_bounds(kMempoolBlockTransactionBytesBounds));
   scheduler_remove_duration_seconds =
       metrics.histogram(kComponent, "scheduler_remove_duration_seconds",
                         "Duration of scheduler removal passes in seconds.",
-                        latency_bounds(kMempoolWorkLatencyBounds));
+                        histogram_bounds(kMempoolWorkLatencyBounds));
 
   metrics.mark_done_with_init(kComponent);
 }

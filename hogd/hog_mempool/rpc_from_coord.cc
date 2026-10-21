@@ -3339,9 +3339,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
         info("schedulercoord_commit_block ret");
-        MempoolMetrics::instance().block_tx_count.record(
+        MempoolMetrics::instance().block_transactions.record(
             static_cast<double>(committed_tx_count));
-        MempoolMetrics::instance().block_tx_bytes.record(
+        MempoolMetrics::instance().block_transaction_bytes.record(
             static_cast<double>(measure_block_node.get()));
         // Skip the first commit after start and the genesis ceremony (height
         // 1): neither is a round.

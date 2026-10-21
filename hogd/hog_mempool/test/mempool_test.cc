@@ -1774,36 +1774,37 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
   MempoolTestInfra server;
   MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
   MempoolMetrics &metrics = MempoolMetrics::instance();
-  ASSERT_EQ(metrics.block_tx_count.count(), 1UL);
-  ASSERT_EQ(metrics.block_tx_bytes.count(), 1UL);
+  ASSERT_EQ(metrics.block_transactions.count(), 1UL);
+  ASSERT_EQ(metrics.block_transaction_bytes.count(), 1UL);
 
   // Dashboards and alerts query these names and edges; 2 MiB and 4 MiB bracket
   // the firehose record cap.
   {
     const std::string dump = Metrics::instance().dump_to_prometheus_string();
     for (const char *series :
-         {"mempool_block_tx_count_bucket{le=\"1\"} ",
-          "mempool_block_tx_count_bucket{le=\"1000000\"} ",
-          "mempool_block_tx_bytes_bucket{le=\"1024\"} ",
-          "mempool_block_tx_bytes_bucket{le=\"2097152\"} ",
-          "mempool_block_tx_bytes_bucket{le=\"4194304\"} ",
-          "mempool_block_tx_bytes_bucket{le=\"536870912\"} ",
-          "# HELP mempool_block_tx_bytes XDR size in bytes of the signed "
+         {"mempool_block_transactions_bucket{le=\"1\"} ",
+          "mempool_block_transactions_bucket{le=\"1000000\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"1024\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"2097152\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"4194304\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"536870912\"} ",
+          "# HELP mempool_block_transaction_bytes XDR size in bytes of the "
+          "signed "
           "transactions in each successfully committed block. Transaction "
           "bytes only, not the block's firehose record"}) {
       EXPECT_NE(dump.find(series), std::string::npos) << series;
     }
   }
 
-  double tx_count_sum = metrics.block_tx_count.sum();
-  double tx_bytes_sum = metrics.block_tx_bytes.sum();
+  double tx_count_sum = metrics.block_transactions.sum();
+  double tx_bytes_sum = metrics.block_transaction_bytes.sum();
   auto expect_recorded = [&](size_t samples, size_t tx_count, size_t tx_bytes) {
     tx_count_sum += static_cast<double>(tx_count);
     tx_bytes_sum += static_cast<double>(tx_bytes);
-    EXPECT_EQ(metrics.block_tx_count.count(), samples);
-    EXPECT_EQ(metrics.block_tx_bytes.count(), samples);
-    EXPECT_EQ(metrics.block_tx_count.sum(), tx_count_sum);
-    EXPECT_EQ(metrics.block_tx_bytes.sum(), tx_bytes_sum);
+    EXPECT_EQ(metrics.block_transactions.count(), samples);
+    EXPECT_EQ(metrics.block_transaction_bytes.count(), samples);
+    EXPECT_EQ(metrics.block_transactions.sum(), tx_count_sum);
+    EXPECT_EQ(metrics.block_transaction_bytes.sum(), tx_bytes_sum);
   };
 
   ValidatorID validator_id{};
@@ -1855,13 +1856,80 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
     }
   }
 
+  // Nomination compacts a block's txs in place, moving each success over
+  // earlier failures. An account's txs are scheduled in [TxKey] order, by
+  // tx hash at equal expiry, so pick fresh txs hashing either side of the
+  // committed txs[1]: the block is then fresh, failing, fresh.
+  std::optional<size_t> before;
+  std::optional<size_t> after;
+  for (size_t i = 2; i < txs.size() && !(before && after); ++i) {
+    std::optional<size_t> &slot =
+        sha256(txs[i].tx) < sha256(txs[1].tx) ? before : after;
+    if (!slot) {
+      slot = i;
+    }
+  }
+  ASSERT_TRUE(before && after);
+  {
+    const SignedTransaction &first = txs[*before];
+    const SignedTransaction &last = txs[*after];
+
+    const ssize_t failed_before = metrics.nomination_failed_tx_count.value();
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{first, txs[1], last})())();
+    ASSERT_EQ(rpc.scheduler()->size(), 3UL);
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    SignedTransactionBatch nominated;
+    ASSERT_TRUE(parallel_batch_to_t(nomination.proposed_block().txs, nominated,
+                                    kNoBatchSizeLimit)());
+    EXPECT_EQ(nominated, (SignedTransactionBatch{first, last}));
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before + 1);
+    expect_recorded(5, 2, x23::xdr_size(first) + x23::xdr_size(last));
+  }
+
   // A failed commit records nothing.
   ConsensusValue value{};
   value.proposal_header.block_height = 100;
   EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
                                             std::move(value))(),
             SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
-  expect_recorded(4, 0, 0);
+  expect_recorded(5, 0, 0);
+
+  // Nor does a commit of a known block with the wrong consensus value; the
+  // retry with the right one records the block once.
+  {
+    // Any fresh tx not used above; one of txs[2..4] always is.
+    size_t unused = 2;
+    while (unused == *before || unused == *after) {
+      ++unused;
+    }
+    const SignedTransaction &tx = txs[unused];
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{tx})())();
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    const SchedulerProposedBlock &proposed = nomination.proposed_block();
+    ConsensusValue wrong = consensus_value(tip.db_tip(), proposed.proposal);
+    wrong.prev_hash[0] ^= 0xff;
+    EXPECT_EQ(rpc.schedulercoord_commit_block(proposed.block_id,
+                                              std::move(wrong))(),
+              SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+    expect_recorded(5, 0, 0);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), proposed),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    expect_recorded(6, 1, x23::xdr_size(tx));
+  }
 }
 
 TEST(Mempool, NewlyDeployedContractHogCount)
