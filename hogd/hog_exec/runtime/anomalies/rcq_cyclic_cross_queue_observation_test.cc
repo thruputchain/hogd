@@ -25,7 +25,6 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <string_view>

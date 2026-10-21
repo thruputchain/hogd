@@ -39,7 +39,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <print>

@@ -39,7 +39,6 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>

@@ -5,7 +5,6 @@
 // WriteAddressRequiredWeight and GetAuthClaim, which previously had only
 // native (host-driven) coverage in syscall_auth_config_test.cc.
 
-#include <cstdint>
 #include <memory>
 
 #include "address_auth.hh"

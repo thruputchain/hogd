@@ -9,7 +9,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>

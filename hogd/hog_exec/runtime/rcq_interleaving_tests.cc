@@ -7,7 +7,6 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <unordered_map>

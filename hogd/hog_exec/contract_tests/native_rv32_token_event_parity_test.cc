@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <concepts>
-#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>

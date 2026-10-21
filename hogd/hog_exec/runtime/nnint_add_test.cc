@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <unordered_map>

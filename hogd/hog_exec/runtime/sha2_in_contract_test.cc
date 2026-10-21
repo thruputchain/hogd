@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 

@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <tuple>
 #include <unordered_map>

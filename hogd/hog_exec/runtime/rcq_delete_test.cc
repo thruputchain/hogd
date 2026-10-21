@@ -1,7 +1,6 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 
