@@ -127,6 +127,35 @@ prefix in shown {
 EOF
 }
 
+# Reads back the path [control_cli start] reported for one of the streams of
+# the process it just launched: $1 is "stdout" or "stderr" and $2 is the output
+# that [start] printed. The control server names those files with [mkstemp], so
+# the only record of where a launched process's output went is the pair of
+# [CONTROL_STDOUT_PATH=]/[CONTROL_STDERR_PATH=] lines [start] emits. A caller
+# that wants to show that output after the process dies has to keep them;
+# picking the newest [/tmp/hogd_stdout*] instead races every other suite that
+# has run on the same bench host, and names no stderr file at all.
+ci_control_log_path() {
+  local stream=$1 start_output=$2
+  local key path
+
+  case $stream in
+  stdout) key=CONTROL_STDOUT_PATH ;;
+  stderr) key=CONTROL_STDERR_PATH ;;
+  *)
+    echo "ci_control_log_path: unknown stream '$stream'" >&2
+    return 1
+    ;;
+  esac
+
+  path=$(printf '%s\n' "$start_output" | sed -n "s/^$key=//p" | tail -n 1)
+  if [ -z "$path" ]; then
+    echo "ci_control_log_path: no $key in control_cli start output" >&2
+    return 1
+  fi
+  printf '%s\n' "$path"
+}
+
 # Replays the x23 panic reports in the local log at $1, if it has any, under a
 # header of their own. Silent for a log without a panic in it, so that a step
 # that failed some other way reads exactly as it did before.

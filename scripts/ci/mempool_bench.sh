@@ -13,15 +13,70 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+COORDINATOR_HOST=hog4
+
+# How much of each of the coordinator's streams to replay when it dies.
+# [ci_report_failed_bench_steps] replays the last $CI_BENCH_FAIL_TAIL_LINES
+# lines of this script's log at the end of the job, and the cleanup trap writes
+# to that log after this dump, so two of these plus the stop RPCs have to leave
+# room for the rest of the failure to still be in the window.
+CI_COORDINATOR_FAIL_TAIL_LINES=${CI_COORDINATOR_FAIL_TAIL_LINES:-80}
+
+# Where the control server put the coordinator's output, as reported by the
+# [start] that launched it.
+COORDINATOR_STDOUT_PATH=""
+COORDINATOR_STDERR_PATH=""
+# 1 once the coordinator has been seen alive after the load, which makes its
+# own output beside the point: whatever is being reported killed something
+# else.
+COORDINATOR_SURVIVED=0
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
+}
+
+# Replays the tail of one of the coordinator's streams, which lives on
+# $COORDINATOR_HOST rather than here. Never fails its caller: it runs while the
+# script is already on its way out, and a host that has stopped answering must
+# not replace the failure being reported with one of its own.
+replay_coordinator_stream() {
+  local stream=$1 path=$2
+
+  echo "===== last $CI_COORDINATOR_FAIL_TAIL_LINES lines of coordinator" \
+    "$stream on $COORDINATOR_HOST ====="
+  if [ -z "$path" ]; then
+    echo "(no $stream log path was recorded for the coordinator)"
+  elif ! ssh "${CI_SSH_OPTS[@]}" "$COORDINATOR_HOST" \
+    "tail -n $CI_COORDINATOR_FAIL_TAIL_LINES $(printf '%q' "$path")"; then
+    echo "(could not read $path from $COORDINATOR_HOST)"
+  fi
+  echo "===== end of coordinator $stream ====="
+}
+
+# The coordinator runs under a control server on another host, so when it dies
+# all this script ever sees is an exit status. On its own that status names no
+# cause: the job log ends up saying "coordinator exit status 2" above a tail of
+# whatever the mempool happened to be logging at the time, and the one process
+# that knows what went wrong says nothing at all. Put its last words in that
+# tail instead.
+#
+# Both streams, because chuckd reports a fatal error on stderr while the
+# benchmark results this script publishes come back on stdout.
+report_coordinator_logs() {
+  replay_coordinator_stream stdout "$COORDINATOR_STDOUT_PATH"
+  replay_coordinator_stream stderr "$COORDINATOR_STDERR_PATH"
 }
 
 cleanup() {
   local exit_code=$1
 
   ci_enter_cleanup
+  # While the files are still there to read, and only when the coordinator is
+  # still a suspect: a mempool that aborted has its own tail to report, and
+  # this dump would push it out of the window.
+  if [ "$exit_code" -ne 0 ] && [ "$COORDINATOR_SURVIVED" -ne 1 ]; then
+    report_coordinator_logs
+  fi
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
 
@@ -110,7 +165,12 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+# Captured rather than streamed, because [start] reports the paths it gave the
+# launched process's streams and they are the only record of where the
+# coordinator's output went. Printed either way, so a failed launch still says
+# what went wrong where it always did.
+coordinator_start_status=0
+coordinator_start_output=$($CONTROL_CLI "$COORDINATOR_HOST" $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
   --stack \
@@ -132,10 +192,17 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+  --scp-control-addr 127.0.0.1:4400 2>&1) || coordinator_start_status=$?
+printf '%s\n' "$coordinator_start_output"
+if [ "$coordinator_start_status" -ne 0 ]; then
+  echo "coordinator start $(ci_describe_exit_status "$coordinator_start_status")" >&2
+  exit "$coordinator_start_status"
+fi
+COORDINATOR_STDOUT_PATH=$(ci_control_log_path stdout "$coordinator_start_output")
+COORDINATOR_STDERR_PATH=$(ci_control_log_path stderr "$coordinator_start_output")
 
 echo 'make sure procs are running'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
+$CONTROL_CLI "$COORDINATOR_HOST" $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog7 $CI_CONTROL_PORT expect_running
@@ -160,16 +227,17 @@ mempool_status=$?
 set -e
 
 coordinator_status=0
-if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
+if ! $CONTROL_CLI "$COORDINATOR_HOST" "$CI_CONTROL_PORT" expect_running; then
   set +e
-  $CONTROL_CLI hog4 "$CI_CONTROL_PORT" wait
+  $CONTROL_CLI "$COORDINATOR_HOST" "$CI_CONTROL_PORT" wait
   coordinator_status=$?
   set -e
+else
+  COORDINATOR_SURVIVED=1
 fi
 
-echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+echo "copy coordinator output from $COORDINATOR_HOST"
+scp "$COORDINATOR_HOST:$COORDINATOR_STDOUT_PATH" ./coordinator_output.txt
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the

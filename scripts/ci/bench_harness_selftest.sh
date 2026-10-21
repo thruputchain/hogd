@@ -176,6 +176,40 @@ esac
 set +x
 check_contains "traced replay still readable" "traced-needle" "$report"
 
+## ci_control_log_path
+
+# What a [control_cli start] prints. The two path lines are the only record of
+# where the launched process's output went, so a benchmark that wants to show
+# that output after the process dies has to read them back out of this.
+control_start_output='I[1021 01:00:01 control_cli.cc:127] Starting server: chuckd.dev
+I[1021 01:00:01 control_cli.cc:131] Start command sent successfully
+CONTROL_STDOUT_PATH=/tmp/hogd_stdout_352932345685521_1005502_Ab3kQ1
+CONTROL_STDERR_PATH=/tmp/hogd_stderr_352932345685521_1005502_Zx9mL4'
+
+check_eq "control log path stdout" \
+  "/tmp/hogd_stdout_352932345685521_1005502_Ab3kQ1" \
+  "$(ci_control_log_path stdout "$control_start_output")"
+check_eq "control log path stderr" \
+  "/tmp/hogd_stderr_352932345685521_1005502_Zx9mL4" \
+  "$(ci_control_log_path stderr "$control_start_output")"
+
+# A launch that reported no paths must fail rather than hand back an empty
+# path: the caller scps from it, and an empty remote path is a whole directory.
+control_log_path_status=0
+control_log_path_output=$(ci_control_log_path stdout "no paths here" 2>&1) ||
+  control_log_path_status=$?
+check_eq "missing path reported as failure" "1" "$control_log_path_status"
+check_eq "missing path yields nothing" "" \
+  "$(ci_control_log_path stdout "no paths here" 2>/dev/null || true)"
+check_contains "missing path names the key" "CONTROL_STDOUT_PATH" \
+  "$control_log_path_output"
+
+control_log_path_status=0
+control_log_path_output=$(ci_control_log_path sideways "$control_start_output" \
+  2>&1) || control_log_path_status=$?
+check_eq "unknown stream reported as failure" "1" "$control_log_path_status"
+check_contains "unknown stream is named" "sideways" "$control_log_path_output"
+
 ## ci_reap_program
 
 # The reap has to be synchronous: its callers bind fixed ports seconds later,
