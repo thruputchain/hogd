@@ -693,7 +693,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   if (!inserted) {
     const SignedTransactionHash cached_signed_tx_hash =
         (*tx_ptr)->signed_tx_hash;
-    if (on_variant == CachedVariant::kKeep ||
+    if (on_variant == CachedVariant::kSubmitUnvetted ||
         cached_signed_tx_hash == signed_tx_hash) {
       return false;
     }
@@ -754,7 +754,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
     signed_tx_hashes.push_back(hash_signed_transaction(tx).signed_tx_hash);
   }
   co_return co_await add_txs(txs, tx_hashes, signed_tx_hashes,
-                             CachedVariant::kKeep);
+                             CachedVariant::kSubmitUnvetted);
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>

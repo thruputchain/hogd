@@ -42,15 +42,17 @@ public:
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
 
-  // What [add_txs()] does with a submission whose body is already cached under
-  // a different signed encoding.
+  // Which submission path a batch for [add_txs()] came from, which decides
+  // what happens to a submission whose body is already cached under a
+  // different signed encoding.
   enum class CachedVariant {
-    // Keep the cached encoding and report the submission admitted.
-    kKeep,
-    // Replace the cached encoding with the submitted one. Validation uses this
-    // for the encodings a proposer chose, so the cache holds what the block
-    // executes.
-    kReplace,
+    // [submit_unvetted()]: keep the cached encoding and report the submission
+    // admitted.
+    kSubmitUnvetted,
+    // [schedulercoord_submit_vetted()]: replace the cached encoding with the
+    // submitted one. The coordinator supplies the encodings a proposer chose,
+    // so the cache holds what the block under validation executes.
+    kSubmitVetted,
   };
 
   x23::Async<void> shut_down()
@@ -79,8 +81,8 @@ public:
           const SignedTransactionHashBatch &signed_tx_hashes,
           CachedVariant on_variant);
 
-  // [add_txs()] for callers that have not hashed the signed encodings, keeping
-  // cached variants.
+  // [add_txs()] for callers that have not hashed the signed encodings, as an
+  // unvetted submission.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);

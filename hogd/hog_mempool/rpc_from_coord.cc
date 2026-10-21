@@ -611,8 +611,9 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         // from the scheduler). But this would make the txs visible to
         // nominate() and validate() before the txs have been verified.
         const SchedGatewaySubmitOutcomeBatch add_outcomes =
-            co_await scheduler_->add_txs(*txs, *tx_hashes, *signed_tx_hashes,
-                                         Scheduler::CachedVariant::kKeep);
+            co_await scheduler_->add_txs(
+                *txs, *tx_hashes, *signed_tx_hashes,
+                Scheduler::CachedVariant::kSubmitUnvetted);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
         SignedTransactionBatch admitted_txs;
@@ -769,7 +770,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         // validation executes, so they replace other encodings of their
         // bodies.
         co_await scheduler_->add_txs(*txs, *tx_hashes, *signed_tx_hashes,
-                                     Scheduler::CachedVariant::kReplace);
+                                     Scheduler::CachedVariant::kSubmitVetted);
         MempoolMetrics::instance().accepted_vetted_tx_count.increment(
             txs->size());
         // [commit_guard] is a smart pointer that has a [reset()] method just

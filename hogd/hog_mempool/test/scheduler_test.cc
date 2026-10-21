@@ -354,7 +354,7 @@ TEST(Scheduler, KeptVariantLeavesCachedEncoding)
 
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
-                         Scheduler::CachedVariant::kKeep)();
+                         Scheduler::CachedVariant::kSubmitUnvetted)();
   ASSERT_EQ(outcomes.size(), 1UL);
   EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1);
@@ -380,7 +380,7 @@ TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
 
   const SchedGatewaySubmitOutcomeBatch outcomes =
       scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
-                         Scheduler::CachedVariant::kReplace)();
+                         Scheduler::CachedVariant::kSubmitVetted)();
   ASSERT_EQ(outcomes.size(), 1UL);
   EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1);
@@ -433,7 +433,7 @@ TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
   // Replacing a body the nomination holds swaps only the cache entry: the
   // nomination keeps its copy, and the body stays off the runqueue.
   scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
-                     Scheduler::CachedVariant::kReplace)();
+                     Scheduler::CachedVariant::kSubmitVetted)();
   EXPECT_EQ(scheduler->size(), 0);
   EXPECT_EQ(scheduled.front(), a);
   EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
