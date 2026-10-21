@@ -5,6 +5,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -17,6 +18,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -57,6 +59,17 @@
 #include "x23/vec.h"
 
 namespace hogd {
+
+// The mempool tests exercise hog accounting with transactions budgeting 5B gas
+// each (txs.h), past the default max_tx_gas, so their chain states no cap.
+inline NetworkConfig
+mempool_test_network_config()
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                 std::numeric_limits<GasAmount>::max());
+  return config;
+}
 
 constexpr ContractAddress
 make_account_address(uint8_t i)
@@ -335,7 +348,7 @@ private:
     // load installs the real ones over these. A recovered database already
     // carries the parameters its genesis installed.
     if (!ctx_->has_committed_tip()) {
-      ctx_->set_network_config(stock_network_config());
+      ctx_->set_network_config(mempool_test_network_config());
     }
   }
 

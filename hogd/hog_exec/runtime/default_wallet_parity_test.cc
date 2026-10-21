@@ -291,7 +291,7 @@ protected:
   {
     Invocation invocation{.invoked_address = wallet,
                           .entrypoint = entrypoint_from_method_id(method_id),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {}};
     invocation.calldata.append(raw_calldata.begin(), raw_calldata.end());
     return run_wallet_root_tx(std::move(invocation),

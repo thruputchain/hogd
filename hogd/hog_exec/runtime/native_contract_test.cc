@@ -383,7 +383,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -478,7 +478,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -621,7 +621,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -723,7 +723,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
 
@@ -739,7 +739,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(1),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -874,7 +874,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                 {
                     .invoked_address = address,
                     .entrypoint = entrypoint_from_method_id(0),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata = {},
                 },
         },
@@ -890,7 +890,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                 {
                     .invoked_address = address,
                     .entrypoint = entrypoint_from_method_id(1),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata = {},
                 },
         },
@@ -951,7 +951,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
               {
                   .invoked_address = kDeployerAddr,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
           .contracts_to_deploy = {malicious_contract},
@@ -1145,7 +1145,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },

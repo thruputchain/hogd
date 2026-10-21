@@ -754,7 +754,7 @@ TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
   Invocation inv{.invoked_address = wallet_,
                  .entrypoint = entrypoint_from_method_id(
                      static_cast<Runtime::MethodID>(999)),
-                 .gas_limit = UINT64_MAX,
+                 .gas_limit = kDefaultMaxTxGas,
                  .calldata = {}};
   auto rec = run_wallet_root_tx(std::move(inv), make_pubkey_claim(preimage_));
   ASSERT_EQ(rec.size(), 3U);
