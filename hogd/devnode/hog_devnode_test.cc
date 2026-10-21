@@ -70,6 +70,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/crypto/mldsa.h"
 #include "hogd/crypto/mldsa_signer.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/runtime_manifest.h"
@@ -3999,9 +4000,12 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   AuthClaim pq_claim(AuthClaimType::kPubkeySignature);
   pq_claim.pubkey_preimage() =
       make_pubkey_account_preimage(pq_public_key, /*nonce=*/0);
-  std::optional<ContractAddress> pq_address =
+  const std::optional<ContractAddress> maybe_pq_address =
       pubkey_auth_address(pq_claim.pubkey_preimage());
-  ASSERT_TRUE(pq_address.has_value());
+  if (!maybe_pq_address.has_value()) {
+    throw std::runtime_error("failed to derive ML-DSA-65 pubkey address");
+  }
+  const ContractAddress pq_address = *maybe_pq_address;
 
   auto sponsor_keypair =
       derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
@@ -4025,7 +4029,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   auto pq_transfer_tx = [&](std::uint64_t nonce) {
     return Transaction{
         .invocation =
-            Invocation{.invoked_address = *pq_address,
+            Invocation{.invoked_address = pq_address,
                        .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                        .gas_limit = GasAmount{10'000'000},
                        .calldata = native_transfer(sponsor_wallet_address,
@@ -4087,7 +4091,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
                        .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                        .gas_limit = GasAmount{10'000'000},
                        .calldata =
-                           native_transfer(*pq_address, int128_t{200'000'000})},
+                           native_transfer(pq_address, int128_t{200'000'000})},
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 40},
@@ -4155,7 +4159,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
     }
 
     AddressTransactionQuery history_query{};
-    history_query.address = *pq_address;
+    history_query.address = pq_address;
     history_query.order = IterationOrder::IterationOrderAscending;
     history_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
     TransactionRefPage history =
