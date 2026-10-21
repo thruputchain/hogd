@@ -9,6 +9,7 @@
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -106,7 +107,7 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
                         Invocation{.invoked_address = contract_addr,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -168,7 +169,7 @@ TEST_P(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
   Transaction tx{
       .invocation = Invocation{.invoked_address = make_contract_address(0),
                                .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
+                               .gas_limit = kDefaultMaxTxGas,
                                .calldata = {}},
       .uniquifier = make_new_uniquifier(),
   };

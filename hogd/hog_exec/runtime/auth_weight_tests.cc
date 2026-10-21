@@ -11,6 +11,7 @@
 #include "address_auth.hh"
 #include "built_contracts/auth_weight_test.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -75,9 +76,8 @@ protected:
 TEST_F(AuthWeightTests, WriteWeightCommitsAuthData)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_write_weight">(UINT64_MAX,
-                                                                     5U),
+      Transaction{.invocation = client_.make_invocation<u8"test_write_weight">(
+                      kDefaultMaxTxGas, 5U),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -99,7 +99,7 @@ TEST_F(AuthWeightTests, GetAuthClaimDefaultClaim)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_get_auth_claim">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -115,7 +115,7 @@ TEST_F(AuthWeightTests, WriteWeightRejectedInReadOnlyFrame)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_write_weight_read_only">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());

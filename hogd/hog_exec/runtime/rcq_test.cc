@@ -11,6 +11,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -414,7 +415,7 @@ protected:
                         Invocation{.invoked_address = contract_address_,
                                    .entrypoint =
                                        entrypoint_from_method_id(method_id),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = Calldata(calldata.begin(),
                                                         calldata.end())},
                     .uniquifier = make_new_uniquifier(),
@@ -617,7 +618,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                     .invoked_address = contract_address_,
                                     .entrypoint =
                                         entrypoint_from_method_id(1), // Consume
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = Calldata({1}),
                                 },
                             .uniquifier = make_new_uniquifier()}}, // Consume 1
@@ -635,7 +636,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({5, 4})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
@@ -683,7 +684,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    1), // Consume
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({2})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
@@ -696,7 +697,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({9})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
@@ -928,7 +929,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -941,7 +942,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -1085,7 +1086,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -1097,7 +1098,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -1152,7 +1153,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(5),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({0x2f})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
@@ -1175,7 +1176,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({0x41})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
@@ -1190,7 +1191,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(
                                                {0x07, 0x02, 0x42, 0x43})},
                             .uniquifier = make_new_uniquifier()}},

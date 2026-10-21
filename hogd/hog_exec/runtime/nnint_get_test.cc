@@ -9,6 +9,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_exec/common/status.h"
@@ -103,7 +104,7 @@ TEST_P(NNIntGetTest, GetOnNonExistentKey)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -174,7 +175,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -238,7 +239,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -304,7 +305,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -371,7 +372,7 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -437,7 +438,7 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -529,7 +530,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -602,7 +603,7 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -667,7 +668,7 @@ TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},

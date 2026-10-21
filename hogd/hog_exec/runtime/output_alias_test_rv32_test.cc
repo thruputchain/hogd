@@ -6,6 +6,7 @@
 
 #include "built_contracts/output_alias_test.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -54,12 +55,13 @@ protected:
 TEST_F(OutputAliasTestRv32Test, NnintExactOverlap)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_nnint_exact_overlap">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_nnint_exact_overlap">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   handler.enable_transaction_stats();
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -76,7 +78,7 @@ TEST_F(OutputAliasTestRv32Test, NnintPartialOverlap)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_nnint_partial_overlap">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -89,12 +91,13 @@ TEST_F(OutputAliasTestRv32Test, NnintPartialOverlap)
 TEST_F(OutputAliasTestRv32Test, NnintNoOverlap)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_nnint_no_overlap">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_nnint_no_overlap">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -106,7 +109,7 @@ TEST_F(OutputAliasTestRv32Test, CalldataSpanWritableOverlap)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_calldata_span_writable_overlap">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -118,12 +121,13 @@ TEST_F(OutputAliasTestRv32Test, CalldataSpanWritableOverlap)
 TEST_F(OutputAliasTestRv32Test, CalldataNoOverlap)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_calldata_no_overlap">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_calldata_no_overlap">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -135,7 +139,7 @@ TEST_F(OutputAliasTestRv32Test, InputInputOverlapFault)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_log_event_input_input_alias">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -153,7 +157,7 @@ TEST_F(OutputAliasTestRv32Test, ZeroLenSpanAliasEdges)
       .tx = Transaction{
           .invocation =
               client_.make_invocation<u8"test_log_event_zero_len_data_alias">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}}};
@@ -172,7 +176,7 @@ TEST_F(OutputAliasTestRv32Test, InputOutputOverlapFault)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_nnint_input_alias_output">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},

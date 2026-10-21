@@ -174,7 +174,7 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   caller.make_invocation<u8"initialize">(
-                                      UINT64_MAX, fibonacci_addr),
+                                      kDefaultMaxTxGas, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -187,7 +187,8 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   caller.make_invocation<u8"call_fibonacci">(
-                                      UINT64_MAX, uint32_t{20}, uint64_t{1000}),
+                                      kDefaultMaxTxGas, uint32_t{20},
+                                      uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     ASSERT_FALSE(handler.root_invoke()().is_root_success());
@@ -207,7 +208,7 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   caller.make_invocation<u8"initialize">(
-                                      UINT64_MAX, fibonacci_addr),
+                                      kDefaultMaxTxGas, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -218,10 +219,11 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation = caller.make_invocation<
-                                  u8"call_fibonacci_expect_out_of_gas">(
-                                  UINT64_MAX, uint32_t{20}, uint64_t{1000}),
-                              .uniquifier = make_new_uniquifier()}},
+            .tx =
+                Transaction{.invocation = caller.make_invocation<
+                                u8"call_fibonacci_expect_out_of_gas">(
+                                kDefaultMaxTxGas, uint32_t{20}, uint64_t{1000}),
+                            .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
@@ -247,7 +249,7 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
         SignedTransaction{
             .tx = Transaction{.invocation =
                                   caller.make_invocation<u8"initialize">(
-                                      UINT64_MAX, fibonacci_addr),
+                                      kDefaultMaxTxGas, fibonacci_addr),
                               .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -259,10 +261,11 @@ TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
   {
     auto handler = make_new_system_call_handler(
         SignedTransaction{
-            .tx = Transaction{.invocation =
-                                  caller.make_invocation<u8"call_fibonacci">(
-                                      UINT64_MAX, uint32_t{5}, UINT64_MAX),
-                              .uniquifier = make_new_uniquifier()}},
+            .tx =
+                Transaction{.invocation =
+                                caller.make_invocation<u8"call_fibonacci">(
+                                    kDefaultMaxTxGas, uint32_t{5}, UINT64_MAX),
+                            .uniquifier = make_new_uniquifier()}},
         runtime_context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);

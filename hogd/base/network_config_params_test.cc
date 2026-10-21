@@ -115,9 +115,8 @@ TEST(ConfigParamValueDeathTest, AUint32ArmRefusesAWiderValue)
                "");
 }
 
-// A configuration predating the parameter continues the rule it ran under:
-// no budget bound beyond hog availability.
-TEST(NetworkConfigParamsTest, AListOmittingTxGasImposesNoBudget)
+// A configuration predating the parameter gets the default cap, not none.
+TEST(NetworkConfigParamsTest, AListOmittingTxGasHasTheDefaultBudget)
 {
   NetworkConfig config;
   config.v(0);
@@ -129,8 +128,7 @@ TEST(NetworkConfigParamsTest, AListOmittingTxGasImposesNoBudget)
                 ConfigParamID::kConfigParamMaxReturnBufferLen)) +
                 1);
 
-  EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas,
-            std::numeric_limits<GasAmount>::max());
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, 1'000'000'000U);
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)

@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -141,7 +142,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -159,7 +160,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -227,7 +228,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -248,7 +249,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -357,7 +358,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kAddressRoot,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -473,7 +474,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -491,7 +492,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -509,7 +510,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(2),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -569,7 +570,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_get_balance">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_get_balance">(
                             kObserverAddr)},
@@ -593,7 +594,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_transfer">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_transfer">(
                             kReceiverAddr)},
@@ -622,7 +623,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
       .tx = Transaction{
           .invocation =
               client_.make_invocation<u8"read_only_deploy_output_preserved">(
-                  UINT64_MAX, callee_addr_, sha256(*contract_)),
+                  kDefaultMaxTxGas, callee_addr_, sha256(*contract_)),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -642,7 +643,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
           .invocation = client_.make_invocation<
-              u8"read_only_aliasing_before_read_only_check">(UINT64_MAX,
+              u8"read_only_aliasing_before_read_only_check">(kDefaultMaxTxGas,
                                                              callee_addr_),
           .uniquifier = make_new_uniquifier(),
       }};

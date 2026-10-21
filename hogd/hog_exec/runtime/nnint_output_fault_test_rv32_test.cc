@@ -5,6 +5,7 @@
 #include <memory>
 
 #include "built_contracts/nnint_output_fault_test.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -55,12 +56,13 @@ protected:
 TEST_F(NnintOutputFaultTestRv32Test, FaultValidFirst)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_fault_valid_first">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_fault_valid_first">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -70,12 +72,13 @@ TEST_F(NnintOutputFaultTestRv32Test, FaultValidFirst)
 TEST_F(NnintOutputFaultTestRv32Test, FaultInvalidFirst)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_fault_invalid_first">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_fault_invalid_first">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -83,12 +86,13 @@ TEST_F(NnintOutputFaultTestRv32Test, FaultInvalidFirst)
 TEST_F(NnintOutputFaultTestRv32Test, ValidationFailure)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_validation_failure">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_validation_failure">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }

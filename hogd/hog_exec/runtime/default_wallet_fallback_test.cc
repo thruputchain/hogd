@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -194,10 +195,9 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
-                                                                  calls),
-                              claim_override ? *claim_override
-                                             : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(
+        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
+        claim_override ? *claim_override : make_pubkey_claim(preimage_));
   }
 
   CapturedRecord run_deploy_tx(
@@ -208,7 +208,7 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
     return run_wallet_root_tx(
         client.make_invocation<u8"deploy">(
-            UINT64_MAX, nonce, hash,
+            kDefaultMaxTxGas, nonce, hash,
             std::tuple<int64_t, uint64_t>{static_cast<int64_t>(amount >> 64U),
                                           static_cast<uint64_t>(amount)},
             initializer),
@@ -702,10 +702,9 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
-                                                                  calls),
-                              claim_override ? *claim_override
-                                             : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(
+        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
+        claim_override ? *claim_override : make_pubkey_claim(preimage_));
   }
 };
 
@@ -873,7 +872,8 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
 
   ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
   SignedTransaction stx;
-  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.invocation =
+      client.make_invocation<u8"echo">(kDefaultMaxTxGas, payload);
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);
@@ -915,7 +915,8 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
   x23::Vec<uint8_t, 4294967295> payload;
   payload.resize(8, 0xAB);
   SignedTransaction stx;
-  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.invocation =
+      client.make_invocation<u8"echo">(kDefaultMaxTxGas, payload);
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);

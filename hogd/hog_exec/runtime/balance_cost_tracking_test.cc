@@ -13,6 +13,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -137,7 +138,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -244,7 +245,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 =
@@ -265,7 +266,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 =
@@ -438,7 +439,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -560,7 +561,7 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -662,7 +663,7 @@ TEST_F(BalanceCostTrackingTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -766,7 +767,7 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -876,7 +877,7 @@ TEST_F(BalanceCostTrackingTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -1040,7 +1041,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1148,7 +1149,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1240,7 +1241,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1344,7 +1345,7 @@ TEST_F(BalanceCostTrackingTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1432,7 +1433,7 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -1552,7 +1553,7 @@ TEST_F(BalanceCostTrackingTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -1682,7 +1683,7 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1765,7 +1766,7 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
           Transaction{.invocation =
                           Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(tx, *runtime_context);
@@ -1870,7 +1871,7 @@ TEST_F(BalanceCostTrackingTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kSenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1967,7 +1968,7 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
           Transaction{.invocation =
                           Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);

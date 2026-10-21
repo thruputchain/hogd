@@ -40,10 +40,10 @@ inline constexpr uint32_t kDefaultMaxCalldataLen = 65536;
 // does not state one keeps exactly the limit it already ran under.
 inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 
-// Hog availability was the only bound on a transaction's budget before this
-// parameter, so a chain that does not state one keeps exactly that rule.
-inline constexpr GasAmount kDefaultMaxTxGas =
-    std::numeric_limits<GasAmount>::max();
+// Not permissive: hog availability was the only bound on a transaction's
+// budget before this parameter, and a chain that does not state one now gets
+// this cap rather than none.
+inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
 
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.

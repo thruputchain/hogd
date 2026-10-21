@@ -41,7 +41,7 @@ namespace {
 // configured value is what is enforced rather than the constant.
 constexpr uint32_t kSavepointDepth = 4;
 constexpr uint32_t kAuthTokenDepth = 2;
-constexpr GasAmount kTxGas = 1'000'000'000;
+constexpr GasAmount kTxGas = 100'000'000;
 static_assert(kSavepointDepth < kMaxSavepointDepth);
 static_assert(kAuthTokenDepth < kAuthTokenMaxDepth);
 static_assert(kTxGas < kDefaultMaxTxGas);

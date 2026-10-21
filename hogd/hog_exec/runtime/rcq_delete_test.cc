@@ -16,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -2311,7 +2312,7 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -2342,7 +2343,7 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -2366,7 +2367,7 @@ protected:
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -3677,7 +3678,7 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
                            Invocation{.invoked_address = kContractAddress,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3729,7 +3730,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3785,7 +3786,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3841,7 +3842,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3899,7 +3900,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3957,7 +3958,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4023,7 +4024,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4080,7 +4081,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4150,7 +4151,7 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4323,7 +4324,7 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
                   .invocation =
                       Invocation{.invoked_address = kContractAddress2,
                                  .entrypoint = entrypoint_from_method_id(67),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = x23::serialize(uint32_t{77},
                                                             uint32_t{42})},
                   .uniquifier = make_new_uniquifier(),

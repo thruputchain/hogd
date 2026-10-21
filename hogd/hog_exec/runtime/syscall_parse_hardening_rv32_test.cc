@@ -6,6 +6,7 @@
 #include <memory>
 
 #include "built_contracts/syscall_parse_hardening_test.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -61,12 +62,13 @@ protected:
 TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsNoncanonicalScheme)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<
-              u8"test_verify_signature_noncanonical_scheme_fault">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation = client_.make_invocation<
+                      u8"test_verify_signature_noncanonical_scheme_fault">(
+                      kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -77,7 +79,7 @@ TEST_F(SyscallParseHardeningRv32Test, ChangePubkeyOptionalPointerFaults)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              u8"test_change_pubkey_optional_pointer_fault">(UINT64_MAX),
+              u8"test_change_pubkey_optional_pointer_fault">(kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -92,7 +94,7 @@ TEST_F(SyscallParseHardeningRv32Test,
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = client_.make_invocation<
                       u8"test_get_deploy_address_optional_pointer_sentinel">(
-                      UINT64_MAX),
+                      kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -108,7 +110,7 @@ TEST_F(SyscallParseHardeningRv32Test, VerifySignatureRejectsWrongSizeSignature)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              u8"test_verify_signature_wrong_size_signature">(UINT64_MAX),
+              u8"test_verify_signature_wrong_size_signature">(kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -124,7 +126,7 @@ TEST_F(SyscallParseHardeningRv32Test, ZeroLenSpanOobPointerFaults)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_zero_len_span_oob_pointer_fault">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -139,7 +141,7 @@ TEST_F(SyscallParseHardeningRv32Test, SpanEndU32WrapFaults)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_span_end_u32_wrap_fault">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),

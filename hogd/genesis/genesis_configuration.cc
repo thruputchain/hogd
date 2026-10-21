@@ -157,7 +157,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 {
   using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
   root_client_t client(kGenesisRootContractAddress);
-  // Ample for a distribution chunk, and within any sensible max_tx_gas: a
+  // Ample for a distribution chunk, and within the default max_tx_gas: a
   // chain whose cap refused its own ceremony could not reach height 1.
   constexpr static GasAmount kDistributionGas = 1'000'000'000;
   // RV32 contracts have a 64 KiB address space. Keep the decoded distribution

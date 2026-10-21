@@ -25,6 +25,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -276,10 +277,9 @@ protected:
                         std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
-    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
-                                                                  calls),
-                              claim_override ? *claim_override
-                                             : make_pubkey_claim(preimage));
+    return run_wallet_root_tx(
+        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
+        claim_override ? *claim_override : make_pubkey_claim(preimage));
   }
 
   // Root-invokes `wallet`'s entrypoint with hand-crafted raw calldata (for
@@ -467,7 +467,7 @@ protected:
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
     return run_wallet_root_tx(client.make_invocation<u8"deploy">(
-                                  UINT64_MAX, nonce, hash,
+                                  kDefaultMaxTxGas, nonce, hash,
                                   std::tuple<int64_t, uint64_t>{0, 0},
                                   x23::Ptr<default_wallet::WalletInitCall>{}),
                               make_pubkey_claim(preimage));
@@ -484,7 +484,7 @@ protected:
                               Invocation{.invoked_address = addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
@@ -1003,7 +1003,7 @@ TEST_F(DefaultWalletParityTest, SameBlockDuplicateDeployFundsTwice)
       // nonces and hashes match. The block snapshot still has no deployment.
       auto record =
           run_wallet_root_tx(client.make_invocation<u8"deploy">(
-                                 UINT64_MAX, nonce, hash,
+                                 kDefaultMaxTxGas, nonce, hash,
                                  std::tuple<int64_t, uint64_t>{0, kAmount},
                                  x23::Ptr<default_wallet::WalletInitCall>{}),
                              make_pubkey_claim(preimage),

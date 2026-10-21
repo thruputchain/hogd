@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -181,7 +182,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                         Invocation{
                             .invoked_address = native_contract_addr,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata =
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
@@ -205,7 +206,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                         Invocation{
                             .invoked_address = native_contract_addr,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata =
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::

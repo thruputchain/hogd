@@ -150,7 +150,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
         Transaction{
             .invocation = Invocation{.invoked_address = kDeployerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = fw.make_new_uniquifier(),
             .contracts_to_deploy = {contract_to_deploy},

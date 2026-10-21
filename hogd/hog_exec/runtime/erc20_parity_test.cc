@@ -23,6 +23,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -428,7 +429,7 @@ protected:
                             Invocation{.invoked_address = addr,
                                        .entrypoint =
                                            entrypoint_from_method_id(method_id),
-                                       .gas_limit = UINT64_MAX,
+                                       .gas_limit = kDefaultMaxTxGas,
                                        .calldata = {}},
                         .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
@@ -457,7 +458,7 @@ protected:
                               Invocation{.invoked_address = addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);
@@ -500,7 +501,7 @@ protected:
                             Invocation{.invoked_address = addr,
                                        .entrypoint =
                                            entrypoint_from_method_id(method_id),
-                                       .gas_limit = UINT64_MAX,
+                                       .gas_limit = kDefaultMaxTxGas,
                                        .calldata = {}},
                         .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(handler_tx, ctx);

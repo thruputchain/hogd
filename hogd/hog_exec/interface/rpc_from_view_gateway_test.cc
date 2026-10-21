@@ -235,7 +235,8 @@ public:
   {
     ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
     return TransactionViewQuery{
-        .invocation = client.make_invocation<u8"read_value">(UINT64_MAX, kKey),
+        .invocation =
+            client.make_invocation<u8"read_value">(kDefaultMaxTxGas, kKey),
         .parent_address = {},
         .auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData),
         .forwarded_tokens = {},
@@ -394,8 +395,8 @@ TEST_F(ViewGatewayRefreshTest, RotationOnStaleSnapshotServesFreshHeight)
     auto query = make_read_query();
     ContractTraitClient<view_gateway_test::ViewGatewayTest> client(kAddr);
     query.invocation = client.make_invocation<u8"read_value">(
-        UINT64_MAX, NativeContractTestFramework::make_storage_key(
-                        std::format("uncached_key_{}", i)));
+        kDefaultMaxTxGas, NativeContractTestFramework::make_storage_key(
+                              std::format("uncached_key_{}", i)));
     ViewGatewayResult fresh = gateway.viewgateway_view(std::move(query))();
     ASSERT_EQ(fresh.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_GT(fresh.payload().height, height);

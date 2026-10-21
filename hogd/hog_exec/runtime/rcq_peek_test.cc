@@ -10,6 +10,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -107,7 +108,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenMatchesInsertedEntry)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -165,7 +166,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntry)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(1),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -220,7 +221,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenNoQueueEntryEmitsNoStorageDelta)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(3),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -285,7 +286,7 @@ TEST_F(SyscallRcqPeekTest, PeekConsumeNoQueueEntryEmitsNoStorageDelta)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(6),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -355,7 +356,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenAfterDeleteNoQueueEntryPreservesDeleteDelta)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(7),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -433,7 +434,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(4),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = insert_calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -454,7 +455,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenOnSnapshotQueueEmitsNoStorageDelta)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(5),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = peek_calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -532,7 +533,7 @@ TEST_F(SyscallRcqPeekTest, PeekLenFailsWhenBytestringOccupiesKey)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(2),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -636,7 +637,7 @@ TEST_F(SyscallRcqPeekTest,
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = std::move(calldata)},
                           .uniquifier = make_new_uniquifier()}};
   };
@@ -782,7 +783,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
                            Invocation{.invoked_address = contract_addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -976,7 +977,7 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);
@@ -1133,7 +1134,7 @@ TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);
@@ -1231,7 +1232,7 @@ TEST_F(SyscallRcqPeekTest, MaterializedSelfConsumeCommitsWhenBelowCap)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()};
     auto handler = make_new_system_call_handler(tx, *context);

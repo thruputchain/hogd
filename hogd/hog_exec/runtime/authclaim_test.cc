@@ -9,6 +9,7 @@
 #include "built_contracts/authclaim_test.h"
 #include "built_contracts/contract_loader.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -73,9 +74,9 @@ TEST_F(AuthClaimTestFixture, TestGetAuthClaim)
 
   // Contract expects allowed_keys == 0 && required_weight == 0
   AuthClaim claim{};
-  auto result =
-      run_method(client.make_invocation<u8"test_get_auth_claim">(UINT64_MAX),
-                 claim);
+  auto result = run_method(client.make_invocation<u8"test_get_auth_claim">(
+                               kDefaultMaxTxGas),
+                           claim);
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -85,8 +86,9 @@ TEST_F(AuthClaimTestFixture, TestSetAddressRequiredWeight)
   authclaim_client_t client(contract_addr);
   setup_contract(contract_addr);
 
-  auto result = run_method(
-      client.make_invocation<u8"test_set_address_required_weight">(UINT64_MAX));
+  auto result =
+      run_method(client.make_invocation<u8"test_set_address_required_weight">(
+          kDefaultMaxTxGas));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -96,8 +98,9 @@ TEST_F(AuthClaimTestFixture, TestAddAddressPublicKey)
   authclaim_client_t client(contract_addr);
   setup_contract(contract_addr);
 
-  auto result = run_method(
-      client.make_invocation<u8"test_add_address_public_key">(UINT64_MAX));
+  auto result =
+      run_method(client.make_invocation<u8"test_add_address_public_key">(
+          kDefaultMaxTxGas));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -107,8 +110,9 @@ TEST_F(AuthClaimTestFixture, TestRemoveAddressPublicKey)
   authclaim_client_t client(contract_addr);
   setup_contract(contract_addr);
 
-  auto result = run_method(
-      client.make_invocation<u8"test_remove_address_public_key">(UINT64_MAX));
+  auto result =
+      run_method(client.make_invocation<u8"test_remove_address_public_key">(
+          kDefaultMaxTxGas));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
@@ -119,7 +123,7 @@ TEST_F(AuthClaimTestFixture, TestAddPubkeyIndexOob)
   setup_contract(contract_addr);
 
   auto result = run_method(
-      client.make_invocation<u8"test_add_pubkey_index_oob">(UINT64_MAX));
+      client.make_invocation<u8"test_add_pubkey_index_oob">(kDefaultMaxTxGas));
   ASSERT_EQ(result, ExecResult::ExecResultOK);
 }
 
