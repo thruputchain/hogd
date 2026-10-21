@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <unordered_map>
@@ -11,6 +10,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -140,7 +140,7 @@ TEST_F(NNIntAddTest, ReadWriteAddValue)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -232,7 +232,7 @@ TEST_F(NNIntAddTest, ReadWriteAddOverwritesSetAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -320,7 +320,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -339,7 +339,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -373,7 +373,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -392,7 +392,7 @@ TEST_F(NNIntAddTest, SetAddWithAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(1),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -478,7 +478,7 @@ TEST_F(NNIntAddTest, NegativeSetValueCommitsNegativeNNInt)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -539,7 +539,7 @@ TEST_F(NNIntAddTest, NegativeSetValueWithPositiveAdd)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},
@@ -603,7 +603,7 @@ TEST_F(NNIntAddTest, NegativeSetValueWithNegativeAddRejected)
                   .invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
               }},

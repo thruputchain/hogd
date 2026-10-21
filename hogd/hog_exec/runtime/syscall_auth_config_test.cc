@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -15,6 +14,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -83,7 +83,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -166,7 +166,7 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -236,7 +236,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -293,7 +293,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -367,7 +367,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -397,7 +397,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -514,7 +514,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationRejectsMalformedArgs)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -589,7 +589,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -657,7 +657,7 @@ TEST_F(SyscallAuthConfigTest,
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -720,7 +720,7 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchCreatesNoRow)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -800,7 +800,7 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchTakesAuthLock)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
   };
@@ -902,7 +902,7 @@ TEST_F(SyscallAuthConfigTest, ExplicitZeroRequiredWeightOverridesDefault)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -975,7 +975,7 @@ TEST_F(SyscallAuthConfigTest, DuplicateSignerIsRefusedAtCommit)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
   };

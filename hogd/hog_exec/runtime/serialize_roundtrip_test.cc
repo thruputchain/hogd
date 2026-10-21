@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -17,6 +16,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -351,7 +351,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -369,7 +369,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -387,7 +387,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(2),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -405,7 +405,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(3),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -423,7 +423,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(4),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -441,7 +441,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(5),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -459,7 +459,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(6),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -477,7 +477,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(7),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -498,7 +498,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(11),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);

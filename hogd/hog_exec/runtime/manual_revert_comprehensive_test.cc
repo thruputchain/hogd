@@ -12,6 +12,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -122,7 +123,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -267,7 +268,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                 Invocation{.invoked_address = kAddressParent,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -369,7 +370,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -392,7 +393,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -673,7 +674,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                                 Invocation{.invoked_address = kAddressA,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -823,7 +824,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                              .entrypoint =
                                                  entrypoint_from_method_id(
                                                      error_type),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -854,7 +855,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(3),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -1052,7 +1053,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                                 Invocation{.invoked_address = kAddressParent,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);

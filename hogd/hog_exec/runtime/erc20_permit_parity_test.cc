@@ -22,6 +22,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -468,7 +469,7 @@ protected:
                               Invocation{.invoked_address = root,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(tx.tx, ctx, &tx_id);

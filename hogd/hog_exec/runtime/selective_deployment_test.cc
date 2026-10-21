@@ -185,7 +185,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {contract_to_deploy_1, contract_to_deploy_2},
@@ -281,7 +281,7 @@ TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -375,7 +375,7 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {malformed_contract},
@@ -452,7 +452,7 @@ TEST_P(SelectiveDeploymentTest,
   Transaction tx{
       .invocation = Invocation{.invoked_address = deployer_addr,
                                .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
+                               .gas_limit = kDefaultMaxTxGas,
                                .calldata = {}},
       .uniquifier = make_new_uniquifier(),
       .contracts_to_deploy = {malformed_contract},
@@ -595,7 +595,7 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {fib_contract},
@@ -709,7 +709,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {big_contract},
@@ -820,7 +820,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
                     .invocation =
                         Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier(),
                     .contracts_to_deploy = {blob},
@@ -840,7 +840,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
                     .invocation =
                         Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -993,7 +993,7 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
                   .invocation =
                       Invocation{.invoked_address = parent_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
                   .contracts_to_deploy = {blob},
@@ -1167,7 +1167,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
                         Invocation{.invoked_address = root_addr,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier(),
                     .contracts_to_deploy = {blob},
@@ -1285,7 +1285,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
                   .invocation =
                       Invocation{.invoked_address = deployer_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier(),
                   .contracts_to_deploy = {blob},
@@ -1365,7 +1365,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {limit_contract},
@@ -1425,7 +1425,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {oversized},
@@ -1489,7 +1489,7 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = std::move(attached),
@@ -1542,7 +1542,7 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {contract, contract},
@@ -1604,7 +1604,7 @@ TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = std::move(attached),
@@ -1666,7 +1666,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = deployer_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
           .contracts_to_deploy = {*attached_native},
@@ -1767,7 +1767,7 @@ protected:
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = deployer_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
             .contracts_to_deploy = {contract},

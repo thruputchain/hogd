@@ -3551,7 +3551,7 @@ TEST(TestBindingsTest, NestedCrossCallOutOfGasFromTrace)
                  {
                      .invoked_address = root_addr,
                      .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {},
                  },
              .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},

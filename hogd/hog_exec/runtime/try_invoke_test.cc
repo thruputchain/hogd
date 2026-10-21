@@ -19,6 +19,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -211,7 +212,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0, 1, 2, 3, 4, 5}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -235,7 +236,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           Transaction{.invocation =
                           Invocation{.invoked_address = addr_orchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(signed_tx2, *context);
@@ -327,7 +328,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressCaller,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -538,7 +539,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(1),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -587,7 +588,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(2),
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -633,7 +634,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(3),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -770,7 +771,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressCaller,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -947,7 +948,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -963,7 +964,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -1121,7 +1122,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -1137,7 +1138,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -1357,7 +1358,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -1372,7 +1373,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -1604,7 +1605,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1, 1}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1624,7 +1625,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1650,7 +1651,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1688,7 +1689,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc2,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1}}, // true
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1709,7 +1710,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc2,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0, 1}}, // {false, true}
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1870,7 +1871,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2070,7 +2071,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2285,7 +2286,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2439,7 +2440,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2646,7 +2647,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2847,7 +2848,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
           Transaction{.invocation =
                           Invocation{.invoked_address = sender_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -3059,7 +3060,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                                  kNNIntInterleavingOrchestrator,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = self->make_new_uniquifier()}};
           auto handler =
@@ -3093,7 +3094,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .invocation =
                       Invocation{.invoked_address = kNNIntInterleavingWriter,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = calldata},
                   .uniquifier = self->make_new_uniquifier()}};
           auto handler =
@@ -3118,7 +3119,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               .invocation =
                   Invocation{.invoked_address = kNNIntInterleavingWriter,
                              .entrypoint = entrypoint_from_method_id(3),
-                             .gas_limit = UINT64_MAX,
+                             .gas_limit = kDefaultMaxTxGas,
                              .calldata = {}},
               .uniquifier = make_new_uniquifier()}};
       auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3340,7 +3341,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           Transaction{.invocation =
                           Invocation{.invoked_address = caller_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -3522,7 +3523,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressEntry,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -3653,7 +3654,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3762,7 +3763,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3844,7 +3845,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressLooper,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3929,7 +3930,7 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressLooper,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);

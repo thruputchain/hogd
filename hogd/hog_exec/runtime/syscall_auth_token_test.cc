@@ -15,6 +15,7 @@
 #include "auth_token.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -173,7 +174,7 @@ TEST_F(SyscallAuthTokenTest, InvokeForwardsOwnedAuthTokens)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -254,7 +255,7 @@ TEST_F(SyscallAuthTokenTest, InvokeRejectsDuplicateForwardedAuthTokenIds)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -389,7 +390,7 @@ TEST_F(SyscallAuthTokenTest, ConsumeNestedAuthTokens)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -512,7 +513,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ExpiryAtParentTipRejectedForExecutingBlock)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -592,7 +593,7 @@ TEST_F(SyscallAuthTokenExpiryTest, ConsumeAuthTokenExpiryBoundary)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -672,7 +673,7 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenExpiryBoundary)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -749,7 +750,7 @@ TEST_F(SyscallAuthTokenExpiryTest, MintAuthTokenRejectsUndeserializableBytes)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -927,7 +928,7 @@ TEST_F(SyscallAuthTokenTest, ReturnAuthTokensToParent)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1015,7 +1016,7 @@ TEST_F(SyscallAuthTokenTest, ReturnRejectsDuplicateAuthTokenIds)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1092,7 +1093,7 @@ TEST_F(SyscallAuthTokenTest, ReturnUnownedAuthTokensCausesExit)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1239,7 +1240,7 @@ TEST_F(SyscallAuthTokenTest, ForwardUnownedAuthTokenAfterChildRevertIsRejected)
                       Invocation{
                           .invoked_address = kAttackerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1309,7 +1310,7 @@ TEST_F(SyscallAuthTokenTest, ForwardFabricatedAuthTokenIdIsRejected)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1424,7 +1425,7 @@ TEST_F(SyscallAuthTokenTest, ReplayConsumedAuthTokenIsRejected)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1546,7 +1547,7 @@ TEST_F(SyscallAuthTokenTest, MiddleContractCannotForwardUnownedToken)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1729,7 +1730,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1820,7 +1821,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1891,7 +1892,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthBranchingTree)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -1988,7 +1989,7 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsFullWidthMaxDepthTree)
                       Invocation{
                           .invoked_address = kAddr,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2103,7 +2104,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyInvokeDropsUnreturnedForwardedAuthTokens)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2236,7 +2237,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildReturnsForwardedAuthToken)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2334,7 +2335,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotConsumeForwardedToken)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2413,7 +2414,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildCannotMintToken)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2526,7 +2527,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildFaultRestoresForwardedTokens)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2641,7 +2642,7 @@ TEST_F(SyscallAuthTokenTest, ReadOnlyChildManualRevertRestoresForwardedTokens)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2742,7 +2743,7 @@ TEST_F(SyscallAuthTokenTest, ReturnRevertWithMintedAuthTokenCausesExit)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -2858,7 +2859,7 @@ TEST_F(SyscallAuthTokenTest, MintedTokenInRevertedChildNotOwnedByParent)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -3067,7 +3068,7 @@ TEST_F(SyscallAuthTokenTest, RevertedConsumeLeavesNoTraceOnAuthTokenIds)
               Invocation{
                   .invoked_address = kCallerAddress,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
           .uniquifier = make_new_uniquifier(),
@@ -3082,7 +3083,7 @@ TEST_F(SyscallAuthTokenTest, RevertedConsumeLeavesNoTraceOnAuthTokenIds)
               Invocation{
                   .invoked_address = kCallerAddress,
                   .entrypoint = entrypoint_from_method_id(1),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
           .uniquifier = make_new_uniquifier(),
@@ -3231,7 +3232,7 @@ TEST_F(SyscallAuthTokenTest, OutOfGasChildCannotReturnMintedAuthToken)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -3416,7 +3417,7 @@ TEST_F(SyscallAuthTokenTest,
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -3515,7 +3516,7 @@ TEST_F(SyscallAuthTokenTest, GetCalldataReportsTheAuthTokenCount)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -3633,7 +3634,7 @@ TEST_F(SyscallAuthTokenTest, InvokeDropsUnreturnedForwardedAuthTokens)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -3783,7 +3784,7 @@ TEST_F(SyscallAuthTokenTest,
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),

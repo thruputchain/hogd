@@ -66,6 +66,7 @@
 #include "built_contracts/itc_erc20.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
@@ -141,7 +142,7 @@ protected:
                            Invocation{.invoked_address = kAddrRoot,
                                       .entrypoint =
                                           entrypoint_from_method_id(0),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }

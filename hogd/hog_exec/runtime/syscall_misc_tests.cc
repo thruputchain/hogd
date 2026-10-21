@@ -7,7 +7,6 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -141,12 +140,12 @@ private:
 TEST_F(SyscallMiscTests, InvokeTestGetReturnBeforeReturnBufferSet)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = client_.make_invocation<
-                      u8"test_get_return_before_return_buffer_set">(UINT64_MAX),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation = client_.make_invocation<
+              u8"test_get_return_before_return_buffer_set">(kDefaultMaxTxGas),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -158,7 +157,7 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_get_return_after_fault">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -172,12 +171,13 @@ TEST_F(SyscallMiscTests, InvokeTestGetReturnAfterFault)
 TEST_F(SyscallMiscTests, TestGetMsgSenderRoot)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_get_msg_sender_root">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_get_msg_sender_root">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -190,7 +190,7 @@ TEST_F(SyscallMiscTests, TestInvokeContractNotFound)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_invoke_contract_not_found">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -207,7 +207,7 @@ TEST_F(SyscallMiscTests, TestInvokeFrameReverted)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_invoke_frame_reverted">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -223,7 +223,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadScheme)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_verify_sig_bad_scheme">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -239,7 +239,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadKeySize)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_verify_sig_bad_key_size">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -256,7 +256,7 @@ TEST_F(SyscallMiscTests, TestVerifySigBadSignature)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_verify_sig_bad_signature">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -272,7 +272,7 @@ TEST_F(SyscallMiscTests, TestBsGetLenKeyNotExist)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_bs_get_len_key_not_exist">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -287,7 +287,7 @@ TEST_F(SyscallMiscTests, TestBsGetLenWrongType)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_bs_get_len_wrong_type">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -303,7 +303,7 @@ TEST_F(SyscallMiscTests, TestBsGetKeyNotExist)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_bs_get_key_not_exist">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -317,12 +317,13 @@ TEST_F(SyscallMiscTests, TestBsGetKeyNotExist)
 TEST_F(SyscallMiscTests, TestBsGetWrongType)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_bs_get_wrong_type">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_bs_get_wrong_type">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -332,12 +333,13 @@ TEST_F(SyscallMiscTests, TestBsGetWrongType)
 TEST_F(SyscallMiscTests, TestBsSetTooLong)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_bs_set_too_long">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_bs_set_too_long">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -349,7 +351,7 @@ TEST_F(SyscallMiscTests, TestNnintGetKeyNotExist)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_nnint_get_key_not_exist">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -365,7 +367,7 @@ TEST_F(SyscallMiscTests, TestNnintGetWrongType)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_nnint_get_wrong_type">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -381,7 +383,7 @@ TEST_F(SyscallMiscTests, TestNnintSetAddNegative)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_nnint_set_add_negative">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -397,7 +399,7 @@ TEST_F(SyscallMiscTests, TestRcqInsertTooLarge)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_rcq_insert_too_large">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -414,7 +416,7 @@ TEST_F(SyscallMiscTests, TestRcqInsertOverBytestring)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_rcq_insert_over_bytestring">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -427,12 +429,13 @@ TEST_F(SyscallMiscTests, TestRcqInsertOverBytestring)
 TEST_F(SyscallMiscTests, TestRcqConsumeEmpty)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_rcq_consume_empty">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation =
+                      client_.make_invocation<u8"test_rcq_consume_empty">(
+                          kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -444,7 +447,7 @@ TEST_F(SyscallMiscTests, TestRcqConsumeWrongType)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_rcq_consume_wrong_type">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -460,7 +463,7 @@ TEST_F(SyscallMiscTests, TestLogEventDataTooLong)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_log_event_data_too_long">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -477,7 +480,7 @@ TEST_F(SyscallMiscTests, TestLogEventNoncontinuousTopics)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_log_event_noncontinuous_topics">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -492,7 +495,7 @@ TEST_F(SyscallMiscTests, TestSha256UpdateNoBuffer)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_sha256_update_no_buffer">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -509,7 +512,7 @@ TEST_F(SyscallMiscTestsEightHashBuffers, TestSha256UpdateTooManyBuffers)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_sha256_update_too_many_buffers">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -525,7 +528,7 @@ TEST_F(SyscallMiscTests, TestSha256FinalizeNoBuffer)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_sha256_finalize_no_buffer">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -540,7 +543,7 @@ TEST_F(SyscallMiscTests, TestSha256FinalizeDouble)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_sha256_finalize_double">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -556,7 +559,7 @@ TEST_F(SyscallMiscTests, TestGetTxStatsInvalid)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_get_tx_stats_invalid">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -572,7 +575,7 @@ TEST_F(SyscallMiscTests, TestChangePubkeyIndexOob)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_change_pubkey_index_oob">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -589,7 +592,7 @@ TEST_F(SyscallMiscTests, TestDeployContractNotAvailable)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_deploy_contract_not_available">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -606,7 +609,7 @@ TEST_F(SyscallMiscTests, TestReturnBufferTooLong)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_too_long">(
-                          UINT64_MAX, kTargetAddress,
+                          kDefaultMaxTxGas, kTargetAddress,
                           NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
@@ -625,7 +628,7 @@ TEST_F(SyscallMiscTests, TestReturnBufferExactMax)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_return_buffer_exact_max">(
-                          UINT64_MAX, kTargetAddress,
+                          kDefaultMaxTxGas, kTargetAddress,
                           NetworkConfigParams{}.max_return_buffer_len),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
@@ -645,13 +648,14 @@ TEST_F(SyscallMiscTests, TestDeployContractAlreadyDeployed)
   auto contract_hash = sha256(*contract);
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation = client_.make_invocation<
-                      u8"test_deploy_contract_already_deployed">(UINT64_MAX,
-                                                                 contract_hash),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation =
+              client_
+                  .make_invocation<u8"test_deploy_contract_already_deployed">(
+                      kDefaultMaxTxGas, contract_hash),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -663,7 +667,7 @@ TEST_F(SyscallMiscTests, TestInvokeInvalidFlags)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_invoke_invalid_flags">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -682,7 +686,7 @@ TEST_F(SyscallMiscTests, TestWriteSyscallInReadOnly)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_write_syscall_in_read_only">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -704,7 +708,7 @@ TEST_F(SyscallMiscTests, InvokeNoReturnSyscall)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_invoke_no_return_syscall">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -722,7 +726,7 @@ TEST_F(SyscallMiscTests, InvokePanicFaults)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_invoke_panic_faults">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -741,7 +745,7 @@ TEST_F(SyscallMiscTests, TestReturnMisalignedAuthTokens)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_misaligned_auth_tokens">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -757,7 +761,7 @@ TEST_F(SyscallMiscTests, TestReturnRevertWithAuthTokens)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_revert_with_auth_tokens">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -773,7 +777,7 @@ TEST_F(SyscallMiscTests, TestReturnWithEmptyAuthTokens)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_with_empty_auth_tokens">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -789,7 +793,7 @@ TEST_F(SyscallMiscTests, TestReturnWithAuthTokenIds)
       Transaction{
           .invocation =
               client_.make_invocation<u8"test_return_with_auth_token_ids">(
-                  UINT64_MAX, kTargetAddress),
+                  kDefaultMaxTxGas, kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -809,7 +813,7 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
     auto handler = make_new_system_call_handler(
         Transaction{.invocation =
                         client_.make_invocation<u8"internal_rcq_obs_cap_seed">(
-                            UINT64_MAX,
+                            kDefaultMaxTxGas,
                             uint32_t{kMaxConcurrentRcqReadsPerTx + 1}),
                     .uniquifier =
                         Uniquifier{.block_expiry_height =
@@ -822,13 +826,12 @@ TEST_F(SyscallMiscTests, RcqReadCapPrecedence)
   }
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"test_rcq_cap_precedence">(
-                          UINT64_MAX, uint32_t{kMaxConcurrentRcqReadsPerTx}),
-                  .uniquifier =
-                      Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = nonce_++}},
+      Transaction{
+          .invocation = client_.make_invocation<u8"test_rcq_cap_precedence">(
+              kDefaultMaxTxGas, uint32_t{kMaxConcurrentRcqReadsPerTx}),
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -841,7 +844,7 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation = client_.make_invocation<
                       u8"test_get_returned_buffer_no_buffer_beats_misaligned">(
-                      UINT64_MAX),
+                      kDefaultMaxTxGas),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
@@ -857,12 +860,13 @@ TEST_F(SyscallMiscTests, GetReturnedBufferNoBufferBeatsMisaligned)
 TEST_F(SyscallMiscTests, InvokeUnownedTokenLosesToReentrance)
 {
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<
-              u8"test_invoke_unowned_token_loses_to_reentrance">(UINT64_MAX),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation = client_.make_invocation<
+                      u8"test_invoke_unowned_token_loses_to_reentrance">(
+                      kDefaultMaxTxGas),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -875,13 +879,13 @@ TEST_F(SyscallMiscTests, ReadOnlyFaultBeatsReadOnlyRejection)
   deploy_target();
 
   auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation = client_.make_invocation<
-              u8"test_readonly_fault_beats_readonly_rejection">(UINT64_MAX,
-                                                                kTargetAddress),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
+      Transaction{.invocation = client_.make_invocation<
+                      u8"test_readonly_fault_beats_readonly_rejection">(
+                      kDefaultMaxTxGas, kTargetAddress),
+                  .uniquifier =
+                      Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce_++}},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
@@ -892,7 +896,7 @@ TEST_F(SyscallMiscTests, OobSyscallArgumentIncrementsSyscallFaultCount)
       Transaction{
           .invocation =
               client_.make_invocation<u8"internal_bytestring_set_oob_key">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
                                    .nonce = nonce_++}},
@@ -980,7 +984,7 @@ TEST_F(SyscallMiscDefaultWalletTest, ReentranceBeatsUnresolvableSelf)
       .tx = Transaction{
           .invocation =
               client.make_invocation<u8"test_invoke_self_is_reentrance">(
-                  UINT64_MAX),
+                  kDefaultMaxTxGas),
           .uniquifier = make_new_uniquifier()}};
 
   auto handler = make_new_system_call_handler(stx, ctx);
@@ -1007,7 +1011,7 @@ TEST_F(SyscallMiscTestsDepthOne, MisalignedAuthTokensBeatDepth)
   auto handler = make_new_system_call_handler(
       Transaction{
           .invocation = client_.make_invocation<
-              u8"test_invoke_misaligned_tokens_beat_depth">(UINT64_MAX,
+              u8"test_invoke_misaligned_tokens_beat_depth">(kDefaultMaxTxGas,
                                                             kTargetAddress),
           .uniquifier = Uniquifier{.block_expiry_height =
                                        std::numeric_limits<BlockHeight>::max(),
@@ -1023,7 +1027,7 @@ TEST_F(SyscallMiscTestsDepthOne, DepthRefusesAnOtherwiseValidInvoke)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_invoke_depth_refused">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),

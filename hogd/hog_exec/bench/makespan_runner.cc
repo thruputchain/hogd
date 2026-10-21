@@ -39,7 +39,6 @@
 #include <cstdlib>
 #include <cstring>
 #include <format>
-#include <limits>
 #include <memory>
 #include <numeric>
 #include <print>
@@ -60,6 +59,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -427,8 +427,7 @@ private:
     const uint64_t seed = uniquifiers_.peek();
     return SignedTransaction{
         .tx = Transaction{.invocation = client.make_invocation<u8"read_keys">(
-                              std::numeric_limits<uint64_t>::max(), seed,
-                              params_.light_reads),
+                              kDefaultMaxTxGas, seed, params_.light_reads),
                           .uniquifier = uniquifiers_.next()}};
   }
 
@@ -439,8 +438,7 @@ private:
       return SignedTransaction{
           .tx = Transaction{.invocation =
                                 client.make_invocation<u8"slow_fibonacci">(
-                                    std::numeric_limits<uint64_t>::max(),
-                                    params_.fib_n),
+                                    kDefaultMaxTxGas, params_.fib_n),
                             .uniquifier = uniquifiers_.next()}};
     }
     assert(cls == TxClass::kReads);
@@ -448,8 +446,7 @@ private:
     const uint64_t seed = uniquifiers_.peek();
     return SignedTransaction{
         .tx = Transaction{.invocation = client.make_invocation<u8"read_keys">(
-                              std::numeric_limits<uint64_t>::max(), seed,
-                              params_.heavy_reads),
+                              kDefaultMaxTxGas, seed, params_.heavy_reads),
                           .uniquifier = uniquifiers_.next()}};
   }
 

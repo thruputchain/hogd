@@ -21,6 +21,7 @@
 #include "built_contracts/itc_erc20.hh" // IWYU pragma: keep
 #include "contract.hh"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -233,7 +234,7 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(
         account_address(preimage));
     return run_account_invocation_no_advance(
-        preimage, client.make_invocation<u8"execute">(UINT64_MAX, calls));
+        preimage, client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls));
   }
 
   TxOutcome run_execute_tx(PubkeyAccountPreimage const &preimage,
@@ -634,7 +635,7 @@ TEST_F(FaucetScenarioTest, AirdropFundsWalletDeployedContractCaller)
       account_address(alice));
   auto deploy_out = run_account_invocation_no_advance(
       alice, wallet_client.make_invocation<u8"deploy">(
-                 UINT64_MAX, nonce, sha256(*caller_obj), make_amount(0),
+                 kDefaultMaxTxGas, nonce, sha256(*caller_obj), make_amount(0),
                  x23::Ptr<default_wallet::WalletInitCall>{}));
   advance_block();
   ASSERT_EQ(deploy_out.status, InvocationFrameStatusCode::Return);

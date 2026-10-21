@@ -14,6 +14,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -261,7 +262,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                         Invocation{
                             .invoked_address = kOrchestratorAddress,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata = {},
                         },
                     .uniquifier = make_new_uniquifier(),
@@ -429,7 +430,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                         Invocation{
                             .invoked_address = native_contract_address,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata = {},
                         },
                     .uniquifier = make_new_uniquifier(),
@@ -502,7 +503,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -604,7 +605,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -686,7 +687,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -796,7 +797,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -891,7 +892,7 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
                                 Invocation{.invoked_address = kSelfAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);

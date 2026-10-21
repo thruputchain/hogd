@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -132,7 +133,7 @@ protected:
         .invocation =
             Invocation{.invoked_address = kAddrB,
                        .entrypoint = entrypoint_from_method_id(0),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(values.begin(), values.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -143,7 +144,7 @@ protected:
                            Invocation{.invoked_address = kAddrA,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -154,7 +155,7 @@ protected:
                            Invocation{.invoked_address = kAddrB,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }

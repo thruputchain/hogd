@@ -1,18 +1,21 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstdint>
+#include <limits>
 #include <optional>
 #include <string_view>
 #include <utility>
 
 #include "hogd/base/network_config_params.h"
 #include "network_config.hh"
+#include "types.hh"
 
 namespace hogd {
 
 // Wire names, spelled out so a rename has to be made here too.
-constexpr std::array<std::pair<ConfigParamID, std::string_view>, 13> kNames{{
+constexpr std::array<std::pair<ConfigParamID, std::string_view>, 14> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},
     {ConfigParamID::kConfigParamMaxNewContractsPerTx,
@@ -29,6 +32,7 @@ constexpr std::array<std::pair<ConfigParamID, std::string_view>, 13> kNames{{
     {ConfigParamID::kConfigParamMaxAuthTokens, "max_auth_tokens"},
     {ConfigParamID::kConfigParamMaxCalldataLen, "max_calldata_len"},
     {ConfigParamID::kConfigParamMaxReturnBufferLen, "max_return_buffer_len"},
+    {ConfigParamID::kConfigParamMaxTxGas, "max_tx_gas"},
 }};
 
 TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
@@ -75,6 +79,56 @@ TEST(ConfigParamValueTest, ReadsTheArmTheParameterNames)
     EXPECT_EQ(param.param(), id) << name;
     EXPECT_EQ(config_param_value(param), value) << name;
   }
+}
+
+// The gas budget is the one GasAmount arm: a value no uint32 arm could carry
+// must survive the round trip rather than truncate.
+TEST(ConfigParamValueTest, TheTxGasArmCarriesAFullGasAmount)
+{
+  constexpr std::uint64_t kValue = (std::uint64_t{1} << 40) + 7;
+  EXPECT_EQ(config_param_max_value(ConfigParamID::kConfigParamMaxTxGas),
+            std::numeric_limits<GasAmount>::max());
+  EXPECT_EQ(config_param_max_value(
+                ConfigParamID::kConfigParamMaxReturnBufferLen),
+            std::numeric_limits<std::uint32_t>::max());
+
+  const ConfigParam param =
+      NetworkConfigParams::make_param(ConfigParamID::kConfigParamMaxTxGas,
+                                      kValue);
+  EXPECT_EQ(param.max_tx_gas(), kValue);
+  EXPECT_EQ(config_param_value(param), kValue);
+
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                 kValue);
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, kValue);
+}
+
+// Narrowing would state a value the caller never asked for.
+TEST(ConfigParamValueDeathTest, AUint32ArmRefusesAWiderValue)
+{
+  EXPECT_DEATH(NetworkConfigParams::make_param(
+                   ConfigParamID::kConfigParamMaxCalldataLen,
+                   std::uint64_t{std::numeric_limits<std::uint32_t>::max()} +
+                       1),
+               "");
+}
+
+// A configuration predating the parameter gets the default cap, not none.
+TEST(NetworkConfigParamsTest, AListOmittingTxGasHasTheDefaultBudget)
+{
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxReturnBufferLen,
+                                 kDefaultMaxReturnBufferLen);
+  ASSERT_EQ(config.v0().params.size(),
+            static_cast<std::size_t>(std::to_underlying(
+                ConfigParamID::kConfigParamMaxReturnBufferLen)) +
+                1);
+
+  EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, 1'000'000'000U);
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)
