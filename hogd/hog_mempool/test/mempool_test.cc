@@ -1781,6 +1781,10 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
   // the firehose record cap.
   {
     const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    const char *const bytes_help =
+        "# HELP mempool_block_transaction_bytes XDR size in bytes of the "
+        "signed transactions in each successfully committed block. "
+        "Transaction bytes only, not the block's firehose record";
     for (const char *series :
          {"mempool_block_transactions_bucket{le=\"1\"} ",
           "mempool_block_transactions_bucket{le=\"1000000\"} ",
@@ -1788,10 +1792,7 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
           "mempool_block_transaction_bytes_bucket{le=\"2097152\"} ",
           "mempool_block_transaction_bytes_bucket{le=\"4194304\"} ",
           "mempool_block_transaction_bytes_bucket{le=\"536870912\"} ",
-          "# HELP mempool_block_transaction_bytes XDR size in bytes of the "
-          "signed "
-          "transactions in each successfully committed block. Transaction "
-          "bytes only, not the block's firehose record"}) {
+          bytes_help}) {
       EXPECT_NE(dump.find(series), std::string::npos) << series;
     }
   }
@@ -1869,7 +1870,11 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
       slot = i;
     }
   }
-  ASSERT_TRUE(before && after);
+  // An explicit early return, not ASSERT_TRUE, so clang-tidy's
+  // unchecked-optional-access analysis sees both as engaged below.
+  if (!before || !after) {
+    FAIL() << "no fresh txs hash on both sides of txs[1]";
+  }
   {
     const SignedTransaction &first = txs[*before];
     const SignedTransaction &last = txs[*after];

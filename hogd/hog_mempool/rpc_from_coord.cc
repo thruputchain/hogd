@@ -61,6 +61,7 @@
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
