@@ -70,6 +70,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/crypto/mldsa.h"
+#include "hogd/crypto/mldsa_signer.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/runtime_manifest.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -699,6 +701,37 @@ sign_transaction(Transaction tx,
           .signature = signature,
       }},
       .pubkey_claim_key = ed25519_public_key(keypair.first),
+  };
+}
+
+PublicKey
+mldsa65_public_key(MlDsa65SigningKey const &key)
+{
+  PublicKey public_key(CryptographicScheme::MlDsa65);
+  public_key.mldsa65() = key.public_key();
+  return public_key;
+}
+
+// Signs as a pure ML-DSA-65 client does: the network-bound signing preimage
+// with an empty context string.
+SignedTransaction
+sign_transaction(Transaction tx, MlDsa65SigningKey const &key,
+                 NetworkHash const &network_hash)
+{
+  Signature signature(CryptographicScheme::MlDsa65);
+  auto signed_bytes =
+      key.sign(transaction_signature_preimage(network_hash, tx));
+  if (!signed_bytes.has_value()) {
+    throw std::runtime_error("failed to sign test transaction");
+  }
+  signature.mldsa65() = std::move(*signed_bytes);
+  return SignedTransaction{
+      .tx = std::move(tx),
+      .signatures = {DecoratedSignature{
+          .public_key_id = 0,
+          .signature = signature,
+      }},
+      .pubkey_claim_key = mldsa65_public_key(key),
   };
 }
 
@@ -3991,6 +4024,205 @@ TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
   }
 
   expect_clean_exit(process);
+}
+
+// An ML-DSA-65 pubkey account, funded by a bootstrap account, spends through
+// the root default wallet, and its full envelope (1952-byte key, 3309-byte
+// signature) survives the indexer outbox, the indexer and history reads under
+// the unsigned-body hash. Envelopes with a missing or substituted claim key in
+// the same batch are never committed.
+TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+
+  MlDsaSeed seed{};
+  seed.fill(0x51);
+  const MlDsa65SigningKey pq_key = MlDsa65SigningKey::from_seed(seed);
+  const PublicKey pq_public_key = mldsa65_public_key(pq_key);
+  AuthClaim pq_claim(AuthClaimType::kPubkeySignature);
+  pq_claim.pubkey_preimage() =
+      make_pubkey_account_preimage(pq_public_key, /*nonce=*/0);
+  const std::optional<ContractAddress> maybe_pq_address =
+      pubkey_auth_address(pq_claim.pubkey_preimage());
+  if (!maybe_pq_address.has_value()) {
+    throw std::runtime_error("failed to derive ML-DSA-65 pubkey address");
+  }
+  const ContractAddress pq_address = *maybe_pq_address;
+
+  auto sponsor_keypair =
+      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+  const ContractAddress sponsor_wallet_address =
+      build_local_bootstrap_account_artifact(fixture_config(1))
+          .accounts[1]
+          .address;
+  using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+  using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  auto native_transfer = [](ContractAddress const &to, int128_t amount) {
+    return wallet_meta::make_calldata<u8"execute">(
+        x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
+            default_wallet::WalletCall{
+                .target = kNativeTokenContractAddress,
+                .entrypoint = erc20_meta::entrypoint<u8"transfer">(),
+                .gas_limit = 10'000'000,
+                .calldata = erc20_meta::make_calldata<u8"transfer">(
+                    to, make_erc20_amount(amount)),
+            }});
+  };
+  auto pq_transfer_tx = [&](std::uint64_t nonce) {
+    return Transaction{
+        .invocation =
+            Invocation{.invoked_address = pq_address,
+                       .entrypoint = wallet_meta::entrypoint<u8"execute">(),
+                       .gas_limit = GasAmount{10'000'000},
+                       .calldata = native_transfer(sponsor_wallet_address,
+                                                   int128_t{50'000'000})},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce},
+        .auth_claim = pq_claim,
+    };
+  };
+
+  TransactionHash pq_tx_hash{};
+  SignedTransaction pq_signed_tx;
+  BlockHeight pq_tx_height = 0;
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start({
+        "--data-dir",
+        data_dir.string(),
+        "--fixture-accounts",
+        "1",
+        "--fixture-seed",
+        "groundhog-dev-accounts",
+        "--fixture-tokens",
+        "1000000000",
+    });
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+    const NetworkHash network_hash = readiness_network_hash(readiness);
+
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+              IndexerBlockExplorerIntroOutcome::IntroSuccess);
+    auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + kIndexPollTimeout;
+      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+      while (std::chrono::steady_clock::now() < deadline) {
+        result = reader.get_transaction_info(tx_hash)();
+        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return result;
+    };
+
+    Transaction prefund_tx{
+        .invocation =
+            Invocation{.invoked_address = sponsor_wallet_address,
+                       .entrypoint = wallet_meta::entrypoint<u8"execute">(),
+                       .gas_limit = GasAmount{10'000'000},
+                       .calldata =
+                           native_transfer(pq_address, int128_t{200'000'000})},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 40},
+        .auth_claim = native_account_auth_claim(),
+    };
+    SignedTransaction signed_prefund_tx =
+        sign_transaction(std::move(prefund_tx), sponsor_keypair, network_hash);
+    const TransactionHash prefund_tx_hash = sha256(signed_prefund_tx.tx);
+    TransactionHashBatch prefund_hashes =
+        submit_and_commit(scheduler, SignedTransactionBatch{signed_prefund_tx});
+    if (prefund_hashes.size() != 1UL) {
+      int status = process.terminate();
+      ADD_FAILURE() << "hog-devnode exited with status " << status
+                    << "\nstderr:\n"
+                    << process.read_remaining_stderr();
+      return;
+    }
+    ASSERT_EQ(prefund_hashes[0], prefund_tx_hash);
+    TxInfoResult prefund_result = wait_for_transaction_info(prefund_tx_hash);
+    ASSERT_EQ(prefund_result.outcome(), TxInfoOutcome::TxInfoFound);
+    ASSERT_EQ(prefund_result.info().events.exec_result,
+              ExecResult::ExecResultOK);
+    ASSERT_EQ(prefund_result.info().events.root_output.status_code(),
+              InvocationFrameStatusCode::Return);
+
+    pq_signed_tx = sign_transaction(pq_transfer_tx(41), pq_key, network_hash);
+    pq_tx_hash = sha256(pq_signed_tx.tx);
+    EXPECT_EQ(pq_signed_tx.signatures[0].signature.mldsa65()->size(),
+              kMlDsa65SignatureBytes);
+
+    // Re-signing yields a different (hedged) signature but the same hash.
+    SignedTransaction resigned_tx =
+        sign_transaction(pq_transfer_tx(41), pq_key, network_hash);
+    EXPECT_NE(resigned_tx.signatures, pq_signed_tx.signatures);
+    EXPECT_EQ(sha256(resigned_tx.tx), pq_tx_hash);
+
+    SignedTransaction missing_key_tx =
+        sign_transaction(pq_transfer_tx(42), pq_key, network_hash);
+    missing_key_tx.pubkey_claim_key.reset();
+    SignedTransaction substituted_key_tx =
+        sign_transaction(pq_transfer_tx(43), pq_key, network_hash);
+    substituted_key_tx.pubkey_claim_key =
+        ed25519_public_key(sponsor_keypair.first);
+
+    TransactionHashBatch committed =
+        submit_and_commit(scheduler,
+                          SignedTransactionBatch{missing_key_tx, pq_signed_tx,
+                                                 substituted_key_tx});
+    ASSERT_EQ(committed, TransactionHashBatch{pq_tx_hash});
+
+    TxInfoResult result = wait_for_transaction_info(pq_tx_hash);
+    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+    EXPECT_EQ(result.info().events.tx_hash, pq_tx_hash);
+    EXPECT_EQ(result.info().events.root_output.status_code(),
+              InvocationFrameStatusCode::Return);
+    EXPECT_EQ(result.info().tx.signed_tx, pq_signed_tx);
+    EXPECT_EQ(sha256(result.info().tx.signed_tx.tx), pq_tx_hash);
+    pq_tx_height = result.info().height;
+
+    for (const SignedTransaction &rejected :
+         {missing_key_tx, substituted_key_tx}) {
+      EXPECT_EQ(reader.get_transaction_info(sha256(rejected.tx))().outcome(),
+                TxInfoOutcome::TxInfoNotFound);
+    }
+
+    AddressTransactionQuery history_query{};
+    history_query.address = pq_address;
+    history_query.order = IterationOrder::IterationOrderAscending;
+    history_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    TransactionRefPage history =
+        page_or_empty(reader.get_transactions_by_address(history_query)());
+    EXPECT_TRUE(std::ranges::any_of(history.refs, [&](auto const &ref) {
+      return ref.tx_hash == pq_tx_hash && ref.height == pq_tx_height;
+    }));
+
+    expect_clean_exit(process);
+  }
+
+  auto store =
+      IndexerOutboxStore::open_or_create_in((data_dir / "events").string());
+  ASSERT_TRUE(store.has_value()) << store.error();
+  auto payload = store->load_committed(pq_tx_height)();
+  ASSERT_TRUE(payload.has_value()) << payload.error();
+  ASSERT_EQ(payload->tx_bodies.size(), 1UL);
+  ASSERT_EQ(payload->event_logs.size(), 1UL);
+  EXPECT_EQ(payload->tx_bodies[0].signed_tx, pq_signed_tx);
+  EXPECT_EQ(payload->event_logs[0].tx_hash, pq_tx_hash);
 }
 
 // The tests below exercise what a devnode data dir has to survive between
