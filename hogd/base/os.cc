@@ -104,7 +104,7 @@ resident_memory_bytes()
   if (!stats) {
     return 0;
   }
-  const long page_size = sysconf(_SC_PAGESIZE);
+  const auto page_size = static_cast<int64_t>(sysconf(_SC_PAGE_SIZE));
   if (page_size <= 0) {
     return 0;
   }
