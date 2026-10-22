@@ -109,7 +109,7 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator (chuckd-rs)'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+ci_control_start_capture "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" \
   chuckd.dev \
   --log-level info \
   bench coordinator-loadgen \
@@ -120,6 +120,7 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
   --inside-addr "$(hog_ip hog4)":7888
+COORDINATOR_STDOUT_PATH=$CI_CONTROL_STDOUT_PATH
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -134,8 +135,11 @@ echo 'launch mempool'
 bash -c 'timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool --bind-ip '"$(hog_ip hog10)"' --metrics-port $MEMPOOL_HTTP_PORT --network-hash 11111111111111111111111111111112 --num-db-shards 1 --num-exec-shards 2 --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT; status=$?; [ $status -eq 124 ] && status=0; exit $status'
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+# By the path the control server reported for this process, rather than by
+# picking the newest [/tmp/hogd_stdout*] on hog4: that guess races every other
+# benchmark sharing the host, and silently logs another run's output as this
+# one's metrics when it loses.
+scp hog4:"$COORDINATOR_STDOUT_PATH" ./coordinator_output.txt
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

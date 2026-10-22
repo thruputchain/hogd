@@ -406,6 +406,107 @@ ci_remote_run() {
   ssh "${CI_SSH_OPTS[@]}" "$host" "$@"
 }
 
+# How much of a failed process's remote log [ci_replay_remote_log] replays.
+# Sized like [CI_BENCH_FAIL_TAIL_LINES]: enough to carry a Go panic with its
+# goroutine trace, far short of the hundreds of megabytes one of these logs
+# runs to under load.
+CI_REMOTE_LOG_TAIL_LINES=${CI_REMOTE_LOG_TAIL_LINES:-200}
+
+# Where [ci_control_start_capture] reports the log paths of the process it
+# started. Cleared on every call, so a caller that ignores a failure cannot
+# read the previous process's paths out of them.
+CI_CONTROL_STDOUT_PATH=""
+CI_CONTROL_STDERR_PATH=""
+
+# Extracts the child log path that [control_cli start] reported for stream [$1]
+# ("stdout" or "stderr") out of its output [$2]. Fails, printing nothing, when
+# the output carries no such line.
+#
+# The last match wins: the output also carries [control_cli]'s own log lines,
+# and only the final CONTROL_*_PATH= pair belongs to the process just started.
+ci_control_log_path() {
+  local stream=$1
+  local start_output=$2
+  local path
+
+  path=$(printf '%s\n' "$start_output" |
+    sed -n "s/^CONTROL_${stream^^}_PATH=//p" | tail -n 1)
+  [ -n "$path" ] || return 1
+  printf '%s\n' "$path"
+}
+
+# Starts [$4...] through the control server on [$2]:[$3], using [$1] (a
+# [control_cli] path), and records where the child's output went in
+# [CI_CONTROL_STDOUT_PATH] and [CI_CONTROL_STDERR_PATH].
+#
+# Reading the paths out of the start output is the only reliable way to name
+# those files. The alternative these scripts reached for -- picking the newest
+# [/tmp/hogd_stdout*] on the host -- races every other benchmark sharing that
+# host, and can only ever name a stdout file: a child that explained itself on
+# stderr, which is where a Go runtime error or a panic goes, left nothing
+# behind at all. That is how the coordinator crash in hogd issue #4546 reached
+# the job log as a bare "coordinator exit status 2".
+#
+# The start output is printed through unchanged, so a caller's log reads as it
+# did when it invoked [control_cli] directly.
+#
+# The paths come back in globals, so this has to be called in the caller's own
+# shell: run from a command substitution it reports them into the subshell it
+# was run in and the caller sees neither.
+ci_control_start_capture() {
+  local control_cli=$1
+  local host=$2
+  local port=$3
+  local output status=0
+  shift 3
+
+  CI_CONTROL_STDOUT_PATH=""
+  CI_CONTROL_STDERR_PATH=""
+
+  output=$("$control_cli" "$host" "$port" start "$@" 2>&1) || status=$?
+  printf '%s\n' "$output"
+  [ "$status" -eq 0 ] || return "$status"
+
+  if ! CI_CONTROL_STDOUT_PATH=$(ci_control_log_path stdout "$output") ||
+    ! CI_CONTROL_STDERR_PATH=$(ci_control_log_path stderr "$output"); then
+    CI_CONTROL_STDOUT_PATH=""
+    CI_CONTROL_STDERR_PATH=""
+    echo "control server on $host did not report the log paths of the" \
+      "process it started" >&2
+    return 1
+  fi
+}
+
+# Replays the tail of the log at [$2] on [$1], under a header naming it [$3],
+# for a step that is about to fail on something that log explains.
+#
+# Best effort throughout: this runs on the way out of a failure that is already
+# being reported, so a path that was never recorded or a host that cannot be
+# reached is said so in place of the log rather than raising a second failure
+# over the first.
+ci_replay_remote_log() {
+  local host=$1
+  local path=$2
+  local label=$3
+  local lines=${4:-$CI_REMOTE_LOG_TAIL_LINES}
+  local output
+
+  if [ -z "$path" ]; then
+    echo "===== no $label log path was recorded ====="
+    return 0
+  fi
+
+  echo "===== last $lines lines of $label ($host:$path) ====="
+  if output=$(ci_remote_run "$host" \
+    "tail -n $(printf '%q' "$lines") -- $(printf '%q' "$path")" 2>&1); then
+    printf '%s\n' "$output"
+  else
+    echo "(could not read $host:$path)"
+    [ -z "$output" ] || printf '%s\n' "$output"
+  fi
+  echo "===== end of $label ====="
+}
+
 ci_control_stop_hosts() {
   local control_cli=$1
   local control_port=$2

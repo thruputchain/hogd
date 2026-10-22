@@ -507,6 +507,120 @@ check_contains "a missing control_cli is reported" "reaping by signal only" \
 check_contains "a missing control_cli still signals by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
 
+## ci_control_log_path
+
+# The real thing: [control_cli]'s own log lines on the way to the two
+# CONTROL_*_PATH= lines it prints for the process it started.
+start_output=$(
+  cat <<'EOF'
+I[1022 18:30:48 init.cc:44] raised RLIMIT_NOFILE soft from 1024 to 524288
+I[1022 18:30:48 control_client.h:79] connecting to control server on hog4:11111
+I[1022 18:30:48 control_cli.cc:125] Start command sent successfully
+CONTROL_STDOUT_PATH=/tmp/hogd_stdout_502426827732455_2385766_aCdRcR
+CONTROL_STDERR_PATH=/tmp/hogd_stderr_502426827732455_2385766_Mb5PpT
+EOF
+)
+check_eq "stdout path parsed" \
+  "/tmp/hogd_stdout_502426827732455_2385766_aCdRcR" \
+  "$(ci_control_log_path stdout "$start_output")"
+check_eq "stderr path parsed" \
+  "/tmp/hogd_stderr_502426827732455_2385766_Mb5PpT" \
+  "$(ci_control_log_path stderr "$start_output")"
+
+# A control server too old to report its paths has to be told apart from one
+# that reported them, rather than silently yielding an empty path that a
+# later [scp] would turn into an unrelated failure.
+if ci_control_log_path stdout "I[1022 18:30:48 control_cli.cc:125] ok" \
+  >/dev/null 2>&1; then
+  echo "FAIL missing path should not parse"
+  fail=1
+else
+  echo "ok   missing path does not parse"
+fi
+
+## ci_control_start_capture
+
+control_cli_stub="$work_dir/control_cli_stub"
+cat >"$control_cli_stub" <<'EOF'
+#!/usr/bin/env bash
+echo "I[1022 18:30:48 control_cli.cc:125] Start command sent successfully"
+echo "CONTROL_STDOUT_PATH=/tmp/hogd_stdout_stub"
+echo "CONTROL_STDERR_PATH=/tmp/hogd_stderr_stub"
+EOF
+chmod +x "$control_cli_stub"
+
+# Called in the current shell, the way a bench script calls it: the paths come
+# back in globals, so a command substitution would run it in a subshell and
+# drop them.
+ci_control_start_capture "$control_cli_stub" hog4 11111 \
+  chuckd.dev -l info >"$work_dir/capture.log"
+capture_output=$(cat "$work_dir/capture.log")
+check_eq "capture records the stdout path" "/tmp/hogd_stdout_stub" \
+  "$CI_CONTROL_STDOUT_PATH"
+check_eq "capture records the stderr path" "/tmp/hogd_stderr_stub" \
+  "$CI_CONTROL_STDERR_PATH"
+# The caller's log has to read as it did when it ran [control_cli] directly,
+# so capturing the output must not swallow it.
+check_contains "capture prints the start output through" \
+  "Start command sent successfully" "$capture_output"
+
+# A failed start leaves no paths behind: a caller that goes on to report the
+# failure must not find the previous process's files in them.
+control_cli_fail_stub="$work_dir/control_cli_fail_stub"
+cat >"$control_cli_fail_stub" <<'EOF'
+#!/usr/bin/env bash
+echo "I[1022 18:30:48 control_cli.cc:107] Error: connect: Connection refused"
+exit 1
+EOF
+chmod +x "$control_cli_fail_stub"
+
+capture_status=0
+ci_control_start_capture "$control_cli_fail_stub" hog4 11111 \
+  chuckd.dev >"$work_dir/capture.log" || capture_status=$?
+capture_output=$(cat "$work_dir/capture.log")
+check_eq "a failed start is reported" "1" "$capture_status"
+check_eq "a failed start clears the stdout path" "" "$CI_CONTROL_STDOUT_PATH"
+check_eq "a failed start clears the stderr path" "" "$CI_CONTROL_STDERR_PATH"
+check_contains "a failed start still prints its output" "Connection refused" \
+  "$capture_output"
+
+## ci_replay_remote_log
+
+# [ci_remote_run] is the only thing standing between this helper and a real
+# ssh, so the replay is exercised against a stub of it.
+ci_remote_run() {
+  printf 'remote-log-line-for %s: %s\n' "$1" "$2"
+}
+
+replay=$(ci_replay_remote_log hog4 /tmp/hogd_stderr_stub 'coordinator stderr')
+check_contains "replay names the log it read" \
+  "coordinator stderr (hog4:/tmp/hogd_stderr_stub)" "$replay"
+check_contains "replay prints the remote log" "remote-log-line-for hog4" \
+  "$replay"
+check_contains "replay bounds what it reads" \
+  "tail -n $CI_REMOTE_LOG_TAIL_LINES" "$replay"
+
+# This runs on the way out of a failure that is already being reported, so an
+# unreadable log is said so rather than raised over the failure it explains.
+ci_remote_run() {
+  echo "ssh: connect to host $1 port 22: No route to host" >&2
+  return 255
+}
+replay_status=0
+replay=$(ci_replay_remote_log hog4 /tmp/hogd_stderr_stub 'coordinator stderr') ||
+  replay_status=$?
+check_eq "an unreachable host does not fail the replay" "0" "$replay_status"
+check_contains "an unreachable host is reported in place of the log" \
+  "(could not read hog4:/tmp/hogd_stderr_stub)" "$replay"
+
+# A process whose start never reported its paths has nothing to replay, and
+# that is a sentence in the log rather than a [tail] of the empty string.
+replay_status=0
+replay=$(ci_replay_remote_log hog4 "" 'coordinator stderr') || replay_status=$?
+check_eq "a missing path does not fail the replay" "0" "$replay_status"
+check_contains "a missing path is reported" \
+  "no coordinator stderr log path was recorded" "$replay"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

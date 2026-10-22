@@ -110,7 +110,7 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+ci_control_start_capture "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" \
   chuckd.dev \
   -l info \
   --stack \
@@ -133,6 +133,20 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --scpd-path ./$BUILD_DIR/scpd.dev \
   --scp-handle-addr 127.0.0.1:3300 \
   --scp-control-addr 127.0.0.1:4400
+COORDINATOR_STDOUT_PATH=$CI_CONTROL_STDOUT_PATH
+COORDINATOR_STDERR_PATH=$CI_CONTROL_STDERR_PATH
+
+# The coordinator's own account of why it stopped, replayed into the job log
+# on the way out of a failure. [coordinator_output.txt] is only its stdout,
+# and a chuckd that dies says why on stderr -- which nothing here collected
+# before, so the crash that filed hogd issue #4546 reached the job log as a
+# bare "coordinator exit status 2" with no cause anywhere in the run.
+replay_coordinator_logs() {
+  ci_replay_remote_log hog4 "$COORDINATOR_STDERR_PATH" 'coordinator stderr'
+  echo "===== last $CI_REMOTE_LOG_TAIL_LINES lines of coordinator stdout ====="
+  tail -n "$CI_REMOTE_LOG_TAIL_LINES" coordinator_output.txt || true
+  echo "===== end of coordinator stdout ====="
+}
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -168,8 +182,11 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
 fi
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+# By the path the control server reported for this process, rather than by
+# picking the newest [/tmp/hogd_stdout*] on hog4: that guess races every other
+# benchmark sharing the host, and silently logs another run's output as this
+# one's metrics when it loses.
+scp hog4:"$COORDINATOR_STDOUT_PATH" ./coordinator_output.txt
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -177,10 +194,14 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # signal-terminated status is a crash rather than a reported error, so name
   # the signal instead of leaving a bare number in the log.
   echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
+  # A mempool that fails usually does so because the coordinator driving it
+  # stopped first, so its logs are the evidence here too.
+  replay_coordinator_logs
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
+  replay_coordinator_logs
   exit "$coordinator_status"
 fi
 
