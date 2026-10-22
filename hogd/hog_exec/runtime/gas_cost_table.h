@@ -58,6 +58,18 @@ constexpr static uint64_t kSHA256StreamCost = 26;
 constexpr static uint64_t kVerifySignatureBaseCost = 17750;
 constexpr static uint64_t kVerifySignatureBlockCost = 131;
 
+// ML-DSA-65 (pure, empty context), priced from RV32 Gas Calibration run
+// 39809791818 on hog10 (gas unit 1.6219 ns, no margin). The entry-row sweep fit
+// 75644.9 ns + 258.0 ns per 136-byte SHAKE256 block: 46640 gas at zero blocks
+// once the ecall is taken off, of which kSyscallBaseCost is 50, and 160 per
+// block. The base is then raised to 46592 so no measured length is
+// undercharged: with the syscall base, 0 and 64 bytes (1 block) bill 46802
+// against a measured 46802 and 46734, and 1024 bytes (9 blocks) bills 48082
+// against 48071. The block term covers hashing the message into mu, which the
+// syscall does not bound; the lattice arithmetic is the rest.
+constexpr static uint64_t kVerifySignatureMlDsa65BaseCost = 46592;
+constexpr static uint64_t kVerifySignatureMlDsa65BlockCost = 160;
+
 // Per-call NNInt access cost, in addition to crossing and database-load costs.
 // The flat charge covers map access, first-touch view creation, and child-frame
 // merge. At 4096 keys the measured components were ~47-55 gas for access,
@@ -122,6 +134,12 @@ constexpr static uint64_t kSHA512BlockBytes = 128;
 constexpr static uint64_t kSHA512PadBytes = 17;
 constexpr static uint64_t kEd25519HashedPrefixBytes = 64;
 static_assert(kSHA512BlockBytes == 128 && kSHA512PadBytes == 17);
+// ML-DSA-65 verification absorbs tr || 0x00 || 0x00 || message into SHAKE256,
+// whose rate is 136 bytes; its pad10*1 padding takes at least one byte.
+constexpr static uint64_t kSHAKE256RateBytes = 136;
+constexpr static uint64_t kSHAKE256PadBytes = 1;
+constexpr static uint64_t kMlDsa65HashedPrefixBytes = 64 + 2;
+static_assert(kSHAKE256RateBytes == 136 && kSHAKE256PadBytes == 1);
 
 // The largest length a cost function may be handed. Every argument they price
 // is a guest span length, which rv32::kMemoryCeilingBytes caps at 16 MiB, so
@@ -147,6 +165,13 @@ struct GasCost {
     assert(message_bytes <= kMaxCostBytes);
     return (message_bytes + kSHA512PadBytes + kSHA512BlockBytes - 1) /
            kSHA512BlockBytes;
+  }
+
+  static constexpr uint64_t shake256_blocks(uint64_t message_bytes)
+  {
+    assert(message_bytes <= kMaxCostBytes);
+    return (message_bytes + kSHAKE256PadBytes + kSHAKE256RateBytes - 1) /
+           kSHAKE256RateBytes;
   }
 
   static constexpr uint64_t sha256_hash(uint64_t bytes_len)
@@ -194,6 +219,14 @@ struct GasCost {
            (kVerifySignatureBlockCost *
             sha512_blocks(message_len + kEd25519HashedPrefixBytes));
   }
+
+  static constexpr uint64_t verify_signature_mldsa65(uint64_t message_len)
+  {
+    assert(message_len <= kMaxCostBytes);
+    return kVerifySignatureMlDsa65BaseCost +
+           (kVerifySignatureMlDsa65BlockCost *
+            shake256_blocks(message_len + kMlDsa65HashedPrefixBytes));
+  }
 };
 
 struct SyscallGasCostEntry {
@@ -207,7 +240,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 14> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -220,6 +253,10 @@ constexpr std::array<SyscallGasCostEntry, 12> kSyscallGasCostSchedule = {{
     {.name = u8"BytestringReadBlock", .cost = kBytestringReadBlockCost},
     {.name = u8"NoSyscall", .cost = kNoSyscallCost},
     {.name = u8"GenericBadSyscall", .cost = kGenericBadSyscallCost},
+    {.name = u8"VerifySignatureMlDsa65Base",
+     .cost = kVerifySignatureMlDsa65BaseCost},
+    {.name = u8"VerifySignatureMlDsa65Block",
+     .cost = kVerifySignatureMlDsa65BlockCost},
 }};
 
 } // namespace hogd
