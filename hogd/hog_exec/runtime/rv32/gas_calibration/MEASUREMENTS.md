@@ -87,6 +87,16 @@ Run `33557627276` measured direct `HashBuffers` slot creation: approximately
 charge. Warm syscall Copy reuses a destination and misses this allocation cost.
 The occupancy sweep supports the tested range, not every possible configuration.
 
+ML-DSA-65 verification is charged the ed25519 price above; the schedule has
+no ML-DSA entry yet. A local, unofficial measurement on a 4-core 2.8 GHz Xeon
+(Release, median of five) put `crypto_bench` verification at 103.0 us for
+ML-DSA-65 against 38.9 us for ed25519, a 2.65x ratio, with about 313 ns per
+136-byte SHAKE256 block against 270 ns per 128-byte SHA-512 block. Through
+`rv32_syscall_entry_bench` the `entry/VerifySignatureMlDsa65` rows took
+103-105 us against 39-42 us for `entry/VerifySignature`, at the same charged
+gas. Scaled to the calibrated ed25519 costs that suggests roughly 47250 base
+and 152 per SHAKE256 block; a price change needs a calibration workflow run.
+
 ## Storage
 
 Run `33725560215`, engine `d4697729c27d6dbd`, gas unit 1.6217 ns, recorded five

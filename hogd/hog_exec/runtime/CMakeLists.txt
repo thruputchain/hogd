@@ -136,6 +136,7 @@ add_library(runtime_test_objects OBJECT
   syscall_misc_tests.cc
   syscall_parse_hardening_rv32_test.cc
   syscall_parse_tests.cc
+  syscall_verify_signature_test.cc
   tracing_tests.cc
   try_invoke_test.cc
   tx_context_tests.cc
@@ -185,6 +186,8 @@ target_include_directories(
 
 target_link_libraries(
   runtime_test
+  # Test-only: makes the ML-DSA signatures syscall_verify_signature_test checks.
+  mldsa_signer
   precompiles
   runtime
   runtime_test_lib
@@ -259,6 +262,7 @@ if(BUILD_BENCHMARKS)
 
   target_link_libraries(
     rv32_syscall_entry_bench
+    mldsa_signer
     precompiles
     rv32_syscall_bridge
     runtime
