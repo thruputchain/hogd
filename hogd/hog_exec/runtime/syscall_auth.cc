@@ -74,6 +74,21 @@ syscall_ChangePublicKeyRegistration_inner(
           new PublicKeyConfig{.key = key,
                               .max_weight = *optional_input_key_weight}}};
     }
+    case CryptographicScheme::MlDsa65:
+    {
+      key.scheme(CryptographicScheme::MlDsa65);
+      MlDsa65PublicKey &mldsa65 = *key.mldsa65();
+      if (input_key_bytes.size() != mldsa65.size()) {
+        return SyscallError{
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      }
+      std::memcpy(mldsa65.data(), input_key_bytes.data(),
+                  sizeof(MlDsa65PublicKey));
+
+      return {x23::Ptr<PublicKeyConfig>{
+          new PublicKeyConfig{.key = std::move(key),
+                              .max_weight = *optional_input_key_weight}}};
+    }
     default:
       trace("Received unknown cryptographic scheme in "
             "ChangePublicKeyRegistration: {}",

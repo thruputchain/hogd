@@ -24,4 +24,15 @@ pub trait AuthWeightTest {
     /// frame it must fail with kInvalidSyscallInput and leave no AuthData
     /// behind.
     fn test_write_weight_read_only(target: &ContractAddress);
+
+    /// Registers the raw ML-DSA-65 public key `key` at `slot` with `weight` on
+    /// this address and sets the address's required weight. Calls
+    /// ChangePublicKeyRegistration directly: the SDK's `add_address_public_key`
+    /// still accepts only Ed25519 keys.
+    fn register_mldsa65_key(
+        slot: u32,
+        key: &[u8],
+        weight: u32,
+        required_weight: u32,
+    );
 }
