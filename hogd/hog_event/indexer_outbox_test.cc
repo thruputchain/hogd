@@ -82,27 +82,28 @@ make_event(const ProposedTransaction &body, uint8_t marker,
 ProposalTxs
 make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : proposal_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
 
   ProposalTxs proposal_txs;
-  const size_t split = std::min<size_t>(2, hashes.size());
+  const size_t split = std::min<size_t>(2, signed_hashes.size());
   if (split != 0) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(hashes.data(),
-                                                              split),
-                             proposal_txs.hash)();
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data(), split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
   }
-  if (split != hashes.size()) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(
-                                 hashes.data() + split, hashes.size() - split),
-                             proposal_txs.hash)();
+  if (split != signed_hashes.size()) {
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data() + split,
+                                               signed_hashes.size() - split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data() + split,
                                  nondeterministic_data.size() - split),
@@ -165,7 +166,7 @@ make_committed_with_proposal(BlockHeight height,
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(events, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_header.block_timepoint = 100 + height;
@@ -258,7 +259,7 @@ make_committed_payload_golden_fixture()
   ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs, payload.tx_bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(payload.tx_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -975,7 +976,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   ProposedTransaction body_c = make_body(3);
   ProposedTransactionBatch proposal_bodies{body_a, body_b, body_c};
   ProposalTxs proposal_txs = make_canonical_proposal_txs(proposal_bodies);
-  ASSERT_GE(proposal_txs.hash.segment_tokens.size(), 2);
+  ASSERT_GE(proposal_txs.signed_hash.segment_tokens.size(), 2);
   ASSERT_GE(proposal_txs.nondeterministic_data.segment_tokens.size(), 2);
 
   ProposedTransactionBatch arrival_bodies{body_a, body_b, body_c};

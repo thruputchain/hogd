@@ -687,8 +687,10 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // its lock here; lookups take one map's lock at a time, so this cannot
   // deadlock.
   const auto [tx_ptr, txs_lock, inserted] = txs_by_body_.find_or_insert(
-      tx_hash, std::make_shared<TxValue>(
-                   TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash}));
+      tx_hash,
+      std::make_shared<TxValue>(TxValue{.tx = tx,
+                                        .tx_hash = tx_hash,
+                                        .signed_tx_hash = signed_tx_hash}));
   CHECK_PTR(tx_ptr);
   if (!inserted) {
     const SignedTransactionHash cached_signed_tx_hash =
@@ -700,8 +702,10 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // Swap in the submitted encoding wherever the cached one is held. A
     // pending nomination keeps its own copy of the tx, and [reenqueue_txs()]
     // re-reads this cache, so an abandoned nomination restores this encoding.
-    std::shared_ptr<TxValue> replacement = std::make_shared<TxValue>(
-        TxValue{.tx = tx, .signed_tx_hash = signed_tx_hash});
+    std::shared_ptr<TxValue> replacement =
+        std::make_shared<TxValue>(TxValue{.tx = tx,
+                                          .tx_hash = tx_hash,
+                                          .signed_tx_hash = signed_tx_hash});
     *tx_ptr = replacement;
     CHECK_EQ(txs_.remove(cached_signed_tx_hash), 1UL);
     CHECK_PTR(txs_.insert(signed_tx_hash, replacement).first);
@@ -1277,6 +1281,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
 
 x23::Async<void>
 Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
+                    SignedTransactionHashBatch &signed_tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
@@ -1356,6 +1361,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         hogs_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes.push_back(tx_hash);
+        signed_tx_hashes.push_back(it->second->signed_tx_hash);
         txs.push_back(tx);
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
