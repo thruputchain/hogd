@@ -610,6 +610,15 @@ ci_capped_log_program() {
 path=$1
 max=$2
 head_bytes=$3
+
+# The cap is the promise; the head budget is only how it is divided. Lowering
+# the maximum alone would otherwise leave a head larger than the whole budget,
+# and [tail -c] reads the negative remainder as a count rather than refusing
+# it, so the copy would emit the oversized head *and* that many trailing bytes
+# -- several times the limit it was just asked to hold to, quietly.
+if [ "\$head_bytes" -gt "\$max" ]; then
+  head_bytes=\$max
+fi
 tail_bytes=\$((max - head_bytes))
 
 size=\$(wc -c <"\$path") || exit 1
@@ -625,7 +634,9 @@ fi
 head -c "\$head_bytes" -- "\$path" || exit 1
 printf '\n===== %s of %s bytes elided: keeping the first %s and the last %s =====\n' \
   "\$((size - max))" "\$size" "\$head_bytes" "\$tail_bytes"
-tail -c "\$tail_bytes" -- "\$path" || exit 1
+if [ "\$tail_bytes" -gt 0 ]; then
+  tail -c "\$tail_bytes" -- "\$path" || exit 1
+fi
 EOF
 }
 

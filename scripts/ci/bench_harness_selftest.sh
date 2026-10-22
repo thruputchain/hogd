@@ -578,6 +578,23 @@ else
   fail=1
 fi
 
+# Lowering the maximum on its own still holds to it. The head budget is how
+# the cap is divided, not a second cap, so a maximum under the default head
+# has to clamp: [tail -c] reads a negative remainder as a count rather than
+# refusing it, so an unclamped head would emit the whole oversized head and
+# that many trailing bytes on top -- several times the limit asked for.
+CI_PUBLISHED_LOG_MAX_BYTES=100 \
+  ci_copy_remote_log_capped hog4 "$capped_dir/big.log" "$capped_dir/clamp.out"
+clamp_size=$(wc -c <"$capped_dir/clamp.out" | tr -cd '0-9')
+if ((clamp_size <= 100 + 200)); then
+  echo "ok   a maximum below the head budget still bounds ($clamp_size bytes)"
+else
+  echo "FAIL a maximum below the head budget does not bound ($clamp_size bytes)"
+  fail=1
+fi
+check_contains "a clamped copy still keeps the head" "HEADMARK" \
+  "$(cat "$capped_dir/clamp.out")"
+
 # What was dropped is named in place, so a reader of the published log is not
 # left to wonder whether the node went quiet or the copy did.
 check_contains "an oversized log says what was elided" "bytes elided" \
