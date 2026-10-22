@@ -1115,13 +1115,15 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
   // the one event log, between its root output and its events. It moved again
   // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body.
+  // absent key at the end of the one transaction body. It moved again, at the
+  // same length, when ProposalTxs began naming transactions by
+  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0xee, 0x08, 0xab, 0x8e, 0xeb, 0x72, 0xa9,
-                                   0x64, 0xa9, 0xb3, 0xd2, 0x90, 0xeb, 0xaf,
-                                   0xbc, 0xa9, 0xb9, 0x07, 0x63, 0xfb, 0xf8,
-                                   0x93, 0x78, 0xff, 0xb9, 0xdd, 0xf8, 0xfc,
-                                   0x6a, 0xa4, 0x41, 0x7e};
+  const SHA256Hash kExpectedDigest{0x52, 0x56, 0x10, 0xd9, 0x5b, 0x85, 0x81,
+                                   0x06, 0xc1, 0x50, 0x32, 0x6d, 0x33, 0x41,
+                                   0x35, 0x96, 0xc0, 0x78, 0xf7, 0x58, 0x93,
+                                   0x69, 0x6d, 0x2d, 0x12, 0x96, 0x6a, 0x9a,
+                                   0xfd, 0x16, 0x1b, 0xa7};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
