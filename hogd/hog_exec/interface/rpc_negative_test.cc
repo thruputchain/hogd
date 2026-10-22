@@ -205,7 +205,7 @@ protected:
     return Transaction{
         .invocation =
             contract_client.make_invocation<u8"test_nnint_get_key_not_exist">(
-                UINT64_MAX),
+                kDefaultMaxTxGas),
         .uniquifier = Uniquifier{.block_expiry_height =
                                      std::numeric_limits<BlockHeight>::max(),
                                  .nonce = 1},
@@ -222,7 +222,7 @@ protected:
                            NativeContractTestFramework::make_contract_address(
                                1),
                        .entrypoint = entrypoint_from_method_id(0),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = {}},
         .uniquifier = Uniquifier{.block_expiry_height = expiry, .nonce = 1},
     };
@@ -262,7 +262,7 @@ protected:
                            NativeContractTestFramework::make_contract_address(
                                1),
                        .entrypoint = entrypoint_from_method_id(0),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(big.begin(), big.end())},
         .uniquifier = Uniquifier{.block_expiry_height = 1'000'000, .nonce = 1},
     };

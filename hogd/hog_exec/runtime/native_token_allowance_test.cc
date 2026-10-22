@@ -16,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -135,7 +136,7 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -205,7 +206,7 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -260,7 +261,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSpenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -329,7 +330,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -447,7 +448,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -466,7 +467,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                               Invocation{.invoked_address = kSpenderAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -485,7 +486,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(1),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -504,7 +505,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
                               Invocation{.invoked_address = kSpenderAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(1),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -604,7 +605,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -682,7 +683,7 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -818,7 +819,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -839,7 +840,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(1),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -859,7 +860,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
                               Invocation{.invoked_address = kSpenderAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -926,7 +927,7 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -997,7 +998,7 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1162,7 +1163,7 @@ TEST_F(NativeTokenAllowanceTest,
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -1182,7 +1183,7 @@ TEST_F(NativeTokenAllowanceTest,
                               Invocation{.invoked_address = kSpenderAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context, &spend_tx_id);
@@ -1238,7 +1239,7 @@ TEST_F(NativeTokenAllowanceTest,
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(1),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -1358,7 +1359,7 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
                               Invocation{.invoked_address = kOwnerAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -1379,7 +1380,7 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
                               Invocation{.invoked_address = kSpenderAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx, *runtime_context);
@@ -1533,7 +1534,7 @@ TEST_F(NativeTokenAllowanceTest,
           Transaction{.invocation =
                           Invocation{.invoked_address = kOwnerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler =
@@ -1639,7 +1640,7 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
           Transaction{.invocation =
                           Invocation{.invoked_address = kSpenderAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1680,7 +1681,7 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
       kGenesisRootContractAddress);
   auto tx = Transaction{
       .invocation = root_client.make_invocation<u8"distribute">(
-          UINT64_MAX, x23::Vec<genesis_root::Distribution, UINT32_MAX>{},
+          kDefaultMaxTxGas, x23::Vec<genesis_root::Distribution, UINT32_MAX>{},
           x23::Vec<genesis_root::AccountAllocation, UINT32_MAX>{},
           make_amount(0), make_amount(0)),
       .uniquifier = make_new_uniquifier(),
@@ -1782,7 +1783,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
                               Invocation{.invoked_address = invoked,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(tx, *runtime_context);
@@ -1911,7 +1912,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
           Transaction{.invocation =
                           Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1991,7 +1992,7 @@ protected:
                               Invocation{.invoked_address = address,
                                          .entrypoint =
                                              entrypoint_from_method_id(0),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
     auto handler = make_new_system_call_handler(tx, context);

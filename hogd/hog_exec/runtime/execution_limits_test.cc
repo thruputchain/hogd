@@ -41,8 +41,10 @@ namespace {
 // configured value is what is enforced rather than the constant.
 constexpr uint32_t kSavepointDepth = 4;
 constexpr uint32_t kAuthTokenDepth = 2;
+constexpr GasAmount kTxGas = 100'000'000;
 static_assert(kSavepointDepth < kMaxSavepointDepth);
 static_assert(kAuthTokenDepth < kAuthTokenMaxDepth);
+static_assert(kTxGas < kDefaultMaxTxGas);
 
 constexpr ContractAddress kAddressNoop =
     NativeContractTestFramework::make_contract_address(0);
@@ -90,8 +92,10 @@ protected:
   }
 
   // Deploys `noop` at kAddressNoop and `driver` at kAddressDriver, invokes the
-  // driver as the root, and reports whether the root succeeded.
-  bool run_driver(NativeContract::function_t driver)
+  // driver as the root with a budget of `gas_limit`, and returns the root's
+  // result.
+  InvokeResult run_driver_with_budget(NativeContract::function_t driver,
+                                      GasAmount gas_limit)
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_noop;
     fns_noop.emplace(
@@ -122,11 +126,18 @@ protected:
                                   Invocation{.invoked_address = kAddressDriver,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = gas_limit,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
-    return handler.root_invoke()().is_root_success();
+    return handler.root_invoke()();
+  }
+
+  // As run_driver_with_budget, at the full budget the chain permits; reports
+  // whether the root succeeded.
+  bool run_driver(NativeContract::function_t driver)
+  {
+    return run_driver_with_budget(std::move(driver), kTxGas).is_root_success();
   }
 
 private:
@@ -139,6 +150,8 @@ private:
     NetworkConfigParams::set_param(config,
                                    ConfigParamID::kConfigParamMaxAuthTokenDepth,
                                    kAuthTokenDepth);
+    NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                   kTxGas);
     return config;
   }
 };
@@ -205,6 +218,36 @@ TEST_P(ExecutionLimitsTest, MintAuthTokenStopsAtConfiguredDepth)
     co_return InvokeStatus<void>{};
   });
   EXPECT_TRUE(ok);
+}
+
+// A budget at the configured bound runs.
+TEST_P(ExecutionLimitsTest, RootBudgetAtConfiguredTxGasRuns)
+{
+  auto ran = std::make_shared<bool>(false);
+  EXPECT_TRUE(run_driver(
+      [ran](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+        *ran = true;
+        co_return InvokeStatus<void>{};
+      }));
+  EXPECT_TRUE(*ran);
+}
+
+// One gas over the bound is refused before the body runs, as a validation
+// failure rather than a clamped budget, though the protocol default would have
+// admitted it.
+TEST_P(ExecutionLimitsTest, RootBudgetOverConfiguredTxGasIsRefused)
+{
+  auto ran = std::make_shared<bool>(false);
+  const InvokeResult over = run_driver_with_budget(
+      [ran](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+        *ran = true;
+        co_return InvokeStatus<void>{};
+      },
+      kTxGas + 1);
+  ASSERT_FALSE(over.is_root_success());
+  EXPECT_EQ(over.result_.error().code(), InvokeErrorCode::ValidationFailure);
+  EXPECT_EQ(over.gas_consumed_, 0U);
+  EXPECT_FALSE(*ran);
 }
 
 INSTANTIATE_TEST_SUITE_P(TestDBs, ExecutionLimitsTest,

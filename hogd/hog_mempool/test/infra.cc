@@ -138,7 +138,7 @@ MempoolTestInfra::start(const Options &options)
     CHECK_EQ(
         mempool_coord_server_->impl()->schedcoord_load_genesis_configuration(
             builder.build(options.network_hash, cost_model, *root_contract,
-                          stock_network_config()))(),
+                          mempool_test_network_config()))(),
         DbSchedResult::DbSchedResultOK);
     register_event_with_mempool();
     register_executor_with_mempool();

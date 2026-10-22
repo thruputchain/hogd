@@ -157,8 +157,9 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 {
   using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
   root_client_t client(kGenesisRootContractAddress);
-  constexpr static GasAmount kDistributionGas =
-      std::numeric_limits<GasAmount>::max();
+  // Ample for a distribution chunk, and within the default max_tx_gas: a
+  // chain whose cap refused its own ceremony could not reach height 1.
+  constexpr static GasAmount kDistributionGas = 1'000'000'000;
   // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
   // vector comfortably below that limit, including allocator and contract
   // stack space. A ceremony is one atomic height-1 block, but it may contain

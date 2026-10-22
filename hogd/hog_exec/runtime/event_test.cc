@@ -11,6 +11,7 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -191,7 +192,7 @@ TEST_F(EventTest, EventSuccess)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -311,7 +312,7 @@ TEST_F(EventTest, BadEventInputs)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -397,7 +398,7 @@ TEST_F(EventTest, EventLengthIncludesTopics)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -477,7 +478,7 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -611,7 +612,7 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -763,7 +764,7 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -944,7 +945,7 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1294,7 +1295,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1315,7 +1316,7 @@ TEST_F(EventTest, EventWithRevertingFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_manual_revert,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1395,7 +1396,7 @@ make_validation_proposal_event_rpc_tx(NativeContractTestFramework &fw,
       .invocation =
           Invocation{.invoked_address = kValidationProposalEventRpcAddress,
                      .entrypoint = entrypoint_from_method_id(method_id),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {}},
       .uniquifier = fw.make_new_uniquifier(),
   };

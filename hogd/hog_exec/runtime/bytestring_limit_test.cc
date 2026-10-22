@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
 #include <memory>
 #include <optional>
 #include <span>
@@ -104,7 +103,7 @@ protected:
         Transaction{.invocation =
                         Invocation{.invoked_address = make_contract_address(0),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier()},
         *runtime_context);

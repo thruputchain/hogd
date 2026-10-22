@@ -17,6 +17,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
@@ -94,7 +95,7 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
             .tx =
                 Transaction{.invocation =
                                 fib_client.make_invocation<u8"slow_fibonacci">(
-                                    UINT64_MAX, nfib),
+                                    kDefaultMaxTxGas, nfib),
                             .uniquifier = CommonBenchState::bench_uniquifier(
                                 base_height, static_cast<uint64_t>(i))}};
         auto handler =
@@ -154,7 +155,7 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     const auto tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                fib_client.make_invocation<u8"slow_fibonacci">(UINT64_MAX,
+                fib_client.make_invocation<u8"slow_fibonacci">(kDefaultMaxTxGas,
                                                                nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {

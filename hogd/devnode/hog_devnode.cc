@@ -319,8 +319,9 @@ Options:
                                  Include the faucet and explicit allocations.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
-                                 decimal uint32. Existing data directories
-                                 require the same overrides on restart.
+                                 decimal uint32 (uint64 for max_tx_gas).
+                                 Existing data directories require the same
+                                 overrides on restart.
   --log-level <level>            Log verbosity: critical, error, warn, info,
                                  debug, or trace [default: build-dependent]
   --ramdb-bytes <bytes>          RAM database capacity to reserve at startup.

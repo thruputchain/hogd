@@ -59,7 +59,7 @@ TEST_F(Sha256IncrementalTest, OneShotChecksGasBeforeHashing)
       handler
           .start_frame(Invocation{.invoked_address = make_contract_address(0),
                                   .entrypoint = {},
-                                  .gas_limit = UINT64_MAX,
+                                  .gas_limit = kDefaultMaxTxGas,
                                   .calldata = {}},
                        std::to_underlying(InvokeFlag::None),
                        ValidatedAuthTokens{})
@@ -128,7 +128,7 @@ TEST_F(Sha256IncrementalTest, UpdateChecksGasBeforeCreatingResettingOrAppending)
       handler
           .start_frame(Invocation{.invoked_address = make_contract_address(0),
                                   .entrypoint = {},
-                                  .gas_limit = UINT64_MAX,
+                                  .gas_limit = kDefaultMaxTxGas,
                                   .calldata = {}},
                        std::to_underlying(InvokeFlag::None),
                        ValidatedAuthTokens{})
@@ -212,7 +212,7 @@ TEST_F(Sha256IncrementalTest, FailedStreamLookupsPayTheStreamCost)
       handler
           .start_frame(Invocation{.invoked_address = make_contract_address(0),
                                   .entrypoint = {},
-                                  .gas_limit = UINT64_MAX,
+                                  .gas_limit = kDefaultMaxTxGas,
                                   .calldata = {}},
                        std::to_underlying(InvokeFlag::None),
                        ValidatedAuthTokens{})
@@ -291,7 +291,7 @@ TEST_F(Sha256SingleBufferTest, FullTableCopyRejectionPaysAndKeepsSource)
       handler
           .start_frame(Invocation{.invoked_address = make_contract_address(0),
                                   .entrypoint = {},
-                                  .gas_limit = UINT64_MAX,
+                                  .gas_limit = kDefaultMaxTxGas,
                                   .calldata = {}},
                        std::to_underlying(InvokeFlag::None),
                        ValidatedAuthTokens{})
@@ -376,7 +376,7 @@ TEST_F(Sha256IncrementalTest, BasicUpdateAndFinalize)
                                 Invocation{.invoked_address = kAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -504,7 +504,7 @@ TEST_F(Sha256IncrementalTest, FramesKeepIndependentHashBuffers)
                                 Invocation{.invoked_address = kParentAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -587,7 +587,7 @@ TEST_F(Sha256ConfiguredBufferLimitTest, GenesisValueBoundsOpenBuffers)
                                 Invocation{.invoked_address = kAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);

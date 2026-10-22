@@ -20,6 +20,7 @@
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -192,7 +193,8 @@ protected:
 TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
 
   auto result = run_view(make_query(invocation));
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -229,7 +231,7 @@ TEST_F(ViewTest, ViewGasConsumedIsIndependentOfLimit)
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
 
   auto measured = run_view(
-      make_query(client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U)));
+      make_query(client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U)));
   ASSERT_EQ(measured.status(), TransactionViewStatus::Ok);
   ASSERT_EQ(measured.result().output.status_code(),
             InvocationFrameStatusCode::Return);
@@ -254,7 +256,7 @@ TEST_F(ViewTest, ViewGasConsumedIsIndependentOfLimit)
 TEST_F(ViewTest, ViewWithMsgSender)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
 
   auto result = run_view(make_query_with_parent(invocation, kReadOnlyAddress));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -271,7 +273,8 @@ TEST_F(ViewTest, ViewNonexistentContract)
   ContractAddress bad_address =
       NativeContractTestFramework::make_contract_address(99);
   ContractTraitClient<fibonacci::Fibonacci> client(bad_address);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -280,7 +283,7 @@ TEST_F(ViewTest, ViewNonexistentContract)
 TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
 
   auto result = run_view(make_query_with_parent(invocation, kFibAddress));
   EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
@@ -292,7 +295,7 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 TEST_F(ViewTest, ViewRejectsUndefinedInvokeFlags)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
   auto query = make_query(invocation);
   query.invoke_flags = 0x8;
 
@@ -313,7 +316,7 @@ TEST_F(ViewTest, ViewContractSelfInvokeAborts)
   // depth bound as callee faults.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
-          UINT64_MAX, kReadOnlyAddress);
+          kDefaultMaxTxGas, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -1303,7 +1306,8 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
 TEST_F(ViewTest, ViewForwardedTokenWithoutParentReturnsInvalidInput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
   auto query = make_query(invocation);
   query.forwarded_tokens.push_back(
       x23::serialize(AuthToken{.mint_address = kFibAddress,

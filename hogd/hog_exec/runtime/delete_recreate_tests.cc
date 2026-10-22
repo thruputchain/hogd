@@ -13,6 +13,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -206,7 +207,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -385,7 +386,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -568,7 +569,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -637,7 +638,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressStorage,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};

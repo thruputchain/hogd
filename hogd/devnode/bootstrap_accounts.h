@@ -30,9 +30,10 @@ struct BootstrapAccountConfig {
   std::uint64_t storage_tokens = kDefaultBootstrapAccountStorageTokens;
 };
 
-using LocalNetworkConfigOverrides = std::map<std::string, std::uint32_t>;
+using LocalNetworkConfigOverrides = std::map<std::string, std::uint64_t>;
 
-// Parse a named decimal uint32 override. Reject unknown names and duplicates.
+// Parse a named decimal override that fits the parameter's type (uint32 for
+// most, uint64 for max_tx_gas). Reject unknown names and duplicates.
 void add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
                                        std::string_view assignment);
 

@@ -22,6 +22,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "hogd/xdr/signed_transaction_hash.h"
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
@@ -29,6 +30,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -46,6 +48,21 @@ hash_txs(const SignedTransactionBatch &txs)
     hashes.push_back(sha256(tx.tx));
   }
   return hashes;
+}
+
+// [tx] with one more placeholder signature, all [byte]: a different signed
+// encoding of the same body for each [byte]. The scheduler does not check
+// signatures.
+SignedTransaction
+with_signature(SignedTransaction tx, uint8_t byte)
+{
+  DecoratedSignature signature;
+  signature.public_key_id = 0;
+  signature.signature = Signature(CryptographicScheme::Ed25519);
+  Ed25519Signature &bytes = signature.signature.ed25519();
+  std::memset(bytes.data(), byte, bytes.size());
+  tx.signatures.push_back(signature);
+  return tx;
 }
 
 // A block's transfers as they arrive when hog_db sent them as one chunk.
@@ -395,6 +412,154 @@ TEST(Scheduler, ResubmittedNominationTxIsReenqueuedAfterAbandon)
   scheduler->commit_pending_nomination(/*block_id=*/3)();
   EXPECT_EQ(scheduler->size(), 0);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, HashSignedTransactionMatchesSeparateHashes)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransaction tx =
+      with_signature(generate_unsigned_txs(fib_client, 1)[0], 7);
+  tx.pubkey_claim_key =
+      x23::Ptr<PublicKey>(new PublicKey(CryptographicScheme::Ed25519));
+
+  const SignedTransactionHashes hashes = hash_signed_transaction(tx);
+  EXPECT_EQ(hashes.tx_hash, sha256(tx.tx));
+  EXPECT_EQ(hashes.signed_tx_hash, sha256(tx));
+  EXPECT_NE(hashes.tx_hash, hashes.signed_tx_hash);
+}
+
+TEST(Scheduler, FindSignedTxMatchesOnlyTheCachedEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const std::shared_ptr<const SignedTransaction> found =
+      scheduler->find_signed_tx(sha256(a));
+  ASSERT_TRUE(found);
+  EXPECT_EQ(*found, a);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_FALSE(scheduler->find_signed_tx(tx_hash));
+}
+
+TEST(Scheduler, KeptVariantLeavesCachedEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                         Scheduler::CachedVariant::kSubmitUnvetted)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  ASSERT_TRUE(scheduler->find_tx(tx_hash));
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), a);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+}
+
+TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                         Scheduler::CachedVariant::kSubmitVetted)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  ASSERT_TRUE(scheduler->find_tx(tx_hash));
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), b);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
+  ASSERT_TRUE(scheduler->find_signed_tx(sha256(b)));
+
+  // The runqueue holds the replacement too.
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), b);
+
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+
+  // The index entry went with the cache entry, so the body can be cached again
+  // under either encoding.
+  scheduler->add_txs({a}, {tx_hash})();
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+}
+
+TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), a);
+
+  // Replacing a body the nomination holds swaps only the cache entry: the
+  // nomination keeps its copy, and the body stays off the runqueue.
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduled.front(), a);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
+
+  scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
+  scheduler->abandon_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->size(), 1);
+  scheduled_hashes.clear();
+  scheduled.clear();
+  scheduler->start_pending_nomination(/*block_id=*/3);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), b);
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/3)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
 }
 
 TEST(Scheduler, LatestFailedTransactionOutcomeWins)

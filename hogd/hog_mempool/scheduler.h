@@ -18,6 +18,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/xdr/signed_transaction_hash.h"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
@@ -41,6 +42,19 @@ public:
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
 
+  // Which submission path a batch for [add_txs()] came from, which decides
+  // what happens to a submission whose body is already cached under a
+  // different signed encoding.
+  enum class CachedVariant {
+    // [submit_unvetted()]: keep the cached encoding and report the submission
+    // admitted.
+    kSubmitUnvetted,
+    // [schedulercoord_submit_vetted()]: replace the cached encoding with the
+    // submitted one. The coordinator supplies the encodings a proposer chose,
+    // so the cache holds what the block under validation executes.
+    kSubmitVetted,
+  };
+
   x23::Async<void> shut_down()
   {
     wait_for_pending_detached_coroutines();
@@ -57,6 +71,18 @@ public:
   // the average age of the [kHogAgeGroupToSchedule] group or (2) the
   // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
   // tx but cycling will add enough hogs to this group to schedule it.
+  //
+  // [signed_tx_hashes] holds each tx's [SignedTransactionHash], aligned with
+  // [txs] and [tx_hashes]. [on_variant] decides between a submission and a
+  // different signed encoding of its body that is already cached.
+  x23::Async<SchedGatewaySubmitOutcomeBatch>
+  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+          const x23::XdrVec<TransactionHash> &tx_hashes,
+          const SignedTransactionHashBatch &signed_tx_hashes,
+          CachedVariant on_variant);
+
+  // [add_txs()] for callers that have not hashed the signed encodings, as an
+  // unvetted submission.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
@@ -81,7 +107,20 @@ public:
   std::shared_ptr<const SignedTransaction>
   find_tx(const TransactionHash &tx_hash)
   {
-    auto [tx_value_ptr, _] = txs_.find(tx_hash);
+    auto [tx_value_ptr, _] = txs_by_body_.find(tx_hash);
+    if (tx_value_ptr) {
+      return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
+                                                      &(*tx_value_ptr)->tx);
+    }
+    return {};
+  }
+
+  // The cached tx with this exact signed encoding, or null if its body is not
+  // cached or is cached under a different encoding.
+  std::shared_ptr<const SignedTransaction>
+  find_signed_tx(const SignedTransactionHash &signed_tx_hash)
+  {
+    auto [tx_value_ptr, _] = txs_.find(signed_tx_hash);
     if (tx_value_ptr) {
       return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
                                                       &(*tx_value_ptr)->tx);
@@ -135,7 +174,7 @@ public:
       const TransactionHash &tx_hash = *it;
       std::shared_ptr<TxValue> tx_value;
       {
-        const auto [tx_value_ptr, lock] = txs_.find(tx_hash);
+        const auto [tx_value_ptr, lock] = txs_by_body_.find(tx_hash);
         CHECK_PTR(tx_value_ptr);
         tx_value = *tx_value_ptr;
       }
@@ -154,7 +193,7 @@ public:
       // its cache entry. Use the newly cached signed tx value because a
       // replacement signed tx may carry different signatures for the same
       // transaction hash.
-      const auto [cached_value, txs_lock] = txs_.find(tx_hash);
+      const auto [cached_value, txs_lock] = txs_by_body_.find(tx_hash);
       if (cached_value &&
           account_state->txs.insert({key, *cached_value}).second) {
         num_inserted++;
@@ -313,6 +352,8 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    // The hash of [tx]'s exact signed encoding, its key in [txs_].
+    SignedTransactionHash signed_tx_hash;
   };
 
   struct AccountState {
@@ -358,7 +399,13 @@ private:
                                     bool remove_expired_txs);
 
   bool add_txs_helper(const SignedTransaction &tx,
-                      const TransactionHash &tx_hash);
+                      const TransactionHash &tx_hash,
+                      const SignedTransactionHash &signed_tx_hash,
+                      CachedVariant on_variant);
+  // Removes the cached tx whose body hash is [tx_hash] from [txs_by_body_] and
+  // [txs_]. The caller holds the lock of the tx's account, as every cache
+  // writer does, so the entry read here is current.
+  void erase_cached_tx(const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
@@ -412,11 +459,20 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache. Entries are removed when transactions expire, are discarded, or
-  // appear in a committed/validated block. Shared ownership keeps an entry's
+  // Tx cache, keyed by each tx's exact signed encoding. It holds at most one
+  // encoding per body: [txs_by_body_] indexes the same entries by body hash.
+  // Entries are removed when transactions expire, are discarded, or appear in
+  // a committed/validated block. Shared ownership keeps an entry's
   // transaction alive for in-flight lookups after it is removed from here.
-  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
+  //
+  // Every write to the two maps happens under the tx's account lock, which
+  // keeps them in step for each body. Lookups take no account lock and touch
+  // one map.
+  SynchronizedMap<SignedTransactionHash, std::shared_ptr<TxValue>,
+                  SipHash24Hasher>
       txs_;
+  SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
+      txs_by_body_;
   // Per-account scheduler state, including hog ages and the account runqueue.
   SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
 

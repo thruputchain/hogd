@@ -33,6 +33,7 @@
 #include "contract.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -185,7 +186,7 @@ setup_root_invokes_child(ContractAddress *child_addr_storage, bool deploy_child)
                  {
                      .invoked_address = root_addr,
                      .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {},
                  },
              .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},

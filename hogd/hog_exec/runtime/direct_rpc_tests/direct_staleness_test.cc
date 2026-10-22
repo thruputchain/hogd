@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,6 +12,7 @@
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -585,11 +585,10 @@ TEST_F(DirectStalenessTest,
   forged.observed_queue_entry_sequence = {QueueEntry{kForgedEntry}};
 
   Transaction tx{
-      .invocation =
-          Invocation{.invoked_address = kContractAddr,
-                     .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = std::numeric_limits<GasAmount>::max(),
-                     .calldata = {}},
+      .invocation = Invocation{.invoked_address = kContractAddr,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = kDefaultMaxTxGas,
+                               .calldata = {}},
       // Non-expired uniquifier: this test drives a manual revert and a
       // staleness abort, not replay expiry, and a default (height-0) uniquifier
       // is now rejected as expired during initial validation.

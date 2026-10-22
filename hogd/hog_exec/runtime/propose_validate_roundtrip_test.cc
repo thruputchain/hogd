@@ -137,7 +137,7 @@ protected:
                            Invocation{.invoked_address = kAddrA,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -253,7 +253,7 @@ protected:
         .invocation =
             Invocation{.invoked_address = kAddrA,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -2393,7 +2393,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
 
@@ -2579,7 +2579,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
@@ -2686,7 +2686,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
@@ -2793,7 +2793,7 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
@@ -2891,7 +2891,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
@@ -2979,7 +2979,7 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);

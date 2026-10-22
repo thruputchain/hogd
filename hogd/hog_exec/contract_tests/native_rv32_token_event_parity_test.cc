@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <concepts>
-#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -19,6 +18,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -325,7 +325,7 @@ protected:
                               Invocation{.invoked_address = invoked,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = target_calldata(target)},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx.tx, *multiplexed_context_);
@@ -347,7 +347,7 @@ protected:
                               Invocation{.invoked_address = invoked,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = target_calldata(target)},
                           .uniquifier = make_new_uniquifier()}};
     auto h =

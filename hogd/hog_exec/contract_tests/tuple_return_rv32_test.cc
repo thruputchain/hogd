@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <tuple>
 #include <unordered_map>
@@ -12,6 +11,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -396,7 +396,7 @@ TEST_F(TupleReturnRv32Test, BasicTwoTuple)
               Invocation{
                   .invoked_address = kNativeContractAddress,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata =
                       Serializer<
                           NativeContractBuilder::kDefaultSerializationFormat>::
@@ -421,7 +421,7 @@ TEST_F(TupleReturnRv32Test, NestedTuple)
               Invocation{
                   .invoked_address = kNativeContractAddress,
                   .entrypoint = entrypoint_from_method_id(1),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata =
                       Serializer<
                           NativeContractBuilder::kDefaultSerializationFormat>::
@@ -444,7 +444,7 @@ TEST_F(TupleReturnRv32Test, SingleElementTuple)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(2),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -463,7 +463,7 @@ TEST_F(TupleReturnRv32Test, ThreeElementTuple)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(3),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -482,7 +482,7 @@ TEST_F(TupleReturnRv32Test, DeeplyNested)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(4),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -501,7 +501,7 @@ TEST_F(TupleReturnRv32Test, TupleWithFixedArray)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(5),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -520,7 +520,7 @@ TEST_F(TupleReturnRv32Test, TupleWithVariableArray)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(6),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -539,7 +539,7 @@ TEST_F(TupleReturnRv32Test, NestedArrays)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(7),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -558,7 +558,7 @@ TEST_F(TupleReturnRv32Test, ArrayOfTuples)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(8),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -577,7 +577,7 @@ TEST_F(TupleReturnRv32Test, NestedArray2D)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(9),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -596,7 +596,7 @@ TEST_F(TupleReturnRv32Test, NestedArray3D)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(10),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -615,7 +615,7 @@ TEST_F(TupleReturnRv32Test, DeeplyNestedArray)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(11),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -634,7 +634,7 @@ TEST_F(TupleReturnRv32Test, TupleWithOption)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(12),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -653,7 +653,7 @@ TEST_F(TupleReturnRv32Test, TupleAllOptional)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(13),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -672,7 +672,7 @@ TEST_F(TupleReturnRv32Test, NestedOptionTuple)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(14),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -691,7 +691,7 @@ TEST_F(TupleReturnRv32Test, KitchenSink)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(15),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -710,7 +710,7 @@ TEST_F(TupleReturnRv32Test, ArraysAndTuples)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(16),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -729,7 +729,7 @@ TEST_F(TupleReturnRv32Test, TupleWithNestedArray)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(17),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -748,7 +748,7 @@ TEST_F(TupleReturnRv32Test, Tuple8Elements)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(18),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -767,7 +767,7 @@ TEST_F(TupleReturnRv32Test, Tuple16Elements)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(19),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -786,7 +786,7 @@ TEST_F(TupleReturnRv32Test, EmptyTuple)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(20),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -805,7 +805,7 @@ TEST_F(TupleReturnRv32Test, TupleWithBytes)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(21),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -824,7 +824,7 @@ TEST_F(TupleReturnRv32Test, TupleWithVariableBytes)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(22),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -843,7 +843,7 @@ TEST_F(TupleReturnRv32Test, NestedBytesArray)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(23),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -862,7 +862,7 @@ TEST_F(TupleReturnRv32Test, TupleArrayOption)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(24),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);
@@ -881,7 +881,7 @@ TEST_F(TupleReturnRv32Test, NestedEverything)
       Transaction{.invocation =
                       Invocation{.invoked_address = kNativeContractAddress,
                                  .entrypoint = entrypoint_from_method_id(25),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *multiplexed_context_);

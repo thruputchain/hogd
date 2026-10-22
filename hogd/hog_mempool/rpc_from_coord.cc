@@ -47,6 +47,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/loadgen/ingestion_diagnostics.h"
+#include "hogd/xdr/signed_transaction_hash.h"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -89,23 +90,29 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 
 x23::Async<void>
 hash_transactions(const SignedTransactionBatch &txs,
-                  TransactionHashBatch &tx_hashes)
+                  TransactionHashBatch &tx_hashes,
+                  SignedTransactionHashBatch &signed_tx_hashes)
 {
   tx_hashes.resize(txs.size());
+  signed_tx_hashes.resize(txs.size());
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back(
-        [](const ChunkRange *chunk, const SignedTransactionBatch &txs,
-           TransactionHashBatch &tx_hashes) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-          for (size_t i = chunk->start; i < chunk->end; i++) {
-            tx_hashes[i] = sha256(txs[i].tx);
-          }
-          co_return;
-        }(&chunk, txs, tx_hashes));
+    handles.push_back([](const ChunkRange *chunk,
+                         const SignedTransactionBatch &txs,
+                         TransactionHashBatch &tx_hashes,
+                         SignedTransactionHashBatch &signed_tx_hashes) noexcept
+                          -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      for (size_t i = chunk->start; i < chunk->end; i++) {
+        const SignedTransactionHashes hashes = hash_signed_transaction(txs[i]);
+        tx_hashes[i] = hashes.tx_hash;
+        signed_tx_hashes[i] = hashes.signed_tx_hash;
+      }
+      co_return;
+    }(&chunk, txs, tx_hashes, signed_tx_hashes));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -422,6 +429,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
   auto original_indices = std::make_shared<x23::Vec<size_t>>();
   auto outcomes = std::make_shared<SchedGatewaySubmitOutcomeBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
+  auto signed_tx_hashes = std::make_shared<SignedTransactionHashBatch>();
   auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
@@ -463,11 +471,11 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         co_return;
       });
 
-  auto hash_node =
-      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
-                             [&, tx_hashes]() -> x23::Async<void> {
-                               co_await hash_transactions(*txs, *tx_hashes);
-                             });
+  auto hash_node = submit_dag.async<void>(
+      "hash transactions", submit_dag.after(decode_node),
+      [&, tx_hashes, signed_tx_hashes]() -> x23::Async<void> {
+        co_await hash_transactions(*txs, *tx_hashes, *signed_tx_hashes);
+      });
 
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(ready_node, hash_node),
@@ -497,9 +505,11 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         SignedTransactionBatch authenticated_txs;
         x23::Vec<size_t> authenticated_indices;
         TransactionHashBatch authenticated_hashes;
+        SignedTransactionHashBatch authenticated_signed_hashes;
         authenticated_txs.reserve(txs->size());
         authenticated_indices.reserve(txs->size());
         authenticated_hashes.reserve(txs->size());
+        authenticated_signed_hashes.reserve(txs->size());
         size_t num_auth_failures = 0;
         for (size_t i = 0; i < auth_ret.size(); i++) {
           const AuthErrorCode &code = auth_ret[i];
@@ -511,6 +521,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             authenticated_txs.push_back(std::move((*txs)[i]));
             authenticated_indices.push_back(original_idx);
             authenticated_hashes.push_back((*tx_hashes)[i]);
+            authenticated_signed_hashes.push_back((*signed_tx_hashes)[i]);
           }
           else {
             (*outcomes)[original_idx] = outcome;
@@ -522,6 +533,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         *txs = std::move(authenticated_txs);
         *original_indices = std::move(authenticated_indices);
         *tx_hashes = std::move(authenticated_hashes);
+        *signed_tx_hashes = std::move(authenticated_signed_hashes);
         co_return;
       });
 
@@ -551,9 +563,11 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         SignedTransactionBatch capacity_txs;
         x23::Vec<size_t> capacity_indices;
         TransactionHashBatch capacity_hashes;
+        SignedTransactionHashBatch capacity_signed_hashes;
         capacity_txs.reserve(txs->size());
         capacity_indices.reserve(txs->size());
         capacity_hashes.reserve(txs->size());
+        capacity_signed_hashes.reserve(txs->size());
         std::unordered_set<TransactionHash, SipHash24Hasher>
             selected_new_hashes;
         size_t num_discarded = 0;
@@ -573,6 +587,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
             capacity_txs.push_back(std::move((*txs)[i]));
             capacity_indices.push_back((*original_indices)[i]);
             capacity_hashes.push_back(tx_hash);
+            capacity_signed_hashes.push_back((*signed_tx_hashes)[i]);
           }
           else {
             (*outcomes)[(*original_indices)[i]] =
@@ -607,6 +622,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         *txs = std::move(capacity_txs);
         *original_indices = std::move(capacity_indices);
         *tx_hashes = std::move(capacity_hashes);
+        *signed_tx_hashes = std::move(capacity_signed_hashes);
         co_return;
       });
 
@@ -619,7 +635,9 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         // from the scheduler). But this would make the txs visible to
         // nominate() and validate() before the txs have been verified.
         const SchedGatewaySubmitOutcomeBatch add_outcomes =
-            co_await scheduler_->add_txs(*txs, *tx_hashes);
+            co_await scheduler_->add_txs(
+                *txs, *tx_hashes, *signed_tx_hashes,
+                Scheduler::CachedVariant::kSubmitUnvetted);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
         // Earlier auth/capacity filters can leave an oversized buffer. Keep
@@ -722,6 +740,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
   //    free up capacity.
   auto txs = std::make_shared<SignedTransactionBatch>();
   auto tx_hashes = std::make_shared<TransactionHashBatch>();
+  auto signed_tx_hashes = std::make_shared<SignedTransactionHashBatch>();
   auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
@@ -742,11 +761,11 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
-  auto hash_node =
-      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
-                             [&, tx_hashes]() -> x23::Async<void> {
-                               co_await hash_transactions(*txs, *tx_hashes);
-                             });
+  auto hash_node = submit_dag.async<void>(
+      "hash transactions", submit_dag.after(decode_node),
+      [&, tx_hashes, signed_tx_hashes]() -> x23::Async<void> {
+        co_await hash_transactions(*txs, *tx_hashes, *signed_tx_hashes);
+      });
 
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(hash_node),
@@ -772,24 +791,29 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
           remove_indices(/*remove_from=*/*txs, /*indices=*/to_remove_indices);
           remove_indices(/*remove_from=*/*tx_hashes,
                          /*indices=*/to_remove_indices);
+          remove_indices(/*remove_from=*/*signed_tx_hashes,
+                         /*indices=*/to_remove_indices);
         }
         co_return;
       });
 
-  submit_dag.async<void>("add txs", submit_dag.after(prune_node),
-                         [&, commit_guard]() -> x23::Async<void> {
-                           co_await scheduler_->add_txs(*txs, *tx_hashes);
-                           MempoolMetrics::instance()
-                               .accepted_vetted_tx_count.increment(txs->size());
-                           // [commit_guard] is a smart pointer that has a
-                           // [reset()] method just like [x23::CoroGuard].
-                           // clang-tidy prefers that we dereference
-                           // [commit_guard] with [*] below rather than write
-                           // [commit_guard->reset()], just so that this is more
-                           // readable.
-                           (*commit_guard).reset();
-                           co_return;
-                         });
+  submit_dag.async<void>(
+      "add txs", submit_dag.after(prune_node),
+      [&, commit_guard]() -> x23::Async<void> {
+        // The coordinator supplies vetted txs in the encodings a block under
+        // validation executes, so they replace other encodings of their
+        // bodies.
+        co_await scheduler_->add_txs(*txs, *tx_hashes, *signed_tx_hashes,
+                                     Scheduler::CachedVariant::kSubmitVetted);
+        MempoolMetrics::instance().accepted_vetted_tx_count.increment(
+            txs->size());
+        // [commit_guard] is a smart pointer that has a [reset()] method just
+        // like [x23::CoroGuard]. clang-tidy prefers that we dereference
+        // [commit_guard] with [*] below rather than write
+        // [commit_guard->reset()], just so that this is more readable.
+        (*commit_guard).reset();
+        co_return;
+      });
 
   co_await submit_dag.run();
   if (!submit_dag.ok() && submit_dag.failure().exception) {
