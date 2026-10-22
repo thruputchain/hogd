@@ -1,4 +1,5 @@
-//! The RV32 reference for native HOG's ERC20 and ERC20Permit interfaces.
+//! The RV32 reference for native HOG's ERC20, ERC20Permit and ERC165
+//! interfaces.
 
 use crate::interface::*;
 use crate::permit_interface::{
@@ -211,3 +212,7 @@ impl ERC20Permit for Token {
         delete_allowance_for(&owner, &grant.spender);
     }
 }
+
+// supports_interface answers from the impls above: ERC20, ERC20Permit and
+// ERC165 itself.
+thruput_erc165_if::impl_erc165!();

@@ -112,6 +112,34 @@ sdk_entrypoint_derivation(std::u8string_view identifier_name,
   return out;
 }
 
+InterfaceId
+sdk_interface_id_derivation(std::u8string_view identifier_name,
+                            std::u8string_view identifier_version)
+{
+  auto as_bytes = [](std::u8string_view s) {
+    return std::string_view(reinterpret_cast<const char *>(s.data()), s.size());
+  };
+
+  // The domain tag keeps interface ids apart from entrypoint ids, whose
+  // preimage is otherwise the same name::major prefix.
+  constexpr std::u8string_view kDomain = u8"groundhog-interface";
+  constexpr std::u8string_view kSeparator = u8"::";
+
+  std::string preimage;
+  preimage.append(as_bytes(kDomain));
+  preimage.append(as_bytes(kSeparator));
+  preimage.append(as_bytes(identifier_name));
+  preimage.append(as_bytes(kSeparator));
+  preimage.append(major_version(as_bytes(identifier_version)));
+
+  auto h = sha256(preimage);
+
+  InterfaceId out{};
+  static_assert(sizeof(out) <= sizeof(h));
+  std::memcpy(out.data(), h.data(), out.size());
+  return out;
+}
+
 Runtime::MethodID
 sdk_method_id(ContractEntrypointID entry_point_id)
 {

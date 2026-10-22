@@ -523,6 +523,7 @@ dependencies = [
 name = "itc_erc20_permit"
 version = "0.2.0"
 dependencies = [
+ "thruput-erc165-if",
  "thruput-erc20-if",
  "thruput-erc20-permit-if",
  "thruput-sdk",
@@ -1031,6 +1032,16 @@ dependencies = [
  "thruput-contract-spec",
  "thruput-xdr",
  "xdrs",
+]
+
+[[package]]
+name = "thruput-erc165-if"
+version = "0.1.59"
+source = "sparse+https://crates.thruput.network/api/v1/crates/"
+checksum = "a1078c11ce8f10291d29f4e423abd7541cd3292cab33d4031a5448b50f12b159"
+dependencies = [
+ "heapless",
+ "thruput-sdk",
 ]
 
 [[package]]
