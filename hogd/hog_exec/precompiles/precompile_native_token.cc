@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <span>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -30,6 +32,7 @@
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
@@ -838,6 +841,70 @@ delete_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
   co_return PermitResult::make_ok();
 }
 
+// ERC165 (thruput-erc165-if). The RV32 reference answers from the interface
+// table its #[contract] impls leave behind; the native token has no such
+// table, so it lists the interfaces make_native_token_contract registers.
+
+using erc165_meta = ContractTraitMeta<itc_erc20_permit::ERC165>;
+using interface_ids_t =
+    std::tuple_element_t<0, erc165_meta::args_t<u8"supports_interfaces">>;
+using interface_support_t = erc165_meta::return_t<u8"supports_interfaces">;
+
+static_assert(
+    std::is_same_v<
+        std::tuple_element_t<0, erc165_meta::args_t<u8"supports_interface">>,
+        InterfaceId>,
+    "ERC165 must take the InterfaceId sdk_interface_id_derivation returns");
+
+template<is_contract_trait Trait>
+InterfaceId
+interface_id_of()
+{
+  return sdk_interface_id_derivation(Trait::kTraitName, Trait::kVersion);
+}
+
+bool
+native_token_implements(InterfaceId const &id)
+{
+  // Keep in step with the builder.add calls in make_native_token_contract.
+  static const std::array<InterfaceId, 3> kImplemented{
+      interface_id_of<itc_erc20::ERC20>(),
+      interface_id_of<itc_erc20_permit::ERC20Permit>(),
+      interface_id_of<itc_erc20_permit::ERC165>(),
+  };
+  return std::ranges::contains(kImplemented, id);
+}
+
+// Ballparks of what the RV32 reference's frame consumes, from the runtime's
+// "gas consumed" trace: supports_interface 470-533, and supports_interfaces
+// about 2450 for an empty query.
+constexpr GasAmount kSupportsInterfaceGas = 500;
+constexpr GasAmount kSupportsInterfacesGas = 2500;
+
+x23::Async<InvokeStatus<bool>>
+supports_interface_impl(NativeSyscallContext &ctx, InterfaceId interface_id)
+{
+  if (!ctx.consume_gas(kSupportsInterfaceGas)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  co_return native_token_implements(interface_id);
+}
+
+x23::Async<InvokeStatus<interface_support_t>>
+supports_interfaces_impl(NativeSyscallContext &ctx,
+                         interface_ids_t interface_ids)
+{
+  if (!ctx.consume_gas(kSupportsInterfacesGas)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  // One answer per queried id, in order; the answer shares the query's bound.
+  interface_support_t support;
+  for (auto const &id : interface_ids) {
+    support.push_back(native_token_implements(id));
+  }
+  co_return support;
+}
+
 } // namespace
 
 x23::Async<InvokeStatus<void>>
@@ -1017,8 +1084,15 @@ make_native_token_contract()
   builder.add<itc_erc20_permit::ERC20Permit, u8"delete_allowance_signed">(
       delete_allowance_signed_impl);
 
+  // ERC165
+  builder.add<itc_erc20_permit::ERC165, u8"supports_interface">(
+      supports_interface_impl);
+  builder.add<itc_erc20_permit::ERC165, u8"supports_interfaces">(
+      supports_interfaces_impl);
+
   assert(builder.check_methods<itc_erc20::ERC20>());
   assert(builder.check_methods<itc_erc20_permit::ERC20Permit>());
+  assert(builder.check_methods<itc_erc20_permit::ERC165>());
 
   return builder.build();
 }

@@ -75,6 +75,7 @@ serde = { version = "1.0.217", default-features = false }
 # Standard interface crates.
 thruput-erc20-if = { registry = "groundhog", version = "0.1.59" }
 thruput-erc20-permit-if = { registry = "groundhog", version = "0.1.59" }
+thruput-erc165-if = { registry = "groundhog", version = "0.1.59" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.

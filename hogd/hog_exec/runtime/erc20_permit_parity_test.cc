@@ -84,6 +84,10 @@ zero_cost_model_xdr()
 
 using permit_meta = ContractTraitMeta<itc_erc20_permit::ERC20Permit>;
 using erc20_meta = ContractTraitMeta<itc_erc20_permit::ERC20>;
+using erc165_meta = ContractTraitMeta<itc_erc20_permit::ERC165>;
+using interface_ids_t =
+    std::tuple_element_t<0, erc165_meta::args_t<u8"supports_interfaces">>;
+using interface_support_t = erc165_meta::return_t<u8"supports_interfaces">;
 
 // A captured call outcome: a tag byte, the child frame status, and the
 // literal bytes the callee returned or aborted with (see append_invoke_record).
@@ -142,6 +146,23 @@ erc20_step(ContractAddress caller, Args... args)
               .grants = {},
               .method = erc20_meta::method_id<Name>(),
               .calldata = erc20_meta::make_calldata<Name>(args...)};
+}
+
+template<StringLiteral Name, typename... Args>
+Step
+erc165_step(ContractAddress caller, Args const &...args)
+{
+  return Step{.caller = caller,
+              .grants = {},
+              .method = erc165_meta::method_id<Name>(),
+              .calldata = erc165_meta::make_calldata<Name>(args...)};
+}
+
+template<is_contract_trait Trait>
+InterfaceId
+interface_id_of()
+{
+  return sdk_interface_id_derivation(Trait::kTraitName, Trait::kVersion);
 }
 
 // The (selector, CXS body) bytes a frame aborts with when it throws `exn`.
@@ -666,6 +687,14 @@ protected:
     return returned(Record(buf->begin(), buf->end()));
   }
 
+  // The record of a call returning `value`, outside any Result.
+  template<typename T> static Record ok_value(T const &value)
+  {
+    auto buf = Serializer<SerializationFormat::kCxs>::serialize(value);
+    EXPECT_TRUE(buf.has_value());
+    return returned(Record(buf->begin(), buf->end()));
+  }
+
   std::vector<TxEmittedEvent> native_events_;
 };
 
@@ -1126,6 +1155,48 @@ TEST_F(Erc20PermitParityTest, GrantRedeemedForTheWrongOperationFailsToDecode)
   EXPECT_EQ(results[1], decode_failure);
   EXPECT_EQ(results[2], decode_failure);
   EXPECT_EQ(results[3], ok_amount(0));
+}
+
+// ERC-165: the native token claims the interfaces the RV32 reference's impls
+// put in its interface table -- ERC20, ERC20Permit and ERC165 itself -- and
+// nothing else, one id at a time or as a list.
+TEST_F(Erc20PermitParityTest, SupportsInterfaceMatchesTheReference)
+{
+  auto const erc20 = interface_id_of<itc_erc20_permit::ERC20>();
+  auto const permit = interface_id_of<itc_erc20_permit::ERC20Permit>();
+  auto const erc165 = interface_id_of<itc_erc20_permit::ERC165>();
+  // ERC20 at the next major is a different interface.
+  auto const erc20_next_major =
+      sdk_interface_id_derivation(u8"ERC20", u8"0.2.0");
+  InterfaceId const unknown{1, 2, 3, 4, 5, 6, 7, 8};
+
+  interface_ids_t query;
+  for (auto const &id : {erc20, unknown, erc165, permit, erc20}) {
+    query.push_back(id);
+  }
+  interface_support_t answer;
+  for (bool b : {true, false, true, true, true}) {
+    answer.push_back(b);
+  }
+
+  auto results = expect_parity({
+      erc165_step<u8"supports_interface">(kOwner, erc20),
+      erc165_step<u8"supports_interface">(kOwner, permit),
+      erc165_step<u8"supports_interface">(kOwner, erc165),
+      erc165_step<u8"supports_interface">(kOwner, erc20_next_major),
+      erc165_step<u8"supports_interface">(kOwner, unknown),
+      erc165_step<u8"supports_interfaces">(kSpender, query),
+      erc165_step<u8"supports_interfaces">(kSpender, interface_ids_t{}),
+  });
+  ASSERT_EQ(results.size(), 7U);
+  EXPECT_EQ(results[0], ok_value(true));
+  EXPECT_EQ(results[1], ok_value(true));
+  EXPECT_EQ(results[2], ok_value(true));
+  EXPECT_EQ(results[3], ok_value(false));
+  EXPECT_EQ(results[4], ok_value(false));
+  EXPECT_EQ(results[5], ok_value(answer));
+  EXPECT_EQ(results[6], ok_value(interface_support_t{}));
+  EXPECT_TRUE(native_events_.empty());
 }
 
 // A delete and an increase of the same allowance cannot both land in one block:
