@@ -150,7 +150,7 @@ erc20_step(ContractAddress caller, Args... args)
 
 template<StringLiteral Name, typename... Args>
 Step
-erc165_step(ContractAddress caller, Args... args)
+erc165_step(ContractAddress caller, Args const &...args)
 {
   return Step{.caller = caller,
               .grants = {},
