@@ -118,6 +118,24 @@ expect_eq 'a stalled push does not start another round' 2 "$(wc -l <"$ssh_log")"
 
 git -C metrics_history config --unset remote.origin.pushurl
 
+# A file the remote will not take must not take the run's other metrics with
+# it. GitHub rejects an oversized file at the pre-receive hook and the whole
+# push with it, and a run's metrics are one commit, so staging it loses every
+# metric the run produced -- silently, since the schedules call this as
+# [(commit_metrics.sh) || true].
+new_metric run3
+printf '%0.sx' $(seq 1 4096) >metrics_history/metrics/oversized.log
+
+status=0
+out=$(METRICS_MAX_FILE_BYTES=1024 "$SCRIPT" 2>&1) || status=$?
+expect_status 'a run with an oversized metric file' 0 "$status"
+expect_contains 'an oversized metric file is named' \
+  'Skipping metrics/oversized.log' "$out"
+expect_eq "the run's other metrics still reach the remote" \
+  'metrics/old.json metrics/run1.json metrics/run2.json metrics/run3.json' \
+  "$(git -C "$work/remote.git" ls-tree -r --name-only main | tr '\n' ' ' | sed 's/ $//')"
+rm -f metrics_history/metrics/oversized.log
+
 # A remote that cannot be reached at all is reported, not mistaken for a run
 # with no metrics to file.
 git -C metrics_history remote set-url origin "$work/absent.git"

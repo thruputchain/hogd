@@ -507,6 +507,67 @@ check_contains "a missing control_cli is reported" "reaping by signal only" \
 check_contains "a missing control_cli still signals by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
 
+## ci_copy_remote_log_capped
+
+# The program runs on the host that holds the log, so [ci_remote_run] is the
+# only thing between this helper and a real ssh: stub it out and run what it
+# would have sent, against a local file.
+ci_remote_run() {
+  shift
+  bash -c "$1"
+}
+
+capped_dir="$work_dir/capped"
+mkdir -p "$capped_dir"
+
+# A log that fits is copied through byte for byte, elision line and all
+# absent: trimming a log that did not need it would make every published log
+# look truncated.
+printf 'small log\nsecond line\n' >"$capped_dir/small.log"
+CI_PUBLISHED_LOG_MAX_BYTES=1024 CI_PUBLISHED_LOG_HEAD_BYTES=256 \
+  ci_copy_remote_log_capped hog4 "$capped_dir/small.log" "$capped_dir/small.out"
+check_eq "a log under the cap is copied whole" \
+  "$(cat "$capped_dir/small.log")" "$(cat "$capped_dir/small.out")"
+check_eq "a log under the cap gains no elision line" "0" \
+  "$(grep -c 'bytes elided' "$capped_dir/small.out" || true)"
+
+# An oversized log keeps both ends. The head has how the node came up and the
+# tail has what it was saying when it stopped; a bare [tail] would drop the
+# first and a bare [head] the second.
+{
+  printf 'HEADMARK\n'
+  head -c 4000 /dev/zero | tr '\0' 'x'
+  printf '\nTAILMARK\n'
+} >"$capped_dir/big.log"
+CI_PUBLISHED_LOG_MAX_BYTES=200 CI_PUBLISHED_LOG_HEAD_BYTES=50 \
+  ci_copy_remote_log_capped hog4 "$capped_dir/big.log" "$capped_dir/big.out"
+check_contains "an oversized log keeps its head" "HEADMARK" \
+  "$(cat "$capped_dir/big.out")"
+check_contains "an oversized log keeps its tail" "TAILMARK" \
+  "$(cat "$capped_dir/big.out")"
+
+# The point of the cap is the size of what gets committed, so the bound has to
+# hold on the output and not merely on the two [head]/[tail] reads: the
+# elision line is written between them and counts against nothing otherwise.
+big_out_size=$(wc -c <"$capped_dir/big.out" | tr -cd '0-9')
+if ((big_out_size <= 200 + 200)); then
+  echo "ok   an oversized log is bounded ($big_out_size bytes)"
+else
+  echo "FAIL an oversized log is not bounded ($big_out_size bytes)"
+  fail=1
+fi
+
+# What was dropped is named in place, so a reader of the published log is not
+# left to wonder whether the node went quiet or the copy did.
+check_contains "an oversized log says what was elided" "bytes elided" \
+  "$(cat "$capped_dir/big.out")"
+
+# The whole file is 4011 bytes and 200 are kept, so the count has to be the
+# difference rather than, say, the size of one of the two reads.
+check_contains "the elision names the byte count" \
+  "$(($(wc -c <"$capped_dir/big.log" | tr -cd '0-9') - 200)) of" \
+  "$(cat "$capped_dir/big.out")"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

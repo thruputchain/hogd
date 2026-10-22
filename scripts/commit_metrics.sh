@@ -26,6 +26,18 @@ METRICS_COMMIT_REPO=${METRICS_COMMIT_REPO:-hogd}
 # for, one loop further out.
 METRICS_COMMIT_ATTEMPTS=${METRICS_COMMIT_ATTEMPTS:-5}
 
+# The largest metric file this will offer to the remote. GitHub rejects a file
+# over 100 MiB at the pre-receive hook, and the whole push with it. A run's
+# metrics are one commit, so an oversized file does not fail on its own: it
+# takes every metric the run produced with it, on each of the attempts above
+# and then silently, because the schedules call this as
+# [(commit_metrics.sh) || true]. Leaving the file out costs that one file.
+#
+# This is a backstop and not the place to fix a producer: a pipeline that
+# writes a file this large should bound it at the source, the way
+# [ci_copy_remote_log_capped] does for the node logs that first hit this.
+METRICS_MAX_FILE_BYTES=${METRICS_MAX_FILE_BYTES:-$((100 * 1024 * 1024))}
+
 # Push metrics_history/ to groundhogchain/metrics_history.git
 cd metrics_history/
 
@@ -44,12 +56,27 @@ echo "Committer email: $committer_email"
 echo "Commit message: Add metrics for $METRICS_COMMIT_REPO $GIT_branch $GIT_commit"
 
 stage_present_metrics() {
+  local metric_file
+  local size
+
   if [ ! -d metrics ] || ! find metrics -type f -print -quit | grep -q .; then
     return 1
   fi
 
   git read-tree HEAD
   while IFS= read -r -d '' metric_file; do
+    # Redirected rather than given the name, so the count is all that is
+    # read back, and stripped because not every [wc] leaves it unpadded.
+    size=$(wc -c <"$metric_file" | tr -cd '0-9')
+    # A file whose size could not be read is staged rather than dropped: this
+    # guard exists to save the run's other metrics from one oversized file,
+    # not to decide which files get filed.
+    if [ -n "$size" ] && [ "$size" -ge "$METRICS_MAX_FILE_BYTES" ]; then
+      echo "Skipping $metric_file: $size bytes, at or over the" \
+        "$METRICS_MAX_FILE_BYTES the remote accepts. The rest of this run's" \
+        "metrics are filed without it." >&2
+      continue
+    fi
     git add -- "$metric_file"
   done < <(find metrics -type f -print0)
 }

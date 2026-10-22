@@ -578,3 +578,67 @@ ci_remote_killall_hosts() {
   done
   return "$status"
 }
+
+# How much of a node log [ci_copy_remote_log_capped] files, and how much of
+# that budget the head of an oversized log gets; the tail takes the rest.
+#
+# These logs are committed to metrics_history, so the ceiling is not only
+# GitHub's hard per-file limit but what a history repository can carry run
+# after run. At [-l info] under load a node's chuckd stderr runs to a quarter
+# of a gigabyte -- 243.73 MB and 241.90 MB in combined-metrics run #2446 --
+# and GitHub's pre-receive hook rejects a file that size outright. The metrics
+# commit is one commit for the whole run, so that rejection does not merely
+# drop the oversized logs: it loses every metric the run produced, including
+# the suites that had nothing to do with them.
+#
+# Both ends are kept because they answer different questions: the head carries
+# the node's configuration and how it came up, and the tail carries whatever
+# it was saying when it stopped. The middle of a quarter-gigabyte info log is
+# the part nobody reads.
+CI_PUBLISHED_LOG_MAX_BYTES=${CI_PUBLISHED_LOG_MAX_BYTES:-$((16 * 1024 * 1024))}
+CI_PUBLISHED_LOG_HEAD_BYTES=${CI_PUBLISHED_LOG_HEAD_BYTES:-$((4 * 1024 * 1024))}
+
+# Emits a program that writes the log at [$1] to stdout, whole if it fits in
+# [$2] bytes and as its first [$3] bytes plus its last [$2 - $3] otherwise,
+# with a line between them naming what was dropped. [$1] arrives already
+# quoted for the shell.
+#
+# Written as a program rather than run directly because the log it reads is on
+# the host that produced it, the same way [ci_reap_program] is.
+ci_capped_log_program() {
+  cat <<EOF
+path=$1
+max=$2
+head_bytes=$3
+tail_bytes=\$((max - head_bytes))
+
+size=\$(wc -c <"\$path") || exit 1
+if [ "\$size" -le "\$max" ]; then
+  exec cat -- "\$path"
+fi
+
+head -c "\$head_bytes" -- "\$path" || exit 1
+printf '\n===== %s of %s bytes elided: keeping the first %s and the last %s =====\n' \
+  "\$((size - max))" "\$size" "\$head_bytes" "\$tail_bytes"
+tail -c "\$tail_bytes" -- "\$path" || exit 1
+EOF
+}
+
+# Copies the log at [$2] on [$1] into the local file [$3], bounded by
+# [$CI_PUBLISHED_LOG_MAX_BYTES].
+#
+# The bounding happens on the host that holds the log rather than here, so an
+# oversized log is never transferred in full either: the straight [scp] this
+# replaced moved close to half a gigabyte per run to produce a commit the
+# remote then refused.
+ci_copy_remote_log_capped() {
+  local host=$1
+  local remote_path=$2
+  local local_path=$3
+  local quoted_path
+
+  printf -v quoted_path '%q' "$remote_path"
+  ci_remote_run "$host" "$(ci_capped_log_program "$quoted_path" \
+    "$CI_PUBLISHED_LOG_MAX_BYTES" "$CI_PUBLISHED_LOG_HEAD_BYTES")" \
+    >"$local_path"
+}

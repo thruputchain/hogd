@@ -152,6 +152,10 @@ copy_remote_file() {
   scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
 }
 
+# Files each node's stdout and stderr in metrics_history, bounded rather than
+# whole: see [ci_copy_remote_log_capped]. An unbounded copy is what made the
+# metrics commit for combined-metrics run #2446 unpushable, which lost every
+# metric that run produced and not just the logs that overran.
 publish_multi_node_logs() {
   local metrics_branch_dir
   local logs_dir
@@ -168,8 +172,10 @@ publish_multi_node_logs() {
   for record in "${CONTROL_LOG_RECORDS[@]}"; do
     IFS='|' read -r host label stdout_path stderr_path <<<"$record"
     echo "copying ${label} logs from ${host}"
-    copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
-    copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    ci_copy_remote_log_capped "$host" "$stdout_path" \
+      "$logs_dir/${host}_${label}.stdout.log"
+    ci_copy_remote_log_capped "$host" "$stderr_path" \
+      "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 
