@@ -2071,10 +2071,11 @@ TEST(Mempool, ValidateOversizedProposalIsRejected)
 
   constexpr size_t kOverCapCount = MempoolCoordinatorRpc::kMaxBlockSize + 1;
 
-  const TransactionHashBatch one_hash{TransactionHash{}};
+  const SignedTransactionHashBatch one_signed_hash{SignedTransactionHash{}};
   const x23::XdrVec<NondeterministicProposalData> one_nomination{
       NondeterministicProposalData{}};
-  ParallelBatch hashes = repeated_parallel_batch(one_hash, kOverCapCount);
+  ParallelBatch signed_hashes =
+      repeated_parallel_batch(one_signed_hash, kOverCapCount);
   ParallelBatch nominations =
       repeated_parallel_batch(one_nomination, kOverCapCount);
 
@@ -2087,7 +2088,7 @@ TEST(Mempool, ValidateOversizedProposalIsRejected)
                  .network_hash = MempoolTestInfra::kNetworkHash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = std::move(hashes),
+                       .signed_hash = std::move(signed_hashes),
                        .nondeterministic_data = std::move(nominations)}};
 
   auto res_validate =
