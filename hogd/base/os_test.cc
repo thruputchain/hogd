@@ -7,7 +7,6 @@
 
 #include <cstddef>
 #include <cstdio>
-#include <cstdlib>
 
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -55,9 +54,12 @@ TEST(OsTest, ResidentMemoryBytesTracksTouchedPages)
   }
   int status = 0;
   ASSERT_EQ(waitpid(pid, &status, 0), pid);
+  // include-cleaner does not credit <sys/wait.h> for the wait macros.
+  // NOLINTBEGIN(misc-include-cleaner)
   ASSERT_TRUE(WIFEXITED(status));
   EXPECT_EQ(WEXITSTATUS(status), kRssOk)
       << "2: mmap failed, 3: RSS not reported, 4: growth outside 96-160 MiB";
+  // NOLINTEND(misc-include-cleaner)
 }
 
 } // namespace
