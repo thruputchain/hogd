@@ -88,7 +88,7 @@ gas_schedule_digest()
 inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Pin the current schedule digest used by artifact producers and admission.
-static_assert(kGasScheduleDigest == 0x3dd1fbedf37a5719ULL);
+static_assert(kGasScheduleDigest == 0xa958d226df658598ULL);
 
 // Accepted artifact declarations, matched as version/digest pairs. Execution
 // always uses this build's current instruction and syscall prices, including
@@ -274,7 +274,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xa538cd2d169ed390ULL);
+static_assert(kArtifactFormatFingerprint == 0x4171b4b8dc19b9abULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 

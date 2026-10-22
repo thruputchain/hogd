@@ -102,17 +102,32 @@ fi
 # ML-DSA-65 exists from OpenSSL 3.5. Older versions reject the name, which is
 # the case the per-algorithm loop already absorbs: a warning, and no ML-DSA row
 # in the report. Its rates come on a +F<n> line of their own, so that line is
-# matched by algorithm name rather than by tag.
+# matched by algorithm name rather than by tag -- and by any spelling of it
+# (ML-DSA-65, mldsa65, ml-dsa-65), since a run on OpenSSL 3.6 produced no
+# ML-DSA row and no warning: the line was there under a name this filter did
+# not expect. A run that succeeds without a recognisable line now says so.
 RAW=()
 for algo in sha256 ed25519 ML-DSA-65; do
   if output="$("${RUNNER[@]}" openssl speed -seconds "${SECONDS_PER_ALGO}" \
     -mr "${algo}" 2>/dev/null)"; then
+    found=0
     while IFS= read -r line; do
       case "${line}" in
       +H:* | +F:* | +F6:*) RAW+=("${line}") ;;
-      +F*:*ML-DSA-65*) RAW+=("${line}") ;;
+      +F*:*)
+        normalized="$(tr -d '-' <<<"${line}" | tr '[:upper:]' '[:lower:]')"
+        if [[ "${normalized}" == *:mldsa65:* ]]; then
+          RAW+=("${line}")
+          found=1
+        fi
+        ;;
       esac
     done <<<"${output}"
+    if [[ "${algo}" == ML-DSA-65 && ${found} -eq 0 ]]; then
+      echo "warning: openssl speed ML-DSA-65 ran but printed no ML-DSA-65" \
+        "+F line; its -mr lines were:" >&2
+      grep -E '^\+' <<<"${output}" | head -5 >&2 || true
+    fi
   else
     echo "warning: openssl speed ${algo} failed; skipping it" >&2
   fi

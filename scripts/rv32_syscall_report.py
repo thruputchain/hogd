@@ -108,12 +108,11 @@ BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
 # ML-DSA-65 VerifySignature, swept on message length. Kept out of the syscall
 # table and out of every shared number -- the crossing group, the seam median
 # that prices the SHA256 sweep, the guard baseline -- for two reasons. It is a
-# length sweep, like SHA256 and the bytestrings. And nothing prices it: the
-# syscall charges it GasCost::verify_signature(len), the ed25519 price, so a
-# number proposed from these rows is not a proposal for any constant in
-# kSyscallGasCostSchedule. The rows are reported as their own family instead,
-# beside the ed25519 row of the same length, so the gap between what it costs
-# and what it is billed is the first thing a reader sees.
+# length sweep, like SHA256 and the bytestrings. And its price is its own: the
+# syscall charges it GasCost::verify_signature_mldsa65(len), which reads only
+# kVerifySignatureMlDsa65BaseCost and kVerifySignatureMlDsa65BlockCost. The
+# rows are reported as their own family, beside the ed25519 row of the same
+# length, with an estimate of those two constants.
 MLDSA_VERIFY_ROW = re.compile(r"^(entry|vm)/VerifySignatureMlDsa65/(\d+)$")
 MLDSA_VERIFY_FAMILY = "VerifySignatureMlDsa65"
 
@@ -321,9 +320,10 @@ def mldsa_verify_summary(measured, sd=None):
     Returns a list of dicts sorted by message length: the entry row's median
     and stddev, the vm row's ns per call where there is one, the gas the row
     was charged, and the same three for entry/VerifySignature/<length> when
-    that row was measured. Both schemes are billed GasCost::verify_signature
-    of the same length, so the ratio of their times is how far ML-DSA is
-    underpriced -- read off the measurement, without needing a gas unit.
+    that row was measured. Each scheme is billed its own cost function
+    (GasCost::verify_signature and GasCost::verify_signature_mldsa65), so
+    comparing time per gas billed says whether they are priced at the same
+    rate -- read off the measurement, without needing a gas unit.
     """
     sd = sd or {}
     points = []
@@ -348,9 +348,9 @@ def mldsa_verify_summary(measured, sd=None):
 
 def print_mldsa_verify(points):
     print()
-    print("ML-DSA-65 VerifySignature: charged the ed25519 price "
-          "(GasCost::verify_signature);")
-    print("nothing in kSyscallGasCostSchedule prices it on its own.")
+    print("ML-DSA-65 VerifySignature: billed GasCost::verify_signature_mldsa65,")
+    print("kVerifySignatureMlDsa65BaseCost plus kVerifySignatureMlDsa65BlockCost "
+          "per SHAKE256 block.")
     header = (f"{'bytes':<10}{'entry ns':>11}{'±':>9}{'gas':>8}"
               f"{'ed25519 ns':>12}{'ed25519 gas':>13}{'x ed25519':>11}")
     print(header)
@@ -372,8 +372,8 @@ def print_mldsa_verify(points):
               f"{ed_gas_text}{ratio_text}")
     if ratios:
         print(f"Per gas billed, ML-DSA-65 takes {min(ratios):.2f}x .. "
-              f"{max(ratios):.2f}x the time ed25519 does at the same length: "
-              "underpriced by that factor.")
+              f"{max(ratios):.2f}x the time ed25519 does at the same length "
+              "(1.00x: priced at the same rate).")
 
 
 def sha256_points(measured, prefix="entry"):
@@ -1353,6 +1353,8 @@ SHA256_PAD_BYTES = 9          # 0x80 plus an 8-byte big-endian bit length
 COMMITTED_SYSCALL_BASE_GAS = 50
 COMMITTED_SHA256_BLOCK_GAS = 22
 COMMITTED_SHA256_STREAM_GAS = 26
+COMMITTED_MLDSA_VERIFY_BASE_GAS = 46592
+COMMITTED_MLDSA_VERIFY_BLOCK_GAS = 160
 
 
 def sha256_blocks(byte_len):
@@ -1591,12 +1593,10 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         if blocks:
             proposal["bytestring_blocks"] = blocks
 
-    # ML-DSA-65 is measured and costed, never proposed: the syscall bills it
-    # GasCost::verify_signature, the ed25519 price, and pricing it on its own
-    # is a coordinated gas-schedule update that has not been made. Computed
-    # here rather than in the printer for the reason the heavy rows are --
-    # to_gas is where --margin applies -- and kept under its own key so nothing
-    # above reads it.
+    # ML-DSA-65 is billed by its own two constants, so its estimate is kept
+    # under its own key: nothing above reads it, and it never moves the shared
+    # base. Computed here rather than in the printer for the reason the heavy
+    # rows are -- to_gas is where --margin applies.
     mldsa = mldsa_verify_summary(measured, stddevs(bench))
     if mldsa:
         points = []
@@ -1621,12 +1621,19 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
                         for p in points], min_points=2)
         if fit:
             base_ns, per_block_ns, r_squared = fit
+            block_gas = to_gas(per_block_ns) if per_block_ns > 0 else 0
+            # The constant the syscall adds to the shared base: the smallest
+            # that bills every measured length at least what it measured.
+            own_base_gas = max(1, max(
+                p["measured_gas"] - proposal["base_gas"]
+                - block_gas * p["blocks"] for p in points))
             estimate.update({
                 "base_ns": base_ns,
                 "per_block_ns": per_block_ns,
                 "r_squared": r_squared,
                 "base_gas": max(1, to_gas(base_ns) - ecall_gas),
-                "block_gas": to_gas(per_block_ns) if per_block_ns > 0 else 0,
+                "block_gas": block_gas,
+                "own_base_gas": own_base_gas,
             })
         proposal["mldsa_verify_estimate"] = estimate
     return proposal
@@ -1773,18 +1780,19 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
     estimate = proposal.get("mldsa_verify_estimate")
     if estimate:
         print()
-        print("ML-DSA-65 VerifySignature -- informational, NOT part of this "
-              "proposal.")
-        print("  The syscall bills it GasCost::verify_signature, the ed25519 "
-              "price, and no")
-        print("  constant in kSyscallGasCostSchedule prices it, so nothing "
-              "below changes")
-        print("  the constants that follow.")
+        print("ML-DSA-65 VerifySignature, billed by its own constants "
+              "(kVerifySignatureMlDsa65BaseCost,")
+        print(f"  committed {COMMITTED_MLDSA_VERIFY_BASE_GAS}, and "
+              f"kVerifySignatureMlDsa65BlockCost, committed "
+              f"{COMMITTED_MLDSA_VERIFY_BLOCK_GAS}). Kept")
+        print("  apart from the shared constants below. measured/billed above "
+              "1.00x means")
+        print("  the committed price is below what this run measured.")
         print(f"    {'bytes':>8}{'ns/call':>11}{'gas now':>9}"
-              f"{'gas measured':>14}{'underpriced':>13}")
+              f"{'gas measured':>14}{'measured/billed':>17}")
         for point in estimate["points"]:
             under = point["underpriced"]
-            under_text = f"{under:>12.2f}x" if under else f"{'-':>13}"
+            under_text = f"{under:>16.2f}x" if under else f"{'-':>17}"
             print(f"    {point['bytes']:>8}{point['guest_ns']:>11.1f}"
                   f"{point['gas']:>9}{point['measured_gas']:>14}{under_text}")
         if "block_gas" in estimate:
@@ -1794,9 +1802,12 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                   f"{SHAKE256_RATE_BYTES}-byte SHAKE256 block")
             print(f"  (R2={estimate['r_squared']:.4f}): about "
                   f"{estimate['base_gas']} gas + {estimate['block_gas']} per "
-                  "block. Adopting it is a coordinated")
-            print("  gas-schedule update: new schedule entries, so the digest "
-                  "and version move.")
+                  "block, shared base included.")
+            print(f"  Over this run's shared base of {proposal['base_gas']}: "
+                  f"kVerifySignatureMlDsa65BaseCost = "
+                  f"{estimate['own_base_gas']},")
+            print(f"  kVerifySignatureMlDsa65BlockCost = "
+                  f"{estimate['block_gas']}.")
 
     print()
     print("=" * 68)
@@ -1991,10 +2002,10 @@ def guardable(measured, sd):
                 continue
             guards[f"bytestring/{family}/{size}"] = ns / baseline
     # ML-DSA-65 verify, at every length. Unlike a cold read it IS priced: a
-    # contract can call it today and pays GasCost::verify_signature, the
-    # ed25519 price. That price is already short of the cost, and an engine
-    # regression would widen the gap with no constant moving -- the one change
-    # this gate exists to catch and the digest cannot. So it is guarded like
+    # contract can call it and pays GasCost::verify_signature_mldsa65. An
+    # engine regression would open a gap between that price and the cost with
+    # no constant moving -- the one change this gate exists to catch and the
+    # digest cannot. So it is guarded like
     # any priced syscall, under the same syscall/ key the ed25519 rows use.
     # Kept out of syscall_names (see MLDSA_VERIFY_ROW), so added here; the
     # guard baseline never sees it, and the cheapest ML-DSA row is hundreds of

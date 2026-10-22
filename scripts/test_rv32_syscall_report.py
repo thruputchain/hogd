@@ -845,7 +845,7 @@ def with_verify_rows(run, ed25519_ns=39000.0, mldsa_ns=103000.0,
 
 
 class MlDsaVerifyTest(unittest.TestCase):
-    """ML-DSA-65 verify is measured and reported, and never priced from."""
+    """ML-DSA-65 verify is reported as its own family, priced on its own."""
 
     def calibration(self):
         calibration = synthetic_calibration(1.6)
@@ -898,30 +898,37 @@ class MlDsaVerifyTest(unittest.TestCase):
         self.assertIsNotNone(points[1]["vm_ns"])
         self.assertIsNone(points[0]["vm_ns"])
 
-    def test_table_shows_the_underpricing(self):
+    def test_table_compares_time_per_gas_with_ed25519(self):
         out = io.StringIO()
         with redirect_stdout(out):
             report.print_table(with_verify_rows(guardable_run()))
         text = out.getvalue()
-        self.assertIn("ML-DSA-65 VerifySignature: charged the ed25519 price",
-                      text)
-        self.assertIn("2.64x", text)  # 103000 / 39000
-        self.assertIn("underpriced by that factor", text)
+        self.assertIn("billed GasCost::verify_signature_mldsa65", text)
+        # The synthetic rows bill both schemes the same gas, so the time
+        # ratio is the per-gas ratio: 103000 / 39000.
+        self.assertIn("2.64x", text)
+        self.assertIn("1.00x: priced at the same rate", text)
 
-    def test_estimate_is_informational_and_fits_the_blocks(self):
+    def test_estimate_fits_the_blocks_and_covers_every_length(self):
         proposal = report.build_schedule(with_verify_rows(guardable_run()),
                                          self.calibration(), 1)
         estimate = proposal["mldsa_verify_estimate"]
         # The synthetic sweep is exactly 300 ns per SHAKE256 block.
         self.assertAlmostEqual(estimate["per_block_ns"], 300.0, places=6)
         for point in estimate["points"]:
+            # Billed the ed25519 gas while costing ML-DSA's time.
             self.assertGreater(point["underpriced"], 1.0)
+            billed = (proposal["base_gas"] + estimate["own_base_gas"]
+                      + estimate["block_gas"] * point["blocks"])
+            self.assertGreaterEqual(billed, point["measured_gas"])
         out = io.StringIO()
         with redirect_stdout(out):
             report.print_schedule(with_verify_rows(guardable_run()),
                                   self.calibration(), 1)
         text = out.getvalue()
-        self.assertIn("informational, NOT part of this proposal", text)
+        self.assertIn("billed by its own constants", text)
+        self.assertIn(f"kVerifySignatureMlDsa65BaseCost = "
+                      f"{estimate['own_base_gas']}", text)
         constants = text.split("Proposed hogd/hog_exec/runtime/"
                                "gas_cost_table.h constants")[1]
         self.assertNotIn("MlDsa", constants)
@@ -967,6 +974,13 @@ class MlDsaVerifyTest(unittest.TestCase):
         ]})
         self.assertEqual(speed["mldsa65"], {"verify_per_second": 24000.0})
         self.assertEqual(speed["ed25519"]["verify_per_second"], 15000.0)
+
+    def test_openssl_mldsa_line_is_parsed_under_any_spelling(self):
+        for name in ("mldsa65", "ml-dsa-65"):
+            speed = report.parse_openssl_speed({"raw": [
+                f"+F14:0:{name}:20000.0:9000.0:24000.0"]})
+            self.assertEqual(speed["mldsa65"],
+                             {"verify_per_second": 24000.0}, name)
 
     def test_openssl_without_mldsa_skips_the_row(self):
         run = with_verify_rows(guardable_run())

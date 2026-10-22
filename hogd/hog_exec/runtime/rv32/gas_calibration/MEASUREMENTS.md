@@ -87,21 +87,28 @@ Run `33557627276` measured direct `HashBuffers` slot creation: approximately
 charge. Warm syscall Copy reuses a destination and misses this allocation cost.
 The occupancy sweep supports the tested range, not every possible configuration.
 
-ML-DSA-65 verification is charged the ed25519 price above; the schedule has
-no ML-DSA entry yet. A local, unofficial measurement on a 4-core 2.8 GHz Xeon
-(Release, median of five) put `crypto_bench` verification at 103.0 us for
-ML-DSA-65 against 38.9 us for ed25519, a 2.65x ratio, with about 313 ns per
-136-byte SHAKE256 block against 270 ns per 128-byte SHA-512 block. Through
-`rv32_syscall_entry_bench` the `entry/VerifySignatureMlDsa65` rows took
-103-105 us against 39-42 us for `entry/VerifySignature`, at the same charged
-gas. Scaled to the calibrated ed25519 costs that suggests roughly 47250 base
-and 152 per SHAKE256 block; a price change needs a calibration workflow run.
-The RV32 Gas Calibration workflow measures these rows on every run.
-`rv32_syscall_report.py` keeps them out of the shared syscall numbers, prints
-them beside the ed25519 row of the same length with the underpricing factor,
-and in `--schedule` shows a base-plus-block estimate marked as not part of the
-proposal. Their guards enter `syscall_reference.txt` the next time it is
-regenerated with mode=reference; until then `--check` notes them as ungated.
+ML-DSA-65 verification has its own price: 46592 gas plus 160 per 136-byte
+SHAKE256 block, on top of the shared syscall base. Run `39809791818` (hog10,
+AMD EPYC 9554, gas unit 1.6219 ns, no margin) measured it:
+
+| Case | Measured ns (entry) | Measured gas | Billed gas |
+|---|---:|---:|---:|
+| VerifySignatureMlDsa65, 0 bytes | 75891.6 | 46802 | 46802 |
+| VerifySignatureMlDsa65, 64 bytes | 75879.8 | 46734 | 46802 |
+| VerifySignatureMlDsa65, 1024 bytes | 77949.7 | 48071 | 48082 |
+
+Measured and billed gas include the 50-gas shared base and exclude the ECALL
+instruction. The sweep fit 75644.9 ns plus 258.0 ns per block (R-squared 1.0),
+which is 46640 gas at zero blocks and 160 per block. Less the shared base that
+leaves 46590; the base was raised to 46592 so that no measured length bills
+below its measurement. Per gas billed under the ed25519 price the same run put
+ML-DSA-65 at 2.53-2.63x the time of ed25519, which this price removes.
+
+`rv32_syscall_report.py` keeps these rows out of the shared syscall numbers,
+prints them beside the ed25519 row of the same length, and in `--schedule`
+proposes the two ML-DSA constants from each run. Their guards enter
+`syscall_reference.txt` the next time it is regenerated with mode=reference;
+until then `--check` notes them as ungated.
 
 ## Storage
 

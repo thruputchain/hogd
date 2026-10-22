@@ -170,11 +170,10 @@ syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
               WrappedGasAmount{0}};
     }
-    // Priced as ed25519 for now: a scheme-specific cost would be a new entry in
-    // the gas schedule, which RV32 artifacts commit to. ML-DSA-65 verification
-    // measures several times slower, so this undercharges it. Reserved before
-    // verifying, as for ed25519 (#4172).
-    const WrappedGasAmount gas{GasCost::verify_signature(input_message.size())};
+    // Priced on its own (see kVerifySignatureMlDsa65BaseCost) and reserved
+    // before verifying, as for ed25519 (#4172).
+    const WrappedGasAmount gas{
+        GasCost::verify_signature_mldsa65(input_message.size())};
     if (remaining_gas.get() <= gas.get()) {
       return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
     }

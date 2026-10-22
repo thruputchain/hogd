@@ -88,7 +88,7 @@ protected:
   MlDsa65SigningKey key_;
 };
 
-TEST_F(MlDsa65VerifySignatureTest, ValidSignatureVerifiesAtTheEd25519Price)
+TEST_F(MlDsa65VerifySignatureTest, ValidSignatureVerifiesAtItsOwnPrice)
 {
   for (size_t len : {0U, 1U, 70U, 71U, 1024U, 4096U}) {
     SCOPED_TRACE(::testing::Message() << "len=" << len);
@@ -98,7 +98,7 @@ TEST_F(MlDsa65VerifySignatureTest, ValidSignatureVerifiesAtTheEd25519Price)
                        std::as_bytes(std::span(signature)), public_key(),
                        message),
                 SyscallErrorCode::kSyscallErrorCodeNone,
-                GasCost::verify_signature(len));
+                GasCost::verify_signature_mldsa65(len));
   }
 }
 
@@ -106,7 +106,7 @@ TEST_F(MlDsa65VerifySignatureTest, InvalidSignatureFailsAndIsCharged)
 {
   const auto message = message_of(64);
   auto signature = sign(message);
-  const GasAmount price = GasCost::verify_signature(message.size());
+  const GasAmount price = GasCost::verify_signature_mldsa65(message.size());
 
   auto tampered = signature;
   tampered[0] ^= 1;
@@ -163,7 +163,7 @@ TEST_F(MlDsa65VerifySignatureTest, RunsOutOfGasBeforeVerifying)
 {
   const auto message = message_of(32);
   const auto signature = sign(message);
-  const GasAmount price = GasCost::verify_signature(message.size());
+  const GasAmount price = GasCost::verify_signature_mldsa65(message.size());
   for (GasAmount budget : {GasAmount{0}, price - 1, price}) {
     SCOPED_TRACE(::testing::Message() << "budget=" << budget);
     auto [result, charged] = verify(CryptographicScheme::MlDsa65,
@@ -177,6 +177,29 @@ TEST_F(MlDsa65VerifySignatureTest, RunsOutOfGasBeforeVerifying)
                      std::as_bytes(std::span(signature)), public_key(), message,
                      price + 1),
               SyscallErrorCode::kSyscallErrorCodeNone, price);
+}
+
+// Pins the calibrated price: with the shared syscall base, each length bills
+// at least what RV32 Gas Calibration run 39809791818 measured on hog10.
+TEST(MlDsa65VerifySignaturePriceTest, CoversTheCalibratedMeasurement)
+{
+  EXPECT_EQ(kVerifySignatureMlDsa65BaseCost, 46592U);
+  EXPECT_EQ(kVerifySignatureMlDsa65BlockCost, 160U);
+  struct Point {
+    uint64_t message_len;
+    uint64_t billed;
+    uint64_t measured;
+  };
+  for (const Point point :
+       {Point{.message_len = 0, .billed = 46802, .measured = 46802},
+        Point{.message_len = 64, .billed = 46802, .measured = 46734},
+        Point{.message_len = 1024, .billed = 48082, .measured = 48071}}) {
+    SCOPED_TRACE(::testing::Message() << "len=" << point.message_len);
+    const uint64_t billed =
+        kSyscallBaseCost + GasCost::verify_signature_mldsa65(point.message_len);
+    EXPECT_EQ(billed, point.billed);
+    EXPECT_GE(billed, point.measured);
+  }
 }
 
 TEST(Ed25519VerifySignatureTest, PriceIsUnchanged)
@@ -239,7 +262,7 @@ TEST_F(VerifySignatureEntryTest, MlDsa65ThroughGuestMemory)
   constexpr uint32_t kKeyOffset = kSigOffset + sizeof(MlDsa65Signature);
   constexpr uint32_t kMessageOffset = kKeyOffset + sizeof(MlDsa65PublicKey);
   const GasAmount cost =
-      kSyscallBaseCost + GasCost::verify_signature(message.size());
+      kSyscallBaseCost + GasCost::verify_signature_mldsa65(message.size());
 
   for (bool tamper : {false, true}) {
     SCOPED_TRACE(::testing::Message() << "tamper=" << tamper);
