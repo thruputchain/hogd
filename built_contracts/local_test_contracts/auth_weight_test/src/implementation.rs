@@ -72,4 +72,21 @@ impl AuthWeightTest for AuthWeightTestContract {
             Err(e) => panic!("read-only invoke failed: {:?}", e),
         }
     }
+
+    fn register_mldsa65_key(
+        slot: u32,
+        key: &[u8],
+        weight: u32,
+        required_weight: u32,
+    ) {
+        let scheme = CryptographicScheme::MlDsa65.0;
+        sys::uninit_ChangePublicKeyRegistration(
+            slot,
+            Some(&scheme),
+            key,
+            Some(&weight),
+        )
+        .unwrap();
+        thruput_sdk::set_address_required_weight(required_weight).unwrap();
+    }
 }

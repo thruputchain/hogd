@@ -45,6 +45,7 @@
 #include <vector>
 
 #include "auth_claim.hh"
+#include "built_contracts/auth_weight_test.h"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
@@ -4223,6 +4224,203 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   ASSERT_EQ(payload->event_logs.size(), 1UL);
   EXPECT_EQ(payload->tx_bodies[0].signed_tx, pq_signed_tx);
   EXPECT_EQ(payload->event_logs[0].tx_hash, pq_tx_hash);
+}
+
+// A contract registers an ML-DSA-65 key in its own address auth data, and a
+// source-address claim signed by that key is admitted and executes. In the
+// same batch, a tampered ML-DSA-65 signature and an Ed25519 signature in the
+// ML-DSA key's slot are rejected. A registered key is named by its slot, so
+// none of these transactions attach a claim key.
+TEST(HogDevnode, RegisteredMlDsa65KeyAuthorizesSourceAddressClaim)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--fixture-accounts",
+      "1",
+      "--fixture-seed",
+      "groundhog-dev-accounts",
+      "--fixture-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+  const NetworkHash network_hash = readiness_network_hash(readiness);
+
+  sched_coord_client_t scheduler =
+      create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                     readiness.scheduler.port,
+                                     /*retry=*/true)()
+          .value();
+  auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                     readiness.indexer.port,
+                                                     /*retry=*/true)()
+                    .value();
+  EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+            IndexerBlockExplorerIntroOutcome::IntroSuccess);
+  auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
+    const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+    TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+    while (std::chrono::steady_clock::now() < deadline) {
+      result = reader.get_transaction_info(tx_hash)();
+      if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+        break;
+      }
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
+    return result;
+  };
+  auto submit_one = [&](SignedTransaction const &signed_tx) {
+    const TransactionHash tx_hash = sha256(signed_tx.tx);
+    TransactionHashBatch committed =
+        submit_and_commit(scheduler, SignedTransactionBatch{signed_tx});
+    EXPECT_EQ(committed, TransactionHashBatch{tx_hash});
+    TxInfoResult result = wait_for_transaction_info(tx_hash);
+    EXPECT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+    if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+      EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+      EXPECT_EQ(result.info().events.root_output.status_code(),
+                InvocationFrameStatusCode::Return);
+    }
+  };
+
+  MlDsaSeed seed{};
+  seed.fill(0x52);
+  const MlDsa65SigningKey pq_key = MlDsa65SigningKey::from_seed(seed);
+
+  auto sponsor_keypair =
+      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+  const ContractAddress sponsor_wallet_address =
+      build_local_bootstrap_account_artifact(fixture_config(1))
+          .accounts[1]
+          .address;
+  using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+  using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+  using account_meta = ContractTraitMeta<auth_weight_test::AuthWeightTest>;
+
+  std::shared_ptr<Contract> account_contract =
+      load_rv32_contract("auth_weight_test.rv32a");
+  if (!account_contract) {
+    throw std::runtime_error("failed to load auth_weight_test.rv32a");
+  }
+  const SHA256Hash account_hash = sha256(*account_contract);
+  const SHA256Hash deploy_nonce = make_nonce(51);
+  const ContractAddress account_address = sha256(
+      ContractDeploymentHashPreimage{.deployer_address = sponsor_wallet_address,
+                                     .nonce = deploy_nonce,
+                                     .contract_hash = account_hash});
+
+  // Prefund the account, which pays for its own transactions below.
+  submit_one(sign_transaction(
+      Transaction{
+          .invocation =
+              Invocation{
+                  .invoked_address = sponsor_wallet_address,
+                  .entrypoint = wallet_meta::entrypoint<u8"execute">(),
+                  .gas_limit = GasAmount{10'000'000},
+                  .calldata = wallet_meta::make_calldata<u8"execute">(
+                      x23::Vec<default_wallet::WalletCall,
+                               UINT32_MAX>{default_wallet::WalletCall{
+                          .target = kNativeTokenContractAddress,
+                          .entrypoint = erc20_meta::entrypoint<u8"transfer">(),
+                          .gas_limit = 10'000'000,
+                          .calldata = erc20_meta::make_calldata<u8"transfer">(
+                              account_address,
+                              make_erc20_amount(int128_t{200'000'000})),
+                      }})},
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 50},
+          .auth_claim = native_account_auth_claim(),
+      },
+      sponsor_keypair, network_hash));
+
+  // Deploy the account; its initializer registers the ML-DSA-65 key at slot 0
+  // with weight 1 and sets the required weight to 1.
+  const MlDsa65PublicKey &pq_public_key = pq_key.public_key();
+  x23::Vec<uint8_t, UINT32_MAX> pq_key_bytes(pq_public_key.begin(),
+                                             pq_public_key.end());
+  submit_one(sign_transaction(
+      Transaction{
+          .invocation =
+              Invocation{.invoked_address = sponsor_wallet_address,
+                         .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
+                         .gas_limit = GasAmount{10'000'000},
+                         .calldata = wallet_meta::make_calldata<u8"deploy">(
+                             deploy_nonce, account_hash,
+                             make_erc20_amount(100'000'000),
+                             x23::Ptr<default_wallet::WalletInitCall>(
+                                 default_wallet::WalletInitCall{
+                                     .entrypoint = account_meta::entrypoint<
+                                         u8"register_mldsa65_key">(),
+                                     .gas_limit = 10'000'000,
+                                     .calldata = account_meta::make_calldata<
+                                         u8"register_mldsa65_key">(
+                                         /*slot=*/uint32_t{0}, pq_key_bytes,
+                                         /*weight=*/uint32_t{1},
+                                         /*required_weight=*/uint32_t{1})}))},
+          .uniquifier = Uniquifier{.block_expiry_height =
+                                       std::numeric_limits<BlockHeight>::max(),
+                                   .nonce = 51},
+          .contracts_to_deploy = {*account_contract},
+          .auth_claim = native_account_auth_claim(),
+      },
+      sponsor_keypair, network_hash));
+
+  // A source-address claim on slot 0, signed by whichever key [sign] uses.
+  AuthClaim slot_zero_claim(AuthClaimType::kSourceAddressAuthData);
+  slot_zero_claim.source_address_claim().allowed_keys = 1U << 0;
+  slot_zero_claim.source_address_claim().required_weight = 1;
+  auto account_tx = [&](std::uint64_t nonce) {
+    return Transaction{
+        .invocation =
+            Invocation{
+                .invoked_address = account_address,
+                .entrypoint = account_meta::entrypoint<u8"test_write_weight">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata =
+                    account_meta::make_calldata<u8"test_write_weight">(1U)},
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = nonce},
+        .auth_claim = slot_zero_claim,
+    };
+  };
+  auto without_claim_key = [](SignedTransaction signed_tx) {
+    signed_tx.pubkey_claim_key.reset();
+    return signed_tx;
+  };
+
+  SignedTransaction pq_signed_tx =
+      without_claim_key(sign_transaction(account_tx(60), pq_key, network_hash));
+  ASSERT_EQ(pq_signed_tx.signatures.size(), 1UL);
+  EXPECT_EQ(pq_signed_tx.signatures[0].public_key_id, 0U);
+  const TransactionHash pq_tx_hash = sha256(pq_signed_tx.tx);
+
+  SignedTransaction tampered_tx =
+      without_claim_key(sign_transaction(account_tx(61), pq_key, network_hash));
+  MlDsa65Signature &tampered_signature =
+      *tampered_tx.signatures[0].signature.mldsa65();
+  tampered_signature[0] ^= 1;
+  SignedTransaction wrong_scheme_tx = without_claim_key(
+      sign_transaction(account_tx(62), sponsor_keypair, network_hash));
+
+  TransactionHashBatch committed =
+      submit_and_commit(scheduler,
+                        SignedTransactionBatch{tampered_tx, pq_signed_tx,
+                                               wrong_scheme_tx});
+  EXPECT_EQ(committed, TransactionHashBatch{pq_tx_hash});
+
+  TxInfoResult result = wait_for_transaction_info(pq_tx_hash);
+  ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
+  EXPECT_EQ(result.info().events.root_output.status_code(),
+            InvocationFrameStatusCode::Return);
+  EXPECT_EQ(result.info().tx.signed_tx, pq_signed_tx);
+  for (const SignedTransaction &rejected : {tampered_tx, wrong_scheme_tx}) {
+    EXPECT_EQ(reader.get_transaction_info(sha256(rejected.tx))().outcome(),
+              TxInfoOutcome::TxInfoNotFound);
+  }
+
+  expect_clean_exit(process);
 }
 
 // The tests below exercise what a devnode data dir has to survive between
