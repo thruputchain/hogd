@@ -13,9 +13,12 @@
 #include <mutex>
 #include <ranges>
 #include <shared_mutex>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
+
+#include <x23/corosync.h>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -56,16 +59,29 @@ static_assert(shared_mutex_like<std::shared_mutex>);
 // auto [val, ul] = map[10];
 // access to val is synchronized
 // ul.unlock();
+//
+// With x23::CoroLock, co_await operations and supply a caller-owned guard
+// when retaining access to an element (CoroGuard cannot be moved):
+// x23::CoroGuard guard;
+// auto *val = co_await map.find(key, guard);
+// guard.reset();
+// co_await map.remove(key);
+// To reuse an acquired guard, pass std::as_const(guard) to find/remove, or
+// pass it after the value to insert(key, value, guard).
 template<class Key, class T, class Hash = std::hash<Key>,
          class KeyEqual = std::equal_to<Key>,
          class Allocator = std::allocator<std::pair<const Key, T>>,
-         mutex_like Lock = std::mutex>
+         class Lock = std::mutex>
+requires (mutex_like<Lock> || std::same_as<Lock, x23::CoroLock>)
 class SynchronizedMap {
 public:
   // type definitions
   using key_type = Key;
   using map_type = T;
   using lock_type = Lock;
+  static constexpr bool kCoro = std::same_as<Lock, x23::CoroLock>;
+  using guard_type =
+      std::conditional_t<kCoro, x23::CoroGuard, std::unique_lock<lock_type>>;
   using value_type = std::pair<const Key, T>;
   using size_type = size_t;
   using hasher = Hash;
@@ -89,7 +105,7 @@ public:
     : hash_fn_(hash), locks_(count), buckets_(count, Map(1, hash, equal, alloc))
   {
     std::ranges::for_each(first, last, [this](const value_type &arg) {
-      insert(arg.first, arg.second);
+      buckets_[bucket_index(arg.first)].insert(arg);
     });
   }
   SynchronizedMap(std::initializer_list<value_type> lst,
@@ -100,7 +116,7 @@ public:
     : hash_fn_(hash), locks_(count), buckets_(count, Map(1, hash, equal, alloc))
   {
     std::ranges::for_each(lst, [this](const value_type &arg) {
-      insert(arg.first, arg.second);
+      buckets_[bucket_index(arg.first)].insert(arg);
     });
   }
   ~SynchronizedMap() = default;
@@ -111,14 +127,14 @@ public:
   SynchronizedMap(SynchronizedMap &&map) noexcept = default;
   SynchronizedMap &operator=(SynchronizedMap &&map) noexcept = default;
 
-  std::pair<T &, std::unique_lock<lock_type>> operator[](const Key &key)
+  std::pair<T &, guard_type> operator[](const Key &key) requires (!kCoro)
   {
     auto [map, ul] = get_bucket(key);
     return {map[key], std::move(ul)};
   }
 
   // find with exclusive lock (for when you need to modify the value)
-  std::pair<T *, std::unique_lock<lock_type>> find(const Key &key)
+  std::pair<T *, guard_type> find(const Key &key) requires (!kCoro)
   {
     auto [map, ul] = get_bucket(key);
     auto it = map.find(key);
@@ -138,9 +154,8 @@ public:
     return {&it->second, std::move(sl)};
   }
 
-  T *find(const Key &key, const std::unique_lock<lock_type> &ul)
+  T *find(const Key &key, const guard_type &ul)
   {
-    assert(ul.owns_lock());
     auto &map = get_bucket(key, ul);
     auto it = map.find(key);
     if (it == map.end())
@@ -148,9 +163,9 @@ public:
     return &it->second;
   }
 
-  template<typename... Args> requires std::constructible_from<T, Args...>
-  std::pair<T *, std::unique_lock<lock_type>> insert(const Key &k,
-                                                     Args &&...args)
+  template<typename... Args>
+  requires (!kCoro && std::constructible_from<T, Args...>)
+  std::pair<T *, guard_type> insert(const Key &k, Args &&...args)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] =
@@ -161,7 +176,8 @@ public:
     return {&it->second, std::move(ul)};
   }
 
-  std::pair<T *, std::unique_lock<lock_type>> insert(const Key &k, const T &obj)
+  std::pair<T *, guard_type> insert(const Key &k, const T &obj)
+      requires (!kCoro)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert({k, obj});
@@ -170,56 +186,42 @@ public:
     return {&it->second, std::move(ul)};
   }
 
-  T *insert(const Key &key, T &&obj, const std::unique_lock<lock_type> &ul)
+  T *insert(const Key &key, T &&obj, const guard_type &ul)
   {
-    assert(std::has_single_bit(locks_.size()));
-    assert(locks_.size() == buckets_.size());
-    assert(ul.owns_lock());
-
-    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    if (ul.mutex() != std::addressof(locks_[idx])) [[unlikely]]
-      panic("Wrong lock.");
-    auto [it, inserted] = buckets_[idx].insert({key, std::move(obj)});
+    auto [it, inserted] = get_bucket(key, ul).insert({key, std::move(obj)});
     if (!inserted)
       return nullptr;
     return &it->second;
   }
 
-  std::tuple<T *, std::unique_lock<lock_type>, bool>
-  find_or_insert(const Key &k, const T &obj)
+  std::tuple<T *, guard_type, bool> find_or_insert(const Key &k, const T &obj)
+      requires (!kCoro)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert({k, obj});
     return {&it->second, std::move(ul), inserted};
   }
 
-  std::pair<T *, std::unique_lock<lock_type>> insert_or_assign(const Key &k,
-                                                               T &&obj)
+  std::pair<T *, guard_type> insert_or_assign(const Key &k, T &&obj)
+      requires (!kCoro)
   {
     auto [map, ul] = get_bucket(k);
     auto [it, inserted] = map.insert_or_assign(k, std::move(obj));
     return {&it->second, std::move(ul)};
   }
 
-  size_t remove(const Key &key)
+  size_t remove(const Key &key) requires (!kCoro)
   {
     auto [map, ul] = get_bucket(key);
     return map.erase(key);
   }
 
-  size_t remove(const Key &key, const std::unique_lock<lock_type> &ul)
+  size_t remove(const Key &key, const guard_type &ul)
   {
-    assert(std::has_single_bit(locks_.size()));
-    assert(locks_.size() == buckets_.size());
-    assert(ul.owns_lock());
-
-    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    if (ul.mutex() != std::addressof(locks_[idx])) [[unlikely]]
-      panic("Wrong lock.");
-    return buckets_[idx].erase(key);
+    return get_bucket(key, ul).erase(key);
   }
 
-  size_t size()
+  size_t size() requires (!kCoro)
   {
     assert(locks_.size() == buckets_.size());
 
@@ -231,7 +233,7 @@ public:
     return ret;
   }
 
-  void clear()
+  void clear() requires (!kCoro)
   {
     assert(locks_.size() == buckets_.size());
 
@@ -242,7 +244,7 @@ public:
   }
 
   // for_each executes func on each element.
-  template<typename F> void for_each(F func)
+  template<typename F> void for_each(F func) requires (!kCoro)
   {
     assert(locks_.size() == buckets_.size());
 
@@ -257,6 +259,7 @@ public:
   template<typename F>
   void for_each_parallel(F func, size_t width = kDefaultParallelRangeWidth,
                          WorkerPool &pool = WorkerPool::get_default_pool())
+      requires (!kCoro)
   {
     assert(locks_.size() == buckets_.size());
 
@@ -269,6 +272,98 @@ public:
           }
         },
         width);
+  }
+
+  auto operator[](const Key &key, x23::CoroGuard &guard) requires kCoro
+  {
+    return with_bucket(key, guard,
+                       [&key](auto &map) -> T & { return map[key]; });
+  }
+
+  auto find(const Key &key, x23::CoroGuard &guard) requires kCoro
+  {
+    return with_bucket(key, guard, [&key](auto &map) -> T * {
+      auto it = map.find(key);
+      return it == map.end() ? nullptr : &it->second;
+    });
+  }
+
+  template<typename... Args>
+  requires (kCoro && std::constructible_from<T, Args...>)
+  auto insert(const Key &key, x23::CoroGuard &guard, Args &&...args)
+  {
+    return with_bucket(key, guard, [&](auto &map) -> T * {
+      auto [it, inserted] = map.try_emplace(key, std::forward<Args>(args)...);
+      return inserted ? &it->second : nullptr;
+    });
+  }
+
+  auto find_or_insert(const Key &key, const T &obj, x23::CoroGuard &guard)
+      requires kCoro
+  {
+    return with_bucket(key, guard, [&](auto &map) {
+      auto [it, inserted] = map.insert({key, obj});
+      return std::pair{&it->second, inserted};
+    });
+  }
+
+  auto insert_or_assign(const Key &key, T &&obj, x23::CoroGuard &guard)
+      requires kCoro
+  {
+    return with_bucket(key, guard, [&](auto &map) {
+      return &map.insert_or_assign(key, std::move(obj)).first->second;
+    });
+  }
+
+  x23::Async<size_t> remove(const Key &key) requires kCoro
+  {
+    x23::CoroGuard guard;
+    co_return co_await with_bucket(key, guard, [&key](auto &map) {
+      return map.erase(key);
+    });
+  }
+
+  x23::Async<size_t> size() requires kCoro
+  {
+    size_t result = 0;
+    co_await for_each_bucket([&](auto &map) { result += map.size(); });
+    co_return result;
+  }
+
+  auto clear() requires kCoro
+  {
+    return for_each_bucket([](auto &map) { map.clear(); });
+  }
+
+  template<typename F> auto for_each(F func) requires kCoro
+  {
+    return for_each_bucket([func = std::move(func)](auto &map) {
+      std::ranges::for_each(map, func);
+    });
+  }
+
+  template<typename F>
+  x23::Async<void>
+  for_each_parallel(F func, size_t width = kDefaultParallelRangeWidth,
+                    WorkerPool &pool = WorkerPool::get_default_pool())
+      requires kCoro
+  {
+    CHECK_GT(width, size_t{0});
+    auto chunk = [this, &func, &pool, width](size_t start) -> x23::Async<void> {
+      co_await OnWorker{pool};
+      for (size_t i = start;
+           i < start + std::min(width, buckets_.size() - start); ++i) {
+        x23::CoroGuard guard;
+        co_await guard(locks_[i]);
+        std::ranges::for_each(buckets_[i], func);
+      }
+    };
+    std::vector<x23::Async<void>> jobs;
+    jobs.reserve(divide_up(buckets_.size(), width));
+    for (size_t i = 0; i < buckets_.size(); i += width)
+      jobs.push_back(chunk(i));
+    for (auto &job : jobs)
+      co_await job;
   }
 
   // unsafe_clear clears the map without locking the buckets.
@@ -292,15 +387,40 @@ private:
   mutable std::vector<lock_type> locks_;
   std::vector<Map> buckets_;
 
-  // get_bucket returns the bucket and its associated exclusive lock.
-  ATTRIBUTE_ALWAYS_INLINE std::pair<Map &, std::unique_lock<lock_type>>
-  get_bucket(const Key &key)
+  template<typename F>
+  auto with_bucket(const Key &key, x23::CoroGuard &guard, F func) requires kCoro
   {
-    assert(std::has_single_bit(locks_.size()));
-    assert(locks_.size() == buckets_.size());
+    size_t idx = bucket_index(key);
+    return x23::MapAwait{[this, idx, func = std::move(func)]() mutable
+                             -> decltype(auto) { return func(buckets_[idx]); },
+                         guard(locks_[idx])};
+  }
 
-    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    return {buckets_[idx], std::unique_lock<lock_type>(locks_[idx])};
+  template<typename F> x23::Async<void> for_each_bucket(F func) requires kCoro
+  {
+    for (size_t i = 0; i < buckets_.size(); ++i) {
+      x23::CoroGuard guard;
+      co_await guard(locks_[i]);
+      func(buckets_[i]);
+    }
+  }
+
+  struct OnWorker {
+    WorkerPool &pool;
+    bool await_ready() const noexcept { return false; }
+    void await_suspend(std::coroutine_handle<> h) const
+    {
+      pool.submit_detached([h] { h.resume(); });
+    }
+    void await_resume() const noexcept {}
+  };
+
+  // get_bucket returns the bucket and its associated exclusive lock.
+  ATTRIBUTE_ALWAYS_INLINE std::pair<Map &, guard_type>
+  get_bucket(const Key &key) requires (!kCoro)
+  {
+    size_t idx = bucket_index(key);
+    return {buckets_[idx], guard_type(locks_[idx])};
   }
 
   // get_bucket_shared returns the bucket and its associated shared lock.
@@ -308,22 +428,31 @@ private:
   std::pair<const Map &, std::shared_lock<lock_type>>
   get_bucket_shared(const Key &key) const requires shared_mutex_like<lock_type>
   {
-    assert(std::has_single_bit(locks_.size()));
-    assert(locks_.size() == buckets_.size());
-
-    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
+    size_t idx = bucket_index(key);
     return {buckets_[idx], std::shared_lock<lock_type>(locks_[idx])};
   }
 
   ATTRIBUTE_ALWAYS_INLINE Map &get_bucket(const Key &key,
-                                          const std::unique_lock<lock_type> &ul)
+                                          const guard_type &guard)
   {
-    assert(ul.owns_lock());
+    size_t idx = bucket_index(key);
+    const lock_type *lock;
+    if constexpr (kCoro)
+      lock = guard.lkp_;
+    else {
+      assert(guard.owns_lock());
+      lock = guard.mutex();
+    }
+    if (lock != std::addressof(locks_[idx])) [[unlikely]]
+      panic("Wrong lock.");
+    return buckets_[idx];
+  }
+
+  size_t bucket_index(const Key &key) const
+  {
     assert(std::has_single_bit(locks_.size()));
     assert(locks_.size() == buckets_.size());
-    size_t idx = hash_fn_(key) & (buckets_.size() - 1);
-    assert(ul.mutex() == std::addressof(locks_[idx]));
-    return buckets_[idx];
+    return hash_fn_(key) & (buckets_.size() - 1);
   }
 };
 
