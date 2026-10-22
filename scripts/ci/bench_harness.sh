@@ -614,7 +614,12 @@ tail_bytes=\$((max - head_bytes))
 
 size=\$(wc -c <"\$path") || exit 1
 if [ "\$size" -le "\$max" ]; then
-  exec cat -- "\$path"
+  # The measured snapshot, not the file: these logs are published while the
+  # processes writing them are still alive -- [publish_results] runs ahead of
+  # [kill_stale_processes] -- so a plain [cat] would copy whatever was
+  # appended after the size was taken, and the bound this function exists for
+  # would hold only for a log that had stopped growing.
+  exec head -c "\$size" -- "\$path"
 fi
 
 head -c "\$head_bytes" -- "\$path" || exit 1

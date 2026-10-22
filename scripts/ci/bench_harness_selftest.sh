@@ -531,6 +531,27 @@ check_eq "a log under the cap is copied whole" \
 check_eq "a log under the cap gains no elision line" "0" \
   "$(grep -c 'bytes elided' "$capped_dir/small.out" || true)"
 
+# A log under the cap is still only copied as far as it was measured. These
+# logs are published while the processes writing them are alive, so the copy
+# has to emit the snapshot it sized and not the file: a [cat] here would carry
+# whatever was appended behind it, and the bound would hold only for a log
+# that had stopped growing. Shimming [wc] to under-report makes the two
+# distinguishable without racing a real writer.
+shim_dir="$work_dir/wc-shim"
+mkdir -p "$shim_dir"
+cat >"$shim_dir/wc" <<'SHIM'
+#!/usr/bin/env bash
+echo 100
+SHIM
+chmod +x "$shim_dir/wc"
+printf '%0.sy' $(seq 1 500) >"$capped_dir/growing.log"
+PATH="$shim_dir:$PATH" CI_PUBLISHED_LOG_MAX_BYTES=1024 \
+  CI_PUBLISHED_LOG_HEAD_BYTES=256 \
+  ci_copy_remote_log_capped hog4 "$capped_dir/growing.log" \
+  "$capped_dir/growing.out"
+check_eq "a log under the cap is cut at the size it was measured" "100" \
+  "$(wc -c <"$capped_dir/growing.out" | tr -cd '0-9')"
+
 # An oversized log keeps both ends. The head has how the node came up and the
 # tail has what it was saying when it stopped; a bare [tail] would drop the
 # first and a bare [head] the second.
