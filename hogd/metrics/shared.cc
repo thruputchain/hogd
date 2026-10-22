@@ -3,6 +3,7 @@
 #include <cstddef>
 
 #include "hogd/base/os.h"
+#include "hogd/base/types.h"
 #include "hogd/metrics/metrics.h"
 
 namespace hogd {

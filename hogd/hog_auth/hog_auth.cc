@@ -19,6 +19,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
 #include "sched_db.hh"

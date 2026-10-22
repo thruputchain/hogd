@@ -7,8 +7,10 @@
 
 #include <cstddef>
 #include <cstdio>
+#include <cstdlib>
 
 #include "hogd/base/os.h"
+#include "hogd/base/types.h"
 
 namespace hogd {
 namespace {
