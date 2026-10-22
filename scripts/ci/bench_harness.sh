@@ -407,10 +407,20 @@ ci_remote_run() {
 }
 
 # How much of a failed process's remote log [ci_replay_remote_log] replays.
-# Sized like [CI_BENCH_FAIL_TAIL_LINES]: enough to carry a Go panic with its
-# goroutine trace, far short of the hundreds of megabytes one of these logs
-# runs to under load.
-CI_REMOTE_LOG_TAIL_LINES=${CI_REMOTE_LOG_TAIL_LINES:-200}
+#
+# Bounded by what survives rather than by what is interesting. A replay is
+# written into a step's log, and [ci_report_failed_bench_steps] serves only
+# the last [$CI_BENCH_FAIL_TAIL_LINES] of that log at the end of the job --
+# the window the replay exists for. A step that replays two streams spends
+# twice this, its cleanup prints after it (stopping eight bench hosts is some
+# sixty lines of [control_cli] banners), and anything that does not fit is
+# dropped from the front. At 120 that is 240 lines plus headers against a 400
+# line window, which leaves the cleanup room to print without pushing the
+# opening of a replay out of it.
+#
+# Still far more than enough to carry a Go panic and its first frames: the
+# x23 panic reports replayed above are capped at 40.
+CI_REMOTE_LOG_TAIL_LINES=${CI_REMOTE_LOG_TAIL_LINES:-120}
 
 # Where [ci_control_start_capture] reports the log paths of the process it
 # started. Cleared on every call, so a caller that ignores a failure cannot

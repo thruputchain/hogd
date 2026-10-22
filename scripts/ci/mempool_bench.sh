@@ -14,14 +14,45 @@ WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
 
+# Filled in once the coordinator is started; empty until then, and read by
+# [cleanup] on every failure, including the ones that happen before the start
+# returns.
+COORDINATOR_STDOUT_PATH=""
+COORDINATOR_STDERR_PATH=""
+
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
+}
+
+# The coordinator's own account of why it stopped. A chuckd that dies says so
+# on stderr, which nothing here collected before: the crash that filed hogd
+# issue #4546 reached the job log as a bare "coordinator exit status 2" with
+# no cause anywhere in the run.
+#
+# Both streams are read from the host rather than from the local
+# [coordinator_output.txt], because the copy into that file happens late and
+# the failures worth explaining include the ones that never reach it -- a
+# coordinator that dies before the first [expect_running] above all, which is
+# the likeliest way for it to fail at all.
+#
+# stderr goes last, nearest the end of the log, because it is the stream that
+# says why.
+replay_coordinator_logs() {
+  ci_replay_remote_log hog4 "$COORDINATOR_STDOUT_PATH" 'coordinator stdout'
+  ci_replay_remote_log hog4 "$COORDINATOR_STDERR_PATH" 'coordinator stderr'
 }
 
 cleanup() {
   local exit_code=$1
 
   ci_enter_cleanup
+  # Before the hosts are stopped, and from here rather than from each failure
+  # site: errexit reaches this trap from any command in the script, so a
+  # coordinator that dies during startup is explained the same way as one that
+  # dies under load.
+  if [ "$exit_code" -ne 0 ]; then
+    replay_coordinator_logs
+  fi
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
 
@@ -136,18 +167,6 @@ ci_control_start_capture "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" \
 COORDINATOR_STDOUT_PATH=$CI_CONTROL_STDOUT_PATH
 COORDINATOR_STDERR_PATH=$CI_CONTROL_STDERR_PATH
 
-# The coordinator's own account of why it stopped, replayed into the job log
-# on the way out of a failure. [coordinator_output.txt] is only its stdout,
-# and a chuckd that dies says why on stderr -- which nothing here collected
-# before, so the crash that filed hogd issue #4546 reached the job log as a
-# bare "coordinator exit status 2" with no cause anywhere in the run.
-replay_coordinator_logs() {
-  ci_replay_remote_log hog4 "$COORDINATOR_STDERR_PATH" 'coordinator stderr'
-  echo "===== last $CI_REMOTE_LOG_TAIL_LINES lines of coordinator stdout ====="
-  tail -n "$CI_REMOTE_LOG_TAIL_LINES" coordinator_output.txt || true
-  echo "===== end of coordinator stdout ====="
-}
-
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
@@ -194,14 +213,10 @@ if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # signal-terminated status is a crash rather than a reported error, so name
   # the signal instead of leaving a bare number in the log.
   echo "mempool $(ci_describe_exit_status "$mempool_status")" >&2
-  # A mempool that fails usually does so because the coordinator driving it
-  # stopped first, so its logs are the evidence here too.
-  replay_coordinator_logs
   exit "$mempool_status"
 fi
 if [[ $coordinator_status -ne 0 ]]; then
   echo "coordinator $(ci_describe_exit_status "$coordinator_status")" >&2
-  replay_coordinator_logs
   exit "$coordinator_status"
 fi
 

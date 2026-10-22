@@ -613,6 +613,20 @@ check_eq "an unreachable host does not fail the replay" "0" "$replay_status"
 check_contains "an unreachable host is reported in place of the log" \
   "(could not read hog4:/tmp/hogd_stderr_stub)" "$replay"
 
+# The replay only does its job if it is still there at the end of the job.
+# Two streams at the configured budget, plus the headers and the cleanup a
+# failing step still has to print, have to fit inside the window
+# [ci_report_failed_bench_steps] serves -- otherwise the replay is written
+# into the step log and then trimmed off the front of it again.
+replay_lines=$((2 * (CI_REMOTE_LOG_TAIL_LINES + 2)))
+if ((replay_lines < CI_BENCH_FAIL_TAIL_LINES)); then
+  echo "ok   a two-stream replay fits the failed-step report"
+else
+  echo "FAIL a two-stream replay ($replay_lines lines) does not fit the" \
+    "failed-step report ($CI_BENCH_FAIL_TAIL_LINES lines)"
+  fail=1
+fi
+
 # A process whose start never reported its paths has nothing to replay, and
 # that is a sentence in the log rather than a [tail] of the empty string.
 replay_status=0
