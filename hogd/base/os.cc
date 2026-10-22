@@ -96,6 +96,10 @@ read_process_stats()
 #endif // defined(__linux__)
 }
 
+// Linux reads the rss page count from /proc/self/stat and scales it by the page
+// size. macOS asks the kernel for this task's resident_size via task_info().
+// Any failure, or another platform, returns 0, which callers treat as "not
+// reported" rather than a real size.
 size_t
 resident_memory_bytes()
 {

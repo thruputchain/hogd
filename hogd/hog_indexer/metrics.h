@@ -5,6 +5,7 @@
 #include <vector>
 
 #include "hogd/metrics/metrics.h"
+#include "hogd/metrics/shared.h"
 
 namespace hogd {
 
@@ -30,7 +31,7 @@ init_indexer_metrics()
       "Seconds to durably apply one newly committed block. Duplicates are "
       "not recorded.",
       {kIndexerApplyDurationBounds.begin(), kIndexerApplyDurationBounds.end()});
-  metrics.register_resident_bytes(kComponent);
+  register_resident_bytes(kComponent);
   metrics.mark_done_with_init(kComponent);
 }
 

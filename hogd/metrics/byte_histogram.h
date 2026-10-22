@@ -8,16 +8,14 @@ namespace hogd {
 // Powers of two from 1 KiB through 512 MiB. 2 MiB and 4 MiB are exact edges:
 // firehose drops a record above its 4 MiB default, and 2 MiB is the step
 // before that.
-inline constexpr std::array<double, 20> kPowerOfTwoByteBounds = {
-    1024,     2048,     4096,     8192,      16384,     32768,     65536,
-    131072,   262144,   524288,   1048576,   2097152,   4194304,   8388608,
-    16777216, 33554432, 67108864, 134217728, 268435456, 536870912,
+inline constexpr std::array<double, 20> kPowerOfTwoBytes = {
+    1 << 10, 1 << 11, 1 << 12, 1 << 13, 1 << 14, 1 << 15, 1 << 16,
+    1 << 17, 1 << 18, 1 << 19, 1 << 20, 1 << 21, 1 << 22, 1 << 23,
+    1 << 24, 1 << 25, 1 << 26, 1 << 27, 1 << 28, 1 << 29,
 };
 
-inline std::vector<double>
-power_of_two_byte_bounds()
-{
-  return {kPowerOfTwoByteBounds.begin(), kPowerOfTwoByteBounds.end()};
-}
+// Histogram upper bounds for byte sizes.
+inline const std::vector<double>
+    power_of_two_byte_bounds(kPowerOfTwoBytes.begin(), kPowerOfTwoBytes.end());
 
 } // namespace hogd

@@ -847,7 +847,7 @@ IndexerOutboxStore::publish_committed_stored(
   // it before the publication lock. The reference path learns the events-file
   // size under that lock and fills this in there.
   std::optional<size_t> pull_record_bytes;
-  if (payload_for_ensure != nullptr) {
+  if (payload_for_ensure) {
     auto response_size = indexer_event_pull_rpc_record_size_for_parts(
         x23::xdr_size(stored.consensus_value),
         x23::xdr_size(payload_for_ensure->event_logs),

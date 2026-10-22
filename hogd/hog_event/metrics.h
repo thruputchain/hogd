@@ -4,6 +4,7 @@
 
 #include "hogd/metrics/byte_histogram.h"
 #include "hogd/metrics/metrics.h"
+#include "hogd/metrics/shared.h"
 
 namespace hogd {
 
@@ -22,12 +23,12 @@ init_event_metrics()
       "Bytes of the indexer event-pull RPC record for a newly published "
       "committed block: consensus value, event logs, and transaction bodies. "
       "Distinct from mempool transaction-only bytes.",
-      power_of_two_byte_bounds());
+      power_of_two_byte_bounds);
   event_committed_height = metrics.gauge(
       kComponent, "committed_height",
       "Height of the newest committed block published to the event outbox "
       "since this process started.");
-  metrics.register_resident_bytes(kComponent);
+  register_resident_bytes(kComponent);
   metrics.mark_done_with_init(kComponent);
 }
 

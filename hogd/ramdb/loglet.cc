@@ -262,9 +262,14 @@ LogletAllocator::print_stats() const
 {
   const LogletUsageStats stats = usage_stats();
   const size_t total = stats.memory_items + stats.disk_buffering + stats.free;
-  const size_t memory_pct = total == 0 ? 0 : stats.memory_items * 100 / total;
-  const size_t disk_pct = total == 0 ? 0 : stats.disk_buffering * 100 / total;
-  const size_t free_pct = total == 0 ? 0 : stats.free * 100 / total;
+  size_t memory_pct = 0;
+  size_t disk_pct = 0;
+  size_t free_pct = 0;
+  if (total) {
+    memory_pct = stats.memory_items * 100 / total;
+    disk_pct = stats.disk_buffering * 100 / total;
+    free_pct = stats.free * 100 / total;
+  }
   info("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
        print_iec_bytes(stats.region_bytes), memory_pct, disk_pct, free_pct);
 }

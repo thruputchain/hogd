@@ -30,7 +30,7 @@ init_hog_exec_metrics()
       "Transactions that failed validation-path execution.");
   gas_consumed_metric =
       metrics.per_thread_counter(kComponent, "gas_consumed", "");
-  metrics.register_resident_bytes(kComponent);
+  register_resident_bytes(kComponent);
   metrics.mark_done_with_init(kComponent);
 }
 

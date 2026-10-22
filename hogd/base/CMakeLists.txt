@@ -39,6 +39,7 @@ add_library(base_test_objects OBJECT
   io_test.cc
   json_test.cc
   network_config_params_test.cc
+  os_test.cc
   perthread_arc_test.cc
   perthread_test.cc
   rc_bytes_test.cc

@@ -8,7 +8,6 @@
 #include <thread>
 #include <vector>
 
-#include "hogd/base/os.h"
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
@@ -85,17 +84,12 @@ TEST_F(MetricsTest, ComponentNamesFormatAsPrometheusPrefixes)
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kAuth), "auth");
 }
 
-TEST(ResidentMemoryTest, ReportsBytesOnThisHost)
-{
-  EXPECT_GT(resident_memory_bytes(), 0U);
-}
-
 TEST_F(MetricsTest, PowerOfTwoByteHistogramIncludesFirehoseEdges)
 {
   Metrics &metrics = Metrics::instance();
   Metrics::Histogram record_bytes =
       metrics.histogram(Metrics::ComponentName::kEvent, "record_bytes",
-                        "event pull record bytes", power_of_two_byte_bounds());
+                        "event pull record bytes", power_of_two_byte_bounds);
   metrics.mark_done_with_init(Metrics::ComponentName::kEvent);
   // 3 MiB sits strictly between the 2 MiB and 4 MiB edges.
   record_bytes.record(static_cast<double>(3 * 1024 * 1024));
@@ -109,9 +103,9 @@ TEST_F(MetricsTest, PowerOfTwoByteHistogramIncludesFirehoseEdges)
 TEST_F(MetricsTest, ScrapeSamplesResidentBytes)
 {
   Metrics &metrics = Metrics::instance();
-  metrics.register_resident_bytes(Metrics::ComponentName::kAuth);
+  register_resident_bytes(Metrics::ComponentName::kAuth);
   metrics.mark_done_with_init(Metrics::ComponentName::kAuth);
-  metrics.sample_resident_bytes();
+  sample_resident_bytes();
 
   const std::string dump = metrics.dump_to_prometheus_string();
   EXPECT_NE(dump.find("auth_resident_bytes "), std::string::npos) << dump;
@@ -121,8 +115,8 @@ TEST_F(MetricsTest, ScrapeSamplesResidentBytes)
 TEST_F(MetricsTest, SamplingSkipsResidentBytesWhileInitializing)
 {
   Metrics &metrics = Metrics::instance();
-  metrics.register_resident_bytes(Metrics::ComponentName::kAuth);
-  metrics.sample_resident_bytes();
+  register_resident_bytes(Metrics::ComponentName::kAuth);
+  sample_resident_bytes();
 
   EXPECT_TRUE(metrics.dump_to_prometheus_string().empty());
   metrics.mark_done_with_init(Metrics::ComponentName::kAuth);

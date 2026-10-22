@@ -6,6 +6,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
@@ -152,11 +153,21 @@ public:
 
   std::string dump_to_prometheus_string();
 
-  // Registers `{component}_resident_bytes`. Call before mark_done_with_init.
-  // sample_resident_bytes() fills every registered gauge from this process's
-  // RSS; the /metrics handler calls it at scrape time.
-  void register_resident_bytes(ComponentName component_name);
-  void sample_resident_bytes();
+  // Returns the gauge registered as [metric_name], or an empty handle if there
+  // is none. Requires mark_done_with_init, after which the component's metrics
+  // no longer change.
+  Gauge find_gauge(ComponentName component_name, const std::string &metric_name)
+  {
+    CHECK(done_with_init(component_name));
+    const Component &component =
+        components_[static_cast<size_t>(component_name)];
+    const auto it = component.metrics.find(metric_name);
+    if (it == component.metrics.end() ||
+        std::string_view(it->second->prometheus_type()) != "gauge") {
+      return Gauge{};
+    }
+    return Gauge(static_cast<GaugeImpl *>(it->second.get()));
+  }
 
   bool done_with_init(ComponentName component_name)
   {
@@ -169,10 +180,6 @@ public:
 
   void clear()
   {
-    // Drop the RSS handles before the metric map frees the implementations.
-    for (Gauge &gauge : resident_gauges_) {
-      gauge = Gauge{};
-    }
     for (size_t i = 0; i < components_.size(); i++) {
       done_with_init_[i].store(false, std::memory_order_release);
 
@@ -264,7 +271,6 @@ private:
 
   std::array<std::atomic<bool>, kNumComponents> done_with_init_{};
   std::array<Component, kNumComponents> components_;
-  std::array<Gauge, kNumComponents> resident_gauges_{};
 };
 
 } // namespace hogd

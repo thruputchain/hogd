@@ -32,7 +32,7 @@ int
 auth_init(const std::string &mempool_address, const std::string &bind_ip,
           uint16_t db_port, uint16_t mempool_port, uint16_t metrics_port)
 {
-  Metrics::instance().register_resident_bytes(Metrics::ComponentName::kAuth);
+  register_resident_bytes(Metrics::ComponentName::kAuth);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kAuth);
 
   HttpServer metrics_server;

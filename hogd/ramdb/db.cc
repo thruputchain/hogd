@@ -30,6 +30,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/metrics/metrics.h"
+#include "hogd/metrics/shared.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
@@ -46,20 +47,6 @@ constexpr std::array<double, 12> kSnapshotDurationBounds = {0.01, 0.05, 0.1,
                                                             0.25, 0.5,  1,
                                                             2,    5,    10,
                                                             30,   60,   120};
-
-ssize_t
-as_gauge(size_t value)
-{
-  const auto max = static_cast<size_t>(std::numeric_limits<ssize_t>::max());
-  if (value > max) {
-    return std::numeric_limits<ssize_t>::max();
-  }
-  return static_cast<ssize_t>(value);
-}
-
-} // namespace
-
-namespace {
 
 constexpr size_t
 active_cores(const WorkerPool &pool)
@@ -176,7 +163,7 @@ Database::register_metrics()
   metrics_.loglet_free = registry.gauge(kComponent, "ramdb_loglet_free",
                                         "Loglets on the free list.");
   disk_writer_.register_metrics();
-  registry.register_resident_bytes(kComponent);
+  register_resident_bytes(kComponent);
   registry.mark_done_with_init(kComponent);
   metrics_registered_.store(true, std::memory_order_release);
 
@@ -196,17 +183,20 @@ Database::record_metrics()
   const size_t total = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
   const size_t covered = covered_wal_bytes_.load(std::memory_order_relaxed);
   const size_t uncovered = total >= covered ? total - covered : 0;
-  metrics_.uncovered_wal_bytes.record(as_gauge(uncovered));
-  metrics_.last_snapshot_bytes.record(
-      as_gauge(last_snapshot_bytes_.load(std::memory_order_relaxed)));
+  metrics_.uncovered_wal_bytes.record(saturating_gauge_value(uncovered));
+  metrics_.last_snapshot_bytes.record(saturating_gauge_value(
+      last_snapshot_bytes_.load(std::memory_order_relaxed)));
   metrics_.snapshot_in_progress.record(
       snapshot_running_.load(std::memory_order_acquire) ? 1 : 0);
 
   const LogletUsageStats loglets = loglet_allocator_->usage_stats();
-  metrics_.loglet_region_bytes.record(as_gauge(loglets.region_bytes));
-  metrics_.loglet_memory_items.record(as_gauge(loglets.memory_items));
-  metrics_.loglet_disk_buffering.record(as_gauge(loglets.disk_buffering));
-  metrics_.loglet_free.record(as_gauge(loglets.free));
+  metrics_.loglet_region_bytes.record(
+      saturating_gauge_value(loglets.region_bytes));
+  metrics_.loglet_memory_items.record(
+      saturating_gauge_value(loglets.memory_items));
+  metrics_.loglet_disk_buffering.record(
+      saturating_gauge_value(loglets.disk_buffering));
+  metrics_.loglet_free.record(saturating_gauge_value(loglets.free));
 }
 
 void
