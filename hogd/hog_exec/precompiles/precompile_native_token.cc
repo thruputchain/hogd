@@ -875,10 +875,17 @@ native_token_implements(InterfaceId const &id)
   return std::ranges::contains(kImplemented, id);
 }
 
+// Ballparks of what the RV32 reference's frame consumes, from the runtime's
+// "gas consumed" trace: supports_interface 470-533 (its table scan), and
+// supports_interfaces about 2450 plus about 132 per queried id.
+constexpr GasAmount kSupportsInterfaceGas = 500;
+constexpr GasAmount kSupportsInterfacesBaseGas = 2500;
+constexpr GasAmount kSupportsInterfacesPerIdGas = 130;
+
 x23::Async<InvokeStatus<bool>>
 supports_interface_impl(NativeSyscallContext &ctx, InterfaceId interface_id)
 {
-  if (!ctx.consume_gas(1)) {
+  if (!ctx.consume_gas(kSupportsInterfaceGas)) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
   co_return native_token_implements(interface_id);
@@ -888,7 +895,9 @@ x23::Async<InvokeStatus<interface_support_t>>
 supports_interfaces_impl(NativeSyscallContext &ctx,
                          interface_ids_t interface_ids)
 {
-  if (!ctx.consume_gas(1)) {
+  // The query is bounded at 32 ids, so this cannot overflow.
+  if (!ctx.consume_gas(kSupportsInterfacesBaseGas +
+                       (kSupportsInterfacesPerIdGas * interface_ids.size()))) {
     co_return InvokeError{InvokeErrorCode::OutOfGas};
   }
   // One answer per queried id, in order; the answer shares the query's bound.
