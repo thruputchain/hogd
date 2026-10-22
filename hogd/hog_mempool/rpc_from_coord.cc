@@ -3083,18 +3083,20 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       });
 
   // Size the committed block while the commit RPCs are in flight, so
-  // finalize only records it. [committed_cache->txs] is exactly the committed
-  // set in both branches: a nominated block's txs are compacted to the
-  // successful ones (its [tx_hashes] also holds nomination failures), and a
-  // validated block holds every tx of the block.
+  // finalize only records it. Finalize must depend on this node: it clears
+  // [validated_block_cache_], which [committed_cache] may point into.
+  // [committed_cache->txs] is exactly the committed set in both branches: a
+  // nominated block's txs are compacted to the successful ones (its
+  // [tx_hashes] also holds nomination failures), and a validated block holds
+  // every tx of the block.
   auto measure_block_node =
       commit_dag.cpu<size_t>("measure committed block",
-                             commit_dag.after(prepare_node), [&] {
-                               size_t tx_bytes = 0;
+                             commit_dag.after(prepare_node), [&]() -> size_t {
                                if (invalid_consensus_value) {
-                                 return tx_bytes;
+                                 return 0;
                                }
                                CHECK_PTR(commit_plan.committed_cache);
+                               size_t tx_bytes = 0;
                                for (const SignedTransaction &tx :
                                     commit_plan.committed_cache->txs) {
                                  tx_bytes += x23::xdr_size(tx);
