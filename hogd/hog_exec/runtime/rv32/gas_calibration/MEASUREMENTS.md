@@ -96,6 +96,12 @@ ML-DSA-65 against 38.9 us for ed25519, a 2.65x ratio, with about 313 ns per
 103-105 us against 39-42 us for `entry/VerifySignature`, at the same charged
 gas. Scaled to the calibrated ed25519 costs that suggests roughly 47250 base
 and 152 per SHAKE256 block; a price change needs a calibration workflow run.
+The RV32 Gas Calibration workflow measures these rows on every run.
+`rv32_syscall_report.py` keeps them out of the shared syscall numbers, prints
+them beside the ed25519 row of the same length with the underpricing factor,
+and in `--schedule` shows a base-plus-block estimate marked as not part of the
+proposal. Their guards enter `syscall_reference.txt` the next time it is
+regenerated with mode=reference; until then `--check` notes them as ungated.
 
 ## Storage
 

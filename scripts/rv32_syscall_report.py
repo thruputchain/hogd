@@ -105,6 +105,27 @@ BYTESTRING_ROW = re.compile(
     r"^(entry|vm)/(BytestringSet|BytestringGet|BytestringGetLen)/(\d+)$")
 BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
 
+# ML-DSA-65 VerifySignature, swept on message length. Kept out of the syscall
+# table and out of every shared number -- the crossing group, the seam median
+# that prices the SHA256 sweep, the guard baseline -- for two reasons. It is a
+# length sweep, like SHA256 and the bytestrings. And nothing prices it: the
+# syscall charges it GasCost::verify_signature(len), the ed25519 price, so a
+# number proposed from these rows is not a proposal for any constant in
+# kSyscallGasCostSchedule. The rows are reported as their own family instead,
+# beside the ed25519 row of the same length, so the gap between what it costs
+# and what it is billed is the first thing a reader sees.
+MLDSA_VERIFY_ROW = re.compile(r"^(entry|vm)/VerifySignatureMlDsa65/(\d+)$")
+MLDSA_VERIFY_FAMILY = "VerifySignatureMlDsa65"
+
+# What ML-DSA-65 verification hashes the message into: mu = SHAKE256(tr || M'),
+# tr the 64-byte hash of the public key and, for pure ML-DSA with an empty
+# context, M' = 0x00 || 0x00 || M. SHAKE256 absorbs 136 bytes per Keccak
+# permutation, so this is the block a per-length price for it would count in.
+# Fixed by the algorithm, like SHA256_BLOCK_BYTES.
+MLDSA_TR_BYTES = 64
+MLDSA_PREFIX_BYTES = 2
+SHAKE256_RATE_BYTES = 136
+
 # The block a bytestring copy is proposed in, mirroring gas_cost_table.h's
 # kBytestringBlockBytes. Unlike a hash's compression block this is chosen, not
 # forced: large enough that rounding a fractional per-byte rate up to a whole
@@ -273,10 +294,86 @@ def syscall_names(measured):
     for name in measured:
         if not name.startswith("entry/"):
             continue
-        if SHA256_ROW.match(name) or BYTESTRING_ROW.match(name):
+        if (SHA256_ROW.match(name) or BYTESTRING_ROW.match(name) or
+                MLDSA_VERIFY_ROW.match(name)):
             continue
         names.append(name[len("entry/"):])
     return sorted(names)
+
+
+def shake256_blocks(byte_len):
+    """Keccak permutations SHAKE256 absorbs byte_len in, padding included.
+
+    pad10*1 needs at least one byte, so a message that fills a block exactly
+    still pays for the next one.
+    """
+    return (byte_len + 1 + SHAKE256_RATE_BYTES - 1) // SHAKE256_RATE_BYTES
+
+
+def mldsa_message_blocks(message_len):
+    """SHAKE256 blocks ML-DSA-65 verification spends hashing the message."""
+    return shake256_blocks(MLDSA_TR_BYTES + MLDSA_PREFIX_BYTES + message_len)
+
+
+def mldsa_verify_summary(measured, sd=None):
+    """The ML-DSA-65 sweep, each length beside ed25519's at the same length.
+
+    Returns a list of dicts sorted by message length: the entry row's median
+    and stddev, the vm row's ns per call where there is one, the gas the row
+    was charged, and the same three for entry/VerifySignature/<length> when
+    that row was measured. Both schemes are billed GasCost::verify_signature
+    of the same length, so the ratio of their times is how far ML-DSA is
+    underpriced -- read off the measurement, without needing a gas unit.
+    """
+    sd = sd or {}
+    points = []
+    for name, entry in measured.items():
+        match = MLDSA_VERIFY_ROW.match(name)
+        if not match or match.group(1) != "entry":
+            continue
+        size = int(match.group(2))
+        vm_row = measured.get(f"vm/{MLDSA_VERIFY_FAMILY}/{size}")
+        ed25519 = measured.get(f"entry/VerifySignature/{size}")
+        points.append({
+            "bytes": size,
+            "entry_ns": entry["real_time"],
+            "entry_sd": sd.get(name, {}).get("real_time", 0.0),
+            "vm_ns": vm_ns_per_call(vm_row) if vm_row else None,
+            "gas": int(entry.get("gas", 0)),
+            "ed25519_ns": ed25519["real_time"] if ed25519 else None,
+            "ed25519_gas": int(ed25519.get("gas", 0)) if ed25519 else None,
+        })
+    return sorted(points, key=lambda point: point["bytes"])
+
+
+def print_mldsa_verify(points):
+    print()
+    print("ML-DSA-65 VerifySignature: charged the ed25519 price "
+          "(GasCost::verify_signature);")
+    print("nothing in kSyscallGasCostSchedule prices it on its own.")
+    header = (f"{'bytes':<10}{'entry ns':>11}{'±':>9}{'gas':>8}"
+              f"{'ed25519 ns':>12}{'ed25519 gas':>13}{'x ed25519':>11}")
+    print(header)
+    print("-" * len(header))
+    ratios = []
+    for point in points:
+        ed_ns = point["ed25519_ns"]
+        ed_ns_text = f"{ed_ns:>12.1f}" if ed_ns else f"{'-':>12}"
+        ed_gas = point["ed25519_gas"]
+        ed_gas_text = f"{ed_gas:>13}" if ed_gas is not None else f"{'-':>13}"
+        ratio = point["entry_ns"] / ed_ns if ed_ns else None
+        ratio_text = f"{ratio:>10.2f}x" if ratio else f"{'-':>11}"
+        # Time per gas against ed25519's, so the claim stays true if the two
+        # are ever billed differently.
+        if ratio and point["gas"] and ed_gas:
+            ratios.append(ratio * ed_gas / point["gas"])
+        print(f"{point['bytes']:<10}{point['entry_ns']:>11.1f}"
+              f"{point['entry_sd']:>9.2f}{point['gas']:>8}{ed_ns_text}"
+              f"{ed_gas_text}{ratio_text}")
+    if ratios:
+        print(f"Per gas billed, ML-DSA-65 takes {min(ratios):.2f}x .. "
+              f"{max(ratios):.2f}x the time ed25519 does at the same length: "
+              "underpriced by that factor.")
 
 
 def sha256_points(measured, prefix="entry"):
@@ -969,8 +1066,14 @@ def check_joinable(bench, calibration):
 # validation of the implementation. A row that takes ed25519's cheap rejection
 # path is caught earlier and far more sharply: verification fails, the syscall
 # returns an error, and the benchmark skips the row rather than timing it.
+#
+# ML-DSA-65 is the same kind of check as ed25519: hogd verifies with
+# mldsa-native and OpenSSL 3.5+ has its own implementation, so a factor apart
+# is allowed and orders of magnitude is the finding. OpenSSL before 3.5 has no
+# ML-DSA at all; the row is then simply absent, not failed.
 SHA256_CROSSCHECK_TOLERANCE = 0.25
 ED25519_CROSSCHECK_FACTOR = 10.0
+MLDSA_CROSSCHECK_FACTOR = 10.0
 
 
 def parse_openssl_speed(data):
@@ -984,8 +1087,25 @@ def parse_openssl_speed(data):
     sizes = []
     sha256 = {}
     ed25519 = {}
+    mldsa65 = {}
     for line in data.get("raw", []):
         fields = line.split(":")
+        # ML-DSA-65 first, matched by name rather than by line tag: OpenSSL
+        # 3.5 reports its signature algorithms on a +F<n> line of their own,
+        # and the tag number is the least stable thing about it. The rates
+        # follow the name, verifications per second last.
+        names = [f.replace("-", "").lower() for f in fields]
+        if fields[0].startswith("+F") and "mldsa65" in names:
+            rest = fields[names.index("mldsa65") + 1:]
+            rates = []
+            for value in rest:
+                try:
+                    rates.append(float(value))
+                except ValueError:
+                    continue
+            if rates:
+                mldsa65 = {"verify_per_second": rates[-1]}
+            continue
         if fields[0] == "+H":
             sizes = [int(f) for f in fields[1:] if f.strip().isdigit()]
         elif fields[0] == "+F" and "sha256" in fields:
@@ -997,7 +1117,7 @@ def parse_openssl_speed(data):
             if len(rest) >= 2:
                 ed25519 = {"sign_per_second": float(rest[0]),
                            "verify_per_second": float(rest[1])}
-    return {"sha256": sha256, "ed25519": ed25519}
+    return {"sha256": sha256, "ed25519": ed25519, "mldsa65": mldsa65}
 
 
 def print_crosscheck(data, openssl):
@@ -1066,6 +1186,21 @@ def print_crosscheck(data, openssl):
                       "backend, and a distro libcrypto is built for baseline "
                       "x86-64; dalek gets target-cpu=native. A factor is "
                       "expected -- an order of magnitude is the test"))
+
+    mldsa_verify = speed.get("mldsa65", {}).get("verify_per_second")
+    ours = [point["entry_ns"] for point in mldsa_verify_summary(measured)]
+    if mldsa_verify and ours:
+        # The cheapest row, as for ed25519: openssl times a short message.
+        ours_ns = min(ours)
+        openssl_ns = 1e9 / mldsa_verify
+        ratio = ours_ns / openssl_ns
+        low = 1.0 / MLDSA_CROSSCHECK_FACTOR
+        ok = low <= ratio <= MLDSA_CROSSCHECK_FACTOR
+        lines.append(("ML-DSA-65 verify ns", f"{openssl_ns:.0f}",
+                      f"{ours_ns:.0f}", ratio, ok,
+                      "hogd verifies with mldsa-native and openssl with its "
+                      "own implementation, so a factor apart is allowed -- "
+                      "an order of magnitude is the test"))
 
     if not lines:
         print("  nothing comparable in this pair of files")
@@ -1147,6 +1282,10 @@ def print_table(data):
         gas = int(entry.get("gas", 0))
         print(f"{name:<28}{entry['real_time']:>11.1f}{error:>9.2f}"
               f"{vm_text}{crossing:>8}{gas:>8}")
+
+    mldsa = mldsa_verify_summary(measured, sd)
+    if mldsa:
+        print_mldsa_verify(mldsa)
 
     points = sha256_points(measured)
     if points:
@@ -1451,6 +1590,45 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
             }
         if blocks:
             proposal["bytestring_blocks"] = blocks
+
+    # ML-DSA-65 is measured and costed, never proposed: the syscall bills it
+    # GasCost::verify_signature, the ed25519 price, and pricing it on its own
+    # is a coordinated gas-schedule update that has not been made. Computed
+    # here rather than in the printer for the reason the heavy rows are --
+    # to_gas is where --margin applies -- and kept under its own key so nothing
+    # above reads it.
+    mldsa = mldsa_verify_summary(measured, stddevs(bench))
+    if mldsa:
+        points = []
+        for point in mldsa:
+            # What a guest causes, crossing included: the vm row where there is
+            # one, otherwise the entry row plus this run's seam -- the same
+            # quantity the heavy rows and the SHA256 sweep are priced on.
+            guest_ns = point["vm_ns"] or (point["entry_ns"] +
+                                          proposal["seam_ns"])
+            measured_gas = to_gas(guest_ns) - ecall_gas
+            points.append({**point, "guest_ns": guest_ns,
+                           "blocks": mldsa_message_blocks(point["bytes"]),
+                           "measured_gas": measured_gas,
+                           "underpriced": (measured_gas / point["gas"]
+                                           if point["gas"] else None)})
+        estimate = {"points": points}
+        # base + per SHAKE256 block, the shape a price of its own would take.
+        # Over the entry rows plus the seam, so every length is measured the
+        # same way; two points suffice because the sweep is three lengths and
+        # the block count is what varies.
+        fit = fit_line([(p["blocks"], p["entry_ns"] + proposal["seam_ns"])
+                        for p in points], min_points=2)
+        if fit:
+            base_ns, per_block_ns, r_squared = fit
+            estimate.update({
+                "base_ns": base_ns,
+                "per_block_ns": per_block_ns,
+                "r_squared": r_squared,
+                "base_gas": max(1, to_gas(base_ns) - ecall_gas),
+                "block_gas": to_gas(per_block_ns) if per_block_ns > 0 else 0,
+            })
+        proposal["mldsa_verify_estimate"] = estimate
     return proposal
 
 
@@ -1591,6 +1769,34 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("Storage (NNInt), in this run's gas unit:")
         print_storage(storage, unit_ns=proposal["unit_ns"],
                       backend=item_backend(bench))
+
+    estimate = proposal.get("mldsa_verify_estimate")
+    if estimate:
+        print()
+        print("ML-DSA-65 VerifySignature -- informational, NOT part of this "
+              "proposal.")
+        print("  The syscall bills it GasCost::verify_signature, the ed25519 "
+              "price, and no")
+        print("  constant in kSyscallGasCostSchedule prices it, so nothing "
+              "below changes")
+        print("  the constants that follow.")
+        print(f"    {'bytes':>8}{'ns/call':>11}{'gas now':>9}"
+              f"{'gas measured':>14}{'underpriced':>13}")
+        for point in estimate["points"]:
+            under = point["underpriced"]
+            under_text = f"{under:>12.2f}x" if under else f"{'-':>13}"
+            print(f"    {point['bytes']:>8}{point['guest_ns']:>11.1f}"
+                  f"{point['gas']:>9}{point['measured_gas']:>14}{under_text}")
+        if "block_gas" in estimate:
+            print(f"  As a price of its own, the sweep fits "
+                  f"{estimate['base_ns']:.1f} ns + "
+                  f"{estimate['per_block_ns']:.1f} ns per "
+                  f"{SHAKE256_RATE_BYTES}-byte SHAKE256 block")
+            print(f"  (R2={estimate['r_squared']:.4f}): about "
+                  f"{estimate['base_gas']} gas + {estimate['block_gas']} per "
+                  "block. Adopting it is a coordinated")
+            print("  gas-schedule update: new schedule entries, so the digest "
+                  "and version move.")
 
     print()
     print("=" * 68)
@@ -1748,7 +1954,9 @@ def guardable(measured, sd):
     of the cheapest, and the cheapest bytestring row sits well above that.
 
     cold/ rows are deliberately absent: nothing charges for a cold read yet,
-    and a guard on an unpriced row gates noise.
+    and a guard on an unpriced row gates noise. The ML-DSA-65 verify rows are
+    present, under syscall/, for the opposite reason: see the comment at the
+    loop that adds them.
     """
     baseline = guard_baseline(measured, sd)
     if not baseline:
@@ -1782,6 +1990,22 @@ def guardable(measured, sd):
             if cv is None or cv > GUARD_MAX_CV:
                 continue
             guards[f"bytestring/{family}/{size}"] = ns / baseline
+    # ML-DSA-65 verify, at every length. Unlike a cold read it IS priced: a
+    # contract can call it today and pays GasCost::verify_signature, the
+    # ed25519 price. That price is already short of the cost, and an engine
+    # regression would widen the gap with no constant moving -- the one change
+    # this gate exists to catch and the digest cannot. So it is guarded like
+    # any priced syscall, under the same syscall/ key the ed25519 rows use.
+    # Kept out of syscall_names (see MLDSA_VERIFY_ROW), so added here; the
+    # guard baseline never sees it, and the cheapest ML-DSA row is hundreds of
+    # times the crossing anyway.
+    for point in mldsa_verify_summary(measured, sd):
+        row_name = f"entry/{MLDSA_VERIFY_FAMILY}/{point['bytes']}"
+        cv = guard_cv(row_name, measured, sd)
+        if cv is None or cv > GUARD_MAX_CV:
+            continue
+        guards[f"syscall/{MLDSA_VERIFY_FAMILY}/{point['bytes']}"] = (
+            point["entry_ns"] / baseline)
     return baseline, guards
 
 
@@ -1904,6 +2128,21 @@ def check_against_reference(data, reference_path):
                     f"{guard_ratio:.2f}x (limit {limit:.2f}x).")
 
     print(f"checked {data.get('_path', '<run>')} against {reference_path}")
+    # The converse of "a guard not measured was not checked": a row measured
+    # with no guard is not checked either, and that is not a failure -- the
+    # reference simply predates it. Said out loud for ML-DSA, whose rows are
+    # newer than the committed reference, so a green gate is not read as
+    # covering them. They are gated from the next mode=reference run on.
+    unguarded = sorted(
+        key for key in current
+        if key.startswith(f"syscall/{MLDSA_VERIFY_FAMILY}/")
+        and key not in reference["guards"])
+    if unguarded:
+        print(f"note: {len(unguarded)} ML-DSA-65 row(s) measured but absent "
+              "from the reference, so not gated:")
+        print("  " + ", ".join(unguarded))
+        print("  Regenerating the reference (mode=reference) adds their "
+              "guards.")
     if not failures:
         print(f"{len(reference['guards'])} guard(s) hold.")
         return 0

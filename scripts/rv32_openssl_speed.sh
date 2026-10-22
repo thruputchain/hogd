@@ -26,6 +26,10 @@
 #   hoisted out of the timing loop, a no-op, the wrong syscall -- which lands
 #   orders of magnitude out. It does not validate the implementation.
 #
+#   ML-DSA-65 is the same kind of check as ed25519: hogd verifies with
+#   mldsa-native, OpenSSL 3.5+ with its own code. Before 3.5 openssl has no
+#   ML-DSA, and the check is skipped rather than failed.
+#
 # The output is JSON so it can be filed to the metrics history beside the
 # benchmark's own, and read back by:
 #   scripts/rv32_syscall_report.py sys.json --crosscheck openssl.json
@@ -94,13 +98,19 @@ fi
 # would turn a missing ed25519 into a run with no SHA256 either. This is a
 # sanity check: it reports what it could measure and stays out of the way of
 # what it could not.
+#
+# ML-DSA-65 exists from OpenSSL 3.5. Older versions reject the name, which is
+# the case the per-algorithm loop already absorbs: a warning, and no ML-DSA row
+# in the report. Its rates come on a +F<n> line of their own, so that line is
+# matched by algorithm name rather than by tag.
 RAW=()
-for algo in sha256 ed25519; do
+for algo in sha256 ed25519 ML-DSA-65; do
   if output="$("${RUNNER[@]}" openssl speed -seconds "${SECONDS_PER_ALGO}" \
     -mr "${algo}" 2>/dev/null)"; then
     while IFS= read -r line; do
       case "${line}" in
       +H:* | +F:* | +F6:*) RAW+=("${line}") ;;
+      +F*:*ML-DSA-65*) RAW+=("${line}") ;;
       esac
     done <<<"${output}"
   else

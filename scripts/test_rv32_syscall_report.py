@@ -812,5 +812,183 @@ class GateTests(unittest.TestCase):
         self.assertIn("syscall/NNIntGet", guards)
 
 
+
+MLDSA_SIZES = (0, 64, 1024)
+
+
+def with_verify_rows(run, ed25519_ns=39000.0, mldsa_ns=103000.0,
+                     mldsa_per_block_ns=300.0, gas=17931, mldsa=True):
+    """Add the VerifySignature sweep to a run: ed25519 at every length and,
+    unless mldsa is False, ML-DSA-65 beside it at the same lengths and the
+    same gas -- the syscall bills both GasCost::verify_signature."""
+    for size in MLDSA_SIZES:
+        name = f"entry/VerifySignature/{size}"
+        run["benchmarks"].append(row(name, ed25519_ns, gas=gas))
+        run["benchmarks"].append(row(name, ed25519_ns * 0.002,
+                                     aggregate="stddev"))
+        if not mldsa:
+            continue
+        blocks = report.mldsa_message_blocks(size)
+        ns = mldsa_ns + mldsa_per_block_ns * (blocks - 1)
+        name = f"entry/VerifySignatureMlDsa65/{size}"
+        run["benchmarks"].append(row(name, ns, gas=gas))
+        run["benchmarks"].append(row(name, ns * 0.002, aggregate="stddev"))
+    if mldsa:
+        # One vm row, at 64 bytes, as the benchmark registers it: 512 calls
+        # per iteration.
+        calls = 512
+        ns = mldsa_ns + 500.0
+        run["benchmarks"].append(
+            row("vm/VerifySignatureMlDsa65/64", ns * calls,
+                items_per_second=calls / (ns * calls) * 1e9))
+    return run
+
+
+class MlDsaVerifyTest(unittest.TestCase):
+    """ML-DSA-65 verify is measured and reported, and never priced from."""
+
+    def calibration(self):
+        calibration = synthetic_calibration(1.6)
+        calibration["provenance"]["engine_fingerprint"] = "abc123"
+        return calibration
+
+    def test_shake256_block_geometry(self):
+        # tr (64) + the 2-byte pure-ML-DSA prefix, padded at a 136-byte rate.
+        self.assertEqual(report.mldsa_message_blocks(0), 1)
+        self.assertEqual(report.mldsa_message_blocks(64), 1)
+        self.assertEqual(report.mldsa_message_blocks(69), 1)
+        # 66 + 70 = 136 fills a block exactly, so padding needs the next.
+        self.assertEqual(report.mldsa_message_blocks(70), 2)
+        self.assertEqual(report.mldsa_message_blocks(1024), 9)
+
+    def test_rows_are_not_syscall_table_rows(self):
+        names = report.syscall_names(report.rows(with_verify_rows(
+            guardable_run())))
+        self.assertIn("VerifySignature/0", names)
+        self.assertFalse([n for n in names if "MlDsa65" in n])
+
+    def test_shared_numbers_do_not_move(self):
+        # Crossing group, shared base, heavy rows, seam: everything the
+        # schedule already proposes is what it was without the ML-DSA rows.
+        without = report.build_schedule(
+            with_verify_rows(guardable_run(), mldsa=False),
+            self.calibration(), 1)
+        with_rows = report.build_schedule(
+            with_verify_rows(guardable_run()), self.calibration(), 1)
+        estimate = with_rows.pop("mldsa_verify_estimate")
+        self.assertEqual(without, with_rows)
+        self.assertEqual(len(estimate["points"]), len(MLDSA_SIZES))
+
+    def test_guard_baseline_does_not_move(self):
+        plain = with_verify_rows(guardable_run(), mldsa=False)
+        mixed = with_verify_rows(guardable_run())
+        base_plain, _ = report.guardable(report.rows(plain),
+                                         report.stddevs(plain))
+        base_mixed, _ = report.guardable(report.rows(mixed),
+                                         report.stddevs(mixed))
+        self.assertEqual(base_plain, base_mixed)
+
+    def test_summary_pairs_each_length_with_ed25519(self):
+        points = report.mldsa_verify_summary(
+            report.rows(with_verify_rows(guardable_run())))
+        self.assertEqual([p["bytes"] for p in points], list(MLDSA_SIZES))
+        for point in points:
+            self.assertEqual(point["ed25519_ns"], 39000.0)
+            self.assertEqual(point["gas"], point["ed25519_gas"])
+        self.assertIsNotNone(points[1]["vm_ns"])
+        self.assertIsNone(points[0]["vm_ns"])
+
+    def test_table_shows_the_underpricing(self):
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_table(with_verify_rows(guardable_run()))
+        text = out.getvalue()
+        self.assertIn("ML-DSA-65 VerifySignature: charged the ed25519 price",
+                      text)
+        self.assertIn("2.64x", text)  # 103000 / 39000
+        self.assertIn("underpriced by that factor", text)
+
+    def test_estimate_is_informational_and_fits_the_blocks(self):
+        proposal = report.build_schedule(with_verify_rows(guardable_run()),
+                                         self.calibration(), 1)
+        estimate = proposal["mldsa_verify_estimate"]
+        # The synthetic sweep is exactly 300 ns per SHAKE256 block.
+        self.assertAlmostEqual(estimate["per_block_ns"], 300.0, places=6)
+        for point in estimate["points"]:
+            self.assertGreater(point["underpriced"], 1.0)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_schedule(with_verify_rows(guardable_run()),
+                                  self.calibration(), 1)
+        text = out.getvalue()
+        self.assertIn("informational, NOT part of this proposal", text)
+        constants = text.split("Proposed hogd/hog_exec/runtime/"
+                               "gas_cost_table.h constants")[1]
+        self.assertNotIn("MlDsa", constants)
+        self.assertNotIn("ML-DSA", constants)
+
+    def test_rows_are_guarded_under_syscall(self):
+        text = reference_text(with_verify_rows(guardable_run()))
+        for size in MLDSA_SIZES:
+            self.assertIn(f"guard syscall/VerifySignatureMlDsa65/{size} ",
+                          text)
+
+    def test_an_older_reference_passes_and_says_what_it_did_not_gate(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        older = reference_text(with_verify_rows(guardable_run(),
+                                                mldsa=False))
+        path = write_reference(self, older)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = report.check_against_reference(
+                with_verify_rows(guardable_run()), path)
+        self.assertEqual(status, 0)
+        self.assertIn("3 ML-DSA-65 row(s) measured but absent", out.getvalue())
+
+    def test_a_doubled_mldsa_row_fails_its_guard(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.tmp = tmp.name
+        path = write_reference(self, reference_text(
+            with_verify_rows(guardable_run())))
+        slow = with_verify_rows(guardable_run(), mldsa_ns=250000.0)
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = report.check_against_reference(slow, path)
+        self.assertEqual(status, 1)
+        self.assertIn("syscall/VerifySignatureMlDsa65/0", out.getvalue())
+
+    def test_openssl_mldsa_line_is_parsed_by_name(self):
+        speed = report.parse_openssl_speed({"raw": [
+            "+F6:0:Ed25519:40000.0:15000.0",
+            "+F14:0:ML-DSA-65:20000.0:9000.0:24000.0",
+        ]})
+        self.assertEqual(speed["mldsa65"], {"verify_per_second": 24000.0})
+        self.assertEqual(speed["ed25519"]["verify_per_second"], 15000.0)
+
+    def test_openssl_without_mldsa_skips_the_row(self):
+        run = with_verify_rows(guardable_run())
+        openssl = {"raw": ["+F6:0:Ed25519:40000.0:15000.0"]}
+        out = io.StringIO()
+        with redirect_stdout(out):
+            status = report.print_crosscheck(run, openssl)
+        self.assertEqual(status, 0)
+        self.assertNotIn("ML-DSA-65 verify ns", out.getvalue())
+
+    def test_openssl_with_mldsa_adds_a_crosscheck_row(self):
+        run = with_verify_rows(guardable_run())
+        openssl = {"raw": ["+F6:0:Ed25519:40000.0:15000.0",
+                           "+F14:0:ML-DSA-65:20000.0:9000.0:24000.0"]}
+        out = io.StringIO()
+        with redirect_stdout(out):
+            report.print_crosscheck(run, openssl)
+        line = [l for l in out.getvalue().splitlines()
+                if l.startswith("  ML-DSA-65 verify ns")]
+        self.assertEqual(len(line), 1)
+        self.assertIn("ok", line[0])
+
+
 if __name__ == "__main__":
     unittest.main()
