@@ -26,6 +26,7 @@ fi
 
 # Full .git URLs prevent prefix collisions between protocol repositories.
 # Explicit .git entries win over no-suffix HTTPS entries (longest match).
+# hogx is read only as a submodule of the chuckd that groundhog-go pins.
 while read -r old new; do
   if [[ -z "$token" || "$token" == '<no value>' ]]; then
     target="git@github.com:thruputchain/${new}.git"
@@ -43,6 +44,7 @@ while read -r old new; do
 done <<'REPOSITORIES'
 hogd hogd
 chuckd chuckd
+hogx hogx
 protocol thruput-protocol
 protocol-go thruput-protocol-go
 protocol-rs thruput-protocol-rs
