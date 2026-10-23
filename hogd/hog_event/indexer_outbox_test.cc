@@ -82,27 +82,28 @@ make_event(const ProposedTransaction &body, uint8_t marker,
 ProposalTxs
 make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : proposal_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
 
   ProposalTxs proposal_txs;
-  const size_t split = std::min<size_t>(2, hashes.size());
+  const size_t split = std::min<size_t>(2, signed_hashes.size());
   if (split != 0) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(hashes.data(),
-                                                              split),
-                             proposal_txs.hash)();
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data(), split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
   }
-  if (split != hashes.size()) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(
-                                 hashes.data() + split, hashes.size() - split),
-                             proposal_txs.hash)();
+  if (split != signed_hashes.size()) {
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data() + split,
+                                               signed_hashes.size() - split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data() + split,
                                  nondeterministic_data.size() - split),
@@ -165,7 +166,7 @@ make_committed_with_proposal(BlockHeight height,
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(events, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_header.block_timepoint = 100 + height;
@@ -258,7 +259,7 @@ make_committed_payload_golden_fixture()
   ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs, payload.tx_bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(payload.tx_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -975,7 +976,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   ProposedTransaction body_c = make_body(3);
   ProposedTransactionBatch proposal_bodies{body_a, body_b, body_c};
   ProposalTxs proposal_txs = make_canonical_proposal_txs(proposal_bodies);
-  ASSERT_GE(proposal_txs.hash.segment_tokens.size(), 2);
+  ASSERT_GE(proposal_txs.signed_hash.segment_tokens.size(), 2);
   ASSERT_GE(proposal_txs.nondeterministic_data.segment_tokens.size(), 2);
 
   ProposedTransactionBatch arrival_bodies{body_a, body_b, body_c};
@@ -1114,13 +1115,15 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
   // the one event log, between its root output and its events. It moved again
   // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body.
+  // absent key at the end of the one transaction body. It moved again, at the
+  // same length, when ProposalTxs began naming transactions by
+  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0xee, 0x08, 0xab, 0x8e, 0xeb, 0x72, 0xa9,
-                                   0x64, 0xa9, 0xb3, 0xd2, 0x90, 0xeb, 0xaf,
-                                   0xbc, 0xa9, 0xb9, 0x07, 0x63, 0xfb, 0xf8,
-                                   0x93, 0x78, 0xff, 0xb9, 0xdd, 0xf8, 0xfc,
-                                   0x6a, 0xa4, 0x41, 0x7e};
+  const SHA256Hash kExpectedDigest{0x52, 0x56, 0x10, 0xd9, 0x5b, 0x85, 0x81,
+                                   0x06, 0xc1, 0x50, 0x32, 0x6d, 0x33, 0x41,
+                                   0x35, 0x96, 0xc0, 0x78, 0xf7, 0x58, 0x93,
+                                   0x69, 0x6d, 0x2d, 0x12, 0x96, 0x6a, 0x9a,
+                                   0xfd, 0x16, 0x1b, 0xa7};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);

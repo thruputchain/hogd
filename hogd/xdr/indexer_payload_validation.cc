@@ -8,14 +8,12 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
-#include "hogd/base/xdr_util.h"
 #include "hogd/container/merkle/allocator.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/merkle_trie.h"
 #include "hogd/container/merkle/node.h"
 #include "hogd/crypto/crypto.h"
 #include "indexer.hh"
-#include "proposal.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -87,24 +85,18 @@ compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs,
   return trie.get_root_hash();
 }
 
-x23::Async<IndexerPayloadStatus<TxsHash>>
-compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs)
+IndexerPayloadStatus<TxsHash>
+compute_indexer_txs_root(const ProposedTransactionBatch &tx_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
-  // Recomputed from this node's own outbox and index, never a peer message.
-  if (!(co_await parallel_batch_to_t(proposal_txs.hash, hashes,
-                                     kNoBatchSizeLimit))) {
-    co_return std::unexpected("malformed canonical transaction hash batch");
-  }
   MerkleTriePrefix trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
-  for (const TransactionHash &hash : hashes) {
-    if (!trie.insert(HexArray(hash), std::span<const std::byte>())) {
-      co_return std::unexpected(
-          "canonical transaction hash batch has duplicates");
+  for (const ProposedTransaction &body : tx_bodies) {
+    if (!trie.insert(HexArray(sha256(body.signed_tx.tx)),
+                     std::span<const std::byte>())) {
+      return std::unexpected("transaction batch has duplicate hashes");
     }
   }
   trie.generate_all_hashes(/*num_threads=*/1);
-  co_return trie.get_root_hash();
+  return trie.get_root_hash();
 }
 
 x23::Async<IndexerPayloadStatus<void>>

@@ -93,8 +93,13 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
+  //
+  // Appends each scheduled tx to [txs], its [TransactionHash] to [tx_hashes]
+  // and the [SignedTransactionHash] of its cached encoding to
+  // [signed_tx_hashes], keeping the three aligned.
   x23::Async<void> schedule(size_t num_txs,
                             x23::XdrVec<TransactionHash> &tx_hashes,
+                            SignedTransactionHashBatch &signed_tx_hashes,
                             x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
@@ -116,12 +121,17 @@ public:
   }
 
   // The cached tx with this exact signed encoding, or null if its body is not
-  // cached or is cached under a different encoding.
+  // cached or is cached under a different encoding. When the tx is found and
+  // [tx_hash] is non-null, sets [*tx_hash] to the tx's [TransactionHash].
   std::shared_ptr<const SignedTransaction>
-  find_signed_tx(const SignedTransactionHash &signed_tx_hash)
+  find_signed_tx(const SignedTransactionHash &signed_tx_hash,
+                 TransactionHash *tx_hash = nullptr)
   {
     auto [tx_value_ptr, _] = txs_.find(signed_tx_hash);
     if (tx_value_ptr) {
+      if (tx_hash) {
+        *tx_hash = (*tx_value_ptr)->tx_hash;
+      }
       return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
                                                       &(*tx_value_ptr)->tx);
     }
@@ -352,6 +362,8 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    // The hash of [tx]'s body, its key in [txs_by_body_].
+    TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
   };
