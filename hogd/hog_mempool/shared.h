@@ -21,6 +21,7 @@
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
 #include "hogd/metrics/metrics.h"
+#include "hogd/metrics/shared.h"
 #include "hogd/xdr/proposal_hash.h"
 #include "loadgen.hh"
 #include "parallel.hh"
@@ -412,6 +413,7 @@ MempoolMetrics::init()
                         "Duration of scheduler removal passes in seconds.",
                         latency_bounds(kMempoolWorkLatencyBounds));
 
+  register_resident_bytes(kComponent);
   metrics.mark_done_with_init(kComponent);
 }
 

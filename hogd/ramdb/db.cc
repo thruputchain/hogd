@@ -1,6 +1,7 @@
 #include "hogd/ramdb/db.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono> // NOLINT(misc-include-cleaner)
@@ -16,6 +17,7 @@
 #include <string_view>
 #include <thread>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/io.h"
@@ -28,6 +30,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/metrics/metrics.h"
+#include "hogd/metrics/shared.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/disk_reader.h"
@@ -37,6 +40,13 @@
 namespace hogd {
 
 namespace {
+
+// Snapshot of a large ramdb can stall for multiple seconds. The top bucket
+// is 120 s; anything longer lands in +Inf.
+constexpr std::array<double, 12> kSnapshotDurationBounds = {0.01, 0.05, 0.1,
+                                                            0.25, 0.5,  1,
+                                                            2,    5,    10,
+                                                            30,   60,   120};
 
 constexpr size_t
 active_cores(const WorkerPool &pool)
@@ -121,12 +131,41 @@ Database::set_active(bool yes)
 void
 Database::register_metrics()
 {
-  metrics_.snap_bytes_out_metric = Metrics::instance().gauge(
-      Metrics::ComponentName::kDb, "ramdb_snap_bytes_out",
+  Metrics &registry = Metrics::instance();
+  constexpr Metrics::ComponentName kComponent = Metrics::ComponentName::kDb;
+  metrics_.snap_bytes_out_metric = registry.gauge(
+      kComponent, "ramdb_snap_bytes_out",
       "Number of bytes written to all snapshot files since the last database "
       "recovery.");
+  metrics_.uncovered_wal_bytes =
+      registry.gauge(kComponent, "ramdb_uncovered_wal_bytes",
+                     "WAL bytes not yet covered by a completed snapshot.");
+  metrics_.last_snapshot_bytes =
+      registry.gauge(kComponent, "ramdb_last_snapshot_bytes",
+                     "On-disk size in bytes of the last completed snapshot.");
+  metrics_.snapshot_in_progress =
+      registry.gauge(kComponent, "ramdb_snapshot_in_progress",
+                     "1 while a snapshot is admitted or running, otherwise 0.");
+  metrics_.snapshot_duration_seconds = registry.histogram(
+      kComponent, "ramdb_snapshot_duration_seconds",
+      "Seconds from snapshot start through durable rename, including failed "
+      "attempts.",
+      {kSnapshotDurationBounds.begin(), kSnapshotDurationBounds.end()});
+  metrics_.loglet_region_bytes =
+      registry.gauge(kComponent, "ramdb_loglet_region_bytes",
+                     "Bytes in the loglet mapping.");
+  metrics_.loglet_memory_items =
+      registry.gauge(kComponent, "ramdb_loglet_memory_items",
+                     "Loglets holding in-memory items.");
+  metrics_.loglet_disk_buffering =
+      registry.gauge(kComponent, "ramdb_loglet_disk_buffering",
+                     "Loglets buffering writes to disk.");
+  metrics_.loglet_free = registry.gauge(kComponent, "ramdb_loglet_free",
+                                        "Loglets on the free list.");
   disk_writer_.register_metrics();
-  Metrics::instance().mark_done_with_init(Metrics::ComponentName::kDb);
+  register_resident_bytes(kComponent);
+  registry.mark_done_with_init(kComponent);
+  metrics_registered_.store(true, std::memory_order_release);
 
   record_metrics();
 }
@@ -134,9 +173,30 @@ Database::register_metrics()
 void
 Database::record_metrics()
 {
+  if (!metrics_registered_.load(std::memory_order_acquire)) {
+    return;
+  }
   metrics_.snap_bytes_out_metric.record(
       metrics_.snap_bytes_out_.load(std::memory_order_relaxed));
   disk_writer_.record_metrics();
+
+  const size_t total = wal_bytes_at_open_ + disk_writer_.get_bytes_out();
+  const size_t covered = covered_wal_bytes_.load(std::memory_order_relaxed);
+  const size_t uncovered = total >= covered ? total - covered : 0;
+  metrics_.uncovered_wal_bytes.record(saturating_gauge_value(uncovered));
+  metrics_.last_snapshot_bytes.record(saturating_gauge_value(
+      last_snapshot_bytes_.load(std::memory_order_relaxed)));
+  metrics_.snapshot_in_progress.record(
+      snapshot_running_.load(std::memory_order_acquire) ? 1 : 0);
+
+  const LogletUsageStats loglets = loglet_allocator_->usage_stats();
+  metrics_.loglet_region_bytes.record(
+      saturating_gauge_value(loglets.region_bytes));
+  metrics_.loglet_memory_items.record(
+      saturating_gauge_value(loglets.memory_items));
+  metrics_.loglet_disk_buffering.record(
+      saturating_gauge_value(loglets.disk_buffering));
+  metrics_.loglet_free.record(saturating_gauge_value(loglets.free));
 }
 
 void
@@ -222,6 +282,8 @@ Database::background_worker(const std::stop_token &stoken)
       if (needed)
         DiskReader::cleanup(dir_);
     }
+
+    record_metrics();
   }
 }
 
@@ -353,6 +415,20 @@ Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
                          std::latch &setup_latch)
 {
   debug("snapshot starting in background");
+  // Records on every return, including the failure paths below. A null handle
+  // means register_metrics() has not run; tests snapshot without it.
+  struct SnapshotDuration {
+    std::atomic<bool> &ready;
+    Metrics::Histogram &histogram;
+    ElapsedTimer timer;
+    ~SnapshotDuration()
+    {
+      if (ready.load(std::memory_order_acquire) && histogram) {
+        histogram.record(timer.elapsed());
+      }
+    }
+  } snapshot_duration{.ready = metrics_registered_,
+                      .histogram = metrics_.snapshot_duration_seconds};
   ElapsedTimer timer{};
 
   struct Stats {

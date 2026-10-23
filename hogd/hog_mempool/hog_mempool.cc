@@ -24,6 +24,7 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
@@ -48,6 +49,9 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
+  // instance() is otherwise lazy on the first RPC, which would hide
+  // resident_bytes on an idle mempool.
+  MempoolMetrics::instance();
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
