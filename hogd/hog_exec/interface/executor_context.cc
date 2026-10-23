@@ -26,9 +26,11 @@
 #include "hogd/hog_exec/runtime/view/view.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
+#include "types.hh"
 #include "view.hh"
 #include "x23/async.h"
 #include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
