@@ -123,6 +123,22 @@ target_include_directories(
 
 set_property(TARGET multiexec_runner PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
 
+# Add out-of-tree benchmark executables, such as Whitney's runner, in the
+# same directory scope as multiexec_runner.
+set(HOGD_EXTRA_BENCH_DIRS "" CACHE STRING "Semicolon-separated absolute directories containing extra benchmarks")
+set(extra_bench_index 0)
+foreach(extra_bench_dir IN LISTS HOGD_EXTRA_BENCH_DIRS)
+  if(NOT IS_ABSOLUTE "${extra_bench_dir}" OR
+     NOT IS_DIRECTORY "${extra_bench_dir}" OR
+     NOT EXISTS "${extra_bench_dir}/CMakeLists.txt" OR
+     IS_DIRECTORY "${extra_bench_dir}/CMakeLists.txt")
+    message(FATAL_ERROR "HOGD_EXTRA_BENCH_DIRS entry must be an absolute path to an existing directory with a CMakeLists.txt: ${extra_bench_dir}")
+  endif()
+  get_filename_component(extra_bench_name "${extra_bench_dir}" NAME)
+  add_subdirectory("${extra_bench_dir}" "${CMAKE_CURRENT_BINARY_DIR}/extra/${extra_bench_index}-${extra_bench_name}")
+  math(EXPR extra_bench_index "${extra_bench_index} + 1")
+endforeach()
+
 add_executable(
   makespan_runner
   makespan_runner.cc
