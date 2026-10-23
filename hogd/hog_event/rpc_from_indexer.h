@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <type_traits>
 
 #include "hogd/base/rpc_server.h"
 #include "hogd/hog_event/rpc_context.h"
@@ -13,30 +14,49 @@ namespace hogd {
 class EventIndexerRpc {
 public:
   using rpc_service = EventIndexer1;
+  // Each procedure is passed its connection's stream, over which a chunked
+  // pull sends the block's chunks to the IndexerEvent1 program the indexer
+  // serves there.
+  static constexpr bool kServesWithStream = true;
 
   EventIndexerRpc(EventRPCContext &ctx) : ctx_(ctx) {}
 
+  template<typename Stream = void>
   x23::Async<EventIndexerPullResult>
-  event_indexer_pull_next(EventIndexerPullRequest request)
+  event_indexer_pull_next(EventIndexerPullRequest request,
+                          Stream * /*stream*/ = nullptr)
   {
     co_return co_await ctx_.pull_indexer_next(request, draining_);
   }
 
-  IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
+  template<typename Stream = void>
+  IndexerTxFailureNoticeBatch
+  event_indexer_pull_tx_failures(Stream * /*stream*/ = nullptr)
   {
     return ctx_.pull_tx_failures();
   }
 
+  template<typename Stream = void>
   x23::Async<EventIndexerChunkedPullResult>
-  event_indexer_pull_next_chunked(EventIndexerPullRequest request)
+  event_indexer_pull_next_chunked(EventIndexerPullRequest request,
+                                  Stream *stream = nullptr)
   {
-    co_return co_await ctx_.pull_indexer_next_chunked(request, draining_);
-  }
-
-  x23::Async<EventIndexerBlockPairsResult>
-  event_indexer_pull_block_pairs(EventIndexerBlockPairsRequest request)
-  {
-    co_return co_await ctx_.pull_indexer_block_pairs(request);
+    if constexpr (std::is_void_v<Stream>) {
+      EventIndexerChunkedPullResult result(
+          EventIndexerPullOutcome::EventIndexerPullInternalFailure);
+      result.diagnostic() = "chunked pull has no connection to send chunks";
+      co_return result;
+    }
+    else {
+      // The stream outlives this call: a handler in flight keeps its
+      // connection open.
+      IndexerEvent1::client<Stream *> indexer{stream};
+      co_return co_await ctx_.pull_indexer_next_chunked(
+          request, draining_,
+          [indexer](const EventIndexerBlockChunk &chunk) mutable {
+            return indexer.indexer_event_block_chunk(chunk);
+          });
+    }
   }
 
   // Set by ~EventIndexerServer before it releases parked pulls. From then on

@@ -56,13 +56,6 @@ public:
         EventIndexerPullOutcome::EventIndexerPullNotReady);
   }
 
-  static EventIndexerBlockPairsResult event_indexer_pull_block_pairs(
-      const EventIndexerBlockPairsRequest & /*unused*/)
-  {
-    return EventIndexerBlockPairsResult(
-        EventIndexerBlockPairsOutcome::EventIndexerBlockPairsNotReady);
-  }
-
 private:
   std::shared_ptr<SuspendedIndexerPullState> state_;
 };

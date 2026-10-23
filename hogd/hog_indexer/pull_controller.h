@@ -3,11 +3,13 @@
 #include <atomic>
 #include <chrono>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
+#include <vector>
 
 #include "hogd/hog_indexer/shared.h"
 
@@ -25,6 +27,29 @@ struct IndexerPullControllerOptions {
   // park and there is nothing to wait for first. Nonzero only matters against
   // a server that answers every caught-up pull eagerly.
   std::chrono::milliseconds caught_up_poll_delay = std::chrono::milliseconds(0);
+};
+
+// Serves IndexerEvent1 on one connection to the event server, collecting the
+// chunks of the block that connection's chunked pull is answering. Pulls on a
+// connection are sequential and the event server replies only after every
+// chunk is acknowledged, so it holds one block's chunks at a time.
+class IndexerChunkSink {
+public:
+  using rpc_service = IndexerEvent1;
+
+  void indexer_event_block_chunk(EventIndexerBlockChunk chunk);
+
+  // The batches of the block a chunked pull answered with [header], once
+  // all of its chunks are in; nullopt if any is missing. Clears the sink.
+  std::optional<IndexerCommittedBlockPayload>
+  take_block(const EventIndexerChunkedBlock &header);
+
+private:
+  std::mutex mutex_;
+  std::vector<std::optional<EventIndexerBlockChunk>> chunks_;
+  // The block the chunks belong to, set by the first.
+  BlockHeight height_ = -1;
+  IndexerCommittedBlockIdentity identity_{};
 };
 
 // Owns the standalone indexer's event connection and durable replay loop.
@@ -45,12 +70,10 @@ private:
   void run(const std::stop_token &stop);
   bool connect_once();
   bool pull_tx_failures(event_indexer_client_t &client);
-  // Reassembles a chunked pull's block, pulling the pairs its reply did not
-  // carry. nullopt if the server stopped being ready part way; the next pull
-  // starts again from durable progress.
-  std::optional<EventIndexerPulledBlock>
-  pull_remaining_pairs(event_indexer_client_t &client,
-                       EventIndexerChunkedBlock chunked);
+  // The block a chunked pull answered, assembled from the chunks [sink]
+  // collected before the reply.
+  static EventIndexerPulledBlock
+  assemble_block(IndexerChunkSink &sink, EventIndexerChunkedBlock header);
   bool initialize_origin_if_needed(const IndexerOutboxOrigin &origin);
   bool wait(std::stop_token stop, std::chrono::milliseconds delay);
   void fail_event_client();
@@ -68,6 +91,8 @@ private:
   IndexerPullControllerOptions options_;
   std::mutex event_client_mutex_;
   std::optional<event_indexer_client_t> event_client_;
+  // Serves the chunks of event_client_'s pulls; replaced with it.
+  std::shared_ptr<IndexerChunkSink> chunk_sink_;
   std::mutex wait_mutex_;
   std::condition_variable_any wake_;
   bool caught_up_ = false;

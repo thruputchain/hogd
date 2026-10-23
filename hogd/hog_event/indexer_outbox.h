@@ -21,7 +21,6 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
-#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -29,19 +28,19 @@ inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 1;
 inline constexpr size_t kIndexerRpcRecordMarkerBytes = sizeof(uint32_t);
 inline constexpr size_t kMaxIndexerEventPullRpcRecordBytes =
     kIndexerRpcMaxMessageSize + kIndexerRpcRecordMarkerBytes;
-// The largest event/body pair the chunked pull serves. A chunked pull reply
-// carries at least one pair beside the block's header, so this leaves room for
-// the largest ConsensusValue and the fixed reply fields. A block of any size
-// whose pairs are each within it can be pulled.
-inline constexpr size_t kIndexerChunkedReplyOverheadBytes = 4096;
+// Bytes of event/body pairs per chunk of a chunked pull, and how many chunks
+// are in flight at once. A chunk carries at least one pair, so one larger than
+// this still goes out alone.
+inline constexpr size_t kIndexerChunkPairBytes = size_t{16} << 20;
+inline constexpr size_t kMaxIndexerChunksInFlight = 4;
+// The largest pair a chunk can carry alone: the x23 record less the chunk's
+// fixed fields. Nothing bounds a block's pairs as a whole. The XDR does not
+// bound one pair either (a transaction and its root output are unbounded
+// opaques); the transaction size and gas limits keep a real pair far below
+// this.
+inline constexpr size_t kIndexerChunkOverheadBytes = 4096;
 inline constexpr size_t kMaxIndexerPairBytes =
-    kIndexerRpcMaxMessageSize -
-    x23::detail::xdr_size_bounds<ConsensusValue>().max_ -
-    kIndexerChunkedReplyOverheadBytes;
-static_assert(kEventIndexerInlinePairBytes < kMaxIndexerPairBytes);
-// Nothing bounds a block's pairs as a whole. The XDR does not bound one pair
-// either (a transaction and its root output are unbounded opaques); the
-// transaction size and gas limits keep a real pair far below this.
+    kIndexerRpcMaxMessageSize - kIndexerChunkOverheadBytes;
 // An outbox record file's payload. A committed record stores only its
 // ConsensusValue, its pairs living in the block's events file; a candidate
 // record, which embeds its pairs, must also fit the single-reply pull record.

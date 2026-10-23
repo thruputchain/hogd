@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -172,48 +173,6 @@ commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
                                   bodies);
 }
 
-// The chunked pull reply carrying a whole block, as the event server answers a
-// block whose pairs fit one reply.
-EventIndexerChunkedPullResult
-chunked_block_reply(const IndexerOutboxOrigin &origin,
-                    const IndexerCommittedBlock &block)
-{
-  EventIndexerChunkedPullResult result(
-      EventIndexerPullOutcome::EventIndexerPullBlock);
-  EventIndexerChunkedBlock &chunked = result.chunked_block();
-  chunked.origin = origin;
-  chunked.format_version = block.payload.format_version;
-  chunked.consensus_value = block.payload.consensus_value;
-  chunked.identity = block.identity;
-  chunked.pair_count =
-      static_cast<std::uint32_t>(block.payload.event_logs.size());
-  for (std::size_t i = 0; i < block.payload.event_logs.size(); ++i) {
-    chunked.first_pairs.push_back(EventIndexerBlockPair{
-        .event_log = block.payload.event_logs[i],
-        .tx_body = block.payload.tx_bodies[i],
-    });
-  }
-  return result;
-}
-
-// The procedures a fake event server whose blocks fit one reply never serves:
-// the indexer pulls with event_indexer_pull_next_chunked.
-EventIndexerPullResult
-unexpected_single_reply_pull()
-{
-  ADD_FAILURE() << "indexer pulled with event_indexer_pull_next";
-  return EventIndexerPullResult(
-      EventIndexerPullOutcome::EventIndexerPullInternalFailure);
-}
-
-EventIndexerBlockPairsResult
-unexpected_block_pairs_pull()
-{
-  ADD_FAILURE() << "indexer pulled pairs of a block it was sent whole";
-  return EventIndexerBlockPairsResult(
-      EventIndexerBlockPairsOutcome::EventIndexerBlockPairsInternalFailure);
-}
-
 void
 rewrite_outbox_protocol(std::string_view directory, BlockHeight height,
                         std::string_view protocol)
@@ -300,6 +259,7 @@ wait_for_condition(Predicate &&predicate, std::chrono::milliseconds timeout)
 class CaughtUpPullRpc {
 public:
   using rpc_service = EventIndexer1;
+  static constexpr bool kServesWithStream = true;
 
   CaughtUpPullRpc()
   {
@@ -329,8 +289,10 @@ public:
     notice_.diagnostic.cause.conflict().code = DbConflictCode::ValueMismatch;
   }
 
+  template<typename Stream = void>
   x23::Async<EventIndexerChunkedPullResult>
-  event_indexer_pull_next_chunked(EventIndexerPullRequest request)
+  event_indexer_pull_next_chunked(EventIndexerPullRequest request,
+                                  Stream *stream = nullptr)
   {
     {
       std::lock_guard lock(mutex_);
@@ -343,7 +305,27 @@ public:
           EventIndexerPullOutcome::EventIndexerPullNotReady);
     }
     if (call == 1) {
-      co_return chunked_block_reply(origin_, block_);
+      if constexpr (!std::is_void_v<Stream>) {
+        // The block has no transactions: a run of one empty chunk.
+        IndexerEvent1::client<Stream *> indexer{stream};
+        co_await indexer.indexer_event_block_chunk(EventIndexerBlockChunk{
+            .block_height =
+                block_.payload.consensus_value.proposal_header.block_height,
+            .identity = block_.identity,
+            .chunk_index = 0,
+            .chunk_count = 1,
+        });
+      }
+      EventIndexerChunkedPullResult result(
+          EventIndexerPullOutcome::EventIndexerPullBlock);
+      result.chunked_block() = EventIndexerChunkedBlock{
+          .origin = origin_,
+          .format_version = block_.payload.format_version,
+          .consensus_value = block_.payload.consensus_value,
+          .identity = block_.identity,
+          .chunk_count = 1,
+      };
+      co_return result;
     }
     EventIndexerChunkedPullResult result(
         EventIndexerPullOutcome::EventIndexerPullCaughtUp);
@@ -351,19 +333,19 @@ public:
     co_return result;
   }
 
+  template<typename Stream = void>
   static EventIndexerPullResult
-  event_indexer_pull_next(const EventIndexerPullRequest & /*unused*/)
+  event_indexer_pull_next(const EventIndexerPullRequest & /*unused*/,
+                          Stream * /*stream*/ = nullptr)
   {
-    return unexpected_single_reply_pull();
+    ADD_FAILURE() << "indexer pulled with event_indexer_pull_next";
+    return EventIndexerPullResult(
+        EventIndexerPullOutcome::EventIndexerPullInternalFailure);
   }
 
-  static EventIndexerBlockPairsResult event_indexer_pull_block_pairs(
-      const EventIndexerBlockPairsRequest & /*unused*/)
-  {
-    return unexpected_block_pairs_pull();
-  }
-
-  x23::Async<IndexerTxFailureNoticeBatch> event_indexer_pull_tx_failures()
+  template<typename Stream = void>
+  x23::Async<IndexerTxFailureNoticeBatch>
+  event_indexer_pull_tx_failures(Stream * /*stream*/ = nullptr)
   {
     IndexerTxFailureNoticeBatch notices;
     if (!notice_returned_.exchange(true, std::memory_order_relaxed)) {
@@ -429,21 +411,17 @@ public:
     co_return result;
   }
 
-  static IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
-  {
-    return {};
-  }
-
   static EventIndexerPullResult
   event_indexer_pull_next(const EventIndexerPullRequest & /*unused*/)
   {
-    return unexpected_single_reply_pull();
+    ADD_FAILURE() << "indexer pulled with event_indexer_pull_next";
+    return EventIndexerPullResult(
+        EventIndexerPullOutcome::EventIndexerPullInternalFailure);
   }
 
-  static EventIndexerBlockPairsResult event_indexer_pull_block_pairs(
-      const EventIndexerBlockPairsRequest & /*unused*/)
+  static IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
   {
-    return unexpected_block_pairs_pull();
+    return {};
   }
 
   bool wait_for_calls(std::size_t count, std::chrono::milliseconds timeout)
@@ -670,16 +648,15 @@ TEST(IndexerPullController, IngestsLiveCommitsAfterCatchingUpAtGenesis)
   }
 }
 
-TEST(IndexerPullController, IngestsBlockWhosePairsSpanSeveralReplies)
+TEST(IndexerPullController, IngestsBlockSentBackAsSeveralChunks)
 {
   TmpDir event_dir;
   TmpDir indexer_dir;
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   EventRPCContext event(event_dir.directory());
-  // Every reply then carries exactly one pair, so a block of n pairs takes the
-  // chunked pull and n - 1 pair pulls.
-  event.set_indexer_pair_budget_bytes_for_test(1);
+  // Every chunk is then one pair, so the block arrives as three chunks.
+  event.set_indexer_chunk_pair_bytes_for_test(1);
   ASSERT_TRUE(event.reconcile_outbox_tip(0, genesis)().has_value());
   const std::vector<ProposedTransaction> bodies{make_body(201), make_body(202),
                                                 make_body(203)};

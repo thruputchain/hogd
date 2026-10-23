@@ -54,6 +54,27 @@ make_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp, bool retry = false,
   }
 }
 
+// make_rpc_client() for a connection the client also serves on, so the server
+// can call back over it: [serve] is passed the new stream's configurator and
+// registers its servers before the client starts reading. Does not retry.
+template<typename RpcService, typename Serve>
+x23::Async<hogd::ErrnoStatus<rpc_client_t<RpcService>>>
+make_serving_rpc_client(sockaddr_storage ss, x23::CoroPoll &cp,
+                        size_t max_message_size, Serve serve)
+{
+  info("make_serving_rpc_client: connecting to {}", x23::HostPort(ss));
+  std::expected<int, x23::Errno> res = co_await cp.tcpconnect(&ss);
+  if (!res) {
+    error("could not create RPC client on {}: {}", x23::show_ipaddr(ss),
+          res.error().error_code().message());
+    co_return std::unexpected(res.error());
+  }
+  auto client_config = x23::rpc_stream_logged(cp, *res);
+  client_config->max_message_size = max_message_size;
+  serve(client_config);
+  co_return client_config->template client<RpcService>();
+}
+
 template<typename RpcService>
 auto
 make_rpc_client(sockaddr_storage &ss, bool retry = false,
