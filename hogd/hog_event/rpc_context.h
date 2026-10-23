@@ -101,6 +101,12 @@ public:
   {
     close_reserved_test_hook_ = std::move(hook);
   }
+  // Runs in open_block() after the id is reserved and lock_ is released,
+  // before the events file is created.
+  void set_open_reserved_test_hook(std::function<void(BlockID)> hook)
+  {
+    open_reserved_test_hook_ = std::move(hook);
+  }
   static constexpr size_t kMaxTxFailureNotices = 256;
 
 private:
@@ -204,6 +210,7 @@ private:
   std::string work_directory_;
   IndexerOutboxStore indexer_outbox_store_;
   std::function<void(BlockID)> close_reserved_test_hook_;
+  std::function<void(BlockID)> open_reserved_test_hook_;
 };
 
 } // namespace hogd

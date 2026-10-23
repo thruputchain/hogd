@@ -1425,6 +1425,52 @@ TEST_F(EventRpcTest, OpenBlockTwiceLeavesTheFirstBlockIntact)
   EXPECT_EQ(pairs->tx_bodies.size(), 1U);
 }
 
+TEST_F(EventRpcTest, OpenIsRejectedWhileOpenBlockIsReserved)
+{
+  // open_block() creates the temp events file with lock_ released.  The id
+  // is reserved first so that a second open in that window is rejected
+  // before create_events_file() can unlink and recreate the temp name the
+  // first open is about to use.  Without the reservation the second open
+  // would insert the context and the first would fail its own insertion.
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc mempool_rpc(ctx);
+
+  std::latch open_reserved(1);
+  std::latch racing_open_done(1);
+  ctx.set_open_reserved_test_hook([&](BlockID /*block_id*/) {
+    open_reserved.count_down();
+    racing_open_done.wait();
+  });
+  std::atomic<bool> open_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    EXPECT_EQ(co_await mempool_rpc.eventsched_open_block(1),
+              RPCError::kRPCNone);
+    open_completed.store(true);
+  }();
+
+  open_reserved.wait();
+  const std::string temp_file =
+      EventBlockContext::temp_events_filename(temp_dir(), 1);
+  // Reserved, but the file does not exist yet: this is the window.
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+  // The racing open is rejected at the reservation, before the hook.
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCBadBlockID);
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+  racing_open_done.count_down();
+  async();
+  EXPECT_TRUE(open_completed.load());
+  EXPECT_TRUE(std::filesystem::exists(temp_file));
+
+  // Only the first open's file exists, and it publishes normally.
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(1, 1)();
+  EXPECT_EQ(closed.error(), RPCError::kRPCNone);
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir(),
+                                               closed.root_hash())));
+}
+
 TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
 {
   EventRPCContext ctx(temp_dir());

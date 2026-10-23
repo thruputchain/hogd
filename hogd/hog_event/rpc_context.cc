@@ -171,6 +171,9 @@ EventRPCContext::open_block(BlockID block_id)
     }
     block_operations_.emplace(block_id, BlockOperation::kOpening);
   }
+  if (open_reserved_test_hook_) {
+    open_reserved_test_hook_(block_id);
+  }
 
   // The only disk I/O on the open path.  Done outside lock_ so a slow
   // filesystem delays this open alone, not every operation on the context.
