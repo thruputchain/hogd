@@ -104,7 +104,7 @@ visit_genesis_execution_prerequisites(
   visit_auth_data(kGenesisRootContractAddress, root_auth);
 
   auto token = make_native_contract(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken);
   visit_contract(token);
   visit_deployment(kNativeTokenContractAddress,
                    make_deployed_contract_hash(token));

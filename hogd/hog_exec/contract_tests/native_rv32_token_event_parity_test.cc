@@ -192,7 +192,7 @@ protected:
 
     // Deploy the precompiled native token at the preset address.
     auto token_contract = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token_contract);
     write_deployment(kNativeTokenContractAddress, token_contract);
     // Cover the native token's own storage writes (e.g. the allowance row).
@@ -275,7 +275,7 @@ protected:
     native_map.emplace(kWrapperNativeId, std::move(wrapper_contract));
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     auto native_context =
         std::make_unique<NativeContext>(std::move(native_map));

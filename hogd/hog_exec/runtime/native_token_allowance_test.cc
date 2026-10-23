@@ -63,7 +63,7 @@ protected:
   void SetUp() override
   {
     auto token_contract = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token_contract);
     write_deployment(kNativeTokenContractAddress, token_contract);
   }
@@ -122,7 +122,7 @@ TEST_F(NativeTokenAllowanceTest, FreshPairAllowanceReturnsZero)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -192,7 +192,7 @@ TEST_F(NativeTokenAllowanceTest, FirstAdjustAllowanceFromZeroSucceeds)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -247,7 +247,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromWithoutAllowanceFails)
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -316,7 +316,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceAccumulatesAcrossAdjusts)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -429,7 +429,7 @@ TEST_F(NativeTokenAllowanceTest, TransferFromDeductsFromAllowance)
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -591,7 +591,7 @@ TEST_F(NativeTokenAllowanceTest, NegativeAdjustCannotDriveAllowanceBelowZero)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -668,7 +668,7 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -800,7 +800,7 @@ TEST_F(NativeTokenAllowanceTest, OverflowingAdjustAllowanceRejectsAtInvoke)
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -913,7 +913,7 @@ TEST_F(NativeTokenAllowanceTest, AdjustAllowanceForSelfSucceeds)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -984,7 +984,7 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferFromSkipsAllowanceAndNoStorageCost)
   contract_map.emplace(kOwnerNativeId, std::move(owner_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1144,7 +1144,7 @@ TEST_F(NativeTokenAllowanceTest,
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1340,7 +1340,7 @@ TEST_F(NativeTokenAllowanceTest, OverBalanceTransferFromRevertsAllowanceDebit)
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1516,7 +1516,7 @@ TEST_F(NativeTokenAllowanceTest,
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1626,7 +1626,7 @@ TEST_F(NativeTokenAllowanceTest, ZeroTransferFromFreshKeysFailsAtCommit)
   contract_map.emplace(kSpenderNativeId, std::move(spender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1765,7 +1765,7 @@ TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
   contract_map.emplace(kWhaleNativeId, std::move(whale_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1898,7 +1898,7 @@ TEST_F(NativeTokenAllowanceTest, AllowanceChargesForKeyDerivationSha256)
   contract_map.emplace(kCallerNativeId, std::move(caller_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1984,7 +1984,7 @@ protected:
                       std::make_unique<NativeContract>(std::move(spender_fns)));
     contracts.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     NativeContext context(std::move(contracts));
     auto tx = SignedTransaction{
