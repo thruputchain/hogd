@@ -2170,17 +2170,6 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredNativeTokens)
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
 }
 
-TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
-{
-  constexpr std::uint64_t kTokenSupply =
-      kTotalNativeTokenSupply * std::uint64_t{kNativeTokenDivisibility};
-  LocalBootstrapConfig config =
-      fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
-
-  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
-               std::runtime_error);
-}
-
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
 {
   HogDevnodeProcess process = HogDevnodeProcess::start({

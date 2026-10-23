@@ -4,6 +4,7 @@
 #include <filesystem>
 #include <fstream>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <random>
 #include <span>
@@ -167,8 +168,7 @@ generate(int argc, char **argv)
     auto nonce = sha256(std::tuple(c.seed, uint64_t(i)));
     u.address = calculate_genesis_deployment_address(sha256(*contract), nonce);
     const int128_t allocation =
-        (int128_t{kTotalNativeTokenSupply} * kNativeTokenDivisibility) /
-        (nusers + 2);
+        std::numeric_limits<int128_t>::max() / (nusers + 2);
     builders[variant].add_distribution(
         contract, nonce, Wallet::entrypoint<u8"initialize">(),
         Wallet::make_calldata<u8"initialize">(u.keys[0], u.keys[1], u.weight),

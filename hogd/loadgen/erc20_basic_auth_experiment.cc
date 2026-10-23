@@ -133,9 +133,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
   const int128_t wallet_initial_native_tokens =
-      ((int128_t{kTotalNativeTokenSupply} *
-        int128_t{kNativeTokenDivisibility}) /
-       num_initial_allocations) -
+      (std::numeric_limits<int128_t>::max() / num_initial_allocations) -
       kWalletInitialNativeTokensEpsilon;
   GenesisConfigurationBuilder builder;
   builder.add_distribution(

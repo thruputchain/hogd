@@ -1716,10 +1716,11 @@ TEST_F(Erc20ParityTest, OneOverBalanceTransferParity)
 }
 
 // Credit-side overflow beyond the supply cap: the receiver already holds
-// INT128_MAX, which cannot occur under the total-supply bound (~2^59) but
-// can be hand-crafted in tests. Native no longer checks the credit leg at
-// invoke (supply-bound makes it unreachable); the RV32 reference still
-// checks it, so the two backends diverge on this artificial state.
+// INT128_MAX while the sender holds more, which the INT128_MAX total-supply
+// bound rules out but tests can hand-craft. Native no longer checks the
+// credit leg at invoke (the supply bound makes it unreachable); the RV32
+// reference still checks it, so the two backends diverge on this
+// artificial state.
 // Native accepts the transfer at invoke; the transaction is then rejected
 // at commit by HogDb's add-capacity bound. RV32 rejects at invoke with
 // ERC20Error::TooLarge. Documented divergence, not a bug.

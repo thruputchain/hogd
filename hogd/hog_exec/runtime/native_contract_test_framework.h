@@ -117,8 +117,6 @@ public:
   void grant_storage_token(ContractAddress const &address, int128_t amount)
   {
     assert(amount >= 0);
-    assert(amount <= int128_t{kNativeTokenDivisibility} *
-                         int128_t{kTotalNativeTokenSupply});
 
     AddressAndKey addrkey = {.address = address,
                              .key = StorageKey(

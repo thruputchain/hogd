@@ -394,9 +394,6 @@ private:
   void grant_initial_tokens_for_account(const ContractAddress &address)
   {
     static_assert(kStorageTokenAmount >= 0);
-    static_assert(kStorageTokenAmount <=
-                  uint128_t{kNativeTokenDivisibility} *
-                      uint128_t{kTotalNativeTokenSupply});
 
     CHECK(get_db()
               .write_address_balance(address, kStorageTokenAmount)
