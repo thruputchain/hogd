@@ -41,6 +41,20 @@ expect_contains() {
   fi
 }
 
+# Which module directory go ran in, not just how many times it ran overall.
+expect_dir_calls() {
+  local label=$1 dir=$2 want=$3 log=$4 got resolved
+  resolved=$(readlink -f "$dir")
+  got=$(grep -c -x -F "$resolved" "$log" || true)
+  if [[ "$got" -ne "$want" ]]; then
+    echo "FAIL $label: go ran $got times in $(basename "$dir"), want $want"
+    sed 's/^/     | /' "$log"
+    fail=1
+  else
+    echo "ok   $label $(basename "$dir") call count"
+  fi
+}
+
 work=$(mktemp -d)
 trap 'rm -rf -- "$work"' EXIT
 
@@ -121,12 +135,19 @@ expect_contains "exhausted attempts report the last failure" "after 3 attempt(s)
 expect_contains "exhausted attempts keep go's stderr" "connection reset by peer" "$output"
 
 # Attempts are per module: one module's blip must not spend another's budget,
-# and every module in the tree still gets downloaded.
+# and every module in the tree still gets downloaded. Every module here fails
+# twice and succeeds on its third attempt, which fits only if each one is given
+# the full three. A counter shared across modules would spend the budget on the
+# first and strand the next with none left, and counting the calls per
+# directory is what tells the two apart -- a total alone would not.
 new_tree "$work/many" chuckd lib-go protocol-go
 status=0
-output=$(run_tree "$work/many" "1 ok ok ok") || status=$?
+output=$(run_tree "$work/many" "1 1 ok 1 1 ok 1 1 ok") || status=$?
 expect_status "several modules" 0 "$status"
-expect_calls "several modules" 4 "$work/calls"
+expect_calls "several modules" 9 "$work/calls"
+expect_dir_calls "several modules" "$work/many/groundhog-go/chuckd" 3 "$work/calls"
+expect_dir_calls "several modules" "$work/many/groundhog-go/lib-go" 3 "$work/calls"
+expect_dir_calls "several modules" "$work/many/groundhog-go/protocol-go" 3 "$work/calls"
 
 # vendor/ holds a module's dependencies, not a module to prefetch for.
 new_tree "$work/vendored" chuckd chuckd/vendor/example.com/dep
