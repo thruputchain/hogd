@@ -1,6 +1,7 @@
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
 
 #ifdef __linux__
@@ -76,7 +77,7 @@ db_connection_map()
     // allowed CPU, so each one is valid and gets a connection.
     x23::Vec<int> buckets;
     buckets.resize(allowed.back() + 1, 0);
-    for (size_t i = 0; i < allowed.size(); i++)
+    for (std::size_t i = 0; i < allowed.size(); i++)
       buckets[allowed[i]] = static_cast<int>(i % nbuckets);
     return x23::CpuMap{std::move(buckets)};
   }();
