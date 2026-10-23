@@ -6,6 +6,7 @@
 #include <bit>
 #include <cassert>
 #include <concepts>
+#include <exception>
 #include <functional>
 #include <initializer_list>
 #include <iterator>
@@ -360,10 +361,24 @@ public:
     };
     std::vector<x23::Async<void>> jobs;
     jobs.reserve(divide_up(buckets_.size(), width));
-    for (size_t i = 0; i < buckets_.size(); i += width)
-      jobs.push_back(chunk(i));
-    for (auto &job : jobs)
-      co_await job;
+    std::exception_ptr failure;
+    try {
+      for (size_t i = 0; i < buckets_.size(); i += width)
+        jobs.push_back(chunk(i));
+    } catch (...) {
+      failure = std::current_exception();
+    }
+    // Every started job must finish before its frame or captures are destroyed.
+    for (auto &job : jobs) {
+      try {
+        co_await job;
+      } catch (...) {
+        if (!failure)
+          failure = std::current_exception();
+      }
+    }
+    if (failure)
+      std::rethrow_exception(failure);
   }
 
   // unsafe_clear clears the map without locking the buckets.
