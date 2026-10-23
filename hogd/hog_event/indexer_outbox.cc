@@ -36,6 +36,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
+#include "hogd/hog_event/metrics.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
@@ -842,6 +843,20 @@ IndexerOutboxStore::publish_committed_stored(
 {
   const BlockHeight height =
       stored.consensus_value.proposal_header.block_height;
+  // Pull-RPC record size for the histogram. The full-payload path can compute
+  // it before the publication lock. The reference path learns the events-file
+  // size under that lock and fills this in there.
+  std::optional<size_t> pull_record_bytes;
+  if (payload_for_ensure) {
+    auto response_size = indexer_event_pull_rpc_record_size_for_parts(
+        x23::xdr_size(stored.consensus_value),
+        x23::xdr_size(payload_for_ensure->event_logs),
+        x23::xdr_size(payload_for_ensure->tx_bodies));
+    if (!response_size) {
+      co_return std::unexpected(response_size.error());
+    }
+    pull_record_bytes = *response_size;
+  }
   auto bytes = encode_file(stored);
   if (!bytes) {
     co_return std::unexpected(bytes.error());
@@ -877,11 +892,12 @@ IndexerOutboxStore::publish_committed_stored(
     if (!batches_size) {
       co_return std::unexpected("events file size overflows replay record");
     }
-    if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
-            x23::xdr_size(stored.consensus_value), *batches_size, 0);
-        !rpc_size) {
+    auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+        x23::xdr_size(stored.consensus_value), *batches_size, 0);
+    if (!rpc_size) {
       co_return std::unexpected(rpc_size.error());
     }
+    pull_record_bytes = *rpc_size;
   }
   // Either way the file's roots are established: the live block computed
   // the event root over the pairs it streamed, and promotion validated the
@@ -996,6 +1012,11 @@ IndexerOutboxStore::publish_committed_stored(
         .height = header->block_height + 1,
         .consensus_hash = header->consensus_hash,
     };
+  }
+  // INT64_MAX is the canonical-boundary sentinel, not a block the firehose
+  // serves. Idempotent retries return above and do not reach here.
+  if (pull_record_bytes && height != std::numeric_limits<BlockHeight>::max()) {
+    record_new_event_block(height, *pull_record_bytes);
   }
   co_return IndexerOutboxStatus<void>{};
 }

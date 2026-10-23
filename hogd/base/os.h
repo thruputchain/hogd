@@ -58,7 +58,12 @@ struct ProcessStats {
 };
 
 // read_proc_stat returns Linux-specific statistics about resource usage.
+// ProcessStats.rss is a page count on Linux, not bytes.
 ErrnoStatus<ProcessStats> read_process_stats();
+
+// resident_memory_bytes returns this process's resident set size in bytes,
+// or 0 when the operating system does not report it.
+size_t resident_memory_bytes();
 
 // returns the process's name.
 std::string read_process_name();

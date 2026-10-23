@@ -2,6 +2,7 @@ add_library(
   metrics
   health.cc
   metrics.cc
+  shared.cc
 )
 target_link_libraries(
   metrics

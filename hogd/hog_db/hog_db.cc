@@ -102,6 +102,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     critical("Could not create database: path '{}', {}", path, ramdb.error());
     return EXIT_FAILURE;
   }
+  (*ramdb)->register_metrics();
 
   // create the RPC context.
   HogDbDAO db_tmp(RAMDB(std::move(*ramdb)));
