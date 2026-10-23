@@ -70,11 +70,9 @@ one hour, which long or queued hog_sched runs outlive; the PAT is used instead
 whenever it is set. If it is empty, the action falls back to minting a token
 from repository variable `COMPONENT_READER_APP_ID` and secret
 `COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
-The PAT, or the App installation, needs Contents: read on hogd, chuckd, hogx, thruput-protocol,
+The PAT, or the App installation, needs Contents: read on hogd, chuckd, thruput-protocol,
 thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
-thruput-integration-test-contracts, scp, and thruput-sdk-rs. hogd has no hogx
-submodule; hogx is read only as a submodule of the chuckd that groundhog-go
-pins, until that chuckd drops it. The hackathon
+thruput-integration-test-contracts, scp, and thruput-sdk-rs. The hackathon
 workflow additionally needs Contents: read on thruput-tools to build its
 RPC gateway; with the App fallback, other callers keep the base repository scope.
 
