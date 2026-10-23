@@ -8,6 +8,7 @@
 #include <exception>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -87,6 +88,12 @@ IndexerChunkSink::take_block(const EventIndexerChunkedBlock &header)
       .format_version = header.format_version,
       .consensus_value = header.consensus_value,
   };
+  size_t pair_count = 0;
+  for (const std::optional<EventIndexerBlockChunk> &chunk : chunks) {
+    pair_count += chunk ? chunk->event_logs.size() : 0;
+  }
+  payload.event_logs.reserve(pair_count);
+  payload.tx_bodies.reserve(pair_count);
   for (std::optional<EventIndexerBlockChunk> &chunk : chunks) {
     if (!chunk ||
         chunk->block_height !=
@@ -94,8 +101,11 @@ IndexerChunkSink::take_block(const EventIndexerChunkedBlock &header)
         chunk->identity != header.identity) {
       return std::nullopt;
     }
-    payload.event_logs.append_range(std::move(chunk->event_logs));
-    payload.tx_bodies.append_range(std::move(chunk->tx_bodies));
+    // x23::Vec::append_range copies from a plain range; move the items, and
+    // free each chunk once taken, so the block is never held twice.
+    payload.event_logs.append_range(std::views::as_rvalue(chunk->event_logs));
+    payload.tx_bodies.append_range(std::views::as_rvalue(chunk->tx_bodies));
+    chunk.reset();
   }
   return payload;
 }
