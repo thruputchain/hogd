@@ -131,8 +131,8 @@ jobs:
           # Both build scripts place their output binary in $PWD; run from
           # build/gcc so chuckd.dev/scpd.dev sit alongside the C++ binaries.
           pushd build/gcc >/dev/null
-          ../../groundhog-go/chuckd/scripts/build_scpd.sh
-          ../../groundhog-go/chuckd/scripts/build_chuckd.sh
+          ../../thruput-go/chuckd/scripts/build_scpd.sh
+          ../../thruput-go/chuckd/scripts/build_chuckd.sh
           popd >/dev/null
 
       - name: "Scenario: mempool-first"

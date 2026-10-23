@@ -22,8 +22,8 @@
 [submodule "external/blake3"]
 	path = external/blake3
 	url = https://github.com/BLAKE3-team/BLAKE3.git
-[submodule "groundhog-go"]
-	path = groundhog-go
+[submodule "thruput-go"]
+	path = thruput-go
 	url = git@github.com:thruputchain/thruput-go.git
 [submodule "external/rocksdb"]
 	path = external/rocksdb
