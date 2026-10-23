@@ -321,10 +321,28 @@ public:
   schedcoord_lookup_transactions(
       const SignedTransactionHashBatch &signed_tx_hashes)
   {
-    co_return lookup_cached_txs(
-        signed_tx_hashes, [this](const SignedTransactionHash &signed_tx_hash) {
-          return scheduler_->find_signed_tx(signed_tx_hash);
-        });
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
+    if (!ready()) {
+      ret.resize(signed_tx_hashes.size());
+      co_return ret;
+    }
+    ret.reserve(signed_tx_hashes.size());
+    for (const SignedTransactionHash &signed_tx_hash : signed_tx_hashes) {
+      // [find_signed_tx] hands back a reference into the scheduler's tx
+      // store, and the reply holds that reference until x23 has serialized
+      // the response, so the tx cannot be freed by another thread in between.
+      // That is what the copy through [x23::Ptr]'s value constructor used to
+      // buy, and it was paying for it with a deep copy of the whole
+      // transaction -- including its unbounded [Calldata] -- for every hash
+      // resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(x23::XdrSharedPtr<SignedTransaction>(
+          scheduler_->find_signed_tx(signed_tx_hash)));
+    }
+
+    co_return ret;
   }
 
   // Looks up in-flight txs by [TransactionHash], returning whichever signing
@@ -332,10 +350,20 @@ public:
   x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   lookup_transactions_by_body(const TransactionHashBatch &tx_hashes)
   {
-    co_return lookup_cached_txs(tx_hashes,
-                                [this](const TransactionHash &tx_hash) {
-                                  return scheduler_->find_tx(tx_hash);
-                                });
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
+    if (!ready()) {
+      ret.resize(tx_hashes.size());
+      co_return ret;
+    }
+    ret.reserve(tx_hashes.size());
+    for (const TransactionHash &tx_hash : tx_hashes) {
+      // As in [schedcoord_lookup_transactions()], the reply shares the
+      // scheduler's copy of each tx rather than copying it.
+      ret.push_back(
+          x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
+    }
+
+    co_return ret;
   }
 
   x23::Async<SchedulerTransactionOutcomeBatch>
@@ -510,34 +538,6 @@ private:
     SignedTransactionHashBatch missing_signed_tx_hashes;
     bool validated = true;
   };
-
-  // One lookup per hash through [find], a [Scheduler] lookup by either
-  // [TransactionHash] or [SignedTransactionHash], with null for each hash not
-  // found.
-  template<typename Find>
-  x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>
-  lookup_cached_txs(const x23::XdrVec<SHA256Hash> &hashes, Find find)
-  {
-    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
-    if (!ready()) {
-      ret.resize(hashes.size());
-      return ret;
-    }
-    ret.reserve(hashes.size());
-    for (const SHA256Hash &hash : hashes) {
-      // [find] hands back a reference into the scheduler's tx store, and the
-      // reply holds that reference until x23 has serialized the response, so
-      // the tx cannot be freed by another thread in between.  That is what
-      // the copy through [x23::Ptr]'s value constructor used to buy, and it
-      // was paying for it with a deep copy of the whole transaction --
-      // including its unbounded [Calldata] -- for every hash resolved.
-      //
-      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
-      // is an ownership change, not a wire change.
-      ret.push_back(x23::XdrSharedPtr<SignedTransaction>(find(hash)));
-    }
-    return ret;
-  }
 
   x23::Async<void> finish_init()
   {
