@@ -181,7 +181,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
   // ceremony transaction. Total supply is a nonnegative int128, so reject the
   // artifact before emitting transactions if all of those mints would take it
   // past INT128_MAX.
-  uint128_t remaining_supply =
+  auto remaining_supply =
       static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
   const std::size_t transaction_count =
       std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
