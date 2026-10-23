@@ -178,10 +178,11 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
     co_return db_res.error();
   }
 
-  // cache both positive and negative lookups
+  // cache both positive and negative lookups.  Move the item out of the reply:
+  // a bytestring can be large, and nothing reads db_res after this.
   WireStorageItem db_item =
       db_res.value().has_value()
-          ? db_res.value().value()
+          ? std::move(*db_res.value())
           : WireStorageItem(StorageItemType::kItemTypeDeleted);
 
   auto entry =

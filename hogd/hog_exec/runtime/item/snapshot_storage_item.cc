@@ -121,7 +121,7 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
   if (!db_res) {
     co_return db_res.error();
   }
-  auto block = db_res.value();
+  auto block = std::move(db_res).value();
 
   if (!block) {
     // cache that there isn't a block above search_start_index
@@ -131,9 +131,10 @@ SnapshotStorageItem::RetrocausalQueueEntry::get_next_block(
     co_return nullptr;
   }
 
-  auto ptr = std::make_unique<RetrocausalQueueBlock>(*block);
+  const uint64_t block_number = block->block_number;
+  auto ptr = std::make_unique<RetrocausalQueueBlock>(std::move(*block));
   auto const *out = ptr.get();
-  blocks_[block->block_number] = std::move(ptr);
+  blocks_[block_number] = std::move(ptr);
   co_return out;
 }
 
@@ -215,7 +216,7 @@ SnapshotStorageItem::get_concurrent_rcq_entry(uint32_t index) const
   if (!db_res) {
     co_return db_res.error();
   }
-  auto entry = db_res.value();
+  auto entry = std::move(db_res).value();
   if (entry.has_value()) {
     auto recorded = co_await record_concurrent_entry(index, *entry);
     if (!recorded.has_value()) {

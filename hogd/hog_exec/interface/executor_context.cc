@@ -205,7 +205,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   case ExecResult::ExecResultOK:
   case ExecResult::ExecResultTxDeterministicError:
   case ExecResult::ExecResultTxRootFrameReverted:
-    out.proposal_data() = syscall_handler->get_proposal_data();
+    // Committed, so the handler is done with its proposal data: move it into
+    // the reply. The event emission below still needs its own copy.
+    out.proposal_data() = syscall_handler->extract_proposal_data();
     break;
   case ExecResult::ExecResultTxNonDeterministicError:
   case ExecResult::ExecResultFailedGasSponsorship:

@@ -82,6 +82,13 @@ public:
     return proposal_data_;
   }
 
+  // Moves the collected data out, for handing it off once execution is done.
+  // Invalidates pointers returned by log_queue_entry_observation().
+  NondeterministicProposalData extract_proposal_data()
+  {
+    return std::move(proposal_data_);
+  }
+
   // In proposal mode, observations don't need validation — the proposer
   // built the block from genuine concurrent data. Return empty so
   // try_acquire_frame_locks() emits no observation deltas.

@@ -485,6 +485,46 @@ SystemCallHandler::get_most_recent_frame_events() const
   return invocation_frame_stack_.copy_active_frame_events();
 }
 
+InvocationFrameOutput
+SystemCallHandler::extract_most_recent_frame_output()
+{
+  // Mirrors get_most_recent_frame_output().
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+    if (!last_frame_.has_value()) {
+      return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+    }
+    return last_frame_.value().extract_frame_output();
+  }
+  if (invocation_frame_stack_.empty()) {
+    return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+  }
+  auto output =
+      invocation_frame_stack_.extract_active_frame_child_return_output();
+  assert(output.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return std::move(*output);
+}
+
+x23::Vec<TxEmittedEvent>
+SystemCallHandler::extract_most_recent_frame_events()
+{
+  // Mirrors get_most_recent_frame_events().
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (!last_frame_.has_value() || last_frame_.value().should_revert()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return last_frame_.value().extract_events();
+  }
+  if (invocation_frame_stack_.empty()) {
+    return x23::Vec<TxEmittedEvent>();
+  }
+  return invocation_frame_stack_.extract_active_frame_events();
+}
+
 InvokeStatus<void>
 SystemCallHandler::handle_root_host_fn_status(
     SystemStatus<SyscallStatus<InvocationFrameStatusCode>> status)
@@ -1481,6 +1521,14 @@ SystemCallHandler::get_proposal_data() const
   return std::get<ValidationModeData>(execution_mode_data_).proposal_data();
 }
 
+NondeterministicProposalData
+SystemCallHandler::extract_proposal_data()
+{
+  assert(root_invoke_result_.has_readable_proposal_data());
+  return std::get<ProposalModeData>(execution_mode_data_)
+      .extract_proposal_data();
+}
+
 x23::Async<SystemStatus<void>>
 SystemCallHandler::emit_events(ExecResult exec_result,
                                ProposedTransaction proposed_tx)
@@ -1489,9 +1537,11 @@ SystemCallHandler::emit_events(ExecResult exec_result,
   auto events = (root_invoke_succeeded() && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  // The handler is finished once events are emitted, so move the root output
+  // (which carries the return buffer) rather than copying it.
   auto root_output =
       last_frame_.has_value()
-          ? last_frame_.value().get_frame_output()
+          ? last_frame_.value().extract_frame_output()
           : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   // gas_consumed is in the event trie leaf, so the events root commits to it.
   co_return co_await event_server_proxy_.emit_events(
