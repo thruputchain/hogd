@@ -85,7 +85,7 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
     block_id_(block_id), buffers_(std::move(data.buffers)),
     events_file_(std::move(events_file))
 {
-  CHECK(events_file_);
+  CHECK(static_cast<bool>(events_file_));
   trie_->clear();
   {
     auto ul = buffers_.lock_threads();

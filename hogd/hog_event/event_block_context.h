@@ -140,7 +140,7 @@ public:
       work_directory_(work_directory), block_id_(block_id),
       events_file_(std::move(events_file))
   {
-    CHECK(events_file_);
+    CHECK(static_cast<bool>(events_file_));
   }
 
   EventBlockContext(std::string_view work_directory, BlockID block_id,
