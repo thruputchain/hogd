@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch the full set of node binaries on localhost in a deliberately-varied
-# order and assert that no process crashes on startup. No hog_sched, no hogx.
+# order and assert that no process crashes on startup. No hog_sched.
 #
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last

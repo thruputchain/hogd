@@ -43,7 +43,6 @@ while read -r old new; do
 done <<'REPOSITORIES'
 hogd hogd
 chuckd chuckd
-hogx hogx
 protocol thruput-protocol
 protocol-go thruput-protocol-go
 protocol-rs thruput-protocol-rs

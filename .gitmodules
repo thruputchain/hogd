@@ -22,15 +22,12 @@
 [submodule "external/blake3"]
 	path = external/blake3
 	url = https://github.com/BLAKE3-team/BLAKE3.git
-[submodule "groundhog-go"]
-	path = groundhog-go
+[submodule "thruput-go"]
+	path = thruput-go
 	url = git@github.com:thruputchain/thruput-go.git
 [submodule "external/rocksdb"]
 	path = external/rocksdb
 	url = https://github.com/facebook/rocksdb.git
-[submodule "hogx"]
-	path = hogx
-	url = git@github.com:thruputchain/hogx.git
 [submodule "external/mldsa-native"]
 	path = external/mldsa-native
 	url = https://github.com/pq-code-package/mldsa-native.git
