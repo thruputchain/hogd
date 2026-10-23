@@ -1742,7 +1742,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   TxEventLogBatch events{event_a, event_b};
   ProposedTransactionBatch bodies{body_a, body_b};
 
-  EventBlockContext context(dir_.directory(), 100);
+  EventBlockContext context(
+      dir_.directory(), 100,
+      EventBlockContext::create_events_file(dir_.directory(), 100));
   context.executor_open_block();
   ASSERT_TRUE(context.add_event(event_a, body_a)());
   ASSERT_TRUE(context.add_event(event_b, body_b)());
@@ -1752,7 +1754,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   context.finish_file(production_root)();
   EXPECT_EQ(compute_indexer_outbox_event_root(events, bodies), production_root);
 
-  EventBlockContext empty_context(dir_.directory(), 101);
+  EventBlockContext empty_context(
+      dir_.directory(), 101,
+      EventBlockContext::create_events_file(dir_.directory(), 101));
   empty_context.finish_file_write()();
   const SHA256Hash empty_production_root = empty_context.get_root_hash();
   empty_context.finish_file(empty_production_root)();

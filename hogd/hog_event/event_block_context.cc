@@ -50,23 +50,17 @@ namespace hogd {
 
 constexpr static size_t kBufferThreshold = 500_KiB;
 
-void
-EventBlockContext::open_events_file()
+x23::UniqueFd
+EventBlockContext::create_events_file(std::string_view work_directory,
+                                      BlockID block_id)
 {
-  auto dir = Directory::open(work_directory_);
+  auto dir = Directory::open(work_directory);
   if (!dir) {
     panic("failed to open work directory: {}", dir.error());
   }
-  auto filename = temp_events_filename(work_directory_, block_id_);
-  // The temp name is only unique among live blocks: block ids are
-  // process-local, so a crash can leave a temp file behind under a name a
-  // later run reuses.  Worse than a stale tail, that leftover can be a hard
-  // link to a PUBLISHED events file -- publish_file() links the final name
-  // before unlinking the temp name, and a crash between the two leaves both
-  // names on one inode -- so opening it in place (with O_TRUNC or otherwise)
-  // would corrupt the published file through the shared inode.  Unlinking the
-  // stale name first breaks any such link, and O_EXCL guarantees this block
-  // writes a fresh, empty inode of its own.
+  auto filename = temp_events_filename(work_directory, block_id);
+  // See the declaration for why a stale name is unlinked rather than opened
+  // in place.
   // NOLINTNEXTLINE(misc-include-cleaner)
   int fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
   if (fd == -1 && errno == EEXIST) {
@@ -80,15 +74,18 @@ EventBlockContext::open_events_file()
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
   }
-  events_file_ = x23::UniqueFd(fd);
+  return x23::UniqueFd(fd);
 }
 
 EventBlockContext::EventBlockContext(std::string_view work_directory,
                                      BlockID block_id,
-                                     ReusableEventBlockContextData data)
+                                     ReusableEventBlockContextData data,
+                                     x23::UniqueFd events_file)
   : trie_(std::move(data.trie)), work_directory_(work_directory),
-    block_id_(block_id), buffers_(std::move(data.buffers))
+    block_id_(block_id), buffers_(std::move(data.buffers)),
+    events_file_(std::move(events_file))
 {
+  CHECK(static_cast<bool>(events_file_));
   trie_->clear();
   {
     auto ul = buffers_.lock_threads();
@@ -97,7 +94,6 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
       ctx.event_count = 0;
     });
   }
-  open_events_file();
 }
 
 ReusableEventBlockContextData
