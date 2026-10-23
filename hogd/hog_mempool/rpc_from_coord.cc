@@ -30,6 +30,7 @@
 #include "exec_sched.hh"
 #include "header.hh"
 #include "hogd/base/block_id.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -3457,8 +3458,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 // I do not need to check this in add_txs--this is all kept in sync by the
 // [auth_data_changed] callback.
 x23::Async<void>
-MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
-                                         KeyChangeBatch key_changes)
+MempoolCoordinatorRpc::auth_data_changed(
+    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
 {
   // Count this callback among the coordinator's pending coroutines so that
   // ~MempoolCoordinatorRpc waits for it to finish before the member

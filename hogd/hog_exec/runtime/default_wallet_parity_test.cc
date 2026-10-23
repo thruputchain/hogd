@@ -129,7 +129,7 @@ protected:
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     for (auto &[id, c] : extra) {
       native_map.emplace(id, std::move(c));
@@ -179,7 +179,7 @@ protected:
     setup_grant_storage_token(kAbortAddr, 1'000'000'000);
 
     auto token = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token);
     write_deployment(kNativeTokenContractAddress, token);
   }
