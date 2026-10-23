@@ -1395,6 +1395,36 @@ TEST_F(EventRpcTest, AbandonActiveBlockDeletesTempFile)
   EXPECT_FALSE(std::filesystem::exists(temp_file));
 }
 
+TEST_F(EventRpcTest, OpenBlockTwiceLeavesTheFirstBlockIntact)
+{
+  // open_block() creates the temp events file outside the context lock, so a
+  // duplicate open has to be rejected before it reaches create_events_file():
+  // that unlinks and recreates the temp name, which would pull the live
+  // block's file out from under it and fail its publish.
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  ProposedTransaction body = make_body(41);
+  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 41),
+                                              body)(),
+            RPCError::kRPCNone);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCBadBlockID);
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir(), 1)));
+
+  // The first block publishes what it streamed, through the file it opened.
+  ASSERT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(1, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  auto pairs = read_final_events_file(temp_dir(), closed.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
+  EXPECT_EQ(pairs->tx_bodies.size(), 1U);
+}
+
 TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
 {
   EventRPCContext ctx(temp_dir());

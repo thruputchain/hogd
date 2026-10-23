@@ -25,6 +25,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 
 namespace hogd {
@@ -46,6 +47,10 @@ public:
 
   // Opens a new block.
   // Returns an error if the block already exists.
+  //
+  // The block's temp events file is created outside lock_, between two short
+  // critical sections: the first reserves the id, the second inserts the
+  // context. Nothing under lock_ touches the disk on this path.
   x23::Async<EventStatus<void>> open_block(BlockID block_id);
 
   // Closes a block.
@@ -99,13 +104,24 @@ public:
   static constexpr size_t kMaxTxFailureNotices = 256;
 
 private:
-  enum class BlockOperation { kClosing, kCommitting, kAbandoning };
+  enum class BlockOperation { kOpening, kClosing, kCommitting, kAbandoning };
 
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
-  void gc_context_internal(
+  // Tears down a settled block's context.  Caller holds lock_.
+  //
+  // Returns the block's events file descriptor, if it still has one, for the
+  // caller to close after releasing lock_ (see close_events_file_async).  The
+  // name may just have been unlinked by release_events_file(); with the
+  // descriptor open that only dropped the directory entry, and the kernel
+  // frees the file's blocks at this close.  For a large losing block that is
+  // milliseconds of filesystem work, which must not happen under the lock
+  // every open_block() waits on.
+  [[nodiscard]] x23::UniqueFd gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
+  // Closes [events_file] on the thread pool, off the calling RPC's thread.
+  static x23::Detached close_events_file_async(x23::UniqueFd events_file);
 
   // Records that a block published its events file under [hash].  Caller holds
   // lock_.
