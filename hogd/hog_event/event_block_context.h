@@ -147,18 +147,6 @@ public:
                     ReusableEventBlockContextData data,
                     x23::UniqueFd events_file);
 
-  // Convenience constructors that create the events file themselves.
-  EventBlockContext(std::string_view work_directory, BlockID block_id)
-    : EventBlockContext(work_directory, block_id,
-                        create_events_file(work_directory, block_id))
-  {}
-
-  EventBlockContext(std::string_view work_directory, BlockID block_id,
-                    ReusableEventBlockContextData data)
-    : EventBlockContext(work_directory, block_id, std::move(data),
-                        create_events_file(work_directory, block_id))
-  {}
-
   ReusableEventBlockContextData extract_data();
 
   // Gives up the events file descriptor without closing it.  The block must
