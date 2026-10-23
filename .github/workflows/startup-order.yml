@@ -1,6 +1,6 @@
 name: Node Startup Order (Namespace)
 
-# Debug-builds the node and launches its binaries directly (no hog_sched/hogx)
+# Debug-builds the node and launches its binaries directly (no hog_sched)
 # in several start orders, asserting no process crashes on startup.
 
 # Manual dispatch only — run on demand from the Actions tab.
