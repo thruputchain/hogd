@@ -70,7 +70,7 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
-CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
+CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/thruput-go/chuckd/scripts
 CHUCKD_BINARY=${HOGD_BUILD_DIR}/chuckd.dev
 CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
 SCPD_BINARY=${HOGD_BUILD_DIR}/scpd.dev

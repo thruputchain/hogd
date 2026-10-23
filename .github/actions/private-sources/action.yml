@@ -36,7 +36,6 @@ runs:
         repositories: |
           hogd
           chuckd
-          hogx
           thruput-protocol
           thruput-protocol-go
           thruput-protocol-rs
