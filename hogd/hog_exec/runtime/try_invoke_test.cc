@@ -2890,13 +2890,13 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 
   // check that hog_db streamed out the results correctly
   if (GetParam() == TestDB::kHogDb) {
-    auto hogs_transferred = get_hogs_transferred(1);
-    ASSERT_EQ(hogs_transferred.size(), 1);
+    auto native_tokens_transferred = get_native_tokens_transferred(1);
+    ASSERT_EQ(native_tokens_transferred.size(), 1);
     // The sender's net balance delta for the block is the transfer out plus the
     // replay-cache cost newly locked against it as the root invoked address.
-    ASSERT_EQ(hogs_transferred.at(sender_addr),
+    ASSERT_EQ(native_tokens_transferred.at(sender_addr),
               -write_cost - replay_cache_cost_charged(1));
-    ASSERT_FALSE(hogs_transferred.contains(receiver_addr));
+    ASSERT_FALSE(native_tokens_transferred.contains(receiver_addr));
   }
 }
 

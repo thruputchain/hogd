@@ -117,7 +117,8 @@ public:
   void grant_storage_token(ContractAddress const &address, int128_t amount)
   {
     assert(amount >= 0);
-    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
+    assert(amount <= int128_t{kNativeTokenDivisibility} *
+                         int128_t{kTotalNativeTokenSupply});
 
     AddressAndKey addrkey = {.address = address,
                              .key = StorageKey(
@@ -128,10 +129,10 @@ public:
   }
 
   static std::map<ContractAddress, int128_t>
-  get_hogs_transferred(BlockHeight /*unused*/)
+  get_native_tokens_transferred(BlockHeight /*unused*/)
   {
     // unimplemented
-    error("get_hogs_transferred in MockDB: unimplemented");
+    error("get_native_tokens_transferred in MockDB: unimplemented");
     return std::map<ContractAddress, int128_t>();
   }
 
@@ -705,11 +706,12 @@ public:
     return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
   }
 
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  std::map<ContractAddress, int128_t>
+  get_native_tokens_transferred(BlockHeight height)
   {
     return std::visit(
         [&](auto &db_wrapper) {
-          return db_wrapper.get_hogs_transferred(height);
+          return db_wrapper.get_native_tokens_transferred(height);
         },
         db_wrapper_);
   }

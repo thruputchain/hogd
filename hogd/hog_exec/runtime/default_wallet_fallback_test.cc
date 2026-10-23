@@ -398,7 +398,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentCommitsTransferAndCode)
   EXPECT_EQ(stored_balance(target),
             int128_t{kAmount} - get_default_cost_model()->get_balance_cost() -
                 get_default_cost_model()->get_deployment_cost(*deployed));
-  auto changes = get_hogs_transferred(block);
+  auto changes = get_native_tokens_transferred(block);
   EXPECT_EQ(changes.at(wallet_),
             -int128_t{kAmount} - replay_cache_cost_charged(1));
   EXPECT_EQ(changes.at(target),
@@ -435,7 +435,7 @@ TEST_F(DefaultWalletFallbackTest,
                 (replay_cache_cost_charged(2) - replay_cache_cost_charged(1)));
   EXPECT_EQ(stored_balance(target), target_before);
   EXPECT_TRUE(lookup_deployment_from_db(target));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_),
             -(replay_cache_cost_charged(2) - replay_cache_cost_charged(1)));
@@ -496,7 +496,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
@@ -530,7 +530,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentUnknownCodeRollsBackTransfer)
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
@@ -562,7 +562,7 @@ TEST_F(DefaultWalletFallbackTest,
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  EXPECT_TRUE(get_hogs_transferred(block).empty());
+  EXPECT_TRUE(get_native_tokens_transferred(block).empty());
 }
 
 TEST_F(DefaultWalletFallbackTest,

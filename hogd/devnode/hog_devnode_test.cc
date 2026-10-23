@@ -2157,7 +2157,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
   }
 }
 
-TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
+TEST(HogDevnode, LocalUserDefaultRemainsOneHundredNativeTokens)
 {
   LocalBootstrapConfig config = fixture_config(1);
   EXPECT_EQ(config.accounts[0].storage_tokens, 1'000'000'000ULL);
@@ -2173,7 +2173,7 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
 TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
 {
   constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+      kTotalNativeTokenSupply * std::uint64_t{kNativeTokenDivisibility};
   LocalBootstrapConfig config =
       fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
 

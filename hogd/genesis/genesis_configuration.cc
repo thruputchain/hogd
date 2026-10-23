@@ -181,7 +181,7 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
   // ceremony transaction. Reject the artifact before emitting transactions if
   // all of those mints would exceed the protocol supply.
   uint128_t remaining_supply =
-      uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+      uint128_t{kTotalNativeTokenSupply} * uint128_t{kNativeTokenDivisibility};
   const std::size_t transaction_count =
       std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
                                 1) /

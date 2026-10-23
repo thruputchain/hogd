@@ -25,15 +25,15 @@ public:
   // RPC methods
   static x23::Async<void> dbsched_null() { co_return; }
 
-  static x23::Async<HogAgeResults>
-  dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+  static x23::Async<NativeTokenAgeResults>
+  dbsched_get_native_token_ages(const ContractAddressBatch &addresses)
   {
-    HogAgeResult result(DbSchedResult::DbSchedResultError);
-    co_return x23::Vec<HogAgeResult>(addresses.size(), result);
+    NativeTokenAgeResult result(DbSchedResult::DbSchedResultError);
+    co_return x23::Vec<NativeTokenAgeResult>(addresses.size(), result);
   }
 
   static x23::Async<DbSchedResult>
-  dbsched_write_hog_ages(const HogAgeBatch &ages)
+  dbsched_write_native_token_ages(const NativeTokenAgeBatch &ages)
   {
     co_return DbSchedResult::DbSchedResultError;
   }

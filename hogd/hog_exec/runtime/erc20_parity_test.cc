@@ -57,7 +57,7 @@ namespace hogd {
 
 namespace {
 
-// All storage costs are zeroed for these tests. The native HOG precompile and
+// All storage costs are zeroed for these tests. The native-token precompile and
 // the RV32 itc_erc20 charge storage differently (native balance_cost vs plain
 // nnint_cost on a contract-data key), and that difference is deliberately out
 // of scope here: parity is about ERC20 *semantics*, not storage-cost
@@ -166,8 +166,8 @@ step_ok_amount(CapturedRecord const &record)
 
 } // namespace
 
-// Drives the native HOG precompile and the RV32 itc_erc20 contract through the
-// same ERC20 operations, capturing each call's commit ExecResult plus the
+// Drives the native-token precompile and the RV32 itc_erc20 contract through
+// the same ERC20 operations, capturing each call's commit ExecResult plus the
 // literal return/abort bytes. The two backends agree byte-for-byte on valid
 // operations, on allowance handling, and on balance checking: the native
 // token's transfer and transfer_from both enforce a strict per-debit check at
@@ -787,7 +787,7 @@ protected:
     deploy_native(kNativeOwnerAddr, kNativeOwnerId);
     deploy_native(kRv32OwnerAddr, kRv32OwnerId);
 
-    // Owner balances: a native HOG grant for the native owner, an admin mint
+    // Owner balances: a native-token grant for the native owner, an admin mint
     // for the RV32 owner. The callers are funded on neither backend.
     setup_grant_storage_token(kNativeOwnerAddr, amount);
     run_tx(kRv32AdminAddr, 0, ctx);
@@ -902,7 +902,7 @@ protected:
     write_contract(rv32_caller_obj);
     write_deployment(kRv32CallerAddr, rv32_caller_obj);
 
-    // Fund the native caller (native HOG balance) and, via the admin tx, the
+    // Fund the native caller (native-token balance) and, via the admin tx, the
     // RV32 caller (itc token balance).
     setup_grant_storage_token(kNativeCallerAddr, start_balance);
 
@@ -911,7 +911,7 @@ protected:
     // INT128_MAX are unreachable via normal supply flows but we need them to
     // exercise the credit-overflow code path.
     if (recipient_start_balance > 0) {
-      // Native: write directly to the HOG balance slot, bypassing the
+      // Native: write directly to the native-token balance slot, bypassing the
       // supply-cap assert in setup_grant_storage_token.
       write_item(make_free_native_token_balance_addrkey(native_receiver),
                  std::make_shared<const StorageItemWrapper>(
@@ -1062,8 +1062,8 @@ protected:
     deploy_native(kRv32OwnerAddr, kRv32OwnerId);
     deploy_native(kRv32SpenderAddr, kRv32SpenderId);
 
-    // Owner balances: native HOG grant for the native owner; admin mint for the
-    // RV32 owner.
+    // Owner balances: native-token grant for the native owner; admin mint for
+    // the RV32 owner.
     setup_grant_storage_token(kNativeOwnerAddr, owner_balance);
     run_tx(kRv32AdminAddr, 0, ctx);
 
@@ -1206,8 +1206,8 @@ protected:
     deploy_native(kRv32OwnerAddr, kRv32OwnerId);
     deploy_native(kRv32SpenderAddr, kRv32SpenderId);
 
-    // Owner balances: native HOG grant for the native owner; admin mint for the
-    // RV32 owner.
+    // Owner balances: native-token grant for the native owner; admin mint for
+    // the RV32 owner.
     setup_grant_storage_token(kNativeOwnerAddr, owner_balance);
     run_tx(kRv32AdminAddr, 0, ctx);
 
@@ -1779,7 +1779,7 @@ TEST_F(Erc20ParityTest, InsufficientAllowanceTransferFromParity)
          "allowance transfer_from";
 }
 
-// A funded transfer to the all-zero address. The native HOG precompile treats
+// A funded transfer to the all-zero address. The native-token precompile treats
 // the zero address as an ordinary recipient (issue #2135, characterized as
 // working-as-intended), and itc_erc20 has no zero-recipient guard either, so
 // both should accept it identically. This locks in that agreement.

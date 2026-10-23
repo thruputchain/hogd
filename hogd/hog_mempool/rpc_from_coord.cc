@@ -1723,8 +1723,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                }));
   }
 
-  // HOG transfers and auth changes from the previous block both affect the
-  // scheduling priorities for this block, but neither depends on the other.
+  // native-token transfers and auth changes from the previous block both affect
+  // the scheduling priorities for this block, but neither depends on the other.
   auto transfer_data_node = nomination_dag.async<void>(
       "wait transfer data", [&]() -> x23::Async<void> {
         co_await wait_for_transfer_data(
@@ -3014,7 +3014,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().block_commit_lock_wait_seconds,
       MempoolMetrics::instance().block_commit_lock_hold_seconds);
-  auto hog_age_guard = std::make_shared<x23::CoroGuard>();
+  auto native_token_age_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag commit_dag("schedulercoord_commit_block", default_threadpool());
   x23::DagCleanup fatal_commit_cleanup = commit_dag.cleanup(
       "fail internal commit error", [&]() -> x23::Async<void> {
@@ -3081,22 +3081,24 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                                co_return;
                              });
 
-  // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
-  // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
-  // We want to ensure that on a block commit, we are able to apply the pending
-  // hog ages in the scheduler *before* the hog transfer deltas are received
-  // from hog_db. Otherwise, if the transfer deltas are applied first, it is
-  // possible that they will transfer hogs between accounts, and then when we
-  // apply the pending hog ages after, we may try to move hogs between scheduler
-  // groups for an account that no longer has any hogs.
-  auto lock_hog_age_node =
-      commit_dag.async<void>("lock pending hog age update",
-                             commit_dag.after(check_block_node),
-                             [&, hog_age_guard]() -> x23::Async<void> {
-                               co_await (*hog_age_guard)(
-                                   scheduler_->pending_hog_age_update_lock_);
-                               co_return;
-                             });
+  // We use [scheduler_->pending_native_token_age_update_lock_] to synchronize
+  // native-token age updates with [MempoolDbRpc], which calls
+  // [scheduler_->process_transfers()]. We want to ensure that on a block
+  // commit, we are able to apply the pending native-token ages in the scheduler
+  // *before* the native-token transfer deltas are received from hog_db.
+  // Otherwise, if the transfer deltas are applied first, it is possible that
+  // they will transfer native tokens between accounts, and then when we apply
+  // the pending native-token ages after, we may try to move native tokens
+  // between scheduler groups for an account that no longer has any native
+  // tokens.
+  auto lock_native_token_age_node = commit_dag.async<void>(
+      "lock pending native-token age update",
+      commit_dag.after(check_block_node),
+      [&, native_token_age_guard]() -> x23::Async<void> {
+        co_await (*native_token_age_guard)(
+            scheduler_->pending_native_token_age_update_lock_);
+        co_return;
+      });
 
   auto prepare_node = commit_dag.async<void>(
       "prepare commit plan",
@@ -3139,7 +3141,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       });
 
   auto commit_block_node = commit_dag.async<JointCommitResult>(
-      "commit block", commit_dag.after(prepare_node, lock_hog_age_node),
+      "commit block",
+      commit_dag.after(prepare_node, lock_native_token_age_node),
       [&]() -> x23::Async<JointCommitResult> {
         if (invalid_consensus_value) {
           co_return JointCommitResult{};
@@ -3234,11 +3237,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  // Scheduler updates only need the commit plan and hog-age lock. Run them in
-  // parallel with external commit/abandon RPCs so committed txs stop occupying
-  // scheduler capacity while those RPCs finish.
+  // Scheduler updates only need the commit plan and native-token-age lock. Run
+  // them in parallel with external commit/abandon RPCs so committed txs stop
+  // occupying scheduler capacity while those RPCs finish.
   auto scheduler_update_node = commit_dag.async<void>(
-      "update scheduler", commit_dag.after(prepare_node, lock_hog_age_node),
+      "update scheduler",
+      commit_dag.after(prepare_node, lock_native_token_age_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {
           co_return;
@@ -3345,9 +3349,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             co_await scheduler_->abandon_pending_nomination(
                 nominated_block_cache_.block_id);
           }
-          // [apply_committed_block_hog_ages] acquires
+          // [apply_committed_block_native_token_ages] acquires
           // [scheduler_->global_lock_] for us, so we do not need to do it here.
-          co_await scheduler_->apply_committed_block_hog_ages(
+          co_await scheduler_->apply_committed_block_native_token_ages(
               commit_plan.committed_cache->txs,
               commit_plan.committed_cache->db_tip.value.proposal_header
                   .block_height);
@@ -3357,20 +3361,20 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   // HogDb commit publishes transfer deltas, and MempoolDbRpc writes average hog
   // ages to DB after processing those deltas. Keep this lock held until the
-  // scheduler has applied pending hog ages and DB commit is complete, matching
-  // the synchronization the pre-DAG code relied on.
-  auto release_hog_age_node =
-      commit_dag.async<void>("release pending hog age update",
+  // scheduler has applied pending native-token ages and DB commit is complete,
+  // matching the synchronization the pre-DAG code relied on.
+  auto release_native_token_age_node =
+      commit_dag.async<void>("release pending native-token age update",
                              commit_dag.after(scheduler_update_node,
                                               commit_block_node),
-                             [hog_age_guard]() -> x23::Async<void> {
-                               (*hog_age_guard).reset();
+                             [native_token_age_guard]() -> x23::Async<void> {
+                               (*native_token_age_guard).reset();
                                co_return;
                              });
 
   commit_dag.async<void>(
       "finalize commit",
-      commit_dag.after(release_hog_age_node, abandon_snapshots_node,
+      commit_dag.after(release_native_token_age_node, abandon_snapshots_node,
                        abandon_events_node, measure_block_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {

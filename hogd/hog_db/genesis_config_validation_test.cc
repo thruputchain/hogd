@@ -278,7 +278,7 @@ TEST(GenesisCeremonyBuilder, DirectAllocationsRejectNegativeAndExcessSupply)
             GenesisCeremonyError::kNegativeDistribution);
 
   const int128_t supply =
-      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+      int128_t{kTotalNativeTokenSupply} * int128_t{kNativeTokenDivisibility};
   const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();
@@ -302,7 +302,7 @@ TEST(GenesisCeremonyBuilder,
 {
   const auto cost_model = StorageCostModel::default_cost_model();
   const int128_t supply =
-      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+      int128_t{kTotalNativeTokenSupply} * int128_t{kNativeTokenDivisibility};
   const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();

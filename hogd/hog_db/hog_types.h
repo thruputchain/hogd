@@ -43,7 +43,7 @@ struct InvokeTxKey {
   };
 };
 
-// storage_cost returns the cost in hogs for storage.
+// storage_cost returns the cost in native tokens for storage.
 //
 // WARNING: This does not necessarily reflect the real storage cost. It can't
 // easily be changed because it is part of the blockchain model.

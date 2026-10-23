@@ -570,8 +570,9 @@ TEST_F(SyscallRcqPeekTest,
        ObservationCapReturnsSyscallErrorInsteadOfTerminating)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr,
+                            int128_t{kNativeTokenDivisibility} *
+                                int128_t{kTotalNativeTokenSupply});
 
   constexpr uint32_t kObservationCount = kMaxConcurrentRcqReadsPerTx + 1;
 
@@ -678,8 +679,9 @@ TEST_F(SyscallRcqPeekTest,
 TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr,
+                            int128_t{kNativeTokenDivisibility} *
+                                int128_t{kTotalNativeTokenSupply});
 
   NativeContractBuilder builder;
   // method 10: insert two entries into target queue T, plus one entry into each
@@ -857,8 +859,9 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
 TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr,
+                            int128_t{kNativeTokenDivisibility} *
+                                int128_t{kTotalNativeTokenSupply});
 
   NativeContractBuilder builder;
   // method 12: insert one entry into each of kMaxConcurrentRcqReadsPerTx + 1
@@ -1002,8 +1005,9 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
 TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr,
+                            int128_t{kNativeTokenDivisibility} *
+                                int128_t{kTotalNativeTokenSupply});
 
   NativeContractBuilder builder;
   // method 20: insert a two-byte past-block entry into the target queue.

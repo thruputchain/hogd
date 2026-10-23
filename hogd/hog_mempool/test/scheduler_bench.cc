@@ -34,19 +34,20 @@ namespace hogd {
 namespace {
 
 void
-reset_cached_hog_ages(Scheduler &scheduler,
-                      const std::vector<ContractAddress> &accounts)
+reset_cached_native_token_ages(Scheduler &scheduler,
+                               const std::vector<ContractAddress> &accounts)
 {
   for (const ContractAddress &account : accounts) {
-    auto [age, lock] = scheduler.get_cached_hog_age(account);
-    age->num_hogs[kHogAgeGroupToSchedule] =
+    auto [age, lock] = scheduler.get_cached_native_token_age(account);
+    age->num_native_tokens[kNativeTokenAgeGroupToSchedule] =
         to_xdr(static_cast<uint128_t>(5'000'000'000 * 10));
-    age->average_ages[kHogAgeGroupToSchedule] = 0;
-    age->num_hogs[kHogAgeGroupAlreadyScheduled] =
+    age->average_ages[kNativeTokenAgeGroupToSchedule] = 0;
+    age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
         to_xdr(static_cast<uint128_t>(0));
-    age->average_ages[kHogAgeGroupAlreadyScheduled] = 0;
-    age->num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(0));
-    age->average_ages[kHogAgeGroupReceived] = 0;
+    age->average_ages[kNativeTokenAgeGroupAlreadyScheduled] = 0;
+    age->num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(static_cast<uint128_t>(0));
+    age->average_ages[kNativeTokenAgeGroupReceived] = 0;
   }
 }
 
@@ -66,14 +67,14 @@ make_benchmark_accounts(size_t num_accounts)
 }
 
 void
-seed_benchmark_hog_ages(MempoolTestInfra &server,
-                        const std::vector<ContractAddress> &accounts)
+seed_benchmark_native_token_ages(MempoolTestInfra &server,
+                                 const std::vector<ContractAddress> &accounts)
 {
   for (const ContractAddress &account : accounts) {
-    server.set_hogs(account,
-                    /*group=*/kHogAgeGroupToSchedule,
-                    /*age=*/0,
-                    /*num_hogs=*/5'000'000'000 * 10);
+    server.set_native_tokens(account,
+                             /*group=*/kNativeTokenAgeGroupToSchedule,
+                             /*age=*/0,
+                             /*num_native_tokens=*/5'000'000'000 * 10);
   }
 }
 
@@ -84,14 +85,14 @@ bm_scheduler_process_transfers(benchmark::State &state)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
   const std::vector<ContractAddress> accounts =
       make_benchmark_accounts(static_cast<size_t>(state.range(0)));
-  seed_benchmark_hog_ages(server, accounts);
+  seed_benchmark_native_token_ages(server, accounts);
 
   DeltaChunk deltas;
   deltas.reserve(state.range(0));
   for (int i = 0; i < state.range(0); ++i) {
     deltas.push_back(Delta{
         .address = accounts[static_cast<size_t>(i)],
-        .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000)),
+        .native_token_delta = to_xdr(static_cast<int128_t>(5'000'000'000)),
     });
   }
   std::vector<DeltaChunk> chunks;
@@ -100,11 +101,11 @@ bm_scheduler_process_transfers(benchmark::State &state)
                                 .deltas = ChunkedVector<DeltaChunk>(
                                     std::move(chunks))};
 
-  scheduler->read_average_hog_ages(transfer)();
+  scheduler->read_average_native_token_ages(transfer)();
 
   for (auto _ : state) {
     state.PauseTiming();
-    reset_cached_hog_ages(*scheduler, accounts);
+    reset_cached_native_token_ages(*scheduler, accounts);
     state.ResumeTiming();
     scheduler->process_transfers(transfer)();
   }
@@ -233,8 +234,8 @@ bm_scheduler_admit_large_batch(benchmark::State &state)
   auto scheduler = server.mempool_coord_rpc().scheduler();
   const auto num_txs = static_cast<size_t>(state.range(0));
   const auto accounts = make_benchmark_accounts(10'000);
-  seed_benchmark_hog_ages(server, accounts);
-  scheduler->read_average_hog_ages(
+  seed_benchmark_native_token_ages(server, accounts);
+  scheduler->read_average_native_token_ages(
       x23::XdrVec<ContractAddress>(accounts.begin(), accounts.end()))();
 
   fib_client_t fib_client(accounts[0]);

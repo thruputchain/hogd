@@ -861,19 +861,19 @@ TEST_P(RCQTest, ConcurrentPartialConsume)
 
 TEST_P(RCQTest, ConsumeReturnsStorageCost)
 {
-  const int128_t hogs = 1'000'000'000;
+  const int128_t native_tokens = 1'000'000'000;
   // Two transactions commit against contract_address_ (insert, consume); each
   // consumes a uniquifier into the replay cache, charged to the root invoked
   // address, so top up the grant by that cost to keep check_balance unchanged.
   setup_grant_storage_token(contract_address_,
-                            hogs + replay_cache_cost_charged(2));
+                            native_tokens + replay_cache_cost_charged(2));
 
   ASSERT_TRUE(insert({1}));
   advance_block();
 
   ASSERT_TRUE(consume({1}));
   advance_block();
-  ASSERT_TRUE(check_balance(hogs));
+  ASSERT_TRUE(check_balance(native_tokens));
 }
 
 TEST_P(RCQTest, OverflowBlockImmediately)
@@ -968,8 +968,8 @@ TEST_P(RCQTest, ConcurrentOverflow)
 // count after each step.
 TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
 {
-  auto const hogs = 1'000'000'000;
-  setup_grant_storage_token(contract_address_, hogs);
+  auto const native_tokens = 1'000'000'000;
+  setup_grant_storage_token(contract_address_, native_tokens);
   auto const *cm = get_default_cost_model();
 
   // Each committed transaction consumes a uniquifier into the replay cache,
@@ -984,14 +984,14 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   advance_block();
 
   // 3 live entries → cost = get_retrocausal_queue_cost(3).
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(3) -
                             replay_cache_cost_charged(1)));
 
   // Block 2: insert 2 more entries (5 total; 2 commits).
   ASSERT_TRUE(insert({4, 5}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(5) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(5) -
                             replay_cache_cost_charged(2)));
 
   // Block 3: consume 2 entries from past block 1 (entries 1, 2; 3 commits).
@@ -999,7 +999,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   ASSERT_TRUE(consume({1, 2}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(3) -
                             replay_cache_cost_charged(3)));
 
   // Block 4: consume remaining 3 (entry 3 from block 1, 4 and 5 from block 2;
@@ -1008,7 +1008,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   advance_block();
 
   // Queue empty → full RCQ refund, leaving only the accumulated replay cost.
-  ASSERT_TRUE(check_balance(hogs - replay_cache_cost_charged(4)));
+  ASSERT_TRUE(check_balance(native_tokens - replay_cache_cost_charged(4)));
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)

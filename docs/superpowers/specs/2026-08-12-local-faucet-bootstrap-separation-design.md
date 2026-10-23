@@ -18,20 +18,20 @@ This makes faucet capacity inseparable from developer-account funding. Raising t
 
 The local faucet and developer accounts have different responsibilities and need separate configuration, allocation, and metadata.
 ## Goals
-- Make `dev-0` an explicit local faucet with a fixed allocation of **1,000,000 HOG** (`10,000,000,000,000` raw units).
+- Make `dev-0` an explicit local faucet with a fixed allocation of **1,000,000 native tokens** (`10,000,000,000,000` raw units).
 
 - Define `--dev-account-count` as the number of developer accounts, excluding the faucet.
 
 - Derive developer accounts from index 1, preserving the existing deterministic identities of `dev-1`, `dev-2`, and later accounts.
 
-- Configure developer-account funding independently, with a default of **100 HOG** (`1,000,000,000` raw units).
+- Configure developer-account funding independently, with a default of **100 native tokens** (`1,000,000,000` raw units).
 
 - Make bootstrap genesis, runtime metadata, persistence metadata, the supervisor, and faucet resolution agree on the faucet role.
 
 - Keep hosted Devnet bootstrap and its dedicated faucet configuration unchanged.
 
 ## Non-goals
-- No protocol-level minting or change to the fixed HOG supply.
+- No protocol-level minting or change to the fixed native-token supply.
 
 - No change to hosted Devnet account or faucet allocations.
 
@@ -54,12 +54,12 @@ creates:
 
 | Name | Derivation index | Role | Initial allocation |
 |------|------------------|------|--------------------|
-| `dev-0` | 0 | `faucet` | 1,000,000 HOG |
-| `dev-1` | 1 | `local_user` | 50,000 HOG |
-| `dev-2` | 2 | `local_user` | 50,000 HOG |
-| `dev-3` | 3 | `local_user` | 50,000 HOG |
+| `dev-0` | 0 | `faucet` | 1,000,000 native tokens |
+| `dev-1` | 1 | `local_user` | 50,000 native tokens |
+| `dev-2` | 2 | `local_user` | 50,000 native tokens |
+| `dev-3` | 3 | `local_user` | 50,000 native tokens |
 
-`--dev-account-count 0` creates only `dev-0`. Omitting `--dev-account-hog` gives each developer account 100 HOG. The supervisor converts the user-facing HOG value to raw units before writing the bootstrap manifest; `hog-devnode` and all JSON metadata continue to use raw integer units.
+`--dev-account-count 0` creates only `dev-0`. Omitting `--dev-account-hog` gives each developer account 100 native tokens. The supervisor converts the user-facing native-token value to raw units before writing the bootstrap manifest; `hog-devnode` and all JSON metadata continue to use raw integer units.
 
 The existing direct `hog-devnode` shorthand retains its raw-unit naming:
 
@@ -89,7 +89,7 @@ struct LocalBootstrapConfig {
 };
 ```
 
-`HostedBootstrapGeneratorConfig::bootstrap_config` remains the existing `BootstrapAccountConfig` with its current count and 100-HOG default. This keeps the local semantic change out of hosted Devnet.
+`HostedBootstrapGeneratorConfig::bootstrap_config` remains the existing `BootstrapAccountConfig` with its current count and 100-native-token default. This keeps the local semantic change out of hosted Devnet.
 
 The maximum applies to developer accounts. If `kMaxBootstrapAccounts` remains 1000, local bootstrap may materialize 1001 total wallets: one faucet plus up to 1000 users. Rename the constant if needed so its meaning is unambiguous.
 ### Materialization and deterministic identity
@@ -198,7 +198,7 @@ The existing conflict rule remains: a bootstrap manifest conflicts with local ac
 
 - Its `BootstrapAccountConfig.count` remains the total homogeneous hosted developer-account count.
 
-- Its developer-account default remains 100 HOG.
+- Its developer-account default remains 100 native tokens.
 
 - Its optional dedicated faucet still requires explicit `--faucet-public-key` and `--faucet-tokens` values.
 
@@ -209,18 +209,18 @@ Tests must make this isolation explicit so future local-default changes cannot a
 ### Transition from the current `fix/faucet-bootstrap` branch
 The current branch raises `BootstrapAccountConfig`'s shared default and the release smoke argument to `10,000,000,000,000` raw units. Those changes are an intermediate homogeneous-account implementation and must not survive the split:
 
-- Restore `BootstrapAccountConfig::storage_tokens` to the 100-HOG homogeneous default used by hosted bootstrap.
+- Restore `BootstrapAccountConfig::storage_tokens` to the 100-native-token homogeneous default used by hosted bootstrap.
 
-- Move the 1,000,000-HOG constant to the local faucet configuration only.
+- Move the 1,000,000-native-token constant to the local faucet configuration only.
 
-- Change the release smoke invocation so `--dev-account-tokens` uses the 100-HOG local-user default, or omit it to exercise that default.
+- Change the release smoke invocation so `--dev-account-tokens` uses the 100-native-token local-user default, or omit it to exercise that default.
 
 - Update release smoke expectations for one always-present faucet plus the requested number of users.
 
 - Replace the existing shared-default assertion with role/allocation assertions for the separated local materialization.
 
 
-This prevents `--dev-account-tokens 10000000000000` from being reinterpreted as 1,000,000 HOG for every developer account after the flag becomes user-only.
+This prevents `--dev-account-tokens 10000000000000` from being reinterpreted as 1,000,000 native tokens for every developer account after the flag becomes user-only.
 ## Cross-repository coordination
 ### `groundhog-hogd`
 - Add `LocalBootstrapConfig` and fixed local faucet constants.
@@ -240,9 +240,9 @@ This prevents `--dev-account-tokens 10000000000000` from being reinterpreted as 
 ### Supervisor / `groundhog node`
 - Define `--dev-account-count` as user accounts excluding the faucet.
 
-- Add or retain `--dev-account-hog` for per-user allocation, defaulting to 100 HOG.
+- Add or retain `--dev-account-hog` for per-user allocation, defaulting to 100 native tokens.
 
-- Convert HOG values with up to seven decimal places to raw units exactly.
+- Convert native-token values with up to seven decimal places to raw units exactly.
 
 - Generate bootstrap manifest version 2 with the fixed faucet and separate user allocation.
 
@@ -279,12 +279,12 @@ Changes should land in dependency order: `groundhog-hogd`, then the consuming RP
 
 - Version-1 persistent metadata requests a fresh data directory.
 
-- Maximum user count plus faucet stays within account and HOG-supply limits; excessive aggregate allocations fail cleanly.
+- Maximum user count plus faucet stays within account and native-token-supply limits; excessive aggregate allocations fail cleanly.
 
-- Hosted bootstrap tests continue to assert ten homogeneous accounts at 100 HOG by default and no implicit dedicated faucet.
+- Hosted bootstrap tests continue to assert ten homogeneous accounts at 100 native tokens by default and no implicit dedicated faucet.
 
 ### Cross-repository integration
-- `groundhog node` with defaults exposes `dev-0` as faucet and the configured default number of users at 100 HOG each.
+- `groundhog node` with defaults exposes `dev-0` as faucet and the configured default number of users at 100 native tokens each.
 
 - `groundhog node --dev-account-count 3 --dev-account-hog 50000` exposes exactly the four-account table described above.
 

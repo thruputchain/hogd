@@ -313,7 +313,7 @@ TEST(HostedBootstrapGenerator, RejectsInvalidFaucetAllocation)
 TEST(HostedBootstrapGenerator, RejectsAggregateAllocationAboveTokenSupply)
 {
   constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+      kTotalNativeTokenSupply * std::uint64_t{kNativeTokenDivisibility};
   HostedBootstrapGeneratorConfig config;
   config.bootstrap_config.count = 1;
   config.bootstrap_config.storage_tokens = kTokenSupply / 2;
@@ -329,7 +329,7 @@ TEST(HostedBootstrapGenerator, RejectsAggregateAllocationAboveTokenSupply)
 TEST(HostedBootstrapGenerator, AcceptsAllocationAtTokenSupplyLimit)
 {
   constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+      kTotalNativeTokenSupply * std::uint64_t{kNativeTokenDivisibility};
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
   const auto ceremony_funding = static_cast<std::uint64_t>(
       (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
@@ -364,7 +364,7 @@ TEST(HostedBootstrapGenerator, RejectsMoreThanOneHostedCeremonyTransaction)
 TEST(HostedBootstrapGenerator, CountsFundingForEveryCeremonyTransaction)
 {
   constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
+      kTotalNativeTokenSupply * std::uint64_t{kNativeTokenDivisibility};
   const StorageCostModel cost_model = StorageCostModel::default_cost_model();
   const auto ceremony_funding = static_cast<std::uint64_t>(
       (2 * cost_model.get_balance_cost()) + cost_model.get_nnint_cost() +
