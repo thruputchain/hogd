@@ -1,10 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
@@ -22,7 +26,8 @@ class MempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
   using auth_data_callback =
-      std::function<x23::Async<void>(BlockHeight, KeyChangeBatch)>;
+      std::function<x23::Async<void>(BlockHeight,
+                                     ChunkedVector<KeyChangeBatch>)>;
 
   MempoolAuthRpc() = default;
 
@@ -85,9 +90,21 @@ public:
     co_return result;
   }
 
-  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
-                                                 KeyChangeBatch key_changes)
+  // Collects the run of chunks the auth server sends for a height and runs
+  // the callback once per complete height. Chunks may arrive in any order.
+  x23::Async<void> mempoolauth_auth_data_changed_chunk(KeyChangeChunk chunk)
   {
+    std::optional<KeyChangeRunAssembler::Run> run =
+        run_assembler_.push(chunk.height,
+                            ChunkPosition{.index = chunk.chunk_index,
+                                          .count = chunk.chunk_count},
+                            std::move(chunk.changes));
+    if (!run.has_value()) {
+      co_return;
+    }
+    const BlockHeight height = run->key;
+    ChunkedVector<KeyChangeBatch> key_changes = std::move(run->parts);
+
     std::optional<auth_data_callback> callback;
     while (true) {
       x23::CoroGuard cg;
@@ -136,6 +153,10 @@ public:
   }
 
 private:
+  using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
+
+  KeyChangeRunAssembler run_assembler_;
+
   x23::CoroLock callback_lock_;
   std::optional<auth_data_callback> callback_;
   x23::CoroFutex<bool> callback_set_{false};

@@ -13,8 +13,11 @@
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
 #include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/key_change_chunk_view.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -24,6 +27,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -101,6 +105,8 @@ AuthServer::register_auth_data_updates(
         return false;
       });
       if (acquired_lock) {
+        // Forwards start at this height.
+        forwarded_height_futex_.store(height - 1);
         break;
       }
       co_await current_height_futex_.wait(current_height);
@@ -143,16 +149,47 @@ AuthServer::register_auth_data_updates(
   current_height_futex_.broadcast(&default_threadpool());
   co_await Health::instance().set_current_block_height(height);
 
-  if (mempool_client_) {
-    // The mempool's proc still takes the height as one batch.
-    std::vector<std::span<const KeyChange>> pieces;
-    pieces.reserve(key_changes.chunks().size());
-    for (const KeyChangeBatch &chunk : key_changes.chunks()) {
-      pieces.emplace_back(chunk.data(), chunk.size());
+  co_await forward_key_changes(height, key_changes);
+}
+
+x23::Async<void>
+AuthServer::ForwardKeyChangeChunk::operator()(ChunkPosition position,
+                                              ChunkItems<KeyChange> changes)
+{
+  // The record is serialized from [changes] in place, before the call first
+  // suspends.
+  const KeyChangeChunkView view{.height = height,
+                                .chunk_index = position.index,
+                                .chunk_count = position.count,
+                                .changes = changes};
+  co_await client.mempoolauth_auth_data_changed_chunk(view);
+}
+
+x23::Async<void>
+AuthServer::forward_key_changes(
+    BlockHeight height, const ChunkedVector<KeyChangeBatch> &key_changes)
+{
+  // Whatever becomes of this forward, the next height gets its turn.
+  x23::Defer _release{[this, height] {
+    forwarded_height_futex_.store(height);
+    forwarded_height_futex_.broadcast(&default_threadpool());
+  }};
+  for (;;) {
+    const BlockHeight forwarded = forwarded_height_futex_.load();
+    if (forwarded + 1 == height) {
+      break;
     }
-    co_await mempool_client_->mempoolauth_auth_data_changed(
-        height, ChunkItems<KeyChange>(pieces));
+    co_await forwarded_height_futex_.wait(forwarded);
   }
+  if (!mempool_client_) {
+    co_return;
+  }
+  // The chunks are serialized from [key_changes] in place; it outlives the
+  // send.
+  ChunkRunSender sender(key_changes.chunks(), max_key_changes_per_chunk_,
+                        ForwardKeyChangeChunk{.client = *mempool_client_,
+                                              .height = height});
+  co_await sender.send();
 }
 
 x23::Async<void>
@@ -171,6 +208,8 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
     });
     if (initialized) {
       info("initializing auth server to height {}", current_height);
+      // Nothing of the intro height is forwarded; forwards start after it.
+      forwarded_height_futex_.store(current_height);
       current_height_futex_.broadcast(&default_threadpool());
       co_await Health::instance().set_current_block_height(current_height);
     }

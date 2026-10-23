@@ -588,7 +588,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
@@ -603,7 +603,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -750,7 +750,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
@@ -767,7 +767,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -868,7 +868,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
@@ -883,7 +883,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -1025,7 +1025,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeOwnerId, std::move(native_owner));
@@ -1042,7 +1042,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -1169,7 +1169,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeOwnerId, std::move(native_owner));
@@ -1186,7 +1186,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -1265,7 +1265,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kNativeCallerId, std::move(native_caller));
@@ -1280,7 +1280,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
@@ -1513,7 +1513,7 @@ protected:
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> native_map;
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     native_map.emplace(kRv32AdminId, std::move(rv32_admin));
     native_map.emplace(kMintDriverId, std::move(driver));
@@ -1527,7 +1527,7 @@ protected:
         });
 
     auto native_token_obj = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token_obj);
     write_deployment(kNativeTokenAddr, native_token_obj);
 
