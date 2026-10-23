@@ -15,6 +15,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -30,6 +31,34 @@
 #include "x23/serialize.h"
 
 namespace hogd {
+
+namespace {
+
+// Returns sha256(tx), the handler's source tx hash, or nullopt if tx's
+// encoding exceeds kMaxBytesTransaction.  The tx is serialized once, into a
+// buffer this thread reuses across transactions, and both the cap and the hash
+// read that encoding -- rather than walking tx for its size and then
+// serializing it into a fresh allocation for the hash.  Nothing here suspends,
+// so transactions interleaved on this thread cannot share the buffer.
+//
+// Serialization allocates proportional to attacker-influenced input, so this
+// can throw std::bad_alloc; callers contain it.
+std::optional<SHA256Hash>
+hash_bounded_transaction(Transaction const &tx)
+{
+  static thread_local x23::Buf buf;
+  buf.clear();
+  x23::serialize_to(&buf, tx);
+  if (buf.size() > kMaxBytesTransaction) {
+    // Don't let one rejected transaction pin an oversized buffer to the
+    // thread; anything we keep is at most a maximal accepted transaction.
+    buf = x23::Buf{};
+    return std::nullopt;
+  }
+  return sha256(buf);
+}
+
+} // namespace
 
 PerTransactionDatabaseProxy
 ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
@@ -160,14 +189,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kProposing);
 
-  // Cap the body, not the wrapper: signatures are node-local (#3844).
-  if (x23::xdr_size(signed_tx.tx) > kMaxBytesTransaction) {
-    co_return ExecProposeResult(ExecResult::ExecResultMalformedTransaction);
-  }
-
   auto proxy = make_per_tx_db_proxy(tx_id);
-  // SystemCallHandler's ctor re-serializes the tx for sha256 (#1905), which
-  // allocates proportional to attacker-influenced input. An exception
+  // Hashing the tx re-serializes it (#1905), which allocates proportional to
+  // attacker-influenced input, as does SystemCallHandler's ctor. An exception
   // escaping an x23 coroutine body is fatal (trace_unhandled_exception is
   // [[noreturn]]), so contain bad_alloc here; anything else is a genuine bug
   // and should still terminate.
@@ -181,7 +205,13 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
   // handler does.
   std::optional<SystemCallHandler> syscall_handler;
   try {
-    syscall_handler.emplace(signed_tx.tx, *snapshot_cache_, std::move(proxy),
+    // Cap the body, not the wrapper: signatures are node-local (#3844).
+    auto tx_hash = hash_bounded_transaction(signed_tx.tx);
+    if (!tx_hash.has_value()) {
+      co_return ExecProposeResult(ExecResult::ExecResultMalformedTransaction);
+    }
+    syscall_handler.emplace(signed_tx.tx, *tx_hash, *snapshot_cache_,
+                            std::move(proxy),
                             make_per_tx_event_server_proxy(tx_id),
                             ProposalModeCtor{}, *context);
   } catch (std::bad_alloc const &e) {
@@ -239,13 +269,9 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
 {
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kValidating);
-  // Same body cap as proposal (#3844).
-  if (x23::xdr_size(tx.signed_tx.tx) > kMaxBytesTransaction) {
-    co_return ExecResult::ExecResultTxValidationFailure;
-  }
   auto proxy = make_per_tx_db_proxy(tx_id);
-  // SystemCallHandler's ctor re-serializes the tx for sha256 (#1905), which
-  // allocates proportional to attacker-influenced input. An exception
+  // Hashing the tx re-serializes it (#1905), which allocates proportional to
+  // attacker-influenced input, as does SystemCallHandler's ctor. An exception
   // escaping an x23 coroutine body is fatal (trace_unhandled_exception is
   // [[noreturn]]), so contain bad_alloc here; anything else is a genuine bug
   // and should still terminate.
@@ -259,11 +285,15 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   // handler does.
   std::optional<SystemCallHandler> syscall_handler;
   try {
-    syscall_handler.emplace(tx.signed_tx.tx, *snapshot_cache_, std::move(proxy),
-                            make_per_tx_event_server_proxy(tx_id),
-                            ValidationModeCtor{
-                                tx.nondeterministic_proposal_data},
-                            *context);
+    // Same body cap as proposal (#3844).
+    auto tx_hash = hash_bounded_transaction(tx.signed_tx.tx);
+    if (!tx_hash.has_value()) {
+      co_return ExecResult::ExecResultTxValidationFailure;
+    }
+    syscall_handler.emplace(
+        tx.signed_tx.tx, *tx_hash, *snapshot_cache_, std::move(proxy),
+        make_per_tx_event_server_proxy(tx_id),
+        ValidationModeCtor{tx.nondeterministic_proposal_data}, *context);
   } catch (std::bad_alloc const &e) {
     // The diagnostic itself allocates while formatting and can throw again
     // under the same memory pressure, so guard it and fall back to the

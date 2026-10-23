@@ -194,6 +194,16 @@ SystemCallHandler::SystemCallHandler(
     PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
+  : SystemCallHandler(tx, sha256(tx), snapshot_cache, std::move(db_proxy),
+                      std::move(event_server_proxy),
+                      std::move(execution_mode_ctor), runtime_context)
+{}
+
+SystemCallHandler::SystemCallHandler(
+    Transaction const &tx, SHA256Hash const &tx_hash,
+    StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
+    PerTransactionEventServerProxy event_server_proxy,
+    ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context)
   : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
@@ -201,7 +211,7 @@ SystemCallHandler::SystemCallHandler(
           commit_last_call_frame_success(std::move(last_frame));
         },
         db_proxy_, snapshot_cache.get_network_config_params()),
-    source_tx_hash_(sha256(tx)), auth_claim_(tx.auth_claim),
+    source_tx_hash_(tx_hash), auth_claim_(tx.auth_claim),
     root_invocation_(tx.invocation), tx_uniquifier_(tx.uniquifier),
     root_invoked_address_(tx.invocation.invoked_address),
     execution_mode_data_(

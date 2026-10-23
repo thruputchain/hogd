@@ -104,10 +104,25 @@ public:
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context);
 
+  // As above, for a caller that already has [tx_hash] == sha256(tx) (computed
+  // from an encoding it needed anyway), so the ctor does not re-serialize tx.
+  SystemCallHandler(Transaction const &tx, SHA256Hash const &tx_hash,
+                    StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context);
+
   // The handler borrows tx.contracts_to_deploy for its whole lifetime (see
   // contracts_to_deploy_ below), so a temporary Transaction would dangle
   // before first use. Deleted to make that a compile error at the call site.
   SystemCallHandler(Transaction &&tx, StorageSnapshotCache &snapshot_cache,
+                    PerTransactionDatabaseProxy db_proxy,
+                    PerTransactionEventServerProxy event_server_proxy,
+                    ExecutionModeCtor execution_mode_ctor,
+                    RuntimeContext &runtime_context) = delete;
+  SystemCallHandler(Transaction &&tx, SHA256Hash const &tx_hash,
+                    StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
