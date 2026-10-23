@@ -1857,14 +1857,14 @@ TEST(Mempool, NominateCommit)
 
 namespace {
 
-// The transactions a proposal names, by hash.
-TransactionHashBatch
+// The transactions a proposal names, by signed hash.
+SignedTransactionHashBatch
 proposed_tx_hashes(const SchedulerProposalResult &result)
 {
-  TransactionHashBatch tx_hashes;
-  EXPECT_TRUE(
-      parallel_batch_to_t(result.proposed_block().proposal.transactions.hash,
-                          tx_hashes, kNoBatchSizeLimit)());
+  SignedTransactionHashBatch tx_hashes;
+  EXPECT_TRUE(parallel_batch_to_t(
+      result.proposed_block().proposal.transactions.signed_hash, tx_hashes,
+      kNoBatchSizeLimit)());
   return tx_hashes;
 }
 

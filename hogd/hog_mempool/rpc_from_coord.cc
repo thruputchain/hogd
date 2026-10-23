@@ -1736,13 +1736,15 @@ MempoolCoordinatorRpc::retire_nominated_block()
   // The block joins the validated blocks with what their commit path reads:
   // its closed state (the tip it makes, its DB snapshot and event block, kept
   // under its id) and its transactions, which are [nominated.txs], compacted
-  // to the ones that executed, in the order of [nominated.result_tx_hashes].
+  // to the ones that executed, in the order of [nominated.result_tx_hashes]
+  // and, aligned with them, [nominated.result_signed_tx_hashes].
   PendingBlock retired{};
   retired.db_tip = nominated.db_tip;
   retired.block_id = nominated.block_id;
   retired.block_execution = nominated.block_execution;
   retired.txs = nominated.txs;
   retired.tx_hashes = nominated.result_tx_hashes;
+  retired.signed_tx_hashes = nominated.result_signed_tx_hashes;
 
   // Every transaction the nomination took leaves the scheduler's pending
   // nomination for its run queue, as when a nomination is rolled back, so
