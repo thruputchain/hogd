@@ -85,10 +85,12 @@ new_tree() {
 # the script waits between them.
 export FETCH_GO_MODULES_RETRY_DELAY_SEC=0
 
+# Any further arguments are NAME=VALUE overrides for that one run.
 run_tree() {
   local tree=$1 behaviours=$2
+  shift 2
   : >"$work/calls"
-  GO_FAKE_LOG="$work/calls" GO_FAKE_SCRIPT="$behaviours" \
+  env GO_FAKE_LOG="$work/calls" GO_FAKE_SCRIPT="$behaviours" "$@" \
     bash "$tree/scripts/ci/fetch_go_modules.sh" 2>&1
 }
 
@@ -142,6 +144,41 @@ output=$(run_tree "$work/empty" "ok") || status=$?
 expect_status "no modules" 1 "$status"
 expect_calls "no modules" 0 "$work/calls"
 expect_contains "no modules reported" "No Go modules found in groundhog-go" "$output"
+
+# A zero-padded override is the decimal an operator wrote, not an octal
+# literal. Reading it as one left the attempt comparison erroring rather than
+# comparing, and the download retried without end -- the stalled job this
+# retry is supposed to prevent.
+new_tree "$work/padded" chuckd
+status=0
+output=$(run_tree "$work/padded" "1 1 1 1 1 1 1 ok" FETCH_GO_MODULES_ATTEMPTS=08) || status=$?
+expect_status "zero-padded attempt limit" 0 "$status"
+expect_calls "zero-padded attempt limit" 8 "$work/calls"
+
+new_tree "$work/padded-delay" chuckd
+status=0
+output=$(run_tree "$work/padded-delay" "1 ok" FETCH_GO_MODULES_RETRY_DELAY_SEC=00) || status=$?
+expect_status "zero-padded delay" 0 "$status"
+expect_calls "zero-padded delay" 2 "$work/calls"
+
+# A typo must stop the script where it can still be read, rather than
+# evaluating to zero and leaving a prefetch that never retries.
+new_tree "$work/typo" chuckd
+status=0
+output=$(run_tree "$work/typo" "ok" FETCH_GO_MODULES_ATTEMPTS=three) || status=$?
+expect_status "non-numeric attempt limit" 1 "$status"
+expect_calls "non-numeric attempt limit" 0 "$work/calls"
+expect_contains "non-numeric attempt limit reported" \
+  "FETCH_GO_MODULES_ATTEMPTS must be a decimal integer" "$output"
+
+# Zero attempts is not a prefetch with the retry off, it is no prefetch.
+new_tree "$work/zero" chuckd
+status=0
+output=$(run_tree "$work/zero" "ok" FETCH_GO_MODULES_ATTEMPTS=0) || status=$?
+expect_status "zero attempt limit" 1 "$status"
+expect_calls "zero attempt limit" 0 "$work/calls"
+expect_contains "zero attempt limit reported" \
+  "FETCH_GO_MODULES_ATTEMPTS must be at least 1" "$output"
 
 if [[ "$fail" -ne 0 ]]; then
   echo "fetch_go_modules selftest FAILED"

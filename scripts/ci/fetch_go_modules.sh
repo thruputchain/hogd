@@ -21,6 +21,33 @@ FETCH_GO_MODULES_ATTEMPTS=${FETCH_GO_MODULES_ATTEMPTS:-3}
 # attempts against a proxy that is genuinely down do not eat the job's budget.
 FETCH_GO_MODULES_RETRY_DELAY_SEC=${FETCH_GO_MODULES_RETRY_DELAY_SEC:-5}
 
+# Both bounds reach arithmetic below, where bash reads a leading zero as octal
+# and a word as zero. Neither reading fails usefully on its own: [08] is an
+# invalid octal literal, so the attempt comparison errors instead of comparing
+# and a download that keeps failing is retried forever, and a typo evaluates to
+# zero, so the retry quietly stops being one. A stall is the worse of the two
+# and the reason the helpers here are bounded at all, so settle both now --
+# take the digits as the decimal the operator wrote, and refuse anything else.
+require_count() {
+  local name=$1 min=$2
+  local value=${!name}
+
+  if [[ ! "$value" =~ ^[0-9]+$ ]]; then
+    echo "fetch_go_modules: $name must be a decimal integer, got [$value]" >&2
+    return 1
+  fi
+  if ((10#$value < min)); then
+    echo "fetch_go_modules: $name must be at least $min, got [$value]" >&2
+    return 1
+  fi
+  printf -v "$name" '%d' "$((10#$value))"
+}
+
+# One attempt is a prefetch with the retry turned off; zero would be no
+# prefetch at all. No delay at all is a legitimate ask of the self-test.
+require_count FETCH_GO_MODULES_ATTEMPTS 1
+require_count FETCH_GO_MODULES_RETRY_DELAY_SEC 0
+
 go_mod_download() {
   local dir=$1 attempt=1 delay=$FETCH_GO_MODULES_RETRY_DELAY_SEC status
 
