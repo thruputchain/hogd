@@ -1214,14 +1214,17 @@ EventRPCContext::gc_context(BlockID block_id)
 x23::Detached
 EventRPCContext::close_events_file_async(x23::UniqueFd events_file)
 {
-  // Off the RPC thread: the reply that triggered this teardown need not wait
-  // for the kernel to free a large file's blocks.
+  // The last close of an unlinked events file frees its blocks, which blocks
+  // for milliseconds on a large block.  Pool workers are reserved for work
+  // that does not block (see ThreadPool::spawn), so run it on a thread
+  // outside the pool; this coroutine resumes in the pool once it is done.
+  // The reply that triggered the teardown does not wait for it either way.
   auto *pool = x23::ThreadPool::get_thread_pool();
   if (pool == nullptr) {
     pool = &default_threadpool();
   }
-  co_await pool->bg();
-  events_file.reset();
+  const int fd = events_file.release();
+  co_await pool->async([fd] { x23::UniqueFd closer(fd); });
 }
 
 void

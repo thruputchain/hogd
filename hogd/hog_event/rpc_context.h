@@ -120,7 +120,8 @@ private:
   [[nodiscard]] x23::UniqueFd gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
-  // Closes [events_file] on the thread pool, off the calling RPC's thread.
+  // Closes [events_file] on a thread outside the pool, since the close can
+  // block for milliseconds; see ThreadPool::async.
   static x23::Detached close_events_file_async(x23::UniqueFd events_file);
 
   // Records that a block published its events file under [hash].  Caller holds
