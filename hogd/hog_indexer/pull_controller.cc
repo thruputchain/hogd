@@ -131,6 +131,70 @@ IndexerPullController::initialize_origin_if_needed(
   return !xdr_equal(before, after);
 }
 
+std::optional<EventIndexerPulledBlock>
+IndexerPullController::pull_remaining_pairs(event_indexer_client_t &client,
+                                            EventIndexerChunkedBlock chunked)
+{
+  if (chunked.first_pairs.size() > chunked.pair_count) {
+    panic("chunked pull reply carries {} pairs of a {}-pair block",
+          chunked.first_pairs.size(), chunked.pair_count);
+  }
+  IndexerCommittedBlock block{
+      .payload =
+          IndexerCommittedBlockPayload{
+              .format_version = chunked.format_version,
+              .consensus_value = std::move(chunked.consensus_value),
+          },
+      .identity = chunked.identity,
+  };
+  block.payload.event_logs.reserve(chunked.pair_count);
+  block.payload.tx_bodies.reserve(chunked.pair_count);
+  const auto append = [&](EventIndexerBlockPairBatch &pairs) {
+    for (EventIndexerBlockPair &pair : pairs) {
+      block.payload.event_logs.push_back(std::move(pair.event_log));
+      block.payload.tx_bodies.push_back(std::move(pair.tx_body));
+    }
+  };
+  append(chunked.first_pairs);
+
+  const BlockHeight height =
+      block.payload.consensus_value.proposal_header.block_height;
+  while (block.payload.event_logs.size() < chunked.pair_count) {
+    const auto first_pair =
+        static_cast<uint32_t>(block.payload.event_logs.size());
+    EventIndexerBlockPairsResult result =
+        client.event_indexer_pull_block_pairs(EventIndexerBlockPairsRequest{
+            .protocol = version::kHogdProtocol(),
+            .block_height = height,
+            .identity = block.identity,
+            .first_pair = first_pair,
+        })();
+    switch (result.outcome()) {
+    case EventIndexerBlockPairsOutcome::EventIndexerBlockPairsFound:
+      if (result.pairs().empty() ||
+          result.pairs().size() > chunked.pair_count - first_pair) {
+        panic("block {} pairs reply from {} carries {} of {} remaining pairs",
+              static_cast<std::int64_t>(height), first_pair,
+              result.pairs().size(), chunked.pair_count - first_pair);
+      }
+      append(result.pairs());
+      break;
+    case EventIndexerBlockPairsOutcome::EventIndexerBlockPairsNotReady:
+      // Pull again from durable progress once the server is ready.
+      mark_not_ready();
+      return std::nullopt;
+    default:
+      panic("fatal indexer block pairs outcome {} at block {}: {}",
+            result.outcome(), static_cast<std::int64_t>(height),
+            result.diagnostic());
+    }
+  }
+  return EventIndexerPulledBlock{
+      .origin = std::move(chunked.origin),
+      .block = std::move(block),
+  };
+}
+
 bool
 IndexerPullController::pull_tx_failures(event_indexer_client_t &client)
 {
@@ -219,8 +283,8 @@ IndexerPullController::run(const std::stop_token &stop)
             IndexerProgress(IndexerProgressState::IndexerProgressCaughtUp);
         request.progress.initialized() = requested_progress.initialized();
       }
-      EventIndexerPullResult result =
-          client->event_indexer_pull_next(request)();
+      EventIndexerChunkedPullResult result =
+          client->event_indexer_pull_next_chunked(request)();
       if (stop.stop_requested()) {
         return;
       }
@@ -229,7 +293,16 @@ IndexerPullController::run(const std::stop_token &stop)
       case EventIndexerPullOutcome::EventIndexerPullBlock:
       {
         mark_not_ready();
-        EventIndexerPulledBlock pulled = std::move(result.pulled_block());
+        std::optional<EventIndexerPulledBlock> assembled =
+            pull_remaining_pairs(*client, std::move(result.chunked_block()));
+        if (stop.stop_requested()) {
+          return;
+        }
+        if (!assembled) {
+          retry_delay = true;
+          break;
+        }
+        EventIndexerPulledBlock pulled = std::move(*assembled);
         initialize_origin_if_needed(pulled.origin);
         const IndexerProgress before_apply = db_.durable_progress();
         const BlockHeight pulled_height =

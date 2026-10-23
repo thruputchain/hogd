@@ -507,14 +507,8 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash)
   if (size < 0) {
     return std::unexpected(std::format("failed to size events file {}", name));
   }
-  // A block's pairs were bounded to the pull RPC's replay limit at
-  // publication, so a larger file cannot be a valid events file.  Rejecting
-  // before the allocation keeps a corrupt or sparse file a clean fail-closed
-  // error instead of an unbounded allocation.
-  if (std::cmp_greater(size, kMaxIndexerOutboxPayloadBytes)) {
-    return std::unexpected(
-        std::format("events file {} exceeds replayable payload size", name));
-  }
+  // Nothing bounds a block's pairs as a whole, so neither is the file; each
+  // pair is bounded, and parse_events_file_pairs rejects a malformed one.
   std::vector<uint8_t> bytes(static_cast<size_t>(size));
   file.seekg(0);
   if (size > 0 && !file.read(reinterpret_cast<char *>(bytes.data()), size)) {

@@ -21,6 +21,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -28,9 +29,22 @@ inline constexpr uint32_t kIndexerOutboxEnvelopeFormatVersion = 1;
 inline constexpr size_t kIndexerRpcRecordMarkerBytes = sizeof(uint32_t);
 inline constexpr size_t kMaxIndexerEventPullRpcRecordBytes =
     kIndexerRpcMaxMessageSize + kIndexerRpcRecordMarkerBytes;
-// A durable payload can never be larger than the RPC body that must replay it.
-// The actual committed limit is lower because the call header, origin, block
-// identity, and record marker are also counted exactly before publication.
+// The largest event/body pair the chunked pull serves. A chunked pull reply
+// carries at least one pair beside the block's header, so this leaves room for
+// the largest ConsensusValue and the fixed reply fields. A block of any size
+// whose pairs are each within it can be pulled.
+inline constexpr size_t kIndexerChunkedReplyOverheadBytes = 4096;
+inline constexpr size_t kMaxIndexerPairBytes =
+    kIndexerRpcMaxMessageSize -
+    x23::detail::xdr_size_bounds<ConsensusValue>().max_ -
+    kIndexerChunkedReplyOverheadBytes;
+static_assert(kEventIndexerInlinePairBytes < kMaxIndexerPairBytes);
+// Nothing bounds a block's pairs as a whole. The XDR does not bound one pair
+// either (a transaction and its root output are unbounded opaques); the
+// transaction size and gas limits keep a real pair far below this.
+// An outbox record file's payload. A committed record stores only its
+// ConsensusValue, its pairs living in the block's events file; a candidate
+// record, which embeds its pairs, must also fit the single-reply pull record.
 inline constexpr size_t kMaxIndexerOutboxPayloadBytes =
     kIndexerRpcMaxMessageSize;
 // The bounded XDR header precedes raw payload bytes. Keep slack explicit so
@@ -112,6 +126,13 @@ void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
 IndexerOutboxStatus<size_t>
 indexer_outbox_file_size_for_payload(size_t payload_size);
 IndexerOutboxStatus<void> validate_indexer_outbox_file_size(size_t file_size);
+// The record event_indexer_pull_next replies with; nullopt only on size_t
+// overflow. The checked form fails unless it fits x23's 31-bit record.
+// event_indexer_pull_next_chunked has no such limit.
+std::optional<size_t>
+indexer_event_pull_record_bytes_for_parts(size_t consensus_value_xdr_size,
+                                          size_t event_logs_xdr_size,
+                                          size_t tx_bodies_xdr_size);
 IndexerOutboxStatus<size_t>
 indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
                                              size_t event_logs_xdr_size,

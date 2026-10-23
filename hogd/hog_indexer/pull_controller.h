@@ -45,6 +45,12 @@ private:
   void run(const std::stop_token &stop);
   bool connect_once();
   bool pull_tx_failures(event_indexer_client_t &client);
+  // Reassembles a chunked pull's block, pulling the pairs its reply did not
+  // carry. nullopt if the server stopped being ready part way; the next pull
+  // starts again from durable progress.
+  std::optional<EventIndexerPulledBlock>
+  pull_remaining_pairs(event_indexer_client_t &client,
+                       EventIndexerChunkedBlock chunked);
   bool initialize_origin_if_needed(const IndexerOutboxOrigin &origin);
   bool wait(std::stop_token stop, std::chrono::milliseconds delay);
   void fail_event_client();

@@ -888,6 +888,229 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
 }
 
+namespace {
+
+// Commits a block of one pair per body at [height].
+ConsensusValue
+commit_block_of_pairs(EventRPCContext &ctx, BlockID block_id,
+                      BlockHeight height, ConsensusValueHash prev_hash,
+                      const ProposedTransactionBatch &bodies)
+{
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+  CHECK_EQ(mempool_rpc.eventsched_open_block(block_id)(), RPCError::kRPCNone);
+  CHECK_EQ(exec_rpc.eventexecutor_open_block(block_id)(), RPCError::kRPCNone);
+  for (size_t i = 0; i < bodies.size(); ++i) {
+    CHECK_EQ(exec_rpc.eventexecutor_emit_event(
+                 block_id, 1, make_event(bodies[i], static_cast<uint8_t>(i)),
+                 bodies[i])(),
+             RPCError::kRPCNone);
+  }
+  CHECK_EQ(exec_rpc.eventexecutor_close_block(block_id)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      mempool_rpc.eventsched_close_block(block_id, height)();
+  CHECK_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(height, closed.root_hash(), bodies);
+  value.prev_hash = std::move(prev_hash);
+  CHECK_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
+           RPCError::kRPCNone);
+  return value;
+}
+
+EventIndexerBlockPairsRequest
+pairs_request(const EventIndexerChunkedBlock &chunked, uint32_t first_pair)
+{
+  return {
+      .protocol = version::kHogdProtocol(),
+      .block_height = chunked.consensus_value.proposal_header.block_height,
+      .identity = chunked.identity,
+      .first_pair = first_pair,
+  };
+}
+
+// Pulls the pairs [chunked] did not carry and reassembles its block.
+EventIndexerPulledBlock
+assemble_chunked(EventRPCContext &ctx, const EventIndexerChunkedBlock &chunked)
+{
+  EventIndexerPulledBlock pulled{
+      .origin = chunked.origin,
+      .block =
+          IndexerCommittedBlock{
+              .payload =
+                  IndexerCommittedBlockPayload{
+                      .format_version = chunked.format_version,
+                      .consensus_value = chunked.consensus_value,
+                  },
+              .identity = chunked.identity,
+          },
+  };
+  auto &payload = pulled.block.payload;
+  const auto append = [&](const EventIndexerBlockPairBatch &pairs) {
+    for (const EventIndexerBlockPair &pair : pairs) {
+      payload.event_logs.push_back(pair.event_log);
+      payload.tx_bodies.push_back(pair.tx_body);
+    }
+  };
+  append(chunked.first_pairs);
+  while (payload.event_logs.size() < chunked.pair_count) {
+    EventIndexerBlockPairsResult pairs = ctx.pull_indexer_block_pairs(
+        pairs_request(chunked,
+                      static_cast<uint32_t>(payload.event_logs.size())))();
+    CHECK(pairs.outcome() ==
+          EventIndexerBlockPairsOutcome::EventIndexerBlockPairsFound);
+    CHECK(!pairs.pairs().empty());
+    append(pairs.pairs());
+  }
+  return pulled;
+}
+
+const std::atomic<bool> kNotDraining{false};
+
+} // namespace
+
+TEST_F(EventRpcTest, ChunkedPullReassemblesTheSingleReplyBlock)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  const ProposedTransactionBatch bodies{make_body(301), make_body(302),
+                                        make_body(303)};
+  commit_block_of_pairs(ctx, 91, 1, sha256(genesis), bodies);
+
+  EventIndexerPullResult whole = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(whole.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+
+  // A block within the budget comes whole in the chunked reply.
+  EventIndexerChunkedPullResult inline_reply =
+      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)();
+  ASSERT_EQ(inline_reply.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(inline_reply.chunked_block().pair_count, 3U);
+  EXPECT_EQ(inline_reply.chunked_block().first_pairs.size(), 3U);
+  EXPECT_EQ(x23::serialize(assemble_chunked(ctx, inline_reply.chunked_block())),
+            x23::serialize(whole.pulled_block()));
+
+  // With a one-byte budget every reply carries exactly one pair.
+  ctx.set_indexer_pair_budget_bytes_for_test(1);
+  EventIndexerChunkedPullResult chunked =
+      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)();
+  ASSERT_EQ(chunked.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(chunked.chunked_block().pair_count, 3U);
+  ASSERT_EQ(chunked.chunked_block().first_pairs.size(), 1U);
+  for (uint32_t first = 1; first < 3; ++first) {
+    EventIndexerBlockPairsResult pairs = ctx.pull_indexer_block_pairs(
+        pairs_request(chunked.chunked_block(), first))();
+    ASSERT_EQ(pairs.outcome(),
+              EventIndexerBlockPairsOutcome::EventIndexerBlockPairsFound)
+        << std::string_view(pairs.diagnostic());
+    ASSERT_EQ(pairs.pairs().size(), 1U);
+    EXPECT_EQ(x23::serialize(pairs.pairs()[0].tx_body),
+              x23::serialize(
+                  whole.pulled_block().block.payload.tx_bodies[first]));
+  }
+  EXPECT_EQ(x23::serialize(assemble_chunked(ctx, chunked.chunked_block())),
+            x23::serialize(whole.pulled_block()));
+}
+
+TEST_F(EventRpcTest, ChunkedPullAnswersNonBlocksAsPullDoes)
+{
+  EventRPCContext ctx(temp_dir());
+  EXPECT_EQ(
+      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)().outcome(),
+      EventIndexerPullOutcome::EventIndexerPullNotReady);
+
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerPullResult pulled = ctx.pull_indexer_next(pull_request())();
+  EventIndexerChunkedPullResult chunked =
+      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)();
+  ASSERT_EQ(pulled.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  ASSERT_EQ(chunked.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(chunked.origin(), pulled.origin());
+
+  EventIndexerPullRequest mismatched = pull_request();
+  mismatched.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
+  EXPECT_EQ(ctx.pull_indexer_next_chunked(mismatched, kNotDraining)().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
+}
+
+TEST_F(EventRpcTest, BlockPairsRejectUnknownBlocksAndRanges)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  const ProposedTransactionBatch bodies{make_body(311), make_body(312)};
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  commit_block_of_pairs(ctx, 92, 1, sha256(genesis), bodies);
+  ctx.set_indexer_pair_budget_bytes_for_test(1);
+  EventIndexerChunkedPullResult chunked =
+      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)();
+  ASSERT_EQ(chunked.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  const EventIndexerChunkedBlock &block = chunked.chunked_block();
+
+  using enum EventIndexerBlockPairsOutcome;
+  EXPECT_EQ(ctx.pull_indexer_block_pairs(pairs_request(block, 2))().outcome(),
+            EventIndexerBlockPairsInvalidRange);
+
+  EventIndexerBlockPairsRequest forged = pairs_request(block, 1);
+  forged.identity.consensus_hash[0] ^= 1;
+  EXPECT_EQ(ctx.pull_indexer_block_pairs(forged)().outcome(),
+            EventIndexerBlockPairsUnknownBlock);
+
+  EventIndexerBlockPairsRequest unpublished = pairs_request(block, 1);
+  unpublished.block_height = 2;
+  EXPECT_EQ(ctx.pull_indexer_block_pairs(unpublished)().outcome(),
+            EventIndexerBlockPairsUnknownBlock);
+
+  EventIndexerBlockPairsRequest mismatched = pairs_request(block, 1);
+  mismatched.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
+  EXPECT_EQ(ctx.pull_indexer_block_pairs(mismatched)().outcome(),
+            EventIndexerBlockPairsMismatchedProtocol);
+
+  EventRPCContext unreconciled(temp_dir());
+  EXPECT_EQ(unreconciled.pull_indexer_block_pairs(pairs_request(block, 1))()
+                .outcome(),
+            EventIndexerBlockPairsNotReady);
+}
+
+TEST_F(EventRpcTest, BlockPairsAreServedAfterRestart)
+{
+  // A server that restarts part way through a chunked block has lost the block
+  // it held, and loads it again for the client's next pair request.
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  const ProposedTransactionBatch bodies{make_body(321), make_body(322)};
+  ConsensusValue block_one;
+  EventIndexerChunkedBlock chunked;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    block_one = commit_block_of_pairs(ctx, 93, 1, sha256(genesis), bodies);
+    ctx.set_indexer_pair_budget_bytes_for_test(1);
+    EventIndexerChunkedPullResult result =
+        ctx.pull_indexer_next_chunked(pull_request(), kNotDraining)();
+    ASSERT_EQ(result.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+    chunked = std::move(result.chunked_block());
+  }
+  ASSERT_EQ(chunked.first_pairs.size(), 1U);
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(193, block_one)().has_value());
+  EventIndexerBlockPairsResult pairs =
+      restarted.pull_indexer_block_pairs(pairs_request(chunked, 1))();
+  ASSERT_EQ(pairs.outcome(),
+            EventIndexerBlockPairsOutcome::EventIndexerBlockPairsFound)
+      << std::string_view(pairs.diagnostic());
+  ASSERT_EQ(pairs.pairs().size(), 1U);
+  expect_xdr_equal(pairs.pairs()[0].tx_body, bodies[1]);
+  expect_xdr_equal(pairs.pairs()[0].event_log, make_event(bodies[1], 1));
+}
+
 TEST_F(EventRpcTest, DuplicateOpenReturnsExists)
 {
   EventRPCContext ctx(temp_dir());
@@ -3407,26 +3630,6 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   // The two committed records keep the file alive as their payload.
   EXPECT_TRUE(std::filesystem::exists(events_file));
   EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(2)().has_value());
-}
-
-TEST_F(EventRpcTest, OversizedEventsFileIsRejectedBeforeAllocation)
-{
-  // A block's pairs were bounded to the pull RPC replay limit at publication,
-  // so a larger file cannot be valid.  A sparse or corrupt file must be a
-  // fail-closed error, not a file-sized allocation.
-  const SHA256Hash root{};
-  const std::string name =
-      EventBlockContext::final_events_filename(temp_dir(), root);
-  {
-    std::ofstream sparse(name, std::ios::binary);
-    ASSERT_TRUE(sparse.good());
-  }
-  std::filesystem::resize_file(name, kMaxIndexerOutboxPayloadBytes + 1);
-
-  auto pairs = read_final_events_file(temp_dir(), root);
-  ASSERT_FALSE(pairs.has_value());
-  EXPECT_NE(pairs.error().find("exceeds replayable payload size"),
-            std::string::npos);
 }
 
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)

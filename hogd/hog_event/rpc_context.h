@@ -3,6 +3,7 @@
 #include <atomic>
 #include <cstdint>
 #include <functional>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -87,6 +88,21 @@ public:
   // For callers with no server to drain.
   x23::Async<EventIndexerPullResult>
   pull_indexer_next(const EventIndexerPullRequest &request);
+  // The same pull, answering a block with its header and first pairs, so a
+  // block of any size fits. A block whose pairs do not all fit stays loaded
+  // for the pull_indexer_block_pairs() requests that follow.
+  x23::Async<EventIndexerChunkedPullResult>
+  pull_indexer_next_chunked(const EventIndexerPullRequest &request,
+                            const std::atomic<bool> &draining);
+  x23::Async<EventIndexerBlockPairsResult>
+  pull_indexer_block_pairs(const EventIndexerBlockPairsRequest &request);
+
+  // Bytes of pairs per chunked reply; kEventIndexerInlinePairBytes unless a
+  // test lowers it to exercise multi-reply blocks with small pairs.
+  void set_indexer_pair_budget_bytes_for_test(size_t bytes)
+  {
+    indexer_pair_budget_bytes_ = bytes;
+  }
 
   void enqueue_tx_failure(TransactionHash tx_hash,
                           TxFailureDiagnostic diagnostic);
@@ -111,6 +127,36 @@ public:
 
 private:
   enum class BlockOperation { kOpening, kClosing, kCommitting, kAbandoning };
+
+  // What a pull answers: a committed block to serve, or the reply that stands
+  // in for one -- caught up, or a failure.
+  struct IndexerPullAnswer {
+    // Implicit, so the pull's many early answers read as replies.
+    // NOLINTNEXTLINE(google-explicit-constructor)
+    IndexerPullAnswer(EventIndexerPullResult reply) : reply(std::move(reply)) {}
+    IndexerPullAnswer(IndexerOutboxOrigin origin, IndexerCommittedBlock block)
+      : origin(std::move(origin)), block(std::move(block))
+    {}
+
+    std::optional<EventIndexerPullResult> reply;
+    IndexerOutboxOrigin origin;
+    std::optional<IndexerCommittedBlock> block;
+  };
+
+  // The pull shared by both pull procedures.
+  x23::Async<IndexerPullAnswer>
+  pull_indexer_block(const EventIndexerPullRequest &request,
+                     const std::atomic<bool> &draining);
+  // The pairs from [first_pair] that one chunked reply carries: at least one,
+  // then as many as fit indexer_pair_budget_bytes_. Fails on a pair larger
+  // than kMaxIndexerPairBytes, which no reply can carry.
+  IndexerOutboxStatus<EventIndexerBlockPairBatch>
+  indexer_block_pairs(const IndexerCommittedBlockPayload &payload,
+                      size_t first_pair) const;
+  std::shared_ptr<const IndexerCommittedBlock>
+  find_chunked_block(BlockHeight height,
+                     const IndexerCommittedBlockIdentity &identity);
+  void cache_chunked_block(std::shared_ptr<const IndexerCommittedBlock> block);
 
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
@@ -201,6 +247,13 @@ private:
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;
+
+  // Blocks part way through a chunked pull, oldest first. Two, so an indexer
+  // and one other puller each finish a large block without reloading it.
+  constexpr static size_t kMaxChunkedBlocks = 2;
+  std::mutex chunked_blocks_mutex_;
+  std::vector<std::shared_ptr<const IndexerCommittedBlock>> chunked_blocks_;
+  size_t indexer_pair_budget_bytes_ = kEventIndexerInlinePairBytes;
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a

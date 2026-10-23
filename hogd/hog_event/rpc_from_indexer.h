@@ -27,6 +27,18 @@ public:
     return ctx_.pull_tx_failures();
   }
 
+  x23::Async<EventIndexerChunkedPullResult>
+  event_indexer_pull_next_chunked(EventIndexerPullRequest request)
+  {
+    co_return co_await ctx_.pull_indexer_next_chunked(request, draining_);
+  }
+
+  x23::Async<EventIndexerBlockPairsResult>
+  event_indexer_pull_block_pairs(EventIndexerBlockPairsRequest request)
+  {
+    co_return co_await ctx_.pull_indexer_block_pairs(request);
+  }
+
   // Set by ~EventIndexerServer before it releases parked pulls. From then on
   // a pull that would park is answered, whichever side of the release it
   // arrives on.
