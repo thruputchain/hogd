@@ -1,6 +1,6 @@
 name: x23c Rust output check
 
-# Builds x23c and type-checks its Rust output in a small crate, since nothing
+# Builds x23c, type-checks its Rust output and runs a round trip through it in a small crate, since nothing
 # else in this repository compiles generated Rust.
 on:
   pull_request:
@@ -44,7 +44,4 @@ jobs:
           cmake --build build-x23c --target x23c --parallel "$(nproc)"
 
       - name: Check generated Rust
-        env:
-          CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-          CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
         run: x23/tests/rust_check/check.sh build-x23c/x23c/x23c

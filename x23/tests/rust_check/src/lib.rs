@@ -4,7 +4,7 @@
 mod generated;
 pub use generated::*;
 
-use rpc_api::{ProgramError, RpcError};
+use thruput_rpc_api::{ProgramError, RpcError};
 use std::sync::Arc;
 
 // In-place decoding fixes the field's lifetime behind a mutable pointer.
@@ -78,4 +78,69 @@ pub async fn call_sites(
 
     client.verify(&Hash::default()).await?;
     Ok(())
+}
+
+// Generated client futures have to stay Send to be spawned.
+fn _client_futures_are_send(client: &check_check_v1_Client, batch: &TxBatch, tx: &mut Tx) {
+    fn send<T: Send>(_: T) {}
+    send(call_sites(client, batch, tx));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::Future;
+    use std::pin::pin;
+    use std::task::{Context, Poll, Waker};
+    use thruput_rpc_api::{CallBuf, ProgVers, RpcHandler, RpcResponse, RpcSender};
+
+    /// Runs each call through the dispatcher in place. It keeps the default
+    /// `send_call_decoded`, so the client decodes an owned response.
+    struct Loopback(check_check_v1_Dispatcher);
+
+    #[async_trait::async_trait]
+    impl RpcSender for Loopback {
+        fn call_buf(&self) -> CallBuf {
+            CallBuf::new()
+        }
+
+        async fn send_call(
+            &self,
+            progvers: ProgVers,
+            proc: u32,
+            call: CallBuf,
+        ) -> Result<RpcResponse, RpcError> {
+            assert_eq!(progvers, self.0.prog_vers());
+            let reply = self.0.dispatch(proc, call.payload()).await?;
+            Ok(RpcResponse::from_payload(reply))
+        }
+    }
+
+    fn block_on<F: Future>(f: F) -> F::Output {
+        let mut f = pin!(f);
+        match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            Poll::Ready(out) => out,
+            Poll::Pending => panic!("loopback calls never wait"),
+        }
+    }
+
+    #[test]
+    fn clients_decode_replies() {
+        let client = check_check_v1_Client::new(Arc::new(Loopback(dispatcher())));
+        block_on(async {
+            client.ping().await.unwrap();
+            assert_eq!(client.add(1, 2).await.unwrap(), 3);
+            assert!(client.verify(&Hash::default()).await.unwrap());
+            let tx = Tx {
+                seq: 7,
+                memo: Default::default(),
+                note: Default::default(),
+                hash: Hash::default(),
+                digest: [1; 32],
+                sig: [2; SIG_SIZE as usize],
+            };
+            let receipt = client.credit(&5, &tx).await.unwrap();
+            assert_eq!(receipt.tx, Some(tx));
+        });
+    }
 }
