@@ -1,9 +1,12 @@
 #include <cerrno>
+#include <climits>
 #include <cstdlib>
 #include <filesystem>
 #include <string>
 #include <string_view>
+#include <sys/uio.h>
 #include <system_error>
+#include <vector>
 
 #include <fcntl.h>
 #include <sys/stat.h>
@@ -168,6 +171,40 @@ TEST_F(FileIO, MissingFileAndParent)
   EXPECT_EQ(written.error().raw_code(), ENOENT);
 }
 
+// More pieces than one writev() takes, with empty ones among them, land in
+// order.
+TEST_F(FileIO, FullWritevManyPieces)
+{
+  std::vector<std::string> pieces;
+  std::string expected;
+  for (int i = 0; i < 2 * IOV_MAX + 3; i++) {
+    pieces.push_back(i % 7 == 0 ? std::string() : std::to_string(i) + ",");
+    expected += pieces.back();
+  }
+  std::vector<iovec> iov;
+  for (auto &piece : pieces) {
+    iov.push_back({piece.data(), piece.size()});
+  }
+  {
+    UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+    ASSERT_TRUE(fd);
+    ASSERT_TRUE(fullwritev(fd, iov));
+  }
+  auto contents = readfile(path_);
+  ASSERT_TRUE(contents);
+  EXPECT_EQ(std::string_view(*contents), expected);
+}
+
+TEST_F(FileIO, FullWritevNothing)
+{
+  UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+  ASSERT_TRUE(fd);
+  std::string empty;
+  std::vector<iovec> iov{{empty.data(), 0}, {empty.data(), 0}};
+  EXPECT_TRUE(fullwritev(fd, iov));
+  EXPECT_TRUE(fullwritev(fd, {}));
+}
+
 TEST_F(FileIO, InvalidDescriptorPreservesBuffer)
 {
   BorrowedFd fd(-1);
@@ -185,6 +222,11 @@ TEST_F(FileIO, InvalidDescriptorPreservesBuffer)
   EXPECT_EQ(result.error().raw_code(), EBADF);
   EXPECT_EQ(std::string_view(buf), "unchanged");
   auto written = fullwrite(fd, std::string_view("data"));
+  ASSERT_FALSE(written);
+  EXPECT_EQ(written.error().raw_code(), EBADF);
+  std::string data = "data";
+  std::vector<iovec> iov{{data.data(), data.size()}};
+  written = fullwritev(fd, iov);
   ASSERT_FALSE(written);
   EXPECT_EQ(written.error().raw_code(), EBADF);
 }
