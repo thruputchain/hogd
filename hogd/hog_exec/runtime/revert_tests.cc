@@ -721,7 +721,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
   auto proposal_res = proposal_handler.root_invoke()();
   ASSERT_TRUE(proposal_res.is_root_success());
-  auto proposal_data = proposal_handler.get_proposal_data();
+  auto proposal_data = proposal_handler.extract_proposal_data();
   ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
 
   // No nondeterministic bit should have been logged.

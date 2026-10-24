@@ -162,6 +162,11 @@ public:
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
+  // As above, but move the output and events out instead of copying them (the
+  // return buffer and event payloads can be large). For a caller that is done
+  // with the handler: afterwards the getters above return unspecified values.
+  InvocationFrameOutput extract_most_recent_frame_output();
+  x23::Vec<TxEmittedEvent> extract_most_recent_frame_events();
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
@@ -299,10 +304,10 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_events(ExecResult exec_result, ProposedTransaction proposed_tx);
 
-  // Get the proposal data.
+  // Proposal mode only: moves the proposal data out of the handler.
   // Can only be called after root_invoke()
-  // (as otherwise the proposal data is not available)
-  NondeterministicProposalData const &get_proposal_data() const;
+  // (as otherwise the proposal data is not available), and only once.
+  NondeterministicProposalData extract_proposal_data();
 
   // Syscalls: operations within an invocation
 

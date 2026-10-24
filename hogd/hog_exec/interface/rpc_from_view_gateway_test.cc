@@ -506,6 +506,101 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
   server.impl()->shut_down();
 }
 
+// A chain permitting more gas per transaction than the default, so the cap a
+// view meets is visibly the chain's and not the constant.
+class ViewGatewayGasCapTest : public ViewGatewayRefreshTest {
+public:
+  static constexpr GasAmount kChainMaxTxGas = 2 * kDefaultMaxTxGas;
+
+  ViewGatewayGasCapTest() : ViewGatewayRefreshTest(gas_cap_config()) {}
+
+  static NetworkConfig gas_cap_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                   kChainMaxTxGas);
+    return config;
+  }
+
+  static TransactionViewQuery make_read_query_with_gas(GasAmount gas)
+  {
+    auto query = make_read_query();
+    query.invocation.gas_limit = gas;
+    return query;
+  }
+
+  static ViewGatewayBatchQuery make_batch_with_gas(GasAmount first,
+                                                   GasAmount second)
+  {
+    return ViewGatewayBatchQuery{.calls = {make_read_query_with_gas(first),
+                                           make_read_query_with_gas(second)},
+                                 .min_height = {},
+                                 .budget_millis = 30'000,
+                                 .max_response_bytes = 1'048'576};
+  }
+};
+
+TEST_F(ViewGatewayGasCapTest, ViewGasIsCappedAtTheChainsMaxTxGas)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  ViewGatewayResult at_cap =
+      gateway.viewgateway_view(make_read_query_with_gas(kChainMaxTxGas))();
+  ASSERT_EQ(at_cap.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(at_cap.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  for (GasAmount over :
+       {kChainMaxTxGas + 1, std::numeric_limits<GasAmount>::max()}) {
+    ViewGatewayResult refused =
+        gateway.viewgateway_view(make_read_query_with_gas(over))();
+    ASSERT_EQ(refused.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+    EXPECT_EQ(refused.error_code(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+  }
+}
+
+// A batch's calls share the one cap a single view gets, rather than each
+// taking it.
+TEST_F(ViewGatewayGasCapTest, BatchGasIsCappedInAggregate)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  constexpr GasAmount kHalf = kChainMaxTxGas / 2;
+  auto at_cap = gateway.viewgateway_view_batch(
+      make_batch_with_gas(kHalf, kChainMaxTxGas - kHalf))();
+  ASSERT_EQ(at_cap.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_EQ(at_cap.payload().results.size(), 2U);
+
+  // Each call alone is within the cap; together they are not.
+  EXPECT_EQ(gateway
+                .viewgateway_view_batch(
+                    make_batch_with_gas(kHalf, kChainMaxTxGas - kHalf + 1))()
+                .outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  EXPECT_EQ(
+      gateway.viewgateway_view_batch(make_batch_with_gas(kChainMaxTxGas, 1))()
+          .outcome(),
+      ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  // A sum that would wrap is refused, not admitted modulo 2^64.
+  EXPECT_EQ(gateway
+                .viewgateway_view_batch(
+                    make_batch_with_gas(std::numeric_limits<GasAmount>::max(),
+                                        2))()
+                .outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+}
+
 } // namespace
 
 // Interpose on real database reads without adding callbacks to the executor.

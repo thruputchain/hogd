@@ -45,7 +45,7 @@ Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 using InterfaceId = std::array<uint8_t, 8>;
 
 // The interface id the SDK gives a contract trait,
-// sha256("groundhog-interface::<name>::<major>")[0..8], matching
+// sha256("thruput-interface::<name>::<major>")[0..8], matching
 // thruput_contract_util::interface_id. Takes the same u8"" trait metadata as
 // sdk_entrypoint_derivation, for the same charset reason (#2898).
 InterfaceId sdk_interface_id_derivation(std::u8string_view identifier_name,

@@ -272,7 +272,7 @@ TEST_F(TryInvokeAdmissionTrustedTest,
   // pay for the write at the child boundary, before the parent's transfer.
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
-  auto proposal = proposal_handler.get_proposal_data();
+  auto proposal = proposal_handler.extract_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(
@@ -357,7 +357,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedTrueBitChildWriteDeletedNeverPaid)
 
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
-  auto proposal = proposal_handler.get_proposal_data();
+  auto proposal = proposal_handler.extract_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(
@@ -447,7 +447,7 @@ TEST_F(TryInvokeAdmissionTrustedTest, ForgedFalseBitForcesParentFallbackBranch)
 
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
-  auto proposal = proposal_handler.get_proposal_data();
+  auto proposal = proposal_handler.extract_proposal_data();
   ASSERT_EQ(proposal_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
   ASSERT_TRUE(proposal_handler.emit_events(

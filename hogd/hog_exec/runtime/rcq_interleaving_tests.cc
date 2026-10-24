@@ -202,7 +202,7 @@ protected:
             co_return;
           }
           if constexpr (Proposal)
-            s.proposal = handler.get_proposal_data();
+            s.proposal = handler.extract_proposal_data();
           auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {
