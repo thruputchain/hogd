@@ -18,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <sys/uio.h> // IWYU pragma: keep
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -310,8 +311,10 @@ EventBlockContext::finish_file_write()
 
   auto ts = x23::fastclock::now();
   size_t total_bytes = 0;
+  size_t buffers = 0;
 
   co_await await_pending_writes_done();
+  auto ts2 = x23::fastclock::now();
 
   x23::CoroGuard g;
   co_await g(lock_);
@@ -321,17 +324,26 @@ EventBlockContext::finish_file_write()
   {
     auto ul = buffers_.lock_threads();
 
-    buffers_.for_each(ul, [this, &total_bytes](detail::EventContext &context) {
-      total_bytes += context.buf.size();
-      auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
-      if (!r) [[unlikely]] {
-        panic("failed to write events to file: {}", r.error());
-      }
+    // Every thread's residual buffer in one writev() where IOV_MAX allows,
+    // rather than a write() per thread.
+    std::vector<iovec> iov; // NOLINT(misc-include-cleaner)
+    buffers_.for_each(ul, [&iov](detail::EventContext &context) {
+      iov.push_back({context.buf.data(), context.buf.size()});
     });
+    for (const iovec &piece : iov) {
+      total_bytes += piece.iov_len;
+      buffers += piece.iov_len != 0 ? 1 : 0;
+    }
+    auto r = x23::fullwritev(events_file_, iov);
+    if (!r) [[unlikely]] {
+      panic("failed to write events to file: {}", r.error());
+    }
   }
 
   auto ts3 = x23::fastclock::now();
-  info("time to write events: {} ns total bytes at end: {}", (ts3 - ts).count(),
+  info("time to write events: {} ns (pending writes {} ns, residual {} ns in "
+       "{} buffers) total bytes at end: {}",
+       (ts3 - ts).count(), (ts2 - ts).count(), (ts3 - ts2).count(), buffers,
        total_bytes);
 
   sync_file(g);
