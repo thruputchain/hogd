@@ -150,7 +150,7 @@ protected:
     auto handler = make_new_system_call_handler(tx, ctx);
     auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
-    auto data = handler.get_proposal_data();
+    auto data = handler.extract_proposal_data();
     if (commit) {
       EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
@@ -278,12 +278,12 @@ protected:
 
     auto ha = make_new_system_call_handler(tx_insert, ctx);
     EXPECT_TRUE(ha.root_invoke()().is_root_success());
-    auto insert_p = ha.get_proposal_data();
+    auto insert_p = ha.extract_proposal_data();
     EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, ctx);
     EXPECT_TRUE(hb.root_invoke()().is_root_success());
-    auto consume_p = hb.get_proposal_data();
+    auto consume_p = hb.extract_proposal_data();
     EXPECT_TRUE(hb.abort_transaction()().has_value());
 
     return {insert_p, consume_p};
@@ -522,12 +522,12 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    consume_p = hb.get_proposal_data();
+    consume_p = hb.extract_proposal_data();
     EXPECT_EQ(consume_p.nondeterministic_bit_count, 1U);
     EXPECT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
     ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
@@ -589,7 +589,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
   {
     auto handler = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     EXPECT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
@@ -647,7 +647,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
   {
     auto handler = make_new_system_call_handler(tx, *ctx);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10, 20}));
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
@@ -741,7 +741,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
   {
     auto handler = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
     ASSERT_TRUE(handler.abort_transaction()().has_value());
@@ -787,12 +787,12 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    consume_p = hb.get_proposal_data();
+    consume_p = hb.extract_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
     ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
@@ -838,7 +838,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    consume_p = hb.get_proposal_data();
+    consume_p = hb.extract_proposal_data();
     ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -873,7 +873,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
   {
     auto ha = make_new_system_call_handler(tx_insert_a, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_a_p = ha.get_proposal_data();
+    insert_a_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_insert_b, *ctx);
@@ -882,7 +882,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 
     auto hc = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(hc.root_invoke()().is_root_success());
-    consume_p = hc.get_proposal_data();
+    consume_p = hc.extract_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 2U);
     ASSERT_EQ(hc.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
@@ -955,7 +955,7 @@ TEST_P(ProposeValidateRoundtripTest,
   {
     auto proposal_handler = make_new_system_call_handler(tx, *ctx);
     ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
-    auto honest_proposal = proposal_handler.get_proposal_data();
+    auto honest_proposal = proposal_handler.extract_proposal_data();
     ASSERT_EQ(honest_proposal.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_proposal.observed_queue_entry_sequence.size(), 0U);
     ASSERT_EQ(honest_proposal.nondeterministic_bits[0] & uint8_t{1}, 0U)
@@ -1096,7 +1096,7 @@ TEST_P(ProposeValidateRoundtripTest,
     ASSERT_EQ(proposal_res.result_.error().code(),
               InvokeErrorCode::Deterministic);
 
-    auto const &honest_proposal = proposal_handler.get_proposal_data();
+    auto honest_proposal = proposal_handler.extract_proposal_data();
     ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kChildCap);
     for (uint32_t i = 0; i < kChildCap; ++i) {
       EXPECT_TRUE(proposal_bit(honest_proposal, i));
@@ -1216,7 +1216,7 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
   // bits.
   auto handler = make_new_system_call_handler(tx, *ctx);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
-  auto proposal_data = handler.get_proposal_data();
+  auto proposal_data = handler.extract_proposal_data();
   EXPECT_EQ(proposal_data.nondeterministic_bit_count,
             static_cast<uint32_t>(kMaxSavepointDepth - 1));
   ASSERT_TRUE(handler.abort_transaction()().has_value());
@@ -1381,7 +1381,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   ASSERT_FALSE(proposal_res.is_root_success());
   EXPECT_EQ(proposal_res.result_.error().code(),
             InvokeErrorCode::Deterministic);
-  auto const &proposal_data = proposal_handler.get_proposal_data();
+  auto proposal_data = proposal_handler.extract_proposal_data();
   EXPECT_EQ(proposal_data.nondeterministic_bit_count,
             static_cast<uint32_t>(kChildCap));
   ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
@@ -1430,7 +1430,7 @@ TEST_P(ProposeValidateRoundtripTest,
     ASSERT_EQ(proposal_res.result_.error().code(),
               InvokeErrorCode::Deterministic);
 
-    proposal_data = proposal_handler.get_proposal_data();
+    proposal_data = proposal_handler.extract_proposal_data();
     ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
     ASSERT_NE(proposal_data.nondeterministic_bits[0] & uint8_t{1}, 0);
@@ -1667,7 +1667,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1733,7 +1733,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1794,7 +1794,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1858,7 +1858,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1916,7 +1916,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1993,7 +1993,7 @@ TEST_P(ProposeValidateRoundtripTest,
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2066,7 +2066,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2130,7 +2130,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2195,7 +2195,7 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2312,7 +2312,7 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2401,7 +2401,7 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
   {
     auto ha = make_new_system_call_handler(tx_insert, *insert_ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -2476,7 +2476,7 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
   {
     auto ha = make_new_system_call_handler(tx_insert_20, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_20_p = ha.get_proposal_data();
+    insert_20_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -3063,12 +3063,12 @@ TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_peek, *ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    peek_p = hb.get_proposal_data();
+    peek_p = hb.extract_proposal_data();
     EXPECT_EQ(peeks_seen, 0x11) << "Both peeks see the same present entry";
     ASSERT_EQ(peek_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(peek_p.observed_queue_entry_sequence.size(), 1U);

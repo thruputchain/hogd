@@ -1507,23 +1507,12 @@ SystemCallHandler::get_parent_supplied_auth_token_count() const
       .get_current_frame_parent_supplied_auth_token_count();
 }
 
-NondeterministicProposalData const &
-SystemCallHandler::get_proposal_data() const
+NondeterministicProposalData
+SystemCallHandler::extract_proposal_data()
 {
   // Either succeeded on the root tx (with or without a revert)
   // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
-  assert(root_invoke_result_.has_readable_proposal_data());
-  assert(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
-  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-    return std::get<ProposalModeData>(execution_mode_data_).proposal_data();
-  }
-  return std::get<ValidationModeData>(execution_mode_data_).proposal_data();
-}
-
-NondeterministicProposalData
-SystemCallHandler::extract_proposal_data()
-{
   assert(root_invoke_result_.has_readable_proposal_data());
   return std::get<ProposalModeData>(execution_mode_data_)
       .extract_proposal_data();

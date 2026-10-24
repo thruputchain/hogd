@@ -304,13 +304,9 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_events(ExecResult exec_result, ProposedTransaction proposed_tx);
 
-  // Get the proposal data.
+  // Proposal mode only: moves the proposal data out of the handler.
   // Can only be called after root_invoke()
-  // (as otherwise the proposal data is not available)
-  NondeterministicProposalData const &get_proposal_data() const;
-
-  // Proposal mode only: moves the proposal data out instead of copying it.
-  // Call after try_commit_transaction(), once nothing else reads it.
+  // (as otherwise the proposal data is not available), and only once.
   NondeterministicProposalData extract_proposal_data();
 
   // Syscalls: operations within an invocation
