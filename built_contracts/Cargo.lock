@@ -325,6 +325,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "erc165_probe"
+version = "0.2.0"
+dependencies = [
+ "thruput-erc165-if",
+ "thruput-erc20-if",
+ "thruput-erc20-permit-if",
+ "thruput-sdk",
+]
+
+[[package]]
 name = "erc20-native-test"
 version = "0.52.0"
 source = "sparse+https://crates.thruput.network/api/v1/crates/"

@@ -40,9 +40,9 @@ inline constexpr uint32_t kDefaultMaxCalldataLen = 65536;
 // does not state one keeps exactly the limit it already ran under.
 inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 
-// Not permissive: hog availability was the only bound on a transaction's
-// budget before this parameter, and a chain that does not state one now gets
-// this cap rather than none.
+// Not permissive: native-token availability was the only bound on a
+// transaction's budget before this parameter, and a chain that does not state
+// one now gets this cap rather than none.
 inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
 
 // The parameters in force, flattened from the list that states them.

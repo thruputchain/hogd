@@ -129,7 +129,7 @@ protected:
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     for (auto &[id, c] : extra) {
       native_map.emplace(id, std::move(c));
@@ -179,7 +179,7 @@ protected:
     setup_grant_storage_token(kAbortAddr, 1'000'000'000);
 
     auto token = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token);
     write_deployment(kNativeTokenContractAddress, token);
   }
@@ -916,7 +916,7 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicateAcrossBlocks)
     EXPECT_EQ(stored_balance(wallet),
               sender_before - kAmount - replay_cache_cost_charged(1));
     EXPECT_EQ(stored_balance(target), target_balance);
-    auto deltas = get_hogs_transferred(block);
+    auto deltas = get_native_tokens_transferred(block);
     ASSERT_EQ(deltas.size(), 2U);
     EXPECT_EQ(deltas.at(wallet),
               -int128_t{kAmount} - replay_cache_cost_charged(1));
@@ -959,7 +959,7 @@ TEST_F(DefaultWalletParityTest, FundedDeploySuccessAndDuplicateAcrossBlocks)
     EXPECT_EQ(stored_balance(wallet), sender_before - replay_delta);
     EXPECT_EQ(stored_balance(target), target_balance);
     EXPECT_TRUE(lookup_deployment_from_db(target));
-    auto duplicate_deltas = get_hogs_transferred(block);
+    auto duplicate_deltas = get_native_tokens_transferred(block);
     ASSERT_EQ(duplicate_deltas.size(), 1U);
     EXPECT_EQ(duplicate_deltas.at(wallet), -replay_delta);
     auto duplicate_events = get_tx_event_log(last_tx_id_)();
@@ -1033,7 +1033,7 @@ TEST_F(DefaultWalletParityTest, SameBlockDuplicateDeployFundsTwice)
     auto sender_delta = (-2 * int128_t{kAmount}) - replay_cache_cost_charged(2);
     EXPECT_EQ(stored_balance(wallet), sender_before + sender_delta);
     EXPECT_EQ(stored_balance(target), target_balance);
-    auto deltas = get_hogs_transferred(block);
+    auto deltas = get_native_tokens_transferred(block);
     ASSERT_EQ(deltas.size(), 2U);
     EXPECT_EQ(deltas.at(wallet), sender_delta);
     EXPECT_EQ(deltas.at(target), target_balance);

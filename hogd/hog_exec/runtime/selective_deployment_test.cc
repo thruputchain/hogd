@@ -222,7 +222,7 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
 }
 
 // Test that verifies attempting to deploy a precompiled (native) contract fails
-// with kSyscallErrorCodeInvalidSyscallInput. Native contracts like the HOG
+// with kSyscallErrorCodeInvalidSyscallInput. Native contracts like the native
 // token are set up at genesis and should not be redeployable.
 TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
 {

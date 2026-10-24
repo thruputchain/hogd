@@ -37,8 +37,8 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invariant.h"
-#include "hogd/hog_db/invariant_hog_age.h"
-#include "hogd/hog_db/invariant_hog_conservation.h"
+#include "hogd/hog_db/invariant_native_token_age.h"
+#include "hogd/hog_db/invariant_native_token_conservation.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -150,8 +150,8 @@ private:
 // without migrating existing data.
 //
 // Not every prefix type is included in the db hash: state-item prefixes (see
-// is_state_item) are folded into the consensus StorageLongHash, while kHogAge
-// and kGlobalMetadata are not.
+// is_state_item) are folded into the consensus StorageLongHash, while
+// kNativeTokenAge and kGlobalMetadata are not.
 //
 // Because these bytes are persisted verbatim as the first byte of each key --
 // and, for state items, hashed into consensus -- they must be fixed protocol
@@ -162,7 +162,7 @@ private:
 // execution charset would persist different bytes and hash differently. See
 // hogd issue #2600.
 enum class Prefix : uint8_t {
-  kHogAge = u8'A',
+  kNativeTokenAge = u8'A',
   kBalance = u8'B',
   kAddressAuthData = u8'D',
   kAddressMetadata = u8'M',
@@ -195,7 +195,7 @@ is_state_item(std::span<const std::byte> key)
   case Prefix::kReplayCache:
   case Prefix::kRetrocausalQueueBlock:
     return true;
-  case Prefix::kHogAge:
+  case Prefix::kNativeTokenAge:
   case Prefix::kGlobalMetadata:
     return false;
   default:
@@ -493,8 +493,8 @@ public:
   {
     assert(invariants_.empty());
     invariants_.push_back(
-        std::make_unique<HogConservationInvariant>(cost_model));
-    invariants_.push_back(std::make_unique<HogAgeInvariant>());
+        std::make_unique<NativeTokenConservationInvariant>(cost_model));
+    invariants_.push_back(std::make_unique<NativeTokenAgeInvariant>());
   }
 
   void clear_invariants() { invariants_.clear(); }
@@ -535,7 +535,8 @@ public:
   //
 
   HogDbStatus<int128_t> read_address_balance(const Address &addr);
-  HogDbStatus<HogAge> read_address_average_hog_age(const Address &addr);
+  HogDbStatus<NativeTokenAge>
+  read_address_average_native_token_age(const Address &addr);
   HogDbStatus<AddressAuthData> read_address_auth_data(const Address &addr);
   HogDbStatus<DeployedContractHash> read_address_metadata(const Address &addr);
   HogDbStatus<ReplayCacheMetadata>
@@ -544,7 +545,8 @@ public:
   read_address_replay_cache_data(Address const &addr, BlockHeight height);
 
   HogDbStatus<void> write_address_balance(const Address &addr, int128_t val);
-  HogDbStatus<void> write_address_average_hog_age(const HogAge &age);
+  HogDbStatus<void>
+  write_address_average_native_token_age(const NativeTokenAge &age);
   HogDbStatus<void> write_address_auth_data(const Address &addr,
                                             const AddressAuthData &auth);
   HogDbStatus<void> write_address_metadata(Address const &addr,

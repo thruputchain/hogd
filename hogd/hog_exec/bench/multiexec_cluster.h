@@ -3,9 +3,9 @@
 // The multiexec bench topology: hog-event, hog-db, hog-indexer and N
 // executors started on CI control servers, with this process standing in for
 // the mempool. The mock scheduler services drop what the mempool would act on
-// (e.g. hogs-transferred chunks), so none of the mempool's own accounting runs
-// and a runner measures the executors and HogDb alone. Shared by
-// multiexec_runner and makespan_runner.
+// (e.g. native-tokens-transferred chunks), so none of the mempool's own
+// accounting runs and a runner measures the executors and HogDb alone. Shared
+// by multiexec_runner and makespan_runner.
 
 #include <atomic>
 #include <cassert>

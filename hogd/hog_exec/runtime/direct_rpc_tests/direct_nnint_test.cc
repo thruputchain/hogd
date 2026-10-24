@@ -308,8 +308,8 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
 
   if (GetParam() == TestDB::kHogDb) {
     // simple check to make sure blockheight of > 1 is working
-    auto hogs_transferred = get_hogs_transferred(2);
-    ASSERT_EQ(hogs_transferred.size(), 0);
+    auto native_tokens_transferred = get_native_tokens_transferred(2);
+    ASSERT_EQ(native_tokens_transferred.size(), 0);
   }
 }
 

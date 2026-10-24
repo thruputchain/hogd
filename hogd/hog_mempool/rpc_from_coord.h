@@ -23,6 +23,7 @@
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
@@ -315,8 +316,40 @@ public:
     co_return ret;
   }
 
+  // Looks up in-flight txs by their exact signed encoding, for repair: a body
+  // cached under a different signing is not found.
   x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
-  schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transactions(
+      const SignedTransactionHashBatch &signed_tx_hashes)
+  {
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
+    if (!ready()) {
+      ret.resize(signed_tx_hashes.size());
+      co_return ret;
+    }
+    ret.reserve(signed_tx_hashes.size());
+    for (const SignedTransactionHash &signed_tx_hash : signed_tx_hashes) {
+      // [find_signed_tx] hands back a reference into the scheduler's tx
+      // store, and the reply holds that reference until x23 has serialized
+      // the response, so the tx cannot be freed by another thread in between.
+      // That is what the copy through [x23::Ptr]'s value constructor used to
+      // buy, and it was paying for it with a deep copy of the whole
+      // transaction -- including its unbounded [Calldata] -- for every hash
+      // resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(x23::XdrSharedPtr<SignedTransaction>(
+          scheduler_->find_signed_tx(signed_tx_hash)));
+    }
+
+    co_return ret;
+  }
+
+  // Looks up in-flight txs by [TransactionHash], returning whichever signing
+  // of each body is cached. Serves the gateway's [schedgateway_lookup_tx].
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
+  lookup_transactions_by_body(const TransactionHashBatch &tx_hashes)
   {
     x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
@@ -325,15 +358,8 @@ public:
     }
     ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      // [find_tx] hands back a reference into the scheduler's tx store, and
-      // the reply holds that reference until x23 has serialized the response,
-      // so the tx cannot be freed by another thread in between.  That is what
-      // the copy through [x23::Ptr]'s value constructor used to buy, and it
-      // was paying for it with a deep copy of the whole transaction --
-      // including its unbounded [Calldata] -- for every hash resolved.
-      //
-      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
-      // is an ownership change, not a wire change.
+      // As in [schedcoord_lookup_transactions()], the reply shares the
+      // scheduler's copy of each tx rather than copying it.
       ret.push_back(
           x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
@@ -379,7 +405,7 @@ public:
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
 
   x23::Async<void> auth_data_changed(BlockHeight height,
-                                     KeyChangeBatch key_changes);
+                                     ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> wait_for_block_commit(BlockHeight expected_height)
   {
@@ -471,9 +497,15 @@ private:
     // validating.
     BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
+    // The block's txs by [TransactionHash], which keys the mempool's runqueue
+    // and the txset trie behind [ProposalHeader::txs_hash].
     x23::XdrVec<TransactionHash> tx_hashes;
+    // The same txs by [SignedTransactionHash], aligned with [tx_hashes]: the
+    // exact encodings named in [ProposalTxs::signed_hash].
+    SignedTransactionHashBatch signed_tx_hashes;
 
     x23::XdrVec<TransactionHash> result_tx_hashes;
+    SignedTransactionHashBatch result_signed_tx_hashes;
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
@@ -499,12 +531,12 @@ private:
 
   struct PreparedValidationChunk {
     x23::Vec<ProposedTransaction> proposed_txs;
-    x23::XdrVec<TransactionHash> missing_tx_hashes;
+    SignedTransactionHashBatch missing_signed_tx_hashes;
   };
 
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
-    x23::XdrVec<TransactionHash> missing_tx_hashes;
+    SignedTransactionHashBatch missing_signed_tx_hashes;
     bool validated = true;
   };
 
@@ -580,7 +612,7 @@ private:
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
     co_await auth_rpc_->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
+        [this](BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes) {
           return auth_data_changed(height, std::move(key_changes));
         },
         [this] { initialized_.store(true, std::memory_order_release); });
@@ -680,13 +712,18 @@ private:
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
 
+  // Looks up each of [signed_tx_hashes] in the mempool by its exact signed
+  // encoding and, for each tx found, writes its [TransactionHash] to the same
+  // index of [tx_hashes].
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
-      x23::span<const TransactionHash> tx_hashes,
-      x23::span<const NondeterministicProposalData> tx_nominations);
+      x23::span<const SignedTransactionHash> signed_tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      x23::span<TransactionHash> tx_hashes);
 
   x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
-      BlockID block_id, x23::span<const TransactionHash> tx_hashes,
-      x23::span<const NondeterministicProposalData> tx_nominations);
+      BlockID block_id, x23::span<const SignedTransactionHash> signed_tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      x23::span<TransactionHash> tx_hashes);
 
   x23::Async<bool> multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);

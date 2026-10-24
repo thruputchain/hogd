@@ -89,9 +89,9 @@ BalanceLock::add_committed_credit(int128_t delta)
   // whose row an earlier commit already materialized). Bump the committed delta
   // directly rather than reserving add-capacity, which a refund is not and
   // which can be exhausted near INT128_MAX. This cannot overflow the committed
-  // balance because total HOG supply is bounded at INT128_MAX in the native
-  // token precompile, and that bound includes storage-locked funds, so any
-  // single balance plus the storage it reclaims stays <= total supply <=
+  // balance because total native-token supply is bounded at INT128_MAX in the
+  // native token precompile, and that bound includes storage-locked funds, so
+  // any single balance plus the storage it reclaims stays <= total supply <=
   // INT128_MAX. The safety comes from that global bound, not from the refund
   // reversing a specific reserved debit (it need not). (#4095)
   delta_bounds_.apply_committed_refund(delta);
@@ -140,36 +140,42 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
   auto value = build_result(ctx);
   CHECK_GE(value, 0);
 
-  // Create the HogAge struct when the balance entry is created for the first
-  // time (not part of blockchain state — ChangeSet will skip hash element
-  // construction because is_state_item returns false for kHogAge).
+  // Create the NativeTokenAge struct when the balance entry is created for the
+  // first time (not part of blockchain state — ChangeSet will skip hash element
+  // construction because is_state_item returns false for kNativeTokenAge).
   if (!snapshot_balance_.snapshot_value().has_value()) {
-    HogAge age = {
+    NativeTokenAge age = {
         .address = ctx.key.to_contract_address(),
-        // We set the hog balance for all groups in [HogAge] to 0 to avoid the
-        // issue described in #1511 on GitHub. Specifically, if we were to set
-        // (let's say) the number of hogs in [kHogAgeGroupToSchedule] to
-        // [value] rather than 0, the following would happen:
-        // 1. A new contract is created at some address X and Y hogs are
+        // We set the hog balance for all groups in [NativeTokenAge] to 0 to
+        // avoid the issue described in #1511 on GitHub. Specifically, if we
+        // were to set (let's say) the number of native tokens in
+        // [kNativeTokenAgeGroupToSchedule] to [value] rather than 0, the
+        // following would happen:
+        // 1. A new contract is created at some address X and Y native tokens
+        // are
         //    transferred to this address.
-        // 2. hog_db creates a new HogAge struct for address X and writes Y hogs
-        //    to the [kHogAgeGroupToSchedule] group in the struct.
-        // 3. hog_db sends a [HogsTransferredChunk] struct to the mempool which
-        //    indicates that Y hogs were transferred to address X.
-        // 4. In the mempool scheduler, Y hogs are added to the
-        //    [kHogAgeGroupReceived] group for address X, so then address X's
-        //    [HogAge] struct has Y + Y = 2Y hogs in total, which is incorrect.
-        .num_hogs = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
-                     to_xdr(uint128_t{0})},
+        // 2. hog_db creates a new NativeTokenAge struct for address X and
+        // writes Y native tokens
+        //    to the [kNativeTokenAgeGroupToSchedule] group in the struct.
+        // 3. hog_db sends a [NativeTokensTransferredChunk] struct to the
+        // mempool which
+        //    indicates that Y native tokens were transferred to address X.
+        // 4. In the mempool scheduler, Y native tokens are added to the
+        //    [kNativeTokenAgeGroupReceived] group for address X, so then
+        //    address X's [NativeTokenAge] struct has Y + Y = 2Y native tokens
+        //    in total, which is incorrect.
+        .num_native_tokens = {to_xdr(uint128_t{0}), to_xdr(uint128_t{0}),
+                              to_xdr(uint128_t{0})},
         .average_ages = {BlockHeight{0}, BlockHeight{0}, BlockHeight{0}},
     };
-    auto hog_age_key = make_address_key(ctx.key.get_address(), Prefix::kHogAge);
+    auto native_token_age_key =
+        make_address_key(ctx.key.get_address(), Prefix::kNativeTokenAge);
     // Persist only the trailing fields; the key already encodes the address, so
     // storing it in the value too is redundant (issue #3812). address is
-    // HogAge's first XDR field, and read_address_average_hog_age reconstructs
-    // it from the key.
+    // NativeTokenAge's first XDR field, and
+    // read_address_average_native_token_age reconstructs it from the key.
     auto age_buf = x23::serialize(age);
-    changes.put(hog_age_key, 0,
+    changes.put(native_token_age_key, 0,
                 std::as_bytes(std::span(age_buf)).subspan(kAddressSize));
   }
 

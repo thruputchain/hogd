@@ -22,7 +22,7 @@ make_hog_exec_precompiles_context()
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   contract_map.emplace(
       std::to_underlying(

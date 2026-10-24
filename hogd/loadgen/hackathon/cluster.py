@@ -745,7 +745,7 @@ def main():
         ).strip(),
         "chuckdRevision": subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
-            cwd=ROOT / "groundhog-go/chuckd",
+            cwd=ROOT / "thruput-go/chuckd",
             text=True,
         ).strip(),
         "singleValidator": True,
