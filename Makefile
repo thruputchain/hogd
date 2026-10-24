@@ -147,7 +147,7 @@ build:
 .PHONY: devnode
 devnode:
 	./scripts/build.sh $(BUILD_FLAGS) hog-devnode
-	@echo "export GROUNDHOG_DEVNODE_BINARY=$(abspath $(DEVNODE_BIN))"
+	@echo "export THRUPUT_DEVNODE_BINARY=$(abspath $(DEVNODE_BIN))"
 
 # Reports rather than computes: cmake/write_version_c.cmake owns the real
 # resolution (HOGD_DISTRIBUTION_VERSION, else an exact tag, else the cmake

@@ -40,13 +40,13 @@ not runtime compatibility or loadability on every supported host.
 
 Before the first automatic publication:
 
-1. Create the `ffi-public-artifacts` Environment in `groundhogchain/hogd` and
+1. Create the `ffi-public-artifacts` Environment in `thruputchain/hogd` and
    restrict its deployment branches to `main`. The follow-on workflow executes
    on main even though the preceding build runs on an FFI tag. Protect main and
    release tags through the repository's normal review and release controls.
 2. Apply the reviewed `ops/tofu/envs/release-artifacts/us-west-2` change that
    adds public `test-ffi/` access and its dedicated publisher role. It trusts
-   only `repo:groundhogchain/hogd:environment:ffi-public-artifacts` and cannot
+   only `repo:thruputchain/hogd:environment:ffi-public-artifacts` and cannot
    write devnode artifacts.
 3. Configure the Environment from the ops outputs:
 
@@ -68,7 +68,7 @@ Dispatch the publisher on main with an existing numeric FFI tag. The default is
 workflow artifact without assuming the AWS role or writing to S3:
 
 ```bash
-gh workflow run publish_test_ffi.yml --repo groundhogchain/hogd --ref main \
+gh workflow run publish_test_ffi.yml --repo thruputchain/hogd --ref main \
   -f tag=test-ffi-vX.Y.Z -f dry_run=true
 ```
 

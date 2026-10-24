@@ -3,8 +3,8 @@
 // way whether the base was set explicitly or taken from the snapshot.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/1634
-//   - https://github.com/groundhogchain/hogd/issues/2155
+//   - https://github.com/thruputchain/hogd/issues/1634
+//   - https://github.com/thruputchain/hogd/issues/2155
 
 #include <gtest/gtest.h>
 

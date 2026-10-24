@@ -9,7 +9,7 @@
     "CARGO_NET_GIT_FETCH_WITH_CLI": "true"
   },
   "remoteEnv": {
-    "CARGO_REGISTRIES_GROUNDHOG_TOKEN": "${localEnv:CARGO_REGISTRIES_GROUNDHOG_TOKEN}"
+    "CARGO_REGISTRIES_THRUPUT_TOKEN": "${localEnv:CARGO_REGISTRIES_THRUPUT_TOKEN}"
   },
   "mounts": [
     "source=hogd-ccache,target=/home/builder/.cache/ccache,type=volume",
@@ -49,6 +49,6 @@
     }
   },
   "initializeCommand": "docker volume create hogd-ccache; docker volume create hogd-cargo-registry; docker volume create hogd-cargo-git || true",
-  "postCreateCommand": "git submodule update --init --recursive --force && if [ -n \"${CARGO_REGISTRIES_GROUNDHOG_TOKEN:-}\" ]; then ./scripts/fetch.sh; else printf '\nCargo registry token missing. Set CARGO_REGISTRIES_GROUNDHOG_TOKEN in the environment that launches VS Code, then rebuild the container.\n\n'; fi",
+  "postCreateCommand": "git submodule update --init --recursive --force && if [ -n \"${CARGO_REGISTRIES_THRUPUT_TOKEN:-}\" ]; then ./scripts/fetch.sh; else printf '\nCargo registry token missing. Set CARGO_REGISTRIES_THRUPUT_TOKEN in the environment that launches VS Code, then rebuild the container.\n\n'; fi",
   "remoteUser": "builder"
 }

@@ -34,7 +34,7 @@
 // the same transaction is also empty.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/1653
+//   - https://github.com/thruputchain/hogd/issues/1653
 
 #include <gtest/gtest.h>
 

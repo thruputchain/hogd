@@ -130,7 +130,7 @@ fetches need qualification; workers do not renew tokens.
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
 - Log in as the `hogci` user before completing the remaining steps in this file. You should add you SSH public key to `~hogci/.ssh/authorized_keys` and then ssh in as `hogci`.
 - Follow the instructions to clone and register the runner as they appear on Github.
-	- Make sure to add the runner overall to the groundhogchain organization, not an individual repository
+	- Make sure to add the runner overall to the thruputchain organization, not an individual repository
 	- Make sure that when you register the runner, register it with any tags you want to add (this can be done later
 	by deregistering and re-adding the runner).  Probably should at least add the machine name as a tag.
 - Copy the svc_nosudo.sh script from an existing runner, and edit the filenames/machine names at the top of that file

@@ -283,7 +283,7 @@ TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
 // the pre-fix unbounded [objs.resize(total_segment_tokens)] threw an
 // XdrLengthError instead of rejecting cleanly; the empty payload also means no
 // token could legitimately be decoded.
-// Regression test for groundhogchain/hogd#1645.
+// Regression test for thruputchain/hogd#1645.
 TEST(ParallelBatchToTTest, RejectsTokenCountExceedingPayloadBytes)
 {
   ParallelBatch batch{

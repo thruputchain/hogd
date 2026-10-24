@@ -4963,7 +4963,7 @@ main(int argc, char *argv[])
 // hash and nondeterministic-data counts equal, so it reaches txset hashing.
 // Building the txset is a set insertion, and the repeat is the one input that
 // fails it -- which used to abort the validator instead of voting the block
-// down. See https://github.com/groundhogchain/hogd/issues/2661.
+// down. See https://github.com/thruputchain/hogd/issues/2661.
 TEST(Mempool, TxsetHashRejectsDuplicateHashes)
 {
   TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{1})};

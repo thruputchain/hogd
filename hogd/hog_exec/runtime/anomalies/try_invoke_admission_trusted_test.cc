@@ -48,7 +48,7 @@
 // tolerance rationale: the merged payload still rides the one aggregate root
 // commit, which enforces the real invariants.
 //
-// See: https://github.com/groundhogchain/hogd/issues/2371
+// See: https://github.com/thruputchain/hogd/issues/2371
 
 #include <gtest/gtest.h>
 
