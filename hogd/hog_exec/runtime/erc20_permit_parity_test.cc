@@ -178,13 +178,13 @@ abort_bytes(uint64_t selector, Exn const &exn)
 Record
 erc20_abort(itc_erc20_permit::ERC20Error error)
 {
-  return abort_bytes(0xb19947acb2fa14ffULL, error);
+  return abort_bytes(0xf63c8b1f5e7e2fe0ULL, error);
 }
 
 Record
 permit_abort(itc_erc20_permit::ERC20PermitError error)
 {
-  return abort_bytes(0xe8abb072f5171148ULL, error);
+  return abort_bytes(0x1aaf2b9becb7ddc4ULL, error);
 }
 
 Record

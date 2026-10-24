@@ -122,7 +122,7 @@ sdk_interface_id_derivation(std::u8string_view identifier_name,
 
   // The domain tag keeps interface ids apart from entrypoint ids, whose
   // preimage is otherwise the same name::major prefix.
-  constexpr std::u8string_view kDomain = u8"groundhog-interface";
+  constexpr std::u8string_view kDomain = u8"thruput-interface";
   constexpr std::u8string_view kSeparator = u8"::";
 
   std::string preimage;

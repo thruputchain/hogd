@@ -27,4 +27,4 @@ set -x
 
 echo "Installing thruput-cli..."
 CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-cli@0.30.0
+  cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-cli@0.37.0

@@ -353,7 +353,7 @@ TEST_F(FaucetScenarioTest, AirdropBootstrapsPubkeyAccountsFromZero)
       run_claim_tx(greedy,
                    airdrop_claim_call(std::numeric_limits<int128_t>::min()));
   EXPECT_EQ(greedy_out.status, InvocationFrameStatusCode::Abort);
-  auto expected = x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+  auto expected = x23::serialize_cxs(uint64_t{0xf63c8b1f5e7e2fe0ULL},
                                      itc_erc20::ERC20Error::NegativeAmount)
                       .value();
   EXPECT_TRUE(std::ranges::equal(greedy_out.buffer, expected));
@@ -552,7 +552,7 @@ TEST_F(FaucetScenarioTest, DripFaucetNegativeClaimLeavesBudgetUnchanged)
   ASSERT_EQ(read_total_supply(), 60);
 
   auto negative_amount_error =
-      x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+      x23::serialize_cxs(uint64_t{0xf63c8b1f5e7e2fe0ULL},
                          itc_erc20::ERC20Error::NegativeAmount)
           .value();
   auto overflow_error =
