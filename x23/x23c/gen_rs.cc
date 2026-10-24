@@ -489,7 +489,6 @@ impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__
         proc: u32,
         data: &[u8],
         reply: ::thruput_rpc_api::ReplyBuf,
-        slot: ::thruput_rpc_api::FutureSlot,
     ) -> Result<::thruput_rpc_api::RpcFuture<'_>, ::thruput_rpc_api::RpcError> {{
         match proc {{
 )",
@@ -518,9 +517,9 @@ impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__
     auto detuple = make_arg_detuple(proc.arg_types.size());
     // Arguments are decoded from the borrowed receive buffer before the
     // future exists, so the future owns them and never the request bytes.
-    // It lives in the slot the driver lends each call and encodes its
-    // result into the driver's reply buffer, after the reserved header.
-    prtop("                Ok(slot.put(async move {{\n");
+    // It encodes its result into the driver's reply buffer, after the
+    // reserved header.
+    prtop("                Ok(Box::pin(async move {{\n");
     prtop("                    let res = self.inner.{}({}).await.map_err(|_| "
           "::thruput_rpc_api::RpcError::SystemError)?;\n",
           proc.id, detuple);

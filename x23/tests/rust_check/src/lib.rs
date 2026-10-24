@@ -228,7 +228,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll, Waker};
     use thruput_rpc_api::{
-        CallBuf, FutureSlot, ProgVers, ReplyBuf, RpcHandler, RpcResponse, RpcSender,
+        CallBuf, ProgVers, ReplyBuf, RpcHandler, RpcResponse, RpcSender,
     };
 
     type Decode<'a> = &'a mut (
@@ -255,7 +255,7 @@ mod tests {
             assert_eq!(progvers, self.0.prog_vers());
             let reply = self
                 .0
-                .dispatch(proc, call.payload(), ReplyBuf::new(), FutureSlot::new())?
+                .dispatch(proc, call.payload(), ReplyBuf::new())?
                 .await?;
             Ok(RpcResponse::from_payload(reply.payload().to_vec()))
         }
@@ -290,7 +290,7 @@ mod tests {
             assert_eq!(progvers, self.0.prog_vers());
             let reply = self
                 .0
-                .dispatch(proc, call.payload(), ReplyBuf::new(), FutureSlot::new())?
+                .dispatch(proc, call.payload(), ReplyBuf::new())?
                 .await?;
             let mut waited = false;
             poll_fn(|_| {
@@ -421,9 +421,9 @@ mod tests {
     fn bad_calls_are_rejected_before_a_future_exists() {
         let dispatcher = dispatcher();
         // `add` takes an int and an unsigned hyper: 12 bytes, not 3.
-        let short = dispatcher.dispatch(1, &[0, 0, 0], ReplyBuf::new(), FutureSlot::new());
+        let short = dispatcher.dispatch(1, &[0, 0, 0], ReplyBuf::new());
         assert!(matches!(short, Err(RpcError::GarbageArguments)));
-        let unknown = dispatcher.dispatch(99, &[], ReplyBuf::new(), FutureSlot::new());
+        let unknown = dispatcher.dispatch(99, &[], ReplyBuf::new());
         assert!(matches!(unknown, Err(RpcError::InvalidProcedure)));
     }
 
