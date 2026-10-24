@@ -68,23 +68,31 @@ require_text("${rust}" "pub next: Option<Box<Record>>")
 require_text("${rust}" "pub payload: BytesM<LIMIT>")
 require_text("${rust}" "#[derive(ReadXDR, WriteXDR, ConstXDRSize)]")
 # Generated clients encode into a CallBuf taken from the sender and pass it
-# to send_call by value, for zero-, one- and two-argument procedures. The
-# xdrs writer runs inside CallBuf::append_with: rpc_api has no xdrs
-# dependency, so the serializer call is the generated code's.
+# to send_call_decoded by value, for zero-, one- and two-argument procedures.
+# The xdrs writer runs inside CallBuf::append_with: thruput_rpc_api has no
+# xdrs dependency, so the serializer call is the generated code's.
 require_text("${rust}" "let mut call = self.handle.call_buf();")
 require_text("${rust}" "call.append_with(|buf| {
              let mut w = xdrs::txs::buf_writer::BufWriter::from(::core::mem::take(buf));
              let r = xdrs::write_xdr(&(), &mut w);
              *buf = w.into();
              r
-         }).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
+         }).map_err(|_| ::thruput_rpc_api::RpcError::GarbageArguments)?;")
 require_text("${rust}" "let r = xdrs::write_xdr(&(arg0), &mut w);")
 require_text("${rust}" "let r = xdrs::write_xdr(&(arg0, arg1), &mut w);")
 string(FIND "${rust}" "call.encode(" encode_pos)
 if(NOT encode_pos EQUAL -1)
   message(FATAL_ERROR "generated client still calls the removed CallBuf::encode")
 endif()
-require_text("${rust}" "let buf = self.handle.send_call(Self::prog_vers(), 2, call).await?;")
+# The reply is decoded by the sender, straight from the reader's buffer on
+# driver connections, into a slot the method returns.
+require_text("${rust}" "out = ::core::option::Option::Some(xdrs::txs::decode(reply)")
+require_text("${rust}" "unsafe { self.handle.send_call_decoded(Self::prog_vers(), 2, call, &mut decode) }.await?;")
+require_text("${rust}" "out.ok_or(::thruput_rpc_api::RpcError::SystemError)")
+string(FIND "${rust}" "::rpc_api::" old_api_pos)
+if(NOT old_api_pos EQUAL -1)
+  message(FATAL_ERROR "generated Rust still names the old rpc_api crate")
+endif()
 # The borrowed read x23c writes out for a newtype fixed-opaque typedef is a
 # plain impl: ReadXDR is a safe trait again as of xdrs 0.12.
 require_text("${rust}" "impl<'r: 'a, 'a> ReadXDR<'r> for &'a Fingerprint {")

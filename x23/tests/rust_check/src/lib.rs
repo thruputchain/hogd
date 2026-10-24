@@ -4,8 +4,8 @@
 mod generated;
 pub use generated::*;
 
-use rpc_api::{ProgramError, RpcError};
 use std::sync::Arc;
+use thruput_rpc_api::{ProgramError, RpcError};
 
 // In-place decoding fixes the field's lifetime behind a mutable pointer.
 // Generated borrowed newtypes must accept a reader that outlives that field.
@@ -154,7 +154,7 @@ pub fn dispatcher() -> check_check_v1_Dispatcher<Server> {
 }
 
 // Dispatchers are services the RPC server holds as trait objects.
-pub fn handlers(receipt: Receipt) -> Vec<Box<dyn rpc_api::RpcHandler>> {
+pub fn handlers(receipt: Receipt) -> Vec<Box<dyn thruput_rpc_api::RpcHandler>> {
     vec![
         Box::new(dispatcher()),
         Box::new(check_check_v1_Dispatcher::new(Box::new(SharedServer {
@@ -192,4 +192,220 @@ pub async fn call_sites(
     client.verify(&Hash::default()).await?;
     client.pending().await?;
     Ok(())
+}
+
+// Generated client futures have to stay Send to be spawned.
+fn _client_futures_are_send(
+    client: &check_check_v1_Client,
+    batch: &TxBatch,
+    tx: &mut Tx,
+) {
+    fn send<T: Send>(_: T) {}
+    send(call_sites(client, batch, tx));
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use std::future::{Future, pending, poll_fn};
+    use std::pin::pin;
+    use std::sync::atomic::{AtomicBool, Ordering};
+    use std::task::{Context, Poll, Waker};
+    use thruput_rpc_api::{
+        CallBuf, ProgVers, RpcHandler, RpcResponse, RpcSender,
+    };
+
+    type Decode<'a> = &'a mut (
+                dyn for<'reply> FnMut(&'reply [u8]) -> Result<(), RpcError>
+                    + Send
+            );
+
+    /// Runs each call through the dispatcher in place. It keeps the default
+    /// `send_call_decoded`, so the client decodes an owned response.
+    struct Loopback<T>(check_check_v1_Dispatcher<T>);
+
+    #[async_trait::async_trait]
+    impl<T: check_check_v1> RpcSender for Loopback<T> {
+        fn call_buf(&self) -> CallBuf {
+            CallBuf::new()
+        }
+
+        async fn send_call(
+            &self,
+            progvers: ProgVers,
+            proc: u32,
+            call: CallBuf,
+        ) -> Result<RpcResponse, RpcError> {
+            assert_eq!(progvers, self.0.prog_vers());
+            let reply = self.0.dispatch(proc, call.payload()).await?;
+            Ok(RpcResponse::from_payload(reply))
+        }
+    }
+
+    /// Decodes the way a driver connection does: the call waits once, then
+    /// `decode` runs on a reply the sender owns. `send_call` is off limits.
+    struct Reader<T>(check_check_v1_Dispatcher<T>);
+
+    #[async_trait::async_trait]
+    impl<T: check_check_v1> RpcSender for Reader<T> {
+        fn call_buf(&self) -> CallBuf {
+            CallBuf::new()
+        }
+
+        async fn send_call(
+            &self,
+            _: ProgVers,
+            _: u32,
+            _: CallBuf,
+        ) -> Result<RpcResponse, RpcError> {
+            panic!("generated clients call send_call_decoded");
+        }
+
+        async unsafe fn send_call_decoded(
+            &self,
+            progvers: ProgVers,
+            proc: u32,
+            call: CallBuf,
+            decode: Decode<'_>,
+        ) -> Result<(), RpcError> {
+            assert_eq!(progvers, self.0.prog_vers());
+            let reply = self.0.dispatch(proc, call.payload()).await?;
+            let mut waited = false;
+            poll_fn(|_| {
+                if std::mem::replace(&mut waited, true) {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await;
+            decode(&reply)
+        }
+    }
+
+    /// Never answers, and records when the call future is dropped.
+    struct Stalled(Arc<AtomicBool>);
+
+    struct SetOnDrop(Arc<AtomicBool>);
+
+    impl Drop for SetOnDrop {
+        fn drop(&mut self) {
+            self.0.store(true, Ordering::SeqCst);
+        }
+    }
+
+    #[async_trait::async_trait]
+    impl RpcSender for Stalled {
+        fn call_buf(&self) -> CallBuf {
+            CallBuf::new()
+        }
+
+        async fn send_call(
+            &self,
+            _: ProgVers,
+            _: u32,
+            _: CallBuf,
+        ) -> Result<RpcResponse, RpcError> {
+            panic!("generated clients call send_call_decoded");
+        }
+
+        async unsafe fn send_call_decoded(
+            &self,
+            _: ProgVers,
+            _: u32,
+            _: CallBuf,
+            _: Decode<'_>,
+        ) -> Result<(), RpcError> {
+            let _dropped = SetOnDrop(self.0.clone());
+            pending().await
+        }
+    }
+
+    fn block_on<F: Future>(f: F) -> F::Output {
+        let mut f = pin!(f);
+        let mut cx = Context::from_waker(Waker::noop());
+        loop {
+            if let Poll::Ready(out) = f.as_mut().poll(&mut cx) {
+                return out;
+            }
+        }
+    }
+
+    fn tx() -> Tx {
+        Tx {
+            seq: 7,
+            memo: Default::default(),
+            note: Default::default(),
+            hash: Hash::default(),
+            digest: [1; 32],
+            sig: [2; SIG_SIZE as usize],
+        }
+    }
+
+    fn round_trip(client: check_check_v1_Client) {
+        block_on(async {
+            client.ping().await.unwrap();
+            assert_eq!(client.add(1, 2).await.unwrap(), 3);
+            assert!(client.verify(&Hash::default()).await.unwrap());
+            let tx = tx();
+            let receipt = client.credit(&5, &tx).await.unwrap();
+            assert_eq!(receipt.tx, Some(tx));
+        });
+    }
+
+    #[test]
+    fn clients_decode_owned_replies() {
+        round_trip(check_check_v1_Client::new(Arc::new(
+            Loopback(dispatcher()),
+        )));
+    }
+
+    #[test]
+    fn clients_decode_where_the_sender_holds_the_reply() {
+        round_trip(check_check_v1_Client::new(Arc::new(Reader(dispatcher()))));
+    }
+
+    #[test]
+    fn borrowed_and_shared_replies_decode_like_owned_ones() {
+        let receipt = Receipt {
+            outcome: Outcome::REJECTED,
+            tx: Some(tx()),
+        };
+        let batch = TxBatch::try_from(vec![tx(), tx()]).unwrap();
+        let shared = check_check_v1_Client::new(Arc::new(Reader(
+            check_check_v1_Dispatcher::new(Box::new(SharedServer {
+                receipt: receipt.clone(),
+                pending: batch.iter().cloned().map(Arc::new).collect(),
+            })),
+        )));
+        let opaque = check_check_v1_Client::new(Arc::new(Loopback(
+            check_check_v1_Dispatcher::new(Box::new(OpaqueServer {
+                pending: batch.to_vec(),
+            })),
+        )));
+        block_on(async {
+            assert_eq!(shared.credit(&5, &tx()).await.unwrap(), receipt);
+            assert_eq!(
+                shared.submit(&batch, false).await.unwrap(),
+                Outcome::REJECTED
+            );
+            assert_eq!(shared.pending().await.unwrap(), batch);
+            assert_eq!(opaque.pending().await.unwrap(), batch);
+        });
+    }
+
+    #[test]
+    fn dropping_a_waiting_client_call_drops_the_call() {
+        let dropped = Arc::new(AtomicBool::new(false));
+        let client =
+            check_check_v1_Client::new(Arc::new(Stalled(dropped.clone())));
+        {
+            let mut call = pin!(client.add(1, 2));
+            let poll =
+                call.as_mut().poll(&mut Context::from_waker(Waker::noop()));
+            assert!(poll.is_pending());
+            assert!(!dropped.load(Ordering::SeqCst));
+        }
+        assert!(dropped.load(Ordering::SeqCst));
+    }
 }
