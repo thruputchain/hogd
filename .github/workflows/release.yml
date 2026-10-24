@@ -19,7 +19,7 @@ env:
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.13"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.14"
 
 permissions:
   contents: write
@@ -130,7 +130,7 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: groundhog-go/chuckd/go.mod
+          go-version-file: thruput-go/chuckd/go.mod
 
       - name: Configure Environment
         run: |

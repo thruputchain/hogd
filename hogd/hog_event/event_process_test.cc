@@ -52,10 +52,10 @@ namespace {
 ProposalTxs
 empty_proposal_txs()
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(hashes, proposal_txs.hash)();
+  append_to_parallel_batch(signed_hashes, proposal_txs.signed_hash)();
   append_to_parallel_batch(nondeterministic_data,
                            proposal_txs.nondeterministic_data)();
   return proposal_txs;
@@ -68,7 +68,7 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root)
   ConsensusValue value{};
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = event_root;
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(/*tx_bodies=*/{});
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);

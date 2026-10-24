@@ -405,10 +405,11 @@ move_balance(NativeSyscallContext &ctx, ContractAddress const &owner,
     co_return ResultT::make_err(Erc20ExceptionT{erc20_error_t::TooLarge});
   }
 
-  // No credit-side overflow check: total supply (~2^59) keeps any reachable
-  // receiver balance + amount far below INT128_MAX, so the reference's
-  // checked add on the credit leg cannot fire. HogDb's commit-time
-  // add-capacity bound remains the backstop for hand-crafted states.
+  // No credit-side overflow check: the receiver balance and [amount] are both
+  // part of total supply, which never exceeds INT128_MAX, so their sum cannot
+  // overflow and the reference's checked add on the credit leg cannot fire.
+  // HogDb's commit-time add-capacity bound remains the backstop for
+  // hand-crafted states.
 
   if (auto moved = co_await native_token_unchecked_transfer(ctx, owner,
                                                             receiver, amount);

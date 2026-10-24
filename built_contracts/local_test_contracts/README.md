@@ -49,6 +49,12 @@ directories.
   concurrent same-window claims compose and only aggregate overdraws are
   rejected (at block packing). Driven by
   `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `erc165_probe` — an ERC165 caller: `supports` runs
+  `ERC165Client::supports` against a target for ERC20, ERC20Permit, ERC165
+  and its own interface, and `probe_interface` makes one read-only
+  `supports_interface` call, returning `None` when the call itself fails.
+  Checks the native token's ERC165 from a real contract-side caller. Driven
+  by `hogd/hog_exec/runtime/erc165_probe_test.cc`.
 - `faucet_caller` — a contract-shaped faucet user for the bootstrap-loop
   scenario: deployed through the default wallet by an airdrop-funded pubkey
   account, then claims from the faucet for itself. Driven by

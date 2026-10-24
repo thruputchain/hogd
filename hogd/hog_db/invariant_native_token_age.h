@@ -13,7 +13,7 @@
 
 namespace hogd {
 
-class HogAgeInvariant : public HogdbInvariant {
+class NativeTokenAgeInvariant : public HogdbInvariant {
 public:
   bool check() override;
   void log_item_change(std::span<const std::byte> key,
@@ -29,7 +29,7 @@ private:
 
   struct Entry {
     ExistenceDelta balance{ExistenceDelta::kUnchanged};
-    ExistenceDelta hog_age{ExistenceDelta::kUnchanged};
+    ExistenceDelta native_token_age{ExistenceDelta::kUnchanged};
   };
 
   static ExistenceDelta compute_delta(HogDbStatus<DBItem> const &before,

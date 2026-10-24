@@ -451,7 +451,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   contract_map.emplace(kCallerNativeId, std::move(caller_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -539,7 +539,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 
   // Deploy the native token precompile so the RV32 contract can invoke it
   auto token_contract_xdr = make_native_contract(std::to_underlying(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
   write_contract(token_contract_xdr);
   write_deployment(kNativeTokenContractAddress, token_contract_xdr);
 
@@ -549,7 +549,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));

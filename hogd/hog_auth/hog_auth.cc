@@ -47,12 +47,10 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
     panic("Invalid mempool address: {}", mempool_address);
   }
 
-  // Auth forwards the same committed KeyChangeBatch it received over the
-  // bulk-capped AuthDB1 link to mempool over this client. HogDb's AuthDB1
-  // client and mempool's MempoolAuthRpc server both use kBulkRpcMaxMessageSize,
-  // so this client must too — otherwise a valid oversized batch fails the
-  // downstream send, HogDb erases the auth subscriber, and subsequent heights
-  // are never delivered (issue #3572).
+  // Match mempool's MempoolAuthRpc server cap. Key changes go to the mempool
+  // as KeyChangeChunk records sized under the default cap, so this is headroom
+  // rather than a requirement; the whole-batch forward it was added for
+  // (issue #3572) is gone.
   auto mempool_client_res =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true,
                                     kBulkRpcMaxMessageSize)();

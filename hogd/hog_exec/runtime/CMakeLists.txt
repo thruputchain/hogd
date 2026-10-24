@@ -89,6 +89,7 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc
+  erc165_probe_test.cc
   erc20_permit_parity_test.cc
   event_test.cc
   faucet_scenario_test.cc

@@ -49,10 +49,12 @@ public:
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model);
 
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  std::map<ContractAddress, int128_t>
+  get_native_tokens_transferred(BlockHeight height)
   {
-    test_sched_db_server_->impl()->wait_for_hog_transferred_height(height);
-    return test_sched_db_server_->impl()->get_hogs_transferred(height);
+    test_sched_db_server_->impl()->wait_for_native_token_transferred_height(
+        height);
+    return test_sched_db_server_->impl()->get_native_tokens_transferred(height);
   }
 
   auto &get_db() { return ctx_.get_db(); }

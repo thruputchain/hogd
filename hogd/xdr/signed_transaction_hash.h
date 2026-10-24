@@ -11,14 +11,12 @@
 
 namespace hogd {
 
-// Identifies one exact signed encoding of a transaction: SHA-256 of the
-// canonical XDR of its [SignedTransaction], signatures and pubkey claim key
-// included. A [TransactionHash] covers only the [Transaction] the signatures
-// are over, so two signings of one body share a [TransactionHash] but not a
+// A [SignedTransactionHash] (see transaction.x) identifies one exact signed
+// encoding of a transaction: SHA-256 of the canonical XDR of its
+// [SignedTransaction], signatures and pubkey claim key included. A
+// [TransactionHash] covers only the [Transaction] the signatures are over, so
+// two signings of one body share a [TransactionHash] but not a
 // [SignedTransactionHash].
-using SignedTransactionHash = SHA256Hash;
-using SignedTransactionHashBatch = x23::XdrVec<SignedTransactionHash>;
-
 struct SignedTransactionHashes {
   TransactionHash tx_hash;
   SignedTransactionHash signed_tx_hash;

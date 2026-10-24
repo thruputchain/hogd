@@ -1399,7 +1399,7 @@ make_empty_outbox_append(BlockHeight height, ConsensusValueHash prev_hash)
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(event_logs, {});
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(/*tx_bodies=*/{});
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -2157,7 +2157,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
   }
 }
 
-TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
+TEST(HogDevnode, LocalUserDefaultRemainsOneHundredNativeTokens)
 {
   LocalBootstrapConfig config = fixture_config(1);
   EXPECT_EQ(config.accounts[0].storage_tokens, 1'000'000'000ULL);
@@ -2168,17 +2168,6 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[0].initial_storage_tokens,
             kLocalFaucetStorageTokens);
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
-}
-
-TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
-{
-  constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
-  LocalBootstrapConfig config =
-      fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
-
-  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
-               std::runtime_error);
 }
 
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)

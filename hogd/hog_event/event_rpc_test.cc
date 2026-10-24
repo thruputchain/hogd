@@ -103,15 +103,16 @@ make_event(const ProposedTransaction &body, uint8_t marker)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const TransactionHash>(hashes),
-                           proposal_txs.hash)();
+  append_to_parallel_batch(x23::span<const SignedTransactionHash>(
+                               signed_hashes),
+                           proposal_txs.signed_hash)();
   append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                nondeterministic_data),
                            proposal_txs.nondeterministic_data)();
@@ -120,27 +121,27 @@ make_proposal_txs(const ProposedTransactionBatch &bodies)
 
 ConsensusValue
 make_consensus_value(BlockHeight height, SHA256Hash event_root,
-                     const ProposalTxs &proposal_txs)
+                     const ProposedTransactionBatch &proposal_bodies)
 {
   ConsensusValue value{};
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = event_root;
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(proposal_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
-  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
+  value.proposal_txs_hash =
+      proposal_txs_compatibility_hash(make_proposal_txs(proposal_bodies));
   return value;
 }
 
 IndexerOutboxCommittedPayload
 make_empty_committed(BlockHeight height, ConsensusValueHash prev_hash)
 {
-  ProposalTxs proposal_txs;
   TxEventLogBatch event_logs;
   ConsensusValue value =
       make_consensus_value(height,
                            compute_indexer_outbox_event_root(event_logs, {}),
-                           proposal_txs);
+                           /*proposal_bodies=*/{});
   value.prev_hash = std::move(prev_hash);
   return {.format_version = kIndexerOutboxFormatVersion,
           .consensus_value = std::move(value),
@@ -359,7 +360,7 @@ commit_empty_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
   EventBlockResult closed = rpc.eventsched_close_block(block_id, height)();
   CHECK_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(height, closed.root_hash(), ProposalTxs{});
+      make_consensus_value(height, closed.root_hash(), /*proposal_bodies=*/{});
   value.prev_hash = std::move(prev_hash);
   CHECK_EQ(rpc.eventsched_commit_block(block_id, value)(), RPCError::kRPCNone);
   return value;
@@ -618,7 +619,7 @@ TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
         event_rpc.eventsched_close_block(block_two_id, 2)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
     ConsensusValue block_two =
-        make_consensus_value(2, closed.root_hash(), ProposalTxs{});
+        make_consensus_value(2, closed.root_hash(), /*proposal_bodies=*/{});
     block_two.prev_hash = sha256(block_one);
 
     fail_next_indexer_outbox_operation_for_test(kFaults[i]);
@@ -670,13 +671,13 @@ TEST_F(EventRpcTest, CommitRejectsConflictingAndOutOfOrderValues)
   EventBlockResult first_closed = event_rpc.eventsched_close_block(843, 1)();
   ASSERT_EQ(first_closed.error(), RPCError::kRPCNone);
   ConsensusValue block_one =
-      make_consensus_value(1, first_closed.root_hash(), ProposalTxs{});
+      make_consensus_value(1, first_closed.root_hash(), /*proposal_bodies=*/{});
   block_one.prev_hash = sha256(genesis);
   ASSERT_EQ(event_rpc.eventsched_open_block(844)(), RPCError::kRPCNone);
   EventBlockResult second_closed = event_rpc.eventsched_close_block(844, 2)();
   ASSERT_EQ(second_closed.error(), RPCError::kRPCNone);
-  ConsensusValue block_two =
-      make_consensus_value(2, second_closed.root_hash(), ProposalTxs{});
+  ConsensusValue block_two = make_consensus_value(2, second_closed.root_hash(),
+                                                  /*proposal_bodies=*/{});
   block_two.prev_hash = sha256(block_one);
   ConsensusValue conflicting = block_one;
   conflicting.prev_hash[0] ^= 1;
@@ -955,11 +956,11 @@ TEST_F(EventRpcTest, TestEmptyBlock)
   EventMempoolRpc mempool_rpc(ctx);
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   EventBlockResult close_result = mempool_rpc.eventsched_close_block(1, 1)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(1, close_result.root_hash(), proposal_txs);
+      make_consensus_value(1, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(1, value)(),
             RPCError::kRPCNone);
@@ -995,11 +996,11 @@ TEST_F(EventRpcTest, TestFromRPC)
                                                  body),
             RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   EventBlockResult close_result = mempool_client.eventsched_close_block(0, 0);
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(0, close_result.root_hash(), proposal_txs);
+      make_consensus_value(0, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_client.eventsched_commit_block(0, value),
             RPCError::kRPCNone);
@@ -1025,11 +1026,11 @@ TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv4Bind)
   EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   EventBlockResult close_result = mempool_client.eventsched_close_block(0, 0);
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(0, close_result.root_hash(), proposal_txs);
+      make_consensus_value(0, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_client.eventsched_commit_block(0, value),
             RPCError::kRPCNone);
@@ -1059,11 +1060,11 @@ TEST_F(EventRpcTest, TestFromRPCWithExplicitIpv6Bind)
   EXPECT_EQ(mempool_client.eventsched_open_block(0), RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_open_block(0), RPCError::kRPCNone);
   EXPECT_EQ(exec_client.eventexecutor_close_block(0), RPCError::kRPCNone);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   EventBlockResult close_result = mempool_client.eventsched_close_block(0, 0);
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(0, close_result.root_hash(), proposal_txs);
+      make_consensus_value(0, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_client.eventsched_commit_block(0, value),
             RPCError::kRPCNone);
@@ -1086,7 +1087,7 @@ TEST_F(EventRpcTest, MultipleExecutors)
   // Add events from different executors
   ProposedTransaction body_a = make_body(11);
   ProposedTransaction body_b = make_body(12);
-  ProposalTxs proposal_txs = make_proposal_txs({body_a, body_b});
+  const ProposedTransactionBatch proposal_bodies{body_a, body_b};
   EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body_a, 11),
                                               body_a)(),
             RPCError::kRPCNone);
@@ -1140,7 +1141,7 @@ TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
 
   // Start close_block in background (it should wait for executor to close)
   ProposedTransaction body = make_body(13);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   std::atomic<bool> close_completed = false;
   std::latch close_reserved(1);
   ctx.set_close_reserved_test_hook(
@@ -1221,7 +1222,7 @@ TEST_F(EventRpcTest, CommitIsRejectedWhileCloseBlockIsReserved)
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(2)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(2)(), RPCError::kRPCNone);
@@ -1233,13 +1234,13 @@ TEST_F(EventRpcTest, CommitIsRejectedWhileCloseBlockIsReserved)
 
   close_reserved.wait();
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(
-                2, make_consensus_value(2, {}, proposal_txs))(),
+                2, make_consensus_value(2, {}, proposal_bodies))(),
             RPCError::kRPCBadBlockID);
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(2)(), RPCError::kRPCNone);
   EventBlockResult close_result = close_async();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(2, close_result.root_hash(), proposal_txs);
+      make_consensus_value(2, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(2, value)(),
             RPCError::kRPCNone);
@@ -1354,7 +1355,7 @@ TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
               RPCError::kRPCNone);
 
     ProposedTransaction body = make_body(block_id + 20);
-    ProposalTxs proposal_txs = make_proposal_txs({body});
+    const ProposedTransactionBatch proposal_bodies{body};
     EXPECT_EQ(exec_rpc.eventexecutor_emit_event(
                   block_id, 1, make_event(body, static_cast<uint8_t>(block_id)),
                   body)(),
@@ -1366,7 +1367,7 @@ TEST_F(EventRpcTest, RecycleContextAcrossBlocks)
     auto result = mempool_rpc.eventsched_close_block(block_id, block_id)();
     EXPECT_EQ(result.error(), RPCError::kRPCNone);
     ConsensusValue value =
-        make_consensus_value(block_id, result.root_hash(), proposal_txs);
+        make_consensus_value(block_id, result.root_hash(), proposal_bodies);
     if (block_id > 1) {
       value.prev_hash = sha256(previous);
     }
@@ -1394,6 +1395,82 @@ TEST_F(EventRpcTest, AbandonActiveBlockDeletesTempFile)
   EXPECT_FALSE(std::filesystem::exists(temp_file));
 }
 
+TEST_F(EventRpcTest, OpenBlockTwiceLeavesTheFirstBlockIntact)
+{
+  // open_block() creates the temp events file outside the context lock, so a
+  // duplicate open has to be rejected before it reaches create_events_file():
+  // that unlinks and recreates the temp name, which would pull the live
+  // block's file out from under it and fail its publish.
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+  ProposedTransaction body = make_body(41);
+  ASSERT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 41),
+                                              body)(),
+            RPCError::kRPCNone);
+
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCBadBlockID);
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir(), 1)));
+
+  // The first block publishes what it streamed, through the file it opened.
+  ASSERT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(1, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  auto pairs = read_final_events_file(temp_dir(), closed.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
+  EXPECT_EQ(pairs->tx_bodies.size(), 1U);
+}
+
+TEST_F(EventRpcTest, OpenIsRejectedWhileOpenBlockIsReserved)
+{
+  // open_block() creates the temp events file with lock_ released.  The id
+  // is reserved first so that a second open in that window is rejected
+  // before create_events_file() can unlink and recreate the temp name the
+  // first open is about to use.  Without the reservation the second open
+  // would insert the context and the first would fail its own insertion.
+  EventRPCContext ctx(temp_dir());
+  EventMempoolRpc mempool_rpc(ctx);
+
+  std::latch open_reserved(1);
+  std::latch racing_open_done(1);
+  ctx.set_open_reserved_test_hook([&](BlockID /*block_id*/) {
+    open_reserved.count_down();
+    racing_open_done.wait();
+  });
+  std::atomic<bool> open_completed = false;
+  auto async = [&](this auto) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    EXPECT_EQ(co_await mempool_rpc.eventsched_open_block(1),
+              RPCError::kRPCNone);
+    open_completed.store(true);
+  }();
+
+  open_reserved.wait();
+  const std::string temp_file =
+      EventBlockContext::temp_events_filename(temp_dir(), 1);
+  // Reserved, but the file does not exist yet: this is the window.
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+  // The racing open is rejected at the reservation, before the hook.
+  EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCBadBlockID);
+  EXPECT_FALSE(std::filesystem::exists(temp_file));
+
+  racing_open_done.count_down();
+  async();
+  EXPECT_TRUE(open_completed.load());
+  EXPECT_TRUE(std::filesystem::exists(temp_file));
+
+  // Only the first open's file exists, and it publishes normally.
+  EventBlockResult closed = mempool_rpc.eventsched_close_block(1, 1)();
+  EXPECT_EQ(closed.error(), RPCError::kRPCNone);
+  EXPECT_TRUE(std::filesystem::exists(
+      EventBlockContext::final_events_filename(temp_dir(),
+                                               closed.root_hash())));
+}
+
 TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
 {
   EventRPCContext ctx(temp_dir());
@@ -1403,7 +1480,7 @@ TEST_F(EventRpcTest, AbandonClosedBlockReclaimsUnsharedFinalFile)
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
   ProposedTransaction body = make_body(31);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 31),
                                               body)(),
             RPCError::kRPCNone);
@@ -1433,7 +1510,7 @@ TEST_F(EventRpcTest, CommitBlockRetainsFinalFileAsRecordPayload)
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
   ProposedTransaction body = make_body(32);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, make_event(body, 32),
                                               body)(),
             RPCError::kRPCNone);
@@ -1446,7 +1523,7 @@ TEST_F(EventRpcTest, CommitBlockRetainsFinalFileAsRecordPayload)
       EventBlockContext::final_events_filename(temp_dir(), result.root_hash());
 
   ConsensusValue value =
-      make_consensus_value(1, result.root_hash(), proposal_txs);
+      make_consensus_value(1, result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(1, value)(),
             RPCError::kRPCNone);
@@ -1461,7 +1538,7 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
 {
   ProposedTransaction body = make_body(41);
   TxEventLog event = make_event(body, 41);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   ConsensusValue consensus_value;
 
   {
@@ -1488,7 +1565,7 @@ TEST_F(EventRpcTest, CloseWritesEventsFileAndCommitPromotesIt)
     expect_xdr_equal(pairs->tx_bodies[0], body);
 
     consensus_value =
-        make_consensus_value(9, close_result.root_hash(), proposal_txs);
+        make_consensus_value(9, close_result.root_hash(), proposal_bodies);
     consensus_value.proposal_header.block_timepoint = 12345;
     initialize_test_origin(ctx, consensus_value);
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(41, consensus_value)(),
@@ -1519,7 +1596,7 @@ TEST_F(EventRpcTest, AbandonClosedBlockReclaimsItsEventsFile)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
   ProposedTransaction body = make_body(42);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(42)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(42)(), RPCError::kRPCNone);
@@ -1544,7 +1621,7 @@ TEST_F(EventRpcTest, EmptyBlockWritesEventsFileAndCommittedRecord)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(43)(), RPCError::kRPCNone);
   EventBlockResult close_result = mempool_rpc.eventsched_close_block(43, 11)();
@@ -1555,7 +1632,7 @@ TEST_F(EventRpcTest, EmptyBlockWritesEventsFileAndCommittedRecord)
   EXPECT_TRUE(pairs->tx_bodies.empty());
 
   ConsensusValue value =
-      make_consensus_value(11, close_result.root_hash(), proposal_txs);
+      make_consensus_value(11, close_result.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(43, value)(),
             RPCError::kRPCNone);
@@ -1573,8 +1650,8 @@ TEST_F(EventRpcTest, CompetingFirstCommitsPublishOneOriginAndRecord)
   EventMempoolRpc mempool_rpc(ctx);
   ProposedTransaction first_body = make_body(430);
   ProposedTransaction second_body = make_body(431);
-  ProposalTxs first_txs = make_proposal_txs({first_body});
-  ProposalTxs second_txs = make_proposal_txs({second_body});
+  const ProposedTransactionBatch first_bodies{first_body};
+  const ProposedTransactionBatch second_bodies{second_body};
 
   for (const auto &[block_id, body] :
        std::vector<std::pair<BlockID, ProposedTransaction>>{{430, first_body},
@@ -1596,9 +1673,9 @@ TEST_F(EventRpcTest, CompetingFirstCommitsPublishOneOriginAndRecord)
   ASSERT_EQ(first_closed.error(), RPCError::kRPCNone);
   ASSERT_EQ(second_closed.error(), RPCError::kRPCNone);
   ConsensusValue first =
-      make_consensus_value(1, first_closed.root_hash(), first_txs);
+      make_consensus_value(1, first_closed.root_hash(), first_bodies);
   ConsensusValue second =
-      make_consensus_value(1, second_closed.root_hash(), second_txs);
+      make_consensus_value(1, second_closed.root_hash(), second_bodies);
   ConsensusValueHash parent{};
   parent[0] = 0x43;
   first.prev_hash = parent;
@@ -1638,7 +1715,7 @@ TEST_F(EventRpcTest, CommitDoesNotInterpretProposalSegmentationCommitment)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
   ProposedTransaction body = make_body(44);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(44)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(44)(), RPCError::kRPCNone);
@@ -1650,7 +1727,7 @@ TEST_F(EventRpcTest, CommitDoesNotInterpretProposalSegmentationCommitment)
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
 
   ConsensusValue mismatched =
-      make_consensus_value(12, close_result.root_hash(), proposal_txs);
+      make_consensus_value(12, close_result.root_hash(), proposal_bodies);
   mismatched.proposal_txs_hash[0] ^= 0x01;
   initialize_test_origin(ctx, mismatched);
   EXPECT_EQ(mempool_rpc.eventsched_commit_block(44, mismatched)(),
@@ -1663,13 +1740,13 @@ TEST_F(EventRpcTest, IdenticalCommittedPrepublicationIsIdempotentAcrossBlockIds)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(45)(), RPCError::kRPCNone);
   EventBlockResult close_result = mempool_rpc.eventsched_close_block(45, 13)();
   ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(13, close_result.root_hash(), proposal_txs);
+      make_consensus_value(13, close_result.root_hash(), proposal_bodies);
   auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
   ASSERT_TRUE(pairs.has_value()) << pairs.error();
   IndexerOutboxCommittedPayload committed{
@@ -1699,7 +1776,7 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryServesTheRecord)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
   ProposedTransaction body = make_body(451);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(451)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(451)(), RPCError::kRPCNone);
@@ -1710,7 +1787,7 @@ TEST_F(EventRpcTest, PrepublishedConsensusRetryServesTheRecord)
   EventBlockResult closed = mempool_rpc.eventsched_close_block(451, 13)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(13, closed.root_hash(), proposal_txs);
+      make_consensus_value(13, closed.root_hash(), proposal_bodies);
   auto original = read_final_events_file(temp_dir(), closed.root_hash());
   ASSERT_TRUE(original.has_value()) << original.error();
   IndexerOutboxCommittedPayload committed{
@@ -1767,7 +1844,7 @@ TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
 
 TEST_F(EventRpcTest, CommitPromotesEventsFileAfterContextRestart)
 {
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   ConsensusValue value;
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
@@ -1781,7 +1858,7 @@ TEST_F(EventRpcTest, CommitPromotesEventsFileAfterContextRestart)
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
     final_file = EventBlockContext::final_events_filename(temp_dir(),
                                                           closed.root_hash());
-    value = make_consensus_value(1, closed.root_hash(), proposal_txs);
+    value = make_consensus_value(1, closed.root_hash(), proposal_bodies);
     value.prev_hash = sha256(genesis);
     // Leave the block closed and un-torn-down: a crash runs no destructors and
     // certainly does not abandon, and abandonment would mean a sibling
@@ -1808,13 +1885,13 @@ TEST_F(EventRpcTest, ReconciliationFailsWithoutCurrentEpochOrigin)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(48)(), RPCError::kRPCNone);
   EventBlockResult closed = mempool_rpc.eventsched_close_block(48, 16)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(16, closed.root_hash(), proposal_txs);
+      make_consensus_value(16, closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(48, value)(),
             RPCError::kRPCNone);
@@ -2001,7 +2078,8 @@ TEST_F(EventRpcTest,
     ASSERT_EQ(event_rpc.eventsched_open_block(kBlockOne)(), RPCError::kRPCNone);
     EventBlockResult closed = event_rpc.eventsched_close_block(kBlockOne, 1)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    block_one = make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+    block_one =
+        make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
     block_one.prev_hash = sha256(genesis);
     ASSERT_EQ(event_rpc.eventsched_commit_block(kBlockOne, block_one)(),
               RPCError::kRPCNone);
@@ -2106,7 +2184,7 @@ TEST_F(EventRpcTest, ChangedStartupTipReconcilesAgainBeforeActivation)
   EventBlockResult closed = event_rpc.eventsched_close_block(kBlockOne, 1)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue block_one =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+      make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
   block_one.prev_hash = sha256(genesis);
   ASSERT_EQ(event_rpc.eventsched_commit_block(kBlockOne, block_one)(),
             RPCError::kRPCNone);
@@ -2180,7 +2258,8 @@ TEST_F(EventRpcTest, GenesisRegistrationRestartCommitsAndReconcilesHeightOne)
     ASSERT_EQ(mempool_rpc.eventsched_open_block(kBlock)(), RPCError::kRPCNone);
     EventBlockResult closed = mempool_rpc.eventsched_close_block(kBlock, 1)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    height_one = make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+    height_one =
+        make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
     height_one.prev_hash = sha256(genesis);
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(kBlock, height_one)(),
               RPCError::kRPCNone);
@@ -2210,8 +2289,8 @@ TEST_F(EventRpcTest, ContiguousGenesisOutboxReopensAndReconciles)
       EventBlockResult closed =
           mempool_rpc.eventsched_close_block(block_id, height)();
       ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-      ConsensusValue value =
-          make_consensus_value(height, closed.root_hash(), ProposalTxs{});
+      ConsensusValue value = make_consensus_value(height, closed.root_hash(),
+                                                  /*proposal_bodies=*/{});
       value.prev_hash = sha256(previous);
       ASSERT_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
                 RPCError::kRPCNone);
@@ -2306,7 +2385,8 @@ TEST_F(EventRpcTest,
     EventBlockResult closed =
         mempool_rpc.eventsched_close_block(kCurrentBlock, 22)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    current_tip = make_consensus_value(22, closed.root_hash(), ProposalTxs{});
+    current_tip =
+        make_consensus_value(22, closed.root_hash(), /*proposal_bodies=*/{});
     current_tip.prev_hash = sha256(archival_tip.consensus_value);
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(kCurrentBlock, current_tip)(),
               RPCError::kRPCNone);
@@ -2408,7 +2488,8 @@ TEST_F(EventRpcTest,
                 RPCError::kRPCNone);
       EventBlockResult closed = mempool_rpc.eventsched_close_block(kBlock, 1)();
       ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-      committed = make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+      committed =
+          make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
       committed.prev_hash = boundary_hash;
       ASSERT_EQ(mempool_rpc.eventsched_commit_block(kBlock, committed)(),
                 RPCError::kRPCNone);
@@ -2549,14 +2630,14 @@ TEST_F(EventRpcTest, ReconciliationLinksCurrentEpochToArchivalPrefixByHeader)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(320)(), RPCError::kRPCNone);
   EventBlockResult archival_closed =
       mempool_rpc.eventsched_close_block(320, 20)();
   ASSERT_EQ(archival_closed.error(), RPCError::kRPCNone);
   ConsensusValue archival =
-      make_consensus_value(20, archival_closed.root_hash(), proposal_txs);
+      make_consensus_value(20, archival_closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, archival);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(320, archival)(),
             RPCError::kRPCNone);
@@ -2566,7 +2647,7 @@ TEST_F(EventRpcTest, ReconciliationLinksCurrentEpochToArchivalPrefixByHeader)
       mempool_rpc.eventsched_close_block(321, 21)();
   ASSERT_EQ(current_closed.error(), RPCError::kRPCNone);
   ConsensusValue current =
-      make_consensus_value(21, current_closed.root_hash(), proposal_txs);
+      make_consensus_value(21, current_closed.root_hash(), proposal_bodies);
   current.prev_hash = sha256(archival);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(321, current)(),
             RPCError::kRPCNone);
@@ -2589,14 +2670,14 @@ TEST_F(EventRpcTest, ReconciliationRejectsDisconnectedArchivalPrefix)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(322)(), RPCError::kRPCNone);
   EventBlockResult archival_closed =
       mempool_rpc.eventsched_close_block(322, 20)();
   ASSERT_EQ(archival_closed.error(), RPCError::kRPCNone);
   ConsensusValue archival =
-      make_consensus_value(20, archival_closed.root_hash(), proposal_txs);
+      make_consensus_value(20, archival_closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, archival);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(322, archival)(),
             RPCError::kRPCNone);
@@ -2606,7 +2687,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsDisconnectedArchivalPrefix)
       mempool_rpc.eventsched_close_block(323, 21)();
   ASSERT_EQ(current_closed.error(), RPCError::kRPCNone);
   ConsensusValue current =
-      make_consensus_value(21, current_closed.root_hash(), proposal_txs);
+      make_consensus_value(21, current_closed.root_hash(), proposal_bodies);
   current.prev_hash = sha256(archival);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(323, current)(),
             RPCError::kRPCNone);
@@ -2773,13 +2854,13 @@ TEST_F(EventRpcTest, ReconciliationRejectsCorruptCurrentEpochPayload)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(214)(), RPCError::kRPCNone);
   EventBlockResult closed = mempool_rpc.eventsched_close_block(214, 21)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(21, closed.root_hash(), proposal_txs);
+      make_consensus_value(21, closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(214, value)(),
             RPCError::kRPCNone);
@@ -2802,7 +2883,8 @@ TEST_F(EventRpcTest, ReconciliationRejectsCommittedRecordWithMissingEventsFile)
     ASSERT_EQ(mempool_rpc.eventsched_open_block(215)(), RPCError::kRPCNone);
     EventBlockResult closed = mempool_rpc.eventsched_close_block(215, 21)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    value = make_consensus_value(21, closed.root_hash(), ProposalTxs{});
+    value =
+        make_consensus_value(21, closed.root_hash(), /*proposal_bodies=*/{});
     initialize_test_origin(ctx, value);
     ASSERT_EQ(mempool_rpc.eventsched_commit_block(215, value)(),
               RPCError::kRPCNone);
@@ -2819,7 +2901,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsMismatchedCommittedRecordAhead)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   ConsensusValue scheduler_tip{};
   scheduler_tip.proposal_header.block_height = 20;
 
@@ -2827,7 +2909,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsMismatchedCommittedRecordAhead)
   EventBlockResult closed = mempool_rpc.eventsched_close_block(211, 21)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue ahead =
-      make_consensus_value(21, closed.root_hash(), proposal_txs);
+      make_consensus_value(21, closed.root_hash(), proposal_bodies);
   ahead.prev_hash[0] = 0xff;
   initialize_test_origin(ctx, ahead);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(211, ahead)(),
@@ -2840,7 +2922,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsTwoCommittedRecordsAhead)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
   ConsensusValue scheduler_tip{};
   scheduler_tip.proposal_header.block_height = 20;
 
@@ -2848,7 +2930,7 @@ TEST_F(EventRpcTest, ReconciliationRejectsTwoCommittedRecordsAhead)
   EventBlockResult closed = mempool_rpc.eventsched_close_block(212, 21)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue first =
-      make_consensus_value(21, closed.root_hash(), proposal_txs);
+      make_consensus_value(21, closed.root_hash(), proposal_bodies);
   first.prev_hash = sha256(scheduler_tip);
   initialize_test_origin(ctx, first);
   ASSERT_EQ(mempool_rpc.eventsched_commit_block(212, first)(),
@@ -2876,7 +2958,7 @@ TEST_F(EventRpcTest, CloseDoesNotMakeEventsPullableBeforeCommit)
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
 
   ProposedTransaction body = make_body(1);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
 
   EXPECT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   EXPECT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
@@ -2942,7 +3024,7 @@ TEST_F(EventRpcTest, CrashBeforeCloseLeavesNothingPullableAfterRestart)
   EventBlockResult closed = rpc.eventsched_close_block(kNextBlockId, 1)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+      make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
   value.prev_hash = sha256(genesis);
   EXPECT_EQ(rpc.eventsched_commit_block(kNextBlockId, value)(),
             RPCError::kRPCNone);
@@ -2962,7 +3044,7 @@ TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)
   ProposedTransaction competing_body = canonical_body;
   competing_body.nondeterministic_proposal_data.nondeterministic_bits[0] ^=
       0xff;
-  ProposalTxs canonical_txs = make_proposal_txs({canonical_body});
+  const ProposedTransactionBatch canonical_bodies{canonical_body};
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   ConsensusValue canonical_value;
@@ -2992,7 +3074,7 @@ TEST_F(EventRpcTest, RecoveryPicksCanonicalEventsFileAmongCompetingBlocks)
     competing_root = close_one(209, competing_body);
     const SHA256Hash canonical_root = close_one(210, canonical_body);
     ASSERT_NE(competing_root, canonical_root);
-    canonical_value = make_consensus_value(1, canonical_root, canonical_txs);
+    canonical_value = make_consensus_value(1, canonical_root, canonical_bodies);
     canonical_value.prev_hash = sha256(genesis);
   }
 
@@ -3018,7 +3100,7 @@ TEST_F(EventRpcTest, IndexerPullsBlockRecoveredAfterCrashBetweenCloseAndCommit)
   // must still be able to pull that block's events and bodies.
   ProposedTransaction body = make_body(77);
   TxEventLog event = make_event(body, 0x77);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   ConsensusValue genesis{};
   genesis.proposal_header.block_height = 0;
   ConsensusValue value;
@@ -3035,7 +3117,7 @@ TEST_F(EventRpcTest, IndexerPullsBlockRecoveredAfterCrashBetweenCloseAndCommit)
     ASSERT_EQ(exec_rpc.eventexecutor_close_block(77)(), RPCError::kRPCNone);
     EventBlockResult closed = mempool_rpc.eventsched_close_block(77, 1)();
     ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    value = make_consensus_value(1, closed.root_hash(), proposal_txs);
+    value = make_consensus_value(1, closed.root_hash(), proposal_bodies);
     value.prev_hash = sha256(genesis);
     // Deliberately no commit: this is the crash.
   }
@@ -3171,7 +3253,7 @@ TEST_F(EventRpcTest, StaleTempFileFromAReusedBlockIdIsDiscarded)
   EXPECT_TRUE(pairs->tx_bodies.empty());
 
   ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), ProposalTxs{});
+      make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
   value.prev_hash = sha256(genesis);
   EXPECT_EQ(rpc.eventsched_commit_block(kReusedBlockId, value)(),
             RPCError::kRPCNone);
@@ -3195,7 +3277,7 @@ TEST_F(EventRpcTest, ReusedBlockIdWithLinkedTempDoesNotTruncatePublishedFile)
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
 
   ProposedTransaction body = make_body(83);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
   ASSERT_EQ(rpc.eventsched_open_block(83)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(83)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_emit_event(83, 1, make_event(body, 83),
@@ -3224,7 +3306,7 @@ TEST_F(EventRpcTest, ReusedBlockIdWithLinkedTempDoesNotTruncatePublishedFile)
 
   // The published block still commits and round-trips.
   ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), proposal_txs);
+      make_consensus_value(1, closed.root_hash(), proposal_bodies);
   value.prev_hash = sha256(genesis);
   EXPECT_EQ(rpc.eventsched_commit_block(83, value)(), RPCError::kRPCNone);
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value());
@@ -3258,7 +3340,7 @@ TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
   ASSERT_TRUE(std::filesystem::exists(events_file));
 
   ConsensusValue one =
-      make_consensus_value(1, first.root_hash(), ProposalTxs{});
+      make_consensus_value(1, first.root_hash(), /*proposal_bodies=*/{});
   one.prev_hash = sha256(genesis);
   ASSERT_EQ(rpc.eventsched_commit_block(51, one)(), RPCError::kRPCNone);
   // Height 2 is closed and still has to read this file at commit, so
@@ -3266,7 +3348,7 @@ TEST_F(EventRpcTest, EmptyBlocksShareOneEventsFileAcrossHeights)
   EXPECT_TRUE(std::filesystem::exists(events_file));
 
   ConsensusValue two =
-      make_consensus_value(2, second.root_hash(), ProposalTxs{});
+      make_consensus_value(2, second.root_hash(), /*proposal_bodies=*/{});
   two.prev_hash = sha256(one);
   ASSERT_EQ(rpc.eventsched_commit_block(52, two)(), RPCError::kRPCNone);
   // Both committed records reference this one file as their payload, so it
@@ -3309,7 +3391,7 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   ASSERT_TRUE(std::filesystem::exists(events_file));
 
   ConsensusValue one =
-      make_consensus_value(1, winner.root_hash(), ProposalTxs{});
+      make_consensus_value(1, winner.root_hash(), /*proposal_bodies=*/{});
   one.prev_hash = sha256(genesis);
   ASSERT_EQ(rpc.eventsched_commit_block(62, one)(), RPCError::kRPCNone);
 
@@ -3318,7 +3400,7 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   EXPECT_TRUE(std::filesystem::exists(events_file));
 
   ConsensusValue two =
-      make_consensus_value(2, next_height.root_hash(), ProposalTxs{});
+      make_consensus_value(2, next_height.root_hash(), /*proposal_bodies=*/{});
   two.prev_hash = sha256(one);
   EXPECT_EQ(rpc.eventsched_commit_block(63, two)(), RPCError::kRPCNone);
   EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value());
@@ -3351,13 +3433,13 @@ TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)
 {
   EventRPCContext ctx(temp_dir());
   EventMempoolRpc mempool_rpc(ctx);
-  ProposalTxs proposal_txs;
+  const ProposedTransactionBatch proposal_bodies;
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(88)(), RPCError::kRPCNone);
   EventBlockResult closed = mempool_rpc.eventsched_close_block(88, 1)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), proposal_txs);
+      make_consensus_value(1, closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   ASSERT_TRUE(std::filesystem::remove(
       EventBlockContext::final_events_filename(temp_dir(),
@@ -3376,7 +3458,7 @@ TEST_F(EventRpcTest, CorruptEventsFileFailsClosedWhereItIsRead)
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
   ProposedTransaction body = make_body(99);
-  ProposalTxs proposal_txs = make_proposal_txs({body});
+  const ProposedTransactionBatch proposal_bodies{body};
 
   ASSERT_EQ(mempool_rpc.eventsched_open_block(99)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(99)(), RPCError::kRPCNone);
@@ -3387,7 +3469,7 @@ TEST_F(EventRpcTest, CorruptEventsFileFailsClosedWhereItIsRead)
   EventBlockResult closed = mempool_rpc.eventsched_close_block(99, 1)();
   ASSERT_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(1, closed.root_hash(), proposal_txs);
+      make_consensus_value(1, closed.root_hash(), proposal_bodies);
   initialize_test_origin(ctx, value);
   corrupt_events_file(temp_dir(), closed.root_hash());
 

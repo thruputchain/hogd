@@ -1,4 +1,4 @@
-#include "hogd/hog_db/invariant_hog_conservation.h"
+#include "hogd/hog_db/invariant_native_token_conservation.h"
 
 #include <algorithm>
 #include <cassert>
@@ -26,7 +26,7 @@
 namespace hogd {
 
 bool
-HogConservationInvariant::check()
+NativeTokenConservationInvariant::check()
 {
   auto r = total_supply_change_.with([](auto &t) { return t; });
   if (!r.is_zero()) {
@@ -39,9 +39,9 @@ HogConservationInvariant::check()
 }
 
 void
-HogConservationInvariant::log_item_change(std::span<const std::byte> key,
-                                          HogDbStatus<DBItem> const &before,
-                                          HogDbStatus<DBItem> const &after)
+NativeTokenConservationInvariant::log_item_change(
+    std::span<const std::byte> key, HogDbStatus<DBItem> const &before,
+    HogDbStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
   switch (prefix) {
@@ -50,7 +50,7 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
     return;
   case Prefix::kContractCode:
   case Prefix::kGlobalMetadata:
-  case Prefix::kHogAge:
+  case Prefix::kNativeTokenAge:
   case Prefix::kContractRefcount:
     // This doesn't pay storage costs;
     return;
@@ -76,7 +76,7 @@ HogConservationInvariant::log_item_change(std::span<const std::byte> key,
 }
 
 void
-HogConservationInvariant::handle_balance_change(
+NativeTokenConservationInvariant::handle_balance_change(
     HogDbStatus<DBItem> const &before, HogDbStatus<DBItem> const &after)
 {
   auto get_balance = [](HogDbStatus<DBItem> const &item) -> int128_t {
@@ -106,7 +106,7 @@ HogConservationInvariant::handle_balance_change(
 }
 
 void
-HogConservationInvariant::handle_address_metadata_item_change(
+NativeTokenConservationInvariant::handle_address_metadata_item_change(
     HogDbStatus<DBItem> const &before, HogDbStatus<DBItem> const &after)
 {
   auto get_storage_cost = [this](HogDbStatus<DBItem> const &item) -> int128_t {
@@ -132,7 +132,7 @@ HogConservationInvariant::handle_address_metadata_item_change(
 }
 
 void
-HogConservationInvariant::handle_contract_data_item_change(
+NativeTokenConservationInvariant::handle_contract_data_item_change(
     std::span<const std::byte> key, HogDbStatus<DBItem> const &before,
     HogDbStatus<DBItem> const &after)
 {
@@ -185,13 +185,13 @@ HogConservationInvariant::handle_contract_data_item_change(
         std::span<const std::byte, sizeof(int128_xdr)>(item->value.data(),
                                                        sizeof(int128_xdr)));
   };
-  // The counter records newly issued HOG. Its positive delta exactly offsets
-  // the corresponding balance credit in the conservation sum.
+  // The counter records newly issued native tokens. Its positive delta exactly
+  // offsets the corresponding balance credit in the conservation sum.
   update_total_supply(-(value(after) - value(before)));
 }
 
 void
-HogConservationInvariant::handle_address_auth_data_item_change(
+NativeTokenConservationInvariant::handle_address_auth_data_item_change(
     HogDbStatus<DBItem> const &before, HogDbStatus<DBItem> const &after)
 {
   auto get_storage_cost = [this](HogDbStatus<DBItem> const &item) -> int128_t {
@@ -222,7 +222,7 @@ HogConservationInvariant::handle_address_auth_data_item_change(
 }
 
 void
-HogConservationInvariant::handle_replay_cache_item_change(
+NativeTokenConservationInvariant::handle_replay_cache_item_change(
     std::span<const std::byte> key, HogDbStatus<DBItem> const &before,
     HogDbStatus<DBItem> const &after)
 {
@@ -258,7 +258,7 @@ HogConservationInvariant::handle_replay_cache_item_change(
 }
 
 void
-HogConservationInvariant::update_total_supply(int128_t change)
+NativeTokenConservationInvariant::update_total_supply(int128_t change)
 {
   total_supply_change_.with([change](auto &t) { t += change; });
 }

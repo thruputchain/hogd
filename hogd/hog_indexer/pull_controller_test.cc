@@ -95,15 +95,16 @@ make_event(const ProposedTransaction &body, std::uint8_t marker)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(x23::span<const TransactionHash>(hashes),
-                           proposal_txs.hash)();
+  append_to_parallel_batch(x23::span<const SignedTransactionHash>(
+                               signed_hashes),
+                           proposal_txs.signed_hash)();
   append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                nondeterministic_data),
                            proposal_txs.nondeterministic_data)();
@@ -112,15 +113,16 @@ make_proposal_txs(const ProposedTransactionBatch &bodies)
 
 ConsensusValue
 make_consensus_value(BlockHeight height, SHA256Hash event_root,
-                     const ProposalTxs &proposal_txs)
+                     const ProposedTransactionBatch &proposal_bodies)
 {
   ConsensusValue value{};
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = event_root;
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(proposal_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
-  value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
+  value.proposal_txs_hash =
+      proposal_txs_compatibility_hash(make_proposal_txs(proposal_bodies));
   return value;
 }
 
@@ -144,12 +146,11 @@ commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
              RPCError::kRPCNone);
     bodies.push_back(*body);
   }
-  ProposalTxs proposal_txs = make_proposal_txs(bodies);
   EventBlockResult closed =
       mempool_rpc.eventsched_close_block(block_id, height)();
   CHECK_EQ(closed.error(), RPCError::kRPCNone);
   ConsensusValue value =
-      make_consensus_value(height, closed.root_hash(), proposal_txs);
+      make_consensus_value(height, closed.root_hash(), bodies);
   value.prev_hash = std::move(prev_hash);
   CHECK_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
            RPCError::kRPCNone);
@@ -255,7 +256,7 @@ public:
     value.proposal_header.block_timepoint = 1000;
     value.proposal_header.events_hash =
         compute_indexer_outbox_event_root({}, {});
-    auto txs_root = compute_indexer_proposal_txs_root(proposal)();
+    auto txs_root = compute_indexer_txs_root(/*tx_bodies=*/{});
     CHECK(txs_root.has_value());
     value.proposal_header.txs_hash = *txs_root;
     value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal);

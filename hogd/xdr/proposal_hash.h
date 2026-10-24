@@ -53,11 +53,12 @@ proposal_txs_compatibility_hash(const ProposalTxs &txs)
   ProposalTxs base{.ext = txs.ext};
 
   ProposalTxsHash result = sha256(base);
-  const SHA256Hash hash = hash_parallel_batch_compatibility(txs.hash);
+  const SHA256Hash signed_hash =
+      hash_parallel_batch_compatibility(txs.signed_hash);
   const SHA256Hash nondeterministic_data_hash =
       hash_parallel_batch_compatibility(txs.nondeterministic_data);
   for (size_t i = 0; i < result.size(); ++i) {
-    result[i] ^= hash[i] ^ nondeterministic_data_hash[i];
+    result[i] ^= signed_hash[i] ^ nondeterministic_data_hash[i];
   }
   return result;
 }

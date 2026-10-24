@@ -276,7 +276,7 @@ protected:
     write_deployment(kRv32Token, rv32_token);
 
     auto native_token = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token);
     write_deployment(kNativeToken, native_token);
 
@@ -534,7 +534,7 @@ protected:
     native_map.emplace(kDriverId, make_driver(token, scenarios));
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();

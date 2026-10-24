@@ -1,4 +1,4 @@
-//! The RV32 reference for native HOG's ERC20, ERC20Permit and ERC165
+//! The RV32 reference for the native token's ERC20, ERC20Permit and ERC165
 //! interfaces.
 
 use crate::interface::*;

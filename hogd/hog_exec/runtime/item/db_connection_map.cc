@@ -1,7 +1,12 @@
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
 
 #include <algorithm>
+#include <cstddef>
 #include <utility>
+
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #include "hogd/base/os.h"
 #include "x23/cpumap.h"
@@ -49,11 +54,31 @@ db_connection_map()
 {
   static const x23::CpuMap map = [] {
     const int nconnections = db_connection_count();
+    // The CPU ids this process may run on. They need not be 0..n-1: with an
+    // affinity of 8-15, a map over ids 0-7 has no allowed CPU in any bucket,
+    // the multiclient builds no connection, and the first lookup divides by
+    // zero.
     const int ncpu = std::max(1, static_cast<int>(available_parallelism()));
+    x23::Vec<int> allowed;
+#ifdef __linux__
+    cpu_set_t mask;
+    if (sched_getaffinity(0, sizeof(mask), &mask) == 0)
+      for (int id = 0; id < CPU_SETSIZE; id++)
+        if (CPU_ISSET(id, &mask))
+          allowed.push_back(id);
+#endif
+    if (allowed.empty())
+      for (int i = 0; i < ncpu; i++)
+        allowed.push_back(i);
+    // ncpu also honors DEFAULT_THREADPOOL_SIZE.
+    const int nbuckets =
+        std::min({nconnections, ncpu, static_cast<int>(allowed.size())});
+    // Ids outside the mask go to bucket 0; every bucket gets at least one
+    // allowed CPU, so each one is valid and gets a connection.
     x23::Vec<int> buckets;
-    buckets.reserve(ncpu);
-    for (int i = 0; i < ncpu; i++)
-      buckets.push_back(i % nconnections);
+    buckets.resize(allowed.back() + 1, 0);
+    for (std::size_t i = 0; i < allowed.size(); i++)
+      buckets[allowed[i]] = static_cast<int>(i % nbuckets);
     return x23::CpuMap{std::move(buckets)};
   }();
   return map;

@@ -1596,7 +1596,7 @@ is_banned_redeploy_native_contract(
     HogexecPrecompiledNativeContracts native_contract_id)
 {
   switch (native_contract_id) {
-  case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+  case HogexecPrecompiledNativeContracts::kNativeContractNativeToken:
   case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }

@@ -103,14 +103,14 @@ make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : canonical_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal;
-  proposal.hash = t_to_parallel_batch(hashes)();
+  proposal.signed_hash = t_to_parallel_batch(signed_hashes)();
   proposal.nondeterministic_data = t_to_parallel_batch(nondeterministic_data)();
   return proposal;
 }
@@ -132,7 +132,7 @@ make_block(BlockHeight height, ConsensusValueHash prev_hash,
   value.proposal_header.block_timepoint = 1000 + height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(logs, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal)();
+  auto txs_root = compute_indexer_txs_root(canonical_bodies);
   EXPECT_TRUE(txs_root.has_value()) << txs_root.error();
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal);

@@ -104,7 +104,7 @@ visit_genesis_execution_prerequisites(
   visit_auth_data(kGenesisRootContractAddress, root_auth);
 
   auto token = make_native_contract(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken);
   visit_contract(token);
   visit_deployment(kNativeTokenContractAddress,
                    make_deployed_contract_hash(token));
@@ -178,10 +178,11 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 
   // The root contract mints each distribution plus enough native token to
   // create the root replay/balance rows and token supply/balance rows for every
-  // ceremony transaction. Reject the artifact before emitting transactions if
-  // all of those mints would exceed the protocol supply.
-  uint128_t remaining_supply =
-      uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+  // ceremony transaction. Total supply is a nonnegative int128, so reject the
+  // artifact before emitting transactions if all of those mints would take it
+  // past INT128_MAX.
+  auto remaining_supply =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
   const std::size_t transaction_count =
       std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
                                 1) /
