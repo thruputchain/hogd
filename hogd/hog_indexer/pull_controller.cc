@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <optional>
 #include <ranges>
@@ -15,8 +16,10 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/metrics.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"

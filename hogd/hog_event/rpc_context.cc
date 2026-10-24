@@ -23,10 +23,12 @@
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "consensus.hh"
 #include "db_conflict.hh"
+#include "event.hh"
 #include "event_outbox_internal.hh"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
@@ -35,6 +37,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/time.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
@@ -49,6 +52,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -803,10 +807,11 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
                                    const std::atomic<bool> &draining)
 {
   IndexerPullAnswer answer = co_await pull_indexer_block(request, draining);
-  if (answer.reply) {
-    co_return std::move(*answer.reply);
+  if (auto *reply = std::get_if<EventIndexerPullResult>(&answer.answer)) {
+    co_return std::move(*reply);
   }
-  const IndexerCommittedBlockPayload &payload = answer.block->payload;
+  auto &pulled = std::get<IndexerPulledBlock>(answer.answer);
+  const IndexerCommittedBlockPayload &payload = pulled.block.payload;
   if (!indexer_event_pull_rpc_record_size_for_parts(
           x23::xdr_size(payload.consensus_value),
           x23::xdr_size(payload.event_logs),
@@ -818,7 +823,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
         "block exceeds the single-reply pull record; pull it with "
         "event_indexer_pull_next_chunked");
   }
-  co_return pull_block(std::move(answer.origin), std::move(*answer.block));
+  co_return pull_block(std::move(pulled.origin), std::move(pulled.block));
 }
 
 x23::Async<EventIndexerChunkedPullResult>
@@ -827,10 +832,11 @@ EventRPCContext::pull_indexer_next_chunked(
     IndexerChunkSender send_chunk)
 {
   IndexerPullAnswer answer = co_await pull_indexer_block(request, draining);
-  if (answer.reply) {
-    co_return chunked_reply(std::move(*answer.reply));
+  if (auto *reply = std::get_if<EventIndexerPullResult>(&answer.answer)) {
+    co_return chunked_reply(std::move(*reply));
   }
-  const IndexerCommittedBlock &block = *answer.block;
+  auto &pulled = std::get<IndexerPulledBlock>(answer.answer);
+  const IndexerCommittedBlock &block = pulled.block;
   const IndexerCommittedBlockPayload &payload = block.payload;
   const BlockHeight height =
       payload.consensus_value.proposal_header.block_height;
@@ -894,7 +900,7 @@ EventRPCContext::pull_indexer_next_chunked(
   EventIndexerChunkedPullResult result(
       EventIndexerPullOutcome::EventIndexerPullBlock);
   result.chunked_block() = EventIndexerChunkedBlock{
-      .origin = std::move(answer.origin),
+      .origin = std::move(pulled.origin),
       .format_version = payload.format_version,
       .consensus_value = payload.consensus_value,
       .identity = block.identity,

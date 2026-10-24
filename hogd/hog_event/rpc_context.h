@@ -9,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "consensus.hh"
@@ -133,17 +134,21 @@ private:
 
   // What a pull answers: a committed block to serve, or the reply that stands
   // in for one -- caught up, or a failure.
+  struct IndexerPulledBlock {
+    IndexerOutboxOrigin origin;
+    IndexerCommittedBlock block;
+  };
   struct IndexerPullAnswer {
     // Implicit, so the pull's many early answers read as replies.
     // NOLINTNEXTLINE(google-explicit-constructor)
-    IndexerPullAnswer(EventIndexerPullResult reply) : reply(std::move(reply)) {}
+    IndexerPullAnswer(EventIndexerPullResult reply) : answer(std::move(reply))
+    {}
     IndexerPullAnswer(IndexerOutboxOrigin origin, IndexerCommittedBlock block)
-      : origin(std::move(origin)), block(std::move(block))
+      : answer(IndexerPulledBlock{.origin = std::move(origin),
+                                  .block = std::move(block)})
     {}
 
-    std::optional<EventIndexerPullResult> reply;
-    IndexerOutboxOrigin origin;
-    std::optional<IndexerCommittedBlock> block;
+    std::variant<EventIndexerPullResult, IndexerPulledBlock> answer;
   };
 
   // The pull shared by both pull procedures.

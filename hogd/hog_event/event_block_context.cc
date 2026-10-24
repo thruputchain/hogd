@@ -1,7 +1,5 @@
 #include "hogd/hog_event/event_block_context.h"
 
-#include "hogd/hog_event/indexer_outbox.h"
-
 #include <atomic>
 #include <cassert>
 #include <cerrno>
