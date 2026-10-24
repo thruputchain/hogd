@@ -184,6 +184,13 @@ public:
     return to_return_output_;
   }
 
+  // Destructively moves the frame output out; the post-commit event handoff
+  // is its sole consumer and never reads it again. Mirrors extract_events().
+  InvocationFrameOutput extract_frame_output()
+  {
+    return std::move(to_return_output_);
+  }
+
   void deploy_contract(ContractAddress const &addr,
                        DeployedContractHash const &hash)
   {
