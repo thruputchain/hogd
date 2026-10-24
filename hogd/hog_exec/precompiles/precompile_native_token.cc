@@ -657,7 +657,9 @@ using PermitErc20Exception =
     ContractException<itc_erc20_permit::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 using PermitException = ContractException<itc_erc20_permit::ERC20PermitError,
                                           0x1aaf2b9becb7ddc4ULL>;
-using PermitResult = Result<void, PermitErc20Exception, PermitException>;
+// Error order follows the generated itc_erc20_permit header, which lists a
+// method's exceptions in the spec's throws order (by selector).
+using PermitResult = Result<void, PermitException, PermitErc20Exception>;
 
 static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
               "ERC20Error must reject identically through either interface");
