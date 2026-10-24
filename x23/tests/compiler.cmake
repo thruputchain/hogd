@@ -125,6 +125,7 @@ require_text("${ts}" "export interface Record")
 require_text("${ts}" "next: proto.Record | null;")
 require_text("${ts}" "w.writeVarOpaque(val.payload, Number(proto.LIMIT));")
 require_text("${ts}" "lookup: { proc: 1, request: () => Int32Codec, response: () => _Reply }")
+require_text("${ts}" "} from \"@thruputchain/xdr\";")
 
 file(WRITE "${TEST_DIR}/warning.x" "enum Warn { VALUE = 0, };\n")
 run_compiler(0 -o warning.hh warning.x)
