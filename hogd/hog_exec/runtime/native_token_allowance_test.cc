@@ -696,15 +696,17 @@ TEST_F(NativeTokenAllowanceTest, SelfTransferDoesNotPublishZeroDelta)
 
   advance_block();
 
-  auto hogs_transferred = get_hogs_transferred(committed_block);
+  auto native_tokens_transferred =
+      get_native_tokens_transferred(committed_block);
   // The zero-value self-transfer itself publishes no delta. The replay nonce
   // consumed by this transaction, however, charges its storage cost to the
   // invoked address, which is published to the scheduler -- so the only delta
   // is exactly that replay cost.
-  EXPECT_EQ(hogs_transferred.size(), 1U)
+  EXPECT_EQ(native_tokens_transferred.size(), 1U)
       << "only the replay-nonce cost should be published for a zero-delta "
          "self-transfer";
-  EXPECT_EQ(hogs_transferred.at(kOwnerAddr), -replay_cache_cost_charged(1));
+  EXPECT_EQ(native_tokens_transferred.at(kOwnerAddr),
+            -replay_cache_cost_charged(1));
 
   auto balance_item = lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(kOwnerAddr));
@@ -1691,11 +1693,12 @@ TEST_F(NativeTokenAllowanceTest, GenesisRootRejectsDistributionAfterHeightOne)
   EXPECT_FALSE(handler.root_invoke()().is_root_success());
 }
 
-// Pins HOG conservation (balance + locked storage <= supply <= INT128_MAX) so a
-// storage refund against a near-max balance never trips the CHECK in
-// release_balance(). Needed because the mint precompile stopped bounding supply
-// below INT128_MAX at invoke (that moved to commit for rv32 parity). Mint max,
-// write a bytestring, then delete it; a regression aborts on the delete.
+// Pins native-token conservation (balance + locked storage <= supply <=
+// INT128_MAX) so a storage refund against a near-max balance never trips the
+// CHECK in release_balance(). Needed because the mint precompile stopped
+// bounding supply below INT128_MAX at invoke (that moved to commit for rv32
+// parity). Mint max, write a bytestring, then delete it; a regression aborts on
+// the delete.
 TEST_F(NativeTokenAllowanceTest, StorageRefundCreditsAgainstNearMaxBalance)
 {
   constexpr static ContractAddress kWhaleAddr = make_contract_address(180);

@@ -5,6 +5,6 @@
 
 namespace hogd {
 
-HogDbStatus<void> reconcile_startup_hog_ages(HogDbDAO &db);
+HogDbStatus<void> reconcile_startup_native_token_ages(HogDbDAO &db);
 
 } // namespace hogd

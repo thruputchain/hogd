@@ -68,36 +68,38 @@ to_db_result(HogDbStatus<T> ret)
 
 } // namespace
 
-x23::Async<HogAgeResults>
-HogDbSchedRpc::dbsched_get_hog_ages(const ContractAddressBatch &addresses)
+x23::Async<NativeTokenAgeResults>
+HogDbSchedRpc::dbsched_get_native_token_ages(
+    const ContractAddressBatch &addresses)
 {
   HogDbDAO &db = ctx_.get_db();
-  HogAgeResults ret;
+  NativeTokenAgeResults ret;
   ret.reserve(addresses.size());
 
   for (const ContractAddress &address : addresses) {
-    HogDbStatus<HogAge> status = db.read_address_average_hog_age(address);
+    HogDbStatus<NativeTokenAge> status =
+        db.read_address_average_native_token_age(address);
     if (!status) {
-      warn("Failed to read hog age for address {}: {}", HexArray(address).str(),
-           status.error());
-      ret.push_back(HogAgeResult(DbSchedResult::DbSchedResultError));
+      warn("Failed to read native-token age for address {}: {}",
+           HexArray(address).str(), status.error());
+      ret.push_back(NativeTokenAgeResult(DbSchedResult::DbSchedResultError));
       continue;
     }
-    ret.push_back(HogAgeResult(DbSchedResult::DbSchedResultOK));
-    ret.back().hog_age() = status.value();
+    ret.push_back(NativeTokenAgeResult(DbSchedResult::DbSchedResultOK));
+    ret.back().native_token_age() = status.value();
   }
   co_return ret;
 }
 
 DbSchedResult
-HogDbSchedRpc::write_hog_ages_locked(const HogAgeBatch &ages)
+HogDbSchedRpc::write_native_token_ages_locked(const NativeTokenAgeBatch &ages)
 {
   // A ramdb write pass: must not overlap commit_block()'s sync (#3397).
   std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
 
   HogDbDAO &db = ctx_.get_db();
-  for (const HogAge &age : ages) {
-    if (!db.write_address_average_hog_age(age)) {
+  for (const NativeTokenAge &age : ages) {
+    if (!db.write_address_average_native_token_age(age)) {
       return DbSchedResult::DbSchedResultError;
     }
   }
@@ -105,9 +107,9 @@ HogDbSchedRpc::write_hog_ages_locked(const HogAgeBatch &ages)
 }
 
 x23::Async<DbSchedResult>
-HogDbSchedRpc::dbsched_write_hog_ages(const HogAgeBatch &ages)
+HogDbSchedRpc::dbsched_write_native_token_ages(const NativeTokenAgeBatch &ages)
 {
-  co_return write_hog_ages_locked(ages);
+  co_return write_native_token_ages_locked(ages);
 }
 
 x23::Async<DbAddressAuthDataBatchResult>
@@ -154,8 +156,8 @@ HogDbSchedRpc::commit_block(BlockID id, ConsensusValue value,
 {
   // This whole function is one ramdb write pass ending in sync(): the
   // changeset apply, the dbtip update, and the commit/snapshot. Holding
-  // the pass lock throughout keeps other write passes (the hog-age batch)
-  // from overlapping the sync (#3397). No co_await may run inside this
+  // the pass lock throughout keeps other write passes (the native-token-age
+  // batch) from overlapping the sync (#3397). No co_await may run inside this
   // scope: commit_block must stay synchronous.
   std::scoped_lock write_pass(ctx_.ramdb_write_pass_lock());
 

@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <utility>
@@ -277,8 +278,7 @@ TEST(GenesisCeremonyBuilder, DirectAllocationsRejectNegativeAndExcessSupply)
   EXPECT_EQ(negative_result.error(),
             GenesisCeremonyError::kNegativeDistribution);
 
-  const int128_t supply =
-      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  const int128_t supply = std::numeric_limits<int128_t>::max();
   const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();
@@ -301,8 +301,7 @@ TEST(GenesisCeremonyBuilder,
      MixedAllocationsShareBatchLimitAndFundingAccounting)
 {
   const auto cost_model = StorageCostModel::default_cost_model();
-  const int128_t supply =
-      int128_t{kTotalHogSupply} * int128_t{kHogDivisibility};
+  const int128_t supply = std::numeric_limits<int128_t>::max();
   const int128_t ceremony_funding = (2 * cost_model.get_balance_cost()) +
                                     cost_model.get_replay_cache_cost(1) +
                                     cost_model.get_nnint_cost();

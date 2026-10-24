@@ -1,4 +1,4 @@
-#include "hogd/hog_db/invariant_hog_age.h"
+#include "hogd/hog_db/invariant_native_token_age.h"
 
 #include <algorithm>
 #include <cassert>
@@ -14,17 +14,17 @@
 namespace hogd {
 
 bool
-HogAgeInvariant::check()
+NativeTokenAgeInvariant::check()
 {
   bool ok = true;
   entries_.with([&](auto &entries) {
     for (auto const &[raw_addr, entry] : entries) {
-      if (entry.balance != entry.hog_age) {
+      if (entry.balance != entry.native_token_age) {
         Address addr(raw_addr);
-        error("hog age invariant violated for {}: balance delta={}, "
-              "hog_age delta={}",
+        error("native-token age invariant violated for {}: balance delta={}, "
+              "native_token_age delta={}",
               addr, static_cast<int>(entry.balance),
-              static_cast<int>(entry.hog_age));
+              static_cast<int>(entry.native_token_age));
         ok = false;
       }
     }
@@ -33,9 +33,9 @@ HogAgeInvariant::check()
 }
 
 void
-HogAgeInvariant::log_item_change(std::span<const std::byte> key,
-                                 HogDbStatus<DBItem> const &before,
-                                 HogDbStatus<DBItem> const &after)
+NativeTokenAgeInvariant::log_item_change(std::span<const std::byte> key,
+                                         HogDbStatus<DBItem> const &before,
+                                         HogDbStatus<DBItem> const &after)
 {
   auto prefix = static_cast<Prefix>(key[0]);
   auto delta = compute_delta(before, after);
@@ -46,8 +46,8 @@ HogAgeInvariant::log_item_change(std::span<const std::byte> key,
   case Prefix::kBalance:
     record_delta(key, delta, &Entry::balance);
     return;
-  case Prefix::kHogAge:
-    record_delta(key, delta, &Entry::hog_age);
+  case Prefix::kNativeTokenAge:
+    record_delta(key, delta, &Entry::native_token_age);
     return;
   default:
     return;
@@ -55,17 +55,17 @@ HogAgeInvariant::log_item_change(std::span<const std::byte> key,
 }
 
 void
-HogAgeInvariant::record_delta(std::span<const std::byte> key,
-                              ExistenceDelta delta,
-                              ExistenceDelta Entry::*field)
+NativeTokenAgeInvariant::record_delta(std::span<const std::byte> key,
+                                      ExistenceDelta delta,
+                                      ExistenceDelta Entry::*field)
 {
   auto raw = raw_address_from_key(key);
   entries_.with([&](auto &entries) { entries[raw].*field = delta; });
 }
 
-HogAgeInvariant::ExistenceDelta
-HogAgeInvariant::compute_delta(HogDbStatus<DBItem> const &before,
-                               HogDbStatus<DBItem> const &after)
+NativeTokenAgeInvariant::ExistenceDelta
+NativeTokenAgeInvariant::compute_delta(HogDbStatus<DBItem> const &before,
+                                       HogDbStatus<DBItem> const &after)
 {
   bool existed_before = before.has_value();
   bool exists_after = after.has_value();
@@ -77,7 +77,7 @@ HogAgeInvariant::compute_delta(HogDbStatus<DBItem> const &before,
 }
 
 RawAddress
-HogAgeInvariant::raw_address_from_key(std::span<const std::byte> key)
+NativeTokenAgeInvariant::raw_address_from_key(std::span<const std::byte> key)
 {
   assert(key.size() == kAddressSize + 1);
   RawAddress raw{};

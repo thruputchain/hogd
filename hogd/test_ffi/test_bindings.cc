@@ -1341,7 +1341,7 @@ setup_deploy_contract(void *db, const uint8_t *deployment_addr,
     return kTestFFIErrorCodeUnrecoverableError;
   }
 
-  // Native precompiles (the default wallet, the hog token) are installed at
+  // Native precompiles (the default wallet, the native token) are installed at
   // genesis and are never (re)deployed at an ordinary address: production
   // deploy_contract() rejects them via is_banned_redeploy_native_contract().
   // The setup path must apply the same ban -- otherwise a native contract can

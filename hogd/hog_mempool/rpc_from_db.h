@@ -49,7 +49,8 @@ public:
   // the scheduler the whole block once, so it keeps seeing one update per
   // height. The chunks may arrive in any order; scheduler_lock_, held through
   // [cg] until handle_transfer is done, serializes the assembler.
-  x23::Async<void> scheddb_hogs_transferred_chunk(HogsTransferredChunk chunk)
+  x23::Async<void>
+  scheddb_native_tokens_transferred_chunk(NativeTokensTransferredChunk chunk)
   {
     auto cg = std::make_unique<x23::CoroGuard>();
     co_await (*cg)(scheduler_lock_);
@@ -68,7 +69,8 @@ public:
       }
     }
     else {
-      info("[MempoolDbRpc::scheddb_hogs_transferred_chunk] failed. This is ok "
+      info("[MempoolDbRpc::scheddb_native_tokens_transferred_chunk] failed. "
+           "This is ok "
            "and expected if the mempool is shutting down, so only ignore this "
            "issue in that case.");
     }
@@ -83,26 +85,27 @@ public:
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 
-    // We write the hog ages to the database down here because we need to update
-    // the hog ages above first ([scheduler_->process_transfers()]) *and*
+    // We write the native-token ages to the database down here because we need
+    // to update the native-token ages above first
+    // ([scheduler_->process_transfers()]) *and*
     // [scheduler_->process_transfers()] completes after block commit (when the
-    // pending hog ages are applied) due to the
-    // [scheduler_->pending_hog_age_update_lock_] lock acquired in
+    // pending native-token ages are applied) due to the
+    // [scheduler_->pending_native_token_age_update_lock_] lock acquired in
     // [schedulercoord_commit_block()] and [process_transfers()].
     //
     // These writes must also never overlap ramdb's sync() for the *next*
     // block's commit (Database::sync()'s precondition); otherwise ramdb
-    // state is corrupted. [pending_hog_age_update_lock_] does not provide
-    // that ordering — it is released before this write runs. hog_db
+    // state is corrupted. [pending_native_token_age_update_lock_] does not
+    // provide that ordering — it is released before this write runs. hog_db
     // serializes its ramdb write passes with
     // [RPCContext::ramdb_write_pass_lock()], and ramdb's [write_record()]
     // CHECKs the invariant (#3397). As a side note, it is okay for
     // [commit_snapshot()] and [abandon_snapshot()] to race. We ensure that
-    // [scheduler_->write_all_average_hog_ages_to_db()] completes before we
-    // update [scheduler_->transfer_finished_], so we do not need to worry
-    // about these hog age writes updating with the *next* block commit
-    // either.
-    co_await scheduler_->write_all_average_hog_ages_to_db();
+    // [scheduler_->write_all_average_native_token_ages_to_db()] completes
+    // before we update [scheduler_->transfer_finished_], so we do not need to
+    // worry about these native-token age writes updating with the *next* block
+    // commit either.
+    co_await scheduler_->write_all_average_native_token_ages_to_db();
 
     scheduler_->transfer_finished_.store(transfers.block);
     scheduler_->transfer_finished_.broadcast(&default_threadpool());

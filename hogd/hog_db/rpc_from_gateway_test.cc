@@ -64,7 +64,7 @@ make_dao()
   return HogDbDAO(RAMDB(std::move(*db)));
 }
 
-// Builds the address+key pair that locates a HOG balance.  The
+// Builds the address+key pair that locates a native-token balance.  The
 // FreeNativeTokenBalance key has no extra payload — the address alone
 // disambiguates.
 AddressAndKey
