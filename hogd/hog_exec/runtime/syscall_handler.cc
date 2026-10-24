@@ -1563,9 +1563,10 @@ SystemCallHandler::log_event(uint32_t num_topics,
   // The topic-pointer overload, the only caller, passes at most kMaxTopics
   // topics and has already rejected oversized and over-cap events before
   // building the buffer it passes in.
-  CHECK_LE(num_topics, kMaxTopics);
+  CHECK_LE(num_topics, uint32_t{kMaxTopics});
   CHECK_LE(data.size(), size_t{kMaxEventLength});
-  CHECK_LT(invocation_frame_stack_.event_count(), kMaxEventsPerTransaction);
+  CHECK_LT(invocation_frame_stack_.event_count(),
+           size_t{kMaxEventsPerTransaction});
 
   auto message = make_tx_emitted_event(get_current_address(), num_topics, data);
   invocation_frame_stack_.log_event(std::move(message));
