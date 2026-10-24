@@ -17,6 +17,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -454,6 +455,108 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
         }
         if (overflow_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+  auto contract_0_addr = make_contract_address(0xFF);
+  write_deployment(contract_0_addr, contract_0);
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = contract_0_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = kDefaultMaxTxGas,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction()();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
+}
+
+// A rejected LogEvent is billed only the syscall crossing, however large its
+// payload: both an oversized event and a max-size event past the
+// per-transaction count cap cost exactly kSyscallBaseCost (issue #3058).
+TEST_F(EventTest, RejectedLogEventCostsOnlySyscallBase)
+{
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        const std::string event_data = "event-count-limit";
+        x23::Vec<uint8_t> oversize_event_data;
+        oversize_event_data.resize(kMaxEventLength + 1);
+        x23::Vec<uint8_t> max_event_data;
+        max_event_data.resize(kMaxEventLength);
+
+        auto expect_rejected_at_base_cost = [&](std::span<const std::byte> data)
+            -> x23::Async<InvokeStatus<void>> {
+          auto gas_before = ctx.total_gas_consumed();
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr), data);
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+              ctx.total_gas_consumed() - gas_before != kSyscallBaseCost) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        };
+
+        if (!(co_await expect_rejected_at_base_cost(
+                  std::as_bytes(std::span(oversize_event_data))))
+                 .has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        if (!(co_await expect_rejected_at_base_cost(
+                  std::as_bytes(std::span(max_event_data))))
+                 .has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 

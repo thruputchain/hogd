@@ -1525,6 +1525,12 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   if (serialized_size > kMaxEventLength) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Reject over-cap events before building the buffer below: a rejected
+  // LogEvent pays only kSyscallBaseCost, so it must not copy the
+  // contract-supplied payload first (issue #3058).
+  if (invocation_frame_stack_.event_count() >= kMaxEventsPerTransaction) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   x23::Buf buf;
   uint32_t num_topics = 0;
