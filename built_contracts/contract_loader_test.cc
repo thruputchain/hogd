@@ -35,11 +35,11 @@ TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
                          "contracts");
 }
 
-TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
+TEST(ContractLoaderTest, LoadsDefaultWalletFromBuildTree)
 {
   ContractArtifactDirectoryGuard guard;
 
-  auto rv32_blob = load_contract_blob("dev_wallet.rv32a");
+  auto rv32_blob = load_contract_blob("default_wallet.rv32a");
   EXPECT_FALSE(rv32_blob.data.empty());
 }
 

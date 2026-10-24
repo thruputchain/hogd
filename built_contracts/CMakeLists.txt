@@ -207,7 +207,6 @@ add_riscv_builds(
     integration_test_contracts/fibonacci
     integration_test_contracts/fibonacci_call
     integration_test_contracts/default_wallet
-    integration_test_contracts/dev_wallet
     integration_test_contracts/deploy_and_transfer
     integration_test_contracts/genesis_root
     integration_test_contracts/read_only_test
@@ -291,7 +290,6 @@ add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
 add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
-add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
 add_contract_header(genesis_root "${CURRENT_RELATIVE_SOURCE_DIR}/genesis_root.hh")
 add_contract_header(read_only_test)

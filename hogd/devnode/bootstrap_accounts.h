@@ -26,7 +26,7 @@ inline constexpr std::uint64_t kDefaultLocalUserStorageTokens = 1'000'000'000;
 
 struct BootstrapAccountConfig {
   std::uint32_t count = 0;
-  std::string seed = "groundhog-dev-accounts";
+  std::string seed = "thruput-dev-accounts";
   std::uint64_t storage_tokens = kDefaultBootstrapAccountStorageTokens;
 };
 
