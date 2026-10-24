@@ -264,12 +264,10 @@ TEST_F(ViewTest, ViewWithMsgSender)
 
 TEST_F(ViewTest, ViewNonexistentContract)
 {
-  // Behavior change: root-resolve fallback (see
-  // docs/superpowers/specs/2026-08-06-default-wallet-root-fallback-resolution-design.md
-  // §4). With the genesis wallet record present, resolve_runtime returns the
-  // default_wallet frame instead of null. The wallet reverts InvalidAuthClaim
-  // (no pubkey claim in the view query), so the result is Ok (frame ran) rather
-  // than InvalidInput (no frame started).
+  // Behavior change: root-resolve fallback. With the genesis wallet record
+  // present, resolve_runtime returns the default_wallet frame instead of null.
+  // The wallet reverts InvalidAuthClaim (no pubkey claim in the view query), so
+  // the result is Ok (frame ran) rather than InvalidInput (no frame started).
   ContractAddress bad_address =
       NativeContractTestFramework::make_contract_address(99);
   ContractTraitClient<fibonacci::Fibonacci> client(bad_address);

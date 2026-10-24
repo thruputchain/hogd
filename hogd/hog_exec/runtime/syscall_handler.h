@@ -652,8 +652,7 @@ private:
   // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
   // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
   // executing block height) to the event server, which relays it to the
-  // indexers so clients can learn why the tx was excluded (see
-  // docs/superpowers/specs/2026-07-07-tx-failure-diagnostics-cache-design.md).
+  // indexers so clients can learn why the tx was excluded.
   // A no-op when hog_db captured no diagnostics (kDbDiagnosticNone, e.g.
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right
