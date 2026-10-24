@@ -28,10 +28,6 @@ esac
 
 export CARGO_REGISTRIES_THRUPUT_INDEX="sparse+https://crates.thruput.network/api/v1/crates/"
 export CARGO_REGISTRIES_THRUPUT_SOURCE="sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-# The token travels from the schedule as CARGO_REGISTRIES_THRUPUT_LEGACY_TOKEN.
-export CARGO_REGISTRIES_THRUPUT_LEGACY_INDEX="sparse+https://groundhog.dev/crates/api/v1/crates/"
-export CARGO_REGISTRIES_THRUPUT_LEGACY_CREDENTIAL_PROVIDER="cargo:token"
 
 echo 'cloning hogd'
 git init -q .
