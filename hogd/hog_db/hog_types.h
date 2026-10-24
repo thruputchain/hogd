@@ -1,4 +1,4 @@
-// hogd_types.h - defines the basic data types used in the HOG blockchain.
+// hogd_types.h - defines the basic data types used by hogd.
 
 #pragma once
 

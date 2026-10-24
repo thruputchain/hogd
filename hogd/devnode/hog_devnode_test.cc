@@ -49,7 +49,6 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
-#include "built_contracts/dev_wallet.h"
 #include "built_contracts/itc_erc20.h"
 #include "consensus.hh"
 #include "contract.hh"
@@ -155,12 +154,6 @@ std::tuple<int64_t, uint64_t>
 make_erc20_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
-}
-
-std::shared_ptr<Contract>
-load_legacy_dev_wallet_fixture()
-{
-  return load_rv32_contract("dev_wallet.rv32a");
 }
 
 // Whole seconds from the environment variable [name], or [fallback] when it is
@@ -662,7 +655,7 @@ native_account_auth_claim(std::uint32_t index = 1)
   AuthClaim claim(AuthClaimType::kPubkeySignature);
   claim.pubkey_preimage() = make_pubkey_account_preimage(
       ed25519_public_key(
-          derive_bootstrap_account_keypair("groundhog-dev-accounts", index)
+          derive_bootstrap_account_keypair("thruput-dev-accounts", index)
               .first),
       /*nonce=*/0);
   return claim;
@@ -785,7 +778,7 @@ submit_and_commit(sched_coord_client_t &scheduler,
 // cross the hog-devnode process boundary.
 LocalBootstrapConfig
 fixture_config(std::uint32_t count = 0,
-               std::string_view seed = "groundhog-dev-accounts",
+               std::string_view seed = "thruput-dev-accounts",
                std::uint64_t tokens = kDefaultLocalUserStorageTokens)
 {
   LocalBootstrapConfig config{
@@ -813,7 +806,7 @@ public:
   {
     std::optional<std::filesystem::path> fixture_manifest;
     std::uint32_t fixture_count = 0;
-    std::string fixture_seed = "groundhog-dev-accounts";
+    std::string fixture_seed = "thruput-dev-accounts";
     std::string fixture_tokens = "1000000000";
     for (std::size_t i = 0; i + 1 < extra_args.size();) {
       auto const name = extra_args[i];
@@ -1352,7 +1345,7 @@ initialize_persistent_data_dir(std::filesystem::path const &data_dir,
       "--fixture-accounts",
       std::to_string(dev_accounts),
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -1439,7 +1432,7 @@ advance_persistent_data_dir(std::filesystem::path const &data_dir)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -2043,18 +2036,18 @@ TEST(HogDevnode, ReadinessParserAcceptsBracketedIpv6Endpoints)
 
 TEST(HogDevnode, BootstrapAccountDerivationMatchesRustGoldens)
 {
-  constexpr std::string_view kDefaultSeed = "groundhog-dev-accounts";
+  constexpr std::string_view kDefaultSeed = "thruput-dev-accounts";
   const std::vector<std::string> expected = {
-      "0x591ff2bdaaf5a0cbfd31f7b0f88c1ddee39fd9e106ba46303bde718459960633",
-      "0xf5495b73debe0193757220005043944a3f03ff20cea7c4559db158eb1389e93f",
-      "0xb8c09ac34f6c3ff58ddb549b19751d4e8b52f217fe6138f47322989c55a279a5",
-      "0x8c8cb82ec23c847434193b00949c37d50313ef4e73e6dc4904028072a236dfbc",
-      "0x45e85a804e73df05e59cdbcabf2252938b3b8b87a274ef60b2eff0b79cdd76dc",
-      "0x178f7e68819b387699d2b5acfc8cda87de03ff92db1944f83a114a1946945d37",
-      "0x7ea77f21cf1e56066f95d01a5bdd42d34087bd8a02261a0cbf67b2eed93393d0",
-      "0xee21e4725d8b38a54e42a0eb83782cdcfcaae89afb665b53c7a941a3835bccf0",
-      "0xe4788cde106e2144b3d111af4adf56170a6e25d2636616f891f304af38397174",
-      "0x404b21c4c455673bb0c841a55cf5f154aa646a83e0ea9722f9a87c64f1864564",
+      "0x29eb00af4faa4461e8f4f8ad1c8f679d10570e94fee73f8c897713e7d56281e1",
+      "0x11c0a466b89bb554a735ffad116151e48c5aa1c4debfc3080c8034ab0d4f0ab5",
+      "0x2bf5c38a719bf77ced2ddf8cbdf1539ff24980d08ed2d277890db00739daad8f",
+      "0xd31aba37e7542eee44e314a1569e8c7877fc67743360f056e2c33301bba32d63",
+      "0x4a7d23a4bd695bceb8fabcec99d1690bfccaf32747fba78f736765f5a52b7266",
+      "0xe5e95a72510b946e4ec9c4f921eac8149ceadca1304a619c2959df5d63900065",
+      "0x25bed695348618b533ba205a2751a53e8cf5fbfc6a425e1f36864a38d3e02950",
+      "0x78ae89c893402e6ef7acd7f85db30e95268b9b9e59f763bcf4dffb7d63aed2ad",
+      "0xaba443eed2ec9ac7567e4570d133d95172e83390419223fffa947b8a5535bd9c",
+      "0xad2c62dff54ead3868d7729cebffebc770aa5fdb8bdb9e6e8c3e8acedb060f18",
   };
 
   for (std::uint32_t i = 0; i < expected.size(); ++i) {
@@ -2176,7 +2169,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
       "--fixture-accounts",
       "3",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -2187,8 +2180,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
       readiness.manifest.find("bootstrapAccountDerivation");
   EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
-    auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", i);
+    auto keypair = derive_bootstrap_account_keypair("thruput-dev-accounts", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].role,
               i == 0 ? "faucet" : "local_user");
@@ -2438,7 +2430,7 @@ TEST(HogDevnode, GatewayEndpointAnswersIntroAndGetItems)
     EXPECT_EQ(result.payload().items[0].error(), RPCError::kRPCNotFound);
 
     const auto faucet_key =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", 0).first;
+        derive_bootstrap_account_keypair("thruput-dev-accounts", 0).first;
     query.address = derive_bootstrap_account_address(faucet_key);
     batch.clear();
     for (auto key :
@@ -2480,7 +2472,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -2556,7 +2548,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -2587,7 +2579,7 @@ TEST(HogDevnode, CommittedTransactionsPopulateIndexerEndpoint)
     auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+        derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
         build_local_bootstrap_account_artifact(fixture_config(1))
@@ -2700,7 +2692,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
             "--fixture-accounts",
             "1",
             "--fixture-seed",
-            "groundhog-dev-accounts",
+            "thruput-dev-accounts",
             "--fixture-tokens",
             "1000000000",
         },
@@ -2725,7 +2717,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
     auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
     ASSERT_TRUE(fibonacci_contract);
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+        derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
 
     Transaction tx{
@@ -2799,7 +2791,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         "--fixture-accounts",
         "1",
         "--fixture-seed",
-        "groundhog-dev-accounts",
+        "thruput-dev-accounts",
         "--fixture-tokens",
         "1000000000",
     });
@@ -2837,7 +2829,7 @@ TEST(HogDevnode, MultiHeightIndexerGapReplaysThroughPull)
         "--fixture-accounts",
         "1",
         "--fixture-seed",
-        "groundhog-dev-accounts",
+        "thruput-dev-accounts",
         "--fixture-tokens",
         "1000000000",
     });
@@ -2869,7 +2861,7 @@ TEST(HogDevnode, DataDirRejectsLegacyNetworkHashAfterFaucetInitialization)
   Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
 
   const std::string manifest =
-      bootstrap_manifest_json(0, "groundhog-dev-accounts", "1000000000");
+      bootstrap_manifest_json(0, "thruput-dev-accounts", "1000000000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -2925,7 +2917,7 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentNetworkHash)
   initialize_persistent_data_dir(data_dir);
 
   const std::string manifest =
-      bootstrap_manifest_json(1, "groundhog-dev-accounts", "1000000000");
+      bootstrap_manifest_json(1, "thruput-dev-accounts", "1000000000");
   std::filesystem::path manifest_path = write_test_bootstrap_manifest(manifest);
   Defer cleanup_manifest([&] { std::filesystem::remove(manifest_path); });
 
@@ -2965,7 +2957,7 @@ TEST(HogDevnode, DataDirRejectsCandidateOnlyOutboxWithoutCurrentOrigin)
       IndexerOutboxStore::current_epoch_origin_filename()));
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
-                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "0", "--fixture-seed", "thruput-dev-accounts",
                           "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
@@ -2986,7 +2978,7 @@ TEST(HogDevnode, DataDirRejectsArchivalOriginWithoutCurrentOrigin)
                        protocol_from_text("hogp/archival")));
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
-                          "0", "--fixture-seed", "groundhog-dev-accounts",
+                          "0", "--fixture-seed", "thruput-dev-accounts",
                           "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
@@ -3002,7 +2994,7 @@ TEST(HogDevnode, DataDirRejectsLegacyChainWithEmptyDurableOutbox)
             0UL);
 
   expect_startup_failure({"--data-dir", data_dir.string(), "--fixture-accounts",
-                          "1", "--fixture-seed", "groundhog-dev-accounts",
+                          "1", "--fixture-seed", "thruput-dev-accounts",
                           "--fixture-tokens", "1000000000"},
                          "recovered devnode chain has no durable outbox "
                          "origin; clean chain rollout "
@@ -3036,7 +3028,7 @@ TEST(HogDevnode, DataDirAcceptsFinalizedOutboxAndIndexerAheadOfHogDb)
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -3110,7 +3102,7 @@ TEST(HogDevnode, DataDirPromotesFinalizedEventsFileAfterRestart)
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -3153,7 +3145,7 @@ TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
         "--fixture-accounts",
         "1",
         "--fixture-seed",
-        "groundhog-dev-accounts",
+        "thruput-dev-accounts",
         "--fixture-tokens",
         "1000000000",
     });
@@ -3177,7 +3169,7 @@ TEST(HogDevnode, DataDirRecoversAfterUncleanKill)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -3226,7 +3218,7 @@ TEST(HogDevnode, DataDirPullReplaysFinalizedOutboxOneAheadOfHogDb)
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   ASSERT_EQ(readiness.chain_state, "recovered");
@@ -3263,7 +3255,7 @@ TEST(HogDevnode, DataDirRejectsIndexerAheadOfHogDb)
 
   expect_startup_failure(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered hog-devnode indexer is ahead of finalized event outbox: "
       "indexed height 2, finalized height 1");
@@ -3277,7 +3269,7 @@ TEST(HogDevnode, DataDirAcceptsMatchingOutboxIndexerAndHogDb)
 
   HogDevnodeProcess process = HogDevnodeProcess::start(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "1",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"});
   Readiness readiness = process.wait_for_readiness();
   EXPECT_EQ(readiness.chain_state, "recovered");
@@ -3310,7 +3302,7 @@ TEST(HogDevnode, DataDirRejectsUnreadableDbTip)
           "--fixture-accounts",
           "1",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "1000000000",
       },
@@ -3339,7 +3331,7 @@ TEST(HogDevnode, DataDirRejectsMismatchedStorageHash)
           "--fixture-accounts",
           "1",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "1000000000",
       },
@@ -3451,7 +3443,7 @@ TEST(HogDevnode, DataDirRejectsRestartWithAdditionalAllocations)
           "--fixture-accounts",
           "2",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "1000000000",
       },
@@ -3471,7 +3463,7 @@ TEST(HogDevnode, DataDirRejectsRestartWithDifferentAllocations)
           "--fixture-accounts",
           "1",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "42",
       },
@@ -3564,7 +3556,7 @@ TEST(HogDevnode, DataDirRejectsCommittedChainWhenMetadataMissing)
           "--fixture-accounts",
           "1",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "1000000000",
       },
@@ -3583,7 +3575,7 @@ TEST(HogDevnode, DataDirResumesMetadataWithoutCommittedChain)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -3599,7 +3591,7 @@ TEST(HogDevnode, DataDirRejectsBootstrapGenesisWithoutInitializationBlock)
   const std::vector<std::string> args{
       "--data-dir",         data_dir.string(),
       "--fixture-accounts", "1",
-      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-seed",     "thruput-dev-accounts",
       "--fixture-tokens",   "1000000000",
   };
 
@@ -3711,7 +3703,7 @@ TEST(HogDevnode, DataDirRejectsCorruptMetadataOnRecovery)
           "--fixture-accounts",
           "1",
           "--fixture-seed",
-          "groundhog-dev-accounts",
+          "thruput-dev-accounts",
           "--fixture-tokens",
           "1000000000",
       },
@@ -3724,7 +3716,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -3763,7 +3755,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
               (320 * 1024U) + rv32::kArtifactHeaderBytes);
 
     auto keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+        derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
     using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
     const ContractAddress wallet_address =
         build_local_bootstrap_account_artifact(fixture_config(1))
@@ -3855,167 +3847,6 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
   expect_clean_exit(process);
 }
 
-TEST(HogDevnode, NativeBootstrapAccountDeploysExplicitLegacyWalletFixture)
-{
-  HogDevnodeProcess process = HogDevnodeProcess::start({
-      "--fixture-accounts",
-      "1",
-      "--fixture-seed",
-      "groundhog-dev-accounts",
-      "--fixture-tokens",
-      "1000000000",
-  });
-  Readiness readiness = process.wait_for_readiness();
-  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
-
-  {
-    sched_coord_client_t scheduler =
-        create_client<SchedulerCoord1>(readiness.scheduler.host,
-                                       readiness.scheduler.port,
-                                       /*retry=*/true)()
-            .value();
-    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
-                                                       readiness.indexer.port,
-                                                       /*retry=*/true)()
-                      .value();
-
-    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
-              IndexerBlockExplorerIntroOutcome::IntroSuccess);
-    auto wait_for_transaction_info = [&reader](const TransactionHash &tx_hash) {
-      const auto deadline =
-          std::chrono::steady_clock::now() + kIndexPollTimeout;
-      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-      while (std::chrono::steady_clock::now() < deadline) {
-        result = reader.get_transaction_info(tx_hash)();
-        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-          break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      }
-      return result;
-    };
-
-    auto wallet_contract = load_legacy_dev_wallet_fixture();
-    ASSERT_TRUE(wallet_contract);
-    auto sponsor_keypair =
-        derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/0);
-    Ed25519PublicKey owner_public_key =
-        derive_bootstrap_account_keypair("created-wallet-owner", /*index=*/0)
-            .first;
-    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
-    const ContractAddress sponsor_wallet_address =
-        build_local_bootstrap_account_artifact(fixture_config(1))
-            .accounts[0]
-            .address;
-    EXPECT_EQ(encode_base58(sponsor_wallet_address),
-              readiness.bootstrap_accounts[0].address);
-
-    const SHA256Hash wallet_hash = sha256(*wallet_contract);
-    const SHA256Hash create_wallet_nonce = make_nonce(31);
-    const ContractAddress created_wallet_address =
-        sha256(ContractDeploymentHashPreimage{.deployer_address =
-                                                  sponsor_wallet_address,
-                                              .nonce = create_wallet_nonce,
-                                              .contract_hash = wallet_hash});
-
-    using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
-    x23::Vec<default_wallet::WalletCall, UINT32_MAX> transfer_calls{
-        default_wallet::WalletCall{
-            .target = kNativeTokenContractAddress,
-            .entrypoint = erc20_meta::entrypoint<u8"transfer">(),
-            .gas_limit = 10'000'000,
-            .calldata = erc20_meta::make_calldata<u8"transfer">(
-                created_wallet_address,
-                make_erc20_amount(int128_t{200'000'000})),
-        }};
-    Transaction prefund_wallet_tx{
-        .invocation =
-            Invocation{.invoked_address = sponsor_wallet_address,
-                       .entrypoint = wallet_meta::entrypoint<u8"execute">(),
-                       .gas_limit = GasAmount{10'000'000},
-                       .calldata = wallet_meta::make_calldata<u8"execute">(
-                           transfer_calls)},
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 30},
-        .auth_claim = native_account_auth_claim(0),
-    };
-    SignedTransaction signed_prefund_wallet_tx =
-        sign_transaction(std::move(prefund_wallet_tx), sponsor_keypair,
-                         readiness_network_hash(readiness));
-    const TransactionHash prefund_wallet_tx_hash =
-        sha256(signed_prefund_wallet_tx.tx);
-    TransactionHashBatch prefund_hashes =
-        submit_and_commit(scheduler,
-                          SignedTransactionBatch{signed_prefund_wallet_tx});
-    ASSERT_EQ(prefund_hashes.size(), 1UL);
-    ASSERT_EQ(prefund_hashes[0], prefund_wallet_tx_hash);
-    TxInfoResult prefund_result =
-        wait_for_transaction_info(prefund_wallet_tx_hash);
-    ASSERT_EQ(prefund_result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(prefund_result.info().events.exec_result,
-              ExecResult::ExecResultOK);
-    EXPECT_EQ(prefund_result.info().events.tx_hash, prefund_wallet_tx_hash);
-    ASSERT_EQ(prefund_result.info().events.root_output.status_code(),
-              InvocationFrameStatusCode::Return);
-
-    Transaction create_wallet_tx{
-        .invocation =
-            Invocation{
-                .invoked_address = sponsor_wallet_address,
-                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
-                .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<u8"deploy">(
-                    create_wallet_nonce, wallet_hash,
-                    make_erc20_amount(100'000'000),
-                    x23::Ptr<default_wallet::WalletInitCall>(
-                        default_wallet::WalletInitCall{
-                            .entrypoint =
-                                ContractTraitMeta<dev_wallet::DevWallet>::
-                                    entrypoint<u8"initialize">(),
-                            .gas_limit = 10'000'000,
-                            .calldata =
-                                ContractTraitMeta<dev_wallet::DevWallet>::
-                                    make_calldata<u8"initialize">(
-                                        owner_public_key)}))},
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 31},
-        .contracts_to_deploy = {*wallet_contract},
-        .auth_claim = native_account_auth_claim(0),
-    };
-    SignedTransaction signed_create_wallet_tx =
-        sign_transaction(std::move(create_wallet_tx), sponsor_keypair,
-                         readiness_network_hash(readiness));
-    const TransactionHash create_wallet_tx_hash =
-        sha256(signed_create_wallet_tx.tx);
-    TransactionHashBatch create_hashes =
-        submit_and_commit(scheduler,
-                          SignedTransactionBatch{signed_create_wallet_tx});
-    if (create_hashes.size() != 1UL) {
-      int status = process.terminate();
-      ADD_FAILURE() << "hog-devnode exited with status " << status
-                    << "\nstderr:\n"
-                    << process.read_remaining_stderr();
-      return;
-    }
-    ASSERT_EQ(create_hashes[0], create_wallet_tx_hash);
-
-    TxInfoResult result = wait_for_transaction_info(create_wallet_tx_hash);
-    ASSERT_EQ(result.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(result.info().events.exec_result, ExecResult::ExecResultOK);
-    EXPECT_EQ(result.info().events.tx_hash, create_wallet_tx_hash);
-    ASSERT_EQ(result.info().events.root_output.status_code(),
-              InvocationFrameStatusCode::Return);
-    ReturnBuffer expected_return_buffer(created_wallet_address.begin(),
-                                        created_wallet_address.end());
-    EXPECT_EQ(result.info().events.root_output.return_buffer(),
-              expected_return_buffer);
-  }
-
-  expect_clean_exit(process);
-}
-
 // An ML-DSA-65 pubkey account, funded by a bootstrap account, spends through
 // the root default wallet, and its full envelope (1952-byte key, 3309-byte
 // signature) survives the indexer outbox, the indexer and history reads under
@@ -4041,7 +3872,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   const ContractAddress pq_address = *maybe_pq_address;
 
   auto sponsor_keypair =
-      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+      derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
   const ContractAddress sponsor_wallet_address =
       build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
@@ -4085,7 +3916,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
         "--fixture-accounts",
         "1",
         "--fixture-seed",
-        "groundhog-dev-accounts",
+        "thruput-dev-accounts",
         "--fixture-tokens",
         "1000000000",
     });
@@ -4226,7 +4057,7 @@ TEST(HogDevnode, RegisteredMlDsa65KeyAuthorizesSourceAddressClaim)
       "--fixture-accounts",
       "1",
       "--fixture-seed",
-      "groundhog-dev-accounts",
+      "thruput-dev-accounts",
       "--fixture-tokens",
       "1000000000",
   });
@@ -4276,7 +4107,7 @@ TEST(HogDevnode, RegisteredMlDsa65KeyAuthorizesSourceAddressClaim)
   const MlDsa65SigningKey pq_key = MlDsa65SigningKey::from_seed(seed);
 
   auto sponsor_keypair =
-      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+      derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
   const ContractAddress sponsor_wallet_address =
       build_local_bootstrap_account_artifact(fixture_config(1))
           .accounts[1]
@@ -4490,7 +4321,7 @@ make_wallet_deploy_tx(Readiness const &readiness, std::uint64_t nonce)
   auto fibonacci_contract = load_rv32_contract("fibonacci.rv32a");
   CHECK(fibonacci_contract != nullptr);
   auto keypair =
-      derive_bootstrap_account_keypair("groundhog-dev-accounts", /*index=*/1);
+      derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
   using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
   const ContractAddress wallet_address =
       build_local_bootstrap_account_artifact(fixture_config(1))
@@ -4597,7 +4428,7 @@ persistent_data_dir_args(std::filesystem::path const &data_dir)
   return {
       "--data-dir",         data_dir.string(),
       "--fixture-accounts", "1",
-      "--fixture-seed",     "groundhog-dev-accounts",
+      "--fixture-seed",     "thruput-dev-accounts",
       "--fixture-tokens",   "1000000000",
   };
 }
@@ -5191,7 +5022,7 @@ TEST(HogDevnode, DataDirRejectsPreparedOriginWithoutCanonicalTipRecord)
 
   expect_startup_failure(
       {"--data-dir", data_dir.string(), "--fixture-accounts", "0",
-       "--fixture-seed", "groundhog-dev-accounts", "--fixture-tokens",
+       "--fixture-seed", "thruput-dev-accounts", "--fixture-tokens",
        "1000000000"},
       "recovered event outbox is missing canonical HogDB tip height 1");
 }

@@ -252,7 +252,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
               std::to_string(config.bootstrap_config.storage_tokens));
     });
     w.object_field("bootstrapAccountDerivation", [&](json::Writer &w) {
-      w.field("scheme", "groundhog-bootstrap-account-v1");
+      w.field("scheme", "thruput-bootstrap-account-v1");
       w.field("seed", config.bootstrap_config.seed);
     });
     w.array_field("bootstrapAccounts", [&](json::Writer &w) {

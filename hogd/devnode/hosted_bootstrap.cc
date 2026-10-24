@@ -59,7 +59,7 @@ Options:
   --dev-accounts <count>         Native dev accounts to fund (16 total with faucet)
                                  [default: 10]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
-                                 [default: groundhog-dev-accounts]
+                                 [default: thruput-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
   --faucet-public-key <base58>   Dedicated faucet Ed25519 public key
