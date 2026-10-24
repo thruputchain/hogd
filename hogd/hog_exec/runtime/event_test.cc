@@ -1566,14 +1566,14 @@ TEST(EventRpcValidationProposalData,
   {
     auto insert_handler = fw.make_new_system_call_handler(insert_tx, *context);
     ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
-    insert_proposal_data = insert_handler.get_proposal_data();
+    insert_proposal_data = insert_handler.extract_proposal_data();
     ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler =
         fw.make_new_system_call_handler(consume_tx, *context);
     ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
-    consume_proposal_data = consume_handler.get_proposal_data();
+    consume_proposal_data = consume_handler.extract_proposal_data();
     ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
               kValidationProposalObservationCount);
     ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(),
