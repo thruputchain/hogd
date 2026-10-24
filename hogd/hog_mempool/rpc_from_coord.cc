@@ -3359,10 +3359,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  // HogDb commit publishes transfer deltas, and MempoolDbRpc writes average hog
-  // ages to DB after processing those deltas. Keep this lock held until the
-  // scheduler has applied pending native-token ages and DB commit is complete,
-  // matching the synchronization the pre-DAG code relied on.
+  // HogDb commit publishes transfer deltas, and MempoolDbRpc writes average
+  // native-token ages to DB after processing those deltas. Keep this lock held
+  // until the scheduler has applied pending native-token ages and DB commit is
+  // complete, matching the synchronization the pre-DAG code relied on.
   auto release_native_token_age_node =
       commit_dag.async<void>("release pending native-token age update",
                              commit_dag.after(scheduler_update_node,

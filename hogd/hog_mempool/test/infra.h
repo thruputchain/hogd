@@ -60,8 +60,9 @@
 
 namespace hogd {
 
-// The mempool tests exercise hog accounting with transactions budgeting 5B gas
-// each (txs.h), past the default max_tx_gas, so their chain states no cap.
+// The mempool tests exercise native-token age accounting with transactions
+// budgeting 5B gas each (txs.h), past the default max_tx_gas, so their chain
+// states no cap.
 inline NetworkConfig
 mempool_test_network_config()
 {

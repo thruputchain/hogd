@@ -46,8 +46,8 @@ is_prefixed_address_key(std::span<const std::byte> key, Prefix prefix)
 // CRC covers accidental corruption but is unkeyed, so it is recomputed by any
 // deliberate rewrite; and the consensus db_hash does not cover the row at all,
 // because Prefix::kNativeTokenAge returns false from is_state_item(). A
-// tampered hog age row therefore reaches reconciliation with both checks
-// satisfied.
+// tampered native-token age row therefore reaches reconciliation with both
+// checks satisfied.
 //
 // If the wrapped total happens to equal the balance, reconciliation below
 // would then accept the row as already reconciled and leave it in place. The
@@ -115,9 +115,9 @@ reconcile_address_native_token_age_helper(const Address &address,
     if (age.average_ages[group] < 0) {
       error("address 0x{} has a corrupt native-token age row: average ages {}, "
             "{}, {} "
-            "contain a negative value. Refusing to reconcile; the durable hog "
-            "age state for this address must be repaired or the volume "
-            "replaced.",
+            "contain a negative value. Refusing to reconcile; the durable "
+            "native-token age state for this address must be repaired or the "
+            "volume replaced.",
             encode_hex(address.as_bytes()),
             age.average_ages[kNativeTokenAgeGroupToSchedule],
             age.average_ages[kNativeTokenAgeGroupAlreadyScheduled],
