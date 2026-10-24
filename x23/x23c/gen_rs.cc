@@ -430,13 +430,17 @@ GenRs::process(const vector<Definition> &defs)
   }
 }
 
-// Generate the trait that the server implements to support the rpc
+// Generate the trait that the server implements to support the rpc.  Each
+// handler's reply is any type that encodes like the wire type, so a server can
+// answer from borrowed or shared data instead of building an owned copy.
 void
 GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
 {
   prtop(R"(
+/// Each handler replies with anything that encodes like the reply type.
+/// Implementations can be plain `async fn`s returning a concrete reply type
+/// under `#[allow(refining_impl_trait)]`.
 #[allow(non_camel_case_types)]
-#[async_trait::async_trait]
 pub trait {}_{}: Send + Sync {{)",
         prog_name, vers.id);
 
@@ -448,9 +452,10 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop(
-        "    async fn {}({}) -> Result<{}, ::thruput_rpc_api::ProgramError>;\n",
-        proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
+    prtop("    fn {}({}) -> impl ::core::future::Future<Output = "
+          "Result<impl xdrs::EncodesAs<{}>, ::thruput_rpc_api::ProgramError>> "
+          "+ Send;\n",
+          proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
   prtop("}}\n");
@@ -460,20 +465,23 @@ void
 GenRs::show_server_dispatch(VersDef const &vers, std::string const &prog_name,
                             std::string const &prog_id)
 {
+  // The handler parameter shares a scope with the schema's type names, which
+  // the arms below use unqualified. Names starting with "__" are reserved in
+  // the C++ that x23 also generates, so no schema can use this one.
   prtop(R"(
 #[allow(non_camel_case_types)]
-pub struct {0}_{1}_Dispatcher {{
-  inner: Box<dyn {0}_{1}>,
+pub struct {0}_{1}_Dispatcher<__Handler> {{
+  inner: Box<__Handler>,
 }}
 
-impl {0}_{1}_Dispatcher {{
-  pub fn new(inner: Box<dyn {0}_{1}>) -> Self {{
+impl<__Handler: {0}_{1}> {0}_{1}_Dispatcher<__Handler> {{
+  pub fn new(inner: Box<__Handler>) -> Self {{
     Self {{ inner }}
   }}
 }}
 
 #[async_trait::async_trait]
-impl ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
+impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__Handler> {{
     fn prog_vers(&self) -> ::thruput_rpc_api::ProgVers {{
         ::thruput_rpc_api::ProgVers::new({2}, {3})
     }}

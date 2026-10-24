@@ -14,9 +14,11 @@ pub struct BorrowedHash<'a> {
     pub hash: &'a Hash,
 }
 
-struct Server;
+pub struct Server;
 
-#[async_trait::async_trait]
+// Handlers are plain `async fn`s; a concrete reply type refines the trait's
+// `impl EncodesAs<_>`.
+#[allow(refining_impl_trait)]
 impl check_check_v1 for Server {
     async fn ping(&self) -> Result<(), ProgramError> {
         Ok(())
@@ -48,10 +50,136 @@ impl check_check_v1 for Server {
     async fn verify(&self, _hash: Hash) -> Result<bool, ProgramError> {
         Ok(true)
     }
+
+    async fn pending(&self) -> Result<TxBatch, ProgramError> {
+        Ok(TxBatch::default())
+    }
+
+    async fn scale(&self, t: T) -> Result<T, ProgramError> {
+        Ok(t * 2)
+    }
 }
 
-pub fn dispatcher() -> check_check_v1_Dispatcher {
+// Replies can be anything that encodes like the wire type: borrowed from the
+// server or shared with it, instead of an owned copy.
+struct SharedServer {
+    receipt: Receipt,
+    pending: Vec<Arc<Tx>>,
+}
+
+#[allow(refining_impl_trait)]
+impl check_check_v1 for SharedServer {
+    async fn ping(&self) -> Result<(), ProgramError> {
+        Ok(())
+    }
+
+    async fn add(&self, a: i32, b: u64) -> Result<i32, ProgramError> {
+        Ok(a + b as i32)
+    }
+
+    async fn submit(
+        &self,
+        _batch: TxBatch,
+        _urgent: bool,
+    ) -> Result<&Outcome, ProgramError> {
+        Ok(&self.receipt.outcome)
+    }
+
+    async fn credit(
+        &self,
+        _amount: Amount,
+        _tx: Tx,
+    ) -> Result<&Receipt, ProgramError> {
+        Ok(&self.receipt)
+    }
+
+    async fn verify(&self, _hash: Hash) -> Result<bool, ProgramError> {
+        Ok(true)
+    }
+
+    async fn pending(&self) -> Result<Arc<[Arc<Tx>]>, ProgramError> {
+        Ok(self.pending.iter().cloned().collect())
+    }
+
+    async fn scale(&self, t: T) -> Result<T, ProgramError> {
+        Ok(t * 2)
+    }
+}
+
+// A handler may also return its reply opaquely, as the trait declares it.
+struct OpaqueServer {
+    pending: Vec<Tx>,
+}
+
+impl check_check_v1 for OpaqueServer {
+    async fn ping(&self) -> Result<impl xdrs::EncodesAs<()>, ProgramError> {
+        Ok(())
+    }
+
+    async fn add(
+        &self,
+        a: i32,
+        b: u64,
+    ) -> Result<impl xdrs::EncodesAs<i32>, ProgramError> {
+        Ok(a + b as i32)
+    }
+
+    async fn submit(
+        &self,
+        _batch: TxBatch,
+        _urgent: bool,
+    ) -> Result<impl xdrs::EncodesAs<Outcome>, ProgramError> {
+        Ok(Outcome::REJECTED)
+    }
+
+    async fn credit(
+        &self,
+        _amount: Amount,
+        tx: Tx,
+    ) -> Result<impl xdrs::EncodesAs<Receipt>, ProgramError> {
+        Ok(Receipt {
+            outcome: Outcome::REJECTED,
+            tx: Some(tx),
+        })
+    }
+
+    async fn verify(
+        &self,
+        _hash: Hash,
+    ) -> Result<impl xdrs::EncodesAs<bool>, ProgramError> {
+        Ok(true)
+    }
+
+    async fn pending(
+        &self,
+    ) -> Result<impl xdrs::EncodesAs<TxBatch>, ProgramError> {
+        Ok(&self.pending[..])
+    }
+
+    async fn scale(
+        &self,
+        t: T,
+    ) -> Result<impl xdrs::EncodesAs<T>, ProgramError> {
+        Ok(t * 2)
+    }
+}
+
+pub fn dispatcher() -> check_check_v1_Dispatcher<Server> {
     check_check_v1_Dispatcher::new(Box::new(Server))
+}
+
+// Dispatchers are services the RPC server holds as trait objects.
+pub fn handlers(receipt: Receipt) -> Vec<Box<dyn thruput_rpc_api::RpcHandler>> {
+    vec![
+        Box::new(dispatcher()),
+        Box::new(check_check_v1_Dispatcher::new(Box::new(SharedServer {
+            receipt,
+            pending: Vec::new(),
+        }))),
+        Box::new(check_check_v1_Dispatcher::new(Box::new(OpaqueServer {
+            pending: Vec::new(),
+        }))),
+    ]
 }
 
 // Clients take any argument that encodes like the wire type, so each of these
@@ -77,6 +205,8 @@ pub async fn call_sites(
     client.credit(&5, &Box::new(tx.clone())).await?;
 
     client.verify(&Hash::default()).await?;
+    client.pending().await?;
+    client.scale(&3).await?;
     Ok(())
 }
 
@@ -108,10 +238,10 @@ mod tests {
 
     /// Runs each call through the dispatcher in place. It keeps the default
     /// `send_call_decoded`, so the client decodes an owned response.
-    struct Loopback(check_check_v1_Dispatcher);
+    struct Loopback<T>(check_check_v1_Dispatcher<T>);
 
     #[async_trait::async_trait]
-    impl RpcSender for Loopback {
+    impl<T: check_check_v1> RpcSender for Loopback<T> {
         fn call_buf(&self) -> CallBuf {
             CallBuf::new()
         }
@@ -130,10 +260,10 @@ mod tests {
 
     /// Decodes the way a driver connection does: the call waits once, then
     /// `decode` runs on a reply the sender owns. `send_call` is off limits.
-    struct Reader(check_check_v1_Dispatcher);
+    struct Reader<T>(check_check_v1_Dispatcher<T>);
 
     #[async_trait::async_trait]
-    impl RpcSender for Reader {
+    impl<T: check_check_v1> RpcSender for Reader<T> {
         fn call_buf(&self) -> CallBuf {
             CallBuf::new()
         }
@@ -217,19 +347,24 @@ mod tests {
         }
     }
 
+    fn tx() -> Tx {
+        Tx {
+            seq: 7,
+            memo: Default::default(),
+            note: Default::default(),
+            hash: Hash::default(),
+            digest: [1; 32],
+            sig: [2; SIG_SIZE as usize],
+        }
+    }
+
     fn round_trip(client: check_check_v1_Client) {
         block_on(async {
             client.ping().await.unwrap();
             assert_eq!(client.add(1, 2).await.unwrap(), 3);
             assert!(client.verify(&Hash::default()).await.unwrap());
-            let tx = Tx {
-                seq: 7,
-                memo: Default::default(),
-                note: Default::default(),
-                hash: Hash::default(),
-                digest: [1; 32],
-                sig: [2; SIG_SIZE as usize],
-            };
+            assert_eq!(client.scale(&3).await.unwrap(), 6);
+            let tx = tx();
             let receipt = client.credit(&5, &tx).await.unwrap();
             assert_eq!(receipt.tx, Some(tx));
         });
@@ -245,6 +380,35 @@ mod tests {
     #[test]
     fn clients_decode_where_the_sender_holds_the_reply() {
         round_trip(check_check_v1_Client::new(Arc::new(Reader(dispatcher()))));
+    }
+
+    #[test]
+    fn borrowed_and_shared_replies_decode_like_owned_ones() {
+        let receipt = Receipt {
+            outcome: Outcome::REJECTED,
+            tx: Some(tx()),
+        };
+        let batch = TxBatch::try_from(vec![tx(), tx()]).unwrap();
+        let shared = check_check_v1_Client::new(Arc::new(Reader(
+            check_check_v1_Dispatcher::new(Box::new(SharedServer {
+                receipt: receipt.clone(),
+                pending: batch.iter().cloned().map(Arc::new).collect(),
+            })),
+        )));
+        let opaque = check_check_v1_Client::new(Arc::new(Loopback(
+            check_check_v1_Dispatcher::new(Box::new(OpaqueServer {
+                pending: batch.to_vec(),
+            })),
+        )));
+        block_on(async {
+            assert_eq!(shared.credit(&5, &tx()).await.unwrap(), receipt);
+            assert_eq!(
+                shared.submit(&batch, false).await.unwrap(),
+                Outcome::REJECTED
+            );
+            assert_eq!(shared.pending().await.unwrap(), batch);
+            assert_eq!(opaque.pending().await.unwrap(), batch);
+        });
     }
 
     #[test]
