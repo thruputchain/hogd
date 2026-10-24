@@ -421,7 +421,7 @@ TEST_F(NativeRv32TokenEventParityTest,
                       "transfer_from");
 }
 
-// Mint events: a supply change is its own event on groundhog-erc20-if, not a
+// Mint events: a supply change is its own event on thruput-erc20-if, not a
 // Transfer from the zero address, so a mint emits Mint(receiver) with two
 // topics, byte-identically on the rv32 itc_erc20 and the native precompile
 // (modulo the emitting contract address). Both run from the genesis root

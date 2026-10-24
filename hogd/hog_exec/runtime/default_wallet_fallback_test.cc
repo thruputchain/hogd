@@ -485,7 +485,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
   auto rec = run_deploy_tx(nonce, hash, 2'000'000'000);
-  auto expected = x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+  auto expected = x23::serialize_cxs(uint64_t{0xf63c8b1f5e7e2fe0ULL},
                                      itc_erc20::ERC20Error::TooLarge)
                       .value();
   ASSERT_EQ(rec.size(), 2U + expected.size());

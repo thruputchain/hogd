@@ -49,7 +49,7 @@
 namespace hogd {
 
 using ERC20Exception =
-    ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 
 namespace {
 
@@ -649,15 +649,17 @@ delete_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
   co_return Result<void, ERC20Exception>::make_ok();
 }
 
-// ERC20Permit (groundhog-erc20-permit-if): approvals that arrive as auth
+// ERC20Permit (thruput-erc20-permit-if): approvals that arrive as auth
 // tokens rather than as a transaction from the owner. The RV32 reference is
 // itc_erc20_permit, which is itc_erc20 with this interface on top.
 
 using PermitErc20Exception =
-    ContractException<itc_erc20_permit::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20_permit::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 using PermitException = ContractException<itc_erc20_permit::ERC20PermitError,
-                                          0xe8abb072f5171148ULL>;
-using PermitResult = Result<void, PermitErc20Exception, PermitException>;
+                                          0x1aaf2b9becb7ddc4ULL>;
+// Error order follows the generated itc_erc20_permit header, which lists a
+// method's exceptions in the spec's throws order (by selector).
+using PermitResult = Result<void, PermitException, PermitErc20Exception>;
 
 static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
               "ERC20Error must reject identically through either interface");
@@ -937,15 +939,15 @@ Topic const &
 native_token_transfer_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::TransferEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::TransferEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_change_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceChangeEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceChangeEvent");
   return kSignature;
 }
 
@@ -953,15 +955,15 @@ Topic const &
 native_token_mint_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::MintEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::MintEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_delete_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceDeleteEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceDeleteEvent");
   return kSignature;
 }
 

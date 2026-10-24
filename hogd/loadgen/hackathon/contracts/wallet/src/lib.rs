@@ -86,7 +86,7 @@ impl HackathonWallet for Wallet {
     ) {
         authorized();
         let address = thruput_sdk::get_deploy_address(nonce, hash);
-        ERC20Client::new(&thruput_sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN)
+        ERC20Client::new(&thruput_sdk::types::genesis_addresses::ADDRESS_NATIVE_TOKEN)
             .transfer(&address, amount);
         thruput_sdk::deploy_contract(nonce, hash);
         invoke(&address, initializer, &[]);

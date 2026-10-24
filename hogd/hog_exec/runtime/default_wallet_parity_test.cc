@@ -1270,7 +1270,7 @@ TEST_F(DefaultWalletParityTest, FundedDeployFailureAndEncodingParity)
       // with NegativeAmount: the wallet forwards the exception, deploys
       // nothing and moves no tokens, identically on both wallets.
       auto const expected =
-          x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+          x23::serialize_cxs(uint64_t{0xf63c8b1f5e7e2fe0ULL},
                              itc_erc20::ERC20Error::NegativeAmount)
               .value();
       for (auto const &[wallet, preimage] : {
