@@ -170,7 +170,7 @@ GenTs::proc_codec_ref(const string &type)
   if (type == "void")
     return "VoidCodec";
 
-  // Primitive types → named codecs from @groundhogchain/xdr
+  // Primitive types → named codecs from @thruputchain/xdr
   static const std::map<string, string> primitive_codec_map{
       {"bool", "BoolCodec"},
       {"int", "Int32Codec"},
@@ -1239,7 +1239,7 @@ gen_ts(vector<Definition> *defs)
       imports += ", type RpcProgramMeta";
     for (const auto &pc : gs.primitive_codecs_)
       imports += ", " + pc;
-    imports += " } from \"@groundhogchain/xdr\";\n";
+    imports += " } from \"@thruputchain/xdr\";\n";
     preamble += imports;
   }
 
