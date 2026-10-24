@@ -1,7 +1,9 @@
 #include <cerrno>
 #include <climits>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
 #include <sys/uio.h>
@@ -9,6 +11,7 @@
 #include <vector>
 
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -193,6 +196,62 @@ TEST_F(FileIO, FullWritevManyPieces)
   auto contents = readfile(path_);
   ASSERT_TRUE(contents);
   EXPECT_EQ(std::string_view(*contents), expected);
+}
+
+// A file size limit makes writev() stop short at a chosen offset, then fail
+// with EFBIG. What reached the file, and the entry left at the front of what
+// remains, must let a second call finish the write exactly.
+TEST_F(FileIO, FullWritevShortWrite)
+{
+  const std::vector<std::string> pieces{"abc", "",   "defgh", "",
+                                        "",    "ij", "klmnop"};
+  std::string expected;
+  for (const auto &piece : pieces) {
+    expected += piece;
+  }
+  struct Case {
+    rlim_t limit;     // where the short write stops
+    size_t resume;    // the entry to resume from
+    size_t remaining; // how much of that entry is left
+  };
+  // Inside "defgh", at the boundary after it, and inside "klmnop".
+  for (auto [limit, resume, remaining] :
+       {Case{5, 2, 3}, Case{8, 3, 0}, Case{12, 6, 4}}) {
+    SCOPED_TRACE(limit);
+    std::vector<std::string> copy = pieces;
+    std::vector<iovec> iov;
+    for (auto &piece : copy) {
+      iov.push_back({piece.data(), piece.size()});
+    }
+    UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+    ASSERT_TRUE(fd);
+
+    rlimit old{};
+    ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &old), 0);
+    auto *old_handler = std::signal(SIGXFSZ, SIG_IGN);
+    rlimit low = old;
+    low.rlim_cur = limit;
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &low), 0);
+    auto written = fullwritev(fd, iov);
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &old), 0);
+    std::signal(SIGXFSZ, old_handler);
+
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().raw_code(), EFBIG);
+    auto contents = readfile(path_);
+    ASSERT_TRUE(contents);
+    EXPECT_EQ(std::string_view(*contents), expected.substr(0, limit));
+    if (remaining > 0) {
+      EXPECT_EQ(iov[resume].iov_base,
+                copy[resume].data() + copy[resume].size() - remaining);
+      EXPECT_EQ(iov[resume].iov_len, remaining);
+    }
+
+    ASSERT_TRUE(fullwritev(fd, std::span(iov).subspan(resume)));
+    contents = readfile(path_);
+    ASSERT_TRUE(contents);
+    EXPECT_EQ(std::string_view(*contents), expected);
+  }
 }
 
 TEST_F(FileIO, FullWritevNothing)
