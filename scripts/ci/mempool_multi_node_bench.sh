@@ -172,6 +172,8 @@ publish_multi_node_logs() {
     echo "copying ${label} logs from ${host}"
     copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
     copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stdout.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 
