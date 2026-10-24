@@ -13,9 +13,9 @@
 
 namespace hogd {
 
-class HogConservationInvariant : public HogdbInvariant {
+class NativeTokenConservationInvariant : public HogdbInvariant {
 public:
-  HogConservationInvariant(StorageCostModel const &cost_model)
+  NativeTokenConservationInvariant(StorageCostModel const &cost_model)
     : cost_model_(cost_model)
   {}
   bool check() override;
@@ -39,12 +39,12 @@ private:
 
   void update_total_supply(int128_t change);
 
-  // Running sum of every HOG-denominated item change in the block. Only the
-  // final value has to be zero: partial sums legitimately leave int128 range
-  // whenever a single item moves an amount near INT128_MAX (minting the whole
-  // supply credits a balance by INT128_MAX and debits the total-supply counter
-  // by the same, and the two arrive as separate changes), so the accumulator is
-  // 256 bits wide to keep those intermediates from overflowing.
+  // Running sum of every native-token-denominated item change in the block.
+  // Only the final value has to be zero: partial sums legitimately leave int128
+  // range whenever a single item moves an amount near INT128_MAX (minting the
+  // whole supply credits a balance by INT128_MAX and debits the total-supply
+  // counter by the same, and the two arrive as separate changes), so the
+  // accumulator is 256 bits wide to keep those intermediates from overflowing.
   x23::MVar<WideIntegral<int128_t>> total_supply_change_{0};
   StorageCostModel cost_model_;
 };

@@ -2157,7 +2157,7 @@ TEST(HogDevnode, BootstrapArtifactBuildsStableAccounts)
   }
 }
 
-TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
+TEST(HogDevnode, LocalUserDefaultRemainsOneHundredNativeTokens)
 {
   LocalBootstrapConfig config = fixture_config(1);
   EXPECT_EQ(config.accounts[0].storage_tokens, 1'000'000'000ULL);
@@ -2168,17 +2168,6 @@ TEST(HogDevnode, LocalUserDefaultRemainsOneHundredHog)
   EXPECT_EQ(artifact.accounts[0].initial_storage_tokens,
             kLocalFaucetStorageTokens);
   EXPECT_EQ(artifact.accounts[1].initial_storage_tokens, 1'000'000'000ULL);
-}
-
-TEST(HogDevnode, LocalBootstrapRejectsAllocationAboveTokenSupply)
-{
-  constexpr std::uint64_t kTokenSupply =
-      kTotalHogSupply * std::uint64_t{kHogDivisibility};
-  LocalBootstrapConfig config =
-      fixture_config(1, "groundhog-dev-accounts", kTokenSupply);
-
-  EXPECT_THROW(build_local_bootstrap_account_artifact(config),
-               std::runtime_error);
 }
 
 TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)

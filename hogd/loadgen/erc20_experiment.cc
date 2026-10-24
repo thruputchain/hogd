@@ -100,20 +100,18 @@ ERC20ExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
-  constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
+  constexpr int128_t kWalletInitialNativeTokensEpsilon = 100'000;
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
-  const int128_t wallet_initial_hogs =
-      ((int128_t{kTotalHogSupply} * int128_t{kHogDivisibility}) /
-       num_initial_allocations) -
-      kWalletInitialHogsEpsilon;
+  const int128_t wallet_initial_native_tokens =
+      (std::numeric_limits<int128_t>::max() / num_initial_allocations) -
+      kWalletInitialNativeTokensEpsilon;
   GenesisConfigurationBuilder builder;
-  builder.add_distribution(erc20_contract, make_nonce(0),
-                           erc20_meta::entrypoint<u8"initialize">(),
-                           erc20_meta::make_calldata<u8"initialize">(
-                               owner_address),
-                           // The number of hogs each wallet starts with.
-                           wallet_initial_hogs);
+  builder.add_distribution(
+      erc20_contract, make_nonce(0), erc20_meta::entrypoint<u8"initialize">(),
+      erc20_meta::make_calldata<u8"initialize">(owner_address),
+      // The number of native tokens each wallet starts with.
+      wallet_initial_native_tokens);
   erc20_address_ = calculate_genesis_deployment_address(sha256(*erc20_contract),
                                                         make_nonce(0));
 
@@ -127,7 +125,7 @@ ERC20ExperimentState::generate_experiment()
                              wallet_meta::entrypoint<u8"initialize">(),
                              wallet_meta::make_calldata<u8"initialize">(
                                  wallet.public_key),
-                             wallet_initial_hogs);
+                             wallet_initial_native_tokens);
   }
 
   // make mint txs

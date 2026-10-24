@@ -1958,7 +1958,7 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
   }
 }
 
-TEST(Mempool, NewlyDeployedContractHogCount)
+TEST(Mempool, NewlyDeployedContractNativeTokenCount)
 {
   constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
   constexpr uint128_t kTransferAmount = 100'000'000;
@@ -2031,24 +2031,32 @@ TEST(Mempool, NewlyDeployedContractHogCount)
 
   server.mempool_coord_rpc().wait_for_transfer_data(
       res_nominate.proposed_block().proposal.header.block_height)();
-  auto [deployed_hog_age, deployed_hog_age_lock] =
-      server.mempool_coord_rpc().scheduler()->get_cached_hog_age(
+  auto [deployed_native_token_age, deployed_native_token_age_lock] =
+      server.mempool_coord_rpc().scheduler()->get_cached_native_token_age(
           deployed_address);
-  ASSERT_EQ(deployed_hog_age->address, deployed_address);
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  ASSERT_EQ(deployed_native_token_age->address, deployed_address);
+  EXPECT_EQ(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0UL);
+  EXPECT_EQ(from_xdr(
+                deployed_native_token_age
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             0UL);
   // The fibonacci contract needs to pay for storage, so the storage cost is
-  // deducted from the live hogs used for scheduling. Thus, the number of hogs
-  // in the [kHogAgeGroupReceived] scheduling group will be less than
-  // [kTransferAmount].
-  EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
-  EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+  // deducted from the live native tokens used for scheduling. Thus, the number
+  // of native tokens in the [kNativeTokenAgeGroupReceived] scheduling group
+  // will be less than [kTransferAmount].
+  EXPECT_GT(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            0UL);
+  EXPECT_LT(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
             kTransferAmount);
   HogDbStatus<int128_t> deployed_address_balance =
       server.read_address_balance(deployed_address);
   ASSERT_TRUE(deployed_address_balance.has_value());
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(*deployed_address_balance));
 }
 
@@ -2086,7 +2094,7 @@ TEST(Mempool, ConcurrentCommitRejected)
   // validation gate closed until the second commit has tried to enter.
   x23::CoroGuard guard;
   [&]() -> x23::Async<void> {
-    co_await guard(rpc.scheduler()->pending_hog_age_update_lock_);
+    co_await guard(rpc.scheduler()->pending_native_token_age_update_lock_);
   }()();
 
   x23::Async<SchedulerCommitOutcome> first =
