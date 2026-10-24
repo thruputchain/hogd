@@ -2180,8 +2180,7 @@ TEST(HogDevnode, BootstrapManifestAdvertisesAccountMetadata)
       readiness.manifest.find("bootstrapAccountDerivation");
   EXPECT_EQ(derivation, nullptr);
   for (std::uint32_t i = 0; i < readiness.bootstrap_accounts.size(); ++i) {
-    auto keypair =
-        derive_bootstrap_account_keypair("thruput-dev-accounts", i);
+    auto keypair = derive_bootstrap_account_keypair("thruput-dev-accounts", i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].index, i);
     EXPECT_EQ(readiness.bootstrap_accounts[i].role,
               i == 0 ? "faucet" : "local_user");

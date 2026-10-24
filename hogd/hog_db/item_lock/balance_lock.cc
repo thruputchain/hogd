@@ -146,9 +146,9 @@ BalanceLock::stage_committed_changes(const LockContext &ctx,
   if (!snapshot_balance_.snapshot_value().has_value()) {
     NativeTokenAge age = {
         .address = ctx.key.to_contract_address(),
-        // We set the native-token balance for all groups in [NativeTokenAge] to 0 to
-        // avoid the issue described in #1511 on GitHub. Specifically, if we
-        // were to set (let's say) the number of native tokens in
+        // We set the native-token balance for all groups in [NativeTokenAge] to
+        // 0 to avoid the issue described in #1511 on GitHub. Specifically, if
+        // we were to set (let's say) the number of native tokens in
         // [kNativeTokenAgeGroupToSchedule] to [value] rather than 0, the
         // following would happen:
         // 1. A new contract is created at some address X and Y native tokens
