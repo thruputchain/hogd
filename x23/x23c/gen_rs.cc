@@ -465,20 +465,23 @@ void
 GenRs::show_server_dispatch(VersDef const &vers, std::string const &prog_name,
                             std::string const &prog_id)
 {
+  // The handler parameter shares a scope with the schema's type names, which
+  // the arms below use unqualified. Names starting with "__" are reserved in
+  // the C++ that x23 also generates, so no schema can use this one.
   prtop(R"(
 #[allow(non_camel_case_types)]
-pub struct {0}_{1}_Dispatcher<T> {{
-  inner: Box<T>,
+pub struct {0}_{1}_Dispatcher<__Handler> {{
+  inner: Box<__Handler>,
 }}
 
-impl<T: {0}_{1}> {0}_{1}_Dispatcher<T> {{
-  pub fn new(inner: Box<T>) -> Self {{
+impl<__Handler: {0}_{1}> {0}_{1}_Dispatcher<__Handler> {{
+  pub fn new(inner: Box<__Handler>) -> Self {{
     Self {{ inner }}
   }}
 }}
 
 #[async_trait::async_trait]
-impl<T: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<T> {{
+impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__Handler> {{
     fn prog_vers(&self) -> ::thruput_rpc_api::ProgVers {{
         ::thruput_rpc_api::ProgVers::new({2}, {3})
     }}

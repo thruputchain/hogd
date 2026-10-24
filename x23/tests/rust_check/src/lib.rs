@@ -54,6 +54,10 @@ impl check_check_v1 for Server {
     async fn pending(&self) -> Result<TxBatch, ProgramError> {
         Ok(TxBatch::default())
     }
+
+    async fn scale(&self, t: T) -> Result<T, ProgramError> {
+        Ok(t * 2)
+    }
 }
 
 // Replies can be anything that encodes like the wire type: borrowed from the
@@ -95,6 +99,10 @@ impl check_check_v1 for SharedServer {
 
     async fn pending(&self) -> Result<Arc<[Arc<Tx>]>, ProgramError> {
         Ok(self.pending.iter().cloned().collect())
+    }
+
+    async fn scale(&self, t: T) -> Result<T, ProgramError> {
+        Ok(t * 2)
     }
 }
 
@@ -147,6 +155,13 @@ impl check_check_v1 for OpaqueServer {
     ) -> Result<impl xdrs::EncodesAs<TxBatch>, ProgramError> {
         Ok(&self.pending[..])
     }
+
+    async fn scale(
+        &self,
+        t: T,
+    ) -> Result<impl xdrs::EncodesAs<T>, ProgramError> {
+        Ok(t * 2)
+    }
 }
 
 pub fn dispatcher() -> check_check_v1_Dispatcher<Server> {
@@ -191,6 +206,7 @@ pub async fn call_sites(
 
     client.verify(&Hash::default()).await?;
     client.pending().await?;
+    client.scale(&3).await?;
     Ok(())
 }
 
@@ -347,6 +363,7 @@ mod tests {
             client.ping().await.unwrap();
             assert_eq!(client.add(1, 2).await.unwrap(), 3);
             assert!(client.verify(&Hash::default()).await.unwrap());
+            assert_eq!(client.scale(&3).await.unwrap(), 6);
             let tx = tx();
             let receipt = client.credit(&5, &tx).await.unwrap();
             assert_eq!(receipt.tx, Some(tx));
