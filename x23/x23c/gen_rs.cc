@@ -430,13 +430,17 @@ GenRs::process(const vector<Definition> &defs)
   }
 }
 
-// Generate the trait that the server implements to support the rpc
+// Generate the trait that the server implements to support the rpc.  Each
+// handler's reply is any type that encodes like the wire type, so a server can
+// answer from borrowed or shared data instead of building an owned copy.
 void
 GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
 {
   prtop(R"(
+/// Each handler replies with anything that encodes like the reply type.
+/// Implementations can be plain `async fn`s returning a concrete reply type
+/// under `#[allow(refining_impl_trait)]`.
 #[allow(non_camel_case_types)]
-#[async_trait::async_trait]
 pub trait {}_{}: Send + Sync {{)",
         prog_name, vers.id);
 
@@ -448,7 +452,9 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop("    async fn {}({}) -> Result<{}, ::rpc_api::ProgramError>;\n",
+    prtop("    fn {}({}) -> impl ::core::future::Future<Output = "
+          "Result<impl xdrs::EncodesAs<{}>, ::rpc_api::ProgramError>> + "
+          "Send;\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
@@ -461,18 +467,18 @@ GenRs::show_server_dispatch(VersDef const &vers, std::string const &prog_name,
 {
   prtop(R"(
 #[allow(non_camel_case_types)]
-pub struct {0}_{1}_Dispatcher {{
-  inner: Box<dyn {0}_{1}>,
+pub struct {0}_{1}_Dispatcher<T> {{
+  inner: Box<T>,
 }}
 
-impl {0}_{1}_Dispatcher {{
-  pub fn new(inner: Box<dyn {0}_{1}>) -> Self {{
+impl<T: {0}_{1}> {0}_{1}_Dispatcher<T> {{
+  pub fn new(inner: Box<T>) -> Self {{
     Self {{ inner }}
   }}
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
+impl<T: {0}_{1}> ::rpc_api::RpcHandler for {0}_{1}_Dispatcher<T> {{
     fn prog_vers(&self) -> ::rpc_api::ProgVers {{
         ::rpc_api::ProgVers::new({2}, {3})
     }}

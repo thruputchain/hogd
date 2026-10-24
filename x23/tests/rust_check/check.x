@@ -43,5 +43,6 @@ program check {
     Outcome submit(TxBatch, bool) = 2;
     Receipt credit(Amount, Tx) = 3;
     bool verify(Hash) = 4;
+    TxBatch pending(void) = 5;
   } = 1;
 } = 0x20000003;
