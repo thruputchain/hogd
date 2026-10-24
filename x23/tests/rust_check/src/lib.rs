@@ -228,7 +228,7 @@ mod tests {
     use std::sync::atomic::{AtomicBool, Ordering};
     use std::task::{Context, Poll, Waker};
     use thruput_rpc_api::{
-        CallBuf, ProgVers, RpcHandler, RpcResponse, RpcSender,
+        CallBuf, FutureSlot, ProgVers, ReplyBuf, RpcHandler, RpcResponse, RpcSender,
     };
 
     type Decode<'a> = &'a mut (
@@ -253,8 +253,11 @@ mod tests {
             call: CallBuf,
         ) -> Result<RpcResponse, RpcError> {
             assert_eq!(progvers, self.0.prog_vers());
-            let reply = self.0.dispatch(proc, call.payload()).await?;
-            Ok(RpcResponse::from_payload(reply))
+            let reply = self
+                .0
+                .dispatch(proc, call.payload(), ReplyBuf::new(), FutureSlot::new())?
+                .await?;
+            Ok(RpcResponse::from_payload(reply.payload().to_vec()))
         }
     }
 
@@ -285,7 +288,10 @@ mod tests {
             decode: Decode<'_>,
         ) -> Result<(), RpcError> {
             assert_eq!(progvers, self.0.prog_vers());
-            let reply = self.0.dispatch(proc, call.payload()).await?;
+            let reply = self
+                .0
+                .dispatch(proc, call.payload(), ReplyBuf::new(), FutureSlot::new())?
+                .await?;
             let mut waited = false;
             poll_fn(|_| {
                 if std::mem::replace(&mut waited, true) {
@@ -295,7 +301,7 @@ mod tests {
                 }
             })
             .await;
-            decode(&reply)
+            decode(reply.payload())
         }
     }
 
@@ -409,6 +415,16 @@ mod tests {
             assert_eq!(shared.pending().await.unwrap(), batch);
             assert_eq!(opaque.pending().await.unwrap(), batch);
         });
+    }
+
+    #[test]
+    fn bad_calls_are_rejected_before_a_future_exists() {
+        let dispatcher = dispatcher();
+        // `add` takes an int and an unsigned hyper: 12 bytes, not 3.
+        let short = dispatcher.dispatch(1, &[0, 0, 0], ReplyBuf::new(), FutureSlot::new());
+        assert!(matches!(short, Err(RpcError::GarbageArguments)));
+        let unknown = dispatcher.dispatch(99, &[], ReplyBuf::new(), FutureSlot::new());
+        assert!(matches!(unknown, Err(RpcError::InvalidProcedure)));
     }
 
     #[test]
