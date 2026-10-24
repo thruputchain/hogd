@@ -1567,9 +1567,9 @@ SystemCallHandler::log_event(uint32_t num_topics,
   if (data.size() > kMaxEventLength) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
-  if (invocation_frame_stack_.event_count() >= kMaxEventsPerTransaction) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  // The topic-pointer overload, the only caller, rejects over-cap events
+  // before building the buffer it passes in.
+  CHECK_LT(invocation_frame_stack_.event_count(), kMaxEventsPerTransaction);
 
   auto message = make_tx_emitted_event(get_current_address(), num_topics, data);
   invocation_frame_stack_.log_event(std::move(message));
