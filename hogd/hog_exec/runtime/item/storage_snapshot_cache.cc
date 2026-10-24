@@ -174,15 +174,16 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
   // item keeps it for the retrocausal-queue reads it may make later.
   const AddressAndKey addrkey = key.to_address_and_key();
   auto db_res = co_await db_proxy_.get_snapshot_item(block_id_, addrkey);
-  if (!db_res) {
+  if (!db_res.has_value()) {
     co_return db_res.error();
   }
 
   // cache both positive and negative lookups.  Move the item out of the reply:
   // a bytestring can be large, and nothing reads db_res after this.
+  auto &maybe_item = *db_res;
   WireStorageItem db_item =
-      db_res.value().has_value()
-          ? std::move(*db_res.value())
+      maybe_item.has_value()
+          ? std::move(*maybe_item)
           : WireStorageItem(StorageItemType::kItemTypeDeleted);
 
   auto entry =
