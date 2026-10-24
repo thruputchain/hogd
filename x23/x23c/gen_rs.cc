@@ -1110,8 +1110,11 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
                   kEnumBaseType);
   std::string converted_read = convert_i32(unsafe_read);
 
+  // Without a default arm the match holds only the wildcard, which clippy
+  // flags; keeping one shape for both cases is simpler than special-casing.
   bottom_ +=
       std::format(R"(impl {0} {{
+    #[allow(clippy::match_single_binding)]
     pub fn {2}(&self) -> {3} {{
         match self {{
             {1}
