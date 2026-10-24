@@ -56,7 +56,7 @@
 // keeps the flag and the later transaction is rejected with
 // `ExclusiveLockDenied`.
 //
-// See: https://github.com/groundhogchain/hogd/issues/3006
+// See: https://github.com/thruputchain/hogd/issues/3006
 
 #include <gtest/gtest.h>
 

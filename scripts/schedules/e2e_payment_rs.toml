@@ -36,7 +36,7 @@ git submodule update --init --recursive --quiet
 source ./scripts/ci/prepare_env.sh > prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 echo 'install chuckd-rs from registry (fail-fast before long hogd build)'
-cargo install chuckd@0.1.9 --registry groundhog > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
+cargo install chuckd@0.1.9 --registry thruput > cargo_install.log 2>&1 || (cat cargo_install.log && exit 1)
 
 echo 'configure'
 ./scripts/build.sh -d release -t Release -c gcc -x -DX23_CORO_TRACE=1 -n > build1.log 2>&1 || (cat build1.log && exit 1)
@@ -62,12 +62,8 @@ echo 'run bench server'
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
+CARGO_REGISTRIES_THRUPUT_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_THRUPUT_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 [jobs.host]
@@ -154,12 +150,8 @@ echo 'cleanup control servers'
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
+CARGO_REGISTRIES_THRUPUT_TOKEN = "{{ .cargo_registry_token }}"
+CARGO_REGISTRIES_THRUPUT_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
 CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
 
 [jobs.host]

@@ -55,7 +55,7 @@ namespace {
 
 // Compute an event-signature topic the same way the SDK does:
 // sha256("<major_version>::<crate_name>::<type_name>"). See
-// groundhog_contract_util::event_signature in the SDK.
+// thruput_contract_util::event_signature in the SDK.
 //
 // The preimage is taken from a `u8"..."` literal so its bytes are the UTF-8
 // (== ASCII, for these names) encoding mandated by the standard, independent of

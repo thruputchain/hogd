@@ -70,7 +70,7 @@ The producer and consumer are maintained in different repositories:
 | Owner | Contract |
 |---|---|
 | SDK (`sdk_rs`) | Guest startup, method dispatch, and typed syscall wrappers |
-| Tooling (`groundhog-rpc`, `crates/rv32/artifact` and `crates/rv32/lower`) | ELF validation and artifact writing; shared by the CLI and standalone lowerer |
+| Tooling (`thruput-tools`, `crates/rv32/artifact` and `crates/rv32/lower`) | ELF validation and artifact writing; shared by the CLI and standalone lowerer |
 | This directory | Artifact admission, preparation, and execution |
 
 Guest dispatch removes the need for the lowerer to discover method symbols or

@@ -799,7 +799,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   // Test to make sure that the system does not crash when a transaction
   // is aborted while locks are held.
   // Asserts that bug like
-  // https://github.com/groundhogchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
+  // https://github.com/thruputchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
   // does not occur again.
   //
   // Writer contract — method 0: loads the calldata, then performs a bytestring

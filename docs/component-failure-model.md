@@ -5,7 +5,7 @@
 This document defines how logical validator components should behave when a
 peer starts late, stops, crashes, or loses durable state. It is aimed at
 developers and reviewers. The operator-facing response guide lives in the
-[validator recovery runbook](https://github.com/groundhogchain/ops/blob/main/docs/validator-recovery.md).
+[validator recovery runbook](https://github.com/thruputchain/ops/blob/main/docs/validator-recovery.md).
 
 The contract is intentionally stricter than process liveness. A process can be
 running while its data is stale, its dependencies are unavailable, or its

@@ -50,22 +50,22 @@ members = [
 
 [workspace.package]
 version = "0.2.0"
-authors = ["Groundhog Team"]
+authors = ["Thruput Team"]
 license = "Apache-2.0"
-publish = ["groundhog"]
-repository = "https://github.com/groundhogchain/example-contracts.git"
-homepage = "https://github.com/groundhogchain/example-contracts.git"
-keywords = ["groundhog"]
+publish = ["thruput"]
+repository = "https://github.com/thruputchain/thruput-integration-test-contracts.git"
+homepage = "https://github.com/thruputchain/thruput-integration-test-contracts.git"
+keywords = ["thruput"]
 categories = ["blockchain"]
 edition = "2024"
 
 [workspace.dependencies]
-thruput-sdk = { registry = "groundhog", version = "0.56.0" }
-thruput-rv32-runtime = { registry = "groundhog", version = "0.56.0" }
+thruput-sdk = { registry = "thruput", version = "0.56.0" }
+thruput-rv32-runtime = { registry = "thruput", version = "0.56.0" }
 # default features include std, which cannot build for the on-chain targets
-thruput-domain-separator = { registry = "groundhog", version = "0.56.0", default-features = false }
-thruput-xdr = { registry = "groundhog", version = "0.58.0", features = ["xdrs", "syscalls"] }
-thruput-syscall = { registry = "groundhog", version = "0.58.0" }
+thruput-domain-separator = { registry = "thruput", version = "0.56.0", default-features = false }
+thruput-xdr = { registry = "thruput", version = "0.58.0", features = ["xdrs", "syscalls"] }
+thruput-syscall = { registry = "thruput", version = "0.58.0" }
 # Published on crates.io as thruput-xdrs; the dependency key keeps the library
 # name contracts import.
 xdrs = { package = "thruput-xdrs", version = "0.16.1", features = ["int128", "heapless"] }
@@ -75,14 +75,14 @@ hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
 # Standard interface crates.
-thruput-erc20-if = { registry = "groundhog", version = "0.1.67" }
-thruput-erc20-permit-if = { registry = "groundhog", version = "0.1.67" }
-thruput-erc165-if = { registry = "groundhog", version = "0.1.67" }
+thruput-erc20-if = { registry = "thruput", version = "0.1.67" }
+thruput-erc20-permit-if = { registry = "thruput", version = "0.1.67" }
+thruput-erc165-if = { registry = "thruput", version = "0.1.67" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless.
-erc20-test = { registry = "groundhog", version = "0.56.0" }
-erc20-native-test = { registry = "groundhog", version = "0.56.0" }
+erc20-test = { registry = "thruput", version = "0.56.0" }
+erc20-native-test = { registry = "thruput", version = "0.56.0" }
 
 [profile.release]
 trim-paths = "all" # unstable

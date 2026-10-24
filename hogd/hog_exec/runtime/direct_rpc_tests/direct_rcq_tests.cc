@@ -4887,7 +4887,7 @@ TEST_F(DirectRCQTests,
 }
 
 // Conservative per-block insertion limit: same-block consumes are not
-// credited back.  See https://github.com/groundhogchain/hogd/issues/1931.
+// credited back.  See https://github.com/thruputchain/hogd/issues/1931.
 //
 // RetrocausalQueueLock::reserved_entry_count_ bounds the size of the single
 // RCQ block generated this block.  It tracks inserts but never subtracts

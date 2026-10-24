@@ -7,7 +7,7 @@ This file provides guidance to LLM agents like Codex and Claude Code when workin
 C++23 implementation of XDR (External Data Representation) and RPC (Remote Procedure Call). Includes:
 - **x23c** — compiler that generates C++ headers (`.hh`) and Rust (`.rs`) from `.x` XDR interface definitions
 - **libx23** — async RPC runtime built on C++23 coroutines, epoll, and a work-stealing thread pool
-- Used by the hogd project (Groundhog Chain)
+- Used by the hogd project (Thruput)
 
 ## Build
 
@@ -49,7 +49,7 @@ ctest --test-dir build --output-on-failure --parallel  # run tests only
 
 Tests live in `tests/`. The `add_x23_test(name)` CMake macro creates `test_<name>` from `<name>.cc`, linked against libx23 and the xdrtest XDR library. GTest-based tests use `add_x23_gtest(name)` and require googletest (auto-detected from git submodules).
 
-x23c's Rust output is checked outside ctest, since it needs cargo and the groundhog registry: `tests/rust_check/check.sh build/x23c/x23c` generates Rust from `tests/rust_check/check.x` and runs `cargo check` on it. CI runs it (`x23c_rust_check.yml`) when x23c changes.
+x23c's Rust output is checked outside ctest, since it needs cargo and the thruput registry: `tests/rust_check/check.sh build/x23c/x23c` generates Rust from `tests/rust_check/check.x` and runs `cargo check` on it. CI runs it (`x23c_rust_check.yml`) when x23c changes.
 
 ## Code generation
 

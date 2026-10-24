@@ -112,7 +112,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 
 // The default wallet selects executing code, and a node's copy of it rides in
 // database metadata the state hash does not cover, so the header has to be
-// what pins it. See groundhogchain/hogd#3926.
+// what pins it. See thruputchain/hogd#3926.
 TEST(ConfigHashTest, CommitsToDefaultWallet)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();

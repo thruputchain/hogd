@@ -19,9 +19,9 @@
 //     block's total set of inserts.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/2359
-//   - https://github.com/groundhogchain/hogd/issues/2381
-//   - https://github.com/groundhogchain/hogd/issues/2382
+//   - https://github.com/thruputchain/hogd/issues/2359
+//   - https://github.com/thruputchain/hogd/issues/2381
+//   - https://github.com/thruputchain/hogd/issues/2382
 
 #include <gtest/gtest.h>
 
