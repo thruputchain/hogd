@@ -961,7 +961,7 @@ struct ChunkRecorder {
   }
 };
 
-const std::atomic<bool> kNotDraining{false};
+const std::atomic<bool> never_draining{false};
 
 } // namespace
 
@@ -980,7 +980,7 @@ TEST_F(EventRpcTest, ChunkedPullSendsTheBlockAsARunOfChunks)
   // Within the budget, the block is one chunk.
   ChunkRecorder one;
   EventIndexerChunkedPullResult single =
-      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining,
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
                                     one.sender())();
   ASSERT_EQ(single.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(single.chunked_block().chunk_count, 1U);
@@ -992,7 +992,7 @@ TEST_F(EventRpcTest, ChunkedPullSendsTheBlockAsARunOfChunks)
   ctx.set_indexer_chunk_pair_bytes_for_test(1);
   ChunkRecorder three;
   EventIndexerChunkedPullResult split =
-      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining,
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
                                     three.sender())();
   ASSERT_EQ(split.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(split.chunked_block().chunk_count, 3U);
@@ -1018,7 +1018,7 @@ TEST_F(EventRpcTest, ChunkedPullOfAnEmptyBlockSendsOneEmptyChunk)
 
   ChunkRecorder recorder;
   EventIndexerChunkedPullResult result =
-      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining,
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
                                     recorder.sender())();
   ASSERT_EQ(result.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(result.chunked_block().chunk_count, 1U);
@@ -1031,7 +1031,7 @@ TEST_F(EventRpcTest, ChunkedPullAnswersNonBlocksAsPullDoes)
 {
   EventRPCContext ctx(temp_dir());
   ChunkRecorder recorder;
-  EXPECT_EQ(ctx.pull_indexer_next_chunked(pull_request(), kNotDraining,
+  EXPECT_EQ(ctx.pull_indexer_next_chunked(pull_request(), never_draining,
                                           recorder.sender())()
                 .outcome(),
             EventIndexerPullOutcome::EventIndexerPullNotReady);
@@ -1041,7 +1041,7 @@ TEST_F(EventRpcTest, ChunkedPullAnswersNonBlocksAsPullDoes)
   ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
   EventIndexerPullResult pulled = ctx.pull_indexer_next(pull_request())();
   EventIndexerChunkedPullResult chunked =
-      ctx.pull_indexer_next_chunked(pull_request(), kNotDraining,
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
                                     recorder.sender())();
   ASSERT_EQ(pulled.outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
@@ -1051,7 +1051,7 @@ TEST_F(EventRpcTest, ChunkedPullAnswersNonBlocksAsPullDoes)
 
   EventIndexerPullRequest mismatched = pull_request();
   mismatched.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
-  EXPECT_EQ(ctx.pull_indexer_next_chunked(mismatched, kNotDraining,
+  EXPECT_EQ(ctx.pull_indexer_next_chunked(mismatched, never_draining,
                                           recorder.sender())()
                 .outcome(),
             EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
@@ -1067,7 +1067,7 @@ TEST_F(EventRpcTest, ChunkedPullFailsWhenAChunkIsNotAccepted)
   commit_block_of_pairs(ctx, 93, 1, sha256(genesis), {make_body(311)});
 
   EventIndexerChunkedPullResult result = ctx.pull_indexer_next_chunked(
-      pull_request(), kNotDraining,
+      pull_request(), never_draining,
       [](const EventIndexerBlockChunk &) -> x23::Async<void> {
         throw x23::XdrException("indexer connection lost");
         co_return;
