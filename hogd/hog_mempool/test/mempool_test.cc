@@ -2190,6 +2190,51 @@ TEST(Mempool, ConcurrentCommitRejected)
   EXPECT_EQ(first(), SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
+// A commit attempt that commits nothing must not record a commit interval. One
+// that read [last_commit_] before closing the validation gate was not ordered
+// after the previous commit's write of it (a data race under TSan), and it
+// overwrote [last_commit_interval_ms] with the interval of a commit that never
+// happened.
+TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+
+  const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  const SchedulerProposalResult nomination =
+      propose_block(server, tip.db_tip());
+  ASSERT_EQ(nomination.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &block = nomination.proposed_block();
+  const ConsensusValue value = consensus_value(tip.db_tip(), block.proposal);
+
+  // The retry runs on a thread that has not synchronized with the first
+  // commit, as an RPC handler need not have synchronized with the thread-pool
+  // worker that finalized the previous commit. The flag is relaxed on purpose:
+  // an acquire would order the retry after the first commit's write of
+  // [last_commit_] and hide the race from TSan.
+  std::atomic<bool> committed = false;
+  SchedulerCommitOutcome retry{};
+  std::thread retry_thread([&] {
+    while (!committed.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+    }
+    retry = rpc.schedulercoord_commit_block(block.block_id, value)();
+  });
+
+  EXPECT_EQ(rpc.schedulercoord_commit_block(block.block_id, value)(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  // No real interval is negative, so any record by the retry replaces this.
+  MempoolMetrics::instance().last_commit_interval_ms.record(-1);
+  committed.store(true, std::memory_order_relaxed);
+  retry_thread.join();
+
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
+}
+
 TEST(Mempool, Validate)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
