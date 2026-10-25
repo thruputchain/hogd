@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <set>
 #include <span>
 #include <string>

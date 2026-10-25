@@ -466,7 +466,7 @@ footprint_bound(FlaggedStorageDelta const &fd)
 // prefixes. footprint_bound accounts for the FlaggedStorageDeltas themselves,
 // and fold_runs_bound for the runs.
 constexpr size_t kMessageOverhead = kXdrMax<x23::rpc_msg> + kXdrMax<BlockID> +
-                                    kXdrMax<TransactionID> + 2 * kXdrWord;
+                                    kXdrMax<TransactionID> + (2 * kXdrWord);
 static_assert(kMessageOverhead < kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;

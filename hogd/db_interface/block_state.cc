@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "contract.hh"
