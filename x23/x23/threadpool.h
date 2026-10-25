@@ -110,6 +110,7 @@
 #include <functional>
 #include <limits>
 #include <memory>
+#include <optional>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -204,6 +205,8 @@ public:
   const size_t nqueues_;
 
   ThreadPool(size_t nthreads = nproc());
+  // Like ThreadPool(nthreads), but every worker runs only on cpus.
+  ThreadPool(size_t nthreads, const CpuSet &cpus);
   // Stop independent producers before destruction.  Waits for async()
   // helpers and the tails of external submissions before stopping workers.
   ~ThreadPool();
@@ -387,6 +390,11 @@ private:
   {
     return value & ~kQuiesceWake;
   }
+
+  ThreadPool(size_t nthreads, std::optional<CpuSet> pin);
+
+  // The CPUs every worker is pinned to, if any.
+  const std::optional<CpuSet> pin_;
 
   // Number of threads currently associated with each runqueue.  We
   // assume threads don't migrade that often, so we can pack these

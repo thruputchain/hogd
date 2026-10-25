@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <atomic>
 #include <cstddef>
 #include <memory>
 #include <optional>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include "hogd/base/log.h"
@@ -46,32 +48,117 @@ public:
   }
 };
 
-// The CoroPoll for sockets whose callers run on one LLC: one per LLC, its
-// poll thread pinned to that LLC's allowed CPUs.
+// One LLC's lane: a ThreadPool whose workers run only on that LLC's allowed
+// CPUs, and a CoroPoll for the LLC's sockets, its poll thread pinned there
+// too, that resumes coroutines in that pool.
 //
-// default_coropoll() is a single epoll thread for every socket in the
-// process.  Every RPC reply that has to wait for its socket goes through it,
-// so at hog-exec's reply rate it is a shared queueing point, and it runs
-// wherever the scheduler puts it.  Per-LLC polls split that load and keep
-// a connection's readiness handling on its callers' LLC.
+// default_threadpool() keeps a run queue per LLC, but its workers are not
+// pinned, a job moves to another LLC's queue when that queue is staler, and
+// an idle worker steals from any queue, so a transaction's coroutines run on
+// whichever L3 is free and its caches follow it around.  On the multiexec
+// benchmark (64 cores, 8 L3s) one hog-exec ran 37% faster with its
+// transaction work in lanes, much as Whitney's one hog-exec per L3 did.
+struct LlcLane {
+  LlcLane(int llc, const x23::CpuSet &cpus, size_t ncpus, unsigned cpu)
+    : llc(llc), cpu(cpu), pool(ncpus, cpus), cp(pool, cpus)
+  {}
+
+  const int llc;
+  // A CPU in the lane, to queue work onto the lane's LLC.
+  const unsigned cpu;
+  x23::ThreadPool pool;
+  PinnedCoroPoll cp;
+};
+
+// The lanes, one per LLC this process may run on.  There are none where
+// there is one such LLC, since default_threadpool() is then already one, or
+// where CPU affinity is unavailable.  Built on first use and never
+// destroyed: work may still be queued on them when the process exits.
+class LlcLanes {
+public:
+  static LlcLanes &get()
+  {
+    static auto *lanes = new LlcLanes;
+    return *lanes;
+  }
+
+  // llc's lane, or nullptr if it has none.
+  LlcLane *at(int llc) const
+  {
+    if (llc < 0 || static_cast<size_t>(llc) >= by_llc_.size())
+      return nullptr;
+    return by_llc_[llc].get();
+  }
+
+  // The next lane round robin, or nullptr if there are none.
+  LlcLane *next()
+  {
+    if (lanes_.empty())
+      return nullptr;
+    return lanes_[next_.fetch_add(1, std::memory_order_relaxed) %
+                  lanes_.size()];
+  }
+
+private:
+  LlcLanes()
+  {
+    x23::init_cpumaps();
+#if HAVE_SCHED_SETAFFINITY
+    std::vector<std::pair<int, x23::CpuSet>> llcs;
+    for (int i = 0; i < x23::llc_map->nbuckets(); i++)
+      if (auto cpus = x23::llc_map->cpuset(i) & *x23::allowed_cpus;
+          cpus.count())
+        llcs.emplace_back(i, cpus);
+    if (llcs.size() < 2)
+      return;
+    by_llc_.resize(x23::llc_map->nbuckets());
+    for (auto &[llc, cpus] : llcs) {
+      unsigned cpu = 0;
+      while (!cpus.isset(cpu))
+        cpu++;
+      by_llc_[llc] = std::make_unique<LlcLane>(llc, cpus, cpus.count(), cpu);
+      lanes_.push_back(by_llc_[llc].get());
+    }
+    info("{} LLC lanes", lanes_.size());
+#endif // HAVE_SCHED_SETAFFINITY
+  }
+
+  std::vector<std::unique_ptr<LlcLane>> by_llc_;
+  std::vector<LlcLane *> lanes_;
+  std::atomic<size_t> next_{0};
+};
+
+// The CoroPoll for sockets whose callers run on one LLC: its lane's, so a
+// reply resumes its caller in the caller's lane.  default_coropoll() if the
+// LLC has no lane.
 inline x23::CoroPoll &
 llc_coropoll(int llc)
 {
-  static const auto polls = [] {
-    x23::init_cpumaps();
-    std::vector<std::unique_ptr<x23::CoroPoll>> v(x23::llc_map->nbuckets());
-#if HAVE_SCHED_SETAFFINITY
-    for (int i = 0; i < x23::llc_map->nbuckets(); i++) {
-      auto cpus = x23::llc_map->cpuset(i) & *x23::allowed_cpus;
-      if (cpus.count())
-        v[i] = std::make_unique<PinnedCoroPoll>(default_threadpool(), cpus);
-    }
-#endif // HAVE_SCHED_SETAFFINITY
-    return v;
-  }();
-  if (llc < 0 || static_cast<size_t>(llc) >= polls.size() || !polls[llc])
-    return default_coropoll();
-  return *polls[llc];
+  if (LlcLane *lane = LlcLanes::get().at(llc))
+    return lane->cp;
+  return default_coropoll();
+}
+
+// The pool the calling thread works for, so that a hop to the background
+// stays in the caller's lane; default_threadpool() outside any pool.
+inline x23::ThreadPool &
+current_threadpool()
+{
+  if (x23::ThreadPool *pool = x23::ThreadPool::get_thread_pool())
+    return *pool;
+  return default_threadpool();
+}
+
+// co_await enter_next_lane() moves the calling coroutine into the next lane,
+// round robin, or into default_threadpool() if there are no lanes.  Each
+// request a hog-exec serves enters a lane this way, so its load spreads over
+// the lanes however many connections it arrives on.
+inline auto
+enter_next_lane()
+{
+  if (LlcLane *lane = LlcLanes::get().next())
+    return lane->pool.bg(lane->cpu);
+  return default_threadpool().bg();
 }
 
 // The first CPU in cpus this process may run on, if any.
