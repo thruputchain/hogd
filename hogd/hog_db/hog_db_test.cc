@@ -1052,8 +1052,8 @@ TEST_F(HogDbTest, NewDeploymentLockStagesNoNativeTokenAge)
   // too, staging a second, all-zero put to the same key that raced the
   // BalanceLock one in apply() (#1282).
   Address addr = make_address(kAddress);
-  LockContext ctx(&db_, BlockHeight{1}, make_address_metadata_item_key(addr),
-                  &cost_model_);
+  ItemKey item_key = make_address_metadata_item_key(addr);
+  LockContext ctx(&db_, BlockHeight{1}, item_key, &cost_model_);
   NewDeploymentLock lock(
       DeployedContractHash{.hash = sha256(Contract(ContractType::kNative)),
                            .contract_size = 10,
