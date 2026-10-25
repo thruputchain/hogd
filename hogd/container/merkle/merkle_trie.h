@@ -689,8 +689,8 @@ public:
 
   template<typename F> void for_each(F func)
   {
-    for (size_t i = 0; i < tries_.size(); i++) {
-      tries_[i]->for_each(func);
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie->for_each(func);
     }
   }
 

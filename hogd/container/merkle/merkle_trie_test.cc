@@ -10,6 +10,7 @@
 #include <memory>
 #include <print>
 #include <random>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
@@ -136,8 +137,8 @@ test_leaf_key_survives_splits_and_collapses(Allocator<Node>::Type allocator)
     ASSERT_TRUE(trie.insert(sibling, {}));
     check_leaf();
   }
-  for (auto it = siblings.rbegin(); it != siblings.rend(); ++it) {
-    ASSERT_TRUE(trie.remove(*it));
+  for (const auto &sibling : siblings | std::views::reverse) {
+    ASSERT_TRUE(trie.remove(sibling));
     check_leaf();
   }
   EXPECT_EQ(trie.get_root_hash(), original_root);
