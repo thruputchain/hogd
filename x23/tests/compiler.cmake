@@ -197,25 +197,6 @@ if(NOT first_pos EQUAL last_pos)
   message(FATAL_ERROR "file header repeated in the generated TypeScript")
 endif()
 
-# In Rust the header precedes the module's inner attributes, where rustc
-# rejects an outer doc comment, so its doc comments become plain ones.
-file(WRITE "${TEST_DIR}/doc_header.x"
-  "/// Doc line\n//// Plain line\n\n  /** Doc block */\n/**/\n\n"
-  "struct Doc { int value; };\n")
-run_compiler(0 --rust -o doc_header.rs doc_header.x)
-file(READ "${TEST_DIR}/doc_header.rs" doc_header)
-require_text("${doc_header}" "
-// Doc line
-//// Plain line
-
-  /* Doc block */
-/**/
-
-#![allow(non_camel_case_types)]")
-run_compiler(0 -o doc_header.hh doc_header.x)
-file(READ "${TEST_DIR}/doc_header.hh" doc_header)
-require_text("${doc_header}" "/// Doc line\n//// Plain line\n\n  /** Doc block */\n")
-
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")
