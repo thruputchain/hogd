@@ -3,6 +3,7 @@ add_subdirectory(test_support)
 # create base module library
 add_library(
   base_objects OBJECT
+  config_failure.cc
   init.cc
   io.cc
   json.cc
@@ -35,6 +36,7 @@ add_library(base_test_objects OBJECT
   chunk_run_sender_test.cc
   chunked_vector_test.cc
   cli_test.cc
+  config_failure_test.cc
   cpputil_test.cc
   io_test.cc
   json_test.cc

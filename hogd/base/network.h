@@ -4,9 +4,11 @@
 
 #include <bit>
 #include <cstdlib>
+#include <expected>
 #include <format>
 #include <string>
 #include <string_view>
+#include <sys/socket.h>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
@@ -40,6 +42,20 @@ inline std::string
 format_advertised_address(std::string_view bind_ip, uint16_t port)
 {
   return std::string(make_bind_host_port(bind_ip, port).show());
+}
+
+// Resolves a peer's [host_port], using DNS if the host is a name. On failure,
+// throws the x23::GaiError as a std::system_error rather than panicking, so
+// that if nothing catches it the process reports the bad address and exits
+// instead of aborting (see hogd/base/config_failure.h).
+inline sockaddr_storage
+resolve_host_port(const x23::HostPort &host_port)
+{
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      host_port.to_addr(/*dns=*/true);
+  if (!addr)
+    addr.error().raise("resolve {}", host_port);
+  return *addr;
 }
 
 inline int

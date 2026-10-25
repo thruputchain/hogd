@@ -15,6 +15,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
 #include "x23/mvar.h"
@@ -150,11 +151,7 @@ RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)
 {
-  x23::HostPort helper(host, port);
-  std::expected<sockaddr_storage, x23::GaiError> addr =
-      helper.to_addr(/*dns=*/true);
-  CHECK(addr.has_value());
-  return *addr;
+  return resolve_host_port(x23::HostPort(host, port));
 }
 
 inline sockaddr_storage
