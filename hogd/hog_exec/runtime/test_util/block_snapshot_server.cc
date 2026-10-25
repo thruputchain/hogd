@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 
-#include <cstdint>
 #include <mutex>
 #include <utility>
 #include <vector>

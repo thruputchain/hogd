@@ -1957,7 +1957,7 @@ TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   constexpr size_t kOverhead = kXdrMaxOf(std::type_identity<x23::rpc_msg>{}) +
                                kXdrMaxOf(std::type_identity<BlockID>{}) +
                                kXdrMaxOf(std::type_identity<TransactionID>{}) +
-                               2 * kWord;
+                               (2 * kWord);
   constexpr size_t kBudget = kCap - kOverhead;
   constexpr size_t kFraming =
       kXdrMaxOf(std::type_identity<AddressAndKey>{}) +

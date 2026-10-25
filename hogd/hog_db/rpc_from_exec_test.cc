@@ -37,6 +37,7 @@
 #include "hogd/hog_db/preserialized_reply.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
+#include "hogd/hog_db/status.h"
 #include "hogd/hog_db/storage_item_reply.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
