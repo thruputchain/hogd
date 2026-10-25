@@ -112,13 +112,13 @@ echo 'build clang tsan'
 ./scripts/build.sh -d build/llvm_tsan -c clang -f "-fsanitize=thread" -t Debug -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tests'
-ctest --test-dir build/llvm_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/llvm_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 echo 'build clang tsan release'
 ./scripts/build.sh -d build/llvm_tsan_release -c clang -f "-fsanitize=thread" -t Release -j 64 "${TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run llvm tsan tests release'
-ctest --test-dir build/llvm_tsan_release --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/llvm_tsan_release --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 # Rust mixed-language sanitizer builds use -Zexternal-clangrt, so keep this
 # schedule on Clang's sanitizer runtime rather than mixing Rust LLVM
@@ -254,7 +254,7 @@ echo 'build gcc tsan'
 ./scripts/build.sh -d build/gcc_tsan -c gcc -f "-fsanitize=thread" -t Debug -j 64 "${GCC_TSAN_CMAKE_FLAGS[@]}"
 
 echo 'run gcc tsan tests'
-ctest --test-dir build/gcc_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/gcc_tsan --parallel "${CTEST_JOBS}" --timeout 300 --output-on-failure
 
 # `set -e` aborts the script on a failing ctest, so this rm is reached only
 # once the tests have passed; a tree whose tests failed survives for the
