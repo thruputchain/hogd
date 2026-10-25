@@ -1701,6 +1701,68 @@ TEST(MerkleTriePrefix, GenerateAllHashesParallelMatchesSerial)
   EXPECT_EQ(serial_hash, parallel_hash);
 }
 
+// [walk] reserves its traversal stack for the deepest possible trie so that it
+// never allocates once it has started visiting nodes (see [free_all_nodes]).
+// This builds a trie of that depth, with one node per hex digit of a
+// maximum-length key, and runs every [walk] caller over it. If the reservation
+// is too small, the walk fails a CHECK.
+//
+// The keys are a chain of prefixes, each extending the previous one by
+// [key_step] hex digits. With a step of one, every node on the chain is a
+// branch. With a step of two, the chain alternates between branches and
+// one-digit extensions. The chain ends with a maximum-length key one digit
+// longer than the previous key, so that its last digit is a level of its own (a
+// leaf with an empty path) rather than part of a leaf's path.
+void
+test_walk_max_depth_trie(size_t key_step)
+{
+  std::vector<size_t> key_sizes;
+  for (size_t size = 1; size < HexArray::kMaxNumHexDigits; size += key_step) {
+    key_sizes.push_back(size);
+  }
+  ASSERT_EQ(key_sizes.back(), HexArray::kMaxNumHexDigits - 1);
+  key_sizes.push_back(HexArray::kMaxNumHexDigits);
+
+  MerkleTrie trie;
+  std::string value = "value";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  std::map<HexArray, SHA256Hash> expected;
+  for (size_t size : key_sizes) {
+    HexArray key(std::string(size, '1'));
+    EXPECT_TRUE(trie.insert(key, value_span));
+    expected[key] = sha256(value);
+  }
+
+  std::map<HexArray, SHA256Hash> seen;
+  trie.for_each([&seen](const std::pair<HexArray, SHA256Hash> &pair) {
+    for_each_func(seen, pair);
+  });
+  EXPECT_EQ(seen, expected);
+
+  trie.generate_all_hashes(/*num_threads=*/1);
+  EXPECT_TRUE(trie.check());
+  EXPECT_FALSE(trie.str().empty());
+
+  trie.clear();
+  EXPECT_TRUE(trie.empty());
+  seen.clear();
+  trie.for_each([&seen](const std::pair<HexArray, SHA256Hash> &pair) {
+    for_each_func(seen, pair);
+  });
+  EXPECT_TRUE(seen.empty());
+}
+
+TEST(MerkleTrie, WalkMaxDepthBranchChain)
+{
+  test_walk_max_depth_trie(/*key_step=*/1);
+}
+
+TEST(MerkleTrie, WalkMaxDepthBranchExtensionChain)
+{
+  test_walk_max_depth_trie(/*key_step=*/2);
+}
+
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
 // Tests for node encoding/decoding roundtrip.
