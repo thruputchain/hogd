@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "x23/async.h"
+#include "x23/config.h"
 #include "x23/cpumap.h"
 #include "x23/event.h"
 #include "x23/refcnt.h"
@@ -101,6 +102,8 @@ TEST(RpcMulticlient, ConstructorWithExplicitIpv6Bind)
   di.destroy_wait();
 }
 
+// Building a map per CPU needs the affinity API.
+#if HAVE_SCHED_SETAFFINITY
 TEST(RpcMulticlient, PlacementPicksEachConnectionsCoroPollAndReaderCpu)
 {
   TestServer impl;
@@ -149,5 +152,6 @@ TEST(RpcMulticlient, PlacementPicksEachConnectionsCoroPollAndReaderCpu)
   server_cp.poison(fd);
   di.destroy_wait();
 }
+#endif // HAVE_SCHED_SETAFFINITY
 
 } // namespace x23
