@@ -85,6 +85,109 @@ build_and_hash_trie(TrieType &trie, size_t num_threads)
   return trie.get_root_hash();
 }
 
+template<typename TrieType>
+void
+test_leaf_key_survives_splits_and_collapses(Allocator<Node>::Type allocator)
+{
+  TrieType trie(allocator);
+  const HexArray key("1234567");
+  const std::string value = "unchanged leaf";
+  const auto bytes = std::as_bytes(std::span(value));
+  ASSERT_TRUE(trie.insert(key, bytes));
+
+  Node *original_leaf = nullptr;
+  auto read_leaf_encoding = [&]() -> std::vector<std::byte> {
+    SHA256Hash *value_hash;
+    void *cookie;
+    if (!trie.find_begin(key, value_hash, cookie)) {
+      ADD_FAILURE() << "Missing leaf";
+      return {};
+    }
+    auto *leaf = static_cast<Node *>(cookie);
+    EXPECT_EQ(leaf->type, Node::Type::kLeaf);
+    EXPECT_EQ(leaf->path(), key);
+    EXPECT_EQ(*value_hash, sha256(value));
+    if (!original_leaf) {
+      original_leaf = leaf;
+    }
+    EXPECT_EQ(leaf, original_leaf);
+    auto encoding = leaf->get_node_encoding();
+    TrieType::find_end(cookie);
+    return encoding;
+  };
+  const auto original_encoding = read_leaf_encoding();
+  trie.generate_all_hashes();
+  const auto original_root = trie.get_root_hash();
+
+  // Split the leaf, split its extension, add a sibling, and add a value to
+  // an ancestor branch. None of these operations changes the existing leaf.
+  const std::vector<HexArray> siblings = {HexArray("1234568"),
+                                          HexArray("1299999"),
+                                          HexArray("1234560"),
+                                          HexArray("1234")};
+  auto check_leaf = [&] {
+    EXPECT_EQ(read_leaf_encoding(), original_encoding);
+    trie.generate_all_hashes();
+    EXPECT_TRUE(trie.check());
+    const auto [root, proof] = trie.get_proof(key);
+    EXPECT_TRUE(TrieType::prove(root, proof, key, bytes));
+  };
+  for (const auto &sibling : siblings) {
+    ASSERT_TRUE(trie.insert(sibling, {}));
+    check_leaf();
+  }
+  for (auto it = siblings.rbegin(); it != siblings.rend(); ++it) {
+    ASSERT_TRUE(trie.remove(*it));
+    check_leaf();
+  }
+  EXPECT_EQ(trie.get_root_hash(), original_root);
+
+  // A key that is itself a prefix becomes a branch value, then a full-key
+  // leaf again when its last descendant is removed.
+  const HexArray descendant("1234567a");
+  ASSERT_TRUE(trie.insert(descendant, {}));
+  trie.generate_all_hashes();
+  const auto [root, proof] = trie.get_proof(key);
+  EXPECT_TRUE(TrieType::prove(root, proof, key, bytes));
+  ASSERT_TRUE(trie.remove(descendant));
+  check_leaf();
+  EXPECT_EQ(trie.get_root_hash(), original_root);
+}
+
+TEST(MerkleTrie, LeafKeySurvivesSplitsAndCollapses)
+{
+  for (auto allocator :
+       {Allocator<Node>::Type::kDefault, Allocator<Node>::Type::kBump}) {
+    test_leaf_key_survives_splits_and_collapses<MerkleTrie>(allocator);
+  }
+}
+
+TEST(MerkleTriePrefix, LeafKeySurvivesSplitsAndCollapses)
+{
+  for (auto allocator :
+       {Allocator<Node>::Type::kDefault, Allocator<Node>::Type::kBump}) {
+    test_leaf_key_survives_splits_and_collapses<MerkleTriePrefix>(allocator);
+  }
+}
+
+TEST(MerkleTriePrefix, SingleTransactionRootMatchesBootstrap)
+{
+  // Also checked by chuckd's hosted bootstrap helper. Both routing nibbles
+  // are retained in the leaf's full 32-byte key.
+  SHA256Hash tx_hash;
+  for (size_t i = 0; i < tx_hash.size(); ++i) {
+    tx_hash[i] = static_cast<unsigned char>(i);
+  }
+  MerkleTriePrefix trie;
+  const HexArray key(tx_hash);
+  ASSERT_TRUE(trie.insert(key, {}));
+  trie.generate_all_hashes();
+  EXPECT_EQ(HexArray(trie.get_root_hash()).str(),
+            "ec2911947930e9266107044fdec7d6c75134868cf8380e45aec57d50dfaad1c4");
+  const auto [root, proof] = trie.get_proof(key);
+  EXPECT_TRUE(MerkleTriePrefix::prove(root, proof, key, {}));
+}
+
 // Tests that [size()] and [empty()] return expected values.
 TEST(MerkleTrie, SizeAndEmpty)
 {
@@ -632,7 +735,7 @@ TEST(MerkleTrie, BranchBranchLeaf)
   EXPECT_EQ(
       HexArray(trie.get_root_hash()),
       HexArray(
-          "b5f9b456037a1449926a578ec7bcf9b1a0f0815e059185ac42d55bebb757ad1d"));
+          "07442370dac22b93a01394f01ad71552a4d4c3e3cbeb36379d593bbbc70cd19a"));
 }
 
 // These tests add three KV pairs to the trie, with this structure:
@@ -1711,8 +1814,8 @@ TEST(MerkleTriePrefix, GenerateAllHashesParallelMatchesSerial)
 // [key_step] hex digits. With a step of one, every node on the chain is a
 // branch. With a step of two, the chain alternates between branches and
 // one-digit extensions. The chain ends with a maximum-length key one digit
-// longer than the previous key, so that its last digit is a level of its own (a
-// leaf with an empty path) rather than part of a leaf's path.
+// longer than the previous key, so that its last digit adds a level of its own
+// ending in a leaf.
 void
 test_walk_max_depth_trie(size_t key_step)
 {
@@ -2026,6 +2129,43 @@ TEST(MerkleTrie, ProveRejectsWrongBranchSlot)
       MerkleTrie::prove(root_hash, node_encodings, real_key, value_span));
   EXPECT_FALSE(MerkleTrie::prove(root_hash, node_encodings, forged_branch_key,
                                  value_span));
+}
+
+TEST(MerkleTrie, FullKeyLeafProofRequiresMatchingAncestorPath)
+{
+  const HexArray key("1234");
+  Node root;
+  Node extension;
+  Node leaf;
+  leaf.init_leaf(&extension);
+  leaf.path() = key;
+  leaf.value_hash() = sha256(std::span<const std::byte>());
+  leaf.hash = leaf.compute_node_hash();
+  extension.init_extension(&root);
+  extension.path() = HexArray("23");
+  extension.extension_child() = &leaf;
+  root.branch_children()[1] = &extension;
+
+  auto proves = [&] {
+    extension.hash = extension.compute_node_hash();
+    std::vector<std::byte> proof;
+    for (const Node *node : {&leaf, &extension, &root}) {
+      const auto &encoding = node->get_node_encoding();
+      proof.insert(proof.end(), encoding.begin(), encoding.end());
+    }
+    return MerkleTrie::prove(root.compute_node_hash(), proof, key, {});
+  };
+  ASSERT_TRUE(proves());
+
+  // Recompute all hash links and the root after changing the routing. The
+  // terminal leaf still commits to the requested key, which is not enough.
+  root.branch_children()[1] = nullptr;
+  root.branch_children()[9] = &extension;
+  EXPECT_FALSE(proves());
+  root.branch_children()[9] = nullptr;
+  root.branch_children()[1] = &extension;
+  extension.path() = HexArray("99");
+  EXPECT_FALSE(proves());
 }
 
 TEST(MerkleTriePrefix, ProveRejectsWrongBranchSlot)
