@@ -179,7 +179,7 @@ check_extension(const Node &extension)
 }
 
 bool
-check_leaf(const Node &leaf)
+check_leaf(const Node &leaf, const HexArray &path)
 {
   bool ret = true;
   size_t num_children = get_num_children(leaf);
@@ -190,6 +190,12 @@ check_leaf(const Node &leaf)
   // Leaves retain the complete key. An empty key is held in the root branch.
   if (leaf.path().empty()) {
     std::println("Unexpected empty key in leaf");
+    ret = false;
+  }
+  if (leaf.path().size() < path.size() ||
+      leaf.path().get_subarray(0, path.size()) != path) {
+    std::println("Leaf key {} does not start with its routing path {}",
+                 leaf.path().str(), path.str());
     ret = false;
   }
   if (!leaf.value_hash()) {
@@ -239,13 +245,10 @@ MerkleTrie::string_from_node(const Node &node)
 
 // static
 bool
-MerkleTrie::check_helper(Node *root)
+MerkleTrie::check_helper(Node *root, const HexArray &prefix)
 {
-
-  HexArray prefix;
   bool ret = true;
-  auto f = [&](const HexArray & /*path*/, const Node &node,
-               const Node *parent) {
+  auto f = [&](const HexArray &path, const Node &node, const Node *parent) {
     if (node.rw_lock.is_locked_relaxed()) {
       std::println("The node is locked.");
       ret = false;
@@ -269,7 +272,7 @@ MerkleTrie::check_helper(Node *root)
       ret = check_extension(node) && ret;
       break;
     case Node::Type::kLeaf:
-      ret = check_leaf(node) && ret;
+      ret = check_leaf(node, path) && ret;
       break;
     }
   };

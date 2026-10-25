@@ -86,7 +86,7 @@ public:
   }
 
   // Performs basic sanity checks on the trie.
-  bool check() { return check_helper(&root_); }
+  bool check() { return check_helper(&root_, root_prefix_); }
 
   // Returns the hash of the root node in the trie.
   SHA256Hash get_root_hash()
@@ -173,9 +173,13 @@ public:
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
       switch (node.type) {
       case Node::Type::kBranch:
-      case Node::Type::kLeaf:
         if (node.value_hash()) {
           func({path, *node.value_hash()});
+        }
+        break;
+      case Node::Type::kLeaf:
+        if (node.value_hash()) {
+          func({node.path(), *node.value_hash()});
         }
         break;
       default:
@@ -195,7 +199,7 @@ private:
   static std::string string_from_node(const Node &node);
 
   // Recursive helper function for [check()].
-  static bool check_helper(Node *root);
+  static bool check_helper(Node *root, const HexArray &prefix);
 
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *find_node(const Key &k);
@@ -428,8 +432,9 @@ private:
 
         NodeType &n = *info.node;
         if constexpr (TrackPath) {
-          // A leaf stores its complete key, including the root prefix.
-          f(n.path(), n, info.parent);
+          // [info.path] is the routing path to the leaf. The leaf itself
+          // stores its complete key, which must start with that path.
+          f(info.path, n, info.parent);
         }
         else {
           f(n, info.parent);
