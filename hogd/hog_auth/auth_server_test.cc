@@ -34,6 +34,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
 #include "integration.hh"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"

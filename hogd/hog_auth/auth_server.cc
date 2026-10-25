@@ -211,9 +211,14 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
 x23::Async<IntroAuthResult>
 AuthServer::subscribe_and_register(AuthCard card)
 {
-  CHECK(mempool_client_.has_value());
+  if (!mempool_client_) {
+    co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+  }
+  // [set_mempool_client] sets the client once and nothing resets it, so the
+  // reference outlives the subscription's suspension.
+  sched_auth_client_t &mempool_client = *mempool_client_;
   co_await subscribe_to_auth_data_changes(card);
-  co_return co_await mempool_client_->mempoolauth_intro_auth(std::move(card));
+  co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
 }
 
 x23::Async<AuthStatus<AuthCacheEntry>>

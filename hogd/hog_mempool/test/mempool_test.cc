@@ -71,6 +71,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
