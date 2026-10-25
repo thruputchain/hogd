@@ -10,7 +10,9 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -33,6 +35,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -845,6 +848,24 @@ HogDbDAO::apply(ChangeSet &changes, WorkerPool &pool)
                                   vecs.push_back(std::move(vec));
                                 }
                               });
+  }
+
+  // Each key may be staged at most once: the vectors flush in parallel and in
+  // no fixed order, so two changes to one key would leave the surviving value
+  // to scheduling (#1282). Locks own disjoint keys, so a repeat means two
+  // locks staged the same row.
+  if constexpr (is_debug_build()) {
+    std::unordered_set<std::string_view> staged;
+    for (const auto &vec : vecs) {
+      for (const auto &change : vec) {
+        auto key = change.key();
+        std::string_view key_view(reinterpret_cast<const char *>(key.data()),
+                                  key.size());
+        if (!staged.insert(key_view).second) {
+          panic("ChangeSet staged key {} twice", encode_hex(key));
+        }
+      }
+    }
   }
 
   std::atomic<bool> had_error{false};
