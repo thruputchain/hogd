@@ -3773,29 +3773,38 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
       << "insert-consume-insert via TryInvoke must succeed";
 }
 
-TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
+// Each successful TryInvoke folds its caller's savepoints into one, so a frame
+// can make more sequential TryInvokes than the savepoint depth admits at once.
+// Every child adds to the same key, so each push re-sends it and the database
+// folds versions of one item. HogDb refuses a push past its savepoint depth, so
+// the commit succeeding there shows the stack really is folded.
+TEST_P(TryInvokeTest, SequentialTryInvokesPastSavepointDepthCommit)
 {
-  // One savepoint slot is reserved for the root commit frame, so the
-  // effective child TryInvoke cap is kMaxSavepointDepth - 1.
-  static constexpr int kChildCap = kMaxSavepointDepth - 1;
+  static constexpr int kTryInvokes = kMaxSavepointDepth + 1;
 
-  static constexpr ContractAddress kAddressNoop = make_contract_address(0);
+  static constexpr ContractAddress kAddressAdder = make_contract_address(0);
   static constexpr ContractAddress kAddressLooper = make_contract_address(1);
 
   auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_noop;
-    fns_noop.emplace(
-        0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
+    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_adder;
+    fns_adder.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              make_storage_key("count"), static_cast<int128_t const *>(nullptr),
+              int128_t{1});
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
           co_return InvokeStatus<void>{};
         });
-    auto noop = std::make_unique<NativeContract>(std::move(fns_noop));
+    auto adder = std::make_unique<NativeContract>(std::move(fns_adder));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_looper;
     fns_looper.emplace(
         0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          int successes = 0;
-          for (int i = 0; i < kChildCap + 1; i++) {
+          for (int i = 0; i < kTryInvokes; i++) {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
@@ -3803,121 +3812,31 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
             };
             CopyableInvokeOutputs outputs{};
             auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
-                kAddressNoop, std::span<const std::byte>{},
+                kAddressAdder, std::span<const std::byte>{},
                 std::span<uint32_t>{}, inputs, outputs);
             if (!r.has_value()) {
               co_return InvokeError{InvokeErrorCode::Deterministic};
             }
-            // Every child runs (the depth-cap overflow is converted to a
-            // deterministic failure, so the syscall still returns
-            // kSyscallErrorCodeNone); a child committed only when its
-            // frame_status is Return.
-            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-                outputs.frame_status == InvocationFrameStatusCode::Return) {
-              successes++;
+            // A child committed only when its frame_status is Return.
+            if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+                outputs.frame_status != InvocationFrameStatusCode::Return) {
+              ADD_FAILURE() << "TryInvoke " << i << " did not commit";
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
-          }
-          if (successes != kChildCap) {
-            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           co_return InvokeStatus<void>{};
         });
     auto looper = std::make_unique<NativeContract>(std::move(fns_looper));
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(noop));
+    contract_map.emplace(0, std::move(adder));
     contract_map.emplace(1, std::move(looper));
     return std::make_unique<NativeContext>(std::move(contract_map));
   };
 
   auto context = make_context();
 
-  ContractAddress addrs[] = {kAddressNoop, kAddressLooper};
-  for (int i = 0; i < 2; ++i) {
-    auto c = make_native_contract(i);
-    write_contract(c);
-    write_deployment(addrs[i], c);
-    setup_grant_storage_token(addrs[i], 1'000'000'000);
-  }
-
-  auto handler_tx = SignedTransaction{
-      .tx =
-          Transaction{.invocation =
-                          Invocation{.invoked_address = kAddressLooper,
-                                     .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = kDefaultMaxTxGas,
-                                     .calldata = {}},
-                      .uniquifier = make_new_uniquifier()}};
-  auto handler = make_new_system_call_handler(handler_tx, *context);
-
-  auto res = handler.root_invoke()();
-  ASSERT_TRUE(res.is_root_success());
-}
-
-TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
-{
-  // Regression test: after exhausting the child TryInvoke cap, root commit
-  // must still succeed because one savepoint slot is reserved for it.
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "HogDb savepoint cap is required for this regression";
-  }
-
-  static constexpr int kChildCap = kMaxSavepointDepth - 1;
-
-  static constexpr ContractAddress kAddressNoop = make_contract_address(0);
-  static constexpr ContractAddress kAddressLooper = make_contract_address(1);
-
-  auto make_context = []() -> std::unique_ptr<RuntimeContext> {
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_noop;
-    fns_noop.emplace(
-        0, [](NativeSyscallContext &) -> x23::Async<InvokeStatus<void>> {
-          co_return InvokeStatus<void>{};
-        });
-    auto noop = std::make_unique<NativeContract>(std::move(fns_noop));
-
-    std::unordered_map<Runtime::MethodID, NativeContract::function_t>
-        fns_looper;
-    fns_looper.emplace(
-        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
-          int successes = 0;
-          for (int i = 0; i < kChildCap + 1; i++) {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 0,
-                .gas_limit = UINT64_MAX,
-                .flags = std::to_underlying(InvokeFlag::TryInvoke),
-            };
-            CopyableInvokeOutputs outputs{};
-            auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
-                kAddressNoop, std::span<const std::byte>{},
-                std::span<uint32_t>{}, inputs, outputs);
-            if (!r.has_value()) {
-              co_return InvokeError{InvokeErrorCode::Deterministic};
-            }
-            // Every child runs (the depth-cap overflow is converted to a
-            // deterministic failure, so the syscall still returns
-            // kSyscallErrorCodeNone); a child committed only when its
-            // frame_status is Return.
-            if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-                outputs.frame_status == InvocationFrameStatusCode::Return) {
-              successes++;
-            }
-          }
-          if (successes != kChildCap) {
-            co_return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          co_return InvokeStatus<void>{};
-        });
-    auto looper = std::make_unique<NativeContract>(std::move(fns_looper));
-
-    std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
-    contract_map.emplace(0, std::move(noop));
-    contract_map.emplace(1, std::move(looper));
-    return std::make_unique<NativeContext>(std::move(contract_map));
-  };
-
-  auto context = make_context();
-
-  ContractAddress addrs[] = {kAddressNoop, kAddressLooper};
+  ContractAddress addrs[] = {kAddressAdder, kAddressLooper};
   for (int i = 0; i < 2; ++i) {
     auto c = make_native_contract(i);
     write_contract(c);

@@ -89,15 +89,32 @@ public:
   // abort rolls back pending changes to the BlockTX.
   void abort();
 
-  // create_savepoint creates a savepoint of the current transaction state. It
-  // returns a depth that can be used to restore to this state later.
-  int create_savepoint();
+  // create_savepoint creates a savepoint of the current transaction state,
+  // named [id], which must exceed every id on the stack. It returns a depth
+  // that can be used to restore to this state later.
+  int create_savepoint(uint32_t id);
+  // As above, named one past the head's id.
+  int create_savepoint()
+  {
+    return create_savepoint(savepoint_ids_.empty() ? 1
+                                                   : savepoint_ids_.back() + 1);
+  }
   // rollback_to_savepoint restores the transaction state to a savepoint.
   void rollback_to_savepoint(int depth);
-  // release_savepoint removes a savepoint and frees its associated resources.
-  // If other savepoints were made after this savepoint, they will be removed
-  // as well.
-  void release_savepoint(int depth);
+  // merge_savepoints merges each savepoint named in [ids] into the one
+  // directly below it, which keeps its own id and then holds the latest
+  // version of every change made in either. Rolling back past the merged
+  // savepoint still restores the state from before it, but the state between
+  // the two is discarded. Every id must be on the stack, none may be the
+  // bottom savepoint, and none may repeat; see can_merge_savepoints().
+  void merge_savepoints(std::span<const uint32_t> ids);
+  // Whether merge_savepoints() accepts [ids], with [pushed_id] counted as the
+  // next savepoint's.
+  bool can_merge_savepoints(std::span<const uint32_t> ids,
+                            uint32_t pushed_id) const;
+
+  // The ids of the savepoints on the stack, from the bottom; increasing.
+  std::span<const uint32_t> savepoint_ids() const { return savepoint_ids_; }
 
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }
@@ -264,6 +281,8 @@ private:
   // reference must outlive every other part of teardown (#2959).
   BlockTXRef block_;
   unsigned int tx_depth_{0};
+  // savepoint_ids_[d - 1] names savepoint d.
+  std::vector<uint32_t> savepoint_ids_;
   std::optional<DbConflictCode> last_conflict_reason_;
   std::unordered_map<ItemKey, std::vector<ItemVersion>> changes_;
   // Whenever you request a balance change (from a user action),
@@ -291,12 +310,21 @@ private:
   // get_storage_balance_change returns the storage balance change for the given
   // address.
   HogDbStatus<Balance> get_storage_balance_change(Address const &addr) const;
+
+  // fold_savepoints folds runs of savepoints counted down the stack from the
+  // head: the [runs[0]] savepoints ending at the head become one, the
+  // [runs[1]] below those become one, and so on. A run of 0 or 1 changes
+  // nothing; the runs' sum must not exceed the head. savepoint_ids_ is left to
+  // the caller.
+  void fold_savepoints(std::span<const uint32_t> runs);
 };
 
 inline int
-InvokeTX::create_savepoint()
+InvokeTX::create_savepoint(uint32_t id)
 {
   CHECK(tx_depth_ < max_savepoint_depth());
+  assert(savepoint_ids_.empty() || id > savepoint_ids_.back());
+  savepoint_ids_.push_back(id);
   return ++tx_depth_;
 }
 

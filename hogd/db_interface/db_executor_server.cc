@@ -78,7 +78,9 @@ DbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 
 TryPushSubtransactionResult
 DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                           StorageDeltaBatch const &batch)
+                                           StorageDeltaBatch const &batch,
+                                           SubtransactionID id,
+                                           SubtransactionMerges const &merges)
 {
   // test double: produces no diagnostics
   auto block_data = block_manager_->get_block_data(block);
@@ -86,7 +88,7 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
   }
 
-  block_data->push_subtransaction(tx);
+  block_data->push_subtransaction(tx, id);
 
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -110,7 +112,8 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     }
   }
 
-  return TryPushSubtransactionResult(RPCError::kRPCNone);
+  return TryPushSubtransactionResult(
+      block_data->merge_subtransactions(tx, merges));
 }
 
 RPCError

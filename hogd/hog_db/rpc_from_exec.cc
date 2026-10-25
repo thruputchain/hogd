@@ -228,8 +228,9 @@ HogDbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 }
 
 TryPushSubtransactionResult
-HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch batch)
+HogDbExecutorRpc::try_push_new_subtransaction(
+    BlockID block, TransactionID tx, StorageDeltaBatch batch,
+    SubtransactionID id, SubtransactionMerges const &merges)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -244,7 +245,14 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (itx->get_savepoint_head() >= itx->max_savepoint_depth()) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
-  int depth = itx->create_savepoint();
+  // A reused id, or a merge naming a savepoint not on the stack, the bottom
+  // one, or one twice, is misbehavior too.
+  auto ids = itx->savepoint_ids();
+  if ((!ids.empty() && id <= ids.back()) ||
+      !itx->can_merge_savepoints(merges, id)) [[unlikely]] {
+    return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
+  }
+  int depth = itx->create_savepoint(id);
 
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -346,6 +354,10 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (first_err != RPCError::kRPCNone) {
     return fail(first_err);
   }
+  // Merge only once every lock, balance locks included, is held:
+  // sync_balance_locks() reads the versions at the new depth, and a failed
+  // push must leave the savepoints below it intact for the executor to pop.
+  itx->merge_savepoints(merges);
   itx->assert_is_valid();
   return TryPushSubtransactionResult(RPCError::kRPCNone);
 }

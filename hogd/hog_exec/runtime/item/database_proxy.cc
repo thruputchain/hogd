@@ -462,10 +462,12 @@ footprint_bound(FlaggedStorageDelta const &fd)
 
 // Bytes of the try_push_new_subtransaction request that count against the cap
 // but are NOT per-delta: the rpc_msg header, the BlockID and TransactionID
-// args, and the StorageDeltaBatch Vec length prefix. footprint_bound accounts
-// for the FlaggedStorageDeltas themselves.
+// args, the StorageDeltaBatch Vec length prefix, the SubtransactionID, and the
+// SubtransactionMerges Vec length prefix. footprint_bound accounts for the
+// FlaggedStorageDeltas themselves, and merges_bound for the merges.
 constexpr size_t kMessageOverhead = kXdrMax<x23::rpc_msg> + kXdrMax<BlockID> +
-                                    kXdrMax<TransactionID> + kXdrWord;
+                                    kXdrMax<TransactionID> + kXdrWord +
+                                    kXdrMax<SubtransactionID> + kXdrWord;
 static_assert(kMessageOverhead < kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
@@ -480,12 +482,24 @@ constexpr size_t kMaxSubtransactionPushFootprint =
 static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
               "the largest possible single delta must fit one push");
 
+// The merges themselves, one word each. Charged as sent rather than at the
+// type's maximum: only proposal mode sends any, about one per open frame, so a
+// fixed maximum would turn away batches that fit. Validation sends none at the
+// root commit, so it never refuses a push the proposer's larger message fit.
+size_t
+merges_bound(SubtransactionMerges const &merges)
+{
+  return kXdrWord * merges.size();
+}
+
 } // namespace
 
 x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
+                                           SubtransactionID id,
+                                           SubtransactionMerges const &merges,
                                            DbConflictResult *conflict_out)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
@@ -505,12 +519,14 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
            "footprint_bound overload for the changed delta layout");
     footprint += bound;
   }
-  if (footprint + kMessageOverhead > kExecToDbMessageCap) {
+  assert(merges_bound(merges) + kXdrWord == x23::xdr_size(merges));
+  const size_t overhead = kMessageOverhead + merges_bound(merges);
+  if (footprint + overhead > kExecToDbMessageCap) {
     debug(
         "rejecting subtransaction push as a conflict: delta-batch footprint "
         "{} + message overhead {} exceeds the {}-byte executor->HogDb message "
         "cap",
-        footprint, kMessageOverhead, kExecToDbMessageCap);
+        footprint, overhead, kExecToDbMessageCap);
     co_return false;
   }
 
@@ -520,8 +536,9 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
-    auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
-                                                            delta_batch);
+    auto res =
+        co_await client_.try_push_new_subtransaction(block_id, tx_id,
+                                                     delta_batch, id, merges);
     co_await default_threadpool().bg();
     switch (res.error()) {
     case RPCError::kRPCNone:
@@ -622,7 +639,8 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 }
 
 x23::Async<SystemStatus<bool>>
-PerTransactionDatabaseProxy::try_push_current_subtransaction()
+PerTransactionDatabaseProxy::try_push_current_subtransaction(
+    SubtransactionID id, SubtransactionMerges const &merges)
 {
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -643,7 +661,8 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
 
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
-      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
+      block_id_, tx_id_, current_subtransaction_batch_, id, merges,
+      &last_push_conflict_);
   current_subtransaction_batch_.clear();
   co_return r;
 }

@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <optional>
+#include <span>
 #include <utility>
 
 #include "contract.hh"
@@ -177,10 +178,10 @@ BlockState::abort_transaction(TransactionID txid)
 }
 
 void
-BlockState::push_subtransaction(TransactionID txid)
+BlockState::push_subtransaction(TransactionID txid, uint32_t id)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  tx.push_subtransaction();
+  tx.push_subtransaction(id);
 }
 
 RPCError
@@ -188,6 +189,14 @@ BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
   return tx.pop_subtransactions(count);
+}
+
+RPCError
+BlockState::merge_subtransactions(TransactionID txid,
+                                  std::span<const uint32_t> ids)
+{
+  auto [tx, tx_lock] = tx_manager_.get(txid);
+  return tx.merge_subtransactions(ids);
 }
 
 Nondeterministic<std::optional<QueueEntry>>

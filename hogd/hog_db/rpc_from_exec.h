@@ -135,9 +135,13 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
+  // Pushes subtransaction [id]; on success, merges each of [merges] into the
+  // subtransaction below it (see SubtransactionMerges in
+  // executor_to_db_rpc.x).
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch batch);
+                              StorageDeltaBatch batch, SubtransactionID id,
+                              SubtransactionMerges const &merges);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 

@@ -51,10 +51,6 @@ constexpr ContractAddress kAddressNoop =
 constexpr ContractAddress kAddressDriver =
     NativeContractTestFramework::make_contract_address(1);
 
-// One savepoint slot is reserved for the root commit, so the configured depth
-// admits exactly this many child TryInvokes.
-constexpr uint32_t kChildCap = kSavepointDepth - 1;
-
 // A chain of `depth` nested AuthTokenNodes.
 AuthTokenNode
 make_token_tree(ContractAddress const &consumer, uint32_t depth)
@@ -156,15 +152,17 @@ private:
   }
 };
 
-// One savepoint slot is reserved for the root commit, so the configured
-// depth admits exactly depth - 1 child TryInvokes; the one after fails
-// deterministically without the syscall itself erroring.
-TEST_P(ExecutionLimitsTest, TryInvokeStopsAtConfiguredSavepointDepth)
+// The configured depth bounds the savepoints open frames hold at once, and
+// each successful TryInvoke folds its caller's into one, so one frame's
+// sequential TryInvokes all commit even past the configured depth.
+// ProposeValidateSavepointCapTest pins where a configured depth is reached.
+TEST_P(ExecutionLimitsTest, SequentialTryInvokesFoldUnderConfiguredDepth)
 {
+  static constexpr uint32_t kTryInvokes = 2 * kSavepointDepth;
   const bool ok = run_driver(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t successes = 0;
-        for (uint32_t i = 0; i < kChildCap + 1; i++) {
+        for (uint32_t i = 0; i < kTryInvokes; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
@@ -182,8 +180,8 @@ TEST_P(ExecutionLimitsTest, TryInvokeStopsAtConfiguredSavepointDepth)
             successes++;
           }
         }
-        if (successes != kChildCap) {
-          ADD_FAILURE() << "expected " << kChildCap
+        if (successes != kTryInvokes) {
+          ADD_FAILURE() << "expected " << kTryInvokes
                         << " committed TryInvokes, got " << successes;
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }

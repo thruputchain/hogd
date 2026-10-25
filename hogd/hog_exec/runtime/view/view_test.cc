@@ -659,14 +659,15 @@ TEST_F(ViewTest, ViewTryInvokeFailsWhenSuppliedFalse)
             InvocationFrameStatusCode::Return);
 }
 
-// The child TryInvoke depth cap holds in a view exactly as it does in
-// proposal and validation: with every TryInvoke bit defaulting to true, a
-// view still admits only kMaxSavepointDepth - 1 successful children, and the
-// next one fails deterministically. The same looper runs under proposal in
-// TryInvokeTest.TryInvokeHitsSavepointDepthLimit.
-TEST_F(ViewTest, ViewTryInvokeHitsSavepointDepthLimit)
+// The savepoint cap counts savepoints in a view exactly as it does in proposal
+// and validation: each successful TryInvoke folds its caller's into one, so
+// with every TryInvoke bit defaulting to true a view admits more sequential
+// children than the savepoint depth. The same looper runs under proposal in
+// TryInvokeTest.SequentialTryInvokesPastSavepointDepthCommit, and
+// InvocationFrameDepthCapTest pins where a view does reach the cap.
+TEST_F(ViewTest, ViewSequentialTryInvokesPastSavepointDepth)
 {
-  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
+  static constexpr uint32_t kTryInvokes = kMaxSavepointDepth + 1;
   static constexpr ContractAddress kCallerAddr =
       NativeContractTestFramework::make_contract_address(10);
   static constexpr ContractAddress kCalleeAddr =
@@ -681,7 +682,7 @@ TEST_F(ViewTest, ViewTryInvokeHitsSavepointDepthLimit)
   fns_setup.emplace(
       1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t successes = 0;
-        for (uint32_t i = 0; i < kChildCap + 1; i++) {
+        for (uint32_t i = 0; i < kTryInvokes; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
@@ -694,10 +695,7 @@ TEST_F(ViewTest, ViewTryInvokeHitsSavepointDepthLimit)
           if (!r.has_value()) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          // Every child runs (the depth-cap overflow is converted to a
-          // deterministic failure, so the syscall still returns
-          // kSyscallErrorCodeNone); a child committed only when its
-          // frame_status is Return.
+          // A child committed only when its frame_status is Return.
           if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
               outputs.frame_status == InvocationFrameStatusCode::Return) {
             successes++;
@@ -730,8 +728,8 @@ TEST_F(ViewTest, ViewTryInvokeHitsSavepointDepthLimit)
   ASSERT_EQ(buf.size(), sizeof(uint32_t));
   uint32_t successes = 0;
   std::memcpy(&successes, buf.data(), sizeof(successes));
-  EXPECT_EQ(successes, kChildCap)
-      << "a view must admit exactly kMaxSavepointDepth - 1 child TryInvokes";
+  EXPECT_EQ(successes, kTryInvokes)
+      << "a view must admit every sequential child TryInvoke";
 }
 
 // WAI: view mode defaults missing TryInvoke bits to true, so a caller that

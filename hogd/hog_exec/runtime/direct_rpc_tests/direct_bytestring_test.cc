@@ -1942,7 +1942,9 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
 // The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
 // (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
 // type-derived footprint lands exactly on the budget is pushed; one XDR word
-// (4 bytes) more is rejected as a clean conflict. The bound arithmetic is
+// (4 bytes) more is rejected as a clean conflict. The push merges nothing, so
+// its SubtransactionMerges cost only their length prefix, beside its
+// SubtransactionID. The bound arithmetic is
 // mirrored from database_proxy.cc, so a change to the cap, the message
 // overhead, or the per-delta bound moves this boundary and fails the test --
 // an off-by-one tightening would abort transactions other validators accept.
@@ -1956,7 +1958,7 @@ TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   constexpr size_t kOverhead = kXdrMaxOf(std::type_identity<x23::rpc_msg>{}) +
                                kXdrMaxOf(std::type_identity<BlockID>{}) +
                                kXdrMaxOf(std::type_identity<TransactionID>{}) +
-                               kWord;
+                               (3 * kWord);
   constexpr size_t kBudget = kCap - kOverhead;
   constexpr size_t kFraming =
       kXdrMaxOf(std::type_identity<AddressAndKey>{}) +
