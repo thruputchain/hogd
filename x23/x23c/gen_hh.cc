@@ -839,12 +839,13 @@ Gen::type_name(const Declaration &d, bool generate)
 }
 
 string
-gen_hh(vector<Definition> *defs)
+gen_hh(vector<Definition> *defs, string const &header)
 {
   Gen gs;
-  gs.prtop(R"(// -*-C++-*-
-
-#pragma once
+  gs.top_ = "// -*-C++-*-\n\n";
+  if (!header.empty())
+    gs.top_ += header + '\n';
+  gs.prtop(R"(#pragma once
 
 #include <array>
 #include <compare>

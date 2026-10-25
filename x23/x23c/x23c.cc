@@ -96,10 +96,23 @@ lex(XdrCtx *xc)
   };
   int sym;
   int comment_end_line = 0;
+  // Comments opening the file that a blank line sets off from what follows
+  // are its header -- typically a copyright and license notice -- rather
+  // than a comment on the first definition, and a notice must survive into
+  // the generated code.
+  const auto take_header = [xc, &loc, &comment_end_line] {
+    if (xc->syms.empty() && !xc->block_comment.empty() &&
+        loc.first_line > comment_end_line) {
+      if (!xc->header.empty())
+        xc->header += '\n';
+      xc->header += std::exchange(xc->block_comment, {});
+    }
+  };
   do {
     string text;
     sym = real_yylex(&text, &loc, s, xc);
     if (sym == T_BLOCKCOMMENT) {
+      take_header();
       if (!xc->block_comment.empty())
         xc->block_comment += '\n';
       xc->block_comment += text;
@@ -112,6 +125,7 @@ lex(XdrCtx *xc)
         // whole lines, so a comment sharing its line with code -- or one
         // at end of file with no trailing newline -- arrives here.  With
         // no preceding token to trail, it belongs to whatever comes next.
+        take_header();
         if (!xc->block_comment.empty())
           xc->block_comment += '\n';
         xc->block_comment += text;
@@ -124,6 +138,7 @@ lex(XdrCtx *xc)
       continue;
     }
     else {
+      take_header();
       if (!xc->block_comment.empty() && loc.first_line > comment_end_line)
         xc->block_comment += '\n';
       xc->syms.push_back(TerminalInfo{
@@ -284,13 +299,14 @@ main(int argc, char **argv)
   std::string res;
 
   if (rust_module) {
-    res = gen_rs(&ctx.defs, recursive_types, rust_features, rust_no_features);
+    res = gen_rs(&ctx.defs, ctx.header, recursive_types, rust_features,
+                 rust_no_features);
   }
   else if (ts_module) {
-    res = gen_ts(&ctx.defs);
+    res = gen_ts(&ctx.defs, ctx.header);
   }
   else {
-    res = gen_hh(&ctx.defs);
+    res = gen_hh(&ctx.defs, ctx.header);
   }
 
   int outfd = outfile == "-"

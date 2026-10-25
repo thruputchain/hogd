@@ -1219,7 +1219,7 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
 // ---- Entry point ----
 
 std::string
-gen_ts(vector<Definition> *defs)
+gen_ts(vector<Definition> *defs, string const &header)
 {
   GenTs gs;
   gs.process(*defs);
@@ -1229,6 +1229,8 @@ gen_ts(vector<Definition> *defs)
                     "\n"
                     "// Generated from x23c commit: " +
                     x23::git_commit_hash() + "\n\n";
+  if (!header.empty())
+    preamble += header + '\n';
 
   {
     string imports = "import { type XdrCodec"

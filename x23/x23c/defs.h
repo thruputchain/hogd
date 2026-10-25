@@ -202,6 +202,7 @@ struct XdrCtx {
   bool warning = false;
   string literals;
   string block_comment;
+  string header;
 };
 void checkliterals(XdrCtx *);
 
@@ -212,12 +213,12 @@ void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);
   int real_yylex(string *yylval_param, YYLTYPE *yylloc_param,                  \
                  yyscan_t yyscanner, XdrCtx *xc)
 
-std::string gen_hh(vector<Definition> *defs);
-std::string gen_rs(vector<Definition> *defs,
+std::string gen_hh(vector<Definition> *defs, string const &header);
+std::string gen_rs(vector<Definition> *defs, string const &header,
                    std::set<std::string> const &recursive_types,
                    std::set<std::string> const &rust_features,
                    std::set<std::string> const &rust_no_features);
-std::string gen_ts(vector<Definition> *defs);
+std::string gen_ts(vector<Definition> *defs, string const &header);
 
 struct Join {
   string str_;
