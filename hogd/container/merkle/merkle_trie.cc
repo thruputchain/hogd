@@ -390,6 +390,8 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kLeaf:
       return terminal && node.path == k && node.value_hash &&
              *node.value_hash == sha256(value);
+    default:
+      return false;
     }
   }
   return false;
@@ -663,7 +665,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // Branch Node: A leaf for [key_window] is child [0xa] and the second
     //              extension node is child [0x3].
     // Second Extension Node: Path is [0x4].
-    // Leaf Node: Path is [0xb].
+    // Leaf Node: Path is the full key [k].
     //
     // Note that the second extension node may have a path length of 1, in which
     // case we will omit the second extension node and add its child directly as
@@ -780,9 +782,10 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // We are inserting [k] into the trie, and it conflicts with a leaf node on the
 // same path. This method resolves that conflict.
 //
-// We create a new branch node and place both [k] and the key in [leaf] as
-// children of this branch. Note that if one of the keys ends on the branch, we
-// place the key directly into the branch node rather than create a leaf for it.
+// We create a branch node and place both [k] and the key in [leaf] under it.
+// If one of the keys ends on the branch, we place its value directly into the
+// branch rather than in a leaf. When that key is [leaf]'s, we reuse [leaf] as
+// the branch.
 //
 // If [k] and the path in [leaf] have hex digits in common, we also create an
 // extension node with the shared hex digits. We place the new branch node as a
