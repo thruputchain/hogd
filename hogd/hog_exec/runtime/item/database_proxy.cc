@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
-#include <coroutine>
 #include <exception>
 #include <format>
 #include <optional>
@@ -92,10 +91,9 @@ public:
   // An awaiter: co_await calls these through the object.
   // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
   bool await_ready() const noexcept { return false; }
-  void await_suspend(std::coroutine_handle<> h) const
-  {
-    default_threadpool().go({h, cpu_});
-  }
+  // Takes the typed handle, as x23's bg() does: with X23_CORO_TRACE the pool's
+  // CoroHandle records the promise, and an erased handle does not convert.
+  void await_suspend(auto h) const { default_threadpool().go({h, cpu_}); }
   void await_resume() const noexcept {}
 
 private:
