@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
