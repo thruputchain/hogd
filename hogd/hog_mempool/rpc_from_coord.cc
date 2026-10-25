@@ -3494,6 +3494,9 @@ MempoolCoordinatorRpc::auth_data_changed(
   // finds us waiting or happens before we read the flag.
   BlockHeight current_height;
   while ((current_height = auth_data_height_.load()) < height - 1) {
+    if (auth_data_wait_test_hook_) {
+      auth_data_wait_test_hook_(height);
+    }
     auto awaiter = auth_data_height_.wait(current_height);
     if (auth_callback_disconnecting_.load(std::memory_order_acquire)) {
       co_return;

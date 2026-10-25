@@ -747,6 +747,14 @@ TEST(Mempool, AuthDataCallbackWaitsForEarlierHeight)
   // callback before injecting later heights.
   coord.wait_for_block_commit(/*expected_height=*/1)();
   const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
 
   std::promise<void> later_result;
   std::future<void> later_applied = later_result.get_future();
@@ -754,15 +762,20 @@ TEST(Mempool, AuthDataCallbackWaitsForEarlierHeight)
     coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
     later_result.set_value();
   });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
   EXPECT_EQ(later_applied.wait_for(std::chrono::milliseconds(100)),
             std::future_status::timeout);
   EXPECT_EQ(coord.auth_data_height(), tip);
 
   coord.auth_data_changed(tip + 1, KeyChangeBatch{})();
-  EXPECT_EQ(later_applied.wait_for(std::chrono::seconds(10)),
+  ASSERT_EQ(later_applied.wait_for(std::chrono::seconds(10)),
             std::future_status::ready);
   later_thread.join();
   EXPECT_EQ(coord.auth_data_height(), tip + 2);
+  coord.set_auth_data_wait_test_hook({});
 }
 
 // Once the auth callback is disconnected, the earlier height a waiting callback
@@ -774,6 +787,14 @@ TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
   MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
   coord.wait_for_block_commit(/*expected_height=*/1)();
   const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
 
   std::promise<void> later_result;
   std::future<void> later_returned = later_result.get_future();
@@ -781,14 +802,31 @@ TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
     coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
     later_result.set_value();
   });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
   EXPECT_EQ(later_returned.wait_for(std::chrono::milliseconds(100)),
             std::future_status::timeout);
 
   coord.disconnect_auth_callback()();
-  EXPECT_EQ(later_returned.wait_for(std::chrono::seconds(10)),
+  ASSERT_EQ(later_returned.wait_for(std::chrono::seconds(10)),
             std::future_status::ready);
   later_thread.join();
   EXPECT_EQ(coord.auth_data_height(), tip);
+  coord.set_auth_data_wait_test_hook({});
+}
+
+// Waiting for auth data at a height the coordinator has already passed returns
+// instead of failing the mempool.
+TEST(Mempool, AuthDataWaitAcceptsLaterHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  ASSERT_GE(coord.auth_data_height(), 1);
+
+  coord.wait_for_auth_data(/*expected_height=*/0)();
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)

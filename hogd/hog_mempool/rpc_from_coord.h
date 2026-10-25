@@ -423,12 +423,15 @@ public:
     co_return;
   }
 
+  // Auth data past [expected_height] also satisfies the wait: a later height's
+  // callback can store before this waiter resumes from the broadcast that woke
+  // it, and a genesis ceremony can reach its height-0 wait after a concurrent
+  // ceremony has committed height 1.
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
-    while ((current_height = auth_data_height_.load()) !=
+    while ((current_height = auth_data_height_.load()) <
            static_cast<int64_t>(expected_height)) {
-      CHECK_EQ(current_height + 1, expected_height);
       co_await auth_data_height_.wait(current_height);
     }
     co_return;
@@ -465,6 +468,13 @@ public:
           hook)
   {
     submission_auth_test_hook_ = std::move(hook);
+  }
+
+  // Runs when an [auth_data_changed] callback for a height is about to wait
+  // for an earlier height.
+  void set_auth_data_wait_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    auth_data_wait_test_hook_ = std::move(hook);
   }
 
   x23::Async<void> test_finish_all_executors(BlockID block_id)
@@ -834,6 +844,7 @@ private:
   std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
                                  bool)>
       submission_auth_test_hook_;
+  std::function<void(BlockHeight)> auth_data_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
