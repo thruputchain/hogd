@@ -35,7 +35,11 @@ namespace {
 // function-local and should not escape.
 class ScopedUndo {
 public:
-  ScopedUndo() = default;
+  // try_atomic_change_lock registers at most two actions (consume bit and
+  // entry reservation). Reserve up front so that push() never allocates after
+  // a mutation has been published; the captures fit in std::function's
+  // small-object buffer.
+  ScopedUndo() { actions_.reserve(2); }
   ~ScopedUndo() noexcept
   {
     if (!armed_) {
