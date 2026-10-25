@@ -39,7 +39,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+      start_server_or_exit(metrics_server, bind_ip, metrics_port);
   info("PORT auth.metrics={}", actual_metrics_port);
 
   x23::HostPort host_port;
@@ -62,14 +62,14 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   RpcServer<AuthDBRpc> auth_db_rpc;
   auth_db_rpc->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auto [actual_db_port, db_lfd] =
-      auth_db_rpc.bind_server(make_bind_host_port(bind_ip, db_port));
+      bind_server_or_exit(auth_db_rpc, bind_ip, db_port);
   CHECK(actual_db_port == db_port || db_port == 0);
   info("PORT auth.db={}", actual_db_port);
 
   RpcServer<AuthMempoolRpc> auth_mempool_rpc;
   auth_mempool_rpc->max_message_size_ = hogd::kBulkRpcMaxMessageSize;
   auto [actual_mempool_port, mempool_lfd] =
-      auth_mempool_rpc.bind_server(make_bind_host_port(bind_ip, mempool_port));
+      bind_server_or_exit(auth_mempool_rpc, bind_ip, mempool_port);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT auth.mempool={}", actual_mempool_port);
 

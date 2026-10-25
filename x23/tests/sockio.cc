@@ -151,6 +151,33 @@ TEST(SocketOptions, NoDelayAndAbortiveClose)
   EXPECT_EQ(value.l_linger, 0);
 }
 
+TEST(TcpListen, AddressInUse)
+{
+  UniqueFd first = stcplisten(numeric_addr("127.0.0.1", 0));
+  const sockaddr_storage taken = local_addr(first);
+
+  auto second = try_tcplisten(taken);
+  ASSERT_FALSE(second);
+  EXPECT_EQ(second.error(), EADDRINUSE);
+
+  try {
+    stcplisten(taken);
+    ADD_FAILURE() << "stcplisten bound an address that is in use";
+  } catch (const std::system_error &e) {
+    EXPECT_EQ(e.code(), std::errc::address_in_use);
+    EXPECT_TRUE(std::string_view(e.what()).starts_with(
+        std::format("listen on {}", HostPort(taken))))
+        << e.what();
+  }
+}
+
+TEST(TcpListen, TryTcplistenIsNonblocking)
+{
+  auto lfd = try_tcplisten(numeric_addr("127.0.0.1", 0));
+  ASSERT_TRUE(lfd);
+  EXPECT_NE(fcntl(lfd->get(), F_GETFL) & O_NONBLOCK, 0);
+}
+
 TEST(SocketOptions, InvalidDescriptor)
 {
   BorrowedFd fd(-1);

@@ -1,6 +1,8 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
+#include <expected>
 #include <string>
 #include <sys/socket.h>
 #include <utility>
@@ -10,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/interface/rpc_from_coord.h"
 #include "sched_exec.hh"
+#include "x23/err.h"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -37,6 +40,20 @@ public:
   uint16_t start(std::string const &bind_ip, uint16_t self_port,
                  const sockaddr_storage &coordinator_sockaddr)
   {
+    std::expected<uint16_t, x23::Errno> port =
+        try_start(bind_ip, self_port, coordinator_sockaddr);
+    if (!port)
+      port.error().raise("listen on {}",
+                         make_bind_host_port(bind_ip, self_port));
+    return *port;
+  }
+
+  // Like start, but returns a failure to listen on [self_port] (the port
+  // already in use, say) rather than throwing it.
+  std::expected<uint16_t, x23::Errno>
+  try_start(std::string const &bind_ip, uint16_t self_port,
+            const sockaddr_storage &coordinator_sockaddr)
+  {
     // When we register with the coordinator, we need to tell the coordinator
     // our port number. However, we do not know our port number until we
     // actually bind our server socket (especially because [self_port] could be
@@ -50,8 +67,11 @@ public:
     // init() runs, the kernel queues any coordinator connections/requests in
     // the listen backlog; we drain them once start_accepting() is called.
     server_->max_message_size_ = kMessageSize;
-    auto [executor_port, listen_fd] =
-        server_.bind_server(make_bind_host_port(bind_ip, self_port));
+    auto bound =
+        server_.try_bind_server(make_bind_host_port(bind_ip, self_port));
+    if (!bound)
+      return std::unexpected(bound.error());
+    auto [executor_port, listen_fd] = std::move(*bound);
     assert(executor_port == self_port || self_port == 0);
 
     // Now register with the coordinator.

@@ -55,7 +55,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
+      start_server_or_exit(metrics_server, bind_ip, metrics_port);
   info("PORT mempool.metrics={}", actual_metrics_port);
 
   // Wait for the db shards to connect.
@@ -65,8 +65,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // balance deltas can exceed x23's 16 MiB default, so the receiver must match
   // it or the record is rejected at the framing layer before dispatch.
   db->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_db_port =
-      db.start_server(make_bind_host_port(bind_ip, db_port));
+  uint16_t actual_db_port = start_server_or_exit(db, bind_ip, db_port);
   CHECK(actual_db_port == db_port || db_port == 0);
   info("PORT mempool.db={}", actual_db_port);
   info("Waiting for {} db shards to connect...", num_db_shards);
@@ -77,8 +76,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // Start event registration. Activation waits for the coordinator's recovered
   // canonical tip, so construction must continue before the card is published.
   RpcServer<MempoolEventRpc> event;
-  uint16_t actual_event_port =
-      event.start_server(make_bind_host_port(bind_ip, event_port));
+  uint16_t actual_event_port = start_server_or_exit(event, bind_ip, event_port);
   CHECK(actual_event_port == event_port || event_port == 0);
   info("PORT mempool.event={}", actual_event_port);
 
@@ -86,14 +84,13 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // canonical tip needed to activate event before executor intro can finish.
   RpcServer<MempoolExecutorRpc> exec;
   uint16_t actual_executor_port =
-      exec.start_server(make_bind_host_port(bind_ip, executor_port));
+      start_server_or_exit(exec, bind_ip, executor_port);
   CHECK(actual_executor_port == executor_port || executor_port == 0);
   info("PORT mempool.executor={}", actual_executor_port);
 
   RpcServer<MempoolAuthRpc> auth;
   auth->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_auth_port =
-      auth.start_server(make_bind_host_port(bind_ip, auth_port));
+  uint16_t actual_auth_port = start_server_or_exit(auth, bind_ip, auth_port);
   CHECK(actual_auth_port == auth_port || auth_port == 0);
   info("PORT mempool.auth={}", actual_auth_port);
   while (!registration.auth_registered(/*card=*/nullptr)) {
@@ -106,7 +103,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
-      coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
+      start_server_or_exit(coord, bind_ip, coordinator_port);
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
 
@@ -123,7 +120,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   MempoolGatewayServer gateway(coord->impl());
   gateway->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_gateway_port =
-      gateway.start_server(make_bind_host_port(bind_ip, gateway_port));
+      start_server_or_exit(gateway, bind_ip, gateway_port);
   CHECK(actual_gateway_port == gateway_port || gateway_port == 0);
   info("PORT mempool.gateway={}", actual_gateway_port);
 

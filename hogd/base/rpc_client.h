@@ -70,7 +70,7 @@ make_rpc_client(const x23::HostPort &host_port, x23::CoroPoll &cp,
                 bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  return make_rpc_client<RpcService>(resolve_host_port(host_port), cp, retry,
+  return make_rpc_client<RpcService>(resolve_or_exit(host_port), cp, retry,
                                      max_message_size);
 }
 
@@ -79,7 +79,7 @@ auto
 make_rpc_client(const x23::HostPort &host_port, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  return make_rpc_client<RpcService>(resolve_host_port(host_port),
+  return make_rpc_client<RpcService>(resolve_or_exit(host_port),
                                      default_coropoll(), retry,
                                      max_message_size);
 }
@@ -115,7 +115,7 @@ auto
 make_srpc_client(const x23::HostPort &host_port, bool retry = false,
                  size_t max_message_size = x23::default_max_message_size)
 {
-  sockaddr_storage ss = resolve_host_port(host_port);
+  sockaddr_storage ss = resolve_or_exit(host_port);
   return make_srpc_client<RpcService>(ss, retry, max_message_size);
 }
 
@@ -148,7 +148,7 @@ auto
 make_srpc_multiclient(const x23::HostPort &host_port, bool retry = false,
                       x23::CpuMap const &map = *x23::llc_map)
 {
-  sockaddr_storage ss = resolve_host_port(host_port);
+  sockaddr_storage ss = resolve_or_exit(host_port);
   return make_srpc_multiclient<RpcService>(ss, retry, map);
 }
 
@@ -182,7 +182,7 @@ make_rpc_multiclient(const x23::HostPort &host_port, bool retry = false,
                      x23::CpuMap const &map = *x23::llc_map,
                      size_t max_message_size = x23::default_max_message_size)
 {
-  sockaddr_storage ss = resolve_host_port(host_port);
+  sockaddr_storage ss = resolve_or_exit(host_port);
   return make_rpc_multiclient<RpcService>(ss, default_coropoll(), retry, map,
                                           max_message_size);
 }

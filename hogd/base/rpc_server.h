@@ -73,17 +73,31 @@ public:
     return {port_, std::move(lfd)};
   }
 
-  std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
+  std::pair<uint16_t, x23::UniqueFd> bind_server(const x23::HostPort &bind_addr)
+  {
+    auto bound = try_bind_server(bind_addr);
+    if (!bound)
+      bound.error().raise("listen on {}", bind_addr);
+    return std::move(*bound);
+  }
+
+  // Like bind_server, but returns a failure to listen (the port already in
+  // use, say) rather than throwing it.
+  std::expected<std::pair<uint16_t, x23::UniqueFd>, x23::Errno>
+  try_bind_server(const x23::HostPort &bind_addr)
   {
     CHECK(!bound_);
-    bound_ = true;
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
-    auto lfd = x23::tcplisten(*addr, backlog);
-    port_ = x23::get_port(x23::local_addr(lfd));
-    return {port_, std::move(lfd)};
+    std::expected<x23::UniqueFd, x23::Errno> lfd =
+        x23::try_tcplisten(*addr, backlog);
+    if (!lfd)
+      return std::unexpected(lfd.error());
+    bound_ = true;
+    port_ = x23::get_port(x23::local_addr(*lfd));
+    return std::pair{port_, std::move(*lfd)};
   }
 
 private:
@@ -115,9 +129,22 @@ public:
     return p;
   }
 
-  uint16_t start_server(x23::HostPort bind_addr)
+  uint16_t start_server(const x23::HostPort &bind_addr)
   {
-    auto [p, lfd] = bind_server(std::move(bind_addr));
+    auto [p, lfd] = bind_server(bind_addr);
+    start_accepting(std::move(lfd));
+    return p;
+  }
+
+  // Like start_server, but returns a failure to listen rather than throwing
+  // it.
+  std::expected<uint16_t, x23::Errno>
+  try_start_server(const x23::HostPort &bind_addr)
+  {
+    auto bound = try_bind_server(bind_addr);
+    if (!bound)
+      return std::unexpected(bound.error());
+    auto [p, lfd] = std::move(*bound);
     start_accepting(std::move(lfd));
     return p;
   }
@@ -151,7 +178,7 @@ RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)
 {
-  return resolve_host_port(x23::HostPort(host, port));
+  return resolve_or_exit(x23::HostPort(host, port));
 }
 
 inline sockaddr_storage

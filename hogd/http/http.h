@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <concepts>
+#include <cstdint>
+#include <expected>
 #include <functional>
 #include <map>
 #include <mutex>
@@ -15,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/mvar.h"
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
@@ -53,7 +56,11 @@ public:
                       }
                     });
   }
-  uint16_t start_server(x23::HostPort bind_addr);
+  uint16_t start_server(const x23::HostPort &bind_addr);
+  // Like start_server, but returns a failure to listen (the port already in
+  // use, say) rather than throwing it.
+  std::expected<uint16_t, x23::Errno>
+  try_start_server(const x23::HostPort &bind_addr);
   uint16_t port() const noexcept { return port_; }
 
 private:

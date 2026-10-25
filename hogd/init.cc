@@ -12,7 +12,6 @@
 #include <x23/progname.h>
 #include <x23/vec.h>
 
-#include "hogd/base/config_failure.h"
 #include "hogd/base/log.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
@@ -135,10 +134,6 @@ hogd_init(int argc, char *argv[], bool do_print_version, LogLevel log_level)
   // initialize logging
   // NOTE: this must come before any use of the CHECK macros
   log_init(make_logger(log_level));
-
-  // Report a busy port or an unresolvable address as a clean failure rather
-  // than an abort; this logs, so it must come after log_init.
-  install_config_failure_handler();
 
   // Ensure we have a pathname for our executable
   if (x23::getprogpath().empty()) {
