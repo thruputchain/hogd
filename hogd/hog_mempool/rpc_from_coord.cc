@@ -3456,11 +3456,18 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   co_return commit_outcome;
 }
 
-// TODO(jhumphri): After a commit, I think I need to check that
-// [auth_data_changed] was called before any subsequent calls to nominate() or
-// validate(). Also be sure to make sure this works with the genesis block.
-// I do not need to check this in add_txs--this is all kept in sync by the
-// [auth_data_changed] callback.
+// Nominate and validate for the block after height H run only once this
+// callback has finished for H, so they never see a tx that H's key changes
+// invalidated. Three things keep it so:
+// - nominate and validate wait in [wait_for_auth_data()] for the parent height
+//   before they touch the scheduler;
+// - this callback re-verifies under [commit_lock_];
+// - commit holds [commit_lock_] across [reenqueue_txs()], so the callback sees
+//   every tx a commit returned to the runqueue.
+// The genesis load and ceremony wait for height 0 the same way. Submissions do
+// not wait for this callback: they verify at the scheduler's current height,
+// which the auth server serves only once it has applied that height's key
+// changes.
 x23::Async<void>
 MempoolCoordinatorRpc::auth_data_changed(
     BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)

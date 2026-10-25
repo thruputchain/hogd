@@ -283,8 +283,12 @@ public:
   // signed encoding before treating an existing body as admitted.
   bool is_pending(const SignedTransaction &tx, const TransactionHash &tx_hash);
 
-  // The number of txs in the scheduler, including both those of the runqueue
-  // and those that are stranded.
+  // The number of txs on the runqueue. Every cached tx is on its account's
+  // runqueue unless [schedule()] took it for the pending nomination, in which
+  // case it stays cached until it is reenqueued or removed. So between
+  // scheduler operations, [tx_cache_size()] is [size()] plus the number of
+  // nominated txs. During an operation the two counts can disagree: [add_txs()]
+  // and [remove_from_scheduler()] update [size_] after the cache.
   ssize_t size() const { return size_.load(std::memory_order_relaxed); }
   size_t tx_cache_size()
   {
