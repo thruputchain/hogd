@@ -13,7 +13,9 @@ namespace hogd {
 // [nominated] txs that [Scheduler::schedule()] took off it and that have not
 // been reenqueued or removed since. A cache entry that is in neither place is
 // stranded: nothing will schedule it or remove it. Call this only between
-// scheduler operations; see [Scheduler::size()].
+// scheduler operations: [Scheduler::add_txs()] and
+// [Scheduler::remove_from_scheduler()] update the runqueue count after the
+// cache count.
 inline ::testing::AssertionResult
 cache_matches_runqueue(Scheduler &scheduler, size_t nominated)
 {
