@@ -362,8 +362,10 @@ private:
             // node.
             info.path.remove_from_back(1);
           }
-          path.push(child);
+          // Update [info] before pushing: [push] may invalidate [info] if
+          // [path] is backed by a container without stable references.
           info.next_child_to_visit++;
+          path.push(child);
           continue;
         }
         break;
@@ -398,8 +400,9 @@ private:
             // node.
             info.path.remove_from_back(info.node->path().size());
           }
-          path.push(child);
+          // Update [info] before pushing, as above.
           info.next_child_to_visit++;
+          path.push(child);
           continue;
         }
         break;
