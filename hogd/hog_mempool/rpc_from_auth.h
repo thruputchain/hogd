@@ -70,12 +70,16 @@ public:
   }
 
   // Registering is what lets the mempool start serving the coordinator, so an
-  // auth server calls this only once it has subscribed to the db.
+  // auth server calls this only once it has subscribed to the db. Only one
+  // auth server is supported, so a second registration fails.
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
     IntroAuthResult result = auth_info(card.protocol);
-    if (result.outcome() == IntroAuthOutcome::kSuccess) {
-      Registration::registration().register_auth(card);
+    if (result.outcome() == IntroAuthOutcome::kSuccess &&
+        !Registration::registration().register_auth(card)) {
+      warn("Rejecting auth registration: an auth server is already "
+           "registered");
+      co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
     co_return result;
   }
