@@ -1359,6 +1359,28 @@ GenRs::type_name(const Declaration &d, bool generate,
       std::format("Unknown declaration qual: {}", std::to_underlying(d.qual)));
 }
 
+// The file header lands ahead of the module's inner attributes, where rustc
+// rejects an outer doc comment, so a header line opening with /// or /**
+// opens with a plain // or /* instead.  //// and /*** are plain already.
+static string
+undoc_header(string header)
+{
+  for (size_t pos = 0; pos < header.size();) {
+    size_t start = header.find_first_not_of(" \t", pos);
+    if (start == string::npos)
+      break;
+    string_view line = string_view(header).substr(start);
+    if ((line.starts_with("///") && !line.starts_with("////")) ||
+        (line.starts_with("/**") && !line.starts_with("/***") &&
+         !line.starts_with("/**/")))
+      header.erase(start + 2, 1);
+    pos = header.find('\n', start);
+    if (pos != string::npos)
+      ++pos;
+  }
+  return header;
+}
+
 string
 gen_rs(vector<Definition> *defs, string const &header,
        std::set<std::string> const &recursive_types,
@@ -1373,7 +1395,7 @@ gen_rs(vector<Definition> *defs, string const &header,
 // Generated from xdrc commit: )" +
       x23::git_commit_hash() + "\n\n";
   if (!header.empty())
-    preamble += header + '\n';
+    preamble += undoc_header(header) + '\n';
   preamble += std::format(R"(#![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
