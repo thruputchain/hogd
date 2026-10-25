@@ -86,7 +86,7 @@ public:
   }
 
   // Performs basic sanity checks on the trie.
-  bool check() { return check_helper(&root_); }
+  bool check() { return check_helper(&root_, root_prefix_); }
 
   // Returns the hash of the root node in the trie.
   SHA256Hash get_root_hash()
@@ -168,22 +168,25 @@ public:
   }
 
   // Executes [func] on each element.
-  template<typename F>
-  void for_each(F func, const HexArray &root_prefix = HexArray())
+  template<typename F> void for_each(F func)
   {
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
       switch (node.type) {
       case Node::Type::kBranch:
-      case Node::Type::kLeaf:
         if (node.value_hash()) {
           func({path, *node.value_hash()});
+        }
+        break;
+      case Node::Type::kLeaf:
+        if (node.value_hash()) {
+          func({node.path(), *node.value_hash()});
         }
         break;
       default:
         break;
       }
     };
-    walk<Node>(&root_, root_prefix, f);
+    walk<Node>(&root_, root_prefix_, f);
   }
 
   // Generates a hash for every node in the trie. If the trie is modified while
@@ -196,7 +199,7 @@ private:
   static std::string string_from_node(const Node &node);
 
   // Recursive helper function for [check()].
-  static bool check_helper(Node *root);
+  static bool check_helper(Node *root, const HexArray &prefix);
 
   // Finds the node for key [k]. Returns nullptr if [k] is not in the trie.
   Node *find_node(const Key &k);
@@ -249,7 +252,7 @@ private:
   // branch to it may now have fewer than "two" KV pairs under it. In this case,
   // the branch is no longer needed, so this function removes it.
   Node *remove_branch(Node *branch, size_t num_children,
-                      std::byte remaining_child_hex);
+                      std::byte remaining_child_hex, const Key &branch_key);
 
   // Does a post-order traversal of the trie starting at [root] with path
   // [prefix], calling [f] on each node. Does not traverse nodes with a depth
@@ -429,13 +432,9 @@ private:
 
         NodeType &n = *info.node;
         if constexpr (TrackPath) {
-          // Append the leaf's path to [info.path] so that the full path is
-          // passed to [f].
-          info.path.append(info.node->path());
+          // [info.path] is the routing path to the leaf. The leaf itself
+          // stores its complete key, which must start with that path.
           f(info.path, n, info.parent);
-          // No need to remove the portion of the path we just appended above
-          // because we pop the leaf anyway below, so we do not access the leaf
-          // after this point.
         }
         else {
           f(n, info.parent);
@@ -508,6 +507,9 @@ private:
   // The root node in the trie. The root node always exists and is always a
   // branch.
   Node root_;
+  // Routing prefix already represented above root_ (one digit for each inner
+  // MerkleTriePrefix trie). Leaves still retain the complete caller key.
+  HexArray root_prefix_;
   // The memory allocator for nodes.
   Allocator<Node> allocator_;
   // The number of KV pairs in the trie.
@@ -552,8 +554,9 @@ public:
   explicit MerkleTriePrefix(
       Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
   {
-    for (std::optional<MerkleTrie> &trie : tries_) {
-      trie.emplace(allocator_type);
+    for (size_t i = 0; i < tries_.size(); ++i) {
+      tries_[i].emplace(allocator_type);
+      tries_[i]->root_prefix_.append(std::byte(i));
     }
   }
 
@@ -608,7 +611,7 @@ public:
       // We do not support empty keys.
       return {SHA256Hash(), {}};
     }
-    const auto &[index, k_no_prefix] = get_prefix(k);
+    const size_t index = get_prefix(k);
 
     Node root;
     root.init_branch(/*parent=*/nullptr);
@@ -619,7 +622,7 @@ public:
       }
     }
     std::vector<std::vector<std::byte>> proof =
-        tries_[index]->get_proof_by_node(k_no_prefix).second;
+        tries_[index]->get_proof_by_node(k).second;
     tries_[index]->root_.parent = nullptr;
     return {root.compute_node_hash(), proof};
   }
@@ -640,8 +643,8 @@ public:
       return false;
     }
 
-    const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index]->find_begin(k_no_prefix, value_hash, cookie);
+    const size_t index = get_prefix(k);
+    return tries_[index]->find_begin(k, value_hash, cookie);
   }
 
   // You must call this when you are done accessing a value returned by
@@ -655,8 +658,8 @@ public:
       return false;
     }
 
-    const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index]->insert(k_no_prefix, obj);
+    const size_t index = get_prefix(k);
+    return tries_[index]->insert(k, obj);
   }
 
   bool insert_or_update(const MerkleTrie::Key &k,
@@ -667,8 +670,8 @@ public:
       return false;
     }
 
-    const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index]->insert_or_update(k_no_prefix, obj);
+    const size_t index = get_prefix(k);
+    return tries_[index]->insert_or_update(k, obj);
   }
 
   bool remove(const MerkleTrie::Key &k)
@@ -678,8 +681,8 @@ public:
       return false;
     }
 
-    const auto &[index, k_no_prefix] = get_prefix(k);
-    return tries_[index]->remove(k_no_prefix);
+    const size_t index = get_prefix(k);
+    return tries_[index]->remove(k);
   }
 
   void clear()
@@ -691,10 +694,8 @@ public:
 
   template<typename F> void for_each(F func)
   {
-    for (size_t i = 0; i < tries_.size(); i++) {
-      HexArray prefix;
-      prefix.append(std::byte(i));
-      tries_[i]->for_each(func, prefix);
+    for (std::optional<MerkleTrie> &trie : tries_) {
+      trie->for_each(func);
     }
   }
 
@@ -773,13 +774,11 @@ private:
   static constexpr size_t kNumTries = 16;
   static_assert(kNumTries == 1 << (4 * kPrefixSize));
 
-  static std::pair<size_t, HexArray> get_prefix(const MerkleTrie::Key &k)
+  static size_t get_prefix(const MerkleTrie::Key &k)
   {
     CHECK_GT(k.size(), 0UL);
 
-    auto index = static_cast<size_t>(k.get(0));
-    MerkleTrie::Key k_no_prefix = k.get_subarray(1, k.size());
-    return {index, k_no_prefix};
+    return static_cast<size_t>(k.get(0));
   }
 
   std::array<std::optional<MerkleTrie>, kNumTries> tries_;

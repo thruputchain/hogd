@@ -72,6 +72,8 @@ public:
   };
 
   struct LeafPayload {
+    // Complete key, unchanged when ancestors split or collapse. Extension
+    // paths remain relative fragments; the leaf encoding commits to this key.
     HexArray path;
     std::optional<SHA256Hash> value_hash;
   };
