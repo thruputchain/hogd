@@ -459,9 +459,8 @@ private:
             make_address(kAddress, auth_db_server_.port()).c_str(),
         .address_for_mempool =
             make_address(kAddress, auth_mempool_server_.port()).c_str()};
-    client.mempoolauth_intro_auth(auth_card)();
     auth_server_->set_mempool_client(std::move(client));
-    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+    auth_server_->subscribe_and_register(std::move(auth_card))();
   }
 
   void register_executor_with_mempool()

@@ -208,6 +208,14 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
   co_return;
 }
 
+x23::Async<IntroAuthResult>
+AuthServer::subscribe_and_register(AuthCard card)
+{
+  CHECK(mempool_client_.has_value());
+  co_await subscribe_to_auth_data_changes(card);
+  co_return co_await mempool_client_->mempoolauth_intro_auth(std::move(card));
+}
+
 x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::populate_auth_data(BlockHeight height,
                                ContractAddress const &address)

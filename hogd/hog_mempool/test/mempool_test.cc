@@ -621,6 +621,34 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
+// An auth server subscribes to the db before it registers, so it needs the
+// shards and the network hash without registering; registering is what lets
+// the mempool start serving the coordinator (issue #1927).
+TEST(MempoolAuthRpc, GetAuthInfoDoesNotRegisterAuth)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  const ShardCard shard{.protocol = version::kHogdProtocol(),
+                        .address_for_auth = "127.0.0.1:3"};
+  registration.register_shard(shard);
+  NetworkHash network_hash{};
+  network_hash[0] = 7;
+  registration.set_network_hash(network_hash);
+
+  IntroAuthResult auth_info =
+      MempoolAuthRpc::mempoolauth_get_auth_info(version::kHogdProtocol())();
+  ASSERT_EQ(auth_info.outcome(), IntroAuthOutcome::kSuccess);
+  ASSERT_EQ(auth_info.success().shards.size(), 1U);
+  EXPECT_EQ(auth_info.success().shards[0], shard);
+  EXPECT_EQ(auth_info.success().network_hash, network_hash);
+  EXPECT_FALSE(registration.auth_registered(/*card=*/nullptr));
+
+  IntroAuthResult wrong_protocol =
+      MempoolAuthRpc::mempoolauth_get_auth_info(ProtocolCommit{})();
+  EXPECT_EQ(wrong_protocol.outcome(), IntroAuthOutcome::kFailure);
+}
+
 TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 {
   MempoolAuthRpc auth_rpc;
