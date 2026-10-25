@@ -7,7 +7,6 @@ add_xdr(
   ../../protocol/auth_rpc.x
   ../../protocol/batch.x
   ../../protocol/catchup.x
-  ../../protocol/ci_server.x
   ../../protocol/consensus.x
   ../../protocol/contract.x
   ../../protocol/coord_sched.x
@@ -32,7 +31,6 @@ add_xdr(
   ../../protocol/network_config.x
   ../../protocol/pagination.x
   ../../protocol/parallel.x
-  ../../protocol/port.x
   ../../protocol/precompiles.x
   ../../protocol/proposal.x
   ../../protocol/preimage.x
@@ -48,7 +46,6 @@ add_xdr(
   ../../protocol/standard_asset_events.x
   ../../protocol/storage_cost.x
   ../../protocol/storage_item.x
-  ../../protocol/storage_lock.x
   ../../protocol/transaction.x
   ../../protocol/transaction_trace.x
   ../../protocol/types.x
@@ -59,8 +56,10 @@ add_xdr(
   ../../protocol/retrocausal_queue.x
   ../../protocol/syscall_error.x
   block_query_internal.x
+  ci_server.x
   event_cursor_internal.x
   event_outbox_internal.x
+  storage_lock.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
