@@ -179,7 +179,7 @@ check_extension(const Node &extension)
 }
 
 bool
-check_leaf(const Node &leaf)
+check_leaf(const Node &leaf, const HexArray &path)
 {
   bool ret = true;
   size_t num_children = get_num_children(leaf);
@@ -187,8 +187,17 @@ check_leaf(const Node &leaf)
     std::println("Unexpected children in leaf");
     ret = false;
   }
-  // A path in the leaf node may or may not be empty, so we do not check its
-  // size.
+  // Leaves retain the complete key. An empty key is held in the root branch.
+  if (leaf.path().empty()) {
+    std::println("Unexpected empty key in leaf");
+    ret = false;
+  }
+  if (leaf.path().size() < path.size() ||
+      leaf.path().get_subarray(0, path.size()) != path) {
+    std::println("Leaf key {} does not start with its routing path {}",
+                 leaf.path().str(), path.str());
+    ret = false;
+  }
   if (!leaf.value_hash()) {
     std::println("Unexpected empty value in leaf");
     ret = false;
@@ -236,13 +245,10 @@ MerkleTrie::string_from_node(const Node &node)
 
 // static
 bool
-MerkleTrie::check_helper(Node *root)
+MerkleTrie::check_helper(Node *root, const HexArray &prefix)
 {
-
-  HexArray prefix;
   bool ret = true;
-  auto f = [&](const HexArray & /*path*/, const Node &node,
-               const Node *parent) {
+  auto f = [&](const HexArray &path, const Node &node, const Node *parent) {
     if (node.rw_lock.is_locked_relaxed()) {
       std::println("The node is locked.");
       ret = false;
@@ -266,7 +272,7 @@ MerkleTrie::check_helper(Node *root)
       ret = check_extension(node) && ret;
       break;
     case Node::Type::kLeaf:
-      ret = check_leaf(node) && ret;
+      ret = check_leaf(node, path) && ret;
       break;
     }
   };
@@ -342,80 +348,56 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
                   const std::vector<std::byte> &encodings, const Key &k,
                   const std::span<const std::byte> &value)
 {
-  Node::Raw node;
-  memset(&node.hash, 0, sizeof(node.hash));
-
-  size_t num_nodes = 0;
+  // Proof encodings arrive leaf-to-root. Full-key leaves no longer encode
+  // their depth, so check routing from the root down to the terminal value.
+  std::vector<Node::Raw> nodes;
   size_t idx = 0;
-  size_t remaining_key_size = k.size();
   while (idx < encodings.size()) {
-    SHA256Hash prev_hash = node.hash;
-    if (!Node::get_node_from_encoding(encodings, idx, node)) {
+    if (nodes.size() >= k.size() + 1) {
       return false;
     }
-    bool ok;
-    switch (node.type) {
-    case Node::Type::kBranch:
-      if (num_nodes) {
-        ok = (remaining_key_size != 0U) &&
-             branch_has_child_hash(
-                 node,
-                 /*idx=*/static_cast<size_t>(k.get(remaining_key_size - 1)),
-                 prev_hash);
-        // [remaining_key_size] could underflow here, so be careful not to use
-        // it if [ok] is false.
-        remaining_key_size--;
-      }
-      else {
-        // We could start on a branch if the value is directly inside the
-        // branch.
-        ok = node.value_hash && (*node.value_hash == sha256(value));
-        // Nothing to check/do for the key or [remaining_key_size]. The value is
-        // directly in the branch, so this branch itself does not contribute to
-        // the key. Only the nodes above this branch in the trie contribute to
-        // the key.
-      }
-      break;
-    case Node::Type::kExtension:
-      ok = (num_nodes != 0U);
-      ok = ok && (remaining_key_size >= node.path.size()) &&
-           (k.get_subarray(remaining_key_size - node.path.size(),
-                           remaining_key_size) == node.path);
-      ok = ok && (node.child_hashes[0] == prev_hash);
-      // [remaining_key_size] could underflow here, so be careful not to use it
-      // if [ok] is false.
-      remaining_key_size -= node.path.size();
-      break;
-    case Node::Type::kLeaf:
-      ok = (num_nodes == 0U);
-      ok = ok && (remaining_key_size >= node.path.size()) &&
-           (k.get_subarray(remaining_key_size - node.path.size(),
-                           remaining_key_size) == node.path);
-      ok = ok && node.value_hash && (*node.value_hash == sha256(value));
-      // [remaining_key_size] could underflow here, so be careful not to use it
-      // if [ok] is false.
-      remaining_key_size -= node.path.size();
-      break;
-
-    default:
-      CHECK(false);
-      return false;
-      break;
-    }
-    if (!ok) {
+    nodes.emplace_back();
+    if (!Node::get_node_from_encoding(encodings, idx, nodes.back())) {
       return false;
     }
-    num_nodes++;
   }
-  // [idx] should never be greater than [encodings.size()] if we reach this
-  // point.
-  CHECK_EQ(idx, encodings.size());
-  if (!num_nodes) {
+  if (nodes.empty() || nodes.back().hash != root_hash) {
     return false;
   }
 
-  // Check that we verified the entire key and that the root hash matches up.
-  return (remaining_key_size == 0U) && node.hash == root_hash;
+  size_t key_idx = 0;
+  for (size_t i = nodes.size(); i > 0; --i) {
+    const Node::Raw &node = nodes[i - 1];
+    const bool terminal = i == 1;
+    switch (node.type) {
+    case Node::Type::kBranch:
+      if (terminal) {
+        return key_idx == k.size() && node.value_hash &&
+               *node.value_hash == sha256(value);
+      }
+      if (key_idx == k.size() ||
+          !branch_has_child_hash(node, std::to_integer<size_t>(k.get(key_idx)),
+                                 nodes[i - 2].hash)) {
+        return false;
+      }
+      ++key_idx;
+      break;
+    case Node::Type::kExtension:
+      if (terminal || node.path.size() > k.size() - key_idx ||
+          node.path != k.get_subarray(key_idx, key_idx + node.path.size()) ||
+          node.child_hashes[0] != nodes[i - 2].hash) {
+        return false;
+      }
+      key_idx += node.path.size();
+      break;
+    case Node::Type::kLeaf:
+      return terminal && node.path == k && node.value_hash &&
+             *node.value_hash == sha256(value);
+    default:
+      return false;
+    }
+  }
+  return false;
 }
 
 bool
@@ -471,7 +453,7 @@ MerkleTrie::find_end(void *cookie)
 Node *
 MerkleTrie::find_node(const Key &k)
 {
-  size_t idx = 0;
+  size_t idx = root_prefix_.size();
   size_t branch_depth;
   Node *existing_key = nullptr;
   Node *branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx,
@@ -496,7 +478,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
   // We are moving down the trie, so we cannot block on acquiring the writer
   // lock; instead, we need to try again if we cannot acquire it.
   while (true) {
-    idx = 0;
+    idx = root_prefix_.size();
     existing_key = nullptr;
 
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key,
@@ -585,11 +567,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         // leaf as a child of the branch.
         Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
         CHECK(leaf->rw_lock.try_lock_writer());
-        // We are going to use the hex character at [idx] in the key to map to
-        // the leaf node from the branch node. Thus, we add 1 below as we do not
-        // want to include this character in the path that is stored in the leaf
-        // node.
-        leaf->path() = k.get_subarray(idx + 1, k.size());
+        leaf->path() = k;
         leaf->value_hash() = sha256(obj);
         branch->branch_children()[branch_idx] = leaf;
         to_hash = leaf;
@@ -690,7 +668,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
     // Branch Node: A leaf for [key_window] is child [0xa] and the second
     //              extension node is child [0x3].
     // Second Extension Node: Path is [0x4].
-    // Leaf Node: Path is [0xb].
+    // Leaf Node: Path is the full key [k].
     //
     // Note that the second extension node may have a path length of 1, in which
     // case we will omit the second extension node and add its child directly as
@@ -796,10 +774,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // the new branch.
   Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
   CHECK(leaf->rw_lock.try_lock_writer());
-  // Add 1 to account for the branch node. Since we are placing the leaf node
-  // for [key_window] as a child of the branch, the branch accounts for 1 hex
-  // digit in the path.
-  leaf->path() = key_window.get_subarray(diverge_idx + 1, key_window.size());
+  leaf->path() = k;
   leaf->value_hash() = sha256(obj);
 
   auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
@@ -810,9 +785,10 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // We are inserting [k] into the trie, and it conflicts with a leaf node on the
 // same path. This method resolves that conflict.
 //
-// We create a new branch node and place both [k] and the key in [leaf] as
-// children of this branch. Note that if one of the keys ends on the branch, we
-// place the key directly into the branch node rather than create a leaf for it.
+// We create a branch node and place both [k] and the key in [leaf] under it.
+// If one of the keys ends on the branch, we place its value directly into the
+// branch rather than in a leaf. When that key is [leaf]'s, we reuse [leaf] as
+// the branch.
 //
 // If [k] and the path in [leaf] have hex digits in common, we also create an
 // extension node with the shared hex digits. We place the new branch node as a
@@ -823,100 +799,65 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
-  CHECK_EQ(leaf->parent->type, Node::Type::kBranch);
+  Node *parent = leaf->parent;
+  CHECK_EQ(parent->type, Node::Type::kBranch);
 
-  // We add 1 since one of the digits will be included in the [leaf->parent]
-  // node.
-  auto parent_branch_digit = std::to_integer<size_t>(k.get(idx));
-  Key key_window = k.get_subarray(idx + 1, k.size());
+  const size_t start = idx + 1;
+  const size_t common =
+      get_longest_common_range_length(k, start, leaf->path(), start);
+  const size_t split = start + common;
+  const bool old_key_ends = split == leaf->path().size();
 
-  // We create a branch that we will put both keys under.
-  Node *branch = Node::create_branch(/*parent=*/leaf->parent, allocator_);
-  CHECK(branch->rw_lock.try_lock_writer());
-  leaf->parent->branch_children()[parent_branch_digit] = branch;
-
-  // Check to see if [key_window] and the path in [leaf] have any digits in
-  // common. If they do, we create an extension node with the shared digits, and
-  // then we place the new branch as a child of this new extension node.
-  size_t common_range_length =
-      get_longest_common_range_length(key_window, 0, leaf->path(), 0);
-  if (common_range_length) {
-    size_t diverge_idx = common_range_length;
-    Node *extension =
-        Node::create_extension(/*parent=*/leaf->parent, allocator_);
-    CHECK(extension->rw_lock.try_lock_writer());
-    extension->path() = key_window.get_subarray(0, diverge_idx);
-
-    leaf->parent->branch_children()[parent_branch_digit] = extension;
-    extension->extension_child() = branch;
-    branch->parent = extension;
-
-    // Now remove the extension path from these keys.
-    key_window = key_window.get_subarray(diverge_idx, key_window.size());
-    leaf->path() = leaf->path().get_subarray(diverge_idx, leaf->path().size());
-  }
-
-  // Now we place both keys in the branch. Note that it is possible one of the
-  // keys is shorter than the other. If so, it is possible the shorter key's
-  // remaining path is empty, in which case it should be placed directly into
-  // the branch rather than in a leaf node that is a child of the branch.
-  const bool key_shorter = key_window.size() <= leaf->path().size();
-  const Key &shorter_path = key_shorter ? key_window : leaf->path();
-  const Key &longer_path = key_shorter ? leaf->path() : key_window;
-  SHA256Hash obj_hash = sha256(obj);
-  SHA256Hash &&shorter_value =
-      key_shorter
-          ? obj_hash
-          : std::move(
-                *leaf->value_hash()); // NOLINT(bugprone-unchecked-optional-access)
-  SHA256Hash &&longer_value =
-      key_shorter
-          ? std::move(
-                *leaf->value_hash()) // NOLINT(bugprone-unchecked-optional-access)
-          : obj_hash;
-
-  if (shorter_path.empty()) {
-    // The shorter key's remaining path is empty, so we should place the shorter
-    // key directly into the branch.
-    branch->value_hash() = std::move(shorter_value);
+  Node *branch;
+  if (old_key_ends) {
+    // The old key is a prefix of the new key, so its value belongs on the
+    // branch. Reuse the node as a branch rather than give its leaf a new key.
+    auto value_hash = std::move(leaf->value_hash());
+    branch = leaf;
+    branch->init_branch(parent);
+    branch->value_hash() = std::move(value_hash);
   }
   else {
-    CHECK(!longer_path.empty());
-    CHECK_NE(static_cast<uint8_t>(shorter_path.get(0)),
-             static_cast<uint8_t>(longer_path.get(0)));
-    // We place the two keys into their own leaf nodes and we make those leaf
-    // nodes children of the branch.
-
-    // Shorter key's leaf node. Note that we reuse [leaf] for the longer node
-    // below, so we allocate a new node here.
-    //
-    // Note that I am deliberately allocating a new node first *before* reusing
-    // [leaf]. The [shorter_*] and [longer_*] variables above are references to
-    // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
-    // those references.
-    Node *shorter_leaf = Node::create_leaf(/*parent=*/branch, allocator_);
-    // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
-    // before writing [shorter_leaf->path] because we are not reusing [leaf].
-    // Thus, [shorter_path] will never be a reference to [shorter_leaf->path]. I
-    // still call it first though to match the style of the node creation below.
-    auto branch_hex = std::to_integer<size_t>(shorter_path.get(0));
-    branch->branch_children()[branch_hex] = shorter_leaf;
-    shorter_leaf->path() = shorter_path.get_subarray(1, shorter_path.size());
-    shorter_leaf->value_hash() = std::move(shorter_value);
+    branch = Node::create_branch(parent, allocator_);
+    CHECK(branch->rw_lock.try_lock_writer());
   }
 
-  // Now we place the longer key into a leaf node that is a child of the branch.
-  // Note that we reuse [leaf] rather than allocate a new node.
-  //
-  // We overwrite [leaf->path] below, so we need call [longer_path.get(0)] first
-  // as [longer_path] may be a reference to [leaf->path].
-  auto branch_hex = std::to_integer<size_t>(longer_path.get(0));
-  branch->branch_children()[branch_hex] = leaf;
-  leaf->path() = longer_path.get_subarray(1, longer_path.size());
-  leaf->value_hash() = std::move(longer_value);
-  leaf->parent = branch;
+  const auto parent_digit = std::to_integer<size_t>(k.get(idx));
+  if (common) {
+    Node *extension = Node::create_extension(parent, allocator_);
+    CHECK(extension->rw_lock.try_lock_writer());
+    extension->path() = k.get_subarray(start, split);
+    extension->extension_child() = branch;
+    branch->parent = extension;
+    parent->branch_children()[parent_digit] = extension;
+  }
+  else {
+    parent->branch_children()[parent_digit] = branch;
+  }
 
-  return leaf;
+  if (!old_key_ends) {
+    // The existing leaf's key and value do not change when it moves down.
+    branch
+        ->branch_children()[std::to_integer<size_t>(leaf->path().get(split))] =
+        leaf;
+    leaf->parent = branch;
+  }
+  if (split == k.size()) {
+    CHECK(!old_key_ends); // Duplicate keys were handled before splitting.
+    branch->value_hash() = sha256(obj);
+    return leaf;
+  }
+
+  Node *new_leaf = Node::create_leaf(branch, allocator_);
+  CHECK(new_leaf->rw_lock.try_lock_writer());
+  new_leaf->path() = k;
+  new_leaf->value_hash() = sha256(obj);
+  branch->branch_children()[std::to_integer<size_t>(k.get(split))] = new_leaf;
+  if (!old_key_ends) {
+    // The old leaf is not on the unlock chain from new_leaf to parent.
+    leaf->rw_lock.unlock();
+  }
+  return new_leaf;
 }
 
 bool
@@ -1041,7 +982,7 @@ MerkleTrie::remove(const Key &k)
   std::byte remaining_child_hex{};
 
   while (true) {
-    idx = 0;
+    idx = root_prefix_.size();
     existing_key = nullptr;
 
     branch = traverse_to_lowest_branch(/*path=*/k, &root_, idx, existing_key,
@@ -1093,7 +1034,8 @@ MerkleTrie::remove(const Key &k)
   else if (need_to_remove_branch) {
     // The branch now has fewer than two KV pairs "under" it, so we can optimize
     // our trie by removing the branch.
-    to_hash = remove_branch(branch, num_children, remaining_child_hex);
+    to_hash = remove_branch(branch, num_children, remaining_child_hex,
+                            k.get_subarray(0, idx));
   }
   else {
     // The branch has multiple children, or there is exactly one child and there
@@ -1116,7 +1058,7 @@ MerkleTrie::remove(const Key &k)
 // static
 Node *
 MerkleTrie::remove_branch(Node *branch, size_t num_children,
-                          std::byte remaining_child_hex)
+                          std::byte remaining_child_hex, const Key &branch_key)
 {
   // We should only remove a branch if it has one KV pair "under" it.
   if (num_children) {
@@ -1128,10 +1070,9 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
   // We should not remove the root node.
   CHECK_PTR(branch->parent);
 
-  // It is possible that the branch's parent is an extension node. In this case,
-  // we need to remove the extension node, too, and then we need to add the
-  // extension node's path as a prefix to the child in the branch. We use
-  // [cur_path] to hold the extension node's path (if needed).
+  // If the branch's parent is an extension, remove it too. Preserve its path
+  // in [cur_path] in case the replacement child needs an extension fragment;
+  // a full-key leaf needs no prefix restored.
   HexArray cur_path;
 
   // This is the hex digit in the parent branch that corresponds to the path
@@ -1172,7 +1113,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
   if (num_children == 0) {
     CHECK(branch->value_hash().has_value());
 
-    // The branch has a value, so place the value in a leaf with path size 0.
+    // The branch has a value, so place it in a leaf retaining the full key.
     //
     // We reuse the branch node below.
     std::optional<SHA256Hash> value_hash = std::move(branch->value_hash());
@@ -1180,7 +1121,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
     new_child = branch;
     new_child->clear();
     new_child->init_leaf(parent);
-    new_child->path() = cur_path;
+    new_child->path() = branch_key;
     new_child->value_hash() = std::move(value_hash);
   }
   else {
@@ -1212,18 +1153,13 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
       remaining_child->rw_lock.unlock();
     }
     else {
-      // The remaining child under [branch] is either an extension node or a
-      // leaf node. Either way, we will add a prefix to the path in the node.
-      // The prefix will be [cur_path] (to account for a possible extension node
-      // we removed above) followed by the hex digit in the branch that the
-      // remaining child is under.
-      cur_path.append(remaining_child_hex);
-
-      // Add [remaining_child->path] to [cur_path] since we then overwrite
-      // [remaining_child->path] entirely with [cur_path]. We want to make sure
-      // the existing path in [remaining_child] remains.
-      cur_path.append(remaining_child->path());
-      remaining_child->path() = cur_path;
+      // Only extension fragments need the removed prefix restored. A leaf
+      // already stores its full key and keeps it unchanged when moved up.
+      if (remaining_child->type == Node::Type::kExtension) {
+        cur_path.append(remaining_child_hex);
+        cur_path.append(remaining_child->path());
+        remaining_child->path() = cur_path;
+      }
 
       new_child = remaining_child;
 
@@ -1332,7 +1268,7 @@ MerkleTrie::traverse_to_lowest_branch(const HexArray &path, Node *root,
       break;
     }
     case Node::Type::kLeaf:
-      if (path.get_subarray(idx, path.size()) == root->path()) {
+      if (path == root->path()) {
         // [path] maps to this leaf node.
         existing_key = root;
       }
@@ -1502,6 +1438,8 @@ MerkleTrie::free_all_nodes(Node *root)
       allocator_.free(&node);
     }
   };
+  // [walk] only allocates before it visits the first node, so if it throws, no
+  // node has been freed and the trie is left intact.
   walk<Node>(root, f);
 }
 

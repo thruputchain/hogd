@@ -112,6 +112,8 @@ public:
   x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
+      auth_callback_disconnecting_.store(true, std::memory_order_release);
+      auth_data_height_.broadcast(&default_threadpool());
       co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
@@ -421,6 +423,13 @@ public:
     co_return;
   }
 
+  // Auth data reaching exactly [expected_height] is an invariant, so landing
+  // past it is a bug, not a satisfied wait. Nomination and validation wait for
+  // the parent of the block they build or check, and commit takes
+  // [nominated_block_cache_lock_] and closes the validation gate before the DB
+  // commits the next height, so that height's auth data cannot arrive while
+  // they wait. The genesis ceremony waits without the nomination lock; that
+  // relies on there being a single ceremony.
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
@@ -463,6 +472,13 @@ public:
           hook)
   {
     submission_auth_test_hook_ = std::move(hook);
+  }
+
+  // Runs when an [auth_data_changed] callback for a height is about to wait
+  // for an earlier height.
+  void set_auth_data_wait_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    auth_data_wait_test_hook_ = std::move(hook);
   }
 
   x23::Async<void> test_finish_all_executors(BlockID block_id)
@@ -832,6 +848,7 @@ private:
   std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
                                  bool)>
       submission_auth_test_hook_;
+  std::function<void(BlockHeight)> auth_data_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -855,6 +872,9 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
+  // Set by [disconnect_auth_callback] to release [auth_data_changed] callbacks
+  // waiting on [auth_data_height_] for an earlier height.
+  std::atomic<bool> auth_callback_disconnecting_ = false;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 

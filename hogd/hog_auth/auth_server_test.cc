@@ -34,6 +34,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
 #include "integration.hh"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
@@ -579,7 +580,14 @@ class RecordingMempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
 
-  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  {
+    intro_calls_.fetch_add(1);
+    co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
+  }
+
+  static x23::Async<IntroAuthResult>
+  mempoolauth_get_auth_info(ProtocolCommit /*protocol*/)
   {
     co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
   }
@@ -598,9 +606,12 @@ public:
     return chunks_;
   }
 
+  int intro_calls() const { return intro_calls_.load(); }
+
 private:
   mutable std::mutex mutex_;
   std::vector<KeyChangeChunk> chunks_;
+  std::atomic<int> intro_calls_ = 0;
 };
 
 static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
@@ -624,6 +635,39 @@ changes_received(const RecordingMempoolAuthRpc &mempool, BlockHeight height)
 }
 
 } // namespace
+
+// The mempool starts serving the coordinator once auth registers, so auth
+// registers only after its db intro has returned. Registering first would let
+// a block commit before the subscription, and that block's changes would never
+// reach the mempool (issue #1927).
+TEST_F(AuthServerTest, RegistersWithMempoolOnlyAfterDbIntro)
+{
+  RpcServer<BlockingIntroDBAuthRpc> db_server;
+  const uint16_t db_port = db_server.start_server(0);
+  dbauth_client_t dbauth_client =
+      make_dbauth_client(std::format("localhost:{}", db_port))().value();
+  AuthServer race_auth_server(std::move(dbauth_client), NetworkHash{}, 16);
+
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t mempool_port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", mempool_port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  race_auth_server.set_mempool_client(std::move(*client));
+
+  std::jthread subscribe_thread([&] {
+    IntroAuthResult intro =
+        race_auth_server.subscribe_and_register(AuthCard{})();
+    EXPECT_EQ(intro.outcome(), IntroAuthOutcome::kSuccess);
+  });
+  db_server->impl()->wait_for_intro();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 0);
+
+  db_server->impl()->release_intro(1);
+  subscribe_thread.join();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 1);
+}
 
 TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
 {

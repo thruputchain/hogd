@@ -2944,14 +2944,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
-  {
-    std::chrono::steady_clock::duration delta =
-        commit_started_at - last_commit_;
-    auto delta_raw =
-        std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-    MempoolMetrics::instance().last_commit_interval_ms.record(
-        delta_raw.count());
-  }
   ElapsedTimer timer;
   auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
@@ -3416,6 +3408,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             static_cast<double>(committed_tx_count));
         MempoolMetrics::instance().block_transaction_bytes.record(
             static_cast<double>(measure_block_node.get()));
+        // Read [last_commit_] only here, under [commit_lock_]: an attempt that
+        // reads it before closing the validation gate races the previous
+        // commit's write below, and only a commit has an interval to record.
+        MempoolMetrics::instance().last_commit_interval_ms.record(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                commit_started_at - last_commit_)
+                .count());
         // Skip the first commit after start and the genesis ceremony (height
         // 1): neither is a round.
         if (last_commit_started_) {
@@ -3485,7 +3484,24 @@ MempoolCoordinatorRpc::auth_data_changed(
   });
 
   CHECK(initialized_.load(std::memory_order_acquire));
-  const BlockHeight current_height = auth_data_height_.load();
+  // The auth server forwards heights concurrently, so a height can arrive
+  // while an earlier height's callback is still re-verifying. Wait for the
+  // earlier height to be applied first. Once [disconnect_auth_callback] stops
+  // admission, that height may never be admitted, so give up instead of
+  // keeping the drain waiting on us. The flag is read while the awaiter holds
+  // [auth_data_height_]'s waiter lock, so the disconnect's broadcast either
+  // finds us waiting or happens before we read the flag.
+  BlockHeight current_height;
+  while ((current_height = auth_data_height_.load()) < height - 1) {
+    if (auth_data_wait_test_hook_) {
+      auth_data_wait_test_hook_(height);
+    }
+    auto awaiter = auth_data_height_.wait(current_height);
+    if (auth_callback_disconnecting_.load(std::memory_order_acquire)) {
+      co_return;
+    }
+    co_await awaiter;
+  }
   if (height <= current_height) {
     // An auth server that subscribes after the database has committed its
     // current tip sends an empty synchronization callback for that tip.  A
@@ -3495,7 +3511,6 @@ MempoolCoordinatorRpc::auth_data_changed(
          height, current_height);
     co_return;
   }
-  CHECK_EQ(height, current_height + 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);

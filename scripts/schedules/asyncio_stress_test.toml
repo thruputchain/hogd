@@ -62,13 +62,13 @@ SIZE_CAP_BULK_SLOW='SizeCapIgnoresSignedTransactionWrapper'
 export X23_RCVBUF=1
 
 echo 'run gcc tests RCVBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}|${SIZE_CAP_BULK_SLOW}"
+./scripts/ci/ctest_replay.py --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "rpcstress_writebuf|${RCQ_DBHASH_SLOW}|${SIZE_CAP_BULK_SLOW}"
 
 unset X23_RCVBUF
 
 export X23_SNDBUF=1
 echo 'run gcc tests SNDBUF=1'
-ctest --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "${RCQ_DBHASH_SLOW}"
+./scripts/ci/ctest_replay.py --test-dir build/gcc_debug --parallel --timeout 100 --output-on-failure -E "${RCQ_DBHASH_SLOW}"
 unset X23_SNDBUF
 
 """
