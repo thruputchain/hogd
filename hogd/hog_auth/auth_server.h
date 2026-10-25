@@ -82,6 +82,14 @@ public:
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
 
+  // Subscribes to the db's auth-data changes, then registers with the mempool
+  // through the client given to [set_mempool_client]. The mempool starts
+  // serving the coordinator once auth registers, so registering only after the
+  // subscription keeps a block from committing before it; that block's
+  // changes would otherwise never reach the mempool (issue #1927). Fails
+  // without subscribing if no mempool client was set.
+  x23::Async<IntroAuthResult> subscribe_and_register(AuthCard card);
+
   void set_mempool_client(sched_auth_client_t &&client)
   {
     CHECK(!mempool_client_);

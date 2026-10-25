@@ -639,12 +639,8 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Now have all of the subsystems register themselves with the mempool.
     register_db_with_mempool();
-    AuthCard auth_card = register_auth_with_mempool();
+    register_auth_with_mempool();
     register_coordinator_with_mempool()();
-    // finish_init() installs the mempool's auth-data callback. Subscribe only
-    // after that callback exists, because a recovered DB immediately reports
-    // its current height through auth_data_changed().
-    auth_server_->subscribe_to_auth_data_changes(std::move(auth_card))();
     if (recovered_existing_chain_) {
       register_event_with_mempool();
       start_indexer_pull();
@@ -1207,7 +1203,7 @@ HogDevnodeNode::register_event_with_mempool()
   }
 }
 
-AuthCard
+void
 HogDevnodeNode::register_auth_with_mempool()
 {
   auto client_res =
@@ -1224,9 +1220,8 @@ HogDevnodeNode::register_auth_with_mempool()
       .address_for_mempool =
           format_advertised_address(bind_host_, auth_mempool_server_.port())
               .c_str()};
-  client.mempoolauth_intro_auth(auth_card)();
   auth_server_->set_mempool_client(std::move(client));
-  return auth_card;
+  auth_server_->subscribe_and_register(std::move(auth_card))();
 }
 
 void
