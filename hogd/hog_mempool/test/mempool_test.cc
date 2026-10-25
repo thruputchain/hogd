@@ -56,6 +56,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
+#include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
@@ -1614,16 +1615,24 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
   // from the cache.
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -1661,12 +1670,14 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // The resubmitted tx remains cached for the nomination, off the runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // Commit the validated block, not the nominated one.
   auto res_validate =
@@ -1676,9 +1687,13 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
             SchedulerValidationResult::SchedulerValidationOK);
   ASSERT_NE(res_validate.block().block_id,
             res_nominate.proposed_block().block_id);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -3508,6 +3523,9 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // ...from the cache as well as the runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
@@ -4086,14 +4104,22 @@ TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
       propose_block(server, get_tip.db_tip());
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
   ASSERT_EQ(commit_block(server, get_tip.db_tip(),
                          res_nominate.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      get_tip.db_tip().value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 
   // The same bytes now carry enough weight, and the earlier rejections must
   // not stand in the way.
   submit_over_gateway(underweight);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 // A rejection is never remembered: every resubmission of a turned-down
