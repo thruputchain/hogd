@@ -8,6 +8,7 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <new>
 #include <print>
 #include <random>
 #include <set>
@@ -18,6 +19,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
+#include "hogd/base/test_support/alloc_fault.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/allocator.h"
@@ -2150,6 +2152,94 @@ TEST(MerkleTriePrefix, ProveRejectsWrongExtensionPath)
       MerkleTriePrefix::prove(root_hash, node_encodings, real_key, value_span));
   EXPECT_FALSE(MerkleTriePrefix::prove(root_hash, node_encodings,
                                        forged_extension_key, value_span));
+}
+
+#if !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
+// Faults the Nth allocation of a proof for every N until a proof completes,
+// and checks after each fault that the proof left the trie as it found it: no
+// node still locked and every parent pointer intact.
+template<typename T>
+void
+sweep_proof_allocation_faults(T &trie)
+{
+  const HexArray key("123456");
+  std::string value = "value";
+  std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
+                                  value.size()};
+  for (const char *k : {"123456", "123457", "12abcd"}) {
+    EXPECT_TRUE(trie.insert(HexArray(k), value_span));
+  }
+  trie.generate_all_hashes();
+  // Also warms up per-thread state, so every proof below allocates the same.
+  const auto expected = trie.get_proof_by_node(key);
+  EXPECT_TRUE(trie.check());
+  // The proof walks up from a leaf through an extension and branches, so the
+  // sweep faults while each kind of node is locked.
+  EXPECT_TRUE(proof_has_node_type(expected.second, Node::Type::kLeaf));
+  EXPECT_TRUE(proof_has_node_type(expected.second, Node::Type::kExtension));
+  EXPECT_TRUE(proof_has_node_type(expected.second, Node::Type::kBranch));
+
+  int faulted = 0;
+  for (int nth = 0;; nth++) {
+    bool threw = false;
+    std::pair<SHA256Hash, std::vector<std::vector<std::byte>>> proof;
+    try {
+      test::ScopedAllocationFailure fail_nth_allocation(nth);
+      proof = trie.get_proof_by_node(key);
+    } catch (const std::bad_alloc &) {
+      threw = true;
+    }
+    if (!threw) {
+      // The proof made fewer than nth+1 allocations: every allocation on the
+      // path has now been faulted once. Copying each node's encoding
+      // allocates, so that includes at least one fault per node.
+      EXPECT_EQ(proof.first, expected.first);
+      EXPECT_TRUE(proof.second == expected.second);
+      EXPECT_GE(faulted, std::ssize(expected.second));
+      return;
+    }
+    faulted++;
+
+    // Stop at the first inconsistency: a node left locked would hang the
+    // proof below.
+    if (!trie.check()) {
+      ADD_FAILURE() << "faulting allocation " << nth
+                    << " left the trie inconsistent";
+      return;
+    }
+    proof = trie.get_proof_by_node(key);
+    EXPECT_EQ(proof.first, expected.first);
+    EXPECT_TRUE(proof.second == expected.second);
+  }
+}
+
+#endif // !HOGD_SANITIZER_OWNS_OPERATOR_NEW
+
+// Regression test for issue #1797: a proof that throws must release the node
+// locks it holds.
+TEST(MerkleTrie, ProofAllocationFailureLeavesTrieConsistent)
+{
+#if HOGD_SANITIZER_OWNS_OPERATOR_NEW
+  GTEST_SKIP() << "faulting an allocation means replacing the global operator "
+                  "new, which the sanitizer runtime already defines";
+#else
+  MerkleTrie trie;
+  sweep_proof_allocation_faults(trie);
+#endif
+}
+
+// Regression test for issue #1797: a proof that throws must also unlink the
+// stack-local root it installs above the child trie.
+TEST(MerkleTriePrefix, ProofAllocationFailureLeavesTrieConsistent)
+{
+#if HOGD_SANITIZER_OWNS_OPERATOR_NEW
+  GTEST_SKIP() << "faulting an allocation means replacing the global operator "
+                  "new, which the sanitizer runtime already defines";
+#else
+  MerkleTriePrefix trie;
+  sweep_proof_allocation_faults(trie);
+#endif
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
