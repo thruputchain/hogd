@@ -329,6 +329,44 @@ TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
   gateway.shut_down();
 }
 
+// shut_down() used to clear [current_view_block_id_] after
+// close_all_view_states() returned, outside [view_state_lock_] -- the one
+// access to that field not under the lock. request_stop() does not wait for
+// the refresh worker, so the worker could be inside current_view_pin(),
+// reading the pin under the lock, while shut_down() wrote it from the control
+// thread. TSan called it a data race in the TSAN nightly (#4605); it took a
+// whole devnode to hit, because the refresh worker has to have probed
+// recently for the two accesses to land in the same shadow window.
+//
+// Pin a view, let the worker take at least one probe, then shut down: that is
+// the devnode's shape without the devnode. Under TSan this fails if the write
+// ever leaves the lock again; otherwise it just pins that shutdown-while-
+// refreshing serves a clean shutdown rather than a hang.
+TEST_F(ViewGatewayRefreshTest, ShutdownDuringRefreshClearsPinUnderTheLock)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
+
+  // A view pins [current_view_block_id_] to a non-zero id, so the worker's
+  // read of it is the one that matters rather than an early-out on zero.
+  ViewGatewayResult pinned = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(pinned.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+
+  // kRefreshProbeInterval is 100ms, so this is at least one full probe.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+  gateway.shut_down();
+
+  // A view after shutdown is refused, not served from the cleared pin.
+  ViewGatewayResult after = gateway.viewgateway_view(make_read_query())();
+  EXPECT_EQ(after.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
+}
+
 // viewgateway_intro: only the exact protocol commit is accepted; anything
 // else is ViewGatewayIntroMismatchedProtocol. Only the success arm was pinned
 // (via devnode) before. Also pins the shutdown arm of viewgateway_view: a
