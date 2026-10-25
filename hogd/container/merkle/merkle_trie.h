@@ -303,7 +303,18 @@ private:
       size_t depth;
     };
 
-    std::stack<CheckInfo> path;
+    // Each step down the trie consumes at least one hex digit of the key (a
+    // branch consumes one, and an extension's path is never empty), so the
+    // stack holds at most one entry per hex digit plus one for [root]. We
+    // reserve that up front so that the traversal never allocates once it has
+    // started calling [f]. [free_all_nodes] relies on this: an allocation
+    // failure after [f] has freed some nodes would unwind with the trie still
+    // pointing at them.
+    constexpr size_t kMaxStackSize = HexArray::kMaxNumHexDigits + 1;
+    std::vector<CheckInfo> stack_storage;
+    stack_storage.reserve(kMaxStackSize);
+    std::stack<CheckInfo, std::vector<CheckInfo>> path(
+        std::move(stack_storage));
     // Push the root node onto the stack.
     CheckInfo root_info{.node = root,
                         .parent = nullptr,
@@ -362,8 +373,11 @@ private:
             // node.
             info.path.remove_from_back(1);
           }
-          path.push(child);
+          // Update [info] before pushing: [path] is backed by a vector, so a
+          // push may invalidate [info].
           info.next_child_to_visit++;
+          CHECK_LT(path.size(), kMaxStackSize);
+          path.push(child);
           continue;
         }
         break;
@@ -398,8 +412,10 @@ private:
             // node.
             info.path.remove_from_back(info.node->path().size());
           }
-          path.push(child);
+          // Update [info] before pushing, as above.
           info.next_child_to_visit++;
+          CHECK_LT(path.size(), kMaxStackSize);
+          path.push(child);
           continue;
         }
         break;

@@ -1502,6 +1502,8 @@ MerkleTrie::free_all_nodes(Node *root)
       allocator_.free(&node);
     }
   };
+  // [walk] only allocates before it visits the first node, so if it throws, no
+  // node has been freed and the trie is left intact.
   walk<Node>(root, f);
 }
 
