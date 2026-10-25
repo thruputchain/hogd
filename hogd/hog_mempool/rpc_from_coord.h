@@ -423,15 +423,19 @@ public:
     co_return;
   }
 
-  // Auth data past [expected_height] also satisfies the wait: a later height's
-  // callback can store before this waiter resumes from the broadcast that woke
-  // it, and a genesis ceremony can reach its height-0 wait after a concurrent
-  // ceremony has committed height 1.
+  // Auth data reaching exactly [expected_height] is an invariant, so landing
+  // past it is a bug, not a satisfied wait. Nomination and validation wait for
+  // the parent of the block they build or check, and commit takes
+  // [nominated_block_cache_lock_] and closes the validation gate before the DB
+  // commits the next height, so that height's auth data cannot arrive while
+  // they wait. The genesis ceremony waits without the nomination lock; that
+  // relies on there being a single ceremony.
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
-    while ((current_height = auth_data_height_.load()) <
+    while ((current_height = auth_data_height_.load()) !=
            static_cast<int64_t>(expected_height)) {
+      CHECK_EQ(current_height + 1, expected_height);
       co_await auth_data_height_.wait(current_height);
     }
     co_return;

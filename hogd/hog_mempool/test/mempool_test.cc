@@ -817,18 +817,6 @@ TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
   coord.set_auth_data_wait_test_hook({});
 }
 
-// Waiting for auth data at a height the coordinator has already passed returns
-// instead of failing the mempool.
-TEST(Mempool, AuthDataWaitAcceptsLaterHeight)
-{
-  MempoolTestInfra server;
-  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
-  coord.wait_for_block_commit(/*expected_height=*/1)();
-  ASSERT_GE(coord.auth_data_height(), 1);
-
-  coord.wait_for_auth_data(/*expected_height=*/0)();
-}
-
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
 {
   MempoolTestInfra server;
