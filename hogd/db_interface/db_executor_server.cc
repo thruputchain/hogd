@@ -78,7 +78,8 @@ DbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 
 TryPushSubtransactionResult
 DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                           StorageDeltaBatch const &batch)
+                                           StorageDeltaBatch const &batch,
+                                           SubtransactionFoldRuns const &fold)
 {
   // test double: produces no diagnostics
   auto block_data = block_manager_->get_block_data(block);
@@ -110,7 +111,8 @@ DbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
     }
   }
 
-  return TryPushSubtransactionResult(RPCError::kRPCNone);
+  return TryPushSubtransactionResult(
+      block_data->fold_subtransactions(tx, fold));
 }
 
 RPCError

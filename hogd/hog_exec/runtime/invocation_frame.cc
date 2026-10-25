@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdint>
 #include <iterator>
 #include <limits>
 #include <map>
@@ -15,7 +16,9 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
+#include "executor_to_db_rpc.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -42,12 +45,10 @@ InvocationFrame::InvocationFrame(
     ContractAddress const &address, Calldata &&calldata, InvokeFlagSet flags,
     size_t event_count,
     std::vector<RegisteredAuthToken> &&forwarded_auth_tokens,
-    uint32_t inherited_try_invoke_depth, NetworkConfigParams const &params)
+    NetworkConfigParams const &params)
   : hash_buffers_(params.max_sha256_buffers), address_(address),
     calldata_(std::forward<Calldata>(calldata)), flags_(flags),
-    event_count_(event_count),
-    total_try_invoke_depth_(inherited_try_invoke_depth),
-    auth_tokens_(std::move(forwarded_auth_tokens)),
+    event_count_(event_count), auth_tokens_(std::move(forwarded_auth_tokens)),
     forwarded_auth_token_count_(static_cast<uint32_t>(auth_tokens_.size()))
 {}
 
@@ -89,8 +90,10 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
     modified_items_.insert_or_assign(key, std::move(item));
   }
 
+  // A child whose own TryInvoke succeeded already handed its subtransactions
+  // over (absorb_folded_savepoints), so this adds 0 for it.
   try_invoke_frame_count_ += frame.try_invoke_frame_count_;
-  total_try_invoke_depth_ = frame.total_try_invoke_depth_;
+  savepoint_count_ += frame.savepoint_count_;
 
   // The tokens forwarded to the child leave this frame now that the child has
   // committed. The tokens it returned join this frame under consecutive new
@@ -167,29 +170,25 @@ make_deployed_contract_delta(DeployedContractHash const &hash)
 
 } // namespace
 
-void
-InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
-{
-  assert(!depth_cap_reached(params));
-  total_try_invoke_depth_++;
-}
-
 x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+    SubtransactionFoldRuns const &fold)
 {
-  // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
-  // true on a successful lock acquisition, false on contention failure.
-  // On success, counts the pushed subtransaction against this frame; the root
-  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
-  // count, since the root frame is discarded immediately after commit.
+  // Pushes the accumulated delta batch as a HogDb subtransaction, which hog_db
+  // folds as [fold] says once it succeeds. Returns true on a successful lock
+  // acquisition, false on contention failure. On success, counts the pushed
+  // subtransaction against this frame; the root commit caller
+  // (SystemCallHandler::try_commit_transaction) ignores that count, since the
+  // root frame is discarded immediately after commit.
   //
-  // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
-  // or advanced here; InvocationFrameStack::finish_frame checks it before
-  // calling this for a child TryInvoke frame and bumps the depth afterwards,
-  // in the one place shared by every execution mode. The child cap reserves
-  // one slot for the root commit's subtransaction push.
+  // The deterministic savepoint cap (max_savepoint_depth) is NOT enforced or
+  // advanced here, and neither is the fold mirrored in the frames' counts;
+  // InvocationFrameStack::finish_frame checks the cap before calling this for
+  // a child TryInvoke frame and does both afterwards, in the one place shared
+  // by every execution mode. The cap reserves one slot for the root commit's
+  // subtransaction push.
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
@@ -232,7 +231,7 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  auto res = co_await db_proxy.try_push_current_subtransaction();
+  auto res = co_await db_proxy.try_push_current_subtransaction(fold);
   if (!res.has_value()) {
     co_return res.error();
   }
@@ -281,9 +280,6 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
 
   size_t event_count =
       frame_stack_.empty() ? 0 : frame_stack_.back().event_count();
-  uint32_t parent_depth =
-      frame_stack_.empty() ? 0
-                           : frame_stack_.back().get_total_try_invoke_depth();
 
   auto forwarded_ids = std::move(owned_auth_tokens).release();
   // A root frame has no parent to forward it tokens.
@@ -303,7 +299,7 @@ InvocationFrameStack::start_frame(ContractAddress const &address,
     }
     frame_stack_.emplace_back(address, std::forward<Calldata>(calldata), flags,
                               event_count, std::move(forwarded_tokens),
-                              parent_depth, config_params_);
+                              config_params_);
   } catch (...) {
     return SystemError{SystemErrorCode::Unrecoverable};
   }
@@ -343,7 +339,17 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
     if (frame_result.is_frame_success() && !manually_reverted) {
       bool acq_success = false;
 
-      if (frame_stack_.back().depth_cap_reached(config_params_)) {
+      if constexpr (is_debug_build()) {
+        // The counts the cap reads must match the subtransactions proposal
+        // mode actually holds.
+        if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
+          for (auto const &frame : frame_stack_) {
+            assert(frame.get_savepoint_count() ==
+                   frame.get_try_invoke_frame_count());
+          }
+        }
+      }
+      if (savepoint_cap_reached()) {
         // Deterministic failure across both proposal and validation modes.
         // No nondeterministic bit is logged or consumed here, so the bit
         // stream represents only lock-acquisition outcomes.
@@ -351,9 +357,23 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
+        // Owned by this coroutine frame across the push's suspension. Its
+        // allocation is contained at the noexcept boundary (#3378); the pop
+        // and co_return stay outside the handler.
+        SubtransactionFoldRuns fold;
+        bool fold_built = true;
+        try {
+          fold = fold_runs_for_push();
+        } catch (...) {
+          fold_built = false;
+        }
+        if (!fold_built) {
+          frame_stack_.pop_back();
+          co_return SystemError{SystemErrorCode::Unrecoverable};
+        }
         auto acq_res =
             co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
-                                                                 no_obs);
+                                                                 no_obs, fold);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           co_return acq_res.error();
@@ -405,12 +425,13 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         }
       }
 
-      // Each mode above only decides whether the child succeeded; the depth
-      // cap is advanced here so that no mode can settle a success without
-      // counting it. A mode-specific bump was how viewing came to skip the
-      // cap.
+      // Each mode above only decides whether the child succeeded; the
+      // savepoint counts are advanced and folded here so that no mode can
+      // settle a success without counting it. A mode-specific bump was how
+      // viewing came to skip the cap.
       if (acq_success) {
-        frame_stack_.back().note_try_invoke_success(config_params_);
+        frame_stack_.back().note_try_invoke_success();
+        fold_open_frame_savepoints();
       }
       else {
         // If the frame locks were not acquired successfully, then we mark
@@ -488,6 +509,59 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
 
   co_return SystemStatus<std::pair<InvokeResult, bool>>{
       std::pair{frame_result, manually_reverted}};
+}
+
+bool
+InvocationFrameStack::savepoint_cap_reached() const
+{
+  uint64_t held = 0;
+  for (auto const &frame : frame_stack_) {
+    held += frame.get_savepoint_count();
+  }
+  // One slot is reserved for the root commit's subtransaction push; a depth
+  // of 0 leaves none for a TryInvoke.
+  return config_params_.max_savepoint_depth == 0 ||
+         held >= config_params_.max_savepoint_depth - 1;
+}
+
+SubtransactionFoldRuns
+InvocationFrameStack::fold_runs_for_push() const
+{
+  assert(!frame_stack_.empty());
+  SubtransactionFoldRuns runs;
+  // Runs go down the stack from the new subtransaction. A frame holding none
+  // contributes an empty run, which is left out, so no more runs are sent
+  // than there are subtransactions.
+  auto frame = frame_stack_.rbegin();
+  uint32_t first = 1 + frame->get_try_invoke_frame_count();
+  if (++frame != frame_stack_.rend()) {
+    first += frame->get_try_invoke_frame_count();
+    ++frame;
+  }
+  runs.push_back(first);
+  for (; frame != frame_stack_.rend(); ++frame) {
+    if (frame->get_try_invoke_frame_count() != 0) {
+      runs.push_back(frame->get_try_invoke_frame_count());
+    }
+  }
+  // Runs of one fold nothing, so the ones at the bottom need not be sent.
+  while (!runs.empty() && runs.back() <= 1) {
+    runs.pop_back();
+  }
+  return runs;
+}
+
+void
+InvocationFrameStack::fold_open_frame_savepoints()
+{
+  assert(!frame_stack_.empty());
+  if (frame_stack_.size() >= 2) {
+    frame_stack_[frame_stack_.size() - 2].absorb_folded_savepoints(
+        frame_stack_.back());
+  }
+  for (auto &frame : frame_stack_) {
+    frame.fold_savepoints();
+  }
 }
 
 void

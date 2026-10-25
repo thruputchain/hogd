@@ -94,10 +94,14 @@ public:
   int create_savepoint();
   // rollback_to_savepoint restores the transaction state to a savepoint.
   void rollback_to_savepoint(int depth);
-  // release_savepoint removes a savepoint and frees its associated resources.
-  // If other savepoints were made after this savepoint, they will be removed
-  // as well.
-  void release_savepoint(int depth);
+  // fold_savepoints folds runs of savepoints counted down the stack from the
+  // head: the [runs[0]] savepoints ending at the head become one, the
+  // [runs[1]] below those become one, and so on. Each folded savepoint holds
+  // the latest version of every change made in its run, so rolling back past
+  // it restores the state from before the run, but the states within the run
+  // are discarded. A run of 0 or 1 changes nothing. The runs must lie within
+  // the savepoint stack: their sum must not exceed the head.
+  void fold_savepoints(std::span<const uint32_t> runs);
 
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }

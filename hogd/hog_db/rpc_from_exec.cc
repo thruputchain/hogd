@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <set>
 #include <span>
 #include <string>
@@ -228,8 +229,9 @@ HogDbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 }
 
 TryPushSubtransactionResult
-HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
-                                              StorageDeltaBatch batch)
+HogDbExecutorRpc::try_push_new_subtransaction(
+    BlockID block, TransactionID tx, StorageDeltaBatch batch,
+    SubtransactionFoldRuns const &fold)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -242,6 +244,15 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   const DbDiagnosticLevel level = diagnostic_level_for(itx->execution_mode());
   // hog_exec enforces the depth cap first, so a push past it is misbehavior.
   if (itx->get_savepoint_head() >= itx->max_savepoint_depth()) [[unlikely]] {
+    return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
+  }
+  // The fold may reach only savepoints the executor pushed, the new one
+  // included; reaching further is misbehavior too.
+  uint64_t folded = 0;
+  for (uint32_t run : fold) {
+    folded += run;
+  }
+  if (folded > uint64_t{itx->get_savepoint_head()} + 1) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
   int depth = itx->create_savepoint();
@@ -346,6 +357,10 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (first_err != RPCError::kRPCNone) {
     return fail(first_err);
   }
+  // Fold only once every lock, balance locks included, is held:
+  // sync_balance_locks() reads the versions at the new depth, and a failed
+  // push must leave the savepoints below it intact for the executor to pop.
+  itx->fold_savepoints(fold);
   itx->assert_is_valid();
   return TryPushSubtransactionResult(RPCError::kRPCNone);
 }

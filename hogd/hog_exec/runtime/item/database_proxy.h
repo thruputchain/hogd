@@ -93,18 +93,23 @@ public:
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                          AddressAndKey addrkey, uint32_t index);
 
+  // On success, hog_db folds the subtransaction stack as [fold] says; see
+  // SubtransactionFoldRuns in executor_to_db_rpc.x.
+  //
   // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
   // non-null it receives the conflict diagnostics hog_db built at the level
   // it selected from the block's execution mode.
   //
-  // [delta_batch] and [conflict_out] are borrowed across the suspension: this
-  // is a coroutine, so a reference parameter is NOT copied into the frame and
-  // the caller must keep the referent alive until the call completes.  The
-  // batch is far too large to copy per push, which is why it stays a
-  // reference; PerTransactionDatabaseProxy owns both for the whole call.
+  // [delta_batch], [fold] and [conflict_out] are borrowed across the
+  // suspension: this is a coroutine, so a reference parameter is NOT copied
+  // into the frame and the caller must keep the referent alive until the call
+  // completes.  The batch is far too large to copy per push, which is why it
+  // stays a reference; PerTransactionDatabaseProxy owns the batch and the
+  // conflict for the whole call, and its caller owns [fold].
   [[nodiscard]] x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
+                              SubtransactionFoldRuns const &fold,
                               DbConflictResult *conflict_out = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
@@ -179,11 +184,14 @@ public:
   // Coroutine: the staged batch stays owned by this object across the
   // suspension, and is cleared only once hog_db has answered.
   //
+  // On success, hog_db folds the subtransaction stack as [fold] says; the
+  // caller must never again pop part of a folded run.
+  //
   // Defined out of line: GCC emits an inline coroutine's ramp even where it is
   // unused, so a header definition would make every includer's link need
   // DatabaseProxy.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_current_subtransaction();
+  try_push_current_subtransaction(SubtransactionFoldRuns const &fold = {});
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   pop_subtransactions(uint32_t count)

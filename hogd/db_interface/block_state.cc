@@ -190,6 +190,14 @@ BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
   return tx.pop_subtransactions(count);
 }
 
+RPCError
+BlockState::fold_subtransactions(TransactionID txid,
+                                 std::span<const uint32_t> runs)
+{
+  auto [tx, tx_lock] = tx_manager_.get(txid);
+  return tx.fold_subtransactions(runs);
+}
+
 Nondeterministic<std::optional<QueueEntry>>
 BlockState::get_concurrent_retrocausal_queue_entry(AddressAndKey const &addrkey,
                                                    uint32_t index)

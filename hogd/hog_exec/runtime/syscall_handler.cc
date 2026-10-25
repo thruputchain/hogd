@@ -647,7 +647,7 @@ SystemCallHandler::try_commit_transaction()
   }
 
   // Root commit: push the accumulated delta batch in one HogDb subtransaction.
-  // The child TryInvoke depth cap reserves one slot for this push.
+  // The savepoint cap reserves one slot for this push.
   //
   // Validation mode pushes no per-frame subtransactions, so the root frame's
   // try_invoke_frame_count_ must still be 0 here. This is load-bearing: if a
@@ -668,7 +668,14 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   add_replay_nonce_delta();
 
-  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
+  // The root commit folds every subtransaction the transaction holds into the
+  // one it pushes: nothing is popped after a successful commit push.
+  SubtransactionFoldRuns fold;
+  if (last_frame.get_try_invoke_frame_count() != 0) {
+    fold.push_back(1 + last_frame.get_try_invoke_frame_count());
+  }
+  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations,
+                                                       fold);
   if (!r.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(
                                                       r.error().code()),

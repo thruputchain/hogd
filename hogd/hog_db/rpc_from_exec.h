@@ -135,9 +135,12 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
+  // On success, folds the subtransaction stack as [fold] says (see
+  // SubtransactionFoldRuns in executor_to_db_rpc.x).
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch batch);
+                              StorageDeltaBatch batch,
+                              SubtransactionFoldRuns const &fold);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 

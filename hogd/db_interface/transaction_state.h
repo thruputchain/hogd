@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -47,6 +48,12 @@ public:
   // Close the most recent `count` subtransactions.  This is e.g. called when
   // a call frame (that contained some number of try_invoke frames) reverts.
   [[nodiscard]] RPCError pop_subtransactions(uint32_t count);
+
+  // Fold runs of subtransactions, counted down the stack from the most recent
+  // one, each into a single subtransaction.  This is e.g. called when a
+  // try_invoke frame commits, after which nothing will revert to the states
+  // within a run.  See SubtransactionFoldRuns in executor_to_db_rpc.x.
+  [[nodiscard]] RPCError fold_subtransactions(std::span<const uint32_t> runs);
 
   // Add a storage delta and associated lock for a given address+key pair.
   // The lock must have been acquired by the caller (via querying the

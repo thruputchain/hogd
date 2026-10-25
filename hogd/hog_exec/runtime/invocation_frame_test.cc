@@ -280,18 +280,14 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
 }
 
-// The child TryInvoke depth cap is a deterministic rule of the frame stack, so
-// it must hold identically in every execution mode. Each mode takes its own
-// arm in finish_frame to decide whether a child succeeded, and a bump missed
-// in one arm lets that mode run past the cap (viewing did, #3943 audit).
+// The savepoint cap is a deterministic rule of the frame stack, so it must
+// hold identically in every execution mode. Each mode takes its own arm in
+// finish_frame to decide whether a child succeeded, and a bump missed in one
+// arm lets that mode run past the cap (viewing did, #3943 audit).
 class InvocationFrameDepthCapTest
   : public InvocationFrameTest,
     public ::testing::WithParamInterface<ExecutionMode> {
 protected:
-  // One slot is reserved for root commit, so the child cap is
-  // kMaxSavepointDepth - 1.
-  static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
-
   static NondeterministicProposalData all_true_bits(uint32_t count)
   {
     NondeterministicProposalData ndet{};
@@ -305,12 +301,13 @@ protected:
   // Mode data under which every child TryInvoke that reaches the mode's arm
   // succeeds: proposal probes locks nothing contends for, validation replays
   // a true bit per child, and viewing is left to its default of true. Only
-  // the depth cap can then fail a child.
-  static ExecutionModeData make_mode_data(ExecutionMode mode)
+  // the savepoint cap can then fail a child.
+  static ExecutionModeData make_mode_data(ExecutionMode mode,
+                                          uint32_t try_invokes)
   {
     if (mode == ExecutionMode::kValidating) {
       return ExecutionModeData{std::in_place_type<ValidationModeData>,
-                               all_true_bits(kChildCap + 1)};
+                               all_true_bits(try_invokes)};
     }
     if (mode == ExecutionMode::kViewing) {
       ViewingModeCtor ctor{.proposal_data_segment_ = {}};
@@ -318,35 +315,62 @@ protected:
     }
     return ProposalModeData{};
   }
-};
 
-TEST_P(InvocationFrameDepthCapTest, TryInvokeHitsSavepointDepthLimit)
-{
-  ExecutionModeData mode_data = make_mode_data(GetParam());
+  static void start(InvocationFrameStack &stack, InvokeFlagSet flags)
+  {
+    ASSERT_TRUE(stack.start_frame(make_test_address(1), Calldata{}, flags, {})
+                    .has_value());
+  }
 
-  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
-  ASSERT_TRUE(
-      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
-
-  for (uint32_t i = 0; i < kChildCap; i++) {
-    ASSERT_TRUE(stack
+  // Starts and finishes a child TryInvoke of the active frame; returns
+  // whether it committed.
+  static bool try_invoke(InvocationFrameStack &stack,
+                         ExecutionModeData &mode_data)
+  {
+    EXPECT_TRUE(stack
                     .start_frame(make_test_address(1), Calldata{},
                                  std::to_underlying(InvokeFlag::TryInvoke), {})
                     .has_value());
     auto result = stack.finish_frame(InvokeStatus<void>{}, mode_data)();
-    ASSERT_TRUE(result.has_value()) << "iteration " << i;
-    ASSERT_TRUE(result.value().first.result_.has_value()) << "iteration " << i;
-    ASSERT_EQ(result.value().second, false);
+    EXPECT_TRUE(result.has_value());
+    return result.has_value() && result.value().first.result_.has_value();
   }
+};
 
-  ASSERT_TRUE(stack
-                  .start_frame(make_test_address(1), Calldata{},
-                               std::to_underlying(InvokeFlag::TryInvoke), {})
-                  .has_value());
-  auto result = stack.finish_frame(InvokeStatus<void>{}, mode_data)();
-  ASSERT_TRUE(result.has_value());
-  ASSERT_FALSE(result.value().first.result_.has_value())
-      << "child TryInvoke past the cap must fail deterministically in "
+// Each successful TryInvoke folds its caller's savepoints into one, so
+// sequential TryInvokes from one frame never approach the cap, however many
+// there are.
+TEST_P(InvocationFrameDepthCapTest, SequentialTryInvokesDoNotAccumulate)
+{
+  static constexpr uint32_t kTryInvokes = kMaxSavepointDepth + 1;
+  ExecutionModeData mode_data = make_mode_data(GetParam(), kTryInvokes);
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  start(stack, 0);
+  for (uint32_t i = 0; i < kTryInvokes; i++) {
+    ASSERT_TRUE(try_invoke(stack, mode_data)) << "iteration " << i;
+  }
+}
+
+// What the cap does bound is savepoints held by open frames at once: one per
+// open frame whose call tree committed a TryInvoke. With a configured depth of
+// 4, one slot reserved for the root commit, the root and two nested frames can
+// hold one each, and a TryInvoke from a third fails.
+TEST_P(InvocationFrameDepthCapTest, TryInvokeFailsOnceOpenFramesHoldTheCap)
+{
+  static constexpr uint32_t kDepth = 4;
+  NetworkConfigParams params{};
+  params.max_savepoint_depth = kDepth;
+  ExecutionModeData mode_data = make_mode_data(GetParam(), kDepth);
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, params);
+  start(stack, 0);
+  for (uint32_t open = 0; open < kDepth - 1; open++) {
+    ASSERT_TRUE(try_invoke(stack, mode_data)) << "open frame " << open;
+    start(stack, std::to_underlying(InvokeFlag::TryInvoke));
+  }
+  EXPECT_FALSE(try_invoke(stack, mode_data))
+      << "TryInvoke past the cap must fail deterministically in "
       << std::format("{}", GetParam());
 }
 
@@ -365,6 +389,43 @@ INSTANTIATE_TEST_SUITE_P(
       }
       return "Unknown";
     });
+
+// The runs a TryInvoke push asks hog_db to fold: the pushing frame's and its
+// parent's savepoints with the new one, then each other open frame's, with
+// runs that fold nothing left off the bottom.
+TEST_F(InvocationFrameTest, TryInvokePushFoldsOpenFrameSavepoints)
+{
+  auto try_invoke = [&](InvocationFrameStack &stack) {
+    ASSERT_TRUE(stack
+                    .start_frame(make_test_address(1), Calldata{},
+                                 std::to_underlying(InvokeFlag::TryInvoke), {})
+                    .has_value());
+    finish_child(stack);
+  };
+  auto plain_call_with_try_invoke = [&](InvocationFrameStack &stack) {
+    ASSERT_TRUE(
+        stack.start_frame(make_test_address(2), Calldata{}, 0, {}).has_value());
+    try_invoke(stack);
+    finish_child(stack);
+  };
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+
+  // Nothing to fold: the root holds 1 after this.
+  try_invoke(stack);
+  // The new savepoint goes to the plain child, which hands it to the root
+  // when it commits: the root holds 2 after this.
+  plain_call_with_try_invoke(stack);
+  // Folds the root's 2 into one below the new savepoint.
+  plain_call_with_try_invoke(stack);
+  // The root holds 2 again; both go into the new savepoint.
+  try_invoke(stack);
+
+  std::vector<std::vector<uint32_t>> expected{{}, {}, {1, 2}, {3}};
+  EXPECT_EQ(server_.impl()->take_pushed_fold_runs(), expected);
+}
 
 TEST_F(InvocationFrameTest, StartFrameReportsSuccess)
 {

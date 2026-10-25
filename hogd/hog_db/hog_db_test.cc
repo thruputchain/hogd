@@ -5257,6 +5257,162 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   EXPECT_FALSE(stale_block_tx.get().close(parent_hash).has_value());
 }
 
+// Folding savepoints keeps the newest version of each change, at the folded
+// run's depth, along with the storage it locked; rolling back past the run
+// still restores the state from before it.
+TEST_F(HogDbTest, FoldSavepointsKeepsNewestAndRollsBackPastRun)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr std::array<std::byte, 1> kSmall{std::byte{1}};
+  constexpr std::array<std::byte, 3> kMedium{std::byte{2}, std::byte{2},
+                                             std::byte{2}};
+  constexpr std::array<std::byte, 5> kLarge{std::byte{3}, std::byte{3},
+                                            std::byte{3}, std::byte{3},
+                                            std::byte{3}};
+
+  Address addr = make_address(kAddress + 80'001);
+  ItemKey rewritten = make_item_key(addr, 1);
+  ItemKey written_once = make_item_key(addr, 2);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx(block_tx);
+
+  // Each savepoint rewrites [rewritten] at a different size, so each version
+  // locks a different storage cost.
+  ASSERT_EQ(itx.create_savepoint(), 1);
+  ASSERT_TRUE(itx.request_bytes(rewritten, std::span(kSmall), kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+  ASSERT_EQ(itx.create_savepoint(), 2);
+  ASSERT_TRUE(itx.request_bytes(rewritten, std::span(kMedium), kNoFlags));
+  ASSERT_TRUE(itx.request_bytes(written_once, std::span(kSmall), kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+  ASSERT_EQ(itx.create_savepoint(), 3);
+  ASSERT_TRUE(itx.request_bytes(rewritten, std::span(kLarge), kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+
+  const std::array<uint32_t, 1> kRuns{3};
+  itx.fold_savepoints(kRuns);
+  EXPECT_EQ(itx.get_savepoint_head(), 1U);
+  {
+    auto stored = itx.read_bytes(rewritten);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(std::ranges::equal(*stored, kLarge));
+  }
+  {
+    auto stored = itx.read_bytes(written_once);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(std::ranges::equal(*stored, kSmall));
+  }
+
+  // A savepoint pushed on the folded one stacks on it as on any other.
+  ASSERT_EQ(itx.create_savepoint(), 2);
+  ASSERT_TRUE(itx.request_bytes(written_once, std::span(kMedium), kNoFlags));
+  ASSERT_TRUE(itx.sync_balance_locks());
+  itx.rollback_to_savepoint(1);
+  {
+    auto stored = itx.read_bytes(written_once);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(std::ranges::equal(*stored, kSmall));
+  }
+
+  itx.rollback_to_savepoint(0);
+  EXPECT_EQ(itx.change_entry_count_for_testing(), 0U);
+  EXPECT_EQ(itx.balance_entry_count_for_testing(), 0U);
+  EXPECT_EQ(itx.read_bytes(rewritten).error().code(), HogDbCode::kNotFound);
+  EXPECT_EQ(itx.read_bytes(written_once).error().code(), HogDbCode::kNotFound);
+}
+
+// Each run folds on its own: rolling back to the boundary between two runs
+// restores the newest state of the lower run.
+TEST_F(HogDbTest, FoldSavepointsFoldsEachRunSeparately)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  auto value = [](uint8_t v) { return std::array<std::byte, 1>{std::byte{v}}; };
+
+  Address addr = make_address(kAddress + 80'002);
+  ItemKey key = make_item_key(addr, 1);
+  ASSERT_TRUE(db_.write_address_balance(addr, 10'000'000));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  InvokeTX itx(block_tx);
+
+  // Savepoints 1..5 write 1..5. Runs {2, 0, 1, 2} from the head fold 4-5 and
+  // 1-2, and leave 3 alone: 1-2 -> 1, 3 -> 2, 4-5 -> 3.
+  for (uint8_t i = 1; i <= 5; ++i) {
+    ASSERT_EQ(itx.create_savepoint(), i);
+    auto v = value(i);
+    ASSERT_TRUE(itx.request_bytes(key, std::span(v), kNoFlags));
+    ASSERT_TRUE(itx.sync_balance_locks());
+  }
+  const std::array<uint32_t, 4> kRuns{2, 0, 1, 2};
+  itx.fold_savepoints(kRuns);
+  EXPECT_EQ(itx.get_savepoint_head(), 3U);
+
+  auto expect_value = [&](uint8_t v) {
+    auto stored = itx.read_bytes(key);
+    ASSERT_TRUE(stored);
+    EXPECT_TRUE(std::ranges::equal(*stored, value(v)));
+  };
+  expect_value(5);
+  itx.rollback_to_savepoint(2);
+  expect_value(3);
+  itx.rollback_to_savepoint(1);
+  expect_value(2);
+  itx.rollback_to_savepoint(0);
+  EXPECT_EQ(itx.read_bytes(key).error().code(), HogDbCode::kNotFound);
+}
+
+// A folded transaction commits its newest writes and the storage they cost.
+TEST_F(HogDbTest, FoldSavepointsThenCommit)
+{
+  constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
+  constexpr std::array<std::byte, 1> kSmall{std::byte{1}};
+  constexpr std::array<std::byte, 4> kLarge{std::byte{4}, std::byte{4},
+                                            std::byte{4}, std::byte{4}};
+  constexpr int128_t kInitialBalance = 10'000'000;
+
+  Address addr = make_address(kAddress + 80'003);
+  ItemKey key = make_item_key(addr, 1);
+  ASSERT_TRUE(db_.write_address_balance(addr, kInitialBalance));
+
+  PerThreadARC<BlockTX> block_tx(
+      db_, cost_model_, background_commit_worker_, 1,
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
+  ASSERT_TRUE(block_tx.try_acquire_reference());
+  {
+    InvokeTX itx(block_tx);
+    itx.create_savepoint();
+    ASSERT_TRUE(itx.request_bytes(key, std::span(kSmall), kNoFlags));
+    ASSERT_TRUE(itx.sync_balance_locks());
+    itx.create_savepoint();
+    ASSERT_TRUE(itx.request_bytes(key, std::span(kLarge), kNoFlags));
+    ASSERT_TRUE(itx.sync_balance_locks());
+    const std::array<uint32_t, 1> kRuns{2};
+    itx.fold_savepoints(kRuns);
+    ASSERT_TRUE(itx.commit());
+  }
+  ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
+  ASSERT_TRUE(block_tx.get().commit());
+
+  auto stored = db_.read_bytes(key);
+  ASSERT_TRUE(stored);
+  EXPECT_TRUE(std::ranges::equal(*stored, kLarge));
+  auto balance = db_.read_address_balance(addr);
+  ASSERT_TRUE(balance);
+  EXPECT_EQ(kInitialBalance - cost_model_.get_bytestring_cost(kLarge.size()),
+            *balance);
+}
+
 } // namespace hogd
 
 int

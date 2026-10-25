@@ -85,7 +85,7 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
   auto r =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas, {})();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
@@ -209,7 +209,7 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
   auto r =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas)();
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas, {})();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
@@ -253,7 +253,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                        .flags = std::to_underlying(
                                            StorageDeltaFlags::None)});
   auto r1 =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner)();
+      db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner, {})();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -265,7 +265,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                           StorageDeltaFlags::None)});
   DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
-                                                 &conflict)();
+                                                 {}, &conflict)();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
   // The fixture runs Proposal mode: hog_db selects All in debug builds,

@@ -6,8 +6,11 @@
 #include <exception>
 #include <expected>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <random>
+#include <ranges>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -352,30 +355,70 @@ InvokeTX::rollback_to_savepoint(int depth)
 }
 
 void
-InvokeTX::release_savepoint(int depth)
+InvokeTX::fold_savepoints(std::span<const uint32_t> runs)
 {
-  assert_is_valid();
+  if (std::ranges::all_of(runs, [](uint32_t run) { return run <= 1; })) {
+    return;
+  }
+  unsigned int folded = 0;
+  for (uint32_t run : runs) {
+    folded += run;
+  }
+  assert(folded <= tx_depth_);
 
-  tx_depth_ = std::max(depth - 1, 0);
-  for (auto &[key, vec] : changes_) {
-    // skip if no changes made after savepoint.
-    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
-      continue;
-
-    // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change), tx_depth_, vec.back().lock);
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &ItemVersion::tx_depth),
-              vec.end());
-    if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
-      vec.back().change = std::move(tmp.change);
-      // TODO(geoff): abelay had left this as return; that seems incorrect.
+  // remap[d] is the depth savepoint d moves to. Depths below [lowest] belong
+  // to no run and keep theirs.
+  const unsigned int lowest = tx_depth_ - folded + 1;
+  std::vector<unsigned int> remap(tx_depth_ + 1);
+  std::iota(remap.begin(), remap.begin() + lowest, 0U);
+  unsigned int old_depth = lowest;
+  unsigned int new_depth = lowest;
+  for (uint32_t run : std::ranges::reverse_view(runs)) {
+    if (run == 0) {
       continue;
     }
-    vec.push_back(std::move(tmp));
+    std::fill_n(remap.begin() + old_depth, run, new_depth);
+    old_depth += run;
+    ++new_depth;
   }
+  assert(old_depth == tx_depth_ + 1);
+  tx_depth_ = new_depth - 1;
 
-  panic("not implemented releasing balance versions");
+  // Every version records the item's whole value at its depth, and the item's
+  // lock already holds the newest one, so folding needs no lock calls: each
+  // version moves to its run's depth and, of the versions that land on the
+  // same depth, only the newest stays. locked_storage_cost moves with it, so
+  // the per-address storage totals that assert_is_valid() checks are
+  // unchanged.
+  auto fold = [&remap, lowest](auto &vec, auto depth_of) {
+    if (vec.empty() || depth_of(vec.back()) < lowest) {
+      return;
+    }
+    auto first = std::ranges::lower_bound(vec, lowest, {}, depth_of);
+    auto out = first;
+    for (auto in = first; in != vec.end(); ++in) {
+      unsigned int depth = remap[depth_of(*in)];
+      if (out != vec.begin() && depth_of(*std::prev(out)) == depth) {
+        *std::prev(out) = std::move(*in);
+      }
+      else {
+        if (out != in) {
+          *out = std::move(*in);
+        }
+        ++out;
+      }
+      depth_of(*std::prev(out)) = depth;
+    }
+    vec.erase(out, vec.end());
+  };
+  for (auto &[key, vec] : changes_) {
+    fold(vec, [](ItemVersion &v) -> unsigned int & { return v.tx_depth; });
+  }
+  for (auto &[addr, vec] : balance_deltas_) {
+    fold(vec,
+         [](StorageBalanceVersion &v) -> unsigned int & { return v.tx_depth; });
+  }
+  assert_is_valid();
 }
 
 void

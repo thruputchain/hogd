@@ -18,6 +18,7 @@
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "event.hh"
+#include "executor_to_db_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
@@ -55,7 +56,6 @@ public:
   InvocationFrame(ContractAddress const &address, Calldata &&calldata,
                   InvokeFlagSet flags, size_t event_count,
                   std::vector<RegisteredAuthToken> &&forwarded_auth_tokens,
-                  uint32_t inherited_try_invoke_depth,
                   NetworkConfigParams const &params);
 
   // Disable copy construction/assignment but allow move ctor
@@ -118,13 +118,8 @@ public:
     return (flags_ & std::to_underlying(InvokeFlag::ReadOnly)) != 0;
   }
 
-  uint32_t get_total_try_invoke_depth() const
-  {
-    return total_try_invoke_depth_;
-  }
-
-  // Number of HogDb subtransactions this frame has pushed for its own
-  // successful TryInvoke children. Validation mode never pushes per-frame
+  // Number of HogDb subtransactions this frame's call tree holds, which
+  // mark_frame_as_failed() pops. Validation mode never pushes per-frame
   // subtransactions, so this stays 0 on every frame in validation; useful
   // for asserting that invariant at the root commit site.
   uint32_t get_try_invoke_frame_count() const
@@ -132,12 +127,27 @@ public:
     return try_invoke_frame_count_;
   }
 
-  bool depth_cap_reached(NetworkConfigParams const &params) const
+  // The subtransactions this frame's call tree would hold in proposal mode,
+  // counted the same way in every execution mode so that the savepoint cap
+  // (InvocationFrameStack::savepoint_cap_reached) decides the same everywhere.
+  // Equal to get_try_invoke_frame_count() in proposal mode.
+  uint32_t get_savepoint_count() const { return savepoint_count_; }
+
+  // After a push folded the open frames' subtransactions (see
+  // InvocationFrameStack::fold_open_frame_savepoints): moves [child]'s into
+  // this frame's, then leaves this frame holding at most one.
+  void absorb_folded_savepoints(InvocationFrame &child)
   {
-    // One slot is reserved for the root commit's subtransaction push; a depth
-    // of 0 leaves none for a TryInvoke.
-    return params.max_savepoint_depth == 0 ||
-           total_try_invoke_depth_ >= params.max_savepoint_depth - 1;
+    try_invoke_frame_count_ += std::exchange(child.try_invoke_frame_count_, 0);
+    savepoint_count_ += std::exchange(child.savepoint_count_, 0);
+    fold_savepoints();
+  }
+
+  // After a push folded this frame's subtransactions into one.
+  void fold_savepoints()
+  {
+    try_invoke_frame_count_ = std::min(try_invoke_frame_count_, 1U);
+    savepoint_count_ = std::min(savepoint_count_, 1U);
   }
 
   // returned pointer is invalidated by any call to add_item_view
@@ -153,16 +163,19 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
+  // [fold] is how hog_db folds the subtransaction stack once the push
+  // succeeds; the caller owns it across the suspension.
   [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
-      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
+      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+      SubtransactionFoldRuns const &fold);
 
-  // Records a successful child TryInvoke against the depth cap. finish_frame
-  // calls this once a child's success is settled in any execution mode, so
-  // the cap counts the same frames whether the mode probed locks (proposal),
-  // replayed a bit (validation), or defaulted one (viewing). Precondition:
-  // !depth_cap_reached(params).
-  void note_try_invoke_success(NetworkConfigParams const &params);
+  // Counts the subtransaction a successful TryInvoke of this frame took.
+  // finish_frame calls this once the frame's success is settled in any
+  // execution mode, so the savepoint cap counts the same subtransactions
+  // whether the mode probed locks (proposal), replayed a bit (validation), or
+  // defaulted one (viewing).
+  void note_try_invoke_success() { ++savepoint_count_; }
 
   void
   collect_storage_deltas(x23::Vec<FlaggedStorageDelta, 0xffffffff> &out) const;
@@ -304,8 +317,9 @@ private:
   x23::Vec<TxEmittedEvent> events_;
   size_t event_count_ = 0;
 
+  // See get_try_invoke_frame_count() and get_savepoint_count().
   uint32_t try_invoke_frame_count_ = 0;
-  uint32_t total_try_invoke_depth_;
+  uint32_t savepoint_count_ = 0;
 
   // elements modified during the current call frame (and child frames)
   // Keyed by the flat, pre-hashed form: a first touch probes every open frame
@@ -384,6 +398,11 @@ public:
                DbConflictResult *try_invoke_conflict_out = nullptr);
 
   void log_trace_finish(InvocationFrameTrace &trace);
+
+  // Whether a TryInvoke push by the active frame would take the transaction
+  // past max_savepoint_depth: the push needs one subtransaction on top of
+  // those the open frames hold, and one is reserved for the root commit.
+  bool savepoint_cap_reached() const;
 
   std::optional<ContractAddress> get_msg_sender() const;
 
@@ -516,6 +535,17 @@ public:
   size_t size() const { return frame_stack_.size(); }
 
 private:
+  // How hog_db should fold the subtransaction stack after a TryInvoke push by
+  // the active frame: the active frame's subtransactions and its parent's go
+  // into the new one, and every other open frame's become one each. No open
+  // frame can be reverted to a state inside its own run (a failing frame pops
+  // all of its subtransactions at once), so nothing is lost.
+  SubtransactionFoldRuns fold_runs_for_push() const;
+
+  // Mirrors that fold in every open frame's counts, after the active frame's
+  // TryInvoke success is settled in any execution mode.
+  void fold_open_frame_savepoints();
+
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;

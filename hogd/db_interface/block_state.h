@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <cstdint>
 #include <optional>
+#include <span>
 
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/types.h"
@@ -87,6 +89,8 @@ public:
   void push_subtransaction(TransactionID txid);
   [[nodiscard]] RPCError pop_subtransactions(TransactionID txid,
                                              uint32_t count);
+  [[nodiscard]] RPCError fold_subtransactions(TransactionID txid,
+                                              std::span<const uint32_t> runs);
 
 private:
   StorageView storage_view_;

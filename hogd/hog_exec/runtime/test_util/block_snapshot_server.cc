@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 
+#include <cstdint>
 #include <mutex>
 #include <utility>
 #include <vector>
@@ -101,9 +102,9 @@ BlockSnapshotRpc::get_deployment(BlockID block,
 }
 
 TryPushSubtransactionResult
-BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
-                                              TransactionID /*unused*/,
-                                              StorageDeltaBatch const &batch)
+BlockSnapshotRpc::try_push_new_subtransaction(
+    BlockID /*unused*/, TransactionID /*unused*/,
+    StorageDeltaBatch const &batch, SubtransactionFoldRuns const &fold)
 {
   // test double: produces no diagnostics
   {
@@ -114,6 +115,7 @@ BlockSnapshotRpc::try_push_new_subtransaction(BlockID /*unused*/,
       }
     }
   }
+  pushed_fold_runs_->emplace_back(fold.begin(), fold.end());
   return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
@@ -228,6 +230,12 @@ void
 BlockSnapshotRpc::setup_ban_subtransaction_key(AddressAndKey const &addrkey)
 {
   blocked_subtransaction_keys_->insert(addrkey);
+}
+
+std::vector<std::vector<uint32_t>>
+BlockSnapshotRpc::take_pushed_fold_runs()
+{
+  return std::exchange(*pushed_fold_runs_.take(), {});
 }
 
 void

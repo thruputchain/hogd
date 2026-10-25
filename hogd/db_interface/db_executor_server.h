@@ -34,11 +34,13 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch new_contracts);
   RPCError abort_transaction(BlockID block, TransactionID tx);
-  // Increases subtransaction count by 1 IF SUCCESSFUL.
+  // Increases subtransaction count by 1 IF SUCCESSFUL, then folds the stack
+  // as [fold] says.
   // Otherwise does not change subtransaction count, and is a no-op.
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch);
+                              StorageDeltaBatch const &batch,
+                              SubtransactionFoldRuns const &fold);
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
   ExpectedStorageItem get_snapshot_item(BlockID block,

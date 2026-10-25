@@ -2,8 +2,11 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdint>
 #include <mutex>
 #include <optional>
+#include <ranges>
+#include <span>
 #include <unordered_map>
 #include <utility>
 
@@ -32,6 +35,38 @@ TransactionState::pop_subtransactions(uint32_t count)
     return RPCError::kRPCUnrecoverable;
   }
   subtransaction_stack_.resize(subtransaction_stack_.size() - count);
+  return RPCError::kRPCNone;
+}
+
+RPCError
+TransactionState::fold_subtransactions(std::span<const uint32_t> runs)
+{
+  assert(!finished_);
+  uint64_t folded = 0;
+  for (uint32_t run : runs) {
+    folded += run;
+  }
+  if (folded > subtransaction_stack_.size()) [[unlikely]] {
+    return RPCError::kRPCUnrecoverable;
+  }
+  // Rebuild the folded part of the stack from the bottom up, merging each
+  // run oldest to newest so a later subtransaction's delta for a key
+  // overwrites an earlier one's.
+  size_t in = subtransaction_stack_.size() - folded;
+  size_t out = in;
+  for (uint32_t run : std::ranges::reverse_view(runs)) {
+    if (run == 0) {
+      continue;
+    }
+    auto merged = std::move(subtransaction_stack_[in++]);
+    for (uint32_t i = 1; i < run; ++i) {
+      for (auto &[addrkey, delta] : subtransaction_stack_[in++].deltas_) {
+        merged.deltas_.insert_or_assign(addrkey, std::move(delta));
+      }
+    }
+    subtransaction_stack_[out++] = std::move(merged);
+  }
+  subtransaction_stack_.resize(out);
   return RPCError::kRPCNone;
 }
 
