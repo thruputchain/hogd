@@ -67,8 +67,9 @@ public:
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
   // Applies a committed block's key changes to the cache, then forwards them
-  // to the mempool as a run of KeyChangeChunk records, heights one after
-  // another. [key_changes] is the run of chunks the block arrived in, or a
+  // to the mempool as a run of KeyChangeChunk records. Forwards of consecutive
+  // heights may overlap; the mempool applies them in height order.
+  // [key_changes] is the run of chunks the block arrived in, or a
   // plain batch. This method can be called in any order.  However, it is
   // vital for cache integrity that batches of block updates are only added to
   // the auth cache in strictly increasing order, with no gaps. The CoroFutex
@@ -101,7 +102,7 @@ private:
   };
 
   // Sends [height]'s changes to the mempool as a run of KeyChangeChunk
-  // records, once every earlier height's run has been acknowledged.
+  // records.
   x23::Async<void>
   forward_key_changes(BlockHeight height,
                       const ChunkedVector<KeyChangeBatch> &key_changes);
@@ -121,13 +122,6 @@ private:
   // Used to stall incoming requests until the updates from the db are present,
   // and to sequence potentially out of order updates from the db.
   x23::CoroFutex<BlockHeight> current_height_futex_{kUninitializedHeight};
-
-  // The last height whose forward to the mempool finished, so forwards go out
-  // one height at a time, in order: the mempool applies a height as soon as
-  // its run is complete and requires the heights in sequence, which a later
-  // height's short run overtaking an earlier height's longer one would break.
-  // Set alongside current_height_futex_ when the cache initializes.
-  x23::CoroFutex<BlockHeight> forwarded_height_futex_{kUninitializedHeight};
 
   std::optional<sched_auth_client_t> mempool_client_;
 

@@ -3485,7 +3485,24 @@ MempoolCoordinatorRpc::auth_data_changed(
   });
 
   CHECK(initialized_.load(std::memory_order_acquire));
-  const BlockHeight current_height = auth_data_height_.load();
+  // The auth server forwards heights concurrently, so a height can arrive
+  // while an earlier height's callback is still re-verifying. Wait for the
+  // earlier height to be applied first. Once [disconnect_auth_callback] stops
+  // admission, that height may never be admitted, so give up instead of
+  // keeping the drain waiting on us. The flag is read while the awaiter holds
+  // [auth_data_height_]'s waiter lock, so the disconnect's broadcast either
+  // finds us waiting or happens before we read the flag.
+  BlockHeight current_height;
+  while ((current_height = auth_data_height_.load()) < height - 1) {
+    if (auth_data_wait_test_hook_) {
+      auth_data_wait_test_hook_(height);
+    }
+    auto awaiter = auth_data_height_.wait(current_height);
+    if (auth_callback_disconnecting_.load(std::memory_order_acquire)) {
+      co_return;
+    }
+    co_await awaiter;
+  }
   if (height <= current_height) {
     // An auth server that subscribes after the database has committed its
     // current tip sends an empty synchronization callback for that tip.  A
@@ -3495,7 +3512,6 @@ MempoolCoordinatorRpc::auth_data_changed(
          height, current_height);
     co_return;
   }
-  CHECK_EQ(height, current_height + 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);
