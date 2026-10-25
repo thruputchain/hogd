@@ -223,7 +223,7 @@ make_llc_rpc_multiclient(
     std::optional<unsigned> cpu = first_allowed_cpu(cpus);
     if (!cpu)
       return Placement{default_coropoll()};
-    return Placement{llc_coropoll(x23::llc_map->bucket(*cpu)), *cpu};
+    return Placement{llc_coropoll(x23::llc_map->bucket(*cpu)), cpu};
   };
   return make_rpc_multiclient<RpcService>(*ss, place, retry, map,
                                           max_message_size);
