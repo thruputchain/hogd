@@ -3,6 +3,7 @@
 #include <chrono>
 #include <expected>
 #include <format>
+#include <optional>
 #include <sys/socket.h>
 #include <system_error>
 #include <thread>
@@ -162,16 +163,19 @@ make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
   return make_srpc_multiclient<RpcService>(*ss, retry, map);
 }
 
+// cp_or_place is the CoroPoll for every connection, or a function from a
+// bucket's CpuSet to that connection's RpcMulticlient::Placement.
 template<typename RpcService>
 auto
-make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
+make_rpc_multiclient(sockaddr_storage &ss, auto &&cp_or_place,
                      bool retry = false, x23::CpuMap const &map = *x23::llc_map,
                      size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
     try {
       auto client = x23::RpcMulticlient<x23::RpcLogger>::make(
-          cp, ss, map, x23::RpcLogger::default_logfd, max_message_size);
+          cp_or_place, ss, map, x23::RpcLogger::default_logfd,
+          max_message_size);
       return client->template client<RpcService>();
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
@@ -197,6 +201,31 @@ make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
     panic("failed to convert host port to sockaddr_storage: {}", ss.error());
   }
   return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
+                                          max_message_size);
+}
+
+// Like make_rpc_multiclient, but each connection is polled by the CoroPoll of
+// its bucket's LLC, and its reader starts on that LLC.  For maps whose
+// buckets each lie within one LLC (llc_map, db_connection_map).
+template<typename RpcService>
+auto
+make_llc_rpc_multiclient(
+    x23::HostPort host_port, bool retry = false,
+    x23::CpuMap const &map = *x23::llc_map,
+    size_t max_message_size = x23::default_max_message_size)
+{
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+  }
+  using Placement = x23::RpcMulticlient<x23::RpcLogger>::Placement;
+  auto place = [](const x23::CpuSet &cpus) {
+    std::optional<unsigned> cpu = first_allowed_cpu(cpus);
+    if (!cpu)
+      return Placement{default_coropoll()};
+    return Placement{llc_coropoll(x23::llc_map->bucket(*cpu)), *cpu};
+  };
+  return make_rpc_multiclient<RpcService>(*ss, place, retry, map,
                                           max_message_size);
 }
 

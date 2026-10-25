@@ -2,12 +2,16 @@
 
 #include <algorithm>
 #include <cstddef>
+#include <memory>
+#include <optional>
+#include <thread>
 #include <vector>
 
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
 
+#include <x23/config.h>
 #include <x23/cpumap.h>
 #include <x23/debug.h>
 #include <x23/event.h>
@@ -27,6 +31,59 @@ default_coropoll()
 {
   static x23::CoroPoll cp{default_threadpool()};
   return cp;
+}
+
+// A CoroPoll whose poll thread runs only on cpus.
+class PinnedCoroPoll : public x23::CoroPoll {
+public:
+  PinnedCoroPoll(x23::ThreadPool &pool, const x23::CpuSet &cpus)
+    : CoroPoll(pool, no_loop_thread{})
+  {
+    pollthread_ = std::thread([this, cpus] {
+      cpus.set_affinity();
+      loop();
+    });
+  }
+};
+
+// The CoroPoll for sockets whose callers run on one LLC: one per LLC, its
+// poll thread pinned to that LLC's allowed CPUs.
+//
+// default_coropoll() is a single epoll thread for every socket in the
+// process.  Every RPC reply that has to wait for its socket goes through it,
+// so at hog-exec's reply rate it is a shared queueing point, and it runs
+// wherever the scheduler puts it.  Per-LLC polls split that load and keep
+// a connection's readiness handling on its callers' LLC.
+inline x23::CoroPoll &
+llc_coropoll(int llc)
+{
+  static const auto polls = [] {
+    x23::init_cpumaps();
+    std::vector<std::unique_ptr<x23::CoroPoll>> v(x23::llc_map->nbuckets());
+#if HAVE_SCHED_SETAFFINITY
+    for (int i = 0; i < x23::llc_map->nbuckets(); i++) {
+      auto cpus = x23::llc_map->cpuset(i) & *x23::allowed_cpus;
+      if (cpus.count())
+        v[i] = std::make_unique<PinnedCoroPoll>(default_threadpool(), cpus);
+    }
+#endif // HAVE_SCHED_SETAFFINITY
+    return v;
+  }();
+  if (llc < 0 || static_cast<size_t>(llc) >= polls.size() || !polls[llc])
+    return default_coropoll();
+  return *polls[llc];
+}
+
+// The first CPU in cpus this process may run on, if any.
+inline std::optional<unsigned>
+first_allowed_cpu(const x23::CpuSet &cpus)
+{
+#if HAVE_SCHED_SETAFFINITY
+  for (unsigned cpu = 0; cpu < x23::CpuSet::num_cpus(); cpu++)
+    if (cpus.isset(cpu) && x23::allowed_cpus->isset(cpu))
+      return cpu;
+#endif // HAVE_SCHED_SETAFFINITY
+  return std::nullopt;
 }
 
 // Inclusive-exclusive half-open range used when slicing transaction batches.
