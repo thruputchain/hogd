@@ -18,6 +18,7 @@
 #include <variant>
 #include <vector>
 
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -614,13 +615,15 @@ public:
     root.init_branch(/*parent=*/nullptr);
     for (size_t i = 0; i < tries_.size(); i++) {
       root.branch_children()[i] = &tries_[i]->root_;
-      if (i == index) {
-        tries_[i]->root_.parent = &root;
-      }
     }
+    // Parent the child trie's root to [root] so the proof walks up into it.
+    // [root] lives on this stack frame, so unlink it on every exit, including
+    // when the proof throws.
+    Node &child_root = tries_[index]->root_;
+    child_root.parent = &root;
+    Defer unlink_root{[&child_root] { child_root.parent = nullptr; }};
     std::vector<std::vector<std::byte>> proof =
         tries_[index]->get_proof_by_node(k_no_prefix).second;
-    tries_[index]->root_.parent = nullptr;
     return {root.compute_node_hash(), proof};
   }
 

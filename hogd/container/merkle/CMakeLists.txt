@@ -44,6 +44,7 @@ hogd_discover_tests(node_test)
 
 add_executable(
   merkle_trie_test
+  $<TARGET_OBJECTS:alloc_fault_test_support>
   merkle_trie_test.cc
 )
 target_link_libraries(

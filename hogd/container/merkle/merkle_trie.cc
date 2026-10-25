@@ -13,6 +13,7 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -309,25 +310,27 @@ MerkleTrie::get_proof_by_node(const Key &k)
 
     bool restart = false;
     while (node) {
-      node->hash_lock.lock_writer();
-      // TODO(jhumphri): Need to hold lock on child hash. Maybe we should just
-      // require this function be called when no other threads are accessing the
-      // trie?
-      const std::vector<std::byte> &encoding = node->get_node_encoding();
-      ret.push_back(encoding);
-      node->hash_lock.unlock();
+      // We hold [node->rw_lock] in reader mode. Drop it on every exit from this
+      // iteration, including when copying the encoding below throws.
+      Defer unlock_node{[locked = node] { locked->rw_lock.unlock(); }};
+      {
+        node->hash_lock.lock_writer();
+        Defer unlock_hash{[node] { node->hash_lock.unlock(); }};
+        // TODO(jhumphri): Need to hold lock on child hash. Maybe we should just
+        // require this function be called when no other threads are accessing
+        // the trie?
+        const std::vector<std::byte> &encoding = node->get_node_encoding();
+        ret.push_back(encoding);
+      }
 
       if (node->parent && !node->parent->rw_lock.try_lock_reader()) {
         // Need to restart from find_node().
-        node->rw_lock.unlock();
         ret.clear();
         restart = true;
         break;
       }
-      // Cache [node->parent] before dropping the lock.
-      Node *parent = node->parent;
-      node->rw_lock.unlock();
-      node = parent;
+      // Read [node->parent] before [unlock_node] drops the lock.
+      node = node->parent;
     }
     if (restart) {
       continue;
