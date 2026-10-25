@@ -492,6 +492,12 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
   Node *branch;
   Node *to_hash = nullptr;
 
+  // Hash the value before acquiring any node locks. The value hash does not
+  // depend on any trie state, and [obj] can be large (e.g. an event-log value),
+  // so hashing it inside the writer-locked mutation section would force
+  // contending inserters to busy-retry while the winner hashes.
+  const SHA256Hash obj_hash = sha256(obj);
+
   // We spin until we acquire the writer lock on the lowest branch node for [k].
   // We are moving down the trie, so we cannot block on acquiring the writer
   // lock; instead, we need to try again if we cannot acquire it.
@@ -511,7 +517,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         if (branch != existing_key) {
           branch->rw_lock.unlock();
         }
-        existing_key->value_hash() = sha256(obj);
+        existing_key->value_hash() = obj_hash;
         // [unlock_nodes_from()] unlocks the node locks we currently hold.
         unlock_nodes_from(existing_key, /*locked_through=*/existing_key);
         return true;
@@ -539,7 +545,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       CHECK(!branch->value_hash().has_value());
-      branch->value_hash() = sha256(obj);
+      branch->value_hash() = obj_hash;
       to_hash = branch;
     }
     else {
@@ -566,7 +572,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_extension(next, k, idx, obj);
+          to_hash = insert_handle_extension(next, k, idx, obj_hash);
         }
         else {
           CHECK_EQ(next->type, Node::Type::kLeaf);
@@ -577,7 +583,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_leaf(next, k, idx, obj);
+          to_hash = insert_handle_leaf(next, k, idx, obj_hash);
         }
       }
       else {
@@ -590,7 +596,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         // want to include this character in the path that is stored in the leaf
         // node.
         leaf->path() = k.get_subarray(idx + 1, k.size());
-        leaf->value_hash() = sha256(obj);
+        leaf->value_hash() = obj_hash;
         branch->branch_children()[branch_idx] = leaf;
         to_hash = leaf;
       }
@@ -635,7 +641,7 @@ MerkleTrie::insert_or_update(const Key &k,
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
-                                    const std::span<const std::byte> &obj)
+                                    const SHA256Hash &obj_hash)
 {
   CHECK(extension->rw_lock.is_writer_locked_relaxed());
   CHECK(extension->extension_child()->rw_lock.is_writer_locked_relaxed());
@@ -789,7 +795,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
-    branch->value_hash() = sha256(obj);
+    branch->value_hash() = obj_hash;
     return branch;
   }
   // Create new leaf node for [key_window] and add the leaf node as a child of
@@ -800,7 +806,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
   // for [key_window] as a child of the branch, the branch accounts for 1 hex
   // digit in the path.
   leaf->path() = key_window.get_subarray(diverge_idx + 1, key_window.size());
-  leaf->value_hash() = sha256(obj);
+  leaf->value_hash() = obj_hash;
 
   auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
   branch->branch_children()[leaf_branch] = leaf;
@@ -819,7 +825,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
-                               const std::span<const std::byte> &obj)
+                               const SHA256Hash &obj_hash)
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
@@ -863,13 +869,12 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
   const bool key_shorter = key_window.size() <= leaf->path().size();
   const Key &shorter_path = key_shorter ? key_window : leaf->path();
   const Key &longer_path = key_shorter ? leaf->path() : key_window;
-  SHA256Hash obj_hash = sha256(obj);
-  SHA256Hash &&shorter_value =
+  SHA256Hash shorter_value =
       key_shorter
           ? obj_hash
           : std::move(
                 *leaf->value_hash()); // NOLINT(bugprone-unchecked-optional-access)
-  SHA256Hash &&longer_value =
+  SHA256Hash longer_value =
       key_shorter
           ? std::move(
                 *leaf->value_hash()) // NOLINT(bugprone-unchecked-optional-access)
@@ -888,12 +893,9 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
     // nodes children of the branch.
 
     // Shorter key's leaf node. Note that we reuse [leaf] for the longer node
-    // below, so we allocate a new node here.
-    //
-    // Note that I am deliberately allocating a new node first *before* reusing
-    // [leaf]. The [shorter_*] and [longer_*] variables above are references to
-    // elements in [leaf], so we cannot overwrite [leaf] until we no longer need
-    // those references.
+    // below, so we allocate a new node here. [shorter_value] and [longer_value]
+    // already hold copies of the hashes (moved/copied out of [leaf] above), so
+    // reusing [leaf] afterwards is safe.
     Node *shorter_leaf = Node::create_leaf(/*parent=*/branch, allocator_);
     // Unlike the other nodes, we do not need to call [shorter_path.get(0)]
     // before writing [shorter_leaf->path] because we are not reusing [leaf].
