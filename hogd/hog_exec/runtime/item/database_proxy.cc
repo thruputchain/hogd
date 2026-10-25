@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <cassert>
 #include <concepts>
+#include <coroutine>
 #include <exception>
 #include <format>
 #include <optional>
@@ -76,6 +77,30 @@ report_rpc_failure(const char *method, std::exception const &e) noexcept
     report_dropped_log("DatabaseProxy RPC failure diagnostic");
   }
 }
+
+// Captures the CPU a call is sent from; co_await it after the reply to leave
+// the connection's reader and resume on that CPU's LLC.
+//
+// The reader resumes callers inline, on whatever CPU it is running on, and the
+// reader is not tied to its callers' LLC: it waits with the hint of wherever it
+// last ran and moves when the pool steals or rebalances it.  A plain bg() then
+// requeues by the reader's cpuid(), so a reply could carry the transaction to
+// another LLC, away from the caches its frame and items were warm in.  Leaving
+// the reader costs the same requeue either way; this only picks its queue.
+class ResumeOnCaller {
+public:
+  // An awaiter: co_await calls these through the object.
+  // NOLINTNEXTLINE(readability-convert-member-functions-to-static)
+  bool await_ready() const noexcept { return false; }
+  void await_suspend(std::coroutine_handle<> h) const
+  {
+    default_threadpool().go({h, cpu_});
+  }
+  void await_resume() const noexcept {}
+
+private:
+  unsigned cpu_ = x23::cpuid();
+};
 
 struct VoidMarker {};
 struct NotFoundIsUnrecoverableError {};
@@ -225,8 +250,9 @@ x23::Async<SystemStatus<std::optional<WireStorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.get_snapshot_item(block_id, addrkey);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<std::nullopt>(
         res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
           return std::make_optional<WireStorageItem>(std::move(x));
@@ -241,8 +267,9 @@ x23::Async<SystemStatus<std::optional<Contract>>>
 DatabaseProxy::get_contract(BlockID block_id, SHA256Hash const &contract_hash)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.get_contract(block_id, contract_hash);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<std::nullopt>(res, [](Contract &&x) {
       return std::make_optional<Contract>(std::move(x));
     });
@@ -256,8 +283,9 @@ x23::Async<SystemStatus<std::optional<DeployedContractHash>>>
 DatabaseProxy::get_deployment(BlockID block_id, ContractAddress const &addr)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.get_deployment(block_id, addr);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<std::nullopt>(
         res, [](DeployedContractHash &&x) {
           return std::make_optional<DeployedContractHash>(std::move(x));
@@ -274,10 +302,11 @@ DatabaseProxy::get_next_retrocausal_queue_block(BlockID block_id,
                                                 uint64_t search_start_number)
 {
   try {
+    const ResumeOnCaller resume;
     auto res =
         co_await client_.get_next_retrocausal_queue_block(block_id, addrkey,
                                                           search_start_number);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<std::nullopt>(
         res, [](RetrocausalQueueBlock &&x) {
           return std::make_optional<RetrocausalQueueBlock>(std::move(x));
@@ -294,10 +323,11 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                                       uint32_t index)
 {
   try {
+    const ResumeOnCaller resume;
     auto res =
         co_await client_.get_concurrent_retrocausal_queue_entry(block_id,
                                                                 addrkey, index);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<std::nullopt>(res, [](QueueEntry &&x) {
       return std::make_optional<QueueEntry>(std::move(x));
     });
@@ -312,9 +342,10 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                   BorrowedContractBatch const &new_contracts)
 {
   try {
+    const ResumeOnCaller resume;
     auto res =
         co_await client_.commit_transaction(block_id, tx_id, new_contracts);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
@@ -343,8 +374,9 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::abort_transaction(BlockID block_id, TransactionID tx_id)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.abort_transaction(block_id, tx_id);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     report_rpc_failure("abort_transaction", e);
@@ -520,9 +552,10 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
                                                             delta_batch);
-    co_await default_threadpool().bg();
+    co_await resume;
     switch (res.error()) {
     case RPCError::kRPCNone:
       co_return true;
@@ -561,8 +594,9 @@ DatabaseProxy::pop_subtransactions(BlockID block_id, TransactionID tx_id,
                                    uint32_t count)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.pop_subtransactions(block_id, tx_id, count);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     report_rpc_failure("pop_subtransactions", e);
@@ -574,8 +608,9 @@ x23::Async<SystemStatus<DbTip>>
 DatabaseProxy::get_db_tip(BlockID block_id, BlockHeight block_height)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.get_db_tip(block_id, block_height);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
         res, [block_id](DbTip &&x) -> SystemStatus<DbTip> {
           if (x.id == block_id) {
@@ -597,8 +632,9 @@ x23::Async<SystemStatus<ViewingSnapshot>>
 DatabaseProxy::open_viewing_snapshot()
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.open_viewing_snapshot();
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<NotFoundIsUnrecoverableError{}>(
         res,
         [](ViewingSnapshot &&x) -> SystemStatus<ViewingSnapshot> { return x; });
@@ -612,8 +648,9 @@ x23::Async<SystemStatus<void>>
 DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 {
   try {
+    const ResumeOnCaller resume;
     auto res = co_await client_.close_viewing_snapshot(block_id);
-    co_await default_threadpool().bg();
+    co_await resume;
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     report_rpc_failure("close_viewing_snapshot", e);
