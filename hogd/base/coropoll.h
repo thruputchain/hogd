@@ -76,7 +76,7 @@ llc_coropoll(int llc)
 
 // The first CPU in cpus this process may run on, if any.
 inline std::optional<unsigned>
-first_allowed_cpu(const x23::CpuSet &cpus)
+first_allowed_cpu([[maybe_unused]] const x23::CpuSet &cpus)
 {
 #if HAVE_SCHED_SETAFFINITY
   for (unsigned cpu = 0; cpu < x23::CpuSet::num_cpus(); cpu++)
