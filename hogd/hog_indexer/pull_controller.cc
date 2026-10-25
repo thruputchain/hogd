@@ -6,15 +6,20 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <ranges>
 #include <stop_token>
 #include <string>
 #include <thread>
 #include <utility>
+#include <vector>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/metrics.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
@@ -42,6 +47,92 @@ xdr_equal(const T &lhs, const T &rhs)
 }
 
 } // namespace
+
+void
+IndexerChunkSink::indexer_event_block_chunk(EventIndexerBlockChunk chunk)
+{
+  if (chunk.chunk_count == 0 || chunk.chunk_index >= chunk.chunk_count ||
+      chunk.event_logs.size() != chunk.tx_bodies.size()) {
+    panic("malformed chunk {} of {} of block {}", chunk.chunk_index,
+          chunk.chunk_count, static_cast<std::int64_t>(chunk.block_height));
+  }
+  std::lock_guard lock(mutex_);
+  if (chunks_.empty()) {
+    chunks_.resize(chunk.chunk_count);
+    height_ = chunk.block_height;
+    identity_ = chunk.identity;
+  }
+  else if (chunks_.size() != chunk.chunk_count ||
+           height_ != chunk.block_height || identity_ != chunk.identity) {
+    panic("chunk of block {} interleaves with the run of block {}",
+          static_cast<std::int64_t>(chunk.block_height),
+          static_cast<std::int64_t>(height_));
+  }
+  std::optional<EventIndexerBlockChunk> &slot = chunks_[chunk.chunk_index];
+  if (slot) {
+    panic("chunk {} of block {} arrived twice", chunk.chunk_index,
+          static_cast<std::int64_t>(chunk.block_height));
+  }
+  slot = std::move(chunk);
+}
+
+std::optional<IndexerCommittedBlockPayload>
+IndexerChunkSink::take_block(const EventIndexerChunkedBlock &header)
+{
+  std::vector<std::optional<EventIndexerBlockChunk>> chunks;
+  {
+    std::lock_guard lock(mutex_);
+    chunks = std::exchange(chunks_, {});
+  }
+  if (chunks.size() != header.chunk_count) {
+    return std::nullopt;
+  }
+  IndexerCommittedBlockPayload payload{
+      .format_version = header.format_version,
+      .consensus_value = header.consensus_value,
+  };
+  size_t pair_count = 0;
+  for (const std::optional<EventIndexerBlockChunk> &chunk : chunks) {
+    pair_count += chunk ? chunk->event_logs.size() : 0;
+  }
+  payload.event_logs.reserve(pair_count);
+  payload.tx_bodies.reserve(pair_count);
+  for (std::optional<EventIndexerBlockChunk> &chunk : chunks) {
+    if (!chunk ||
+        chunk->block_height !=
+            header.consensus_value.proposal_header.block_height ||
+        chunk->identity != header.identity) {
+      return std::nullopt;
+    }
+    // x23::Vec::append_range copies from a plain range; move the items, and
+    // free each chunk once taken, so the block is never held twice.
+    payload.event_logs.append_range(std::views::as_rvalue(chunk->event_logs));
+    payload.tx_bodies.append_range(std::views::as_rvalue(chunk->tx_bodies));
+    chunk.reset();
+  }
+  return payload;
+}
+
+EventIndexerPulledBlock
+IndexerPullController::assemble_block(IndexerChunkSink &sink,
+                                      EventIndexerChunkedBlock header)
+{
+  std::optional<IndexerCommittedBlockPayload> payload = sink.take_block(header);
+  if (!payload) {
+    panic("chunked pull answered block {} before all {} of its chunks",
+          static_cast<std::int64_t>(
+              header.consensus_value.proposal_header.block_height),
+          header.chunk_count);
+  }
+  return EventIndexerPulledBlock{
+      .origin = std::move(header.origin),
+      .block =
+          IndexerCommittedBlock{
+              .payload = std::move(*payload),
+              .identity = header.identity,
+          },
+  };
+}
 
 IndexerPullController::IndexerPullController(
     std::string event_server_addr, IndexDB &db,
@@ -92,8 +183,12 @@ IndexerPullController::connect_once()
          resolved.error().error_code().message());
     return false;
   }
-  auto client = make_rpc_client<EventIndexer1>(*resolved, /*retry=*/false,
-                                               kIndexerRpcMaxMessageSize)();
+  // The event server sends a chunked pull's block back over this connection,
+  // to the sink served on it.
+  auto sink = std::make_shared<IndexerChunkSink>();
+  auto client = make_serving_rpc_client<EventIndexer1>(
+      *resolved, default_coropoll(), kIndexerRpcMaxMessageSize,
+      [&sink](auto &config) { config->server(sink, IndexerEvent1{}); })();
   if (!client) {
     return false;
   }
@@ -102,6 +197,7 @@ IndexerPullController::connect_once()
     return false;
   }
   event_client_.emplace(std::move(*client));
+  chunk_sink_ = std::move(sink);
   return true;
 }
 
@@ -167,9 +263,11 @@ IndexerPullController::run(const std::stop_token &stop)
 {
   while (!stop.stop_requested()) {
     std::optional<event_indexer_client_t> client;
+    std::shared_ptr<IndexerChunkSink> sink;
     {
       std::lock_guard lock(event_client_mutex_);
       client = event_client_;
+      sink = chunk_sink_;
     }
     if (!client) {
       mark_not_ready();
@@ -192,6 +290,7 @@ IndexerPullController::run(const std::stop_token &stop)
       {
         std::lock_guard lock(event_client_mutex_);
         client = event_client_;
+        sink = chunk_sink_;
       }
       if (!client) {
         continue;
@@ -219,8 +318,8 @@ IndexerPullController::run(const std::stop_token &stop)
             IndexerProgress(IndexerProgressState::IndexerProgressCaughtUp);
         request.progress.initialized() = requested_progress.initialized();
       }
-      EventIndexerPullResult result =
-          client->event_indexer_pull_next(request)();
+      EventIndexerChunkedPullResult result =
+          client->event_indexer_pull_next_chunked(request)();
       if (stop.stop_requested()) {
         return;
       }
@@ -229,7 +328,8 @@ IndexerPullController::run(const std::stop_token &stop)
       case EventIndexerPullOutcome::EventIndexerPullBlock:
       {
         mark_not_ready();
-        EventIndexerPulledBlock pulled = std::move(result.pulled_block());
+        EventIndexerPulledBlock pulled =
+            assemble_block(*sink, std::move(result.chunked_block()));
         initialize_origin_if_needed(pulled.origin);
         const IndexerProgress before_apply = db_.durable_progress();
         const BlockHeight pulled_height =
@@ -403,6 +503,7 @@ IndexerPullController::reset_event_client()
 {
   std::lock_guard lock(event_client_mutex_);
   event_client_.reset();
+  chunk_sink_.reset();
 }
 
 bool

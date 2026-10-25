@@ -49,6 +49,13 @@ public:
     return {};
   }
 
+  static EventIndexerChunkedPullResult
+  event_indexer_pull_next_chunked(const EventIndexerPullRequest & /*unused*/)
+  {
+    return EventIndexerChunkedPullResult(
+        EventIndexerPullOutcome::EventIndexerPullNotReady);
+  }
+
 private:
   std::shared_ptr<SuspendedIndexerPullState> state_;
 };

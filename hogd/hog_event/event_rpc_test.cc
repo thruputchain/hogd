@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono> // IWYU pragma: keep
@@ -10,6 +11,7 @@
 #include <latch>
 #include <limits>
 #include <memory>
+#include <mutex>
 #include <span>
 #include <string>
 #include <string_view>
@@ -886,6 +888,192 @@ TEST_F(EventRpcTest, PullAdvancesThroughConsecutiveEmptyEpochs)
   EXPECT_EQ(first_block.pulled_block().origin.protocol,
             version::kHogdProtocol());
   EXPECT_EQ(first_block.pulled_block().block.payload.consensus_value, block);
+}
+
+namespace {
+
+// Commits a block of one event/body pair per body at [height].
+ConsensusValue
+commit_block_of_pairs(EventRPCContext &ctx, BlockID block_id,
+                      BlockHeight height, ConsensusValueHash prev_hash,
+                      const ProposedTransactionBatch &bodies)
+{
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+  CHECK_EQ(mempool_rpc.eventsched_open_block(block_id)(), RPCError::kRPCNone);
+  CHECK_EQ(exec_rpc.eventexecutor_open_block(block_id)(), RPCError::kRPCNone);
+  for (size_t i = 0; i < bodies.size(); ++i) {
+    CHECK_EQ(exec_rpc.eventexecutor_emit_event(
+                 block_id, 1, make_event(bodies[i], static_cast<uint8_t>(i)),
+                 bodies[i])(),
+             RPCError::kRPCNone);
+  }
+  CHECK_EQ(exec_rpc.eventexecutor_close_block(block_id)(), RPCError::kRPCNone);
+  EventBlockResult closed =
+      mempool_rpc.eventsched_close_block(block_id, height)();
+  CHECK_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(height, closed.root_hash(), bodies);
+  value.prev_hash = std::move(prev_hash);
+  CHECK_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
+           RPCError::kRPCNone);
+  return value;
+}
+
+// Collects the chunks a chunked pull sends, as the indexer's sink would.
+struct ChunkRecorder {
+  std::mutex mutex;
+  std::vector<EventIndexerBlockChunk> chunks;
+
+  EventRPCContext::IndexerChunkSender sender()
+  {
+    return [this](const EventIndexerBlockChunk &chunk) -> x23::Async<void> {
+      {
+        std::lock_guard lock(mutex);
+        chunks.push_back(chunk);
+      }
+      co_return;
+    };
+  }
+
+  // The block the recorded chunks and [header] make, as a pull returns it.
+  EventIndexerPulledBlock assemble(const EventIndexerChunkedBlock &header)
+  {
+    std::lock_guard lock(mutex);
+    std::ranges::sort(chunks, {}, &EventIndexerBlockChunk::chunk_index);
+    EventIndexerPulledBlock pulled{
+        .origin = header.origin,
+        .block =
+            IndexerCommittedBlock{
+                .payload =
+                    IndexerCommittedBlockPayload{
+                        .format_version = header.format_version,
+                        .consensus_value = header.consensus_value,
+                    },
+                .identity = header.identity,
+            },
+    };
+    for (const EventIndexerBlockChunk &chunk : chunks) {
+      pulled.block.payload.event_logs.append_range(chunk.event_logs);
+      pulled.block.payload.tx_bodies.append_range(chunk.tx_bodies);
+    }
+    return pulled;
+  }
+};
+
+const std::atomic<bool> never_draining{false};
+
+} // namespace
+
+TEST_F(EventRpcTest, ChunkedPullSendsTheBlockAsARunOfChunks)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  const ProposedTransactionBatch bodies{make_body(301), make_body(302),
+                                        make_body(303)};
+  commit_block_of_pairs(ctx, 91, 1, sha256(genesis), bodies);
+  EventIndexerPullResult whole = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(whole.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+
+  // Within the budget, the block is one chunk.
+  ChunkRecorder one;
+  EventIndexerChunkedPullResult single =
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
+                                    one.sender())();
+  ASSERT_EQ(single.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(single.chunked_block().chunk_count, 1U);
+  ASSERT_EQ(one.chunks.size(), 1U);
+  EXPECT_EQ(x23::serialize(one.assemble(single.chunked_block())),
+            x23::serialize(whole.pulled_block()));
+
+  // With a one-byte budget every chunk is one pair, sent before the reply.
+  ctx.set_indexer_chunk_pair_bytes_for_test(1);
+  ChunkRecorder three;
+  EventIndexerChunkedPullResult split =
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
+                                    three.sender())();
+  ASSERT_EQ(split.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(split.chunked_block().chunk_count, 3U);
+  ASSERT_EQ(three.chunks.size(), 3U);
+  for (const EventIndexerBlockChunk &chunk : three.chunks) {
+    EXPECT_EQ(chunk.chunk_count, 3U);
+    EXPECT_EQ(chunk.block_height, 1);
+    EXPECT_EQ(chunk.identity, split.chunked_block().identity);
+    EXPECT_EQ(chunk.event_logs.size(), 1U);
+    EXPECT_EQ(chunk.tx_bodies.size(), 1U);
+  }
+  EXPECT_EQ(x23::serialize(three.assemble(split.chunked_block())),
+            x23::serialize(whole.pulled_block()));
+}
+
+TEST_F(EventRpcTest, ChunkedPullOfAnEmptyBlockSendsOneEmptyChunk)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  commit_empty_block(ctx, 92, 1, sha256(genesis));
+
+  ChunkRecorder recorder;
+  EventIndexerChunkedPullResult result =
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
+                                    recorder.sender())();
+  ASSERT_EQ(result.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(result.chunked_block().chunk_count, 1U);
+  ASSERT_EQ(recorder.chunks.size(), 1U);
+  EXPECT_TRUE(recorder.chunks[0].event_logs.empty());
+  EXPECT_TRUE(recorder.chunks[0].tx_bodies.empty());
+}
+
+TEST_F(EventRpcTest, ChunkedPullAnswersNonBlocksAsPullDoes)
+{
+  EventRPCContext ctx(temp_dir());
+  ChunkRecorder recorder;
+  EXPECT_EQ(ctx.pull_indexer_next_chunked(pull_request(), never_draining,
+                                          recorder.sender())()
+                .outcome(),
+            EventIndexerPullOutcome::EventIndexerPullNotReady);
+
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  EventIndexerPullResult pulled = ctx.pull_indexer_next(pull_request())();
+  EventIndexerChunkedPullResult chunked =
+      ctx.pull_indexer_next_chunked(pull_request(), never_draining,
+                                    recorder.sender())();
+  ASSERT_EQ(pulled.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  ASSERT_EQ(chunked.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+  EXPECT_EQ(chunked.origin(), pulled.origin());
+
+  EventIndexerPullRequest mismatched = pull_request();
+  mismatched.protocol = protocol_from_text("definitely-not-the-hogd-protocol");
+  EXPECT_EQ(ctx.pull_indexer_next_chunked(mismatched, never_draining,
+                                          recorder.sender())()
+                .outcome(),
+            EventIndexerPullOutcome::EventIndexerPullMismatchedProtocol);
+  EXPECT_TRUE(recorder.chunks.empty());
+}
+
+TEST_F(EventRpcTest, ChunkedPullFailsWhenAChunkIsNotAccepted)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  commit_block_of_pairs(ctx, 93, 1, sha256(genesis), {make_body(311)});
+
+  EventIndexerChunkedPullResult result = ctx.pull_indexer_next_chunked(
+      pull_request(), never_draining,
+      [](const EventIndexerBlockChunk &) -> x23::Async<void> {
+        throw x23::XdrException("indexer connection lost");
+        co_return;
+      })();
+  EXPECT_EQ(result.outcome(),
+            EventIndexerPullOutcome::EventIndexerPullInternalFailure);
 }
 
 TEST_F(EventRpcTest, DuplicateOpenReturnsExists)
@@ -3407,26 +3595,6 @@ TEST_F(EventRpcTest, AbandoningOneEmptyBlockKeepsTheSharedFileForAnother)
   // The two committed records keep the file alive as their payload.
   EXPECT_TRUE(std::filesystem::exists(events_file));
   EXPECT_TRUE(ctx.indexer_outbox_store().load_committed(2)().has_value());
-}
-
-TEST_F(EventRpcTest, OversizedEventsFileIsRejectedBeforeAllocation)
-{
-  // A block's pairs were bounded to the pull RPC replay limit at publication,
-  // so a larger file cannot be valid.  A sparse or corrupt file must be a
-  // fail-closed error, not a file-sized allocation.
-  const SHA256Hash root{};
-  const std::string name =
-      EventBlockContext::final_events_filename(temp_dir(), root);
-  {
-    std::ofstream sparse(name, std::ios::binary);
-    ASSERT_TRUE(sparse.good());
-  }
-  std::filesystem::resize_file(name, kMaxIndexerOutboxPayloadBytes + 1);
-
-  auto pairs = read_final_events_file(temp_dir(), root);
-  ASSERT_FALSE(pairs.has_value());
-  EXPECT_NE(pairs.error().find("exceeds replayable payload size"),
-            std::string::npos);
 }
 
 TEST_F(EventRpcTest, CommitFailsClosedWhenEventsFileIsMissing)

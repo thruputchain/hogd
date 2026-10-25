@@ -1,6 +1,7 @@
 #include "hogd/hog_event/rpc_context.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <cerrno>
@@ -15,21 +16,28 @@
 #include <iterator>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stdexcept>
 #include <string>
 #include <string_view>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "consensus.hh"
 #include "db_conflict.hh"
+#include "event.hh"
 #include "event_outbox_internal.hh"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/time.h"
+#include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
@@ -44,6 +52,7 @@
 #include "x23/async.h"
 #include "x23/cleanup.h"
 #include "x23/corosync.h"
+#include "x23/serialize.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -91,6 +100,22 @@ pull_block(IndexerOutboxOrigin origin, IndexerCommittedBlock block)
       .origin = std::move(origin),
       .block = std::move(block),
   };
+  return result;
+}
+
+// A chunked pull answers everything but a block exactly as a pull does.
+EventIndexerChunkedPullResult
+chunked_reply(EventIndexerPullResult reply)
+{
+  using enum EventIndexerPullOutcome;
+  CHECK(reply.outcome() != EventIndexerPullBlock);
+  EventIndexerChunkedPullResult result(reply.outcome());
+  if (reply.outcome() == EventIndexerPullCaughtUp) {
+    result.origin() = std::move(reply.origin());
+  }
+  else {
+    result.diagnostic() = std::move(reply.diagnostic());
+  }
   return result;
 }
 
@@ -781,6 +806,113 @@ x23::Async<EventIndexerPullResult>
 EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
                                    const std::atomic<bool> &draining)
 {
+  IndexerPullAnswer answer = co_await pull_indexer_block(request, draining);
+  if (auto *reply = std::get_if<EventIndexerPullResult>(&answer.answer)) {
+    co_return std::move(*reply);
+  }
+  auto &pulled = std::get<IndexerPulledBlock>(answer.answer);
+  const IndexerCommittedBlockPayload &payload = pulled.block.payload;
+  if (!indexer_event_pull_rpc_record_size_for_parts(
+          x23::xdr_size(payload.consensus_value),
+          x23::xdr_size(payload.event_logs),
+          x23::xdr_size(payload.tx_bodies))) {
+    error("committed block {} exceeds the single-reply pull record",
+          payload.consensus_value.proposal_header.block_height);
+    co_return pull_failure(
+        EventIndexerPullOutcome::EventIndexerPullInternalFailure,
+        "block exceeds the single-reply pull record; pull it with "
+        "event_indexer_pull_next_chunked");
+  }
+  co_return pull_block(std::move(pulled.origin), std::move(pulled.block));
+}
+
+x23::Async<EventIndexerChunkedPullResult>
+EventRPCContext::pull_indexer_next_chunked(
+    const EventIndexerPullRequest &request, const std::atomic<bool> &draining,
+    IndexerChunkSender send_chunk)
+{
+  IndexerPullAnswer answer = co_await pull_indexer_block(request, draining);
+  if (auto *reply = std::get_if<EventIndexerPullResult>(&answer.answer)) {
+    co_return chunked_reply(std::move(*reply));
+  }
+  auto &pulled = std::get<IndexerPulledBlock>(answer.answer);
+  const IndexerCommittedBlock &block = pulled.block;
+  const IndexerCommittedBlockPayload &payload = block.payload;
+  const BlockHeight height =
+      payload.consensus_value.proposal_header.block_height;
+  CHECK_EQ(payload.event_logs.size(), payload.tx_bodies.size());
+
+  // Every chunk holds the same number of pairs: as many of the block's
+  // largest as fit the chunk budget, so only a chunk of one pair larger than
+  // the budget exceeds it.
+  size_t largest_pair = 0;
+  for (size_t i = 0; i < payload.event_logs.size(); ++i) {
+    largest_pair =
+        std::max(largest_pair, x23::xdr_size(payload.event_logs[i]) +
+                                   x23::xdr_size(payload.tx_bodies[i]));
+  }
+  if (largest_pair > kMaxIndexerPairBytes) {
+    error("committed block {} has a pair of {} bytes, over the chunk limit",
+          height, largest_pair);
+    co_return chunked_reply(
+        pull_failure(EventIndexerPullOutcome::EventIndexerPullInternalFailure,
+                     "a pair of the block does not fit in one chunk"));
+  }
+  const size_t pairs_per_chunk =
+      std::max<size_t>(1, indexer_chunk_pair_bytes_ /
+                              std::max<size_t>(1, largest_pair));
+  const size_t pair_count = payload.event_logs.size();
+  const size_t chunk_count =
+      std::max<size_t>(1, (pair_count + pairs_per_chunk - 1) / pairs_per_chunk);
+
+  // The run is numbered over the event logs; a chunk's bodies are the ones at
+  // the same positions.
+  const std::array parts{
+      std::span<const TxEventLog>(payload.event_logs.data(), pair_count)};
+  ChunkRunSender sender(
+      parts, pairs_per_chunk,
+      [&](ChunkPosition position,
+          ChunkItems<TxEventLog> event_logs) -> x23::Async<void> {
+        EventIndexerBlockChunk chunk{
+            .block_height = height,
+            .identity = block.identity,
+            .chunk_index = position.index,
+            .chunk_count = position.count,
+        };
+        for (const std::span<const TxEventLog> &piece : event_logs.pieces()) {
+          chunk.event_logs.append_range(piece);
+        }
+        const size_t first = size_t{position.index} * pairs_per_chunk;
+        chunk.tx_bodies.append_range(
+            std::span(payload.tx_bodies.data() + first, event_logs.size()));
+        co_await send_chunk(chunk);
+      });
+  try {
+    co_await sender.send(kMaxIndexerChunksInFlight);
+  } catch (const x23::XdrException &e) {
+    warn("failed to send committed block {} to the indexer: {}", height,
+         e.what());
+    co_return chunked_reply(
+        pull_failure(EventIndexerPullOutcome::EventIndexerPullInternalFailure,
+                     "the indexer did not accept the block's chunks"));
+  }
+
+  EventIndexerChunkedPullResult result(
+      EventIndexerPullOutcome::EventIndexerPullBlock);
+  result.chunked_block() = EventIndexerChunkedBlock{
+      .origin = std::move(pulled.origin),
+      .format_version = payload.format_version,
+      .consensus_value = payload.consensus_value,
+      .identity = block.identity,
+      .chunk_count = static_cast<uint32_t>(chunk_count),
+  };
+  co_return result;
+}
+
+x23::Async<EventRPCContext::IndexerPullAnswer>
+EventRPCContext::pull_indexer_block(const EventIndexerPullRequest &request,
+                                    const std::atomic<bool> &draining)
+{
   using enum EventIndexerPullOutcome;
   if (request.protocol != version::kHogdProtocol()) {
     co_return pull_failure(EventIndexerPullMismatchedProtocol,
@@ -1079,7 +1211,7 @@ EventRPCContext::pull_indexer_next(const EventIndexerPullRequest &request,
                              "event outbox state changed during pull");
     }
   }
-  co_return pull_block(std::move(response_origin), std::move(block));
+  co_return IndexerPullAnswer(std::move(response_origin), std::move(block));
 }
 
 void

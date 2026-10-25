@@ -164,20 +164,12 @@ same_inode(const struct stat &lhs, const struct stat &rhs)
   return lhs.st_dev == rhs.st_dev && lhs.st_ino == rhs.st_ino;
 }
 
-template<typename Payload>
 IndexerOutboxStatus<void>
-validate_payload_sizes(const Payload &payload)
+validate_payload_sizes(const IndexerOutboxCandidatePayload &payload)
 {
-  size_t consensus_value_size = 0;
-  if constexpr (std::same_as<Payload, IndexerOutboxCommittedPayload>) {
-    consensus_value_size = x23::xdr_size(payload.consensus_value);
-  }
-  else {
-    consensus_value_size = x23::detail::xdr_size_bounds<ConsensusValue>().max_;
-  }
   auto response_size = indexer_event_pull_rpc_record_size_for_parts(
-      consensus_value_size, x23::xdr_size(payload.event_logs),
-      x23::xdr_size(payload.tx_bodies));
+      x23::detail::xdr_size_bounds<ConsensusValue>().max_,
+      x23::xdr_size(payload.event_logs), x23::xdr_size(payload.tx_bodies));
   if (!response_size) {
     return std::unexpected(response_size.error());
   }
@@ -209,7 +201,8 @@ validate_candidate(const IndexerOutboxCandidatePayload &payload)
 }
 
 // The cheap, always-on checks of a committed payload: its height is the
-// record's, and it fits the replay record and file limits.
+// record's. Its pairs have no aggregate size limit; the chunked pull serves a
+// block of any size.
 IndexerOutboxStatus<void>
 validate_committed_shape(const IndexerOutboxCommittedPayload &payload,
                          BlockHeight expected_height)
@@ -223,7 +216,7 @@ validate_committed_shape(const IndexerOutboxCommittedPayload &payload,
     return std::unexpected(
         "committed filename height differs from ConsensusValue");
   }
-  return validate_payload_sizes(payload);
+  return {};
 }
 
 // The full check, roots recomputed over the pairs included. This is what
@@ -438,10 +431,10 @@ validate_indexer_outbox_file_size(size_t file_size)
   return {};
 }
 
-IndexerOutboxStatus<size_t>
-indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
-                                             size_t event_logs_xdr_size,
-                                             size_t tx_bodies_xdr_size)
+std::optional<size_t>
+indexer_event_pull_record_bytes_for_parts(size_t consensus_value_xdr_size,
+                                          size_t event_logs_xdr_size,
+                                          size_t tx_bodies_xdr_size)
 {
   x23::rpc_msg reply{};
   x23::msg_set_reply_stat(&reply, x23::accept_stat::SUCCESS);
@@ -463,6 +456,18 @@ indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   size = size.and_then([&](size_t value) {
     return checked_add(value, x23::xdr_size(IndexerCommittedBlockIdentity{}));
   });
+  return size;
+}
+
+IndexerOutboxStatus<size_t>
+indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
+                                             size_t event_logs_xdr_size,
+                                             size_t tx_bodies_xdr_size)
+{
+  auto size =
+      indexer_event_pull_record_bytes_for_parts(consensus_value_xdr_size,
+                                                event_logs_xdr_size,
+                                                tx_bodies_xdr_size);
   if (!size || *size > kMaxIndexerEventPullRpcRecordBytes) {
     return std::unexpected(
         "EventIndexer1 pull reply record exceeds x23 31-bit limit");
@@ -843,19 +848,17 @@ IndexerOutboxStore::publish_committed_stored(
 {
   const BlockHeight height =
       stored.consensus_value.proposal_header.block_height;
-  // Pull-RPC record size for the histogram. The full-payload path can compute
-  // it before the publication lock. The reference path learns the events-file
-  // size under that lock and fills this in there.
+  // The block's single-reply pull record size, for the histogram. The
+  // full-payload path can compute it before the publication lock. The
+  // reference path learns the events-file size under that lock and fills this
+  // in there. A block over the single-reply limit is still published: the
+  // chunked pull serves it.
   std::optional<size_t> pull_record_bytes;
   if (payload_for_ensure) {
-    auto response_size = indexer_event_pull_rpc_record_size_for_parts(
+    pull_record_bytes = indexer_event_pull_record_bytes_for_parts(
         x23::xdr_size(stored.consensus_value),
         x23::xdr_size(payload_for_ensure->event_logs),
         x23::xdr_size(payload_for_ensure->tx_bodies));
-    if (!response_size) {
-      co_return std::unexpected(response_size.error());
-    }
-    pull_record_bytes = *response_size;
   }
   auto bytes = encode_file(stored);
   if (!bytes) {
@@ -879,25 +882,16 @@ IndexerOutboxStore::publish_committed_stored(
   else {
     // Reference publication: the live commit path, whose block streamed and
     // fsynced the file at close. It must exist -- a record must never
-    // reference a payload that is not durable -- and it must fit the pull
-    // RPC's replay record, so an unservable block fails at commit rather than
-    // at first pull. The two batch counts (4 bytes each) are the only
-    // reassembly bytes not in the file.
+    // reference a payload that is not durable. The two batch counts (4 bytes
+    // each) are the only reassembly bytes not in the file.
     auto file_size = probe_events_file_size(
         stored.consensus_value.proposal_header.events_hash);
     if (!file_size) {
       co_return std::unexpected(file_size.error());
     }
-    auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
-    if (!batches_size) {
-      co_return std::unexpected("events file size overflows replay record");
-    }
-    auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
-        x23::xdr_size(stored.consensus_value), *batches_size, 0);
-    if (!rpc_size) {
-      co_return std::unexpected(rpc_size.error());
-    }
-    pull_record_bytes = *rpc_size;
+    pull_record_bytes = indexer_event_pull_record_bytes_for_parts(
+        x23::xdr_size(stored.consensus_value), static_cast<size_t>(*file_size),
+        8);
   }
   // Either way the file's roots are established: the live block computed
   // the event root over the pairs it streamed, and promotion validated the
@@ -2111,12 +2105,8 @@ IndexerOutboxStore::assemble_committed_payload(
       file_stat.st_size < 0) {
     return std::unexpected(system_error("stat events file", errno));
   }
-  // A record's pairs were bounded to the pull RPC's replay limit at
-  // publication, so anything larger is not this record's file.
-  if (std::cmp_greater(file_stat.st_size, kMaxIndexerOutboxPayloadBytes)) {
-    return std::unexpected(
-        std::format("events file {} exceeds replayable payload size", name));
-  }
+  // Nothing bounds a block's pairs as a whole, so neither is the file; each
+  // pair is bounded, and parse_events_file_pairs rejects a malformed one.
   std::vector<uint8_t> bytes(static_cast<size_t>(file_stat.st_size));
   size_t offset = 0;
   while (offset < bytes.size()) {
@@ -2194,18 +2184,8 @@ IndexerOutboxStore::validate_committed_record_reference(
     return std::unexpected(
         "committed outbox header does not match enumerated record");
   }
-  auto file_size = probe_events_file_size(header->event_root);
-  if (!file_size) {
+  if (auto file_size = probe_events_file_size(header->event_root); !file_size) {
     return std::unexpected(file_size.error());
-  }
-  auto batches_size = checked_add(static_cast<size_t>(*file_size), 8);
-  if (!batches_size) {
-    return std::unexpected("events file size overflows replay record");
-  }
-  if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
-          x23::xdr_size(stored->consensus_value), *batches_size, 0);
-      !rpc_size) {
-    return std::unexpected(rpc_size.error());
   }
   return {};
 }

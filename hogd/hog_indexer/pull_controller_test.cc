@@ -16,6 +16,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -127,24 +128,26 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root,
 }
 
 ConsensusValue
-commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
-             ConsensusValueHash prev_hash,
-             std::optional<ProposedTransaction> body = std::nullopt)
+commit_block_with_bodies(EventRPCContext &ctx, BlockID block_id,
+                         BlockHeight height, ConsensusValueHash prev_hash,
+                         const std::vector<ProposedTransaction> &block_bodies)
 {
   EventExecRpc exec_rpc(ctx);
   EventMempoolRpc mempool_rpc(ctx);
   CHECK_EQ(mempool_rpc.eventsched_open_block(block_id)(), RPCError::kRPCNone);
 
   ProposedTransactionBatch bodies;
-  if (body) {
+  if (!block_bodies.empty()) {
     CHECK_EQ(exec_rpc.eventexecutor_open_block(block_id)(), RPCError::kRPCNone);
-    CHECK_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1,
-                                               make_event(*body, 0xA1),
-                                               *body)(),
-             RPCError::kRPCNone);
+    for (const ProposedTransaction &body : block_bodies) {
+      CHECK_EQ(exec_rpc.eventexecutor_emit_event(block_id, 1,
+                                                 make_event(body, 0xA1),
+                                                 body)(),
+               RPCError::kRPCNone);
+      bodies.push_back(body);
+    }
     CHECK_EQ(exec_rpc.eventexecutor_close_block(block_id)(),
              RPCError::kRPCNone);
-    bodies.push_back(*body);
   }
   EventBlockResult closed =
       mempool_rpc.eventsched_close_block(block_id, height)();
@@ -155,6 +158,19 @@ commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
   CHECK_EQ(mempool_rpc.eventsched_commit_block(block_id, value)(),
            RPCError::kRPCNone);
   return value;
+}
+
+ConsensusValue
+commit_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
+             ConsensusValueHash prev_hash,
+             std::optional<ProposedTransaction> body = std::nullopt)
+{
+  std::vector<ProposedTransaction> bodies;
+  if (body) {
+    bodies.push_back(std::move(*body));
+  }
+  return commit_block_with_bodies(ctx, block_id, height, std::move(prev_hash),
+                                  bodies);
 }
 
 void
@@ -243,6 +259,7 @@ wait_for_condition(Predicate &&predicate, std::chrono::milliseconds timeout)
 class CaughtUpPullRpc {
 public:
   using rpc_service = EventIndexer1;
+  static constexpr bool kServesWithStream = true;
 
   CaughtUpPullRpc()
   {
@@ -272,8 +289,10 @@ public:
     notice_.diagnostic.cause.conflict().code = DbConflictCode::ValueMismatch;
   }
 
-  x23::Async<EventIndexerPullResult>
-  event_indexer_pull_next(EventIndexerPullRequest request)
+  template<typename Stream = void>
+  x23::Async<EventIndexerChunkedPullResult>
+  event_indexer_pull_next_chunked(EventIndexerPullRequest request,
+                                  Stream *stream = nullptr)
   {
     {
       std::lock_guard lock(mutex_);
@@ -282,23 +301,51 @@ public:
     requests_wake_.notify_all();
     const std::size_t call = calls_.fetch_add(1, std::memory_order_relaxed);
     if (call == 0) {
-      co_return EventIndexerPullResult(
+      co_return EventIndexerChunkedPullResult(
           EventIndexerPullOutcome::EventIndexerPullNotReady);
     }
     if (call == 1) {
-      EventIndexerPullResult result(
+      if constexpr (!std::is_void_v<Stream>) {
+        // The block has no transactions: a run of one empty chunk.
+        IndexerEvent1::client<Stream *> indexer{stream};
+        co_await indexer.indexer_event_block_chunk(EventIndexerBlockChunk{
+            .block_height =
+                block_.payload.consensus_value.proposal_header.block_height,
+            .identity = block_.identity,
+            .chunk_index = 0,
+            .chunk_count = 1,
+        });
+      }
+      EventIndexerChunkedPullResult result(
           EventIndexerPullOutcome::EventIndexerPullBlock);
-      result.pulled_block().origin = origin_;
-      result.pulled_block().block = block_;
+      result.chunked_block() = EventIndexerChunkedBlock{
+          .origin = origin_,
+          .format_version = block_.payload.format_version,
+          .consensus_value = block_.payload.consensus_value,
+          .identity = block_.identity,
+          .chunk_count = 1,
+      };
       co_return result;
     }
-    EventIndexerPullResult result(
+    EventIndexerChunkedPullResult result(
         EventIndexerPullOutcome::EventIndexerPullCaughtUp);
     result.origin() = origin_;
     co_return result;
   }
 
-  x23::Async<IndexerTxFailureNoticeBatch> event_indexer_pull_tx_failures()
+  template<typename Stream = void>
+  static EventIndexerPullResult
+  event_indexer_pull_next(const EventIndexerPullRequest & /*unused*/,
+                          Stream * /*stream*/ = nullptr)
+  {
+    ADD_FAILURE() << "indexer pulled with event_indexer_pull_next";
+    return EventIndexerPullResult(
+        EventIndexerPullOutcome::EventIndexerPullInternalFailure);
+  }
+
+  template<typename Stream = void>
+  x23::Async<IndexerTxFailureNoticeBatch>
+  event_indexer_pull_tx_failures(Stream * /*stream*/ = nullptr)
   {
     IndexerTxFailureNoticeBatch notices;
     if (!notice_returned_.exchange(true, std::memory_order_relaxed)) {
@@ -347,8 +394,8 @@ public:
     std::ranges::fill(origin_.first_prev_hash, 0x42);
   }
 
-  x23::Async<EventIndexerPullResult>
-  event_indexer_pull_next(EventIndexerPullRequest /*unused*/)
+  x23::Async<EventIndexerChunkedPullResult>
+  event_indexer_pull_next_chunked(EventIndexerPullRequest /*unused*/)
   {
     {
       std::lock_guard lock(mutex_);
@@ -358,10 +405,18 @@ public:
     while (!released_.load()) {
       co_await released_.wait(false);
     }
-    EventIndexerPullResult result(
+    EventIndexerChunkedPullResult result(
         EventIndexerPullOutcome::EventIndexerPullCaughtUp);
     result.origin() = origin_;
     co_return result;
+  }
+
+  static EventIndexerPullResult
+  event_indexer_pull_next(const EventIndexerPullRequest & /*unused*/)
+  {
+    ADD_FAILURE() << "indexer pulled with event_indexer_pull_next";
+    return EventIndexerPullResult(
+        EventIndexerPullOutcome::EventIndexerPullInternalFailure);
   }
 
   static IndexerTxFailureNoticeBatch event_indexer_pull_tx_failures()
@@ -589,6 +644,48 @@ TEST(IndexerPullController, IngestsLiveCommitsAfterCatchingUpAtGenesis)
     auto record = db->get_tx_record(sha256(body.signed_tx.tx));
     ASSERT_TRUE(record.has_value()) << record.error();
     EXPECT_EQ(record->height, height);
+    expect_xdr_equal(record->tx, body);
+  }
+}
+
+TEST(IndexerPullController, IngestsBlockSentBackAsSeveralChunks)
+{
+  TmpDir event_dir;
+  TmpDir indexer_dir;
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  EventRPCContext event(event_dir.directory());
+  // Every chunk is then one pair, so the block arrives as three chunks.
+  event.set_indexer_chunk_pair_bytes_for_test(1);
+  ASSERT_TRUE(event.reconcile_outbox_tip(0, genesis)().has_value());
+  const std::vector<ProposedTransaction> bodies{make_body(201), make_body(202),
+                                                make_body(203)};
+  const ConsensusValue block_one =
+      commit_block_with_bodies(event, 1, 1, sha256(genesis), bodies);
+
+  EventIndexerServer event_server(event);
+  const std::uint16_t event_port =
+      event_server.start_server(x23::HostPort{"127.0.0.1", 0});
+  auto db = IndexDB::make_new(std::filesystem::path(indexer_dir.directory()) /
+                              "indexer-db");
+  ASSERT_TRUE(db.has_value()) << db.error();
+  RecentTxFailureCache failures;
+  IndexerPullControllerOptions options;
+  options.retry_delay = std::chrono::milliseconds(1);
+  options.caught_up_poll_delay = std::chrono::milliseconds(1);
+  IndexerPullController controller(
+      std::string(x23::HostPort{"127.0.0.1", event_port}.show()), *db, failures,
+      options);
+  controller.wait_until_caught_up();
+
+  const IndexerProgress progress = db->durable_progress();
+  ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
+  EXPECT_EQ(progress.initialized().contiguous_height, 1);
+  EXPECT_EQ(progress.initialized().last_consensus_hash, sha256(block_one));
+  for (const ProposedTransaction &body : bodies) {
+    auto record = db->get_tx_record(sha256(body.signed_tx.tx));
+    ASSERT_TRUE(record.has_value()) << record.error();
+    EXPECT_EQ(record->height, 1);
     expect_xdr_equal(record->tx, body);
   }
 }

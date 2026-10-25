@@ -9,6 +9,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "consensus.hh"
@@ -88,6 +89,25 @@ public:
   x23::Async<EventIndexerPullResult>
   pull_indexer_next(const EventIndexerPullRequest &request);
 
+  // Sends one chunk of a pulled block to the puller; resolves on its reply.
+  using IndexerChunkSender =
+      std::function<x23::Async<void>(const EventIndexerBlockChunk &)>;
+  // The same pull, for a block of any size: the block's event logs and bodies
+  // go out through [send_chunk] as a run of chunks, at most
+  // kMaxIndexerChunksInFlight at once, and the reply, the block's header and
+  // chunk count, follows once every chunk has been acknowledged.
+  x23::Async<EventIndexerChunkedPullResult>
+  pull_indexer_next_chunked(const EventIndexerPullRequest &request,
+                            const std::atomic<bool> &draining,
+                            IndexerChunkSender send_chunk);
+
+  // Bytes of pairs per chunk; kIndexerChunkPairBytes unless a test lowers it
+  // to split small blocks into several chunks.
+  void set_indexer_chunk_pair_bytes_for_test(size_t bytes)
+  {
+    indexer_chunk_pair_bytes_ = bytes;
+  }
+
   void enqueue_tx_failure(TransactionHash tx_hash,
                           TxFailureDiagnostic diagnostic);
   IndexerTxFailureNoticeBatch pull_tx_failures();
@@ -111,6 +131,30 @@ public:
 
 private:
   enum class BlockOperation { kOpening, kClosing, kCommitting, kAbandoning };
+
+  // What a pull answers: a committed block to serve, or the reply that stands
+  // in for one -- caught up, or a failure.
+  struct IndexerPulledBlock {
+    IndexerOutboxOrigin origin;
+    IndexerCommittedBlock block;
+  };
+  struct IndexerPullAnswer {
+    // Implicit, so the pull's many early answers read as replies.
+    // NOLINTNEXTLINE(google-explicit-constructor)
+    IndexerPullAnswer(EventIndexerPullResult reply) : answer(std::move(reply))
+    {}
+    IndexerPullAnswer(IndexerOutboxOrigin origin, IndexerCommittedBlock block)
+      : answer(IndexerPulledBlock{.origin = std::move(origin),
+                                  .block = std::move(block)})
+    {}
+
+    std::variant<EventIndexerPullResult, IndexerPulledBlock> answer;
+  };
+
+  // The pull shared by both pull procedures.
+  x23::Async<IndexerPullAnswer>
+  pull_indexer_block(const EventIndexerPullRequest &request,
+                     const std::atomic<bool> &draining);
 
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
@@ -201,6 +245,7 @@ private:
 
   std::mutex tx_failure_mutex_;
   std::vector<IndexerTxFailureNotice> tx_failure_mailbox_;
+  size_t indexer_chunk_pair_bytes_ = kIndexerChunkPairBytes;
 
   PerThread<ContextCache> cache_;
   // In any normal workflow we almost certainly are not seeing more than a
