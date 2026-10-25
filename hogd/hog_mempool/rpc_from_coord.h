@@ -112,6 +112,8 @@ public:
   x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
+      auth_callback_disconnecting_.store(true, std::memory_order_release);
+      auth_data_height_.broadcast(&default_threadpool());
       co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
@@ -855,6 +857,9 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
+  // Set by [disconnect_auth_callback] to release [auth_data_changed] callbacks
+  // waiting on [auth_data_height_] for an earlier height.
+  std::atomic<bool> auth_callback_disconnecting_ = false;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 

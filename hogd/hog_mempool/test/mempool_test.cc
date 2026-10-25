@@ -736,6 +736,61 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   unregister_thread.join();
 }
 
+// The auth server forwards consecutive heights concurrently, so a height can
+// reach the coordinator before the previous one has been applied. It waits
+// for that height instead of failing the mempool.
+TEST(Mempool, AuthDataCallbackWaitsForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  // The fixture commits genesis and the ceremony; wait for the height-1
+  // callback before injecting later heights.
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+
+  std::promise<void> later_result;
+  std::future<void> later_applied = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  EXPECT_EQ(later_applied.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_EQ(coord.auth_data_height(), tip);
+
+  coord.auth_data_changed(tip + 1, KeyChangeBatch{})();
+  EXPECT_EQ(later_applied.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip + 2);
+}
+
+// Once the auth callback is disconnected, the earlier height a waiting callback
+// needs may never be admitted, so the waiting callback gives up rather than
+// keep the coordinator from draining.
+TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+
+  std::promise<void> later_result;
+  std::future<void> later_returned = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  EXPECT_EQ(later_returned.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+
+  coord.disconnect_auth_callback()();
+  EXPECT_EQ(later_returned.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip);
+}
+
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
 {
   MempoolTestInfra server;
