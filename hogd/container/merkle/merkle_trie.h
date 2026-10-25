@@ -325,6 +325,12 @@ private:
       switch (info.node->type) {
       case Node::Type::kBranch:
         CHECK_LE(info.next_child_to_visit, info.node->branch_children().size());
+        // Empty slots have no node to visit. Avoid pushing a traversal frame
+        // that the null-node check above would immediately pop.
+        while (info.next_child_to_visit < info.node->branch_children().size() &&
+               !info.node->branch_children()[info.next_child_to_visit]) {
+          info.next_child_to_visit++;
+        }
         if (info.next_child_to_visit == info.node->branch_children().size() ||
             (max_depth && info.depth == *max_depth)) {
           // We have visited all of the branch's children, so now we can "visit"
