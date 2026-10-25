@@ -88,6 +88,7 @@
 #include <exception>
 #include <expected>
 #include <map>
+#include <optional>
 #include <print>
 #include <stop_token>
 #include <string>
@@ -331,6 +332,10 @@ protected:
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
   [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
+  // If set, the reader moves to this CPU's LLC before its first read, so
+  // the readiness hint it waits with starts there rather than wherever the
+  // stream was created.
+  std::optional<unsigned> reader_cpu_;
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
@@ -415,10 +420,11 @@ struct RpcStream : public detail::RpcStreamImpl {
                                                       ea)...);
   }
 
-  void go()
+  void go(std::optional<unsigned> reader_cpu = std::nullopt)
   {
     if (!reader_running_) {
       reader_running_ = true;
+      reader_cpu_ = reader_cpu;
       reader();
     }
   }
@@ -546,34 +552,53 @@ struct RpcMulticlient : RefCount,
     return this->lookup()->template send_call<ProcMeta>(args...);
   }
 
+  // Where one connection of the multiclient runs: the CoroPoll that polls
+  // its socket, and optionally the CPU its reader starts from.
+  struct Placement {
+    CoroPoll &cp;
+    std::optional<unsigned> reader_cpu = std::nullopt;
+  };
+
   static ClientRef make(CoroPoll &cp, const struct sockaddr_storage &ss,
                         const CpuMap &map = *llc_map,
                         int logfd = RpcLogger::default_logfd,
                         size_t max_message_size = default_max_message_size)
   {
-    return *new RpcMulticlient(cp, ss, map, logfd, max_message_size);
+    return make([&cp](const CpuSet &) { return Placement{cp}; }, ss, map, logfd,
+                max_message_size);
+  }
+
+  // place(cpuset) picks the Placement of the connection serving the CPUs in
+  // cpuset, once per bucket of map.
+  template<std::invocable<const CpuSet &> Place>
+  static ClientRef make(Place &&place, const struct sockaddr_storage &ss,
+                        const CpuMap &map = *llc_map,
+                        int logfd = RpcLogger::default_logfd,
+                        size_t max_message_size = default_max_message_size)
+  {
+    return *new RpcMulticlient(place, ss, map, logfd, max_message_size);
   }
 
 protected:
-  RpcMulticlient(CoroPoll &cp, const struct sockaddr_storage &ss,
+  RpcMulticlient(auto &place, const struct sockaddr_storage &ss,
                  const CpuMap &map, int logfd, size_t max_message_size)
     : super2(map)
   {
-    super2::populate(
-        [&cp, &ss, logfd, max_message_size](
-            const CpuSet & /*unused*/) -> RpcStream<Logger>::ClientRef {
-          auto conn = tcpconnect(ss);
-          if (!conn)
-            conn.error().raise("connect({})", HostPort(ss));
-          UniqueFd fd = std::move(*conn);
-          int socketfd = fd.get();
-          typename super2::value_type stream =
-              *new RpcStream<Logger>(cp, std::move(fd),
-                                     Logger{socketfd, logfd});
-          stream->max_message_size = max_message_size;
-          stream->go();
-          return stream;
-        });
+    super2::populate([&place, &ss, logfd, max_message_size](
+                         const CpuSet &cpus) -> RpcStream<Logger>::ClientRef {
+      Placement where = place(cpus);
+      auto conn = tcpconnect(ss);
+      if (!conn)
+        conn.error().raise("connect({})", HostPort(ss));
+      UniqueFd fd = std::move(*conn);
+      int socketfd = fd.get();
+      typename super2::value_type stream =
+          *new RpcStream<Logger>(where.cp, std::move(fd),
+                                 Logger{socketfd, logfd});
+      stream->max_message_size = max_message_size;
+      stream->go(where.reader_cpu);
+      return stream;
+    });
   }
 };
 

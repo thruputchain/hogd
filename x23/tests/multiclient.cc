@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <cstdint>
+
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/event.h"
@@ -7,6 +9,7 @@
 #include "x23/rpc.h"
 #include "x23/sockio.h"
 #include "x23/threadpool.h"
+#include "x23/vec.h"
 #include "xdrtest.hh"
 
 namespace x23 {
@@ -95,6 +98,55 @@ TEST(RpcMulticlient, ConstructorWithExplicitIpv6Bind)
   EXPECT_EQ(result, (Data{7, 8, 9}));
 
   cp.poison(fd);
+  di.destroy_wait();
+}
+
+TEST(RpcMulticlient, PlacementPicksEachConnectionsCoroPollAndReaderCpu)
+{
+  TestServer impl;
+  ThreadPool pool(4);
+  CoroPoll server_cp(pool);
+  CoroPoll cp0(pool);
+  CoroPoll cp1(pool);
+  DestroyInhibit di;
+
+  auto [port, fd] =
+      tcp_rpc_server(server_cp, 0, [&impl, _d = RefPtr(di)](auto c) {
+        c->server(&impl, blank_rpc_v1{});
+      });
+  auto addr = HostPort{"localhost", port}.to_addr(true);
+  ASSERT_TRUE(addr.has_value());
+
+  // One bucket per CPU we may run on, so every bucket is valid.
+  Vec<int> buckets(CpuSet::num_cpus(), 0);
+  int nbuckets = 0;
+  for (unsigned cpu = 0; cpu < CpuSet::num_cpus() && nbuckets < 4; ++cpu)
+    if (allowed_cpus->isset(cpu))
+      buckets[cpu] = nbuckets++;
+  if (nbuckets < 2)
+    GTEST_SKIP() << "needs two allowed CPUs";
+  CpuMap map{buckets};
+
+  using Placement = RpcMulticlient<RpcLogger>::Placement;
+  int calls = 0;
+  auto place = [&](const CpuSet &cpus) {
+    unsigned first = 0;
+    while (!cpus.isset(first))
+      ++first;
+    return Placement{(calls++ % 2) ? cp1 : cp0, first};
+  };
+  auto client = RpcMulticlient<RpcLogger>::make(place, *addr, map);
+  EXPECT_EQ(calls, map.nbuckets());
+
+  for (int i = 0; i < map.nbuckets(); ++i) {
+    auto &stream = client->lookup(i);
+    EXPECT_EQ(stream->cp_.get(), (i % 2) ? &cp1 : &cp0) << "bucket " << i;
+    auto result = stream->client(blank_rpc_v1{})
+                      .echo(Data{static_cast<std::uint8_t>(i)})();
+    EXPECT_EQ(result, (Data{static_cast<std::uint8_t>(i)})) << "bucket " << i;
+  }
+
+  server_cp.poison(fd);
   di.destroy_wait();
 }
 

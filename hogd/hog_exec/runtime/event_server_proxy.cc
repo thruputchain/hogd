@@ -26,8 +26,8 @@ connect_to_event_server(x23::HostPort const &host_port, x23::CpuMap const &map,
                         size_t max_message_size)
 {
   info("Connecting to event server on host port {}", host_port.show());
-  return make_rpc_multiclient<EventExecutor1>(host_port, true, map,
-                                              max_message_size);
+  return make_llc_rpc_multiclient<EventExecutor1>(host_port, true, map,
+                                                  max_message_size);
 }
 
 } // namespace
