@@ -390,10 +390,10 @@ INSTANTIATE_TEST_SUITE_P(
       return "Unknown";
     });
 
-// The runs a TryInvoke push asks hog_db to fold: the pushing frame's and its
-// parent's savepoints with the new one, then each other open frame's, with
-// runs that fold nothing left off the bottom.
-TEST_F(InvocationFrameTest, TryInvokePushFoldsOpenFrameSavepoints)
+// The savepoints a TryInvoke push asks hog_db to merge: of each open frame's,
+// all but the oldest, with the pushing frame's and the new one counted as its
+// parent's.
+TEST_F(InvocationFrameTest, TryInvokePushMergesOpenFrameSavepoints)
 {
   auto try_invoke = [&](InvocationFrameStack &stack) {
     ASSERT_TRUE(stack
@@ -413,18 +413,21 @@ TEST_F(InvocationFrameTest, TryInvokePushFoldsOpenFrameSavepoints)
   ASSERT_TRUE(
       stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
 
-  // Nothing to fold: the root holds 1 after this.
+  // Savepoint 1; nothing to merge, and the root holds 1 after this.
   try_invoke(stack);
-  // The new savepoint goes to the plain child, which hands it to the root
-  // when it commits: the root holds 2 after this.
+  // Savepoint 2 goes to the plain child, which hands it to the root when it
+  // commits: the root holds 1 and 2 after this.
   plain_call_with_try_invoke(stack);
-  // Folds the root's 2 into one below the new savepoint.
+  // Savepoint 3: merges the root's 2 into its 1, and the root holds 1 and 3.
   plain_call_with_try_invoke(stack);
-  // The root holds 2 again; both go into the new savepoint.
+  // Savepoint 4 joins the root's, so 3 and 4 merge into 1.
   try_invoke(stack);
 
-  std::vector<std::vector<uint32_t>> expected{{}, {}, {1, 2}, {3}};
-  EXPECT_EQ(server_.impl()->take_pushed_fold_runs(), expected);
+  std::vector<std::pair<uint32_t, std::vector<uint32_t>>> expected{{1, {}},
+                                                                   {2, {}},
+                                                                   {3, {2}},
+                                                                   {4, {3, 4}}};
+  EXPECT_EQ(server_.impl()->take_pushed_merges(), expected);
 }
 
 TEST_F(InvocationFrameTest, StartFrameReportsSuccess)

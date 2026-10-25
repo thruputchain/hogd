@@ -1,13 +1,14 @@
 #include "transaction_state.h"
 
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <mutex>
 #include <optional>
-#include <ranges>
 #include <span>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/types.h"
@@ -20,10 +21,10 @@
 namespace hogd {
 
 void
-TransactionState::push_subtransaction()
+TransactionState::push_subtransaction(uint32_t id)
 {
   assert(!finished_);
-  subtransaction_stack_.emplace_back();
+  subtransaction_stack_.emplace_back().id_ = id;
 }
 
 RPCError
@@ -38,32 +39,39 @@ TransactionState::pop_subtransactions(uint32_t count)
 }
 
 RPCError
-TransactionState::fold_subtransactions(std::span<const uint32_t> runs)
+TransactionState::merge_subtransactions(std::span<const uint32_t> ids)
 {
   assert(!finished_);
-  uint64_t folded = 0;
-  for (uint32_t run : runs) {
-    folded += run;
+  std::vector<bool> merged(subtransaction_stack_.size());
+  for (uint32_t id : ids) {
+    auto it =
+        std::ranges::find(subtransaction_stack_, id, &SubTransactionState::id_);
+    if (it == subtransaction_stack_.end() ||
+        it == subtransaction_stack_.begin()) [[unlikely]] {
+      return RPCError::kRPCUnrecoverable;
+    }
+    auto pos = static_cast<size_t>(it - subtransaction_stack_.begin());
+    if (merged[pos]) [[unlikely]] {
+      return RPCError::kRPCUnrecoverable;
+    }
+    merged[pos] = true;
   }
-  if (folded > subtransaction_stack_.size()) [[unlikely]] {
-    return RPCError::kRPCUnrecoverable;
-  }
-  // Rebuild the folded part of the stack from the bottom up, merging each
-  // run oldest to newest so a later subtransaction's delta for a key
+  // Merge oldest to newest, so a later subtransaction's delta for a key
   // overwrites an earlier one's.
-  size_t in = subtransaction_stack_.size() - folded;
-  size_t out = in;
-  for (uint32_t run : std::ranges::reverse_view(runs)) {
-    if (run == 0) {
+  size_t out = 0;
+  for (size_t in = 0; in < subtransaction_stack_.size(); ++in) {
+    if (merged[in]) {
+      for (auto &[addrkey, delta] : subtransaction_stack_[in].deltas_) {
+        subtransaction_stack_[out - 1].deltas_.insert_or_assign(addrkey,
+                                                                std::move(
+                                                                    delta));
+      }
       continue;
     }
-    auto merged = std::move(subtransaction_stack_[in++]);
-    for (uint32_t i = 1; i < run; ++i) {
-      for (auto &[addrkey, delta] : subtransaction_stack_[in++].deltas_) {
-        merged.deltas_.insert_or_assign(addrkey, std::move(delta));
-      }
+    if (out != in) {
+      subtransaction_stack_[out] = std::move(subtransaction_stack_[in]);
     }
-    subtransaction_stack_[out++] = std::move(merged);
+    ++out;
   }
   subtransaction_stack_.resize(out);
   return RPCError::kRPCNone;

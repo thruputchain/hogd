@@ -295,6 +295,7 @@ void
 InvokeTX::rollback_to_savepoint(int depth)
 {
   tx_depth_ = depth;
+  savepoint_ids_.resize(tx_depth_);
   // Entries emptied by this rollback are erased, not just cleared. An empty
   // vector holds no lock and is invisible to commit/abort/sync_balance_locks,
   // but the skip below means no later rollback would ever prune it -- so a
@@ -352,6 +353,65 @@ InvokeTX::rollback_to_savepoint(int depth)
     it = vec.empty() ? balance_deltas_.erase(it) : std::next(it);
   }
   assert_is_valid();
+}
+
+bool
+InvokeTX::can_merge_savepoints(std::span<const uint32_t> ids,
+                               uint32_t pushed_id) const
+{
+  std::vector<uint32_t> stack(savepoint_ids_.begin(), savepoint_ids_.end());
+  stack.push_back(pushed_id);
+  std::vector<bool> named(stack.size());
+  for (uint32_t id : ids) {
+    auto it = std::ranges::lower_bound(stack, id);
+    if (it == stack.end() || *it != id || it == stack.begin()) {
+      return false;
+    }
+    auto pos = static_cast<size_t>(it - stack.begin());
+    if (named[pos]) {
+      return false;
+    }
+    named[pos] = true;
+  }
+  return true;
+}
+
+void
+InvokeTX::merge_savepoints(std::span<const uint32_t> ids)
+{
+  if (ids.empty()) {
+    return;
+  }
+  // merged[i]: savepoint i + 1 joins the one below it.
+  std::vector<bool> merged(savepoint_ids_.size());
+  for (uint32_t id : ids) {
+    auto it = std::ranges::lower_bound(savepoint_ids_, id);
+    assert(it != savepoint_ids_.end() && *it == id &&
+           it != savepoint_ids_.begin());
+    merged[static_cast<size_t>(it - savepoint_ids_.begin())] = true;
+  }
+  // A run is a savepoint that keeps its start together with the merged ones
+  // above it; counted down from the head, as fold_savepoints() takes them.
+  std::vector<uint32_t> runs;
+  uint32_t run = 0;
+  for (size_t i = merged.size(); i-- > 0;) {
+    ++run;
+    if (!merged[i]) {
+      runs.push_back(run);
+      run = 0;
+    }
+  }
+  assert(run == 0);
+  // The ids go first: fold_savepoints() checks them against the new head.
+  size_t out = 0;
+  for (size_t i = 0; i < merged.size(); ++i) {
+    if (!merged[i]) {
+      savepoint_ids_[out++] = savepoint_ids_[i];
+    }
+  }
+  savepoint_ids_.resize(out);
+  fold_savepoints(runs);
+  assert(savepoint_ids_.size() == tx_depth_);
 }
 
 void

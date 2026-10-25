@@ -90,8 +90,8 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
   }
 
   // A child whose own TryInvoke succeeded already handed its subtransactions
-  // over (absorb_folded_savepoints), so this adds 0 for it.
-  try_invoke_frame_count_ += frame.try_invoke_frame_count_;
+  // over (absorb_merged_savepoints), so this adds none for it.
+  held_subtransactions_.append_range(frame.held_subtransactions_);
   savepoint_count_ += frame.savepoint_count_;
 
   // The tokens forwarded to the child leave this frame now that the child has
@@ -118,8 +118,9 @@ x23::Async<SystemStatus<void>>
 InvocationFrame::mark_frame_as_failed(
     PerTransactionDatabaseProxy &db_proxy) const
 {
-  if (try_invoke_frame_count_ > 0) {
-    auto st = co_await db_proxy.pop_subtransactions(try_invoke_frame_count_);
+  if (!held_subtransactions_.empty()) {
+    auto st =
+        co_await db_proxy.pop_subtransactions(get_try_invoke_frame_count());
     if (!st.has_value()) {
       co_return st.error();
     }
@@ -173,17 +174,17 @@ x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
     std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
-    SubtransactionFoldRuns const &fold)
+    SubtransactionID id, SubtransactionMerges const &merges)
 {
-  // Pushes the accumulated delta batch as a HogDb subtransaction, which hog_db
-  // folds as [fold] says once it succeeds. Returns true on a successful lock
-  // acquisition, false on contention failure. On success, counts the pushed
-  // subtransaction against this frame; the root commit caller
-  // (SystemCallHandler::try_commit_transaction) ignores that count, since the
-  // root frame is discarded immediately after commit.
+  // Pushes the accumulated delta batch as HogDb subtransaction [id], after
+  // which hog_db merges [merges] into the subtransactions below them. Returns
+  // true on a successful lock acquisition, false on contention failure. On
+  // success, counts the pushed subtransaction against this frame; the root
+  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
+  // count, since the root frame is discarded immediately after commit.
   //
   // The deterministic savepoint cap (max_savepoint_depth) is NOT enforced or
-  // advanced here, and neither is the fold mirrored in the frames' counts;
+  // advanced here, and neither are the merges mirrored in the frames';
   // InvocationFrameStack::finish_frame checks the cap before calling this for
   // a child TryInvoke frame and does both afterwards, in the one place shared
   // by every execution mode. The cap reserves one slot for the root commit's
@@ -230,12 +231,12 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  auto res = co_await db_proxy.try_push_current_subtransaction(fold);
+  auto res = co_await db_proxy.try_push_current_subtransaction(id, merges);
   if (!res.has_value()) {
     co_return res.error();
   }
   if (res.value()) {
-    try_invoke_frame_count_++;
+    held_subtransactions_.push_back(id);
   }
   co_return res.value();
 }
@@ -359,20 +360,22 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
         // Owned by this coroutine frame across the push's suspension. Its
         // allocation is contained at the noexcept boundary (#3378); the pop
         // and co_return stay outside the handler.
-        SubtransactionFoldRuns fold;
-        bool fold_built = true;
+        SubtransactionID const id = db_proxy_.next_subtransaction_id();
+        SubtransactionMerges merges;
+        bool merges_built = true;
         try {
-          fold = fold_runs_for_push();
+          merges = merges_for_push(id);
         } catch (...) {
-          fold_built = false;
+          merges_built = false;
         }
-        if (!fold_built) {
+        if (!merges_built) {
           frame_stack_.pop_back();
           co_return SystemError{SystemErrorCode::Unrecoverable};
         }
         auto acq_res =
             co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
-                                                                 no_obs, fold);
+                                                                 no_obs, id,
+                                                                 merges);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           co_return acq_res.error();
@@ -425,12 +428,12 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
 
       // Each mode above only decides whether the child succeeded; the
-      // savepoint counts are advanced and folded here so that no mode can
+      // savepoint counts are advanced and merged here so that no mode can
       // settle a success without counting it. A mode-specific bump was how
       // viewing came to skip the cap.
       if (acq_success) {
         frame_stack_.back().note_try_invoke_success();
-        fold_open_frame_savepoints();
+        merge_open_frame_savepoints();
       }
       else {
         // If the frame locks were not acquired successfully, then we mark
@@ -523,43 +526,48 @@ InvocationFrameStack::savepoint_cap_reached() const
          held >= config_params_.max_savepoint_depth - 1;
 }
 
-SubtransactionFoldRuns
-InvocationFrameStack::fold_runs_for_push() const
+SubtransactionMerges
+InvocationFrameStack::merges_for_push(SubtransactionID id) const
 {
   assert(!frame_stack_.empty());
-  SubtransactionFoldRuns runs;
-  // Runs go down the stack from the new subtransaction. A frame holding none
-  // contributes an empty run, which is left out, so no more runs are sent
-  // than there are subtransactions.
+  SubtransactionMerges merges;
+  // Lists all of a frame's subtransactions but the oldest; [keep_oldest]
+  // carries across the pushing frame's run, which spans its parent's
+  // subtransactions, its own, and [id].
+  bool keep_oldest = true;
+  auto merge_all_but_oldest = [&](std::span<const SubtransactionID> ids) {
+    for (SubtransactionID held : ids) {
+      if (std::exchange(keep_oldest, false)) {
+        continue;
+      }
+      merges.push_back(held);
+    }
+  };
   auto frame = frame_stack_.rbegin();
-  uint32_t first = 1 + frame->get_try_invoke_frame_count();
+  auto const &pusher = *frame;
   if (++frame != frame_stack_.rend()) {
-    first += frame->get_try_invoke_frame_count();
+    merge_all_but_oldest(frame->held_subtransactions());
     ++frame;
   }
-  runs.push_back(first);
+  merge_all_but_oldest(pusher.held_subtransactions());
+  merge_all_but_oldest(std::span(&id, 1));
   for (; frame != frame_stack_.rend(); ++frame) {
-    if (frame->get_try_invoke_frame_count() != 0) {
-      runs.push_back(frame->get_try_invoke_frame_count());
-    }
+    keep_oldest = true;
+    merge_all_but_oldest(frame->held_subtransactions());
   }
-  // Runs of one fold nothing, so the ones at the bottom need not be sent.
-  while (!runs.empty() && runs.back() <= 1) {
-    runs.pop_back();
-  }
-  return runs;
+  return merges;
 }
 
 void
-InvocationFrameStack::fold_open_frame_savepoints()
+InvocationFrameStack::merge_open_frame_savepoints() noexcept
 {
   assert(!frame_stack_.empty());
   if (frame_stack_.size() >= 2) {
-    frame_stack_[frame_stack_.size() - 2].absorb_folded_savepoints(
+    frame_stack_[frame_stack_.size() - 2].absorb_merged_savepoints(
         frame_stack_.back());
   }
   for (auto &frame : frame_stack_) {
-    frame.fold_savepoints();
+    frame.merge_savepoints();
   }
 }
 

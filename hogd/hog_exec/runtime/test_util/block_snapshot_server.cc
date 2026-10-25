@@ -103,7 +103,8 @@ BlockSnapshotRpc::get_deployment(BlockID block,
 TryPushSubtransactionResult
 BlockSnapshotRpc::try_push_new_subtransaction(
     BlockID /*unused*/, TransactionID /*unused*/,
-    StorageDeltaBatch const &batch, SubtransactionFoldRuns const &fold)
+    StorageDeltaBatch const &batch, SubtransactionID id,
+    SubtransactionMerges const &merges)
 {
   // test double: produces no diagnostics
   {
@@ -114,7 +115,8 @@ BlockSnapshotRpc::try_push_new_subtransaction(
       }
     }
   }
-  pushed_fold_runs_->emplace_back(fold.begin(), fold.end());
+  pushed_merges_->emplace_back(id, std::vector<uint32_t>(merges.begin(),
+                                                         merges.end()));
   return TryPushSubtransactionResult(RPCError::kRPCNone);
 }
 
@@ -231,10 +233,10 @@ BlockSnapshotRpc::setup_ban_subtransaction_key(AddressAndKey const &addrkey)
   blocked_subtransaction_keys_->insert(addrkey);
 }
 
-std::vector<std::vector<uint32_t>>
-BlockSnapshotRpc::take_pushed_fold_runs()
+std::vector<std::pair<uint32_t, std::vector<uint32_t>>>
+BlockSnapshotRpc::take_pushed_merges()
 {
-  return std::exchange(*pushed_fold_runs_.take(), {});
+  return std::exchange(*pushed_merges_.take(), {});
 }
 
 void

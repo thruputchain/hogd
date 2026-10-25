@@ -230,7 +230,7 @@ HogDbExecutorRpc::abort_transaction(BlockID block, TransactionID tx)
 TryPushSubtransactionResult
 HogDbExecutorRpc::try_push_new_subtransaction(
     BlockID block, TransactionID tx, StorageDeltaBatch batch,
-    SubtransactionFoldRuns const &fold)
+    SubtransactionID id, SubtransactionMerges const &merges)
 {
   if constexpr (is_debug_build()) {
     trace("Trying to push new subtransaction for block {} and transaction {}",
@@ -245,16 +245,14 @@ HogDbExecutorRpc::try_push_new_subtransaction(
   if (itx->get_savepoint_head() >= itx->max_savepoint_depth()) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
-  // The fold may reach only savepoints the executor pushed, the new one
-  // included; reaching further is misbehavior too.
-  uint64_t folded = 0;
-  for (uint32_t run : fold) {
-    folded += run;
-  }
-  if (folded > uint64_t{itx->get_savepoint_head()} + 1) [[unlikely]] {
+  // A reused id, or a merge naming a savepoint not on the stack, the bottom
+  // one, or one twice, is misbehavior too.
+  auto ids = itx->savepoint_ids();
+  if ((!ids.empty() && id <= ids.back()) ||
+      !itx->can_merge_savepoints(merges, id)) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
-  int depth = itx->create_savepoint();
+  int depth = itx->create_savepoint(id);
 
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -356,10 +354,10 @@ HogDbExecutorRpc::try_push_new_subtransaction(
   if (first_err != RPCError::kRPCNone) {
     return fail(first_err);
   }
-  // Fold only once every lock, balance locks included, is held:
+  // Merge only once every lock, balance locks included, is held:
   // sync_balance_locks() reads the versions at the new depth, and a failed
   // push must leave the savepoints below it intact for the executor to pop.
-  itx->fold_savepoints(fold);
+  itx->merge_savepoints(merges);
   itx->assert_is_valid();
   return TryPushSubtransactionResult(RPCError::kRPCNone);
 }

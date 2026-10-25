@@ -93,23 +93,25 @@ public:
   get_concurrent_retrocausal_queue_entry(BlockID block_id,
                                          AddressAndKey addrkey, uint32_t index);
 
-  // On success, hog_db folds the subtransaction stack as [fold] says; see
-  // SubtransactionFoldRuns in executor_to_db_rpc.x.
+  // Pushes subtransaction [id]; on success, hog_db merges each of [merges]
+  // into the subtransaction below it; see SubtransactionMerges in
+  // executor_to_db_rpc.x.
   //
   // On kRPCStorageWriteFailed (returns false), if [conflict_out] is
   // non-null it receives the conflict diagnostics hog_db built at the level
   // it selected from the block's execution mode.
   //
-  // [delta_batch], [fold] and [conflict_out] are borrowed across the
+  // [delta_batch], [merges] and [conflict_out] are borrowed across the
   // suspension: this is a coroutine, so a reference parameter is NOT copied
   // into the frame and the caller must keep the referent alive until the call
   // completes.  The batch is far too large to copy per push, which is why it
   // stays a reference; PerTransactionDatabaseProxy owns the batch and the
-  // conflict for the whole call, and its caller owns [fold].
+  // conflict for the whole call, and its caller owns [merges].
   [[nodiscard]] x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
-                              SubtransactionFoldRuns const &fold,
+                              SubtransactionID id,
+                              SubtransactionMerges const &merges,
                               DbConflictResult *conflict_out = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
@@ -184,14 +186,31 @@ public:
   // Coroutine: the staged batch stays owned by this object across the
   // suspension, and is cleared only once hog_db has answered.
   //
-  // On success, hog_db folds the subtransaction stack as [fold] says; the
-  // caller must never again pop part of a folded run.
+  // Pushes it as subtransaction [id], from next_subtransaction_id(). On
+  // success, hog_db merges each of [merges] into the subtransaction below it;
+  // the caller must never again pop a merged one on its own. [merges] is
+  // borrowed across the suspension.
   //
   // Defined out of line: GCC emits an inline coroutine's ramp even where it is
   // unused, so a header definition would make every includer's link need
   // DatabaseProxy.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_current_subtransaction(SubtransactionFoldRuns const &fold = {});
+  try_push_current_subtransaction(SubtransactionID id,
+                                  SubtransactionMerges const &merges);
+
+  // As above, with a fresh id and nothing merged: for callers that push and
+  // pop subtransactions directly rather than through invocation frames.
+  [[nodiscard]] x23::Async<SystemStatus<bool>> try_push_current_subtransaction()
+  {
+    static const SubtransactionMerges kNoMerges;
+    return try_push_current_subtransaction(next_subtransaction_id(), kNoMerges);
+  }
+
+  // A new id, greater than every one this transaction has pushed.
+  SubtransactionID next_subtransaction_id()
+  {
+    return ++last_subtransaction_id_;
+  }
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   pop_subtransactions(uint32_t count)
@@ -243,5 +262,6 @@ private:
   const BlockID block_id_;
   const TransactionID tx_id_;
   DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
+  SubtransactionID last_subtransaction_id_ = 0;
 };
 } // namespace hogd

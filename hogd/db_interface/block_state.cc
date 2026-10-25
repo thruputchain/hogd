@@ -178,10 +178,10 @@ BlockState::abort_transaction(TransactionID txid)
 }
 
 void
-BlockState::push_subtransaction(TransactionID txid)
+BlockState::push_subtransaction(TransactionID txid, uint32_t id)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  tx.push_subtransaction();
+  tx.push_subtransaction(id);
 }
 
 RPCError
@@ -192,11 +192,11 @@ BlockState::pop_subtransactions(TransactionID txid, uint32_t count)
 }
 
 RPCError
-BlockState::fold_subtransactions(TransactionID txid,
-                                 std::span<const uint32_t> runs)
+BlockState::merge_subtransactions(TransactionID txid,
+                                  std::span<const uint32_t> ids)
 {
   auto [tx, tx_lock] = tx_manager_.get(txid);
-  return tx.fold_subtransactions(runs);
+  return tx.merge_subtransactions(ids);
 }
 
 Nondeterministic<std::optional<QueueEntry>>

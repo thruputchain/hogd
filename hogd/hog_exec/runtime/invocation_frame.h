@@ -124,7 +124,13 @@ public:
   // for asserting that invariant at the root commit site.
   uint32_t get_try_invoke_frame_count() const
   {
-    return try_invoke_frame_count_;
+    return static_cast<uint32_t>(held_subtransactions_.size());
+  }
+
+  // The ids of those subtransactions, oldest first.
+  std::span<const SubtransactionID> held_subtransactions() const
+  {
+    return held_subtransactions_;
   }
 
   // The subtransactions this frame's call tree would hold in proposal mode,
@@ -133,20 +139,24 @@ public:
   // Equal to get_try_invoke_frame_count() in proposal mode.
   uint32_t get_savepoint_count() const { return savepoint_count_; }
 
-  // After a push folded the open frames' subtransactions (see
-  // InvocationFrameStack::fold_open_frame_savepoints): moves [child]'s into
-  // this frame's, then leaves this frame holding at most one.
-  void absorb_folded_savepoints(InvocationFrame &child)
+  // After a push merged [child]'s subtransactions into this frame's (see
+  // InvocationFrameStack::merges_for_push): takes them over, leaving this
+  // frame holding at most one. Does not allocate.
+  void absorb_merged_savepoints(InvocationFrame &child) noexcept
   {
-    try_invoke_frame_count_ += std::exchange(child.try_invoke_frame_count_, 0);
+    if (held_subtransactions_.empty()) {
+      held_subtransactions_ = std::move(child.held_subtransactions_);
+    }
+    child.held_subtransactions_.clear();
     savepoint_count_ += std::exchange(child.savepoint_count_, 0);
-    fold_savepoints();
+    merge_savepoints();
   }
 
-  // After a push folded this frame's subtransactions into one.
-  void fold_savepoints()
+  // After a push merged this frame's subtransactions into its oldest.
+  void merge_savepoints() noexcept
   {
-    try_invoke_frame_count_ = std::min(try_invoke_frame_count_, 1U);
+    held_subtransactions_.resize(
+        std::min<size_t>(held_subtransactions_.size(), 1));
     savepoint_count_ = std::min(savepoint_count_, 1U);
   }
 
@@ -163,12 +173,13 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
-  // [fold] is how hog_db folds the subtransaction stack once the push
-  // succeeds; the caller owns it across the suspension.
+  // Pushes as subtransaction [id]; once the push succeeds hog_db merges each
+  // of [merges] into the subtransaction below it. The caller owns [merges]
+  // across the suspension.
   [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
       std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
-      SubtransactionFoldRuns const &fold);
+      SubtransactionID id, SubtransactionMerges const &merges);
 
   // Counts the subtransaction a successful TryInvoke of this frame took.
   // finish_frame calls this once the frame's success is settled in any
@@ -317,8 +328,8 @@ private:
   x23::Vec<TxEmittedEvent> events_;
   size_t event_count_ = 0;
 
-  // See get_try_invoke_frame_count() and get_savepoint_count().
-  uint32_t try_invoke_frame_count_ = 0;
+  // See held_subtransactions() and get_savepoint_count().
+  std::vector<SubtransactionID> held_subtransactions_;
   uint32_t savepoint_count_ = 0;
 
   // elements modified during the current call frame (and child frames)
@@ -535,16 +546,16 @@ public:
   size_t size() const { return frame_stack_.size(); }
 
 private:
-  // How hog_db should fold the subtransaction stack after a TryInvoke push by
-  // the active frame: the active frame's subtransactions and its parent's go
-  // into the new one, and every other open frame's become one each. No open
-  // frame can be reverted to a state inside its own run (a failing frame pops
-  // all of its subtransactions at once), so nothing is lost.
-  SubtransactionFoldRuns fold_runs_for_push() const;
+  // The subtransactions whose start a TryInvoke push by the active frame, as
+  // [id], stops needing as a rollback point: of each open frame's, all but
+  // the oldest, with the active frame's and [id] counted as its parent's. An
+  // open frame that fails pops all of its subtransactions at once, so it is
+  // only ever reverted to its oldest one's start.
+  SubtransactionMerges merges_for_push(SubtransactionID id) const;
 
-  // Mirrors that fold in every open frame's counts, after the active frame's
-  // TryInvoke success is settled in any execution mode.
-  void fold_open_frame_savepoints();
+  // Mirrors those merges in every open frame's holdings, after the active
+  // frame's TryInvoke success is settled in any execution mode.
+  void merge_open_frame_savepoints() noexcept;
 
   std::vector<InvocationFrame> frame_stack_;
   std::function<void(InvocationFrame &&)> last_frame_action_;

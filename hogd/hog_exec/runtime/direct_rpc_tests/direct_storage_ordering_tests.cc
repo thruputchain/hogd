@@ -84,8 +84,8 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
       .delta = make_nnint_add_delta(cost_model_->get_nnint_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas, {})();
+  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas,
+                                                1, {})();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
@@ -208,8 +208,8 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
                                     cost_model_->get_balance_cost()),
       .flags = std::to_underlying(StorageDeltaFlags::None)});
 
-  auto r =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas, {})();
+  auto r = db_proxy.try_push_new_subtransaction(get_block_number(), 1, deltas,
+                                                1, {})();
   ASSERT_TRUE(r.has_value());
   ASSERT_TRUE(r.value());
   ASSERT_TRUE(
@@ -252,8 +252,8 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                        .delta = make_nnint_set_add_delta(0, 1),
                                        .flags = std::to_underlying(
                                            StorageDeltaFlags::None)});
-  auto r1 =
-      db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner, {})();
+  auto r1 = db_proxy.try_push_new_subtransaction(get_block_number(), 1, winner,
+                                                 1, {})();
   ASSERT_TRUE(r1.has_value());
   ASSERT_TRUE(r1.value());
 
@@ -265,7 +265,7 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
                                           StorageDeltaFlags::None)});
   DbConflictResult conflict(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r2 = db_proxy.try_push_new_subtransaction(get_block_number(), 2, loser,
-                                                 {}, &conflict)();
+                                                 1, {}, &conflict)();
   ASSERT_TRUE(r2.has_value());
   ASSERT_FALSE(r2.value());
   // The fixture runs Proposal mode: hog_db selects All in debug builds,

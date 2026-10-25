@@ -64,10 +64,9 @@ public:
   static RPCError abort_transaction(BlockID block, TransactionID tx);
 
   // Create a new subtransaction on top of the current (sub)transaction.
-  TryPushSubtransactionResult
-  try_push_new_subtransaction(BlockID block, TransactionID tx,
-                              StorageDeltaBatch const &batch,
-                              SubtransactionFoldRuns const &fold);
+  TryPushSubtransactionResult try_push_new_subtransaction(
+      BlockID block, TransactionID tx, StorageDeltaBatch const &batch,
+      SubtransactionID id, SubtransactionMerges const &merges);
 
   // Revert one or more subtransactions.
   static RPCError pop_subtransactions(BlockID block, TransactionID tx,
@@ -140,9 +139,10 @@ public:
 
   void setup_ban_item(AddressAndKey const &addrkey);
   void setup_ban_subtransaction_key(AddressAndKey const &addrkey);
-  // The fold runs each successful subtransaction push carried, oldest first.
-  // Savepoints are not modeled here, so this is all that can be checked.
-  std::vector<std::vector<uint32_t>> take_pushed_fold_runs();
+  // The id and merges each successful subtransaction push carried, oldest
+  // first. Savepoints are not modeled here, so this is all that can be
+  // checked.
+  std::vector<std::pair<uint32_t, std::vector<uint32_t>>> take_pushed_merges();
   void setup_stall_item(AddressAndKey const &addrkey);
   void wait_for_stalled_item(AddressAndKey const &addrkey);
   void release_stalled_item(AddressAndKey const &addrkey);
@@ -178,8 +178,9 @@ private:
   // For testing subtransaction key banning:
   x23::MVar<std::set<AddressAndKey>> blocked_subtransaction_keys_;
 
-  // For testing savepoint folding; see take_pushed_fold_runs().
-  x23::MVar<std::vector<std::vector<uint32_t>>> pushed_fold_runs_;
+  // For testing savepoint merging; see take_pushed_merges().
+  x23::MVar<std::vector<std::pair<uint32_t, std::vector<uint32_t>>>>
+      pushed_merges_;
 
   // For testing in-flight snapshot access:
   // Reads to these items suspend (via CoroFutex) until released by the test

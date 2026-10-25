@@ -86,11 +86,11 @@ public:
   void close_block();
   bool is_closed() const { return storage_view_.is_closed(); }
 
-  void push_subtransaction(TransactionID txid);
+  void push_subtransaction(TransactionID txid, uint32_t id);
   [[nodiscard]] RPCError pop_subtransactions(TransactionID txid,
                                              uint32_t count);
-  [[nodiscard]] RPCError fold_subtransactions(TransactionID txid,
-                                              std::span<const uint32_t> runs);
+  [[nodiscard]] RPCError merge_subtransactions(TransactionID txid,
+                                               std::span<const uint32_t> ids);
 
 private:
   StorageView storage_view_;

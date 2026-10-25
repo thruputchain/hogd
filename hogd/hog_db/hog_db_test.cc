@@ -5257,10 +5257,10 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlockExceedsReservedStorageCost)
   EXPECT_FALSE(stale_block_tx.get().close(parent_hash).has_value());
 }
 
-// Folding savepoints keeps the newest version of each change, at the folded
-// run's depth, along with the storage it locked; rolling back past the run
+// Merging savepoints keeps the newest version of each change, along with the
+// storage it locked, in the savepoint they merge into; rolling back past it
 // still restores the state from before it.
-TEST_F(HogDbTest, FoldSavepointsKeepsNewestAndRollsBackPastRun)
+TEST_F(HogDbTest, MergeSavepointsKeepsNewestAndRollsBackPastThem)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
   constexpr std::array<std::byte, 1> kSmall{std::byte{1}};
@@ -5295,9 +5295,10 @@ TEST_F(HogDbTest, FoldSavepointsKeepsNewestAndRollsBackPastRun)
   ASSERT_TRUE(itx.request_bytes(rewritten, std::span(kLarge), kNoFlags));
   ASSERT_TRUE(itx.sync_balance_locks());
 
-  const std::array<uint32_t, 1> kRuns{3};
-  itx.fold_savepoints(kRuns);
+  const std::array<uint32_t, 2> kMerges{2, 3};
+  itx.merge_savepoints(kMerges);
   EXPECT_EQ(itx.get_savepoint_head(), 1U);
+  EXPECT_TRUE(std::ranges::equal(itx.savepoint_ids(), std::array{1U}));
   {
     auto stored = itx.read_bytes(rewritten);
     ASSERT_TRUE(stored);
@@ -5309,7 +5310,7 @@ TEST_F(HogDbTest, FoldSavepointsKeepsNewestAndRollsBackPastRun)
     EXPECT_TRUE(std::ranges::equal(*stored, kSmall));
   }
 
-  // A savepoint pushed on the folded one stacks on it as on any other.
+  // A savepoint pushed on the merged one stacks on it as on any other.
   ASSERT_EQ(itx.create_savepoint(), 2);
   ASSERT_TRUE(itx.request_bytes(written_once, std::span(kMedium), kNoFlags));
   ASSERT_TRUE(itx.sync_balance_locks());
@@ -5327,9 +5328,9 @@ TEST_F(HogDbTest, FoldSavepointsKeepsNewestAndRollsBackPastRun)
   EXPECT_EQ(itx.read_bytes(written_once).error().code(), HogDbCode::kNotFound);
 }
 
-// Each run folds on its own: rolling back to the boundary between two runs
-// restores the newest state of the lower run.
-TEST_F(HogDbTest, FoldSavepointsFoldsEachRunSeparately)
+// Only the listed savepoints merge: rolling back to an unlisted one's start
+// restores the newest state of the savepoints below it.
+TEST_F(HogDbTest, MergeSavepointsKeepsUnlistedStarts)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
   auto value = [](uint8_t v) { return std::array<std::byte, 1>{std::byte{v}}; };
@@ -5345,17 +5346,18 @@ TEST_F(HogDbTest, FoldSavepointsFoldsEachRunSeparately)
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX itx(block_tx);
 
-  // Savepoints 1..5 write 1..5. Runs {2, 0, 1, 2} from the head fold 4-5 and
-  // 1-2, and leave 3 alone: 1-2 -> 1, 3 -> 2, 4-5 -> 3.
+  // Savepoints 1..5 write 1..5. Merging 2 and 5 leaves 1 (holding 1-2), 3,
+  // and 4 (holding 4-5).
   for (uint8_t i = 1; i <= 5; ++i) {
     ASSERT_EQ(itx.create_savepoint(), i);
     auto v = value(i);
     ASSERT_TRUE(itx.request_bytes(key, std::span(v), kNoFlags));
     ASSERT_TRUE(itx.sync_balance_locks());
   }
-  const std::array<uint32_t, 4> kRuns{2, 0, 1, 2};
-  itx.fold_savepoints(kRuns);
+  const std::array<uint32_t, 2> kMerges{5, 2};
+  itx.merge_savepoints(kMerges);
   EXPECT_EQ(itx.get_savepoint_head(), 3U);
+  EXPECT_TRUE(std::ranges::equal(itx.savepoint_ids(), std::array{1U, 3U, 4U}));
 
   auto expect_value = [&](uint8_t v) {
     auto stored = itx.read_bytes(key);
@@ -5371,8 +5373,8 @@ TEST_F(HogDbTest, FoldSavepointsFoldsEachRunSeparately)
   EXPECT_EQ(itx.read_bytes(key).error().code(), HogDbCode::kNotFound);
 }
 
-// A folded transaction commits its newest writes and the storage they cost.
-TEST_F(HogDbTest, FoldSavepointsThenCommit)
+// A merged transaction commits its newest writes and the storage they cost.
+TEST_F(HogDbTest, MergeSavepointsThenCommit)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
   constexpr std::array<std::byte, 1> kSmall{std::byte{1}};
@@ -5397,8 +5399,8 @@ TEST_F(HogDbTest, FoldSavepointsThenCommit)
     itx.create_savepoint();
     ASSERT_TRUE(itx.request_bytes(key, std::span(kLarge), kNoFlags));
     ASSERT_TRUE(itx.sync_balance_locks());
-    const std::array<uint32_t, 1> kRuns{2};
-    itx.fold_savepoints(kRuns);
+    const std::array<uint32_t, 1> kMerges{2};
+    itx.merge_savepoints(kMerges);
     ASSERT_TRUE(itx.commit());
   }
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));

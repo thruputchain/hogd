@@ -23,6 +23,8 @@ namespace hogd {
 
 struct SubTransactionState {
   std::unordered_map<AddressAndKey, std::pair<StorageDelta, int128_t>> deltas_;
+  // Names the subtransaction for merge_subtransactions().
+  uint32_t id_ = 0;
 };
 
 // THE STORAGE COST ACCOUNTING HERE IS BROKEN.
@@ -43,17 +45,17 @@ public:
   // a new try_invoke frame.
   // New add_delta operations will always be added to the most recent
   // subtransaction.
-  void push_subtransaction();
+  void push_subtransaction(uint32_t id = 0);
 
   // Close the most recent `count` subtransactions.  This is e.g. called when
   // a call frame (that contained some number of try_invoke frames) reverts.
   [[nodiscard]] RPCError pop_subtransactions(uint32_t count);
 
-  // Fold runs of subtransactions, counted down the stack from the most recent
-  // one, each into a single subtransaction.  This is e.g. called when a
-  // try_invoke frame commits, after which nothing will revert to the states
-  // within a run.  See SubtransactionFoldRuns in executor_to_db_rpc.x.
-  [[nodiscard]] RPCError fold_subtransactions(std::span<const uint32_t> runs);
+  // Merge each subtransaction named in `ids` into the one below it.  This is
+  // called when a try_invoke frame's push succeeds, after which nothing will
+  // revert to the state between them.  See SubtransactionMerges in
+  // executor_to_db_rpc.x.
+  [[nodiscard]] RPCError merge_subtransactions(std::span<const uint32_t> ids);
 
   // Add a storage delta and associated lock for a given address+key pair.
   // The lock must have been acquired by the caller (via querying the
