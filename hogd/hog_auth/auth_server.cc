@@ -27,7 +27,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/cleanup.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -105,8 +104,6 @@ AuthServer::register_auth_data_updates(
         return false;
       });
       if (acquired_lock) {
-        // Forwards start at this height.
-        forwarded_height_futex_.store(height - 1);
         break;
       }
       co_await current_height_futex_.wait(current_height);
@@ -169,18 +166,6 @@ x23::Async<void>
 AuthServer::forward_key_changes(
     BlockHeight height, const ChunkedVector<KeyChangeBatch> &key_changes)
 {
-  // Whatever becomes of this forward, the next height gets its turn.
-  x23::Defer _release{[this, height] {
-    forwarded_height_futex_.store(height);
-    forwarded_height_futex_.broadcast(&default_threadpool());
-  }};
-  for (;;) {
-    const BlockHeight forwarded = forwarded_height_futex_.load();
-    if (forwarded + 1 == height) {
-      break;
-    }
-    co_await forwarded_height_futex_.wait(forwarded);
-  }
   if (!mempool_client_) {
     co_return;
   }
@@ -208,8 +193,6 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
     });
     if (initialized) {
       info("initializing auth server to height {}", current_height);
-      // Nothing of the intro height is forwarded; forwards start after it.
-      forwarded_height_futex_.store(current_height);
       current_height_futex_.broadcast(&default_threadpool());
       co_await Health::instance().set_current_block_height(current_height);
     }
@@ -223,6 +206,19 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
     info("not initializing auth server height");
   }
   co_return;
+}
+
+x23::Async<IntroAuthResult>
+AuthServer::subscribe_and_register(AuthCard card)
+{
+  if (!mempool_client_) {
+    co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+  }
+  // [set_mempool_client] sets the client once and nothing resets it, so the
+  // reference outlives the subscription's suspension.
+  sched_auth_client_t &mempool_client = *mempool_client_;
+  co_await subscribe_to_auth_data_changes(card);
+  co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
 }
 
 x23::Async<AuthStatus<AuthCacheEntry>>

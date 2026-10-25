@@ -56,6 +56,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
+#include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
@@ -70,6 +71,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
@@ -620,6 +622,34 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
+// An auth server subscribes to the db before it registers, so it needs the
+// shards and the network hash without registering; registering is what lets
+// the mempool start serving the coordinator (issue #1927).
+TEST(MempoolAuthRpc, GetAuthInfoDoesNotRegisterAuth)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  const ShardCard shard{.protocol = version::kHogdProtocol(),
+                        .address_for_auth = "127.0.0.1:3"};
+  registration.register_shard(shard);
+  NetworkHash network_hash{};
+  network_hash[0] = 7;
+  registration.set_network_hash(network_hash);
+
+  IntroAuthResult auth_info =
+      MempoolAuthRpc::mempoolauth_get_auth_info(version::kHogdProtocol())();
+  ASSERT_EQ(auth_info.outcome(), IntroAuthOutcome::kSuccess);
+  ASSERT_EQ(auth_info.success().shards.size(), 1U);
+  EXPECT_EQ(auth_info.success().shards[0], shard);
+  EXPECT_EQ(auth_info.success().network_hash, network_hash);
+  EXPECT_FALSE(registration.auth_registered(/*card=*/nullptr));
+
+  IntroAuthResult wrong_protocol =
+      MempoolAuthRpc::mempoolauth_get_auth_info(ProtocolCommit{})();
+  EXPECT_EQ(wrong_protocol.outcome(), IntroAuthOutcome::kFailure);
+}
+
 TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 {
   MempoolAuthRpc auth_rpc;
@@ -734,6 +764,87 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
   unregister_thread.join();
+}
+
+// The auth server forwards consecutive heights concurrently, so a height can
+// reach the coordinator before the previous one has been applied. It waits
+// for that height instead of failing the mempool.
+TEST(Mempool, AuthDataCallbackWaitsForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  // The fixture commits genesis and the ceremony; wait for the height-1
+  // callback before injecting later heights.
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
+
+  std::promise<void> later_result;
+  std::future<void> later_applied = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  EXPECT_EQ(later_applied.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_EQ(coord.auth_data_height(), tip);
+
+  coord.auth_data_changed(tip + 1, KeyChangeBatch{})();
+  ASSERT_EQ(later_applied.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip + 2);
+  coord.set_auth_data_wait_test_hook({});
+}
+
+// Once the auth callback is disconnected, the earlier height a waiting callback
+// needs may never be admitted, so the waiting callback gives up rather than
+// keep the coordinator from draining.
+TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
+
+  std::promise<void> later_result;
+  std::future<void> later_returned = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  EXPECT_EQ(later_returned.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+
+  coord.disconnect_auth_callback()();
+  ASSERT_EQ(later_returned.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip);
+  coord.set_auth_data_wait_test_hook({});
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
@@ -1533,16 +1644,24 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
   // from the cache.
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -1580,12 +1699,14 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // The resubmitted tx remains cached for the nomination, off the runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // Commit the validated block, not the nominated one.
   auto res_validate =
@@ -1595,9 +1716,13 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
             SchedulerValidationResult::SchedulerValidationOK);
   ASSERT_NE(res_validate.block().block_id,
             res_nominate.proposed_block().block_id);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -2107,6 +2232,51 @@ TEST(Mempool, ConcurrentCommitRejected)
 
   EXPECT_EQ(second, SchedulerCommitOutcome::SchedulerConcurrentCommit);
   EXPECT_EQ(first(), SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A commit attempt that commits nothing must not record a commit interval. One
+// that read [last_commit_] before closing the validation gate was not ordered
+// after the previous commit's write of it (a data race under TSan), and it
+// overwrote [last_commit_interval_ms] with the interval of a commit that never
+// happened.
+TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+
+  const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  const SchedulerProposalResult nomination =
+      propose_block(server, tip.db_tip());
+  ASSERT_EQ(nomination.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &block = nomination.proposed_block();
+  const ConsensusValue value = consensus_value(tip.db_tip(), block.proposal);
+
+  // The retry runs on a thread that has not synchronized with the first
+  // commit, as an RPC handler need not have synchronized with the thread-pool
+  // worker that finalized the previous commit. The flag is relaxed on purpose:
+  // an acquire would order the retry after the first commit's write of
+  // [last_commit_] and hide the race from TSan.
+  std::atomic<bool> committed = false;
+  SchedulerCommitOutcome retry{};
+  std::thread retry_thread([&] {
+    while (!committed.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+    }
+    retry = rpc.schedulercoord_commit_block(block.block_id, value)();
+  });
+
+  EXPECT_EQ(rpc.schedulercoord_commit_block(block.block_id, value)(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  // No real interval is negative, so any record by the retry replaces this.
+  MempoolMetrics::instance().last_commit_interval_ms.record(-1);
+  committed.store(true, std::memory_order_relaxed);
+  retry_thread.join();
+
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
 TEST(Mempool, Validate)
@@ -3427,6 +3597,9 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // ...from the cache as well as the runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
@@ -4005,14 +4178,22 @@ TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
       propose_block(server, get_tip.db_tip());
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
   ASSERT_EQ(commit_block(server, get_tip.db_tip(),
                          res_nominate.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      get_tip.db_tip().value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 
   // The same bytes now carry enough weight, and the earlier rejections must
   // not stand in the way.
   submit_over_gateway(underweight);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 // A rejection is never remembered: every resubmission of a turned-down

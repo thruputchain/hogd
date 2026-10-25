@@ -253,8 +253,12 @@ ViewGatewayRpc::shut_down()
   // Called from the node's control path on its own thread, never an x23
   // ThreadPool worker, so it blocks on the coroutine that does the work -- and
   // it must be a coroutine, because taking view_state_lock_ requires awaiting.
+  // Clearing the pin belongs to that coroutine for the same reason: every
+  // other access to [current_view_block_id_] is under [view_state_lock_], and
+  // request_stop() above only asks the refresh worker to stop rather than
+  // waiting for it, so the worker can still be inside current_view_pin()
+  // reading the pin while we are here.
   close_all_view_states()();
-  current_view_block_id_ = 0;
 }
 
 x23::Async<void>
@@ -275,6 +279,7 @@ ViewGatewayRpc::close_all_view_states()
       ++it;
     }
   }
+  current_view_block_id_ = 0;
   co_await g.reset_and_return();
   panic("unreachable");
 }

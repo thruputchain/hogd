@@ -1360,7 +1360,8 @@ GenRs::type_name(const Declaration &d, bool generate,
 }
 
 string
-gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
+gen_rs(vector<Definition> *defs, string const &header,
+       std::set<std::string> const &recursive_types,
        std::set<std::string> const &rust_features,
        std::set<std::string> const &rust_no_features)
 {
@@ -1370,10 +1371,10 @@ gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
 // Generated Code: DO NOT CHECK IN
 
 // Generated from xdrc commit: )" +
-      x23::git_commit_hash() +
-      std::format(R"(
-
-#![allow(non_camel_case_types)]
+      x23::git_commit_hash() + "\n\n";
+  if (!header.empty())
+    preamble += header + '\n';
+  preamble += std::format(R"(#![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
@@ -1387,9 +1388,9 @@ use core::ops::{{Deref, DerefMut}};
 
 {0}{1}{2}
 )",
-                  gs.cfg("std", "use std::io::{Read, Write};"),
-                  gs.cfg("xdrs", "use xdrs::*;"),
-                  gs.cfg("spec", "use xdrs::xdr_repr::*;"));
+                          gs.cfg("std", "use std::io::{Read, Write};"),
+                          gs.cfg("xdrs", "use xdrs::*;"),
+                          gs.cfg("spec", "use xdrs::xdr_repr::*;"));
 
   gs.process(*defs);
 

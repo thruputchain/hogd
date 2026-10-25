@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,7 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/new_deployment_lock.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
@@ -69,6 +71,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -1042,6 +1045,30 @@ TEST_F(HogDbTest, NewBalanceNativeTokenAgeIsAllZeroes)
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 0UL);
 }
 
+TEST_F(HogDbTest, NewDeploymentLockStagesNoNativeTokenAge)
+{
+  // The native-token age row belongs to BalanceLock, which creates it with the
+  // address's first balance. A merge once left NewDeploymentLock writing it
+  // too, staging a second, all-zero put to the same key that raced the
+  // BalanceLock one in apply() (#1282).
+  Address addr = make_address(kAddress);
+  ItemKey item_key = make_address_metadata_item_key(addr);
+  LockContext ctx(&db_, BlockHeight{1}, item_key, &cost_model_);
+  NewDeploymentLock lock(
+      DeployedContractHash{.hash = sha256(Contract(ContractType::kNative)),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32});
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  EXPECT_TRUE(db_.read_address_metadata(addr));
+  auto age = db_.read_address_average_native_token_age(addr);
+  ASSERT_FALSE(age);
+  EXPECT_EQ(age.error(), HogDbCode::kNotFound);
+}
+
 TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
 {
   Address account = make_address(kAddress);
@@ -1672,6 +1699,30 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   ASSERT_TRUE(db_.apply(changeset));
 
   EXPECT_FALSE(db_.check_invariants());
+}
+
+TEST_F(HogDbTest, ApplyPanicsOnKeyStagedTwice)
+{
+  // apply() flushes the per-thread change vectors in parallel and in no fixed
+  // order, so two staged changes to one key leave the surviving value up to
+  // the scheduler (#1282). Debug builds refuse to flush such a ChangeSet.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "the duplicate-key check only runs in debug builds";
+  }
+  // apply() runs on the worker pool, so re-exec the child rather than fork a
+  // threaded parent.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  auto balance_key = make_address_key(make_address(kAddress), Prefix::kBalance);
+  auto first_bytes = int128_to_xdr_bytes(1000);
+  auto second_bytes = int128_to_xdr_bytes(2000);
+  std::span<const std::byte> key_span = std::as_bytes(std::span(balance_key));
+
+  auto changeset = db_.create_changeset();
+  changeset.put(key_span, kNNInt128, std::as_bytes(std::span(first_bytes)));
+  changeset.put(key_span, kNNInt128, std::as_bytes(std::span(second_bytes)));
+  X23_EXPECT_DEATH(std::ignore = db_.apply(changeset),
+                   "ChangeSet staged key [0-9a-f]+ twice");
 }
 
 TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
