@@ -155,8 +155,9 @@ public:
   // After a push merged this frame's subtransactions into its oldest.
   void merge_savepoints() noexcept
   {
-    held_subtransactions_.resize(
-        std::min<size_t>(held_subtransactions_.size(), 1));
+    while (held_subtransactions_.size() > 1) {
+      held_subtransactions_.pop_back();
+    }
     savepoint_count_ = std::min(savepoint_count_, 1U);
   }
 
