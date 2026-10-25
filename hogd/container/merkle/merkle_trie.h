@@ -692,33 +692,58 @@ public:
       return;
     }
 
-    const std::vector<ChunkRange> thread_allocations =
-        make_chunks(std::max(num_threads, tries_.size()), tries_.size());
+    const size_t workers =
+        std::min(num_threads, WorkerPool::get_default_pool().worker_count());
+    // Smaller subtrees reduce the tail of the parallel pass. Submit only one
+    // pool job per worker, so finer subdivision does not multiply queue and
+    // future overhead.
+    constexpr size_t kSubtreesPerWorker = 32;
+    constexpr size_t kMinKeysPerSubtree = 256;
+    const std::vector<ChunkRange> subtree_allocations =
+        make_chunks(std::max(workers * kSubtreesPerWorker, tries_.size()),
+                    tries_.size());
     std::array<std::vector<Node *>, 16> frontiers;
 
     for (size_t i = 0; i < tries_.size(); i++) {
       std::optional<MerkleTrie> &trie = tries_[i];
-      const ChunkRange &allocation = thread_allocations[i];
-      const size_t child_threads = allocation.end - allocation.start;
+      const ChunkRange &allocation = subtree_allocations[i];
+      // Keep frontier collection and the serial reduction small on partial
+      // blocks. The budget is approximate: splitting a branch can overshoot.
+      const size_t subtree_budget =
+          std::min(allocation.end - allocation.start,
+                   std::max<size_t>(1, trie->size() / kMinKeysPerSubtree));
       frontiers[i] =
-          MerkleTrie::collect_hash_frontier(&trie->root_, child_threads);
+          MerkleTrie::collect_hash_frontier(&trie->root_, subtree_budget);
     }
 
-    size_t total_jobs = 0;
+    size_t total_subtrees = 0;
     for (size_t i = 0; i < tries_.size(); i++) {
-      total_jobs += frontiers[i].size();
+      total_subtrees += frontiers[i].size();
     }
 
-    // JobScope joins every worker before the frontier subtree roots (owned by
-    // this->tries_) can be touched again, even if a submit() fails mid-loop.
+    std::vector<Node *> subtree_roots;
+    subtree_roots.reserve(total_subtrees);
+    for (size_t i = 0; i < tries_.size(); i++) {
+      subtree_roots.insert(subtree_roots.end(), frontiers[i].begin(),
+                           frontiers[i].end());
+    }
+    std::atomic<size_t> next_subtree{0};
+    // Declared after the captured locals so every worker is joined before
+    // they go out of scope, including when submit() throws partway through.
     WorkerPool::JobScope scope;
-    scope.reserve(total_jobs);
-    for (size_t i = 0; i < tries_.size(); i++) {
-      for (Node *subtree_root : frontiers[i]) {
-        scope.submit([subtree_root] {
-          MerkleTrie::generate_all_hashes_serial(subtree_root);
-        });
-      }
+    const size_t jobs = std::min(total_subtrees, workers);
+    scope.reserve(jobs);
+    for (size_t i = 0; i < jobs; ++i) {
+      scope.submit([&] {
+        while (true) {
+          const size_t index =
+              next_subtree.fetch_add(1, std::memory_order_relaxed);
+          if (index >= subtree_roots.size()) {
+            break;
+          }
+          MerkleTrie::generate_all_hashes_serial(subtree_roots[index]);
+        }
+      });
     }
     scope.wait();
 

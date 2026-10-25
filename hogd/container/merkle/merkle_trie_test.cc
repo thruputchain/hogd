@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdio>
 #include <cstring>
@@ -1699,6 +1700,43 @@ TEST(MerkleTriePrefix, GenerateAllHashesParallelMatchesSerial)
       build_and_hash_trie(parallel_trie, available_parallelism());
 
   EXPECT_EQ(serial_hash, parallel_hash);
+}
+
+TEST(MerkleTriePrefix, GenerateAllHashesFineFrontierMatchesSerial)
+{
+  for (auto allocator :
+       {Allocator<Node>::Type::kDefault, Allocator<Node>::Type::kBump}) {
+    for (bool single_prefix : {false, true}) {
+      SCOPED_TRACE(single_prefix);
+      auto build_and_hash = [&](size_t threads) {
+        MerkleTriePrefix trie(allocator);
+        std::array<SHA256Hash, 3> hashes;
+        trie.generate_all_hashes(threads);
+        hashes[0] = trie.get_root_hash(); // Empty tries.
+        for (size_t i = 0; i < 16'384; ++i) {
+          HexArray key(sha256(std::to_string(i)));
+          if (single_prefix) {
+            key.set(0, std::byte{0xa});
+          }
+          EXPECT_TRUE(trie.insert(key, std::span<const std::byte>()));
+          if (i == 0) {
+            trie.generate_all_hashes(threads);
+            hashes[1] = trie.get_root_hash(); // Fewer subtrees than workers.
+          }
+        }
+        trie.generate_all_hashes(threads);
+        hashes[2] = trie.get_root_hash(); // Multiple subtrees per worker.
+        EXPECT_TRUE(trie.check());
+        return hashes;
+      };
+      const auto expected = build_and_hash(1);
+      for (size_t threads : {size_t{2}, size_t{3}, available_parallelism(),
+                             available_parallelism() + 1}) {
+        SCOPED_TRACE(threads);
+        EXPECT_EQ(build_and_hash(threads), expected);
+      }
+    }
+  }
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
