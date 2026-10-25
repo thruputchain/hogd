@@ -150,7 +150,7 @@ contract artifact by default; no network-config overrides are needed.
 Fresh local and hosted bootstrap accounts use the native default wallet at
 nonce zero. Genesis funds their public-key-derived addresses directly; runtime
 bundles need only `genesis_root.rv32a`. Bootstrap and runtime manifests use
-schema 3; hosted bootstrap metadata uses schema 2.
+schema 5; hosted bootstrap metadata uses schema 3.
 
 Persistent local directories from the older dev-wallet bootstrap are not migrated
 in place. Keep the original CLI/runtime to open those directories, or explicitly

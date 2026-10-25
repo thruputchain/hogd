@@ -315,7 +315,7 @@ Options:
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
-  --bootstrap-manifest <path>    Required schema-4 public bootstrap intent.
+  --bootstrap-manifest <path>    Required schema-5 public bootstrap intent.
                                  Include the faucet and explicit allocations.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
