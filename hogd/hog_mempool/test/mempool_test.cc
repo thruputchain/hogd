@@ -3015,6 +3015,167 @@ TEST(Mempool, NominationAbortsWhenEventServerDropsBlockAtFinish)
                    kFinishOrEventCloseCheck);
 }
 
+namespace {
+
+// Holds the event emissions of every block the executor runs from here on, so
+// a block that reaches executor finish stays there, its executor handle open,
+// until [release()].
+class ExecutorFinishHold {
+public:
+  explicit ExecutorFinishHold(MempoolTestInfra &server) : server_(server)
+  {
+    server_.event_aggregator().block_emit_events();
+    server_.mempool_coord_rpc().set_finish_executor_started_test_hook(
+        [this](BlockID /*block_id*/, size_t /*executor_idx*/) {
+          finishing_.store(true);
+        });
+  }
+
+  ExecutorFinishHold(const ExecutorFinishHold &) = delete;
+  ExecutorFinishHold &operator=(const ExecutorFinishHold &) = delete;
+
+  ~ExecutorFinishHold()
+  {
+    release();
+    server_.mempool_coord_rpc().set_finish_executor_started_test_hook({});
+  }
+
+  // Returns once a block has started finishing on the executor.
+  void wait_for_finish() const
+  {
+    while (!finishing_.load()) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    }
+  }
+
+  void release()
+  {
+    released_.store(true);
+    server_.event_aggregator().unblock_emit_events();
+  }
+
+  bool released() const { return released_.load(); }
+
+private:
+  MempoolTestInfra &server_;
+  std::atomic_bool finishing_{false};
+  std::atomic_bool released_{false};
+};
+
+// How long a commit is given to finish, if it is going to, while another block
+// is held in executor finish.
+constexpr auto kHeldCommitWindow = std::chrono::milliseconds(200);
+
+} // namespace
+
+// A commit abandons every validated block it does not commit, but never one
+// still validating: it first closes the validation gate, which waits out the
+// validations in flight. Here a peer's block is still finishing on the
+// executor when this node commits its own nomination at the same height. The
+// commit returns only once that validation has finished, and abandons the
+// peer's block after its executors have closed it.
+TEST(Mempool, CommitWaitsForInFlightValidationBeforeAbandoningIt)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  const DbTip db_tip = current_tip(server);
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerProposalResult nominated = propose_block(server, db_tip);
+  ASSERT_EQ(nominated.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  const Proposal &peer_proposal = nominated.proposed_block().proposal;
+
+  ExecutorFinishHold hold(server);
+  std::optional<SchedulerValidationResult> validation;
+  std::thread validation_thread([&] {
+    validation.emplace(server.mempool_coord_rpc().schedulercoord_validate_block(
+        db_tip.id, peer_proposal)());
+  });
+  hold.wait_for_finish();
+
+  std::optional<SchedulerCommitOutcome> commit;
+  bool commit_returned_after_release = false;
+  std::thread commit_thread([&] {
+    commit = commit_block(server, db_tip, nominated.proposed_block());
+    commit_returned_after_release = hold.released();
+  });
+  std::this_thread::sleep_for(kHeldCommitWindow);
+  hold.release();
+  validation_thread.join();
+  commit_thread.join();
+
+  ASSERT_TRUE(validation.has_value());
+  EXPECT_EQ(validation->outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  ASSERT_TRUE(commit.has_value());
+  EXPECT_EQ(*commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  EXPECT_TRUE(commit_returned_after_release);
+}
+
+// The same for a nomination: before it lists the blocks to abandon, a commit
+// takes the nominated-block-cache lock, which a nomination holds until it
+// returns. Here this node's own nomination is still finishing on the executor
+// when it commits a peer's block at the same height. The commit returns only
+// once the nomination has finished, and abandons it after its executors have
+// closed it.
+TEST(Mempool, CommitWaitsForInFlightNominationBeforeAbandoningIt)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  // A peer's block, nominated on a stack of its own. Every stack starts from
+  // the same state, so this node has the peer's proposal for its own tip
+  // without having nominated a block of its own.
+  Proposal peer_proposal;
+  {
+    MempoolTestInfra peer;
+    peer_proposal = nominate_for_validation(peer, current_tip(peer), txs);
+  }
+  MempoolTestInfra server;
+  const DbTip db_tip = current_tip(server);
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerValidationResult validated =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               peer_proposal)();
+  ASSERT_EQ(validated.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+
+  ExecutorFinishHold hold(server);
+  std::optional<SchedulerProposalResult> nomination;
+  std::thread nomination_thread(
+      [&] { nomination.emplace(propose_block(server, db_tip)); });
+  hold.wait_for_finish();
+
+  std::optional<SchedulerCommitOutcome> commit;
+  bool commit_returned_after_release = false;
+  std::thread commit_thread([&] {
+    commit =
+        commit_block(server, validated.block().block_id, db_tip, peer_proposal);
+    commit_returned_after_release = hold.released();
+  });
+  std::this_thread::sleep_for(kHeldCommitWindow);
+  hold.release();
+  nomination_thread.join();
+  commit_thread.join();
+
+  ASSERT_TRUE(nomination.has_value());
+  EXPECT_EQ(nomination->outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  ASSERT_TRUE(commit.has_value());
+  EXPECT_EQ(*commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  EXPECT_TRUE(commit_returned_after_release);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
