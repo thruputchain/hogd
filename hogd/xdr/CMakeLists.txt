@@ -59,7 +59,6 @@ add_xdr(
   ci_server.x
   event_cursor_internal.x
   event_outbox_internal.x
-  storage_lock.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")

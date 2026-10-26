@@ -41,9 +41,9 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "precompiles.hh"
 #include "rpc_types.hh"
@@ -415,7 +415,7 @@ public:
   // The native-token storage cost charged for consuming `count` uniquifiers
   // into the replay cache. Use this to top up a grant so an exact
   // invoked-address balance assertion holds.
-  int128_t replay_cache_cost_charged(uint32_t count) const
+  static int128_t replay_cache_cost_charged(uint32_t count)
   {
     return get_default_cost_model()->get_replay_cache_cost(count);
   }
@@ -466,8 +466,7 @@ public:
 
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount);
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> item);
+  void write_item(AddressAndKey const &addrkey, WireStorageItem const &item);
   void write_contract(std::shared_ptr<const Contract> const &contract);
 
   void write_deployment(ContractAddress const &addr,

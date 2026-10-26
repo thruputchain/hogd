@@ -4,7 +4,6 @@
 #include <expected>
 #include <format>
 #include <memory>
-#include <utility>
 
 #include "consensus.hh"
 #include "contract.hh"
@@ -17,8 +16,8 @@
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
@@ -199,9 +198,8 @@ NativeContractTestFramework::setup_grant_storage_token(
 }
 
 void
-NativeContractTestFramework::write_item(
-    AddressAndKey const &addrkey,
-    std::shared_ptr<const StorageItemWrapper> item)
+NativeContractTestFramework::write_item(AddressAndKey const &addrkey,
+                                        WireStorageItem const &item)
 {
   db_wrapper_.write_item(addrkey, item);
 }

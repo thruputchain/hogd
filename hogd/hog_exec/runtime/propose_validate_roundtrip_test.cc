@@ -504,7 +504,6 @@ TEST_F(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 // These tests exercise the proposer/validator pipeline for
 // RetrocausalQueue operations.  The key code paths are:
 //   - concurrent-entry observation replay (item_view.cc)
-//   - consumed_but_not_inserted reconciliation (refcounted_delta_variant.cc)
 //   - consumed_set check in block finalization (retrocausal_queue_lock.cc)
 
 // Two TXs in same block: TX_A inserts {10}, TX_B consumes the

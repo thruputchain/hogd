@@ -18,7 +18,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -392,9 +392,7 @@ TEST_F(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
   auto key = make_contract_data_addrkey(contract_addr, "snapshot_key");
 
   // First, write an NNInt to the database in a previous block
-  write_item(key,
-             std::make_shared<StorageItemWrapper>(300,
-                                                  get_default_cost_model()));
+  write_item(key, make_nnint_item(300));
   advance_block();
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;

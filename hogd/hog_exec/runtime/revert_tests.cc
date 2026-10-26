@@ -23,7 +23,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -760,8 +760,7 @@ TEST_F(RevertTest, RepeatedLoadAfterRevertChargedOnce)
 
   // Seed the key so the loads have a real row to find.
   write_item(make_contract_data_addrkey(addr_1, "cold"),
-             std::make_shared<const StorageItemWrapper>(
-                 make_bytestring("value"), get_default_cost_model()));
+             make_bytestring_item(make_bytestring("value")));
 
   // addr_0: two try_invokes of addr_1, each of which reverts.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
@@ -868,8 +867,7 @@ TEST_F(RevertTest, DeleteMasksLoadUntilFrameReverts)
   auto key = make_storage_key("cold");
 
   write_item(make_contract_data_addrkey(addr_1, "cold"),
-             std::make_shared<const StorageItemWrapper>(
-                 make_bytestring("value"), get_default_cost_model()));
+             make_bytestring_item(make_bytestring("value")));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(

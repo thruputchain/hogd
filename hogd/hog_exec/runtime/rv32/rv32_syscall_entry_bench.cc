@@ -41,10 +41,9 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -461,7 +460,7 @@ public:
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_item_key(space, index);
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+                make_nnint_item(kNNIntSnapshotValue));
     }
   }
 
@@ -479,7 +478,7 @@ public:
       // be measuring something other than the copy it is meant to.
       std::ranges::fill(value, uint8_t{0xAB});
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(std::move(value), &cost_model()));
+                make_bytestring_item(std::move(value)));
     }
   }
 
@@ -518,17 +517,9 @@ public:
   }
 
 private:
-  static StorageCostModel const &cost_model()
+  void seed_item(AddressAndKey const &addrkey, WireStorageItem const &item)
   {
-    static const StorageCostModel model =
-        StorageCostModel::default_cost_model();
-    return model;
-  }
-
-  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
-  {
-    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                                       std::move(item)));
+    framework_.write_item(addrkey, item);
   }
 
   NativeContractTestFramework framework_{

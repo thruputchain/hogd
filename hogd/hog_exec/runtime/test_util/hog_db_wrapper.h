@@ -14,8 +14,8 @@
 #include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/hog_exec/runtime/test_util/test_sched_db_server.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "sched_db.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
@@ -42,8 +42,7 @@ public:
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> const &item);
+  void write_item(AddressAndKey const &addrkey, WireStorageItem const &item);
 
   void write_contract(ContractAddress const &addr,
                       std::shared_ptr<const Contract> const &contract);
