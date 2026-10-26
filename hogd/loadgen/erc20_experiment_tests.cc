@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <set>
 
 #include "exec_result.hh"
+#include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"

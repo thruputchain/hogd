@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cassert>
-#include <cstdint>
 #include <vector>
 
 #include "hogd/base/types.h"
