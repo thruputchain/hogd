@@ -715,6 +715,7 @@ TEST_F(Rv32ProductionMappingTest,
   constexpr size_t kReadCount = 4;
   constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
   constexpr int32_t kRetrocausalQueuePeekLenSyscallNo = 30;
+  constexpr uint32_t kOutputAddress = 192;
 
   auto make_program = [&](bool distinct) {
     std::vector<uint32_t> program;
@@ -726,7 +727,8 @@ TEST_F(Rv32ProductionMappingTest,
                     static_cast<uint8_t>(i + 1));
       }
       append_syscall(program, {kRetrocausalQueuePeekLenSyscallNo,
-                               static_cast<int32_t>(key_address)});
+                               static_cast<int32_t>(key_address),
+                               static_cast<int32_t>(kOutputAddress)});
     }
     append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
     return std::pair{std::move(program), std::move(memory)};
