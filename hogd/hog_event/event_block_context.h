@@ -220,6 +220,10 @@ public:
   bool closing() { return closing_.load(std::memory_order_acquire); }
 
 private:
+  // Takes an extra handle only while one is already open, so it never revives
+  // a block whose executors have all closed.
+  bool try_acquire_executor_handle();
+
   x23::Async<void> write_event(std::span<const uint8_t> data);
 
   // Flush the current thread's buffer to the file.

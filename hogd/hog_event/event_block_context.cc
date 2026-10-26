@@ -106,9 +106,13 @@ EventBlockContext::extract_data()
 x23::Async<bool>
 EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
 {
-  if (open_executor_handles_.load(std::memory_order_acquire) == 0) {
+  // Hold a handle for the whole insert and write, so the last
+  // executor_close_block() cannot let close_block() hash the trie or drain the
+  // buffers while this event is still being added (#4642).
+  if (!try_acquire_executor_handle()) {
     co_return false;
   }
+  x23::Defer release_handle{[this] { executor_close_block(); }};
 
   static PerThread<x23::Buf> serialize_buf;
   const size_t event_xdr_size =
@@ -432,6 +436,19 @@ EventBlockContext::executor_open_block()
 {
   open_executor_handles_.fetch_add(1, std::memory_order_release);
   x23assert(all_executors_closed_.load() == false);
+}
+
+bool
+EventBlockContext::try_acquire_executor_handle()
+{
+  uint32_t handles = open_executor_handles_.load(std::memory_order_acquire);
+  while (handles > 0) {
+    if (open_executor_handles_.compare_exchange_weak(
+            handles, handles + 1, std::memory_order_acquire)) {
+      return true;
+    }
+  }
+  return false;
 }
 
 void

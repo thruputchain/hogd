@@ -1170,6 +1170,51 @@ TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
   EXPECT_TRUE(close_completed.load(std::memory_order_acquire));
 }
 
+// Emits racing the last executor close must either be refused or land in both
+// the trie and the events file before close_block() hashes and drains them
+// (#4642).  Under TSan this also catches a trie insert racing the root hash.
+TEST_F(EventRpcTest, EmitsRacingLastExecutorCloseAreAllCommitted)
+{
+  EventRPCContext ctx(temp_dir());
+  EventExecRpc exec_rpc(ctx);
+  EventMempoolRpc mempool_rpc(ctx);
+
+  ASSERT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
+  ASSERT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
+
+  constexpr uint64_t kThreads = 4;
+  constexpr uint64_t kEventsPerThread = 2000;
+  std::atomic<size_t> accepted = 0;
+  std::latch started(kThreads);
+  std::vector<std::thread> emitters;
+  for (uint64_t t = 0; t < kThreads; ++t) {
+    emitters.emplace_back([&, t] {
+      started.count_down();
+      for (uint64_t i = 0; i < kEventsPerThread; ++i) {
+        const uint64_t nonce = 1 + t * kEventsPerThread + i;
+        ProposedTransaction body = make_body(nonce);
+        if (exec_rpc.eventexecutor_emit_event(
+                1, nonce, make_event(body, static_cast<uint8_t>(nonce)),
+                body)() == RPCError::kRPCNone) {
+          accepted.fetch_add(1, std::memory_order_relaxed);
+        }
+      }
+    });
+  }
+
+  started.wait();
+  EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
+  EventBlockResult close_result = mempool_rpc.eventsched_close_block(1, 1)();
+  for (auto &emitter : emitters) {
+    emitter.join();
+  }
+  ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
+
+  auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
+  ASSERT_TRUE(pairs.has_value()) << pairs.error();
+  EXPECT_EQ(pairs->event_logs.size(), accepted.load());
+}
+
 TEST_F(EventRpcTest, TestAbandonBlockThenCloseBlock)
 {
   EventRPCContext ctx(temp_dir());
