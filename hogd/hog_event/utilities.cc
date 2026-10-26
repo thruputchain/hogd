@@ -17,6 +17,8 @@ make_tx_emitted_event(ContractAddress const &contract_address,
 {
   CHECK_LE(event.size(), size_t{kMaxEventLength});
 
+  // An empty event may have a null data(); null + 0 is well-defined in C++
+  // and yields null ([expr.add]/4.1), so no special case is needed.
   return TxEmittedEvent{
       .contract_address = contract_address,
       .num_topics = num_topics,
