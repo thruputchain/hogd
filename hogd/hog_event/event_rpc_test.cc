@@ -1203,6 +1203,9 @@ TEST_F(EventRpcTest, CloseWaitsForAdmittedEmit)
   admitted.wait();
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
 
+  std::latch close_reserved(1);
+  ctx.set_close_reserved_test_hook(
+      [&](BlockID /*block_id*/) { close_reserved.count_down(); });
   std::atomic<bool> close_completed = false;
   EventBlockResult close_result;
   std::thread close_thread([&] {
@@ -1210,6 +1213,7 @@ TEST_F(EventRpcTest, CloseWaitsForAdmittedEmit)
     close_completed.store(true, std::memory_order_release);
   });
 
+  close_reserved.wait();
   std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
   release_emit.count_down();
