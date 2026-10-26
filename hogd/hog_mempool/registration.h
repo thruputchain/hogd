@@ -232,13 +232,22 @@ public:
   }
 
   // Auth.
-  void register_auth(const AuthCard &card)
+  // Only one auth server is supported: the mempool builds its auth client from
+  // the first card and never rebuilds it. Returns false, leaving the
+  // registered card unchanged, if an auth server is already registered.
+  bool register_auth(const AuthCard &card)
   {
+    std::unique_lock lk(auth_mutex_);
+    if (auth_registered_.load(std::memory_order_acquire)) {
+      return false;
+    }
     auth_card_ = card;
     auth_registered_.store(true, std::memory_order_release);
+    return true;
   }
   bool auth_registered(AuthCard *card) const
   {
+    std::unique_lock lk(auth_mutex_);
     bool ret = auth_registered_.load(std::memory_order_acquire);
     if (card) {
       *card = auth_card_;
@@ -291,8 +300,11 @@ public:
       std::unique_lock lk(shard_cards_mutex_);
       shard_cards_.clear();
     }
-    auth_registered_ = false;
-    auth_card_ = AuthCard{};
+    {
+      std::unique_lock lk(auth_mutex_);
+      auth_registered_ = false;
+      auth_card_ = AuthCard{};
+    }
 
     network_hash_ = NetworkHash{};
   }
@@ -357,6 +369,7 @@ private:
   std::optional<EventCanonicalTip> event_canonical_tip_;
 
   std::atomic<bool> auth_registered_ = false;
+  mutable std::mutex auth_mutex_;
   AuthCard auth_card_;
 
   std::mutex shard_cards_mutex_;
