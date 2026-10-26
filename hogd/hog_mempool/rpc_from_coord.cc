@@ -151,6 +151,8 @@ combine_batch_outcomes(SchedulerValidationOutcome a,
       b == SchedulerValidationOutcome::SchedulerValidationInvalid) {
     return SchedulerValidationOutcome::SchedulerValidationInvalid;
   }
+  CHECK_EQ(a, SchedulerValidationOutcome::SchedulerValidationOK);
+  CHECK_EQ(b, SchedulerValidationOutcome::SchedulerValidationOK);
   return SchedulerValidationOutcome::SchedulerValidationOK;
 }
 
