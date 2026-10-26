@@ -33,6 +33,7 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
@@ -2610,20 +2611,23 @@ public:
   }
 
   static x23::Async<ExecProposeResult>
-  executorsched_propose_transaction(BlockID, SignedTransaction)
+  executorsched_propose_transaction(BlockID /*unused*/,
+                                    SignedTransaction /*unused*/)
   {
     co_return ExecProposeResult(ExecResult::ExecResultSystemError);
   }
 
   x23::Async<ExecResult>
-  executorsched_validate_transaction(BlockID, ProposedTransaction proposed_tx)
+  executorsched_validate_transaction(BlockID /*unused*/,
+                                     ProposedTransaction proposed_tx)
   {
     validated_tx_count_.fetch_add(1);
     co_return result_for(proposed_tx);
   }
 
   static x23::Async<ExecProposeBatchResult>
-  executorsched_propose_batch(BlockID, SignedTransactionBatch signed_txs)
+  executorsched_propose_batch(BlockID /*unused*/,
+                              SignedTransactionBatch signed_txs)
   {
     co_return ExecProposeBatchResult(signed_txs.size(),
                                      ExecProposeResult(
@@ -2631,7 +2635,8 @@ public:
   }
 
   x23::Async<ExecValidateBatchResult>
-  executorsched_validate_batch(BlockID, ProposedTransactionBatch proposed_txs)
+  executorsched_validate_batch(BlockID /*unused*/,
+                               ProposedTransactionBatch proposed_txs)
   {
     validated_tx_count_.fetch_add(proposed_txs.size());
     ExecValidateBatchResult results;
@@ -2643,18 +2648,20 @@ public:
   }
 
   static x23::Async<ExecResult>
-  executorsched_open_proposal_block(BlockID, BlockExecutionContext)
+  executorsched_open_proposal_block(BlockID /*unused*/,
+                                    BlockExecutionContext /*unused*/)
   {
     co_return ExecResult::ExecResultSystemError;
   }
 
   static x23::Async<ExecResult>
-  executorsched_open_validation_block(BlockID, BlockExecutionContext)
+  executorsched_open_validation_block(BlockID /*unused*/,
+                                      BlockExecutionContext /*unused*/)
   {
     co_return ExecResult::ExecResultOK;
   }
 
-  static x23::Async<ExecResult> executorsched_finish_block(BlockID)
+  static x23::Async<ExecResult> executorsched_finish_block(BlockID /*unused*/)
   {
     co_return ExecResult::ExecResultOK;
   }
