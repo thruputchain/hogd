@@ -10,7 +10,9 @@
 #include <initializer_list>
 #include <latch>
 #include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -37,6 +39,7 @@
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -2574,6 +2577,198 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
                                                                proposal)();
   EXPECT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationInvalid);
+}
+
+namespace {
+
+// Opens and finishes blocks like an executor, but answers each validated
+// transaction with a scripted [ExecResult] instead of executing it.
+class ScriptedValidationExecutorRpc {
+public:
+  using rpc_service = ExecutorSched1;
+
+  // Every validated transaction gets [result] unless [script_tx()] names it.
+  void script(ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    default_result_ = result;
+  }
+
+  void script_tx(const TransactionHash &tx_hash, ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    tx_results_[tx_hash] = result;
+  }
+
+  size_t validated_tx_count() const { return validated_tx_count_.load(); }
+
+  static x23::Async<void> executorsched_null() { co_return; }
+
+  static x23::Async<ExecResult> executorsched_ready()
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecProposeResult>
+  executorsched_propose_transaction(BlockID, SignedTransaction)
+  {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+
+  x23::Async<ExecResult>
+  executorsched_validate_transaction(BlockID, ProposedTransaction proposed_tx)
+  {
+    validated_tx_count_.fetch_add(1);
+    co_return result_for(proposed_tx);
+  }
+
+  static x23::Async<ExecProposeBatchResult>
+  executorsched_propose_batch(BlockID, SignedTransactionBatch signed_txs)
+  {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+
+  x23::Async<ExecValidateBatchResult>
+  executorsched_validate_batch(BlockID, ProposedTransactionBatch proposed_txs)
+  {
+    validated_tx_count_.fetch_add(proposed_txs.size());
+    ExecValidateBatchResult results;
+    results.reserve(proposed_txs.size());
+    for (const ProposedTransaction &proposed_tx : proposed_txs) {
+      results.push_back(result_for(proposed_tx));
+    }
+    co_return results;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_proposal_block(BlockID, BlockExecutionContext)
+  {
+    co_return ExecResult::ExecResultSystemError;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_validation_block(BlockID, BlockExecutionContext)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecResult> executorsched_finish_block(BlockID)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<void> executorsched_shutdown() { co_return; }
+
+private:
+  ExecResult result_for(const ProposedTransaction &proposed_tx)
+  {
+    std::lock_guard lock(mutex_);
+    auto it = tx_results_.find(sha256(proposed_tx.signed_tx.tx));
+    return it == tx_results_.end() ? default_result_ : it->second;
+  }
+
+  std::mutex mutex_;
+  ExecResult default_result_ = ExecResult::ExecResultOK;
+  std::map<TransactionHash, ExecResult> tx_results_;
+  std::atomic<size_t> validated_tx_count_{0};
+};
+static_assert(is_ExecutorSched1<ScriptedValidationExecutorRpc *, x23::Async>);
+
+} // namespace
+
+// Proposes a real block, then validates it with [ScriptedValidationExecutorRpc]
+// standing in for the registered executors.
+class MempoolValidationExecutorResultTest : public testing::Test {
+protected:
+  static constexpr size_t kNumBlockTxs = 2;
+
+  void SetUp() override
+  {
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    txs_ = generate_unsigned_txs(fib_client, kNumBlockTxs);
+    server_.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{}, t_to_parallel_batch(txs_)())();
+
+    SchedulerGetTipResult get_tip =
+        server_.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    parent_ = get_tip.db_tip();
+    SchedulerProposalResult res_nominate = propose_block(server_, parent_);
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    proposal_ = res_nominate.proposed_block().proposal;
+
+    executor_.start_server(/*port=*/0);
+    x23::Vec<exec_sched_client_t> &exec_clients =
+        server_.mempool_coord_rpc().exec_clients_;
+    for (size_t i = 0; i < exec_clients.size(); ++i) {
+      swapped_clients_.push_back(
+          create_client<ExecutorSched1>(MempoolTestInfra::kAddress,
+                                        executor_.port())()
+              .value());
+    }
+    std::swap(exec_clients, swapped_clients_);
+    swapped_ = true;
+  }
+
+  void TearDown() override
+  {
+    if (swapped_) {
+      std::swap(server_.mempool_coord_rpc().exec_clients_, swapped_clients_);
+    }
+  }
+
+  ScriptedValidationExecutorRpc &executor() { return *executor_.impl(); }
+
+  SchedulerValidationOutcome validate()
+  {
+    return server_.mempool_coord_rpc()
+        .schedulercoord_validate_block(parent_.id, proposal_)()
+        .outcome();
+  }
+
+  MempoolTestInfra server_;
+  SignedTransactionBatch txs_;
+  DbTip parent_;
+  Proposal proposal_;
+
+private:
+  RpcServer<ScriptedValidationExecutorRpc> executor_;
+  // The scripted executor's clients until [SetUp()] swaps them in, then the
+  // registered executors' clients until [TearDown()] swaps them back.
+  x23::Vec<exec_sched_client_t> swapped_clients_;
+  bool swapped_ = false;
+};
+
+TEST_F(MempoolValidationExecutorResultTest, TxValidationFailureIsInvalid)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  EXPECT_EQ(validate(), SchedulerValidationOutcome::SchedulerValidationInvalid);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// A system error means this node could not run the block, which says nothing
+// about whether the block is valid.
+TEST_F(MempoolValidationExecutorResultTest, SystemErrorIsNotInvalid)
+{
+  executor().script(ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// Once one transaction hits a system error, the others' results come from a
+// run this node could not complete, so they cannot show the block is invalid.
+TEST_F(MempoolValidationExecutorResultTest,
+       SystemErrorOutranksTxValidationFailure)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  executor().script_tx(sha256(txs_[0].tx), ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
 }
 
 TEST(Mempool, ValidateEmpty)
