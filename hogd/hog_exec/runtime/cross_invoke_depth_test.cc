@@ -156,9 +156,8 @@ class CrossInvokeDepthTestBase : public ::testing::Test,
 protected:
   explicit CrossInvokeDepthTestBase(uint32_t max_cross_invoke_depth)
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt,
-          genesis_network_config(max_cross_invoke_depth))
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config(max_cross_invoke_depth))
   {}
 
   // Deploys `count` native contracts at make_contract_address(0..count-1) and

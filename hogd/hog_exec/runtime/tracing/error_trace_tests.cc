@@ -79,8 +79,7 @@ class ErrorTraceTest : public ::testing::Test,
 public:
   ErrorTraceTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

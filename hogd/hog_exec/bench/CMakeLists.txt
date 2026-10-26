@@ -9,7 +9,6 @@ if(BUILD_BENCHMARKS)
     protocol
     runtime
     exec_interface
-    db_interface
     hog_db
     runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
     contract_loader
@@ -39,7 +38,6 @@ if(BUILD_BENCHMARKS)
     protocol
     runtime
     exec_interface
-    db_interface
     hog_db
     runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
     contract_loader
@@ -111,7 +109,6 @@ target_link_libraries(
   protocol
   runtime
   exec_interface
-  db_interface
   hog_db
   runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
   contract_loader
@@ -136,7 +133,6 @@ target_link_libraries(
   protocol
   runtime
   exec_interface
-  db_interface
   hog_db
   runtime_test_util #TODO(geoff): for the local event server; remove this once we have a proper event server
   contract_loader

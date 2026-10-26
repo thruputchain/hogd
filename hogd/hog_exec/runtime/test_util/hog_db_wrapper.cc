@@ -10,11 +10,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "sched_db.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -38,28 +38,21 @@ HogdbWrapper::grant_storage_token(ContractAddress const &address,
 
 void
 HogdbWrapper::write_item(AddressAndKey const &addrkey,
-                         std::shared_ptr<const StorageItemWrapper> const &item)
+                         WireStorageItem const &item)
 {
-  switch (item->type()) {
+  switch (item.type()) {
   case StorageItemType::kItemTypeBytestring:
   {
     auto ret =
         ctx_.get_db().write_bytes(make_item_key(addrkey),
-                                  std::as_bytes(std::span(item->bytestring())));
+                                  std::as_bytes(std::span(item.bytestring())));
     CHECK(ret.has_value());
     return;
   }
   case StorageItemType::kItemTypeNonnegativeInt:
   {
-    auto ret =
-        ctx_.get_db().write_nnint128(make_item_key(addrkey), item->nnint());
-    CHECK(ret.has_value());
-    return;
-  }
-  case StorageItemType::kItemTypeDeleted:
-  {
-    info("write_item: removing item");
-    auto ret = ctx_.get_db().remove_item(make_item_key(addrkey));
+    auto ret = ctx_.get_db().write_nnint128(make_item_key(addrkey),
+                                            from_xdr(item.nnint()));
     CHECK(ret.has_value());
     return;
   }

@@ -52,8 +52,7 @@ class RcqObservationOnFaultTest : public ::testing::Test,
 public:
   RcqObservationOnFaultTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override

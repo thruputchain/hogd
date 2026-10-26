@@ -25,12 +25,12 @@ namespace hogd {
 //
 // Test fixture for manual revert caller RV32 contract tests
 //
-class ManualRevertCallerRv32Test : public ::testing::TestWithParam<TestDB>,
+class ManualRevertCallerRv32Test : public ::testing::Test,
                                    public NativeContractTestFramework {
 public:
   ManualRevertCallerRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -60,7 +60,7 @@ protected:
 //
 // Test that basic cross-contract revert functionality works
 //
-TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, BasicCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -129,7 +129,7 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
 }
 
 // Test nested manual revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, NestedCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -197,7 +197,7 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
 }
 
 // Test error type revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -266,7 +266,7 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
 }
 
 // Test storage manual revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, StorageCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -336,7 +336,7 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
 }
 
 // Test that caller's state persists and can be checked
-TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
+TEST_F(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -419,7 +419,7 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
 
 // Check that the native contract test framework's implementation of static_key
 // matches the sdk's version
-TEST_P(ManualRevertCallerRv32Test, StaticKeyMacro)
+TEST_F(ManualRevertCallerRv32Test, StaticKeyMacro)
 {
   auto native_key =
       make_storage_key_matching_static_key_sdk_macro("caller_state");
@@ -433,11 +433,6 @@ TEST_P(ManualRevertCallerRv32Test, StaticKeyMacro)
                               0x52, 0xa4, 0x6b, 0xa3, 0x8a, 0x6a, 0xe1, 0x7d};
   ASSERT_EQ(sdk_key, native_key);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertCallerRv32Test,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 

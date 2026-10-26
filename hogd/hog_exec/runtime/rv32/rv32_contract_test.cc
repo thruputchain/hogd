@@ -45,12 +45,12 @@ namespace hogd {
 // Rv32Context, and invoke it through Rv32Runtime. Mirrors the fibonacci
 // tests (fibonacci_test.cc), but drives the runtime directly.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
+class Rv32FibonacciTest : public ::testing::Test,
                           public NativeContractTestFramework {
 public:
   Rv32FibonacciTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -80,7 +80,7 @@ protected:
 
 // Smoke: the RV32 fibonacci contract loads, dispatches, runs, and returns
 // success through Rv32Context/Rv32Runtime.
-TEST_P(Rv32FibonacciTest, FibonacciCalls)
+TEST_F(Rv32FibonacciTest, FibonacciCalls)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -99,7 +99,7 @@ TEST_P(Rv32FibonacciTest, FibonacciCalls)
 
 // The deployment back-pointer exposes the eagerly-built rv32 translation,
 // so the engine reaches a ready-to-instantiate image with no extra lookup.
-TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
+TEST_F(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
 
@@ -118,7 +118,7 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
 
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
 // root frame's return buffer (CXS-serialized u32).
-TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
+TEST_F(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -142,7 +142,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
 
 // slow_fibonacci is exponential recursion; with a small gas limit it traps
 // out-of-gas, so the root invocation fails and the whole limit is consumed.
-TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
+TEST_F(Rv32FibonacciTest, SlowFibonacciOutOfGas)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -163,7 +163,7 @@ TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
 // Cross-call where the inner fibonacci call is given too little gas. The caller
 // uses the non-try client, so the inner out-of-gas propagates as a fault and
 // the whole transaction fails.
-TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
+TEST_F(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -197,7 +197,7 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
 
 // Cross-call where the caller *expects* the inner call to run out of gas and
 // handles it (try client), so the outer transaction still succeeds.
-TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
+TEST_F(Rv32FibonacciTest, CrossCallExpectOutOfGas)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -235,7 +235,7 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
 // Cross-call: an RV32 "caller" contract invokes a separate RV32 fibonacci
 // contract. This re-enters Rv32Context::make_new_runtime for the inner call,
 // exercising nested RV32 invocations through the syscall/ecall bridge.
-TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
+TEST_F(Rv32FibonacciTest, CrossCallFibonacci)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -281,8 +281,7 @@ class Rv32ProductionMappingTest : public ::testing::Test,
 public:
   Rv32ProductionMappingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -826,10 +825,5 @@ TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, Rv32FibonacciTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

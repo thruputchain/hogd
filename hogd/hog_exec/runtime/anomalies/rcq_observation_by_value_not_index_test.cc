@@ -65,8 +65,7 @@ class RCQObservationByValueTest : public ::testing::Test,
 public:
   RCQObservationByValueTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override

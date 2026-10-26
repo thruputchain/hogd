@@ -182,7 +182,7 @@ protected:
   }
 
   NativeContractTestFramework framework_{
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb};
+      false, BlockExecutionMode::kBlockExecutionModeProposal};
 
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();

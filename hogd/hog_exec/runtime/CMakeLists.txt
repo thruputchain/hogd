@@ -66,7 +66,6 @@ target_link_libraries(
   runtime_test_lib
   runtime
   runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
-  db_interface
   hog_db
   GTest::gtest
 )
@@ -193,7 +192,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -230,7 +228,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -269,7 +266,6 @@ if(BUILD_BENCHMARKS)
     runtime
     runtime_test_lib
     runtime_test_util
-    db_interface
     hog_db
     storage_cost
     model_checker
@@ -360,7 +356,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -385,7 +380,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -412,7 +406,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -443,7 +436,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker

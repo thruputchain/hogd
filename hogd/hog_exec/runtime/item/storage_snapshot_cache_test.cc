@@ -13,8 +13,7 @@
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -83,13 +82,11 @@ protected:
 
   void seed_bytestring(AddressAndKey const &addrkey, std::string_view text)
   {
-    server_->impl()->setup_create_item(addrkey,
-                                       StorageItemWrapper(make_bytestring(text),
-                                                          &cost_model_));
+    server_->impl()->setup_create_item(addrkey, make_bytestring_item(
+                                                    make_bytestring(text)));
   }
 
   BlockSnapshotServer server_ = BlockSnapshotServer(/*block_id=*/1);
-  StorageCostModel cost_model_{12000, 1, 5, 5, 1234};
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> cache_;
 };

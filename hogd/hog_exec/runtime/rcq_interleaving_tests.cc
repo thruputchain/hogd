@@ -42,8 +42,7 @@ class RCQInterleavingTest : public ::testing::Test,
 public:
   RCQInterleavingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

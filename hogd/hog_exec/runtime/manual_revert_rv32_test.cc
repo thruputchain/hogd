@@ -38,12 +38,12 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-class ManualRevertRv32Test : public ::testing::TestWithParam<TestDB>,
+class ManualRevertRv32Test : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
   ManualRevertRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -95,7 +95,7 @@ protected:
 // false)
 // - Ensures the transaction commits successfully despite the revert
 //
-TEST_P(ManualRevertRv32Test, BasicManualRevert)
+TEST_F(ManualRevertRv32Test, BasicManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -189,7 +189,7 @@ TEST_P(ManualRevertRv32Test, BasicManualRevert)
 // - This validates that the manual revert behavior is intentional, not a side
 // effect
 //
-TEST_P(ManualRevertRv32Test, BasicNoRevert)
+TEST_F(ManualRevertRv32Test, BasicNoRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -271,7 +271,7 @@ TEST_P(ManualRevertRv32Test, BasicNoRevert)
 // - Ensures the outer method can handle the reverted inner call
 // - Validates that the SDK properly handles nested Result::Err scenarios
 //
-TEST_P(ManualRevertRv32Test, NestedManualRevert)
+TEST_F(ManualRevertRv32Test, NestedManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -343,7 +343,7 @@ TEST_P(ManualRevertRv32Test, NestedManualRevert)
 // - Error type 0 (no error) succeeds normally without revert
 // - Validates the end-to-end flow: SDK error → Returnable trait → manual revert
 //
-TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
+TEST_F(ManualRevertRv32Test, ErrorTypeManualReverts)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -423,7 +423,7 @@ TEST_P(ManualRevertRv32Test, ErrorTypeManualReverts)
 // - Transaction succeeds normally
 // - This serves as a control to confirm error types 1-4 behavior is intentional
 //
-TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
+TEST_F(ManualRevertRv32Test, ErrorTypeNoError)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -496,7 +496,7 @@ TEST_P(ManualRevertRv32Test, ErrorTypeNoError)
 // - Validates that manual revert properly handles multiple storage operations
 // - Confirms end-to-end storage revert functionality through RV32
 //
-TEST_P(ManualRevertRv32Test, StorageManualRevert)
+TEST_F(ManualRevertRv32Test, StorageManualRevert)
 {
   using client_t = ContractTraitClient<manual_revert_test::ManualRevertTest>;
   client_t client(contract_addr_);
@@ -622,11 +622,6 @@ TEST_P(ManualRevertRv32Test, StorageManualRevert)
         << "Storage no revert transaction should commit successfully";
   }
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertRv32Test,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

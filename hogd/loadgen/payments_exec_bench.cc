@@ -40,7 +40,7 @@ public:
     try {
       framework_ = std::make_unique<NativeContractTestFramework>(
           /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/false);
+          /*empty_genesis=*/false);
       context_ = make_hog_exec_context();
 
       ERC20ExperimentState exp(ERC20PaymentsConfig{

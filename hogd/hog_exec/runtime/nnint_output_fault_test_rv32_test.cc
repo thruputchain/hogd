@@ -22,8 +22,7 @@ class NnintOutputFaultTestRv32Test : public ::testing::Test,
 public:
   NnintOutputFaultTestRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       runtime_context_(make_hog_exec_context())
   {}
 

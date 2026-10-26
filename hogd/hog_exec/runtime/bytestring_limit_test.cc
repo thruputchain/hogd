@@ -21,7 +21,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -61,8 +61,8 @@ class BytestringLimitTest : public ::testing::Test,
 protected:
   BytestringLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, genesis_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config())
   {}
 
   void SetUp() override
@@ -77,8 +77,7 @@ protected:
   {
     auto value = make_bytestring(std::string(kLegacyItemLen, byte));
     write_item(make_contract_data_addrkey(make_contract_address(0), kKeyName),
-               std::make_shared<StorageItemWrapper>(value,
-                                                    get_default_cost_model()));
+               make_bytestring_item(value));
     advance_block();
     return value;
   }

@@ -9,7 +9,7 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/queue_util.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "types.hh"
@@ -61,7 +61,7 @@ BlockSnapshotRpc::get_snapshot_item(BlockID block, AddressAndKey addrkey)
     co_return ExpectedStorageItem(RPCError::kRPCNotFound);
   }
   ExpectedStorageItem out(RPCError::kRPCNone);
-  out.item() = it->second.to_wire_item();
+  out.item() = it->second;
   co_return out;
 }
 
@@ -148,18 +148,17 @@ BlockSnapshotRpc::get_next_retrocausal_queue_block(BlockID block,
   if (block != block_id_) {
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCBadBlockID);
   }
-  auto m = items_.take();
+  auto m = queue_blocks_.take();
   auto it = m->find(addrkey);
   if (it == m->end()) {
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
-  auto &queue = it->second.queue();
-  auto const *out = queue.try_get_next_block(search_start_number);
-  if (!out) {
+  auto block_it = it->second.lower_bound(search_start_number);
+  if (block_it == it->second.end()) {
     return ExpectedRetrocausalQueueBlock(RPCError::kRPCNotFound);
   }
   ExpectedRetrocausalQueueBlock blk(RPCError::kRPCNone);
-  blk.queue_block() = *out;
+  blk.queue_block() = block_it->second;
   return blk;
 }
 
@@ -199,9 +198,17 @@ BlockSnapshotRpc::setup_create_deployment(
 
 void
 BlockSnapshotRpc::setup_create_item(AddressAndKey const &addrkey,
-                                    StorageItemWrapper item)
+                                    WireStorageItem item)
 {
   items_->emplace(addrkey, std::move(item));
+}
+
+void
+BlockSnapshotRpc::setup_create_queue(AddressAndKey const &addrkey,
+                                     TestQueue queue)
+{
+  items_->emplace(addrkey, std::move(queue.item));
+  queue_blocks_->emplace(addrkey, std::move(queue.blocks));
 }
 
 void
