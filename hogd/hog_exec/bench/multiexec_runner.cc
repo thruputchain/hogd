@@ -71,14 +71,14 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
                 x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
                 std::atomic<size_t> &n_total_coros,
                 x23::XdrVec<NondeterministicProposalData> *nominations,
-                ConnectionLoad *load)
+                ConnectionLoad *load, x23::ThreadPool *pool)
 {
   auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
                  BlockValidationQueue *queue, BlockID block_number,
                  std::atomic<size_t> &n_total_coros,
                  x23::XdrVec<NondeterministicProposalData> *nominations,
-                 ConnectionLoad *load) -> x23::Detached {
-    co_await default_threadpool().bg();
+                 ConnectionLoad *load, x23::ThreadPool *pool) -> x23::Detached {
+    co_await pool->bg();
     while (true) {
       auto batch = queue->next_batch();
       if (batch.txs.empty()) {
@@ -91,6 +91,10 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
       const auto sent = x23::fastclock::now();
       auto r = co_await exec_client.executorsched_propose_batch(block_number,
                                                                 batch.txs);
+      // x23 resumes this coroutine inline on the connection's reader.  Get
+      // off it before handling the reply and sending the next batch, or every
+      // other reply on the connection waits behind that work.
+      co_await pool->bg();
       load->record(batch.txs.size(), x23::fastclock::now() - sent);
       assert(r.size() == batch.txs.size());
       for (size_t i = 0; i < r.size(); ++i) {
@@ -104,8 +108,8 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
   };
 
   for (int i = 0; i < ncoro; i++) {
-    coro(exec_client, cb, queue, block_number, n_total_coros, nominations,
-         load);
+    coro(exec_client, cb, queue, block_number, n_total_coros, nominations, load,
+         pool);
   }
   co_return;
 };
@@ -160,6 +164,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number, ConsensusValue &prev_value,
           IndexerLatencyProbe *indexer_probe,
+          const std::vector<x23::ThreadPool *> &pools,
           const MultiexecCluster *report_load = nullptr)
 {
   auto start_time = x23::fastclock::now();
@@ -184,7 +189,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
     for (size_t i = 0; i < exec_clients.size(); i++) {
       connection_coro(exec_clients[i], &block_validation_queue, cb,
                       n_coros_per_connection, current_block_number,
-                      n_total_coros, &nominations, &loads[i]);
+                      n_total_coros, &nominations, &loads[i], pools[i]);
     }
     async();
   }
@@ -239,13 +244,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   const size_t n_connections =
       n_connections_per_executor * cluster.num_executors();
-  std::vector<exec_client_t> coro_exec_clients =
-      cluster.connect_exec_clients(n_connections_per_executor);
+  auto [coro_exec_clients, coro_pools] =
+      cluster.connect_exec_clients_in_lanes(n_connections_per_executor);
 
   run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
-            current_block_number, prev_value, &indexer_probe);
+            current_block_number, prev_value, &indexer_probe, coro_pools);
   parent_block_number = current_block_number;
   current_block_number++;
 
@@ -253,7 +258,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, coro_pools);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -299,7 +304,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
-              &indexer_probe, &cluster);
+              &indexer_probe, coro_pools, &cluster);
     auto end_time = x23::fastclock::now();
     double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;

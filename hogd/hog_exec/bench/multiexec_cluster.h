@@ -172,13 +172,14 @@ connect_to_db_server(ShardCard const &card)
 }
 
 inline auto
-connect_to_exec_server(const ExecCard &card)
+connect_to_exec_server(const ExecCard &card,
+                       x23::CoroPoll &cp = default_coropoll())
 {
   x23::HostPort host_port;
   if (!host_port.parse(card.address)) {
     panic("Failed to parse exec server address");
   }
-  auto client = make_rpc_client<ExecutorSched1>(host_port, false)();
+  auto client = make_rpc_client<ExecutorSched1>(host_port, cp, false)();
   if (!client)
     panic("connect_to_exec_server failed: {}",
           client.error().error_code().message());
@@ -467,6 +468,34 @@ public:
   }
 
   size_t num_executors() const { return exec_cards_.size(); }
+
+  // Like connect_exec_clients(), but each connection is polled in the next
+  // LLC lane of this process (LlcLanes), with the pool its coroutines should
+  // run in.  One CoroPoll for every connection saturates its poll thread at
+  // a few executors' worth of replies; lanes split that load and keep each
+  // connection's work on one L3.  Without lanes, every connection gets
+  // default_coropoll() and default_threadpool().
+  struct LaneExecClients {
+    std::vector<exec_client_t> clients;
+    std::vector<x23::ThreadPool *> pools;
+  };
+  LaneExecClients
+  connect_exec_clients_in_lanes(size_t n_connections_per_executor) const
+  {
+    const size_t n_connections =
+        n_connections_per_executor * exec_cards_.size();
+    LaneExecClients out;
+    out.clients.reserve(n_connections);
+    out.pools.reserve(n_connections);
+    for (size_t i = 0; i < n_connections; i++) {
+      LlcLane *lane = LlcLanes::get().next();
+      x23::CoroPoll &cp = lane ? lane->cp : default_coropoll();
+      out.clients.push_back(
+          connect_to_exec_server(exec_cards_[i % exec_cards_.size()], cp));
+      out.pools.push_back(&cp.pool_);
+    }
+    return out;
+  }
 
   // Executor i's host, as connect_exec_clients() dials it.
   std::string exec_host(size_t i) const
