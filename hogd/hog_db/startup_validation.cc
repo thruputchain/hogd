@@ -39,6 +39,10 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
     critical("tip network config is not a gapless prefix of parameter ids");
     return false;
   }
+  // Only a self-consistency check: a paired rewrite of the cost model and tip
+  // passes it. Consensus binds the model, since block validation compares the
+  // recomputed config hash with each proposal header, so such a node stalls
+  // rather than forks (#4645).
   if (compute_config_hash(make_config_hash_preimage(cost_model,
                                                     tip.network_config,
                                                     tip.default_wallet)) !=
