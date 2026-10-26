@@ -406,45 +406,6 @@ TEST_F(DirectNNIntTest, TwoConcurrentAddsBothCommit)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_F(DirectNNIntTest, AddAndSubOk)
-{
-  // This tests the case of receiving and immediately using a balance within the
-  // same block.
-  GTEST_SKIP() << "HogDb doesn't support retrocausal nnints";
-  return;
-
-  auto contract_addr = make_contract_address(0);
-  constexpr static int128_t kInitialBalance = 1'000'000'000;
-  setup_grant_storage_token(contract_addr, kInitialBalance);
-
-  auto key = make_addrkey(contract_addr, "nn_key8");
-
-  {
-    auto tx1 = make_new_per_tx_db_proxy();
-
-    tx1.add_delta(key, make_nnint_set_add_delta(0, 100),
-                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(r.value());
-
-    auto r2 = tx1.try_push_current_subtransaction()();
-    ASSERT_TRUE(r2.has_value());
-    ASSERT_TRUE(r2.value());
-    ASSERT_TRUE(tx1.commit_transaction()().has_value());
-  }
-
-  {
-    auto tx2 = make_new_per_tx_db_proxy();
-    tx2.add_delta(key, make_nnint_set_add_delta(0, -100),
-                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx2.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx2.commit_transaction()().has_value());
-  }
-}
-
 TEST_F(DirectNNIntTest, NNIntProperLocksHeld)
 {
   auto contract_addr = make_contract_address(0);

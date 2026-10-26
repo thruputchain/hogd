@@ -317,40 +317,4 @@ TEST_F(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
 
-TEST_F(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
-{
-  GTEST_SKIP() << "Auth data concurrent ops are not supported in HogDb yet";
-  return;
-
-  auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
-
-  auto key = make_address_auth_data_addrkey(contract_addr);
-
-  auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction()();
-  ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(r1.value());
-
-  auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_auth_data_delta({2, 5, 7}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction()();
-  ASSERT_TRUE(r2.has_value());
-  ASSERT_FALSE(r2.value());
-
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_auth_data_delta({2, 7}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction()();
-  ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value());
-
-  ASSERT_TRUE(tx1.commit_transaction()().has_value());
-  ASSERT_TRUE(tx2.abort_transaction()().has_value());
-  ASSERT_TRUE(tx3.commit_transaction()().has_value());
-}
-
 } // namespace hogd
