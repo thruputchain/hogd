@@ -1210,8 +1210,7 @@ TEST_F(EventRpcTest, CloseWaitsForAdmittedEmit)
     close_completed.store(true, std::memory_order_release);
   });
 
-  using namespace std::chrono_literals;
-  std::this_thread::sleep_for(100ms);
+  std::this_thread::sleep_for(std::chrono::milliseconds(100));
   EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
   release_emit.count_down();
   close_thread.join();
