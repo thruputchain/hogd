@@ -1170,10 +1170,9 @@ TEST_F(EventRpcTest, CloseBlockWaitsForExecutors)
   EXPECT_TRUE(close_completed.load(std::memory_order_acquire));
 }
 
-// Emits racing the last executor close must either be refused or land in both
-// the trie and the events file before close_block() hashes and drains them
-// (#4642).  Under TSan this also catches a trie insert racing the root hash.
-TEST_F(EventRpcTest, EmitsRacingLastExecutorCloseAreAllCommitted)
+// An emit admitted before the last executor handle closes must land in the
+// trie and events file before close_block() hashes and drains them (#4642).
+TEST_F(EventRpcTest, CloseWaitsForAdmittedEmit)
 {
   EventRPCContext ctx(temp_dir());
   EventExecRpc exec_rpc(ctx);
@@ -1182,42 +1181,51 @@ TEST_F(EventRpcTest, EmitsRacingLastExecutorCloseAreAllCommitted)
   ASSERT_EQ(mempool_rpc.eventsched_open_block(1)(), RPCError::kRPCNone);
   ASSERT_EQ(exec_rpc.eventexecutor_open_block(1)(), RPCError::kRPCNone);
 
-  constexpr uint64_t kThreads = 4;
-  constexpr uint64_t kEventsPerThread = 2000;
-  std::atomic<size_t> accepted = 0;
-  std::latch started(kThreads);
-  // Emitters outlive the close: a thread's PerThread event buffer goes away
-  // when it exits, as no long-lived RPC thread's would.
+  std::latch admitted(1);
+  std::latch release_emit(1);
+  auto held_ref = ctx.get_context(1)();
+  ASSERT_TRUE(held_ref);
+  held_ref->set_add_event_admitted_test_hook([&] {
+    admitted.count_down();
+    release_emit.wait();
+  });
+
+  ProposedTransaction body = make_body(1);
+  TxEventLog event = make_event(body, 1);
+  // The emitter outlives the close, as a pool thread would: its PerThread
+  // event buffer goes away when it exits.
   std::latch closed(1);
-  std::vector<std::thread> emitters;
-  for (uint64_t t = 0; t < kThreads; ++t) {
-    emitters.emplace_back([&, t] {
-      started.count_down();
-      for (uint64_t i = 0; i < kEventsPerThread; ++i) {
-        const uint64_t nonce = 1 + t * kEventsPerThread + i;
-        ProposedTransaction body = make_body(nonce);
-        if (exec_rpc.eventexecutor_emit_event(
-                1, nonce, make_event(body, static_cast<uint8_t>(nonce)),
-                body)() == RPCError::kRPCNone) {
-          accepted.fetch_add(1, std::memory_order_relaxed);
-        }
-      }
-      closed.wait();
-    });
-  }
-
-  started.wait();
+  std::thread emit_thread([&] {
+    EXPECT_EQ(exec_rpc.eventexecutor_emit_event(1, 1, event, body)(),
+              RPCError::kRPCNone);
+    closed.wait();
+  });
+  admitted.wait();
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
-  EventBlockResult close_result = mempool_rpc.eventsched_close_block(1, 1)();
-  closed.count_down();
-  for (auto &emitter : emitters) {
-    emitter.join();
-  }
-  ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
 
+  std::atomic<bool> close_completed = false;
+  EventBlockResult close_result;
+  std::thread close_thread([&] {
+    close_result = mempool_rpc.eventsched_close_block(1, 1)();
+    close_completed.store(true, std::memory_order_release);
+  });
+
+  using namespace std::chrono_literals;
+  std::this_thread::sleep_for(100ms);
+  EXPECT_FALSE(close_completed.load(std::memory_order_acquire));
+  release_emit.count_down();
+  close_thread.join();
+  closed.count_down();
+  emit_thread.join();
+  if (held_ref.release_reference()) {
+    ctx.gc_context(1)();
+  }
+
+  ASSERT_EQ(close_result.error(), RPCError::kRPCNone);
   auto pairs = read_final_events_file(temp_dir(), close_result.root_hash());
   ASSERT_TRUE(pairs.has_value()) << pairs.error();
-  EXPECT_EQ(pairs->event_logs.size(), accepted.load());
+  ASSERT_EQ(pairs->event_logs.size(), 1);
+  expect_xdr_equal(pairs->event_logs[0], event);
 }
 
 TEST_F(EventRpcTest, TestAbandonBlockThenCloseBlock)

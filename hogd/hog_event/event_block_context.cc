@@ -113,6 +113,9 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
     co_return false;
   }
   x23::Defer release_handle{[this] { executor_close_block(); }};
+  if (add_event_admitted_test_hook_) {
+    add_event_admitted_test_hook_();
+  }
 
   static PerThread<x23::Buf> serialize_buf;
   const size_t event_xdr_size =

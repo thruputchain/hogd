@@ -6,6 +6,7 @@
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
+#include <functional>
 #include <memory>
 #include <span>
 #include <string>
@@ -216,6 +217,13 @@ public:
   // Returns true if all executors closed normally, false if block was abandoned
   x23::Async<bool> await_all_executors_closed();
 
+  // Runs in add_event() once the event has been admitted, before it touches
+  // the trie or events file.
+  void set_add_event_admitted_test_hook(std::function<void()> hook)
+  {
+    add_event_admitted_test_hook_ = std::move(hook);
+  }
+
   void set_closing() { closing_.store(true, std::memory_order_release); }
   bool closing() { return closing_.load(std::memory_order_acquire); }
 
@@ -265,6 +273,7 @@ private:
   }
 
   std::atomic<bool> closing_ = false;
+  std::function<void()> add_event_admitted_test_hook_;
 
   x23::Async<void> await_pending_writes_done();
 
