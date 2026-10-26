@@ -2248,6 +2248,8 @@ x23::Async<SystemStatus<StorageRead<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  using Read = StorageRead<QueueEntry>;
+
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
@@ -2274,7 +2276,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (!entry.has_value()) {
     co_return entry.error();
   }
-  co_return StorageRead<QueueEntry>{std::move(entry.value()), load_gas};
+  co_return Read{std::move(entry.value()), load_gas};
 }
 
 // == Native token syscalls ==
