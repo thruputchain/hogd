@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -373,7 +374,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
     case Node::Type::kBranch:
       if (terminal) {
         return key_idx == k.size() && node.value_hash &&
-               *node.value_hash == sha256(value);
+               *node.value_hash == Node::compute_value_commitment(k, value);
       }
       if (key_idx == k.size() ||
           !branch_has_child_hash(node, std::to_integer<size_t>(k.get(key_idx)),
@@ -392,7 +393,7 @@ MerkleTrie::prove(const SHA256Hash &root_hash,
       break;
     case Node::Type::kLeaf:
       return terminal && node.path == k && node.value_hash &&
-             *node.value_hash == sha256(value);
+             *node.value_hash == Node::compute_value_commitment(k, value);
     default:
       return false;
     }
@@ -468,6 +469,20 @@ bool
 MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
                           bool update)
 {
+  // Prepare the complete leaf before acquiring any trie locks. Insertion only
+  // links this node; retries keep the same allocation and completed hashes.
+  auto free_unlinked_leaf = [this](Node *node) {
+    node->rw_lock.unlock();
+    allocator_.free(node);
+  };
+  std::unique_ptr<Node, decltype(free_unlinked_leaf)> prepared_leaf(
+      Node::create_leaf(/*parent=*/nullptr, allocator_), free_unlinked_leaf);
+  Node *new_leaf = prepared_leaf.get();
+  CHECK(new_leaf->rw_lock.try_lock_writer());
+  new_leaf->path() = k;
+  new_leaf->value_hash() = Node::compute_value_commitment(k, obj);
+  new_leaf->hash = new_leaf->compute_node_hash();
+
   size_t idx;
   size_t branch_depth;
   Node *existing_key;
@@ -493,7 +508,10 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
         if (branch != existing_key) {
           branch->rw_lock.unlock();
         }
-        existing_key->value_hash() = sha256(obj);
+        existing_key->value_hash() = new_leaf->value_hash();
+        if (existing_key->type == Node::Type::kLeaf) {
+          existing_key->hash = new_leaf->hash;
+        }
         // [unlock_nodes_from()] unlocks the node locks we currently hold.
         unlock_nodes_from(existing_key, /*locked_through=*/existing_key);
         return true;
@@ -521,15 +539,15 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
       // The key maps to a branch node, so we should add the value directly into
       // the branch node.
       CHECK(!branch->value_hash().has_value());
-      branch->value_hash() = sha256(obj);
+      branch->value_hash() = new_leaf->value_hash();
       to_hash = branch;
     }
     else {
       // The key does not map to an existing node. We must next check the branch
       // to see if it has any children on the path corresponding to the key. If
       // so, we need to handle the children, such as by splitting apart an
-      // extension node. If there are no children, we can create a leaf node for
-      // the key and add it as a child of the branch.
+      // extension node. If there are no children, link the prepared leaf as a
+      // child of the branch.
       auto branch_idx = std::to_integer<size_t>(k.get(idx));
       Node *next = branch->branch_children()[branch_idx];
       if (next) {
@@ -548,7 +566,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_extension(next, k, idx, obj);
+          to_hash = insert_handle_extension(next, k, idx, new_leaf);
         }
         else {
           CHECK_EQ(next->type, Node::Type::kLeaf);
@@ -559,24 +577,24 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
             branch->rw_lock.unlock();
             continue;
           }
-          to_hash = insert_handle_leaf(next, k, idx, obj);
+          to_hash = insert_handle_leaf(next, k, idx, new_leaf);
         }
       }
       else {
-        // There is no child node, so we create a leaf for [key] and place the
-        // leaf as a child of the branch.
-        Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
-        CHECK(leaf->rw_lock.try_lock_writer());
-        leaf->path() = k;
-        leaf->value_hash() = sha256(obj);
-        branch->branch_children()[branch_idx] = leaf;
-        to_hash = leaf;
+        new_leaf->parent = branch;
+        branch->branch_children()[branch_idx] = new_leaf;
+        to_hash = new_leaf;
       }
     }
     break;
   }
   CHECK_PTR(to_hash);
 
+  // A parent means the prepared leaf was linked into the trie. Otherwise its
+  // value went on a branch and the unused allocation is released below.
+  if (new_leaf->parent) {
+    prepared_leaf.release();
+  }
   size_.fetch_add(1, std::memory_order_relaxed);
   // [unlock_nodes_from()] unlocks the node locks we currently hold.
   unlock_nodes_from(to_hash, /*locked_through=*/branch);
@@ -613,7 +631,7 @@ MerkleTrie::insert_or_update(const Key &k,
 // Second Extension Node: Path is [0x6]. The child is c.
 Node *
 MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
-                                    const std::span<const std::byte> &obj)
+                                    Node *new_leaf)
 {
   CHECK(extension->rw_lock.is_writer_locked_relaxed());
   CHECK(extension->extension_child()->rw_lock.is_writer_locked_relaxed());
@@ -762,24 +780,19 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 
   // Now we need to place [key_window] into the trie. If [key_window] entirely
   // overlaps with the path in the first extension node, then we place
-  // [key_window] directly into the new branch. Otherwise, we create a leaf node
-  // for [key_window] and add the leaf as a child of the new branch.
+  // [key_window] directly into the new branch. Otherwise, link the prepared
+  // leaf as a child of the new branch.
   if (diverge_idx >= key_window.size()) {
     // Place [key_window] directly into the branch.
     CHECK_EQ(diverge_idx, key_window.size());
-    branch->value_hash() = sha256(obj);
+    branch->value_hash() = new_leaf->value_hash();
     return branch;
   }
-  // Create new leaf node for [key_window] and add the leaf node as a child of
-  // the new branch.
-  Node *leaf = Node::create_leaf(/*parent=*/branch, allocator_);
-  CHECK(leaf->rw_lock.try_lock_writer());
-  leaf->path() = k;
-  leaf->value_hash() = sha256(obj);
-
+  // Link the already-hashed leaf under the new branch.
+  new_leaf->parent = branch;
   auto leaf_branch = std::to_integer<size_t>(key_window.get(diverge_idx));
-  branch->branch_children()[leaf_branch] = leaf;
-  return leaf;
+  branch->branch_children()[leaf_branch] = new_leaf;
+  return new_leaf;
 }
 
 // We are inserting [k] into the trie, and it conflicts with a leaf node on the
@@ -795,7 +808,7 @@ MerkleTrie::insert_handle_extension(Node *extension, const Key &k, size_t idx,
 // child of this extension node.
 Node *
 MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
-                               const std::span<const std::byte> &obj)
+                               Node *new_leaf)
 {
   CHECK(leaf->rw_lock.is_writer_locked_relaxed());
   CHECK_EQ(leaf->type, Node::Type::kLeaf);
@@ -844,14 +857,11 @@ MerkleTrie::insert_handle_leaf(Node *leaf, const Key &k, size_t idx,
   }
   if (split == k.size()) {
     CHECK(!old_key_ends); // Duplicate keys were handled before splitting.
-    branch->value_hash() = sha256(obj);
+    branch->value_hash() = new_leaf->value_hash();
     return leaf;
   }
 
-  Node *new_leaf = Node::create_leaf(branch, allocator_);
-  CHECK(new_leaf->rw_lock.try_lock_writer());
-  new_leaf->path() = k;
-  new_leaf->value_hash() = sha256(obj);
+  new_leaf->parent = branch;
   branch->branch_children()[std::to_integer<size_t>(k.get(split))] = new_leaf;
   if (!old_key_ends) {
     // The old leaf is not on the unlock chain from new_leaf to parent.
@@ -1123,6 +1133,7 @@ MerkleTrie::remove_branch(Node *branch, size_t num_children,
     new_child->init_leaf(parent);
     new_child->path() = branch_key;
     new_child->value_hash() = std::move(value_hash);
+    new_child->hash = new_child->compute_node_hash();
   }
   else {
     CHECK_EQ(num_children, 1UL);
@@ -1318,7 +1329,9 @@ void
 MerkleTrie::generate_all_hashes_serial(Node *root)
 {
   auto f = [&](Node &node, Node * /*parent*/) {
-    node.hash = node.compute_node_hash();
+    if (node.type != Node::Type::kLeaf) {
+      node.hash = node.compute_node_hash();
+    }
   };
   walk<Node>(root, f);
 }
@@ -1360,7 +1373,7 @@ MerkleTrie::generate_all_hashes_above_frontier(
 
   while (!stack.empty()) {
     HashInfo &info = stack.back();
-    if (frontier.contains(info.node)) {
+    if (frontier.contains(info.node) || info.node->type == Node::Type::kLeaf) {
       stack.pop_back();
       continue;
     }

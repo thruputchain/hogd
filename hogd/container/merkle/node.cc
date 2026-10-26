@@ -221,6 +221,11 @@ get_path_from_encoding(const std::vector<std::byte> &encodings, size_t &idx,
   }
   node.path = HexArray(std::span(encodings).subspan(idx, path_size_in_bytes));
   if (path_size % 2 == 1) {
+    // Leaf proof descriptors are not hashed, so require canonical padding
+    // rather than silently ignoring changes to the unused low nibble.
+    if (node.path.get(path_size) != std::byte{0}) {
+      return false;
+    }
     node.path.remove_from_back(1);
   }
   idx += path_size_in_bytes;
@@ -307,8 +312,27 @@ Node::get_node_encoding() const
 }
 
 SHA256Hash
+Node::compute_value_commitment(const HexArray &key,
+                               std::span<const std::byte> value)
+{
+  SHA256Hasher hasher;
+  auto update_hash = [&](std::span<const std::byte> bytes) {
+    hasher.update(bytes);
+  };
+  emit_bytes(update_hash, std::array{static_cast<std::byte>(Type::kLeaf)});
+  visit_path_encoding(update_hash, key);
+  emit_bytes(update_hash, size_to_bytes(value.size()));
+  emit_bytes(update_hash, value);
+  return hasher.finalize();
+}
+
+SHA256Hash
 Node::compute_node_hash() const
 {
+  if (type == Type::kLeaf) {
+    CHECK(value_hash().has_value());
+    return *value_hash();
+  }
   SHA256Hasher hasher;
   auto update_hash = [&](std::span<const std::byte> bytes) {
     hasher.update(bytes);
@@ -381,7 +405,15 @@ Node::get_node_from_encoding(const std::vector<std::byte> &encodings,
     ret = false;
     break;
   }
-  if (ret) {
+  // Leaf proofs carry the commitment directly. The verifier binds it to the
+  // supplied key/value; branches and extensions still hash their encodings.
+  if (ret && node.type == Type::kLeaf) {
+    if (!node.value_hash) {
+      return false;
+    }
+    node.hash = *node.value_hash;
+  }
+  else if (ret) {
     node.hash =
         sha256(std::span(encodings).subspan(original_idx, idx - original_idx));
   }

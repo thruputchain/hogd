@@ -1,9 +1,11 @@
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <memory>
 #include <optional>
+#include <span>
 #include <string>
 #include <vector>
 
@@ -267,35 +269,67 @@ TEST(Node, HashExtension)
   expect_hash_matches_materialized_encoding(extension);
 }
 
-// This test hashes a leaf node.
+// Leaves use the key/value commitment directly, including when decoded from
+// a proof. The proof descriptor is not itself a hash preimage.
 TEST(Node, HashLeaf)
 {
   Node leaf;
   leaf.init_leaf(nullptr);
-  memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
   leaf.path() = HexArray("00010203");
-  leaf.value_hash() = SHA256Hash();
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  leaf.value_hash()->at(0) = 0xFF;
+  const std::string value = "hello";
+  leaf.value_hash() =
+      Node::compute_value_commitment(leaf.path(),
+                                     std::as_bytes(std::span(value)));
+  const SHA256Hash expected = hash_from_string(
+      "ed601bfeacd678e5814cb9adf207256004ce70dc2e41b8eda66ea002a5a03904");
+  EXPECT_EQ(leaf.compute_node_hash(), expected);
 
-  SHA256Hash hash = leaf.compute_node_hash();
-  SHA256Hash expected = hash_from_string(
-      "7e7dac6030735a4abea721534ce38b97f63cf230bfef391e4328099d3bc24e3d");
-  EXPECT_EQ(hash, expected);
-  expect_hash_matches_materialized_encoding(leaf);
+  size_t idx = 0;
+  Node::Raw raw;
+  const auto encoding = leaf.get_node_encoding();
+  ASSERT_TRUE(Node::get_node_from_encoding(encoding, idx, raw));
+  EXPECT_EQ(idx, encoding.size());
+  EXPECT_EQ(raw.hash, expected);
 }
 
-TEST(Node, HashLeafOddPathMatchesMaterializedEncoding)
+TEST(Node, ValueCommitmentMatchesFramedEncoding)
+{
+  for (const auto &key_text :
+       {std::string(), std::string("1"), std::string("12"), std::string("123"),
+        std::string(HexArray::kMaxNumHexDigits, 'a')}) {
+    const HexArray key(key_text);
+    for (size_t size : {0, 1, 55, 56, 64, 256}) {
+      const std::vector<std::byte> value(size, std::byte{0x5a});
+      std::vector<std::byte> encoding{std::byte{2}};
+      auto append_size = [&](uint64_t n) {
+        for (size_t i = 0; i < 8; ++i) {
+          encoding.push_back(std::byte((n >> (8 * i)) & 0xff));
+        }
+      };
+      append_size(key.size());
+      for (size_t i = 0; i < key.size(); i += 2) {
+        const auto low = i + 1 < key.size() ? key.get(i + 1) : std::byte{0};
+        encoding.push_back((key.get(i) << 4) | low);
+      }
+      append_size(value.size());
+      encoding.insert(encoding.end(), value.begin(), value.end());
+      EXPECT_EQ(Node::compute_value_commitment(key, value), sha256(encoding));
+    }
+  }
+  // The nibble count distinguishes these keys despite identical packed bytes.
+  EXPECT_NE(Node::compute_value_commitment(HexArray("123"), {}),
+            Node::compute_value_commitment(HexArray("1230"), {}));
+}
+
+TEST(Node, LeafProofRequiresValueCommitment)
 {
   Node leaf;
   leaf.init_leaf(nullptr);
-  memset(leaf.hash.data(), 0, leaf.hash.size() * sizeof(leaf.hash[0]));
-  leaf.path() = HexArray("123");
-  leaf.value_hash() = SHA256Hash();
-  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  leaf.value_hash()->at(0) = 0xAB;
-
-  expect_hash_matches_materialized_encoding(leaf);
+  leaf.path() = HexArray("12");
+  const auto encoding = leaf.get_node_encoding();
+  size_t idx = 0;
+  Node::Raw raw;
+  EXPECT_FALSE(Node::get_node_from_encoding(encoding, idx, raw));
 }
 
 TEST(Node, ReinitAcrossNodeTypes)
