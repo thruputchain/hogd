@@ -22,6 +22,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
@@ -648,6 +649,35 @@ TEST(MempoolAuthRpc, GetAuthInfoDoesNotRegisterAuth)
   IntroAuthResult wrong_protocol =
       MempoolAuthRpc::mempoolauth_get_auth_info(ProtocolCommit{})();
   EXPECT_EQ(wrong_protocol.outcome(), IntroAuthOutcome::kFailure);
+}
+
+// Only one auth server is supported. The mempool builds its auth client from
+// the first registered card and never rebuilds it, so a second registration
+// must fail rather than replace the card (issue #2816).
+TEST(MempoolAuthRpc, SecondIntroAuthFails)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  const AuthCard first{.protocol = version::kHogdProtocol(),
+                       .upid = {},
+                       .address_for_db = "127.0.0.1:1",
+                       .address_for_mempool = "127.0.0.1:2"};
+  IntroAuthResult first_intro = MempoolAuthRpc::mempoolauth_intro_auth(first)();
+  ASSERT_EQ(first_intro.outcome(), IntroAuthOutcome::kSuccess);
+
+  const AuthCard second{.protocol = version::kHogdProtocol(),
+                        .upid = {},
+                        .address_for_db = "127.0.0.1:3",
+                        .address_for_mempool = "127.0.0.1:4"};
+  IntroAuthResult second_intro =
+      MempoolAuthRpc::mempoolauth_intro_auth(second)();
+  EXPECT_EQ(second_intro.outcome(), IntroAuthOutcome::kFailure);
+
+  AuthCard registered;
+  ASSERT_TRUE(registration.auth_registered(&registered));
+  EXPECT_EQ(registered, first);
 }
 
 TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
