@@ -1186,6 +1186,9 @@ TEST_F(EventRpcTest, EmitsRacingLastExecutorCloseAreAllCommitted)
   constexpr uint64_t kEventsPerThread = 2000;
   std::atomic<size_t> accepted = 0;
   std::latch started(kThreads);
+  // Emitters outlive the close: a thread's PerThread event buffer goes away
+  // when it exits, as no long-lived RPC thread's would.
+  std::latch closed(1);
   std::vector<std::thread> emitters;
   for (uint64_t t = 0; t < kThreads; ++t) {
     emitters.emplace_back([&, t] {
@@ -1199,12 +1202,14 @@ TEST_F(EventRpcTest, EmitsRacingLastExecutorCloseAreAllCommitted)
           accepted.fetch_add(1, std::memory_order_relaxed);
         }
       }
+      closed.wait();
     });
   }
 
   started.wait();
   EXPECT_EQ(exec_rpc.eventexecutor_close_block(1)(), RPCError::kRPCNone);
   EventBlockResult close_result = mempool_rpc.eventsched_close_block(1, 1)();
+  closed.count_down();
   for (auto &emitter : emitters) {
     emitter.join();
   }
