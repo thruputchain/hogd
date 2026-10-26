@@ -2130,60 +2130,20 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
   co_return SyscallError{
       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
 }
-} // namespace
-
-x23::Async<SystemStatus<SyscallStatus<void>>>
-SystemCallHandler::retrocausal_queue_insert(
-    StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
-{
-  if (queue_entry.size() > kQueueEntryMaxLen) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
-  auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
-  assert(item_view);
-
-  auto queue_item =
-      co_await retrocausal_queue_item_from_view(item_view, item_key, addrkey,
-                                                snapshot_cache_,
-                                                execution_mode_data_);
-  if (!queue_item.has_value()) {
-    co_return queue_item.error();
-  }
-  if (!queue_item.value().has_value()) {
-    co_return queue_item.value().error();
-  }
-
-  // Now we have either grabbed the preexisting RCQItem, or created a new one.
-  // In either case, we can now insert the new entry.
-  co_return queue_item.value().value()->insert_entry(
-      queue_entry_from_span(queue_entry));
-}
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
-SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
-                                             bool peek)
+retrocausal_queue_consume_from_view(ItemView *item_view,
+                                    FrameItemKey const &item_key,
+                                    AddressAndKey const &addrkey,
+                                    StorageSnapshotCache &snapshot_cache,
+                                    ExecutionModeData &execution_mode_data)
 {
-  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
-  auto addrkey = invocation_frame_stack_.get_addrkey(key);
-  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
-  assert(item_view);
-
-  if (peek) {
-    co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
-                                                        addrkey,
-                                                        snapshot_cache_,
-                                                        execution_mode_data_);
-  }
-
   // For unmodified keys, probe with a local item first. Only persist
   // into the view if an entry is found, so that a no-op consume on an
   // absent key does not pin the storage type.
   if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
     if (auto loaded =
-            co_await ensure_loaded(*unmodified_item, snapshot_cache_, item_key);
+            co_await ensure_loaded(*unmodified_item, snapshot_cache, item_key);
         !loaded.has_value()) {
       co_return loaded.error();
     }
@@ -2192,9 +2152,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    auto entry =
-        co_await load_next_queue_entry(queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
+    auto entry = co_await load_next_queue_entry(queue_item, execution_mode_data,
+                                                /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
@@ -2207,7 +2166,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     auto entry =
-        co_await load_next_queue_entry(*queue_item, execution_mode_data_,
+        co_await load_next_queue_entry(*queue_item, execution_mode_data,
                                        /*advance_cursor=*/true);
     item_view->sync_retrocausally_consumed(*queue_item);
     co_return entry;
@@ -2218,14 +2177,13 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   if (item_view->get<DeletedItem>()) {
     auto queue_item_res = co_await make_replaced_key_queue_item(
         item_key, addrkey, item_view->get_retrocausally_consumed_count(),
-        snapshot_cache_, execution_mode_data_);
+        snapshot_cache, execution_mode_data);
     if (!queue_item_res.has_value()) {
       co_return queue_item_res.error();
     }
     auto &queue_item = queue_item_res.value();
-    auto entry =
-        co_await load_next_queue_entry(queue_item, execution_mode_data_,
-                                       /*advance_cursor=*/true);
+    auto entry = co_await load_next_queue_entry(queue_item, execution_mode_data,
+                                                /*advance_cursor=*/true);
     if (entry.has_value() && entry.value().has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
@@ -2238,6 +2196,85 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
   co_return SyscallError{
       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+}
+} // namespace
+
+x23::Async<SystemStatus<StorageRead<void>>>
+SystemCallHandler::retrocausal_queue_insert(
+    StorageKeyContractData const &key, std::span<const std::byte> queue_entry)
+{
+  using Read = StorageRead<void>;
+
+  if (queue_entry.size() > kQueueEntryMaxLen) {
+    co_return Read{SyscallError{
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                   0};
+  }
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
+  auto addrkey = invocation_frame_stack_.get_addrkey(key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Prices the snapshot fetch retrocausal_queue_item_from_view() makes for
+  // anything but a queue already in the frame: an unloaded committed value,
+  // or the committed queue under a key this transaction replaced.
+  GasAmount load_gas = 0;
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    load_gas = unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+  }
+  else if (!item_view->get<RetrocausalQueueItem>()) {
+    load_gas = note_item_load(item_key);
+  }
+
+  auto queue_item =
+      co_await retrocausal_queue_item_from_view(item_view, item_key, addrkey,
+                                                snapshot_cache_,
+                                                execution_mode_data_);
+  if (!queue_item.has_value()) {
+    co_return queue_item.error();
+  }
+  if (!queue_item.value().has_value()) {
+    co_return Read{queue_item.value().error(), load_gas};
+  }
+
+  // Now we have either grabbed the preexisting RCQItem, or created a new one.
+  // In either case, we can now insert the new entry.
+  co_return Read{queue_item.value().value()->insert_entry(
+                     queue_entry_from_span(queue_entry)),
+                 load_gas};
+}
+
+x23::Async<SystemStatus<StorageRead<QueueEntry>>>
+SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
+                                             bool peek)
+{
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
+  auto addrkey = invocation_frame_stack_.get_addrkey(key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Prices the snapshot fetch the paths below make: an unloaded committed
+  // value, or the committed queue under a key this transaction deleted.
+  GasAmount load_gas = 0;
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    load_gas = unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+  }
+  else if (item_view->get<DeletedItem>()) {
+    load_gas = note_item_load(item_key);
+  }
+
+  auto entry =
+      peek ? co_await retrocausal_queue_peek_from_view(item_view, item_key,
+                                                       addrkey, snapshot_cache_,
+                                                       execution_mode_data_)
+           : co_await retrocausal_queue_consume_from_view(item_view, item_key,
+                                                          addrkey,
+                                                          snapshot_cache_,
+                                                          execution_mode_data_);
+  if (!entry.has_value()) {
+    co_return entry.error();
+  }
+  co_return StorageRead<QueueEntry>{std::move(entry.value()), load_gas};
 }
 
 // == Native token syscalls ==

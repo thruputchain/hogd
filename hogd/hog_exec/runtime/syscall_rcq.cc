@@ -29,14 +29,15 @@ syscall_RetrocausalQueueInsert_inner(
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &rcq_syscall_status = *status;
+  // A handled error pays the load too; see syscall_BytestringGet_inner().
+  auto const &[rcq_syscall_status, load_gas] = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -52,10 +53,10 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &rcq_syscall_status = *status;
+  auto const &[rcq_syscall_status, load_gas] = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -72,7 +73,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -88,10 +89,10 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &rcq_syscall_status = *status;
+  auto const &[rcq_syscall_status, load_gas] = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -105,7 +106,7 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 } // namespace hogd

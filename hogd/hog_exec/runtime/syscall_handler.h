@@ -442,10 +442,10 @@ public:
   void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<QueueEntry>>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
