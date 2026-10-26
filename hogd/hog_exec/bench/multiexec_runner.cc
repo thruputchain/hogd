@@ -2,7 +2,6 @@
 #include <atomic>
 #include <cassert>
 #include <chrono>
-#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -16,7 +15,6 @@
 #include "consensus.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -32,6 +30,7 @@
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
