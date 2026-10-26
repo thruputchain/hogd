@@ -193,10 +193,12 @@ InvocationFrame::try_acquire_frame_locks(
   //
   // modified_items_ iterates in process-random (SipHash) order, so the delta
   // order differs between nodes. That can change which of two conflicting
-  // transactions wins its locks, but not whether a conflict occurs. Validation
-  // rejects the whole proposal on any non-deterministic failure
-  // (MempoolCoordinatorRpc::validate_batch_chunk), so the order never reaches
-  // consensus-visible state.
+  // transactions wins its locks, but not whether a conflict occurs. Neither
+  // reaches consensus-visible state: a proposer's child TryInvoke outcomes are
+  // recorded as nondeterministic bits that validators replay without calling
+  // this, and in validation only the root commit calls this, where any
+  // conflict rejects the whole proposal
+  // (MempoolCoordinatorRpc::validate_batch_chunk).
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
