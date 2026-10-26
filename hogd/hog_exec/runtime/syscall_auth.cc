@@ -177,6 +177,14 @@ syscall_MintAuthToken_inner(
         WrappedGasAmount{0}};
   }
 
+  // Each mint retains a decoded tree for the base crossing charge, so the
+  // count is capped before decoding (#4653).
+  if (!syscall_handler.reserve_auth_token_mint()) {
+    return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
+  }
+
   // The wire type does not bound depth; decode under the chain's limit.
   try {
     x23::deserialize(&auth_token.root_node,
