@@ -3,7 +3,6 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstring>
-#include <initializer_list>
 #include <memory>
 #include <optional>
 #include <span>
@@ -297,6 +296,7 @@ protected:
   constexpr static int32_t kExitSyscallNo = 8;
   constexpr static int32_t kBytestringGetLenSyscallNo = 13;
   constexpr static int32_t kBytestringSetSyscallNo = 15;
+  constexpr static int32_t kRetrocausalQueueConsumeSyscallNo = 21;
   constexpr static int32_t kRetrocausalQueuePeekLenSyscallNo = 30;
 
   ContractAddress
@@ -315,7 +315,7 @@ protected:
 
   // Sets a0..aN then ecalls, mirroring the register-native syscall ABI.
   static void append_syscall(std::vector<uint32_t> &program,
-                             std::initializer_list<int32_t> arg_regs)
+                             std::vector<int32_t> const &arg_regs)
   {
     uint8_t reg = 10;
     for (const int32_t imm : arg_regs) {
@@ -342,14 +342,18 @@ protected:
     return handler.root_invoke()();
   }
 
+  // Scratch output address for expect_distinct_missing_reads_charged(), past
+  // the keys it lays out.
+  constexpr static int32_t kMissingReadOutputAddress = 192;
+
   // Regression check for #4038 and #4629: a missing-key read must still pay
   // the host cold-load charge, so distinct keys cost one extra kDBRPCCost
-  // each. [syscall_no] takes (key, output), as BytestringGetLen does.
-  void expect_distinct_missing_reads_charged(int32_t syscall_no)
+  // each. [syscall] is the syscall number and its arguments; the first
+  // argument, the key address, is filled in per read.
+  void expect_distinct_missing_reads_charged(std::vector<int32_t> syscall)
   {
     constexpr size_t kReadCount = 4;
     constexpr uint32_t kKeyBytes = StorageKeyContractData{}.size();
-    constexpr uint32_t kOutputAddress = 192;
 
     auto make_program = [&](bool distinct) {
       std::vector<uint32_t> program;
@@ -360,8 +364,8 @@ protected:
           std::fill_n(memory.begin() + key_address, kKeyBytes,
                       static_cast<uint8_t>(i + 1));
         }
-        append_syscall(program, {syscall_no, static_cast<int32_t>(key_address),
-                                 static_cast<int32_t>(kOutputAddress)});
+        syscall[1] = static_cast<int32_t>(key_address);
+        append_syscall(program, syscall);
       }
       append_syscall(program, {kReturnSyscallNo, 0, 0, 0, 0, 0});
       return std::pair{std::move(program), std::move(memory)};
@@ -711,13 +715,24 @@ TEST_F(Rv32ProductionMappingTest, UntranslatableDeployedBlobFailsUnrecoverable)
 TEST_F(Rv32ProductionMappingTest,
        DistinctMissingBytestringReadsAreChargedHostGas)
 {
-  expect_distinct_missing_reads_charged(kBytestringGetLenSyscallNo);
+  expect_distinct_missing_reads_charged(
+      {kBytestringGetLenSyscallNo, 0, kMissingReadOutputAddress});
 }
 
 TEST_F(Rv32ProductionMappingTest,
        DistinctMissingRetrocausalQueuePeeksAreChargedHostGas)
 {
-  expect_distinct_missing_reads_charged(kRetrocausalQueuePeekLenSyscallNo);
+  expect_distinct_missing_reads_charged(
+      {kRetrocausalQueuePeekLenSyscallNo, 0, kMissingReadOutputAddress});
+}
+
+TEST_F(Rv32ProductionMappingTest,
+       DistinctMissingRetrocausalQueueConsumesAreChargedHostGas)
+{
+  expect_distinct_missing_reads_charged(
+      {kRetrocausalQueueConsumeSyscallNo, 0,
+       /*peek=*/0, kMissingReadOutputAddress + 8,
+       /*queue_entry_len=*/0, kMissingReadOutputAddress});
 }
 
 TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
