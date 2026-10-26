@@ -50,8 +50,7 @@ class PaymentChannelIntegrationTest : public ::testing::Test,
 public:
   PaymentChannelIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       rv32_runtime_context_(make_hog_exec_context())
   {}
 

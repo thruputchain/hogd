@@ -34,12 +34,12 @@ namespace hogd {
 // focusing on the behavior when keys don't exist, are deleted, have different
 // types, or have been written to in the current transaction.
 
-class NNIntGetTest : public ::testing::TestWithParam<TestDB>,
+class NNIntGetTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
   NNIntGetTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -61,7 +61,7 @@ protected:
 // Test: Get on a key that doesn't exist (UnmodifiedItem, not loaded).
 // With force_load_snapshot=false, should return (nullopt, 0) without
 // querying the database.
-TEST_P(NNIntGetTest, GetOnNonExistentKey)
+TEST_F(NNIntGetTest, GetOnNonExistentKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -117,7 +117,7 @@ TEST_P(NNIntGetTest, GetOnNonExistentKey)
 
 // Test: Get on a key that was deleted (DeletedItem).
 // With force_load_snapshot=false, should return (nullopt, 0).
-TEST_P(NNIntGetTest, GetOnDeletedKey)
+TEST_F(NNIntGetTest, GetOnDeletedKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
@@ -188,7 +188,7 @@ TEST_P(NNIntGetTest, GetOnDeletedKey)
 
 // Test: Get on a key that has an NNInt write with base_value.
 // Should return (base_value, add_value).
-TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
+TEST_F(NNIntGetTest, GetOnNNIntWithBaseValue)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
@@ -252,7 +252,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithBaseValue)
 
 // Test: Get on a key that has an NNInt write without base_value (just add).
 // Should return (nullopt, add_value).
-TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
+TEST_F(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -318,7 +318,7 @@ TEST_P(NNIntGetTest, GetOnNNIntWithoutBaseValue)
 
 // Test: Get on a key that has a bytestring write (different type).
 // With force_load_snapshot=false, should return (nullopt, 0).
-TEST_P(NNIntGetTest, GetOnBytestringKey)
+TEST_F(NNIntGetTest, GetOnBytestringKey)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -386,7 +386,7 @@ TEST_P(NNIntGetTest, GetOnBytestringKey)
 // Test: Get on a key that exists in snapshot but hasn't been accessed yet.
 // With force_load_snapshot=false, should return (nullopt, 0) without
 // loading from snapshot.
-TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
+TEST_F(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
 {
   auto contract_addr = make_contract_address(0);
   auto key = make_contract_data_addrkey(contract_addr, "snapshot_key");
@@ -451,7 +451,7 @@ TEST_P(NNIntGetTest, GetOnUnmodifiedKeyInSnapshot)
 
 // Test: Multiple operations - set with base, then add, then get.
 // Verifies that the latest write is what's returned.
-TEST_P(NNIntGetTest, MultipleOperationsSequence)
+TEST_F(NNIntGetTest, MultipleOperationsSequence)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
@@ -544,7 +544,7 @@ TEST_P(NNIntGetTest, MultipleOperationsSequence)
 // Test: DeletedItem + force_load=true.
 // Set a key, delete it, call kNonnegativeIntGet with force_load=true.
 // Should return kSyscallErrorCodeStorageKeyNotExist.
-TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
+TEST_F(NNIntGetTest, GetDeletedKeyWithForceLoad)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
@@ -617,7 +617,7 @@ TEST_P(NNIntGetTest, GetDeletedKeyWithForceLoad)
 // Test: Non-NNInt type + force_load=true.
 // Write a bytestring at a key, call kNonnegativeIntGet with force_load=true.
 // Should return kSyscallErrorCodeInvalidSyscallInput.
-TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
+TEST_F(NNIntGetTest, GetBytestringKeyWithForceLoad)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(
@@ -678,11 +678,6 @@ TEST_P(NNIntGetTest, GetBytestringKeyWithForceLoad)
   auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, NNIntGetTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

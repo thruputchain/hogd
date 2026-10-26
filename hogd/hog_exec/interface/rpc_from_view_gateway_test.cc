@@ -200,8 +200,8 @@ public:
 
   // For a chain whose genesis states `network_config`.
   explicit ViewGatewayRefreshTest(NetworkConfig const &network_config)
-    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal,
-                 TestDB::kHogDb, true, std::nullopt, network_config)
+    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+                 std::nullopt, network_config)
   {}
 
   void SetUp() override

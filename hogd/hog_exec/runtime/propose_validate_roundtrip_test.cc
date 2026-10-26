@@ -45,12 +45,12 @@ namespace hogd {
 // the results match.  Also test that tampered proposal data causes
 // validation failure.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class ProposeValidateRoundtripTest : public ::testing::TestWithParam<TestDB>,
+class ProposeValidateRoundtripTest : public ::testing::Test,
                                      public NativeContractTestFramework {
 public:
   ProposeValidateRoundtripTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -315,7 +315,7 @@ protected:
 // Both succeed, producing 2 nondeterministic bits (both true).
 // Nondeterministic bits are only logged when the inner frame succeeds
 // (deterministic errors skip lock acquisition entirely).
-TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 {
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -356,7 +356,7 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 
 // Test that validation fails when the proposal data has extra unconsumed
 // nondeterministic bits (entropy grinding attack vector).
-TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 {
   // A: single try_invoke of B.write_hello → produces 1 nondeterministic bit.
   auto contract_a = make_contract(
@@ -392,7 +392,7 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 // succeeds.  In proposal mode both succeed, producing 2 bits (both true).
 // Flipping bit 0 to false causes the validator to skip the second
 // try_invoke, consuming only 1 of 2 bits → check_all_consumed() fails.
-TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 {
   // A: try_invoke B.write_hello, then conditionally try_invoke B.write_world.
   // Both succeed in proposal → 2 bits.  Flipping bit 0 makes validator
@@ -454,7 +454,7 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 
 // Test that validation fails when the proposal is structurally malformed
 // (e.g. bit count doesn't match byte count).
-TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
+TEST_F(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -476,7 +476,7 @@ TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
 
 // Test that validation fails when there are padding bits set in the last
 // byte (entropy grinding vector).
-TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
+TEST_F(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -511,7 +511,7 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 // concurrent entry.  This produces 1 nondeterministic bit (entry
 // exists) and 1 queue entry observation ({10}).  Validates that
 // the full propose→validate pipeline preserves these correctly.
-TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
 {
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
@@ -560,16 +560,14 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   // so the roots must match. (Only HogDb computes real trie roots.)
   StorageShortHash validation_hash =
       discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
-  if (GetParam() == TestDB::kHogDb) {
-    EXPECT_EQ(proposal_hash, validation_hash)
-        << "Proposal and validation trie root hashes must match";
-  }
+  EXPECT_EQ(proposal_hash, validation_hash)
+      << "Proposal and validation trie root hashes must match";
 }
 
 // Insert 1 entry in block 1.  Block 2: consume past entry (deterministic),
 // then try concurrent consume (no entries → bit=false).  Validates that
 // the bit=false replay path works correctly.
-TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
 {
   auto ctx = make_rcq_context();
 
@@ -609,7 +607,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
 // Single TX inserts {10, 20} then consumes 3 times.  First 2 consumes
 // return self-entries (deterministic), third tries concurrent (miss →
 // bit=false).  Validates that self-entry + concurrent-miss replay works.
-TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
 {
   std::vector<uint8_t> consumed_values;
 
@@ -674,7 +672,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
 
 // Tamper: add an extra queue entry observation.
 // check_all_consumed() detects the surplus → validation fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
+TEST_F(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -690,7 +688,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
 
 // Tamper: remove the queue entry observation (keep bit=true).
 // consume_queue_entry_observation returns nullptr → validation fails.
-TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
+TEST_F(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -706,7 +704,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
 // Tamper: flip existence bit true→false.
 // Validator skips observation consumption → unconsumed observation →
 // check_all_consumed() fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
+TEST_F(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -721,7 +719,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
 
 // Tamper: flip existence bit false→true.
 // Validator tries to consume an observation that doesn't exist → fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
+TEST_F(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
 {
   auto ctx = make_rcq_context();
 
@@ -774,11 +772,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
 
 // Proposer claims TX_B consumed {99} but TX_A only inserted {10}.
 // Block finalization: consumed_set={99} vs added_entries={10} → error.
-TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
+TEST_F(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
   auto tx_consume = make_rcq_consume_tx(1);
@@ -821,11 +816,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 
 // Proposer claims TX_B consumed {10} from TX_A, but TX_A is absent
 // from validation (aborted).  No insert → consumed_set non-empty → error.
-TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
+TEST_F(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
   auto tx_consume = make_rcq_consume_tx(1);
@@ -859,11 +851,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 // Two inserters, one consumer.  Proposer claims consumer saw 2 entries,
 // but only 1 inserter is included in validation.  Second consumed entry
 // has no matching insert → error.
-TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
+TEST_F(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert_a = make_rcq_insert_tx({10});
   auto tx_insert_b = make_rcq_insert_tx({20});
@@ -910,12 +899,9 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 // Root manual revert must still submit observation deltas to HogDb.
 // A forged observation on an empty queue that triggers manual revert
 // must be rejected at block close.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        RootManualRevertSkipsForgedRCQObservationValidation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   static constexpr uint8_t kForgedEntry = 0xE7;
 
   auto revert_on_forged_observation = make_contract(
@@ -986,7 +972,7 @@ TEST_P(ProposeValidateRoundtripTest,
          "insert";
 }
 
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ValidationRejectsOverDepthTryInvokeTrueBits)
 {
   auto make_depth_poc_key = [](uint32_t index) {
@@ -1127,7 +1113,7 @@ TEST_P(ProposeValidateRoundtripTest,
       << "Over-cap child storage must not be persisted";
 }
 
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ValidationRejectsStaleTrailingBitAtDepthCap)
 {
   // A is tolerant: it does NOT propagate child failures, so a single dangling
@@ -1184,7 +1170,7 @@ TEST_P(ProposeValidateRoundtripTest,
   ASSERT_NE(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 {
   auto contract_a = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -1235,7 +1221,7 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 // a proposal with many more `true` bits than the cap would silently roll
 // through. Honest proposal can never produce more than kMaxSavepointDepth
 // `true` bits.
-TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
+TEST_F(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 {
   static constexpr uint32_t kAttempts = 2 * kMaxSavepointDepth;
   auto contract_a = make_contract(
@@ -1300,7 +1286,7 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 //
 // This exercises depth accumulation through a parent-child boundary
 // (B inherits depth from C), distinct from sequential siblings at one level.
-TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
+TEST_F(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 {
   static constexpr ContractAddress kAddrC = make_contract_address(2);
   static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
@@ -1404,7 +1390,7 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 // Regression: deterministic root errors must still check that all proposal
 // data was consumed.  Before the fix, finalize_after_root_frame() returned
 // early for non-success results, skipping check_all_consumed().
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DeterministicRootErrorSkipsExtraProposalBitCheck)
 {
   auto contract_a = make_contract(
@@ -1460,7 +1446,7 @@ TEST_P(ProposeValidateRoundtripTest,
 // contracts_to_deploy triggers a deterministic error during initial validation,
 // returning before check_all_consumed(). Unused proposal bits must still be
 // detected as a validation failure.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        InvalidAttachedContractChecksUnusedProposalBits)
 {
   auto native_context = make_noop_context();
@@ -1499,7 +1485,7 @@ TEST_P(ProposeValidateRoundtripTest,
 // proposer-attributable ValidationFailure rather than the Unrecoverable that
 // proposal mode reports -- a peer must not be able to induce an internal
 // error on every validating node.
-TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -1524,7 +1510,7 @@ TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
 
 // Regression test for issue #2063: verify that unused queue entry observations
 // are also detected when initial validation fails before root execution.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        InvalidAttachedContractChecksUnusedQueueObservations)
 {
   auto native_context = make_noop_context();
@@ -1562,7 +1548,7 @@ TEST_P(ProposeValidateRoundtripTest,
 // Regression test for issue #2063: when initial validation itself reports
 // ValidationFailure (malformed proposal shape), adding extra unused data
 // should still result in ValidationFailure, not get downgraded.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        MalformedProposalShapeWithExtraDataStillValidationFailure)
 {
   auto native_context = make_noop_context();
@@ -1583,7 +1569,7 @@ TEST_P(ProposeValidateRoundtripTest,
             ExecResult::ExecResultTxValidationFailure);
 }
 
-TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
+TEST_F(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 {
   auto tx = make_invoke_a_tx(0);
 
@@ -1654,11 +1640,8 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
 // concurrent entry then overwrites the key with a bytestring.
 // Observation key has a bytestring delta, not RCQ → conflict.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10} into rcq0, commit (same block).
@@ -1720,11 +1703,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
 // concurrent entry then deletes the key.
 // Observation key has a delete delta, not RCQ → conflict.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1781,11 +1761,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
 // concurrent entry then consumes it.  The observation is covered by
 // current_block_consumed → success.
-TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
+TEST_F(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1845,11 +1822,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B only peeks at the
 // concurrent entry, does nothing else.  An observation-only RCQ delta is
 // emitted for the key (not in modified_items_) and validated by HogDb.
-TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
+TEST_F(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1903,11 +1877,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
 // contract B consumes from "rcq0" then faults (frame reverts).
 // Contract A catches the fault via try_invoke, then re-consumes from
 // "rcq0" itself.  The re-consume in A succeeds → commit should succeed.
-TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
+TEST_F(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1979,12 +1950,9 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
 // so no observation is generated, and the transaction commits cleanly.
 // Contrast with ConsumeInRevertedFrameReconsumeSucceeds where A's
 // subsequent root-frame re-consume DOES observe the concurrent entry.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ConsumeInRevertedFrameNoReconsumeCommitsCleanly)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2053,11 +2021,8 @@ TEST_P(ProposeValidateRoundtripTest,
 // concurrent entry then overwrites the key with a bytestring.
 // Peek without consume means retrocausally_consumed_count=0, so
 // subspan keeps the full observation.  Type conflict fires.
-TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2117,11 +2082,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
 // concurrent entry then overwrites the key with set_nnint.
 // Same conflict as PeekThenBytestringOverwriteConflicts but via NNInt.
-TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2182,11 +2144,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
 // TX_B consumes one entry then peeks the next.
 // The consumed entry goes into current_block_consumed; the peeked entry
 // goes into observed_concurrent_entries.  Both should succeed.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entries {10} and {20}, commit.
@@ -2248,11 +2207,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
 // The consume gets the self-inserted entry (step 2 in get_next_item),
 // never reaching concurrent entries (step 3).  No nondeterministic bits
 // or observations should be generated.
-TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
+TEST_F(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // Single TX: insert then consume from the same key.
   auto self_insert_consume_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -2299,11 +2255,8 @@ TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 // observation-only delta records observed_concurrent_entries={0xFF}.
 // Block close: HogDb checks that every observed entry was actually
 // inserted by some TX.  {0xFF} was never inserted → reject_block.
-TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
+TEST_F(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2364,11 +2317,8 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
 // TX_B: contract A try_invokes B (which peeks at kAddrB's "rcq0"),
 // B returns success.  The peek observation at kAddrB is logged in the
 // child frame and promoted to the parent on success.  Commit succeeds.
-TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
+TEST_F(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // First, insert {10} into kAddrB's "rcq0" via a simple insert contract.
   auto insert_contract_b = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -2454,11 +2404,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 // (gets {10} from past block), then peeks (gets {20} from concurrent).
 // Past-block consume does not generate an observation; the peek does.
 // Both should succeed.
-TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
+TEST_F(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // Block 1: insert {10}, commit, advance.
@@ -2529,12 +2476,9 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
 // concurrent RCQ entry at kAddrB and faults. The observation persists in
 // queue_entry_observations_. Root A does nothing with that key. The
 // observation must be emitted as an observation-only delta for kAddrB.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ConsumeInRevertedFrameWithConcurrentEntryEmitsObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -2619,12 +2563,9 @@ TEST_P(ProposeValidateRoundtripTest,
 // conflict), so the nondeterministic bit is false.  A malicious proposer
 // doctors the bit to true.  In validation mode, finish_frame must detect
 // the observation/type mismatch and return ValidationFailure.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DoctoredTryInvokeBitOnObservedKeyReturnsValidationFailure)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   //    method 1 = write bytestring to "rcq0".
   auto b_contract = make_contract(
@@ -2744,11 +2685,8 @@ TEST_P(ProposeValidateRoundtripTest,
 // should still pass (bits and observations were consumed from the stream).
 // The real question is whether the block finalizes without catching the
 // suppressed observation.
-TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
+TEST_F(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = peek at "rcq0", return success.
   auto b_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -2844,12 +2782,9 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
 // Same as DoctoredTryInvokeBitFalseDropsObservation, but the concurrent
 // insert is NOT replayed in validation mode.  The observation-only delta
 // reaches HogDb with no matching insert → block rejected.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DoctoredTryInvokeBitFalseNoInsertRejectsBlock)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto b_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
@@ -2924,11 +2859,8 @@ TEST_P(ProposeValidateRoundtripTest,
 // (parent's value is restored on revert), all three observe at index 0
 // and hit the same cached entry in queue_entry_observations_.  The
 // observation count should be 1 (not 3), so a single insert suffices.
-TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
+TEST_F(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -3014,7 +2946,7 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
 
 // #1946: two peeks of one current-block position log two presence bits but
 // hold one entry, so present-then-absent is a proposal no honest run makes.
-TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
+TEST_F(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
 {
   // Bit 4 set: first peek saw an entry. Bit 0 set: second peek saw an entry.
   uint8_t peeks_seen = 0;
@@ -3101,12 +3033,9 @@ TEST_P(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
 
 // Absent-then-present variant of #1946: per-tx replay accepts it (a producer
 // may appear between reads); block close rejects it, since no insert matches.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        RCQRepeatedPeekAbsentThenPresentWithoutProducerFailsBlockClose)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "observation matching requires kHogDb";
-
   static const QueueEntry kFabricatedEntry{1, 2, 3, 4};
 
   auto contract = make_contract([](NativeSyscallContext &ctx)
@@ -3167,11 +3096,6 @@ TEST_P(ProposeValidateRoundtripTest,
       << "Block close must reject the fabricated peek observation, which no "
          "insert in the block matches";
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

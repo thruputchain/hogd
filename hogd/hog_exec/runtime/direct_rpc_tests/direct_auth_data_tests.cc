@@ -24,12 +24,12 @@ namespace hogd {
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-class DirectAuthDataTest : public ::testing::TestWithParam<TestDB>,
+class DirectAuthDataTest : public ::testing::Test,
                            public NativeContractTestFramework {
 public:
   DirectAuthDataTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override { cost_model_ = get_default_cost_model(); }
@@ -79,7 +79,7 @@ public:
   const StorageCostModel *cost_model_;
 };
 
-TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
+TEST_F(DirectAuthDataTest, BasicAuthDataCreation)
 {
   // Test basic creation of auth data
   auto contract_addr = make_contract_address(0);
@@ -100,12 +100,8 @@ TEST_P(DirectAuthDataTest, BasicAuthDataCreation)
   ASSERT_TRUE(tx1.commit_transaction()());
 }
 
-TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
+TEST_F(DirectAuthDataTest, AuthDataDoubleWrite)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);
@@ -141,7 +137,7 @@ TEST_P(DirectAuthDataTest, AuthDataDoubleWrite)
             auth_data.auth_data_change_signers[0].public_key->key);
 }
 
-TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
+TEST_F(DirectAuthDataTest, AuthDataStorageCosts)
 {
   // Test that auth data creation incurs proper storage costs
   auto contract_addr = make_contract_address(0);
@@ -195,7 +191,7 @@ TEST_P(DirectAuthDataTest, AuthDataStorageCosts)
             auth_data.auth_data_change_signers[1].public_key->key);
 }
 
-TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
+TEST_F(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -237,7 +233,7 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataNonconflicting)
             auth_data2.auth_data_change_signers[0].public_key->key);
 }
 
-TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
+TEST_F(DirectAuthDataTest, AuthDataTryInvoke)
 {
   auto contract_addr = make_contract_address(0);
   auto contract_addr_ref = make_contract_address(1);
@@ -305,12 +301,8 @@ TEST_P(DirectAuthDataTest, AuthDataTryInvoke)
   ASSERT_EQ(db_auth_data, db_auth_data_ref);
 }
 
-TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
+TEST_F(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);
@@ -393,13 +385,12 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataConcurrentLocks)
                 kInitialBalance - (cost_model_->get_auth_data_cost(1)));
 }
 
-TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
+TEST_F(DirectAuthDataTest, AuthDataMarginalCosts)
 {
-  if (GetParam() == TestDB::kHogDb) {
-    GTEST_SKIP()
-        << "Auth data concurrent modifications not supported in HogDb yet";
-    return;
-  }
+  GTEST_SKIP()
+      << "Auth data concurrent modifications not supported in HogDb yet";
+  return;
+
   // This test would fail if tx2 were to be charged more than the marginal cost
   // of adding two new keys.
   auto contract_addr = make_contract_address(0);
@@ -457,13 +448,12 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts)
   check_balance(contract_addr, 0);
 }
 
-TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
+TEST_F(DirectAuthDataTest, AuthDataMarginalCosts2)
 {
-  if (GetParam() == TestDB::kHogDb) {
-    GTEST_SKIP()
-        << "Auth data concurrent modifications not supported in HogDb yet";
-    return;
-  }
+  GTEST_SKIP()
+      << "Auth data concurrent modifications not supported in HogDb yet";
+  return;
+
   // This test would fail if tx2 were to be charged more than the marginal cost
   // of adding two new keys.
   auto contract_addr = make_contract_address(0);
@@ -522,12 +512,8 @@ TEST_P(DirectAuthDataTest, AuthDataMarginalCosts2)
   check_balance(contract_addr, 0);
 }
 
-TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
+TEST_F(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
-    return;
-  }
   AuthDataChangeArgs auth_data_init{};
   auth_data_init.auth_data_change_signers.push_back(
       {0, make_pk_config(Weight{1})});
@@ -654,12 +640,8 @@ TEST_P(DirectAuthDataTest, DISABLED_AuthDataInterleavings)
   }
 }
 
-TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
+TEST_F(DirectAuthDataTest, AcquireInExclusiveMode)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);
@@ -695,12 +677,8 @@ TEST_P(DirectAuthDataTest, AcquireInExclusiveMode)
 // exclusive mode, as it is without the flag. The refusal has to come at
 // reservation: a conflict first seen when the change commits lands after the
 // transaction's balance changes are committed and poisons the whole block.
-TEST_P(DirectAuthDataTest, ExclusiveModeRefusesDuplicateSignerAtReservation)
+TEST_F(DirectAuthDataTest, ExclusiveModeRefusesDuplicateSignerAtReservation)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Auth data shared locks not supported in MockInMemory";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
   setup_grant_storage_token(contract_addr, kInitialBalance);
@@ -764,10 +742,5 @@ TEST_P(DirectAuthDataTest, ExclusiveModeRefusesDuplicateSignerAtReservation)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DirectAuthDataTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

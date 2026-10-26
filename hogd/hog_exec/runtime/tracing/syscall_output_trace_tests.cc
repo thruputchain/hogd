@@ -182,8 +182,7 @@ class SyscallOutputTraceTest : public ::testing::Test,
 public:
   SyscallOutputTraceTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

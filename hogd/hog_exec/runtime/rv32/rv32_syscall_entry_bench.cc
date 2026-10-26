@@ -534,7 +534,6 @@ private:
   NativeContractTestFramework framework_{
       /*log=*/false,
       BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb,
       /*empty_genesis=*/true,
       /*genesis_cost_model=*/std::nullopt,
       bench_network_config(),

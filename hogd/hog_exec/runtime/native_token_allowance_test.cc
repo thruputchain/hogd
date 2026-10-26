@@ -55,8 +55,7 @@ class NativeTokenAllowanceTest : public ::testing::Test,
 public:
   NativeTokenAllowanceTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

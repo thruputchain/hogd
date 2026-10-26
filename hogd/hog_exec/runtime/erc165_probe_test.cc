@@ -51,8 +51,7 @@ class Erc165ProbeTest : public ::testing::Test,
 public:
   Erc165ProbeTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

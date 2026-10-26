@@ -6,8 +6,6 @@
 // replay cache, keyed by the root invoked address. This holds for the success,
 // manual-revert, and deterministic-fault outcomes; only a replay-cache conflict
 // (a duplicate or expired nonce) leaves the transaction not included.
-//
-// These run against HogDb; MockInMemory does not implement the replay cache.
 
 #include <gtest/gtest.h>
 
@@ -44,8 +42,7 @@ class ReplayCacheIntegrationTest : public ::testing::Test,
 public:
   ReplayCacheIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   // method 0: success (no-op)

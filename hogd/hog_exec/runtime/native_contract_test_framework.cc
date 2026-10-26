@@ -5,7 +5,6 @@
 #include <format>
 #include <memory>
 #include <utility>
-#include <variant>
 
 #include "consensus.hh"
 #include "contract.hh"
@@ -108,10 +107,8 @@ NativeContractTestFramework::reject_block(BlockExecutionMode mode)
   // Verify DAO is unchanged: since prepare failed before any mutation,
   // the db hash must be identical to what it was before the block. Read the
   // dbtip directly from the DAO rather than through the executor RPC: after
-  // abandon, the per-block executor view of the tip is Abandon. Reading
-  // through the DAO means reject_block only works with HogdbWrapper.
-  assert(std::holds_alternative<HogdbWrapper>(db_wrapper_));
-  auto tip_after = std::get<HogdbWrapper>(db_wrapper_).get_db().read_dbtip();
+  // abandon, the per-block executor view of the tip is Abandon.
+  auto tip_after = db_wrapper_.get_db().read_dbtip();
   if (!tip_after) {
     panic("reject_block: failed to read dbtip from DAO after abandon");
   }
@@ -198,11 +195,7 @@ NativeContractTestFramework::setup_grant_storage_token(
 {
   assert(amount >= 0);
 
-  std::visit(
-      [&](auto &db_wrapper) {
-        db_wrapper.grant_storage_token(address, amount);
-      },
-      db_wrapper_);
+  db_wrapper_.grant_storage_token(address, amount);
 }
 
 void
@@ -210,32 +203,20 @@ NativeContractTestFramework::write_item(
     AddressAndKey const &addrkey,
     std::shared_ptr<const StorageItemWrapper> item)
 {
-  std::visit(
-      [&](auto &db_wrapper) {
-        db_wrapper.write_item(addrkey, std::move(item));
-      },
-      db_wrapper_);
+  db_wrapper_.write_item(addrkey, item);
 }
 void
 NativeContractTestFramework::write_contract(
     std::shared_ptr<const Contract> const &contract)
 {
-  std::visit(
-      [&](auto &db_wrapper) {
-        db_wrapper.write_contract(sha256(*contract), contract);
-      },
-      db_wrapper_);
+  db_wrapper_.write_contract(sha256(*contract), contract);
 }
 void
 NativeContractTestFramework::write_deployment(
     ContractAddress const &addr, DeployedContractHash const &deployment,
     StorageCostModel const *cost_model)
 {
-  std::visit(
-      [&](auto &db_wrapper) {
-        db_wrapper.write_deployment(addr, deployment, cost_model);
-      },
-      db_wrapper_);
+  db_wrapper_.write_deployment(addr, deployment, cost_model);
 }
 
 void

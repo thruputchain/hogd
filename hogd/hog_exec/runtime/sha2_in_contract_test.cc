@@ -26,8 +26,7 @@ class Sha2InContractTest : public ::testing::Test,
 public:
   Sha2InContractTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

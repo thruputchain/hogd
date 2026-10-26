@@ -183,7 +183,7 @@ public:
   Erc20ParityTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/true,
+          /*empty_genesis=*/true,
           /*genesis_cost_model=*/zero_cost_model_xdr())
   {}
 

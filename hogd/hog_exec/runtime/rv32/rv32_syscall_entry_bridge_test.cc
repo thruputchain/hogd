@@ -133,8 +133,7 @@ class Rv32SyscallEntryBridgeTest : public ::testing::Test,
 public:
   Rv32SyscallEntryBridgeTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

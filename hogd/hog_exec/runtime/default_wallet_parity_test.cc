@@ -96,8 +96,7 @@ class DefaultWalletParityTest : public ::testing::Test,
 public:
   DefaultWalletParityTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

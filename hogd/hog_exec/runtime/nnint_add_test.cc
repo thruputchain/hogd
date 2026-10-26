@@ -38,8 +38,7 @@ class NNIntAddTest : public ::testing::Test,
 public:
   NNIntAddTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
