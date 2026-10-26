@@ -73,9 +73,10 @@ struct LlcLane {
 };
 
 // The lanes, one per LLC this process may run on.  There are none where
-// there is one such LLC, since default_threadpool() is then already one, or
-// where CPU affinity is unavailable.  Built on first use and never
-// destroyed: work may still be queued on them when the process exits.
+// there is one such LLC, since default_threadpool() is then already one, where
+// DEFAULT_THREADPOOL_SIZE sets the worker count, or where CPU affinity is
+// unavailable.  Built on first use and never destroyed: work may still be
+// queued on them when the process exits.
 class LlcLanes {
 public:
   static LlcLanes &get()
@@ -107,11 +108,18 @@ private:
     x23::init_cpumaps();
 #if HAVE_SCHED_SETAFFINITY
     std::vector<std::pair<int, x23::CpuSet>> llcs;
+    size_t ncpus = 0;
     for (int i = 0; i < x23::llc_map->nbuckets(); i++)
       if (auto cpus = x23::llc_map->cpuset(i) & *x23::allowed_cpus;
-          cpus.count())
+          cpus.count()) {
+        ncpus += static_cast<size_t>(cpus.count());
         llcs.emplace_back(i, cpus);
-    if (llcs.size() < 2)
+      }
+    // The lanes run one worker per allowed CPU.  A DEFAULT_THREADPOOL_SIZE
+    // that asks for another count (available_parallelism()), as the
+    // single-thread stress tests do, keeps everything on default_threadpool(),
+    // which honors it.
+    if (llcs.size() < 2 || available_parallelism() != ncpus)
       return;
     by_llc_.resize(x23::llc_map->nbuckets());
     for (auto &[llc, cpus] : llcs) {
