@@ -442,6 +442,12 @@ public:
   void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
+  // Records and returns the load cost of the snapshot read the RCQ call about
+  // to run on [key] makes, if any: kDBRPCCost on a cold first touch, else 0.
+  // Call it before the operation, which may change the key's view. [insert]
+  // because insert also reads the snapshot to replace an other-typed value.
+  [[nodiscard]] GasAmount
+  note_retrocausal_queue_load(StorageKeyContractData const &key, bool insert);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);

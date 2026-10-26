@@ -2132,6 +2132,29 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
 }
 } // namespace
 
+GasAmount
+SystemCallHandler::note_retrocausal_queue_load(
+    StorageKeyContractData const &key, bool insert)
+{
+  const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
+  assert(item_view);
+
+  // Mirrors where the RCQ paths reach the snapshot: ensure_loaded() on a cold
+  // UnmodifiedItem, and make_replaced_key_queue_item() on a deleted key -- or,
+  // for an insert, on any other non-queue value.
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    return unmodified_item->is_loaded() ? 0 : note_item_load(item_key);
+  }
+  if (item_view->get<RetrocausalQueueItem>()) {
+    return 0;
+  }
+  if (insert || item_view->get<DeletedItem>()) {
+    return note_item_load(item_key);
+  }
+  return 0;
+}
+
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::retrocausal_queue_insert(
     StorageKeyContractData const &key, std::span<const std::byte> queue_entry)

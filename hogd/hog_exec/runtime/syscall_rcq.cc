@@ -22,6 +22,10 @@ syscall_RetrocausalQueueInsert_inner(
     SystemCallHandler &syscall_handler, StorageKeyContractData const &input_key,
     std::span<const std::byte> input_queue_entry)
 {
+  // Billed on every syscall-visible exit: the load has happened by the time
+  // a missing or wrong-typed key is detected. See syscall_BytestringGet.
+  const GasAmount load_gas =
+      syscall_handler.note_retrocausal_queue_load(input_key, /*insert=*/true);
   auto status =
       co_await syscall_handler.retrocausal_queue_insert(input_key,
                                                         input_queue_entry);
@@ -32,11 +36,11 @@ syscall_RetrocausalQueueInsert_inner(
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult
@@ -46,6 +50,10 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
                                       std::span<std::byte> output_queue_entry,
                                       RuntimeMemoryLength &output_written_len)
 {
+  // Billed on every syscall-visible exit: the load has happened by the time
+  // a missing or wrong-typed key is detected. See syscall_BytestringGet.
+  const GasAmount load_gas =
+      syscall_handler.note_retrocausal_queue_load(input_key, /*insert=*/false);
   auto status =
       co_await syscall_handler.retrocausal_queue_consume(input_key, input_peek);
   if (!status) {
@@ -55,7 +63,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -72,7 +80,7 @@ syscall_RetrocausalQueueConsume_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -80,7 +88,10 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
                                       const StorageKeyContractData &input_key,
                                       RuntimeMemoryLength &output_len)
 {
-
+  // Billed on every syscall-visible exit: the load has happened by the time
+  // a missing or wrong-typed key is detected. See syscall_BytestringGet.
+  const GasAmount load_gas =
+      syscall_handler.note_retrocausal_queue_load(input_key, /*insert=*/false);
   auto status =
       co_await syscall_handler.retrocausal_queue_consume(input_key,
                                                          /*peek=*/true);
@@ -91,7 +102,7 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   auto &rcq_syscall_status = *status;
   if (!rcq_syscall_status) {
     co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+                                 WrappedGasAmount{load_gas}};
   }
 
   auto const &queue_entry = *rcq_syscall_status;
@@ -105,7 +116,7 @@ syscall_RetrocausalQueuePeekLen_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{load_gas}};
 }
 
 } // namespace hogd
