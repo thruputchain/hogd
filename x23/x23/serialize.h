@@ -568,8 +568,9 @@ serialize(const is_xdr_serializable auto &...x)
 // number of bytes beyond the end of the buffer to bufend().  Bytes
 // between the end and bufend() may be uninitialized (e.g., spare Buf
 // capacity).  The Deserializer intentionally reads them to elide bounds
-// checks on truncated input, but then throws XdrBadInput, so the garbage
-// is never observed.  MemorySanitizer will (spuriously) flag such reads.
+// checks on truncated input, but then throws XdrBadInput.  The output
+// object may already hold garbage, so must not be used after a throw.
+// MemorySanitizer will (spuriously) flag such reads.
 class BufViewEnd : public BufView {
 public:
   BufViewEnd(const Buf &b) noexcept
