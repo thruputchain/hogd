@@ -221,6 +221,8 @@ raw_int128_le_bytes(int128_t value)
 }
 
 constexpr uint64_t kAddress = 0xdeadbeef;
+// The recovered tip height handed to startup native-token age reconciliation.
+constexpr BlockHeight kCommittedHeight = 100;
 
 NativeTokenAge
 make_native_token_age(const Address &addr, uint128_t to_schedule,
@@ -1081,7 +1083,7 @@ TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kCommittedHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
@@ -1110,7 +1112,7 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kCommittedHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
@@ -1139,7 +1141,7 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kCommittedHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
@@ -1162,7 +1164,8 @@ TEST_F(
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 10));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
@@ -1180,7 +1183,8 @@ TEST_F(
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
@@ -1197,7 +1201,8 @@ TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationFailsWhenBalanceIsNegative)
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
@@ -1220,7 +1225,8 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
@@ -1243,7 +1249,31 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
+  ASSERT_FALSE(status.has_value());
+  EXPECT_EQ(status.error(), HogDbCode::kInternal);
+}
+
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationFailsWhenAverageAgeIsAboveTip)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 10));
+
+  // As with a negative average, counts sum to the balance, so only the
+  // average-age check can catch this. An average above the committed tip sorts
+  // the account behind every valid age in the scheduler's ready-account key.
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/5,
+                            /*already_scheduled=*/3,
+                            /*received=*/2,
+                            /*to_schedule_age=*/kCommittedHeight + 1,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
+
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kCommittedHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }

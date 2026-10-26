@@ -5,6 +5,9 @@
 
 namespace hogd {
 
-HogDbStatus<void> reconcile_startup_native_token_ages(HogDbDAO &db);
+// [committed_height] is the recovered committed tip's height (-1 for a fresh
+// database); no valid average age exceeds it.
+HogDbStatus<void>
+reconcile_startup_native_token_ages(HogDbDAO &db, BlockHeight committed_height);
 
 } // namespace hogd

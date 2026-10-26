@@ -161,8 +161,8 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
-  HogDbStatus<void> reconcile_status =
-      reconcile_startup_native_token_ages(ctx.get_db());
+  HogDbStatus<void> reconcile_status = reconcile_startup_native_token_ages(
+      ctx.get_db(), ctx.get_tip().value.proposal_header.block_height);
   if (!reconcile_status.has_value()) {
     critical("Failed to reconcile startup native-token ages: {}",
              reconcile_status.error());

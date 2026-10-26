@@ -1125,8 +1125,8 @@ HogDevnodeNode::init_db_backend(
     // this process started. hog-db's own main does this at startup; a composed
     // devnode has to as well, or every account reads zero native tokens
     // available and the scheduler discards every transaction it is handed.
-    HogDbStatus<void> reconciled =
-        reconcile_startup_native_token_ages(ctx_->get_db());
+    HogDbStatus<void> reconciled = reconcile_startup_native_token_ages(
+        ctx_->get_db(), ctx_->get_tip().value.proposal_header.block_height);
     if (!reconciled.has_value()) {
       throw std::runtime_error(
           std::format("failed to reconcile startup native-token ages: {}",
