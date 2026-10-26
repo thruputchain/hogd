@@ -56,8 +56,10 @@ public:
 // pinned, a job moves to another LLC's queue when that queue is staler, and
 // an idle worker steals from any queue, so a transaction's coroutines run on
 // whichever L3 is free and its caches follow it around.  On the multiexec
-// benchmark (64 cores, 8 L3s) one hog-exec ran 37% faster with its
-// transaction work in lanes, much as Whitney's one hog-exec per L3 did.
+// benchmark (64 cores, 8 L3s) one hog-exec ran about 30% faster with each
+// connection's work in one lane, much as Whitney's one hog-exec per L3 did.
+// Dealing requests rather than connections over the lanes kept only a third
+// of that: a request then crosses L3s between its reader and its lane.
 struct LlcLane {
   LlcLane(int llc, const x23::CpuSet &cpus, size_t ncpus, unsigned cpu)
     : llc(llc), cpu(cpu), pool(ncpus, cpus), cp(pool, cpus)
@@ -147,18 +149,6 @@ current_threadpool()
   if (x23::ThreadPool *pool = x23::ThreadPool::get_thread_pool())
     return *pool;
   return default_threadpool();
-}
-
-// co_await enter_next_lane() moves the calling coroutine into the next lane,
-// round robin, or into default_threadpool() if there are no lanes.  Each
-// request a hog-exec serves enters a lane this way, so its load spreads over
-// the lanes however many connections it arrives on.
-inline auto
-enter_next_lane()
-{
-  if (LlcLane *lane = LlcLanes::get().next())
-    return lane->pool.bg(lane->cpu);
-  return default_threadpool().bg();
 }
 
 // The first CPU in cpus this process may run on, if any.

@@ -99,8 +99,8 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   // connection waits behind it.  This is also what earns the coroutine frame
   // -- the body cannot simply return run_view_with_retries(...), because that
   // takes its query by reference and would be left pointing at this frame's
-  // local once the frame went away.  Like those, it enters the next LLC lane.
-  co_await enter_next_lane();
+  // local once the frame went away.
+  co_await current_threadpool().bg();
   query = normalize_public_view_query(std::move(query));
   co_return co_await run_view_with_retries(query);
 }
@@ -109,7 +109,7 @@ x23::Async<ViewGatewayBatchResult>
 ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
 {
   const auto received = std::chrono::steady_clock::now();
-  co_await enter_next_lane();
+  co_await current_threadpool().bg();
   if (query.calls.empty() || query.budget_millis == 0 ||
       query.max_response_bytes == 0 ||
       (query.min_height && *query.min_height < 0)) {

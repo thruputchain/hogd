@@ -119,6 +119,13 @@
 
 namespace x23 {
 
+// Where an RPC stream runs: the CoroPoll that polls its socket, and
+// optionally a CPU whose LLC its reader starts on (see RpcStream::go()).
+struct StreamPlacement {
+  CoroPoll &cp;
+  std::optional<unsigned> reader_cpu = std::nullopt;
+};
+
 struct RpcService {
   virtual ~RpcService() = default;
   virtual std::uint32_t program() const = 0;
@@ -420,11 +427,20 @@ struct RpcStream : public detail::RpcStreamImpl {
                                                       ea)...);
   }
 
+  // Before go(): have the reader move to cpu's LLC before its first read.
+  void set_reader_cpu(std::optional<unsigned> cpu) noexcept
+  {
+    reader_cpu_ = cpu;
+  }
+
+  // Start the reader.  With reader_cpu, or one set by set_reader_cpu(), it
+  // moves to that CPU's LLC before its first read.
   void go(std::optional<unsigned> reader_cpu = std::nullopt)
   {
     if (!reader_running_) {
       reader_running_ = true;
-      reader_cpu_ = reader_cpu;
+      if (reader_cpu)
+        reader_cpu_ = reader_cpu;
       reader();
     }
   }
@@ -552,12 +568,8 @@ struct RpcMulticlient : RefCount,
     return this->lookup()->template send_call<ProcMeta>(args...);
   }
 
-  // Where one connection of the multiclient runs: the CoroPoll that polls
-  // its socket, and optionally the CPU its reader starts from.
-  struct Placement {
-    CoroPoll &cp;
-    std::optional<unsigned> reader_cpu = std::nullopt;
-  };
+  // Where one connection of the multiclient runs.
+  using Placement = StreamPlacement;
 
   static ClientRef make(CoroPoll &cp, const struct sockaddr_storage &ss,
                         const CpuMap &map = *llc_map,
@@ -630,19 +642,32 @@ rpc_stream_logged(CoroPoll &cp, int fd, int logfd = RpcLogger::default_logfd)
   return RpcStream<Logger>::make(cp, UniqueFd{fd}, Logger(fd, logfd));
 }
 
+// Accept connections on lfd, polled by cp, and invoke cb with a configurator
+// for each.  place() picks each accepted stream's StreamPlacement: the
+// CoroPoll that polls it, which need not be cp, and the CPU its reader starts
+// on.
 inline void
-start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb)
+start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb, std::invocable auto place)
 {
-  [&cp, lfd = std::move(lfd),
-   cb = std::move(cb)](this auto /*copy*/) -> Detached {
+  [&cp, lfd = std::move(lfd), cb = std::move(cb),
+   place = std::move(place)](this auto /*copy*/) -> Detached {
     Defer _resetfd{[&lfd, &cp] { cp.reset(lfd); }};
     while (auto c = co_await (cp.accept(lfd))) {
+      const StreamPlacement where = place();
       server_trace().with_logger(*c, [&](auto logger) {
-        std::invoke(cb, RpcStream<decltype(logger)>::make(cp, UniqueFd{*c},
-                                                          std::move(logger)));
+        auto conf = RpcStream<decltype(logger)>::make(where.cp, UniqueFd{*c},
+                                                      std::move(logger));
+        conf->set_reader_cpu(where.reader_cpu);
+        std::invoke(cb, std::move(conf));
       });
     }
   }();
+}
+inline void
+start_listening(CoroPoll &cp, UniqueFd &lfd, auto cb)
+{
+  start_listening(cp, lfd, std::move(cb),
+                  [&cp] { return StreamPlacement{.cp = cp}; });
 }
 // Listen on a TCP port, and for each incoming connection invoke a
 // callback with a new configurator.  Sets logging based on the

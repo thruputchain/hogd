@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstdint>
+#include <vector>
 
 #include "x23/async.h"
 #include "x23/config.h"
@@ -150,6 +152,74 @@ TEST(RpcMulticlient, PlacementPicksEachConnectionsCoroPollAndReaderCpu)
   }
 
   server_cp.poison(fd);
+  di.destroy_wait();
+}
+
+// Serves echo by returning the index of the pool it ran in.
+struct PoolServer {
+  using rpc_service = blank_rpc_v1;
+  static inline std::array<ThreadPool *, 2> pools{};
+
+  static Async<void> null() { co_return; }
+  static Async<Data> echo(Data /*arg*/)
+  {
+    ThreadPool *pool = ThreadPool::get_thread_pool();
+    co_return Data{static_cast<std::uint8_t>(pool == pools[1] ? 1 : 0),
+                   static_cast<std::uint8_t>(pool == pools[0] ||
+                                             pool == pools[1])};
+  }
+};
+static_assert(is_blank_rpc_v1<PoolServer *, Async>);
+
+TEST(StartListening, PlacementPutsEachAcceptedStreamOnItsCoroPoll)
+{
+  unsigned cpu = 0;
+  while (!allowed_cpus->isset(cpu))
+    ++cpu;
+
+  ThreadPool listen_pool(2);
+  ThreadPool pool0(2);
+  ThreadPool pool1(2);
+  CoroPoll listen_cp(listen_pool);
+  CoroPoll cp0(pool0);
+  CoroPoll cp1(pool1);
+  PoolServer::pools = {&pool0, &pool1};
+  PoolServer impl;
+  DestroyInhibit di;
+
+  auto lfd = tcplisten(0, 16);
+  const std::uint16_t port = get_port(local_addr(lfd));
+  const int rawfd = lfd.get();
+  int accepted = 0;
+  std::vector<CoroPoll *> placed;
+  start_listening(
+      listen_cp, lfd,
+      [&impl, &placed, _d = RefPtr(di)](auto c) {
+        placed.push_back(c->cp_.get());
+        c->server(&impl, blank_rpc_v1{});
+      },
+      [&] {
+        return StreamPlacement{.cp = (accepted++ % 2) ? cp1 : cp0,
+                               .reader_cpu = cpu};
+      });
+
+  // One call per connection, each before the next connects, so they are
+  // accepted in order.
+  auto addr = HostPort{"localhost", port}.to_addr(true);
+  ASSERT_TRUE(addr.has_value());
+  for (int i = 0; i < 4; ++i) {
+    auto fd = tcpconnect(*addr);
+    ASSERT_TRUE(fd.has_value());
+    auto cs = RpcStream<>::make(listen_cp, std::move(*fd));
+    auto result = cs->client(blank_rpc_v1{}).echo(Data{})();
+    EXPECT_EQ(result, (Data{static_cast<std::uint8_t>(i % 2), 1}))
+        << "connection " << i;
+  }
+  ASSERT_EQ(placed.size(), 4U);
+  for (int i = 0; i < 4; ++i)
+    EXPECT_EQ(placed[i], (i % 2) ? &cp1 : &cp0) << "connection " << i;
+
+  listen_cp.poison(rawfd);
   di.destroy_wait();
 }
 #endif // HAVE_SCHED_SETAFFINITY
