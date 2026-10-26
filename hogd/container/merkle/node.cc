@@ -330,8 +330,10 @@ SHA256Hash
 Node::compute_node_hash() const
 {
   if (type == Type::kLeaf) {
-    CHECK(value_hash().has_value());
-    return value_hash().value();
+    if (const auto &leaf_hash = value_hash()) {
+      return *leaf_hash;
+    }
+    panic("Leaf node has no value commitment.");
   }
   SHA256Hasher hasher;
   auto update_hash = [&](std::span<const std::byte> bytes) {
