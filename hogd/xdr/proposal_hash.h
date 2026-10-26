@@ -13,6 +13,13 @@ namespace hogd {
 // Compatibility behavior for chuckd's proposal hash. This is intentionally not
 // SHA-256 of canonical ProposalTxs XDR; changing it requires a protocol
 // migration.
+//
+// XOR-ing segment digests makes the hash insensitive to the order of segments
+// with equal token and byte counts, so reordered payloads can share a
+// ConsensusValue. This is harmless: validation replays the payload in the order
+// given and requires the resulting storage, config, and events roots to match
+// the proposal header, so payloads sharing a ConsensusValue commit the same
+// state.
 inline SHA256Hash
 hash_parallel_batch_compatibility(const ParallelBatch &batch)
 {
