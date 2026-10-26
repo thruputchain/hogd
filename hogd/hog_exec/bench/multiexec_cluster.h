@@ -468,6 +468,15 @@ public:
 
   size_t num_executors() const { return exec_cards_.size(); }
 
+  // Executor i's host, as connect_exec_clients() dials it.
+  std::string exec_host(size_t i) const
+  {
+    x23::HostPort host_port;
+    if (!host_port.parse(exec_cards_[i].address))
+      return "?";
+    return std::string(host_port.host.data(), host_port.host.size());
+  }
+
   // Where executors reach hog-db, for a client that wants to read from it
   // the way they do.
   const x23::HostPort &db_exec_addr() const { return db_exec_addr_; }

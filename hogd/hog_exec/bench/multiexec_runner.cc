@@ -1,6 +1,8 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -20,6 +22,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/indexer_latency_probe.h"
+#include "hogd/hog_exec/bench/load_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
 #include "hogd/init.h"
@@ -67,13 +70,14 @@ x23::Detached
 connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
                 x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
                 std::atomic<size_t> &n_total_coros,
-                x23::XdrVec<NondeterministicProposalData> *nominations)
+                x23::XdrVec<NondeterministicProposalData> *nominations,
+                ConnectionLoad *load)
 {
   auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
                  BlockValidationQueue *queue, BlockID block_number,
                  std::atomic<size_t> &n_total_coros,
-                 x23::XdrVec<NondeterministicProposalData> *nominations)
-      -> x23::Detached {
+                 x23::XdrVec<NondeterministicProposalData> *nominations,
+                 ConnectionLoad *load) -> x23::Detached {
     co_await default_threadpool().bg();
     while (true) {
       auto batch = queue->next_batch();
@@ -84,8 +88,10 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
         co_return;
       }
 
+      const auto sent = x23::fastclock::now();
       auto r = co_await exec_client.executorsched_propose_batch(block_number,
                                                                 batch.txs);
+      load->record(batch.txs.size(), x23::fastclock::now() - sent);
       assert(r.size() == batch.txs.size());
       for (size_t i = 0; i < r.size(); ++i) {
         const ExecProposeResult &result = r[i];
@@ -98,10 +104,52 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
   };
 
   for (int i = 0; i < ncoro; i++) {
-    coro(exec_client, cb, queue, block_number, n_total_coros, nominations);
+    coro(exec_client, cb, queue, block_number, n_total_coros, nominations,
+         load);
   }
   co_return;
 };
+
+// Where the propose phase's throughput went: for each executor, its share of
+// the block, its rate and its mean batch round trip; and the runner's own CPU
+// use, with its busiest threads.  Connection i serves executor
+// i % num_executors() (MultiexecCluster::connect_exec_clients()).  An
+// executor whose round trip stays flat while its rate falls is waiting on
+// the runner, not the other way round.
+void
+print_load(const MultiexecCluster &cluster,
+           const std::vector<ConnectionLoad> &loads, size_t block_txs,
+           const ThreadCpuSnapshot &cpu_before,
+           std::chrono::nanoseconds elapsed)
+{
+  const double wall_s = std::chrono::duration<double>(elapsed).count();
+  const ThreadCpuUse cpu =
+      thread_cpu_use(cpu_before, thread_cpu_snapshot(), wall_s);
+  std::string busiest;
+  for (const auto &[cores, thread] : cpu.busiest)
+    busiest += std::format(" {}={:.2f}", thread, cores);
+  std::println("load: runner_cores={:.2f} busiest:{}", cpu.cores, busiest);
+
+  const size_t nexec = cluster.num_executors();
+  for (size_t e = 0; e < nexec; e++) {
+    uint64_t txs = 0;
+    uint64_t batches = 0;
+    uint64_t latency_ns = 0;
+    for (size_t i = e; i < loads.size(); i += nexec) {
+      txs += loads[i].txs.load(std::memory_order_relaxed);
+      batches += loads[i].batches.load(std::memory_order_relaxed);
+      latency_ns += loads[i].latency_ns.load(std::memory_order_relaxed);
+    }
+    std::println("load: executor={} host={} txs={} share={:.3f} tps={:.0f} "
+                 "mean_batch_us={:.1f}",
+                 e, cluster.exec_host(e), txs,
+                 static_cast<double>(txs) / static_cast<double>(block_txs),
+                 static_cast<double>(txs) / wall_s,
+                 batches ? static_cast<double>(latency_ns) / 1e3 /
+                               static_cast<double>(batches)
+                         : 0.0);
+  }
+}
 
 void
 run_block(x23::XdrVec<SignedTransaction> const *txs,
@@ -111,7 +159,8 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number, ConsensusValue &prev_value,
-          IndexerLatencyProbe *indexer_probe)
+          IndexerLatencyProbe *indexer_probe,
+          const MultiexecCluster *report_load = nullptr)
 {
   auto start_time = x23::fastclock::now();
 
@@ -124,20 +173,26 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   BlockValidationQueue block_validation_queue(txs, batch_size);
   x23::XdrVec<NondeterministicProposalData> nominations(txs->size());
 
+  std::vector<ConnectionLoad> loads(exec_clients.size());
+  const ThreadCpuSnapshot cpu_before =
+      report_load ? thread_cpu_snapshot() : ThreadCpuSnapshot{};
   auto start_coros_time = x23::fastclock::now();
 
   // make sure any destructors are run during the measured inner loop
   {
     auto [async, cb] = x23::make_async<void>();
-    for (auto &exec_client : exec_clients) {
-      connection_coro(exec_client, &block_validation_queue, cb,
+    for (size_t i = 0; i < exec_clients.size(); i++) {
+      connection_coro(exec_clients[i], &block_validation_queue, cb,
                       n_coros_per_connection, current_block_number,
-                      n_total_coros, &nominations);
+                      n_total_coros, &nominations, &loads[i]);
     }
     async();
   }
 
   auto end_coros_time = x23::fastclock::now();
+  if (report_load)
+    print_load(*report_load, loads, txs->size(), cpu_before,
+               end_coros_time - start_coros_time);
   double elapsed_time = (end_coros_time - start_coros_time).count();
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
@@ -244,7 +299,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, &cluster);
     auto end_time = x23::fastclock::now();
     double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
