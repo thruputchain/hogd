@@ -1740,7 +1740,8 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
 }
 
 // Each mint retains its decoded tree for the base crossing charge, so a
-// transaction may mint at most max_auth_tokens tokens (#4653).
+// transaction may attempt at most max_auth_tokens mints (#4653). A failed
+// decode counts too.
 TEST_F(SyscallAuthTokenTest, MintAuthTokenStopsAtMaxAuthTokens)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
@@ -1749,8 +1750,17 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenStopsAtMaxAuthTokens)
       fns_contract;
   fns_contract.emplace(
       0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto over_depth = x23::serialize(
+            make_auth_token_chain(kAddr, uint32_t{kAuthTokenMaxDepth} + 1));
+        uint32_t failed_id = 0;
+        auto failed_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(over_depth), failed_id);
+        EXPECT_TRUE(failed_res.has_value());
+        EXPECT_EQ(failed_res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
         auto serialized = x23::serialize(make_auth_token_chain(kAddr, 1));
-        for (uint32_t i = 0; i < kDefaultMaxAuthTokens; ++i) {
+        for (uint32_t i = 0; i + 1 < kDefaultMaxAuthTokens; ++i) {
           uint32_t token_id = 0;
           auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
               BlockHeight{1000}, as_byte_span(serialized), token_id);
