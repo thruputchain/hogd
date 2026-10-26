@@ -197,6 +197,35 @@ if(NOT first_pos EQUAL last_pos)
   message(FATAL_ERROR "file header repeated in the generated TypeScript")
 endif()
 
+# A trailing comment runs on over the comment lines below it, but a doc
+# comment there opens the next definition or field and must document it,
+# not the one whose trailing comment it follows.
+file(WRITE "${TEST_DIR}/trailing_comment.x"
+  "/// Documents First.\ntypedef opaque First[4]; // trails First\n"
+  "/// Documents Second.\ntypedef opaque Second[4];\n"
+  "typedef int Third; // trails Third\n"
+  "                   // and runs on\n"
+  "struct Fourth {\n  int a; // trails a\n  /// Documents b.\n  int b;\n};\n")
+run_compiler(0 -o trailing_comment.hh trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.hh" trailing_comment)
+require_text("${trailing_comment}" "/// Documents First.
+// trails First
+using First = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "/// Documents Second.
+using Second = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "// trails Third
+// and runs on
+using Third = std::int32_t;")
+require_text("${trailing_comment}" "  // trails a
+  std::int32_t a;
+  /// Documents b.
+  std::int32_t b;")
+run_compiler(0 --rust -o trailing_comment.rs trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.rs" trailing_comment)
+require_text("${trailing_comment}" "    pub a: i32,
+    /// Documents b.
+    pub b: i32,")
+
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")
