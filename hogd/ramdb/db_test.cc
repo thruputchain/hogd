@@ -592,6 +592,32 @@ TEST_F(DatabaseTest, RecoveryRejectsSkippedWalCommitMarker)
   EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
+// A kBig storage marker is never written to the log, so recovery must reject
+// it as corruption rather than panic (#4619).
+TEST_F(DatabaseTest, RecoveryRejectsBigStorageMarker)
+{
+  const std::string key = "key";
+  const std::string value = "value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
+  ASSERT_TRUE(db_->sync());
+  db_.reset();
+
+  // Overwrite the first record's storage byte, leaving its commit CRC intact.
+  {
+    ErrnoStatus<File> wal = dir_.openat("0.log", O_WRONLY);
+    ASSERT_TRUE(wal);
+    const auto storage = std::to_underlying(ItemStorage::kBig);
+    ASSERT_TRUE(write_full(*wal, byte_view(storage)));
+  }
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
 // Restoring to an LSN inside a snapshot's range is legitimate (the snapshot's
 // commit is skipped as >= target_lsn); the #4320 guard must not reject it.
 TEST_F(DatabaseTest, RestoreToLsnInsideSnapshotRange)
