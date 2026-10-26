@@ -129,6 +129,11 @@ ValidationModeData::consume_queue_entry_observation(
     }
     return nullptr;
   }
+  // The value is deliberately not checked against any live index: a block's
+  // concurrent inserts form an unordered multiset (the proposer saw them in
+  // nondeterministic commit order, and block close persists them sorted), so
+  // their order is the proposer's choice. RetrocausalQueueLock's
+  // has_unmatched_entries() checks that every observed value was inserted.
   entries.push_back(
       proposal_data_.observed_queue_entry_sequence[next_queue_entry_index_]);
   next_queue_entry_index_++;
