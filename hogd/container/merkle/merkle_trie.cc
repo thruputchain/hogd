@@ -20,7 +20,6 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/merkle/hex_array.h"
 #include "hogd/container/merkle/node.h"
-#include "hogd/crypto/crypto.h"
 #include "types.hh"
 
 namespace hogd {
@@ -593,7 +592,7 @@ MerkleTrie::insert_helper(const Key &k, const std::span<const std::byte> &obj,
   // A parent means the prepared leaf was linked into the trie. Otherwise its
   // value went on a branch and the unused allocation is released below.
   if (new_leaf->parent) {
-    prepared_leaf.release();
+    std::ignore = prepared_leaf.release();
   }
   size_.fetch_add(1, std::memory_order_relaxed);
   // [unlock_nodes_from()] unlocks the node locks we currently hold.

@@ -1,6 +1,5 @@
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 #include <memory>

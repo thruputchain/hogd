@@ -331,7 +331,7 @@ Node::compute_node_hash() const
 {
   if (type == Type::kLeaf) {
     CHECK(value_hash().has_value());
-    return *value_hash();
+    return value_hash().value();
   }
   SHA256Hasher hasher;
   auto update_hash = [&](std::span<const std::byte> bytes) {
