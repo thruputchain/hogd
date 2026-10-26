@@ -29,7 +29,13 @@ public:
 private:
   ERC20PaymentsConfig config_;
 
-  bool check_config_valid() const { return config_.num_addresses >= 2; }
+  // Configs arrive over RPC; bound the wallet count before allocating wallets.
+  static constexpr uint64_t kMaxAddresses = 1'000'000;
+
+  bool check_config_valid() const
+  {
+    return config_.num_addresses >= 2 && config_.num_addresses <= kMaxAddresses;
+  }
 
   void initialize_wallets(SHA256Hash const &wallet_contract_hash);
 

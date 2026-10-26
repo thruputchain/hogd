@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <limits>
 #include <memory>
 #include <optional>
 #include <set>
@@ -172,6 +173,25 @@ TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
             result2.value().genesis_ceremony_txs);
   EXPECT_EQ(result1.value().initialization_txs,
             result2.value().initialization_txs);
+}
+
+TEST(ERC20ExperimentConfigTest, RejectsOutOfRangeAddressCount)
+{
+  for (uint64_t n : {uint64_t{1}, std::numeric_limits<uint64_t>::max()}) {
+    ERC20PaymentsConfig config{.num_addresses = n};
+    auto res =
+        std::make_shared<ERC20ExperimentState>(config)->generate_experiment()();
+    ASSERT_FALSE(res.has_value());
+    EXPECT_EQ(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig,
+              res.error().code());
+
+    auto basic_auth_res =
+        std::make_shared<ERC20BasicAuthExperimentState>(config)
+            ->generate_experiment()();
+    ASSERT_FALSE(basic_auth_res.has_value());
+    EXPECT_EQ(LoadgenRPCError::kLoadgenRPCErrorInvalidConfig,
+              basic_auth_res.error().code());
+  }
 }
 
 TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)

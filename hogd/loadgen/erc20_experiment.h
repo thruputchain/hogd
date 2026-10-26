@@ -26,7 +26,13 @@ public:
 private:
   ERC20PaymentsConfig config_;
 
-  bool check_config_valid() const { return config_.num_addresses >= 2; }
+  // Configs arrive over RPC; bound the wallet count before allocating wallets.
+  static constexpr uint64_t kMaxAddresses = 1'000'000;
+
+  bool check_config_valid() const
+  {
+    return config_.num_addresses >= 2 && config_.num_addresses <= kMaxAddresses;
+  }
 
   // Outer gas limit for a wallet do_action tx. rv32 meters one gas per
   // instruction, so the same do_action + cross-called erc20 transfer/mint costs

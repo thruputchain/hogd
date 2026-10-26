@@ -121,11 +121,11 @@ ERC20BasicAuthExperimentState::generate_experiment()
   assert(erc20_contract);
   assert(wallet_contract);
 
-  initialize_wallets(sha256(*wallet_contract));
-
   if (!check_config_valid()) {
     co_return LoadgenError{LoadgenRPCError::kLoadgenRPCErrorInvalidConfig};
   }
+
+  initialize_wallets(sha256(*wallet_contract));
 
   const ContractAddress owner_address = get_owner_address();
 
