@@ -190,6 +190,13 @@ InvocationFrame::try_acquire_frame_locks(
   // calling this for a child TryInvoke frame and bumps the depth afterwards,
   // in the one place shared by every execution mode. The child cap reserves
   // one slot for the root commit's subtransaction push.
+  //
+  // modified_items_ iterates in process-random (SipHash) order, so the delta
+  // order differs between nodes. That can change which of two conflicting
+  // transactions wins its locks, but not whether a conflict occurs. Validation
+  // rejects the whole proposal on any non-deterministic failure
+  // (MempoolCoordinatorRpc::validate_batch_chunk), so the order never reaches
+  // consensus-visible state.
 
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
