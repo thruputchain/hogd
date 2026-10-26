@@ -59,7 +59,7 @@ LINE_COMMENTS	^([ \t]*\/\/.*\n)+
 ^%.*		return T_LITERAL;
 
 \/\*([^*]|\*+[^*/])*\*\/	|
-\/\/.*(\n[ \t]*\/\/.*)*		return T_LINECOMMENT;
+\/\/.*(\n[ \t]*\/\/[^/\n].*)*		return T_LINECOMMENT;
 
 const		return T_CONST;
 struct		return T_STRUCT;
