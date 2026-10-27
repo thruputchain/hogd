@@ -1654,6 +1654,45 @@ TEST_F(DatabaseTest, SyncRefusesExhaustedLsn)
   EXPECT_EQ(*checked, kMaxLsn);
 }
 
+// A WAL commit at UINT64_MAX would wrap the recovery cursor to zero, so
+// recovery must reject it (#4665).
+TEST_F(DatabaseTest, RecoveryRejectsWalCommitLsnWrap)
+{
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_TRUE(std::get<1>(*snapshot).get());
+  db_.reset();
+
+  // Recover from a snapshot ending at UINT64_MAX - 1, then sync with nothing
+  // pending so the WAL holds only a commit record at that LSN.
+  constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
+  const std::string snap = std::format("0-{}.snap", kMaxLsn - 1);
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", snap)));
+  ASSERT_NO_FATAL_FAILURE(tamper_snapshot_commit_lsn(dir_, snap, kMaxLsn - 2));
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  DBStatus<uint64_t> synced = db_->sync();
+  ASSERT_TRUE(synced);
+  ASSERT_EQ(*synced, kMaxLsn);
+  db_.reset();
+
+  // Shift both files up by one LSN so the WAL commits at UINT64_MAX.
+  const std::string max_snap = std::format("0-{}.snap", kMaxLsn);
+  const std::string max_wal = std::format("{}.log", kMaxLsn);
+  ASSERT_TRUE(static_cast<bool>(dir_.rename(snap, max_snap)));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, max_snap, kMaxLsn - 1));
+  ASSERT_TRUE(static_cast<bool>(
+      dir_.rename(std::format("{}.log", kMaxLsn - 1), max_wal)));
+  ASSERT_NO_FATAL_FAILURE(tamper_snapshot_commit_lsn(dir_, max_wal, kMaxLsn));
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_FALSE(static_cast<bool>(checked));
+  EXPECT_EQ(checked.error(), DBCode::kCorruption);
+}
+
 } // namespace hogd
 
 int
