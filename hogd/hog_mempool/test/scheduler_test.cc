@@ -437,11 +437,14 @@ TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
                          Scheduler::CachedVariant::kSubmitVetted)();
   ASSERT_EQ(outcomes.size(), 1UL);
   EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  // The displaced encoding stays findable, so a proposal naming both signings
+  // resolves and its repeated body is rejected.
   EXPECT_EQ(scheduler->size(), 1);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   ASSERT_TRUE(scheduler->find_tx(tx_hash));
   EXPECT_EQ(*scheduler->find_tx(tx_hash), b);
-  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
+  ASSERT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_EQ(*scheduler->find_signed_tx(sha256(a)), a);
   ASSERT_TRUE(scheduler->find_signed_tx(sha256(b)));
 
   // The runqueue holds the replacement too.
@@ -462,6 +465,7 @@ TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
   scheduler->commit_pending_nomination(/*block_id=*/2)();
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
   EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 
   // The index entry went with the cache entry, so the body can be cached again
@@ -469,6 +473,46 @@ TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
   scheduler->add_txs({a}, {tx_hash})();
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+}
+
+// Vetted replacements keep every encoding they displace findable, and bringing
+// back a displaced encoding makes it live again.
+TEST(Scheduler, ReplacedVariantKeepsEveryEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const SignedTransaction c = with_signature(body, 3);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  scheduler->add_txs({c}, {tx_hash}, {sha256(c)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), c);
+  for (const SignedTransaction &encoding : {a, b, c}) {
+    TransactionHash found_tx_hash{};
+    const std::shared_ptr<const SignedTransaction> found =
+        scheduler->find_signed_tx(sha256(encoding), &found_tx_hash);
+    ASSERT_TRUE(found);
+    EXPECT_EQ(*found, encoding);
+    EXPECT_EQ(found_tx_hash, tx_hash);
+  }
+
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), b);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(c)));
   EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 }
 

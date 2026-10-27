@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -5302,6 +5303,89 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
             tip.db_tip().id, proposal)();
     EXPECT_EQ(validated.outcome(),
               SchedulerValidationOutcome::SchedulerValidationOK);
+  }
+}
+
+// A proposal naming two or more signings of one body repeats that body, so it
+// can never validate. The validator caches one live encoding per body, and
+// each encoding the coordinator supplies used to displace the other, so
+// validation kept reporting one signing missing until the coordinator's retry
+// bound stopped it. Now every supplied signing stays cached, so one supply
+// round resolves them all and execution rejects the repeated body.
+TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
+{
+  const SignatureVariants variants =
+      make_signature_variants(kMaxBytesTransaction);
+  // A third signing: all but the last of the fat wrapper's signatures.
+  SignedTransaction mid = variants.fat;
+  mid.signatures.pop_back();
+  const SignedTransactionBatch signings{variants.thin, mid, variants.fat};
+  ASSERT_NE(sha256(mid), sha256(variants.thin));
+  ASSERT_NE(sha256(mid), sha256(variants.fat));
+
+  for (size_t num_named = 2; num_named <= signings.size(); num_named++) {
+    SCOPED_TRACE(num_named);
+    MempoolTestInfra validator;
+    validator.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                                    variants.auth_data);
+    // The validator holds the fat wrapper, which the proposal names last.
+    EXPECT_EQ(submit_through_gateway(validator, variants.fat),
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
+    const SchedulerGetTipResult tip =
+        validator.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SignedTransactionHashBatch named;
+    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+    for (size_t i = signings.size() - num_named; i < signings.size(); i++) {
+      named.push_back(sha256(signings[i]));
+      nondeterministic_data.push_back(NondeterministicProposalData{});
+    }
+    const Proposal proposal{
+        .header = {.ext = {},
+                   .network_hash = MempoolTestInfra::kNetworkHash,
+                   .block_height =
+                       tip.db_tip().value.proposal_header.block_height + 1},
+        .transactions = {.ext = {},
+                         .signed_hash = t_to_parallel_batch(named)(),
+                         .nondeterministic_data =
+                             t_to_parallel_batch(nondeterministic_data)()}};
+
+    // Play the coordinator: supply whatever validation reports missing, as
+    // the proposer would serve it, and validate again.
+    constexpr size_t kMaxRounds = 8;
+    SchedulerValidationOutcome outcome =
+        SchedulerValidationOutcome::SchedulerValidationMissingTxs;
+    size_t rounds = 0;
+    while (outcome ==
+               SchedulerValidationOutcome::SchedulerValidationMissingTxs &&
+           rounds < kMaxRounds) {
+      rounds++;
+      const SchedulerValidationResult result =
+          validator.mempool_coord_rpc().schedulercoord_validate_block(
+              tip.db_tip().id, proposal)();
+      outcome = result.outcome();
+      if (outcome !=
+          SchedulerValidationOutcome::SchedulerValidationMissingTxs) {
+        break;
+      }
+      SignedTransactionBatch supplied;
+      for (const SignedTransactionHash &missing :
+           result.missing_signed_tx_hashes()) {
+        const auto it =
+            std::ranges::find_if(signings, [&](const SignedTransaction &stx) {
+              return sha256(stx) == missing;
+            });
+        ASSERT_NE(it, signings.end());
+        supplied.push_back(*it);
+      }
+      validator.mempool_coord_rpc().schedulercoord_submit_vetted(
+          ValidatorID{}, t_to_parallel_batch(supplied)())();
+      ASSERT_EQ(validator.mempool_coord_rpc().scheduler()->size(), 1UL);
+    }
+    EXPECT_EQ(outcome, SchedulerValidationOutcome::SchedulerValidationInvalid);
+    EXPECT_LE(rounds, 2UL);
   }
 }
 
