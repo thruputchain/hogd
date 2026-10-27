@@ -85,9 +85,9 @@ private:
   static HogexecMetrics &get_instance();
 
   struct MetricsSnapshot {
-    ssize_t successful_proposed_tx_count = 0;
-    ssize_t failed_proposed_tx_count = 0;
-    ssize_t gas_consumed = 0;
+    uint64_t successful_proposed_tx_count = 0;
+    uint64_t failed_proposed_tx_count = 0;
+    uint64_t gas_consumed = 0;
     int64_t time_ns = 0;
 
     MetricsSnapshot operator-(const MetricsSnapshot &other) const
