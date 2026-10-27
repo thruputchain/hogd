@@ -104,7 +104,7 @@ InvocationFrame::commit_successful_child_frame(InvocationFrame &&frame)
     // Return ends the child, so it still owns every token it returned.
     auto token_id = add_auth_token(frame.take_auth_token(child_token_id));
     if (!token_id.has_value()) {
-      panic("a frame cannot hold 2^32 auth tokens within any gas limit");
+      panic("Return checked the parent had ids for every returned token");
     }
     assert(*token_id == child_returned_auth_tokens_.start +
                             child_returned_auth_tokens_.count);
@@ -640,6 +640,18 @@ InvocationFrameStack::check_auth_tokens_owned(
   return std::ranges::all_of(token_ids, [&](uint32_t token_id) {
     return frame_stack_.back().check_owns_auth_token(token_id);
   });
+}
+
+bool
+InvocationFrameStack::check_parent_can_take_auth_tokens(size_t count) const
+{
+  assert(!frame_stack_.empty());
+  if (frame_stack_.size() < 2) {
+    return true;
+  }
+  auto const &parent = frame_stack_[frame_stack_.size() - 2];
+  return count <=
+         std::numeric_limits<uint32_t>::max() - parent.next_auth_token_id();
 }
 
 } // namespace hogd

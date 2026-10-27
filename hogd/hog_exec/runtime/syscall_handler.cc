@@ -1369,6 +1369,12 @@ SystemCallHandler::check_auth_tokens_owned(
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
 }
 
+bool
+SystemCallHandler::check_parent_can_take_auth_tokens(size_t count) const
+{
+  return invocation_frame_stack_.check_parent_can_take_auth_tokens(count);
+}
+
 AuthTokenIdRange
 SystemCallHandler::get_returned_auth_tokens() const
 {
