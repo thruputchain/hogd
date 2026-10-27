@@ -35,7 +35,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      start_server_or_exit(metrics_server, bind_ip, metrics_port);
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT indexer.metrics={}", actual_metrics_port);
 
   IndexerStatus<IndexDB> db_status = IndexDB::open_or_make_new(path);
@@ -57,8 +57,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
   // Do not serve stale product queries while startup replay is incomplete.
   RpcServer<IndexerBlockExplorerRpc> block_explorer(db, failure_cache);
   block_explorer->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_block_explorer_port =
-      start_server_or_exit(block_explorer, bind_ip, block_explorer_port);
+  uint16_t actual_block_explorer_port = block_explorer.start_server(
+      make_bind_host_port(bind_ip, block_explorer_port));
   CHECK(actual_block_explorer_port == block_explorer_port ||
         block_explorer_port == 0);
   info("PORT indexer.block_explorer={}", actual_block_explorer_port);

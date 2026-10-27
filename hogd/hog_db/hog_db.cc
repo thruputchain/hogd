@@ -83,7 +83,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      start_server_or_exit(metrics_server, bind_ip, metrics_port);
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT hog_db.metrics={}", actual_metrics_port);
 
   // check the database's integrity and find the highest valid LSN.
@@ -173,7 +173,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   info("starting executor server.");
   HogDbExecutorServer exec_server(ctx);
   const uint16_t actual_exec_port =
-      start_server_or_exit(exec_server, bind_ip, exec_port);
+      exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
   CHECK(actual_exec_port == exec_port || exec_port == 0);
   info("PORT hog_db.exec={}", actual_exec_port);
 
@@ -182,7 +182,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   HogDbSchedServer mempool_server(ctx);
   mempool_server.max_message_size_ = kBulkRpcMaxMessageSize;
   const uint16_t actual_mempool_port =
-      start_server_or_exit(mempool_server, bind_ip, mempool_port);
+      mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hog_db.mempool={}", actual_mempool_port);
 
@@ -190,14 +190,14 @@ hog_db_init(std::string_view path, size_t ram_bytes,
   info("starting auth server.");
   HogDbAuthServer auth_server(ctx);
   const uint16_t actual_auth_port =
-      start_server_or_exit(auth_server, bind_ip, auth_port);
+      auth_server.start_server(make_bind_host_port(bind_ip, auth_port));
   CHECK(actual_auth_port == auth_port || auth_port == 0);
   info("PORT hog_db.auth={}", actual_auth_port);
 
   info("starting gateway server.");
   HogDbGatewayServer gateway_server(ctx);
   const uint16_t actual_gateway_port =
-      start_server_or_exit(gateway_server, bind_ip, gateway_port);
+      gateway_server.start_server(make_bind_host_port(bind_ip, gateway_port));
   CHECK(actual_gateway_port == gateway_port || gateway_port == 0);
   info("PORT hog_db.gateway={}", actual_gateway_port);
 

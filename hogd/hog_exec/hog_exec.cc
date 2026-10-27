@@ -1,6 +1,5 @@
 #include <cstdint>
 #include <cstdlib>
-#include <expected>
 #include <format>
 #include <future>
 #include <memory>
@@ -21,7 +20,6 @@
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
-#include "x23/err.h"
 #include "x23/sockio.h"
 
 namespace hogd {
@@ -62,7 +60,7 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      start_server_or_exit(metrics_server, bind_ip, metrics_port);
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT hog_exec.metrics={}", actual_metrics_port);
 
   const ParsedHostPort coordinator =
@@ -79,12 +77,8 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
   Executor executor;
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(coordinator.host, coordinator.port);
-  std::expected<uint16_t, x23::Errno> started =
-      executor.try_start(bind_ip, mempool_port, coordinator_sockaddr);
-  if (!started)
-    exit_cannot_listen(make_bind_host_port(bind_ip, mempool_port),
-                       started.error());
-  const uint16_t actual_mempool_port = *started;
+  uint16_t actual_mempool_port =
+      executor.start(bind_ip, mempool_port, coordinator_sockaddr);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);
   info("PORT hog_exec.mempool={}", actual_mempool_port);
 
@@ -96,8 +90,8 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
         std::make_unique<ViewGatewayServer>(*db_executor_addr,
                                             event_executor.host,
                                             event_executor.port);
-    const uint16_t actual_view_gateway_port =
-        start_server_or_exit(*view_gateway_server, bind_ip, *view_gateway_port);
+    const uint16_t actual_view_gateway_port = view_gateway_server->start_server(
+        make_bind_host_port(bind_ip, *view_gateway_port));
     CHECK(actual_view_gateway_port == *view_gateway_port ||
           *view_gateway_port == 0);
     info("PORT hog_exec.view_gateway={}", actual_view_gateway_port);

@@ -66,21 +66,26 @@ make_rpc_client(sockaddr_storage &ss, bool retry = false,
 
 template<typename RpcService>
 auto
-make_rpc_client(const x23::HostPort &host_port, x23::CoroPoll &cp,
-                bool retry = false,
+make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  return make_rpc_client<RpcService>(resolve_or_exit(host_port), cp, retry,
-                                     max_message_size);
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    exit_cannot_resolve(host_port, ss.error());
+  }
+  return make_rpc_client<RpcService>(*ss, cp, retry, max_message_size);
 }
 
 template<typename RpcService>
 auto
-make_rpc_client(const x23::HostPort &host_port, bool retry = false,
+make_rpc_client(x23::HostPort host_port, bool retry = false,
                 size_t max_message_size = x23::default_max_message_size)
 {
-  return make_rpc_client<RpcService>(resolve_or_exit(host_port),
-                                     default_coropoll(), retry,
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    exit_cannot_resolve(host_port, ss.error());
+  }
+  return make_rpc_client<RpcService>(*ss, default_coropoll(), retry,
                                      max_message_size);
 }
 
@@ -112,11 +117,14 @@ make_srpc_client(sockaddr_storage &ss, bool retry = false,
 
 template<typename RpcService>
 auto
-make_srpc_client(const x23::HostPort &host_port, bool retry = false,
+make_srpc_client(x23::HostPort host_port, bool retry = false,
                  size_t max_message_size = x23::default_max_message_size)
 {
-  sockaddr_storage ss = resolve_or_exit(host_port);
-  return make_srpc_client<RpcService>(ss, retry, max_message_size);
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    exit_cannot_resolve(host_port, ss.error());
+  }
+  return make_srpc_client<RpcService>(*ss, retry, max_message_size);
 }
 
 // TODO(geoff): setting max_message_size isn't implemented for the srpc
@@ -145,11 +153,14 @@ make_srpc_multiclient(sockaddr_storage &ss, bool retry = false,
 
 template<typename RpcService>
 auto
-make_srpc_multiclient(const x23::HostPort &host_port, bool retry = false,
+make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
                       x23::CpuMap const &map = *x23::llc_map)
 {
-  sockaddr_storage ss = resolve_or_exit(host_port);
-  return make_srpc_multiclient<RpcService>(ss, retry, map);
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    exit_cannot_resolve(host_port, ss.error());
+  }
+  return make_srpc_multiclient<RpcService>(*ss, retry, map);
 }
 
 template<typename RpcService>
@@ -178,12 +189,15 @@ make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
 
 template<typename RpcService>
 auto
-make_rpc_multiclient(const x23::HostPort &host_port, bool retry = false,
+make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
                      x23::CpuMap const &map = *x23::llc_map,
                      size_t max_message_size = x23::default_max_message_size)
 {
-  sockaddr_storage ss = resolve_or_exit(host_port);
-  return make_rpc_multiclient<RpcService>(ss, default_coropoll(), retry, map,
+  auto ss = host_port.to_addr(true);
+  if (!ss) {
+    exit_cannot_resolve(host_port, ss.error());
+  }
+  return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
                                           max_message_size);
 }
 

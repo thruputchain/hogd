@@ -13,6 +13,7 @@
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
@@ -177,16 +178,7 @@ HttpServer::add_async_route(std::string path, Handler handler)
 }
 
 uint16_t
-HttpServer::start_server(const x23::HostPort &bind_addr)
-{
-  std::expected<uint16_t, x23::Errno> port = try_start_server(bind_addr);
-  if (!port)
-    port.error().raise("listen on {}", bind_addr);
-  return *port;
-}
-
-std::expected<uint16_t, x23::Errno>
-HttpServer::try_start_server(const x23::HostPort &bind_addr)
+HttpServer::start_server(x23::HostPort bind_addr)
 {
   CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
   std::expected<sockaddr_storage, x23::GaiError> addr =
@@ -194,14 +186,15 @@ HttpServer::try_start_server(const x23::HostPort &bind_addr)
   CHECK(addr.has_value());
 
   int backlog = 5 + cp_.pool_.nthreads_;
-  std::expected<x23::UniqueFd, x23::Errno> lfd =
+  std::expected<x23::UniqueFd, x23::Errno> listened =
       x23::try_tcplisten(*addr, backlog);
-  if (!lfd)
-    return std::unexpected(lfd.error());
-  port_ = x23::get_port(x23::local_addr(*lfd));
-  listen_fd_ = lfd->get();
+  if (!listened)
+    exit_cannot_listen(bind_addr, listened.error());
+  x23::UniqueFd lfd = std::move(*listened);
+  port_ = x23::get_port(x23::local_addr(lfd));
+  listen_fd_ = lfd.get();
 
-  accept_loop(cp_, std::move(*lfd), x23::RefPtr(*this));
+  accept_loop(cp_, std::move(lfd), x23::RefPtr(*this));
 
   return port_;
 }

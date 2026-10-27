@@ -51,7 +51,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
-      start_server_or_exit(metrics_server, bind_ip, metrics_port);
+      metrics_server.start_server(make_bind_host_port(bind_ip, metrics_port));
   info("PORT event.metrics={}", actual_metrics_port);
 
   // Start the event servers.
@@ -62,11 +62,11 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   mempool_server.max_message_size_ = kEventSchedulerRpcMaxMessageSize;
 
   uint16_t actual_exec_port =
-      start_server_or_exit(exec_server, bind_ip, exec_port);
+      exec_server.start_server(make_bind_host_port(bind_ip, exec_port));
   uint16_t actual_indexer_port =
-      start_server_or_exit(indexer_server, bind_ip, indexer_port);
+      indexer_server.start_server(make_bind_host_port(bind_ip, indexer_port));
   uint16_t actual_mempool_port =
-      start_server_or_exit(mempool_server, bind_ip, mempool_port);
+      mempool_server.start_server(make_bind_host_port(bind_ip, mempool_port));
   CHECK(actual_exec_port == exec_port || exec_port == 0);
   CHECK(actual_indexer_port == indexer_port || indexer_port == 0);
   CHECK(actual_mempool_port == mempool_port || mempool_port == 0);

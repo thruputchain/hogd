@@ -73,16 +73,16 @@ public:
     return {port_, std::move(lfd)};
   }
 
+  // Exits if it cannot listen on [bind_addr] (see exit_cannot_listen).
   std::pair<uint16_t, x23::UniqueFd> bind_server(const x23::HostPort &bind_addr)
   {
     auto bound = try_bind_server(bind_addr);
     if (!bound)
-      bound.error().raise("listen on {}", bind_addr);
+      exit_cannot_listen(bind_addr, bound.error());
     return std::move(*bound);
   }
 
-  // Like bind_server, but returns a failure to listen (the port already in
-  // use, say) rather than throwing it.
+  // Like bind_server, but returns a failure to listen instead of exiting.
   std::expected<std::pair<uint16_t, x23::UniqueFd>, x23::Errno>
   try_bind_server(const x23::HostPort &bind_addr)
   {
@@ -91,8 +91,7 @@ public:
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
-    std::expected<x23::UniqueFd, x23::Errno> lfd =
-        x23::try_tcplisten(*addr, backlog);
+    auto lfd = x23::try_tcplisten(*addr, backlog);
     if (!lfd)
       return std::unexpected(lfd.error());
     bound_ = true;
@@ -136,19 +135,6 @@ public:
     return p;
   }
 
-  // Like start_server, but returns a failure to listen rather than throwing
-  // it.
-  std::expected<uint16_t, x23::Errno>
-  try_start_server(const x23::HostPort &bind_addr)
-  {
-    auto bound = try_bind_server(bind_addr);
-    if (!bound)
-      return std::unexpected(bound.error());
-    auto [p, lfd] = std::move(*bound);
-    start_accepting(std::move(lfd));
-    return p;
-  }
-
   Impl *impl() noexcept { return &impl_; }
   uint16_t port() const noexcept { return port_; }
   RpcServer *operator->() noexcept { return this; }
@@ -178,7 +164,12 @@ RpcServer(I &&) -> RpcServer<std::remove_cvref_t<I>>;
 inline sockaddr_storage
 host_port_to_sockaddr(const std::string &host, uint16_t port)
 {
-  return resolve_or_exit(x23::HostPort(host, port));
+  x23::HostPort helper(host, port);
+  std::expected<sockaddr_storage, x23::GaiError> addr =
+      helper.to_addr(/*dns=*/true);
+  if (!addr)
+    exit_cannot_resolve(helper, addr.error());
+  return *addr;
 }
 
 inline sockaddr_storage

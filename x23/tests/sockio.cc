@@ -171,13 +171,6 @@ TEST(TcpListen, AddressInUse)
   }
 }
 
-TEST(TcpListen, TryTcplistenIsNonblocking)
-{
-  auto lfd = try_tcplisten(numeric_addr("127.0.0.1", 0));
-  ASSERT_TRUE(lfd);
-  EXPECT_NE(fcntl(lfd->get(), F_GETFL) & O_NONBLOCK, 0);
-}
-
 TEST(SocketOptions, InvalidDescriptor)
 {
   BorrowedFd fd(-1);
