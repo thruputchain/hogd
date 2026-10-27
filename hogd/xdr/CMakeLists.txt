@@ -21,7 +21,6 @@ add_xdr(
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
   ../../protocol/header.x
-  ../../protocol/hog_exec_constants.x
   ../../protocol/indexer.x
   ../../protocol/integration.x
   ../../protocol/invoke_flag.x
@@ -59,6 +58,7 @@ add_xdr(
   ci_server.x
   event_cursor_internal.x
   event_outbox_internal.x
+  hog_exec_constants.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")
