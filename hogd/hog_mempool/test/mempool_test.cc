@@ -5369,12 +5369,15 @@ TEST(Mempool, ValidatedBlockCommitsAfterLocalNominationDropsItsTx)
   fib_client_t fib_client(account);
   const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
   const TransactionHash tx_hash = sha256(tx.tx);
+  // Enough to pay for executing [tx], but below its gas limit, so the
+  // scheduler drops it.
+  const uint128_t native_tokens = tx.tx.invocation.gas_limit - 1;
 
   Proposal proposal;
   {
     MempoolTestInfra proposer;
     proposer.set_native_tokens(account, kNativeTokenAgeGroupToSchedule,
-                               /*age=*/0, /*num_native_tokens=*/1);
+                               /*age=*/0, native_tokens);
     ASSERT_EQ(submit_through_gateway(proposer, tx),
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
@@ -5386,7 +5389,7 @@ TEST(Mempool, ValidatedBlockCommitsAfterLocalNominationDropsItsTx)
           proposer.mempool_coord_rpc().scheduler()->get_cached_native_token_age(
               account);
       native_token_age->num_native_tokens[kNativeTokenAgeGroupToSchedule] =
-          to_xdr(static_cast<uint128_t>(50'000'000'000));
+          to_xdr(static_cast<uint128_t>(tx.tx.invocation.gas_limit));
     }
 
     const SchedulerGetTipResult tip =
@@ -5402,7 +5405,7 @@ TEST(Mempool, ValidatedBlockCommitsAfterLocalNominationDropsItsTx)
 
   MempoolTestInfra validator;
   validator.set_native_tokens(account, kNativeTokenAgeGroupToSchedule,
-                              /*age=*/0, /*num_native_tokens=*/1);
+                              /*age=*/0, native_tokens);
   MempoolCoordinatorRpc &rpc = validator.mempool_coord_rpc();
   std::shared_ptr<Scheduler> scheduler = rpc.scheduler();
 
