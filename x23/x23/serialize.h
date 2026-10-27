@@ -767,6 +767,9 @@ struct Deserializer
       x = std::bit_cast<X>(get64<Safe>());
   }
 
+  // In unsafe mode p may already be past e, in which case this reads
+  // (possibly uninitialized) bytes in [e, ee).  That's fine: either
+  // way the input is rejected, since raise() calls check() first.
   void check_trailing_zeros(size_t rem) const
   {
     constexpr auto swaple = [](uint32_t v) consteval -> uint32_t {
