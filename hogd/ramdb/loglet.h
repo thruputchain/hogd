@@ -389,8 +389,9 @@ public:
   Loglet *alloc(LogletMode mode, bool use_reserved = false);
   // free frees a loglet, allowing it to be reused.
   void free(Loglet *ll);
-  // print_stats prints loglet memory usage statistics.
-  void print_stats() const;
+  // print_stats prints loglet memory usage statistics, at most once a minute
+  // unless force is set (after compaction, which changes them materially).
+  void print_stats(bool force = false) const;
   // usage_stats snapshots the same counts print_stats logs. The mode of a
   // loglet can change during the scan; this is the same relaxed read.
   LogletUsageStats usage_stats() const;
@@ -433,7 +434,7 @@ private:
   // the number of loglets that must be reserved so compaction always succeeds.
   const size_t reserved_count_;
   // Shared by maintenance and post-compaction diagnostics.
-  mutable std::atomic<std::chrono::steady_clock::time_point> last_stats_time_{};
+  mutable std::atomic<std::chrono::steady_clock::time_point> last_stats_time_;
   // a vector of all loglets in the order they appear in the region.
   std::vector<Loglet> loglets_;
 

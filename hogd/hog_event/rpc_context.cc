@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -510,11 +511,12 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
   // A record may have been durably written by an earlier attempt that failed
   // the tail checks above. Its first successful publication still needs a
-  // summary; a retry of an already visible height does not.
+  // summary; a retry of an already visible height does not. A live context
+  // always means this process opened and closed the block (commit GCs it),
+  // including a re-execution after a crash between outbox and HogDB commit.
   const bool log_commit =
-      !*committed_exists ||
-      (finalized_indexer_tail_ ? block_height > *finalized_indexer_tail_
-                               : context_ptr != nullptr);
+      !*committed_exists || context_ptr != nullptr ||
+      (finalized_indexer_tail_ && block_height > *finalized_indexer_tail_);
   if (finalized_indexer_tail_) {
     finalized_indexer_tail_ = block_height;
     // Bumped under the publication lock: a pull that sampled the counter under
@@ -542,7 +544,14 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   if (log_commit) {
     std::string fields;
     auto append = [&fields](std::string_view key, const auto &value) {
-      if (value) {
+      if (!value) {
+        return;
+      }
+      if constexpr (std::is_floating_point_v<
+                        std::remove_cvref_t<decltype(*value)>>) {
+        fields += std::format(" {}={:.6f}", key, *value);
+      }
+      else {
         fields += std::format(" {}={}", key, *value);
       }
     };
@@ -563,7 +572,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       append("prepare_context_and_async_s", s.prepare_context_and_async_s);
       append("close_total_s", s.close_total_s);
       append("close_total_ns", s.close_total_ns);
-      append("events_bytes", s.events_bytes);
+      append("residual_bytes", s.residual_bytes);
     }
     else {
       fields += std::format(" commit_lock_wait_ns={}", lock_wait_ns);

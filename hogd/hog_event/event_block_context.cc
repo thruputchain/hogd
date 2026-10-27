@@ -357,7 +357,7 @@ EventBlockContext::finish_file_write()
   log_stats.write_events_ns = (ts3 - ts).count();
   log_stats.residual_write_ns = (ts3 - ts2).count();
   log_stats.residual_buffers = buffers;
-  log_stats.events_bytes = total_bytes;
+  log_stats.residual_bytes = total_bytes;
   warn_slow_phase("write_events", block_id_, *log_stats.write_events_ns);
   warn_slow_phase("residual_write", block_id_, *log_stats.residual_write_ns);
   debug("time to write events: {} ns (pending writes {} ns, residual {} ns in "

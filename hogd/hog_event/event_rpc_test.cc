@@ -408,10 +408,10 @@ TEST_F(EventRpcTest, CommitLogsOneSummaryIncludingCollectedValues)
         "write_events_ns", "pending_writes_ns", "residual_write_ns",
         "residual_buffers", "sync_ns", "publish_ns", "wait_executors_closed_s",
         "wait_lock_s", "prepare_context_and_async_s", "close_total_s",
-        "close_total_ns", "events_bytes"}) {
+        "close_total_ns", "residual_bytes"}) {
     EXPECT_NE(line.find(std::format(" {}=", key)), std::string::npos) << key;
   }
-  EXPECT_NE(line.find(" events_bytes=0"), std::string::npos);
+  EXPECT_NE(line.find(" residual_bytes=0"), std::string::npos);
   EXPECT_TRUE(line.ends_with(" outcome=ok"));
 }
 
