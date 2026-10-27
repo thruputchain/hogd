@@ -1,7 +1,10 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
 #include <span>
@@ -18,6 +21,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -31,6 +35,7 @@
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -561,6 +566,145 @@ TEST_F(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
       discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
   EXPECT_EQ(proposal_hash, validation_hash)
       << "Proposal and validation trie root hashes must match";
+}
+
+// Validation replays a tx's peeked concurrent RCQ entries as
+// observed_concurrent_entries deltas in the tx's root push, which the
+// proposer's own push does not carry, and both pushes are held to the same
+// executor->HogDb message cap. A tx that writes just under the cap and peeks
+// one concurrent entry must not be accepted by the proposer and then rejected
+// by every validator (TxNonDeterministicError), which would invalidate an
+// honest block. So the largest payload the proposer accepts must validate.
+TEST_F(ProposeValidateRoundtripTest, RCQObservationFitsValidationPushCap)
+{
+  constexpr auto kQueueKey = make_storage_key("rcq0");
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(
+      0,
+      make_contract(
+          // Method 0: insert calldata[0] into the queue.
+          [kQueueKey](
+              NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+            auto const &cd = ctx.handler().get_calldata();
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                kQueueKey, std::as_bytes(std::span(cd.data(), 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            co_return InvokeStatus<void>{};
+          },
+          // Method 1: write calldata's little-endian u64 of bytes across
+          // max-length bytestrings, then peek one concurrent queue entry.
+          [kQueueKey](
+              NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+            auto const &cd = ctx.handler().get_calldata();
+            uint64_t left = 0;
+            std::memcpy(&left, cd.data(), sizeof(left));
+            const std::string chunk(kDefaultMaxBytestringLen, 'x');
+            for (uint32_t i = 0; left > 0; ++i) {
+              const size_t len = std::min<uint64_t>(left, chunk.size());
+              left -= len;
+              auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                  make_storage_key("fill" + std::to_string(i)),
+                  std::as_bytes(std::span(chunk.data(), len)));
+              if (!ws.has_value()) {
+                co_return NativeContractBuilder::host_fn_error_conversion(
+                    ws.error());
+              }
+              if (ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+            }
+            RuntimeMemoryLength peek_len = 0;
+            auto peek =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    kQueueKey, /*peek=*/true, std::span<std::byte>{}, peek_len);
+            if (!peek.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  peek.error());
+            }
+            if (peek.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+            co_return InvokeStatus<void>{};
+          }));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  const Transaction tx_insert = make_rcq_insert_tx({10});
+  const Uniquifier fill_uniquifier = make_new_uniquifier();
+  auto make_fill_tx = [&](uint64_t bytes) {
+    std::array<uint8_t, sizeof(bytes)> le{};
+    std::memcpy(le.data(), &bytes, sizeof(bytes));
+    return Transaction{
+        .invocation = Invocation{.invoked_address = kAddrA,
+                                 .entrypoint = entrypoint_from_method_id(1),
+                                 .gas_limit = kDefaultMaxTxGas,
+                                 .calldata = Calldata(le.begin(), le.end())},
+        .uniquifier = fill_uniquifier};
+  };
+
+  // Proposes tx_insert then a fill tx peeking its entry, in the current
+  // block, and returns the fill tx's commit result.
+  NondeterministicProposalData insert_p, fill_p;
+  auto propose_pair = [&](Transaction const &tx_fill) {
+    auto ha = make_new_system_call_handler(tx_insert, *context);
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto hb = make_new_system_call_handler(tx_fill, *context);
+    EXPECT_TRUE(hb.root_invoke()().is_root_success());
+    fill_p = hb.extract_proposal_data();
+    EXPECT_EQ(fill_p.observed_queue_entry_sequence.size(), 1U);
+    return hb.try_commit_transaction()();
+  };
+  // Each attempt runs in its own block, discarded afterward.
+  auto proposer_accepts = [&](uint64_t bytes) {
+    ExecResult res = propose_pair(make_fill_tx(bytes));
+    discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
+    EXPECT_TRUE(res == ExecResult::ExecResultOK ||
+                res == ExecResult::ExecResultTxNonDeterministicError)
+        << "unexpected proposal result " << std::to_underlying(res);
+    return res == ExecResult::ExecResultOK;
+  };
+
+  // Find the largest payload the proposer includes.
+  uint64_t lo = 0;
+  uint64_t hi = kExecToDbMessageCap;
+  ASSERT_TRUE(proposer_accepts(lo));
+  ASSERT_FALSE(proposer_accepts(hi));
+  while (hi - lo > 1) {
+    const uint64_t mid = lo + ((hi - lo) / 2);
+    if (proposer_accepts(mid)) {
+      lo = mid;
+    }
+    else {
+      hi = mid;
+    }
+  }
+
+  const Transaction tx_fill = make_fill_tx(lo);
+  ASSERT_EQ(propose_pair(tx_fill), ExecResult::ExecResultOK);
+  StorageShortHash proposal_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *context, insert_p);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto hb =
+        make_new_system_call_handler_validation(tx_fill, *context, fill_p);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    EXPECT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK)
+        << "validation rejected a " << lo << "-byte tx the proposer included";
+  }
+
+  StorageShortHash validation_hash =
+      discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
+  EXPECT_EQ(proposal_hash, validation_hash);
 }
 
 // Insert 1 entry in block 1.  Block 2: consume past entry (deterministic),
