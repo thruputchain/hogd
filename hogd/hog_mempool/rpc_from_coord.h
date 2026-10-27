@@ -486,6 +486,8 @@ public:
   }
 
 private:
+  friend class MempoolValidationExecutorResultTest;
+
   struct SubmissionAuth {
     std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
         accounts;
@@ -552,7 +554,8 @@ private:
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
     SignedTransactionHashBatch missing_signed_tx_hashes;
-    bool validated = true;
+    SchedulerValidationOutcome outcome =
+        SchedulerValidationOutcome::SchedulerValidationOK;
   };
 
   x23::Async<void> finish_init()
@@ -722,7 +725,9 @@ private:
   schedulercoord_commit_block_impl(BlockID block_id,
                                    ConsensusValue expected_value);
 
-  x23::Async<bool>
+  // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
+  // [SchedulerValidationExecutorFailed] when an executor could not run a tx.
+  x23::Async<SchedulerValidationOutcome>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
@@ -740,11 +745,12 @@ private:
       x23::span<const NondeterministicProposalData> tx_nominations,
       x23::span<TransactionHash> tx_hashes);
 
-  x23::Async<bool> multiplex_large_validation_chunk_across_executors(
+  x23::Async<SchedulerValidationOutcome>
+  multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
 
-  x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<SchedulerValidationOutcome>
+  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult>
   open_validation_block(BlockID block_id, BlockExecutionContext block_execution,

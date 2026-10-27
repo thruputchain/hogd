@@ -136,6 +136,26 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+// Folds the outcomes of two batches of one block's validation. An executor
+// failure outranks an invalid transaction: once this node could not complete
+// the block's execution, no result from that run shows the block is invalid.
+SchedulerValidationOutcome
+combine_batch_outcomes(SchedulerValidationOutcome a,
+                       SchedulerValidationOutcome b)
+{
+  if (a == SchedulerValidationOutcome::SchedulerValidationExecutorFailed ||
+      b == SchedulerValidationOutcome::SchedulerValidationExecutorFailed) {
+    return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  if (a == SchedulerValidationOutcome::SchedulerValidationInvalid ||
+      b == SchedulerValidationOutcome::SchedulerValidationInvalid) {
+    return SchedulerValidationOutcome::SchedulerValidationInvalid;
+  }
+  CHECK_EQ(a, SchedulerValidationOutcome::SchedulerValidationOK);
+  CHECK_EQ(b, SchedulerValidationOutcome::SchedulerValidationOK);
+  return SchedulerValidationOutcome::SchedulerValidationOK;
+}
+
 SchedulerTransactionStatus
 transaction_status_for_exec(const ExecResult result)
 {
@@ -2151,7 +2171,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   co_return committed;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch_chunk(
     BlockID block_id, x23::span<const ProposedTransaction> txs,
     size_t executor_idx)
@@ -2161,10 +2181,17 @@ MempoolCoordinatorRpc::validate_batch_chunk(
           block_id, txs);
   CHECK_EQ(res.size(), txs.size());
   CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
-  // Validation succeeds if every entry in the executor response is a
+  // A system error means the executor could not run a transaction (e.g. its
+  // block was cancelled mid-flight), which says nothing about the block, so it
+  // must never make the block invalid.
+  if (std::ranges::contains(res, ExecResult::ExecResultSystemError)) {
+    co_return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  // Otherwise validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
-  // System errors are nondeterministic and cause validation to fail.
-  co_return !(std::ranges::any_of(res, tx_failed));
+  co_return std::ranges::any_of(res, tx_failed)
+      ? SchedulerValidationOutcome::SchedulerValidationInvalid
+      : SchedulerValidationOutcome::SchedulerValidationOK;
 }
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
@@ -2255,13 +2282,13 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
 
   PreparedAndValidatedChunk ret{
       .missing_signed_tx_hashes = std::move(prepared.missing_signed_tx_hashes),
-      .validated = true,
+      .outcome = SchedulerValidationOutcome::SchedulerValidationOK,
   };
   if (!ret.missing_signed_tx_hashes.empty()) {
     co_return ret;
   }
 
-  ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
+  ret.outcome = co_await validate_batch(block_id, prepared.proposed_txs);
   ret.txs.reserve(prepared.proposed_txs.size());
   for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
     ret.txs.push_back(std::move(proposed_tx.signed_tx));
@@ -2269,7 +2296,7 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
   co_return ret;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
 {
@@ -2280,7 +2307,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(large_chunks.size());
 
   for (const ChunkRange &chunk : large_chunks) {
@@ -2290,7 +2317,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
         multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
   }
 
-  x23::Vec<bool> results(large_chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      large_chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2304,10 +2332,12 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
     BlockID block_id, x23::span<const ProposedTransaction> txs)
 {
@@ -2316,7 +2346,7 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
 
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -2328,7 +2358,8 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
                              /*executor_idx=*/i % exec_clients_.size()));
   }
 
-  x23::Vec<bool> results(chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2342,7 +2373,9 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
 x23::Async<ExecResult>
@@ -2461,7 +2494,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   SignedTransactionHashBatch missing_signed_tx_hashes;
   PendingBlock cache{};
-  bool validated = true;
+  SchedulerValidationOutcome batch_outcome =
+      SchedulerValidationOutcome::SchedulerValidationOK;
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationInvalid);
   SchedulerValidationOutcome dag_outcome =
@@ -2724,7 +2758,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
             panic("validation result missing without a captured exception");
           }
           PreparedAndValidatedChunk &chunk_result = *settled;
-          validated = chunk_result.validated && validated;
+          batch_outcome =
+              combine_batch_outcomes(batch_outcome, chunk_result.outcome);
           missing_signed_tx_hashes += chunk_result.missing_signed_tx_hashes;
           cache.txs += chunk_result.txs;
         }
@@ -2746,10 +2781,9 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         }
         CHECK_EQ(cache.txs.size(), tx_nominations.size());
 
-        if (!validated) {
-          co_await cancel_with_result(
-              SchedulerValidationOutcome::SchedulerValidationInvalid,
-              "check validation chunks");
+        if (batch_outcome !=
+            SchedulerValidationOutcome::SchedulerValidationOK) {
+          co_await cancel_with_result(batch_outcome, "check validation chunks");
           co_return;
         }
         co_return;
