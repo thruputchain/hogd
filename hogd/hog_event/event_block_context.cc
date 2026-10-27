@@ -8,6 +8,7 @@
 #include <concepts>
 #include <coroutine>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <expected>
@@ -50,6 +51,16 @@
 namespace hogd {
 
 constexpr static size_t kBufferThreshold = 500_KiB;
+
+void
+EventBlockContext::warn_slow_phase(std::string_view phase, BlockID block_id,
+                                   std::int64_t elapsed_ns)
+{
+  if (elapsed_ns > 1'000'000'000) {
+    warn("slow block phase phase={} block_id={} elapsed_ns={}", phase, block_id,
+         elapsed_ns);
+  }
+}
 
 x23::UniqueFd
 EventBlockContext::create_events_file(std::string_view work_directory,
@@ -315,6 +326,8 @@ EventBlockContext::finish_file_write()
 
   co_await await_pending_writes_done();
   auto ts2 = x23::fastclock::now();
+  log_stats.pending_writes_ns = (ts2 - ts).count();
+  warn_slow_phase("pending_writes", block_id_, *log_stats.pending_writes_ns);
 
   x23::CoroGuard g;
   co_await g(lock_);
@@ -341,14 +354,22 @@ EventBlockContext::finish_file_write()
   }
 
   auto ts3 = x23::fastclock::now();
-  info("time to write events: {} ns (pending writes {} ns, residual {} ns in "
-       "{} buffers) total bytes at end: {}",
-       (ts3 - ts).count(), (ts2 - ts).count(), (ts3 - ts2).count(), buffers,
-       total_bytes);
+  log_stats.write_events_ns = (ts3 - ts).count();
+  log_stats.residual_write_ns = (ts3 - ts2).count();
+  log_stats.residual_buffers = buffers;
+  log_stats.events_bytes = total_bytes;
+  warn_slow_phase("write_events", block_id_, *log_stats.write_events_ns);
+  warn_slow_phase("residual_write", block_id_, *log_stats.residual_write_ns);
+  debug("time to write events: {} ns (pending writes {} ns, residual {} ns in "
+        "{} buffers) total bytes at end: {}",
+        (ts3 - ts).count(), (ts2 - ts).count(), (ts3 - ts2).count(), buffers,
+        total_bytes);
 
   sync_file(g);
   auto ts4 = x23::fastclock::now();
-  info("time to sync {} ns,", (ts4 - ts3).count());
+  log_stats.sync_ns = (ts4 - ts3).count();
+  warn_slow_phase("sync", block_id_, *log_stats.sync_ns);
+  debug("time to sync {} ns,", (ts4 - ts3).count());
 }
 
 x23::Async<void>
@@ -361,7 +382,9 @@ EventBlockContext::finish_file(SHA256Hash const &hash)
   auto ts4 = x23::fastclock::now();
   publish_file(g, hash);
   auto ts5 = x23::fastclock::now();
-  info("time to publish file: {} ns", (ts5 - ts4).count());
+  log_stats.publish_ns = (ts5 - ts4).count();
+  warn_slow_phase("publish", block_id_, *log_stats.publish_ns);
+  debug("time to publish file: {} ns", (ts5 - ts4).count());
   auto directory = Directory::open(work_directory_, /*create=*/false);
   if (!directory) {
     panic("failed to open events directory after rename: {}",

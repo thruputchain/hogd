@@ -12,6 +12,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <cstring>
@@ -431,6 +432,8 @@ private:
   const size_t len_;
   // the number of loglets that must be reserved so compaction always succeeds.
   const size_t reserved_count_;
+  // Shared by maintenance and post-compaction diagnostics.
+  mutable std::atomic<std::chrono::steady_clock::time_point> last_stats_time_{};
   // a vector of all loglets in the order they appear in the region.
   std::vector<Loglet> loglets_;
 
