@@ -6,6 +6,7 @@
 #include <cstring>
 #include <span>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
