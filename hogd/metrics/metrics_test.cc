@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <atomic>
-#include <cstdint>
 #include <format>
 #include <limits>
 #include <string>
