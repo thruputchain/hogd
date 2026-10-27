@@ -7,6 +7,7 @@
 #include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -59,6 +60,13 @@ public:
   {}
 
 protected:
+  explicit ProposeValidateRoundtripTest(NetworkConfig const &network_config)
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          /*empty_genesis=*/true, /*genesis_cost_model=*/std::nullopt,
+          network_config)
+  {}
+
   void SetUp() override
   {
     // Deploy two native contracts
@@ -575,7 +583,27 @@ TEST_F(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
 // one concurrent entry must not be accepted by the proposer and then rejected
 // by every validator (TxNonDeterministicError), which would invalidate an
 // honest block. So the largest payload the proposer accepts must validate.
-TEST_F(ProposeValidateRoundtripTest, RCQObservationFitsValidationPushCap)
+//
+// Bytestrings may be as long as kBytestringCeilingLen here, so a push near the
+// cap takes a few hundred writes rather than ~16000 and the search stays fast.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class ProposeValidatePushCapTest : public ProposeValidateRoundtripTest {
+protected:
+  ProposeValidatePushCapTest()
+    : ProposeValidateRoundtripTest(max_bytestring_config())
+  {}
+
+  static NetworkConfig max_bytestring_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxBytestringLen,
+                                   kBytestringCeilingLen);
+    return config;
+  }
+};
+
+TEST_F(ProposeValidatePushCapTest, RCQObservationFitsValidationPushCap)
 {
   constexpr auto kQueueKey = make_storage_key("rcq0");
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -601,7 +629,7 @@ TEST_F(ProposeValidateRoundtripTest, RCQObservationFitsValidationPushCap)
             auto const &cd = ctx.handler().get_calldata();
             uint64_t left = 0;
             std::memcpy(&left, cd.data(), sizeof(left));
-            const std::string chunk(kDefaultMaxBytestringLen, 'x');
+            const std::string chunk(kBytestringCeilingLen, 'x');
             for (uint32_t i = 0; left > 0; ++i) {
               const size_t len = std::min<uint64_t>(left, chunk.size());
               left -= len;
