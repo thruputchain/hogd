@@ -15,7 +15,7 @@ env:
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.31-rc.17"
+  HOGD_DISTRIBUTION_VERSION: "0.1.31"
 
 permissions:
   contents: write
