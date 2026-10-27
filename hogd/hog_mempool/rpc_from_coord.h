@@ -19,7 +19,6 @@
 #include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
