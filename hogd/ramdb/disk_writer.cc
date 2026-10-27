@@ -9,6 +9,7 @@
 #include <cstddef>
 #include <cstring>
 #include <format>
+#include <limits>
 #include <mutex>
 #include <new>
 #include <span>
@@ -204,6 +205,11 @@ DiskWriter::sync()
       [this] { sync_active_.store(false, std::memory_order_relaxed); }};
 
   std::unique_lock ul(to_disk_lock_);
+
+  // This commit takes LSN cur_lsn_; refuse UINT64_MAX, whose successor would
+  // wrap to zero (#4665).
+  if (cur_lsn_ == std::numeric_limits<uint64_t>::max())
+    return DBError(DBCode::kInternal);
 
   // Reserve the queue slots (one per dirty head plus the commit marker) before
   // draining any head, so an allocation failure here leaves the heads and

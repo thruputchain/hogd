@@ -482,13 +482,19 @@ load_log_file(
           return DBError{DBCode::kCorruption};
         }
       }
-      // A snapshot commits at end_lsn - 1; reject anything else, including a
-      // zero end_lsn whose successor would wrap to zero (#4229).
-      else if (file.end_lsn_exclusive_ == 0 ||
-               hdr.lsn != file.end_lsn_exclusive_ - 1) {
+      // A snapshot commits at end_lsn - 1; reject anything else.
+      else if (hdr.lsn != file.end_lsn_exclusive_ - 1) {
         error("snapshot {} has commit for lsn {} but its filename range ends "
               "at lsn {}",
               file.path_, hdr.lsn, file.end_lsn_exclusive_);
+        return DBError{DBCode::kCorruption};
+      }
+
+      // The successor of UINT64_MAX would wrap the cursor to zero (#4229,
+      // #4665).
+      if (hdr.lsn == std::numeric_limits<uint64_t>::max()) {
+        error("{} has commit for lsn {}, which has no successor", file.path_,
+              hdr.lsn);
         return DBError{DBCode::kCorruption};
       }
 

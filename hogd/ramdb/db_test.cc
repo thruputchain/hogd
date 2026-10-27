@@ -1619,6 +1619,41 @@ TEST_F(DatabaseTest, RecoveryRejectsZeroEndedSnapshot)
   EXPECT_EQ(checked.error(), DBCode::kCorruption);
 }
 
+// A snapshot ending at UINT64_MAX recovers, but the writer must refuse the
+// next commit rather than write it at UINT64_MAX and wrap the cursor (#4665).
+TEST_F(DatabaseTest, SyncRefusesExhaustedLsn)
+{
+  const std::string key = "existing-key";
+  const std::string value = "existing-value";
+  ASSERT_TRUE(db_->put(std::as_bytes(std::span(key)), 0,
+                       std::as_bytes(std::span(value))));
+
+  auto snapshot = db_->sync_and_snapshot(0);
+  ASSERT_TRUE(snapshot);
+  ASSERT_TRUE(std::get<1>(*snapshot).get());
+  db_.reset();
+
+  constexpr uint64_t kMaxLsn = std::numeric_limits<uint64_t>::max();
+  const std::string max_snapshot = std::format("0-{}.snap", kMaxLsn);
+  ASSERT_TRUE(static_cast<bool>(dir_.unlink("0.log")));
+  ASSERT_TRUE(static_cast<bool>(dir_.rename("0-1.snap", max_snapshot)));
+  ASSERT_NO_FATAL_FAILURE(
+      tamper_snapshot_commit_lsn(dir_, max_snapshot, kMaxLsn - 1));
+
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  insert_n(1);
+  DBStatus<uint64_t> synced = db_->sync();
+  ASSERT_FALSE(static_cast<bool>(synced));
+  EXPECT_EQ(synced.error(), DBCode::kInternal);
+  db_.reset();
+
+  const size_t heap_size =
+      Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
+  DBStatus<uint64_t> checked = Database::check(dir_.get_path(), heap_size);
+  ASSERT_TRUE(static_cast<bool>(checked));
+  EXPECT_EQ(*checked, kMaxLsn);
+}
+
 } // namespace hogd
 
 int
