@@ -259,12 +259,12 @@ LogletAllocator::usage_stats() const
 }
 
 void
-LogletAllocator::print_stats() const
+LogletAllocator::print_stats(bool force) const
 {
   const auto now = std::chrono::steady_clock::now();
   auto last = last_stats_time_.load(std::memory_order_relaxed);
   do {
-    if (last != std::chrono::steady_clock::time_point{} &&
+    if (!force && last != std::chrono::steady_clock::time_point{} &&
         now - last < std::chrono::seconds(60)) {
       return;
     }

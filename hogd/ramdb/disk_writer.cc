@@ -245,16 +245,18 @@ DiskWriter::sync()
 void
 DiskWriter::print_stats()
 {
-  // This is called by the maintenance loop; keep its one-second wakeup for
-  // compaction/reclamation, but sample these statistics only once a minute.
-  std::scoped_lock guard(to_disk_lock_);
+  // Only the maintenance loop calls this, so prev_stats_time_ needs no lock.
+  // Keep its one-second wakeup but log these statistics once a minute.
   time_point now = std::chrono::steady_clock::now();
   if (prev_stats_time_ != time_point{} &&
       now - prev_stats_time_ < std::chrono::seconds(60)) {
     return;
   }
   size_t in, out;
-  in = bytes_in_;
+  {
+    std::scoped_lock guard(to_disk_lock_);
+    in = bytes_in_;
+  }
   out = bytes_out_.load(std::memory_order_relaxed);
 
   std::chrono::nanoseconds ns = now - prev_stats_time_;

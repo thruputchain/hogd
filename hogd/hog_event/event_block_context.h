@@ -112,7 +112,9 @@ public:
     std::optional<std::int64_t> pending_writes_ns;
     std::optional<std::int64_t> residual_write_ns;
     std::optional<size_t> residual_buffers;
-    std::optional<size_t> events_bytes;
+    // Bytes in the close-time residual write; earlier buffer flushes are
+    // not counted (the old "total bytes at end" value).
+    std::optional<size_t> residual_bytes;
     std::optional<std::int64_t> sync_ns;
     std::optional<std::int64_t> publish_ns;
     std::optional<double> wait_executors_closed_s;
