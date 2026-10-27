@@ -245,14 +245,18 @@ DiskWriter::sync()
 void
 DiskWriter::print_stats()
 {
-  size_t in, out;
-  {
-    std::scoped_lock guard(to_disk_lock_);
-    in = bytes_in_;
+  // This is called by the maintenance loop; keep its one-second wakeup for
+  // compaction/reclamation, but sample these statistics only once a minute.
+  std::scoped_lock guard(to_disk_lock_);
+  time_point now = std::chrono::steady_clock::now();
+  if (prev_stats_time_ != time_point{} &&
+      now - prev_stats_time_ < std::chrono::seconds(60)) {
+    return;
   }
+  size_t in, out;
+  in = bytes_in_;
   out = bytes_out_.load(std::memory_order_relaxed);
 
-  time_point now = std::chrono::steady_clock::now();
   std::chrono::nanoseconds ns = now - prev_stats_time_;
   // Guard against a zero/non-positive interval: dividing by it yields a
   // non-finite double, and converting that to size_t for print_iec_bytes is
