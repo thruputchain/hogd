@@ -5360,6 +5360,77 @@ TEST(Mempool, OverCapBodyIsDroppedFromProposal)
   EXPECT_TRUE(nominated_hashes(proposed.proposed_block().proposal).empty());
 }
 
+// #4680: validating a block does not pin its txs, so a local nomination can
+// drop one for insufficient native tokens before the validated block commits.
+// The commit must still succeed.
+TEST(Mempool, ValidatedBlockCommitsAfterLocalNominationDropsItsTx)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  Proposal proposal;
+  {
+    MempoolTestInfra proposer;
+    proposer.set_native_tokens(account, kNativeTokenAgeGroupToSchedule,
+                               /*age=*/0, /*num_native_tokens=*/1);
+    ASSERT_EQ(submit_through_gateway(proposer, tx),
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
+    // A Byzantine proposer need not follow its scheduler's native token
+    // policy. Raise only the proposer's cached scheduling balance; its DB
+    // state stays the same as the validator's.
+    {
+      auto [native_token_age, lock] =
+          proposer.mempool_coord_rpc().scheduler()->get_cached_native_token_age(
+              account);
+      native_token_age->num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+          to_xdr(static_cast<uint128_t>(50'000'000'000));
+    }
+
+    const SchedulerGetTipResult tip =
+        proposer.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult proposed =
+        propose_block(proposer, tip.db_tip());
+    ASSERT_EQ(proposed.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    proposal = proposed.proposed_block().proposal;
+    ASSERT_EQ(nominated_hashes(proposal).size(), 1UL);
+  }
+
+  MempoolTestInfra validator;
+  validator.set_native_tokens(account, kNativeTokenAgeGroupToSchedule,
+                              /*age=*/0, /*num_native_tokens=*/1);
+  MempoolCoordinatorRpc &rpc = validator.mempool_coord_rpc();
+  std::shared_ptr<Scheduler> scheduler = rpc.scheduler();
+
+  const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  rpc.schedulercoord_submit_vetted(ValidatorID{},
+                                   t_to_parallel_batch(
+                                       SignedTransactionBatch{tx})())();
+  const SchedulerValidationResult validated =
+      rpc.schedulercoord_validate_block(tip.db_tip().id, proposal)();
+  ASSERT_EQ(validated.outcome(),
+            SchedulerValidationOutcome::SchedulerValidationOK);
+
+  // The local nomination drops the tx the validated block still names.
+  const SchedulerProposalResult local = propose_block(validator, tip.db_tip());
+  ASSERT_EQ(local.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(nominated_hashes(local.proposed_block().proposal).empty());
+  ASSERT_FALSE(scheduler->find_tx(tx_hash));
+
+  EXPECT_EQ(commit_block(validator, validated.block().block_id, tip.db_tip(),
+                         proposal),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  EXPECT_EQ(rpc.schedcoord_lookup_transaction_outcomes({tx_hash})()[0].status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
 } // namespace hogd
 
 int
