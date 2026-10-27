@@ -12,7 +12,6 @@ add_xdr(
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x
   ../../protocol/db_conflict.x
-  ../../protocol/discovery.x
   ../../protocol/event.x
   ../../protocol/event_rpc.x
   ../../protocol/executor_to_db_rpc.x
