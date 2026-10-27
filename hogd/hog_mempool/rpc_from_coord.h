@@ -368,8 +368,10 @@ public:
     co_return ret;
   }
 
+  // Takes [tx_hashes] by value: the loop below suspends on each lookup, and
+  // the RPC dispatcher frees its decoded arguments at the first suspension.
   x23::Async<SchedulerTransactionOutcomeBatch>
-  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
   {
     SchedulerTransactionOutcomeBatch ret;
     ret.reserve(tx_hashes.size());
