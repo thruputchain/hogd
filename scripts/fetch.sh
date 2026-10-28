@@ -16,5 +16,12 @@ rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
 # The CLI is `thruput` on crates.io. Keep this version in step with the gates
 # in built_contracts/build_risc.sh and hogd/loadgen/hackathon/build_contracts.py.
-echo "Installing the thruput CLI..."
-cargo "+${TOOL_RUST}" install --locked thruput@0.42.0
+# --force: ~/.cargo may hold `thruput` from the old `thruput-cli` package,
+# which cargo will not overwrite otherwise. Skip the install when the CLI is
+# already current, so --force does not rebuild it on every run.
+THRUPUT_CLI_VERSION=0.42.0
+THRUPUT_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/thruput"
+if [ "$("$THRUPUT_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUPUT_CLI_VERSION}" ]; then
+    echo "Installing the thruput CLI..."
+    cargo "+${TOOL_RUST}" install --locked --force "thruput@${THRUPUT_CLI_VERSION}"
+fi
