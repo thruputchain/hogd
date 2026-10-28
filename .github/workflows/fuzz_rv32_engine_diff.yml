@@ -4,9 +4,6 @@ on:
     schedule:
         - cron: "0 15 * * *" # Daily at 8am PDT/7am PST
     workflow_dispatch:
-env:
-    CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     build:
@@ -45,8 +42,6 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     --timeout-sec=2400 \
                     ./scripts/schedules/fuzz_rv32_engine_diff.toml
             - name: Print Log Download Instructions

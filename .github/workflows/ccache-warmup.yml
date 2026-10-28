@@ -9,8 +9,6 @@ on:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   HOGD_CCACHE_WARMUP_JOBS: "auto"
 
 jobs:
@@ -76,8 +74,6 @@ jobs:
             --key=git_commit --value=${{ github.sha }} \
             --key=git_branch --value="$BRANCH_NAME" \
             --key=hogd_ccache_warmup_jobs --value=${{ env.HOGD_CCACHE_WARMUP_JOBS }} \
-            --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-            --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
             --timeout-sec=28800 \
             ./scripts/schedules/ccache_warmup.toml &
           HOG_SCHED_PID=$!

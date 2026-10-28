@@ -4,9 +4,6 @@ on:
     schedule:
         - cron: "0 14 * * *" # Daily at 7am PDT/6am PST
     workflow_dispatch:
-env:
-    CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     build:
@@ -46,8 +43,6 @@ jobs:
                     --key=github_repo --value=${{ github.repository }} \
                     --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                     --key=git_commit --value=${{ github.sha }} \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     ./scripts/schedules/asyncio_stress_test.toml
             - name: Print Log Download Instructions
               if: always()

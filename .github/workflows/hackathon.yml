@@ -30,9 +30,6 @@ on:
                 required: true
                 default: 3
                 type: number
-env:
-    CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     benchmark:
@@ -92,8 +89,6 @@ jobs:
                     --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value="$BRANCH_NAME" \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     --key=hackathon_users --value="$HACKATHON_USERS" \
                     --key=hackathon_rate_multiplier --value="$HACKATHON_RATE_MULTIPLIER" \
                     --key=hackathon_outstanding --value="$HACKATHON_OUTSTANDING" \
