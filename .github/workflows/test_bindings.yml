@@ -51,7 +51,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
-          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's thruput-cli
+          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's thruput CLI
           # install, rebuilt from source on every run without it) and the
           # toolchains (~/.cache/rustup) on the cache volume.
           path: |

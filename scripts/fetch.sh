@@ -14,6 +14,7 @@ set -ex
 TOOL_RUST=1.96.0
 rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
-echo "Installing thruput-cli..."
-CARGO_REGISTRIES_THRUPUT_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry thruput thruput-cli@0.37.0
+# The CLI is `thruput` on crates.io. Keep this version in step with the gates
+# in built_contracts/build_risc.sh and hogd/loadgen/hackathon/build_contracts.py.
+echo "Installing the thruput CLI..."
+cargo "+${TOOL_RUST}" install --locked thruput@0.42.0
