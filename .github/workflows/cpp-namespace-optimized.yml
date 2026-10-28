@@ -20,8 +20,6 @@ concurrency:
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
   # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.

@@ -13,8 +13,6 @@ concurrency:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
@@ -51,7 +49,7 @@ jobs:
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
-          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's thruput-cli
+          # Like the other Linux jobs, keep ~/.cargo (fetch.sh's thruput CLI
           # install, rebuilt from source on every run without it) and the
           # toolchains (~/.cache/rustup) on the cache volume.
           path: |

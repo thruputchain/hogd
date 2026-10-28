@@ -13,10 +13,6 @@ concurrency:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
-  CARGO_REGISTRIES_THRUPUT_INDEX: sparse+https://crates.thruput.network/api/v1/crates/
-  CARGO_REGISTRIES_THRUPUT_SOURCE: sparse+https://crates.thruput.network/api/v1/crates/
   CARGO_BUILD_JOBS: "6"
   # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
   # is cached by `cache: rust`); see built_contracts/build_risc.sh.
@@ -71,7 +67,7 @@ jobs:
           echo "CCACHE_MAXSIZE=20G" >> "$GITHUB_ENV"
 
           # cargo install writes to ~/.cargo/bin, which the cache volume does not
-          # cover, so thruput-cli was compiled from source on every run.
+          # cover, so the thruput CLI was compiled from source on every run.
           # Install into a cached root instead. ~/.cargo/bin itself is left
           # alone because rustup's proxies live there.
           echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"

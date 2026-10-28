@@ -2,9 +2,6 @@ name: Metrics (hog_sched)
 
 on:
     workflow_dispatch:
-env:
-    CARGO_REGISTRIES_THRUPUT_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     build:
@@ -46,8 +43,6 @@ jobs:
                   --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                   --key=git_branch --value=$BRANCH_NAME \
                   --key=git_commit --value=${{ github.sha }} \
-                  --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                  --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                   --timeout-sec=1800 \
                   ./scripts/schedules/metrics.toml
             - name: Print Log Download Instructions
