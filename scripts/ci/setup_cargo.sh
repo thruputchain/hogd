@@ -1,9 +1,10 @@
 set -x
 echo 'setting up cargo'
 
-# Get rid of the .cargo that's checked in to the repo;
-# Right now, that just sets build flags when building on macos.
-rm -r ${HOME}/.cargo
+# Get rid of any .cargo in the job directory before symlinking the real one
+# into place. The repo no longer checks one in, so it is usually absent; -f
+# keeps that from failing the sourcing script, which runs under `set -e`.
+rm -rf ${HOME}/.cargo
 
 # curl -sSf https://sh.rustup.rs | sh -s -- -y
 ln -s "$USER_HOME/.cargo" "$HOME/.cargo"
