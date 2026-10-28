@@ -51,11 +51,7 @@ jobs:
           app-id: ${{ vars.COMPONENT_READER_APP_ID }}
           private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
           ssh-private-key: |
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
             ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1

@@ -92,18 +92,18 @@ Rotate `READ_ACCESS_PAT` before it expires. Existing pre-checkout
 the Git CLI. Go module paths remain unchanged; this tree has no go.mod/go.work
 or workflow GOPRIVATE/GOFLAGS settings to migrate.
 
-Deploy-key inputs are retained only for repositories still in groundhogchain:
-abort_rs (`HOGD_TO_ABORT_RS_KEY`), bcs (`HOGD_TO_BCS_ACCESS_KEY`),
-metrics_history (`HOGD_TO_METRICS_HISTORY_KEY`), serde_arrays
-(`HOGD_TO_SERDE_ARRAYS`) and xdr_common (`HOGD_TO_XDR_COMMON_ACCESS_KEY`).
-xdrs and xdr_rpc moved to thruputchain; hogd gets them from the registry, so it needs no
-key or token for them. metrics_history is fetched
-and written by the metrics scripts. The other four keys preserve access to
-nested private sources: their manifests are unavailable in an uninitialized
-checkout, so qualify their continued necessity in CI before deleting secrets.
-The obsolete bcs_rs key and all transferred-repository keys, including the hogd
-self key, are no longer referenced. Do not delete stored secrets until CI is
-qualified.
+The only deploy key still passed is metrics_history's
+(`HOGD_TO_METRICS_HISTORY_KEY`), the one repository in groundhogchain that hogd
+still uses; the metrics scripts fetch and write it. hogd's Rust dependencies,
+xdrs and xdr_rpc included, come from crates.io and need no key or token. The
+abort_rs, bcs, serde_arrays, xdr_common, xdrs and xdr_rpc keys
+(`HOGD_TO_ABORT_RS_KEY`, `HOGD_TO_BCS_ACCESS_KEY`, `HOGD_TO_SERDE_ARRAYS`,
+`HOGD_TO_XDR_COMMON_ACCESS_KEY`, `HOGD_XDRS_ACCESS_KEY`, `HOGD_TO_XDR_RPC`), the
+obsolete bcs_rs key and all transferred-repository keys, including the hogd
+self key, are no longer referenced and can be deleted from the repository's
+secrets. The composite's `ssh-private-key` input is optional: without it no
+agent is started, so a hog_sched job that needs none starts an empty
+`ssh-agent` for hog_sched to forward (see `hackathon.yml`).
 
 Release publication and protocol-rs workflow dispatch keep their existing
 write credentials. The read-only component token never rewrites metrics_history.
@@ -112,8 +112,8 @@ using `--key=git_token`. Every fetching worker job creates its own private
 `GIT_CONFIG_GLOBAL` file, bootstraps the hogd checkout via an HTTPS rewrite,
 and runs `.github/actions/private-sources/git-config.sh` after checkout for
 the same legacy and canonical URL map as the composite. Stored remote URLs
-remain token-free. Worker EXIT traps remove the config; the existing SSH agent
-still serves groundhogchain repositories. Cargo uses the Git CLI on workers.
+remain token-free. Worker EXIT traps remove the config; the forwarded SSH agent
+serves metrics_history. Cargo uses the Git CLI on workers.
 
 For manual launches, set `GIT_TOKEN` to a private-source read token before running
 `scripts/schedules/launch.sh <xid> <schedule_toml>`. The launcher passes it as
