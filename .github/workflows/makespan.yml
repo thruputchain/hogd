@@ -1,7 +1,8 @@
 name: Makespan Benchmark (hog_sched)
 
 # Manual: the makespan bench with every knob exposed, for experiments on a
-# branch. combined_metrics runs it with the defaults below as a tracked metric.
+# branch. Combined Metrics (thruputchain/benchmarks, started by benchmarks.yml)
+# runs it with the defaults below as a tracked metric.
 # See hogd/hog_exec/bench/makespan_runner.cc.
 on:
     workflow_dispatch:
