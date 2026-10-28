@@ -22,6 +22,6 @@ rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 THRUPUT_CLI_VERSION=0.42.0
 THRUPUT_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/thruput"
 if [ "$("$THRUPUT_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUPUT_CLI_VERSION}" ]; then
-    echo "Installing the thruput CLI..."
-    cargo "+${TOOL_RUST}" install --locked --force "thruput@${THRUPUT_CLI_VERSION}"
+  echo "Installing the thruput CLI..."
+  cargo "+${TOOL_RUST}" install --locked --force "thruput@${THRUPUT_CLI_VERSION}"
 fi
