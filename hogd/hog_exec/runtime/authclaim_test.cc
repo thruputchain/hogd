@@ -25,8 +25,7 @@ class AuthClaimTestFixture : public ::testing::Test,
 public:
   AuthClaimTestFixture()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

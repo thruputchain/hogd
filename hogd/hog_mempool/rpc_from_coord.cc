@@ -30,6 +30,7 @@
 #include "exec_sched.hh"
 #include "header.hh"
 #include "hogd/base/block_id.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
@@ -133,6 +134,26 @@ bool
 tx_failed(const ExecResult &r)
 {
   return !tx_succeeded(r);
+}
+
+// Folds the outcomes of two batches of one block's validation. An executor
+// failure outranks an invalid transaction: once this node could not complete
+// the block's execution, no result from that run shows the block is invalid.
+SchedulerValidationOutcome
+combine_batch_outcomes(SchedulerValidationOutcome a,
+                       SchedulerValidationOutcome b)
+{
+  if (a == SchedulerValidationOutcome::SchedulerValidationExecutorFailed ||
+      b == SchedulerValidationOutcome::SchedulerValidationExecutorFailed) {
+    return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  if (a == SchedulerValidationOutcome::SchedulerValidationInvalid ||
+      b == SchedulerValidationOutcome::SchedulerValidationInvalid) {
+    return SchedulerValidationOutcome::SchedulerValidationInvalid;
+  }
+  CHECK_EQ(a, SchedulerValidationOutcome::SchedulerValidationOK);
+  CHECK_EQ(b, SchedulerValidationOutcome::SchedulerValidationOK);
+  return SchedulerValidationOutcome::SchedulerValidationOK;
 }
 
 SchedulerTransactionStatus
@@ -1287,7 +1308,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             co_await scheduler_guard(scheduler_->global_lock_);
             co_await scheduler_->schedule(kMaxBlockSize /
                                               kNumSchedulerIterations,
-                                          cache.tx_hashes, cache.txs);
+                                          cache.tx_hashes,
+                                          cache.signed_tx_hashes, cache.txs);
           }
           const size_t start = state->num_scheduled;
           const size_t end = cache.tx_hashes.size();
@@ -1360,6 +1382,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
               if (tx_succeeded(cache.statuses[tx_idx])) {
                 const TransactionHash &tx_hash = cache.tx_hashes[tx_idx];
                 cache.result_tx_hashes.push_back(tx_hash);
+                cache.result_signed_tx_hashes.push_back(
+                    cache.signed_tx_hashes[tx_idx]);
                 state->txset_hash_chunks[i].push_back(tx_hash);
                 if (state->tx_write_idx != tx_idx) {
                   cache.txs[state->tx_write_idx] = std::move(cache.txs[tx_idx]);
@@ -1383,6 +1407,8 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
             CHECK_EQ(state->num_tx_outcomes_processed, cache.tx_hashes.size());
             CHECK_EQ(cache.result_tx_hashes.size(),
                      cache.result_tx_nominations.size());
+            CHECK_EQ(cache.result_signed_tx_hashes.size(),
+                     cache.result_tx_hashes.size());
           }
           co_return;
         });
@@ -1434,18 +1460,20 @@ MempoolCoordinatorRpc::add_schedule_nodes(x23::Dag &dag, PendingBlock &cache,
         [&, state, i]() -> x23::Async<void> {
           Proposal &proposal = cache.proposal_result.proposed_block().proposal;
           if (i == 0) {
-            proposal.transactions.hash = {};
+            proposal.transactions.signed_hash = {};
           }
           if (!state->summarized_chunks[i].active) {
             co_return;
           }
+          // The proposal names each tx by the exact encoding this node
+          // executed. The txset trie keys the same txs by [TransactionHash].
           const size_t start = state->summarized_chunks[i].start;
           const size_t end = state->summarized_chunks[i].end;
-          x23::span<const TransactionHash> tx_hashes_span(
-              cache.result_tx_hashes.begin() + start,
-              cache.result_tx_hashes.begin() + end);
-          co_await append_to_parallel_batch(tx_hashes_span,
-                                            proposal.transactions.hash);
+          x23::span<const SignedTransactionHash> signed_tx_hashes_span(
+              cache.result_signed_tx_hashes.begin() + start,
+              cache.result_signed_tx_hashes.begin() + end);
+          co_await append_to_parallel_batch(signed_tx_hashes_span,
+                                            proposal.transactions.signed_hash);
           co_return;
         });
     nodes.serialize_chunks.push_back(hash_serialize_node);
@@ -1715,8 +1743,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                }));
   }
 
-  // HOG transfers and auth changes from the previous block both affect the
-  // scheduling priorities for this block, but neither depends on the other.
+  // native-token transfers and auth changes from the previous block both affect
+  // the scheduling priorities for this block, but neither depends on the other.
   auto transfer_data_node = nomination_dag.async<void>(
       "wait transfer data", [&]() -> x23::Async<void> {
         co_await wait_for_transfer_data(
@@ -1755,11 +1783,15 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         nominated_block_cache_.txs = {};
         nominated_block_cache_.txs.reserve(kMaxBlockSize);
         nominated_block_cache_.tx_hashes.clear();
+        nominated_block_cache_.signed_tx_hashes.clear();
         nominated_block_cache_.result_tx_hashes.clear();
+        nominated_block_cache_.result_signed_tx_hashes.clear();
         nominated_block_cache_.result_tx_nominations.clear();
         nominated_block_cache_.txs.reserve(kMaxBlockSize);
         nominated_block_cache_.tx_hashes.reserve(kMaxBlockSize);
+        nominated_block_cache_.signed_tx_hashes.reserve(kMaxBlockSize);
         nominated_block_cache_.result_tx_hashes.reserve(kMaxBlockSize);
+        nominated_block_cache_.result_signed_tx_hashes.reserve(kMaxBlockSize);
         nominated_block_cache_.result_tx_nominations.reserve(kMaxBlockSize);
         // We set the outcome here because doing so resets
         // [nominated_block_cache_.proposal_result.proposed_block()]. We
@@ -2025,10 +2057,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     cache.txs = std::move(txs);
     cache.tx_hashes.clear();
     cache.tx_hashes.reserve(cache.txs.size());
+    cache.signed_tx_hashes.clear();
+    cache.signed_tx_hashes.reserve(cache.txs.size());
     for (const SignedTransaction &tx : cache.txs) {
-      cache.tx_hashes.push_back(sha256(tx.tx));
+      const SignedTransactionHashes hashes = hash_signed_transaction(tx);
+      cache.tx_hashes.push_back(hashes.tx_hash);
+      cache.signed_tx_hashes.push_back(hashes.signed_tx_hash);
     }
     cache.result_tx_hashes = cache.tx_hashes;
+    cache.result_signed_tx_hashes = cache.signed_tx_hashes;
     cache.result_tx_nominations.clear();
     cache.failed_tx_hashes.clear();
     cache.failed_tx_results.clear();
@@ -2046,9 +2083,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
 
     co_await finish_all_executors(block_id);
     executors_open = 0;
+    // As in an ordinary nomination, [ProposalTxs] names the ceremony txs by
+    // [SignedTransactionHash] while [ProposalHeader::txs_hash] below is the
+    // txset trie over their [TransactionHash]es.
     ProposalTxs ceremony_proposal_txs;
-    co_await t_to_parallel_batch(cache.result_tx_hashes,
-                                 ceremony_proposal_txs.hash);
+    co_await t_to_parallel_batch(cache.result_signed_tx_hashes,
+                                 ceremony_proposal_txs.signed_hash);
     co_await t_to_parallel_batch(cache.result_tx_nominations,
                                  ceremony_proposal_txs.nondeterministic_data);
     const DbBlockResult db_close = co_await close_snapshot(block_id);
@@ -2104,6 +2144,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
     // entries; leave that eviction set empty while retaining the committed
     // hashes in ProposalTxs above.
     cache.tx_hashes.clear();
+    cache.signed_tx_hashes.clear();
   }
 
   // A joint DB/event commit may already have succeeded in one subsystem when
@@ -2130,7 +2171,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   co_return committed;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch_chunk(
     BlockID block_id, x23::span<const ProposedTransaction> txs,
     size_t executor_idx)
@@ -2140,39 +2181,52 @@ MempoolCoordinatorRpc::validate_batch_chunk(
           block_id, txs);
   CHECK_EQ(res.size(), txs.size());
   CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
-  // Validation succeeds if every entry in the executor response is a
+  // A system error means the executor could not run a transaction (e.g. its
+  // block was cancelled mid-flight), which says nothing about the block, so it
+  // must never make the block invalid.
+  if (std::ranges::contains(res, ExecResult::ExecResultSystemError)) {
+    co_return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  // Otherwise validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
-  // System errors are nondeterministic and cause validation to fail.
-  co_return !(std::ranges::any_of(res, tx_failed));
+  co_return std::ranges::any_of(res, tx_failed)
+      ? SchedulerValidationOutcome::SchedulerValidationInvalid
+      : SchedulerValidationOutcome::SchedulerValidationOK;
 }
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
 MempoolCoordinatorRpc::prepare_validation_chunk(
-    x23::span<const TransactionHash> tx_hashes,
-    x23::span<const NondeterministicProposalData> tx_nominations)
+    x23::span<const SignedTransactionHash> signed_tx_hashes,
+    x23::span<const NondeterministicProposalData> tx_nominations,
+    x23::span<TransactionHash> tx_hashes)
 {
+  CHECK_EQ(tx_hashes.size(), signed_tx_hashes.size());
   PreparedValidationChunk prepared;
-  prepared.proposed_txs.resize(tx_hashes.size());
-  x23::Vec<bool> tx_found(tx_hashes.size(), false);
+  prepared.proposed_txs.resize(signed_tx_hashes.size());
+  x23::Vec<bool> tx_found(signed_tx_hashes.size(), false);
 
   const std::vector<ChunkRange> lookup_chunks =
-      make_chunks(tx_hashes.size(), available_parallelism());
+      make_chunks(signed_tx_hashes.size(), available_parallelism());
   x23::Vec<x23::Async<void>> lookup_handles;
   lookup_handles.reserve(lookup_chunks.size());
 
   for (const ChunkRange &lookup_chunk : lookup_chunks) {
     lookup_handles.push_back(
         [](const ChunkRange *lookup_chunk,
-           x23::span<const TransactionHash> tx_hashes,
+           x23::span<const SignedTransactionHash> signed_tx_hashes,
            x23::span<const NondeterministicProposalData> tx_nominations,
+           x23::span<TransactionHash> tx_hashes,
            x23::Vec<ProposedTransaction> &proposed_txs,
            x23::Vec<bool> &tx_found,
            std::shared_ptr<Scheduler> scheduler) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
           for (size_t i = lookup_chunk->start; i < lookup_chunk->end; i++) {
+            // The proposal names the exact encoding to execute. A body cached
+            // under a different signing is missing, and the coordinator
+            // fetches the proposer's encoding.
             std::shared_ptr<const SignedTransaction> found_tx =
-                scheduler->find_tx(tx_hashes[i]);
+                scheduler->find_signed_tx(signed_tx_hashes[i], &tx_hashes[i]);
             if (!found_tx) {
               continue;
             }
@@ -2182,7 +2236,8 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
             tx_found[i] = true;
           }
           co_return;
-        }(&lookup_chunk, tx_hashes, tx_nominations, prepared.proposed_txs,
+        }(&lookup_chunk, signed_tx_hashes, tx_nominations, tx_hashes,
+                                                          prepared.proposed_txs,
                                                           tx_found,
                                                           scheduler_));
   }
@@ -2202,11 +2257,11 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
 
   for (size_t i = 0; i < tx_found.size(); i++) {
     if (!tx_found[i]) {
-      prepared.missing_tx_hashes.push_back(tx_hashes[i]);
+      prepared.missing_signed_tx_hashes.push_back(signed_tx_hashes[i]);
     }
   }
 
-  if (!prepared.missing_tx_hashes.empty()) {
+  if (!prepared.missing_signed_tx_hashes.empty()) {
     prepared.proposed_txs.clear();
   }
 
@@ -2215,23 +2270,25 @@ MempoolCoordinatorRpc::prepare_validation_chunk(
 
 x23::Async<MempoolCoordinatorRpc::PreparedAndValidatedChunk>
 MempoolCoordinatorRpc::prepare_and_validate_chunk(
-    BlockID block_id, x23::span<const TransactionHash> tx_hashes,
-    x23::span<const NondeterministicProposalData> tx_nominations)
+    BlockID block_id, x23::span<const SignedTransactionHash> signed_tx_hashes,
+    x23::span<const NondeterministicProposalData> tx_nominations,
+    x23::span<TransactionHash> tx_hashes)
 {
   co_await default_coropoll().pool_.bg();
 
   PreparedValidationChunk prepared =
-      co_await prepare_validation_chunk(tx_hashes, tx_nominations);
+      co_await prepare_validation_chunk(signed_tx_hashes, tx_nominations,
+                                        tx_hashes);
 
   PreparedAndValidatedChunk ret{
-      .missing_tx_hashes = std::move(prepared.missing_tx_hashes),
-      .validated = true,
+      .missing_signed_tx_hashes = std::move(prepared.missing_signed_tx_hashes),
+      .outcome = SchedulerValidationOutcome::SchedulerValidationOK,
   };
-  if (!ret.missing_tx_hashes.empty()) {
+  if (!ret.missing_signed_tx_hashes.empty()) {
     co_return ret;
   }
 
-  ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
+  ret.outcome = co_await validate_batch(block_id, prepared.proposed_txs);
   ret.txs.reserve(prepared.proposed_txs.size());
   for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
     ret.txs.push_back(std::move(proposed_tx.signed_tx));
@@ -2239,7 +2296,7 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
   co_return ret;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
 {
@@ -2250,7 +2307,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(large_chunks.size());
 
   for (const ChunkRange &chunk : large_chunks) {
@@ -2260,7 +2317,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
         multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
   }
 
-  x23::Vec<bool> results(large_chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      large_chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2274,10 +2332,12 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
     BlockID block_id, x23::span<const ProposedTransaction> txs)
 {
@@ -2286,7 +2346,7 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
 
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -2298,7 +2358,8 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
                              /*executor_idx=*/i % exec_clients_.size()));
   }
 
-  x23::Vec<bool> results(chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2312,7 +2373,9 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
 x23::Async<ExecResult>
@@ -2429,9 +2492,10 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   // TODO(jhumphri): Need to ensure that the node that proposed the block is
   // following the expected scheduling policy.
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
-  x23::XdrVec<TransactionHash> missing_tx_hashes;
+  SignedTransactionHashBatch missing_signed_tx_hashes;
   PendingBlock cache{};
-  bool validated = true;
+  SchedulerValidationOutcome batch_outcome =
+      SchedulerValidationOutcome::SchedulerValidationOK;
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationInvalid);
   SchedulerValidationOutcome dag_outcome =
@@ -2499,22 +2563,23 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   auto decode_node = validation_dag.async<void>(
       "decode nomination batches", [&]() -> x23::Async<void> {
         // We call [reserve] here to avoid racing with accesses to
-        // [cache.tx_hashes] in [parallel_batch_to_t()] below.
+        // [cache.signed_tx_hashes] in [parallel_batch_to_t()] below.
         cache.txs.reserve(kMaxBlockSize);
         cache.tx_hashes.reserve(kMaxBlockSize);
+        cache.signed_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_hashes.reserve(kMaxBlockSize);
         cache.result_tx_nominations.reserve(kMaxBlockSize);
 
         // The coordinator RPC runs with [kBulkRpcMaxMessageSize], so a peer
         // can claim far more transactions than a block holds.  Each claimed
-        // hash costs an allocation and a [find_tx] lookup before anything
-        // rejects it, and any that resolve go on to the executors.
+        // hash costs an allocation and a [find_signed_tx] lookup before
+        // anything rejects it, and any that resolve go on to the executors.
         x23::Async<bool> tx_nondeterministic_data_handle =
             parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                 tx_nominations, kMaxBlockSize);
         x23::Async<bool> tx_hash_handle =
-            parallel_batch_to_t(proposal.transactions.hash, cache.tx_hashes,
-                                kMaxBlockSize);
+            parallel_batch_to_t(proposal.transactions.signed_hash,
+                                cache.signed_tx_hashes, kMaxBlockSize);
 
         std::exception_ptr first_exception;
         bool decoded_tx_nominations = false;
@@ -2544,17 +2609,20 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
           co_return;
         }
 
-        if (cache.tx_hashes.size() != tx_nominations.size()) {
+        if (cache.signed_tx_hashes.size() != tx_nominations.size()) {
           log_validation_return = false;
           co_await cancel_with_result(
               SchedulerValidationOutcome::SchedulerValidationMalformed,
               "decode nomination batches");
           co_return;
         }
+        // Filled with each tx's [TransactionHash] as the mempool lookups
+        // resolve [cache.signed_tx_hashes].
+        cache.tx_hashes.resize(cache.signed_tx_hashes.size());
 
         cache.block_id = BlockIdGenerator::generate(BlockIdLane::kMempool);
         validation_block_id = cache.block_id;
-        validation_tx_count = cache.tx_hashes.size();
+        validation_tx_count = cache.signed_tx_hashes.size();
         co_return;
       });
 
@@ -2641,27 +2709,32 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       merge_dag_deps(validation_dag.after(open_event_node),
                      dag_deps_from_nodes(open_validation_block_nodes)),
       [&]() -> x23::Async<void> {
-        // [nomination] includes the tx hashes and the nondeterministic
-        // proposal data. We use these tx hashes to look up the vetted txs in
-        // [vetted_txs_]. Assuming we find all of the txs, we then combine them
-        // with the nondeterministic proposal data to form a
+        // [nomination] includes the signed tx hashes and the nondeterministic
+        // proposal data. We use these signed tx hashes to look up the vetted
+        // txs in the mempool. Assuming we find all of the txs, we then combine
+        // them with the nondeterministic proposal data to form a
         // [ProposedTransaction], which is what the executors expect.
         const std::vector<ChunkRange> validation_chunks =
-            make_chunks_for_max_size(cache.tx_hashes.size(),
+            make_chunks_for_max_size(cache.signed_tx_hashes.size(),
                                      kNumTxsPerNominationChunk);
         x23::Vec<x23::Async<PreparedAndValidatedChunk>> chunk_handles;
         chunk_handles.reserve(validation_chunks.size());
 
         for (const ChunkRange &chunk : validation_chunks) {
-          x23::span<const TransactionHash> tx_hashes_span(
-              cache.tx_hashes.begin() + chunk.start,
-              cache.tx_hashes.begin() + chunk.end);
+          x23::span<const SignedTransactionHash> signed_tx_hashes_span(
+              cache.signed_tx_hashes.begin() + chunk.start,
+              cache.signed_tx_hashes.begin() + chunk.end);
           x23::span<const NondeterministicProposalData> tx_nominations_span(
               tx_nominations.begin() + chunk.start,
               tx_nominations.begin() + chunk.end);
+          x23::span<TransactionHash> tx_hashes_span(cache.tx_hashes.begin() +
+                                                        chunk.start,
+                                                    cache.tx_hashes.begin() +
+                                                        chunk.end);
           chunk_handles.push_back(
-              prepare_and_validate_chunk(validation_block_id, tx_hashes_span,
-                                         tx_nominations_span));
+              prepare_and_validate_chunk(validation_block_id,
+                                         signed_tx_hashes_span,
+                                         tx_nominations_span, tx_hashes_span));
         }
 
         x23::Vec<std::optional<PreparedAndValidatedChunk>> chunk_results(
@@ -2685,43 +2758,46 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
             panic("validation result missing without a captured exception");
           }
           PreparedAndValidatedChunk &chunk_result = *settled;
-          validated = chunk_result.validated && validated;
-          missing_tx_hashes += chunk_result.missing_tx_hashes;
+          batch_outcome =
+              combine_batch_outcomes(batch_outcome, chunk_result.outcome);
+          missing_signed_tx_hashes += chunk_result.missing_signed_tx_hashes;
           cache.txs += chunk_result.txs;
         }
         co_return;
       });
 
-  // A nomination is free to repeat a transaction hash: the batches still
-  // decode and still have equal element counts, so nothing upstream rejects
-  // one. [try_get_txset_hash()] reports the repeat rather than asserting on it.
-  auto txset_hash_node = validation_dag.cpu<std::optional<SHA256Hash>>(
-      "compute txset hash", validation_dag.after(decode_node),
-      [&]() { return try_get_txset_hash(cache.tx_hashes); });
-
   auto check_validation_node = validation_dag.async<void>(
       "check validation chunks", validation_dag.after(prepare_validate_node),
       [&]() -> x23::Async<void> {
-        if (!missing_tx_hashes.empty()) {
+        if (!missing_signed_tx_hashes.empty()) {
           dag_outcome =
               SchedulerValidationOutcome::SchedulerValidationMissingTxs;
           result = SchedulerValidationResult(
               SchedulerValidationOutcome::SchedulerValidationMissingTxs);
-          result.missing_tx_hashes() = missing_tx_hashes;
+          result.missing_signed_tx_hashes() = missing_signed_tx_hashes;
           validation_dag.fail(x23::DagFailureKind::Cancelled,
                               "check validation chunks");
           co_return;
         }
         CHECK_EQ(cache.txs.size(), tx_nominations.size());
 
-        if (!validated) {
-          co_await cancel_with_result(
-              SchedulerValidationOutcome::SchedulerValidationInvalid,
-              "check validation chunks");
+        if (batch_outcome !=
+            SchedulerValidationOutcome::SchedulerValidationOK) {
+          co_await cancel_with_result(batch_outcome, "check validation chunks");
           co_return;
         }
         co_return;
       });
+
+  // The txset trie is keyed by [TransactionHash], which the mempool lookups
+  // filled into [cache.tx_hashes], so it waits until every tx is found.
+  //
+  // A nomination is free to repeat a transaction: the batches still decode
+  // and still have equal element counts, so nothing upstream rejects one.
+  // [try_get_txset_hash()] reports the repeat rather than asserting on it.
+  auto txset_hash_node = validation_dag.cpu<std::optional<SHA256Hash>>(
+      "compute txset hash", validation_dag.after(check_validation_node),
+      [&]() { return try_get_txset_hash(cache.tx_hashes); });
 
   x23::Vec<x23::DagNode<void>> finish_executor_nodes;
   finish_executor_nodes.reserve(exec_clients_.size());
@@ -2902,14 +2978,6 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
-  {
-    std::chrono::steady_clock::duration delta =
-        commit_started_at - last_commit_;
-    auto delta_raw =
-        std::chrono::duration_cast<std::chrono::milliseconds>(delta);
-    MempoolMetrics::instance().last_commit_interval_ms.record(
-        delta_raw.count());
-  }
   ElapsedTimer timer;
   auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
@@ -2972,7 +3040,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto commit_guard = std::make_shared<InstrumentedCoroGuard>(
       MempoolMetrics::instance().block_commit_lock_wait_seconds,
       MempoolMetrics::instance().block_commit_lock_hold_seconds);
-  auto hog_age_guard = std::make_shared<x23::CoroGuard>();
+  auto native_token_age_guard = std::make_shared<x23::CoroGuard>();
   x23::Dag commit_dag("schedulercoord_commit_block", default_threadpool());
   x23::DagCleanup fatal_commit_cleanup = commit_dag.cleanup(
       "fail internal commit error", [&]() -> x23::Async<void> {
@@ -3039,22 +3107,24 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                                co_return;
                              });
 
-  // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
-  // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
-  // We want to ensure that on a block commit, we are able to apply the pending
-  // hog ages in the scheduler *before* the hog transfer deltas are received
-  // from hog_db. Otherwise, if the transfer deltas are applied first, it is
-  // possible that they will transfer hogs between accounts, and then when we
-  // apply the pending hog ages after, we may try to move hogs between scheduler
-  // groups for an account that no longer has any hogs.
-  auto lock_hog_age_node =
-      commit_dag.async<void>("lock pending hog age update",
-                             commit_dag.after(check_block_node),
-                             [&, hog_age_guard]() -> x23::Async<void> {
-                               co_await (*hog_age_guard)(
-                                   scheduler_->pending_hog_age_update_lock_);
-                               co_return;
-                             });
+  // We use [scheduler_->pending_native_token_age_update_lock_] to synchronize
+  // native-token age updates with [MempoolDbRpc], which calls
+  // [scheduler_->process_transfers()]. We want to ensure that on a block
+  // commit, we are able to apply the pending native-token ages in the scheduler
+  // *before* the native-token transfer deltas are received from hog_db.
+  // Otherwise, if the transfer deltas are applied first, it is possible that
+  // they will transfer native tokens between accounts, and then when we apply
+  // the pending native-token ages after, we may try to move native tokens
+  // between scheduler groups for an account that no longer has any native
+  // tokens.
+  auto lock_native_token_age_node = commit_dag.async<void>(
+      "lock pending native-token age update",
+      commit_dag.after(check_block_node),
+      [&, native_token_age_guard]() -> x23::Async<void> {
+        co_await (*native_token_age_guard)(
+            scheduler_->pending_native_token_age_update_lock_);
+        co_return;
+      });
 
   auto prepare_node = commit_dag.async<void>(
       "prepare commit plan",
@@ -3097,7 +3167,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       });
 
   auto commit_block_node = commit_dag.async<JointCommitResult>(
-      "commit block", commit_dag.after(prepare_node, lock_hog_age_node),
+      "commit block",
+      commit_dag.after(prepare_node, lock_native_token_age_node),
       [&]() -> x23::Async<JointCommitResult> {
         if (invalid_consensus_value) {
           co_return JointCommitResult{};
@@ -3192,11 +3263,12 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  // Scheduler updates only need the commit plan and hog-age lock. Run them in
-  // parallel with external commit/abandon RPCs so committed txs stop occupying
-  // scheduler capacity while those RPCs finish.
+  // Scheduler updates only need the commit plan and native-token-age lock. Run
+  // them in parallel with external commit/abandon RPCs so committed txs stop
+  // occupying scheduler capacity while those RPCs finish.
   auto scheduler_update_node = commit_dag.async<void>(
-      "update scheduler", commit_dag.after(prepare_node, lock_hog_age_node),
+      "update scheduler",
+      commit_dag.after(prepare_node, lock_native_token_age_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {
           co_return;
@@ -3303,9 +3375,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             co_await scheduler_->abandon_pending_nomination(
                 nominated_block_cache_.block_id);
           }
-          // [apply_committed_block_hog_ages] acquires
+          // [apply_committed_block_native_token_ages] acquires
           // [scheduler_->global_lock_] for us, so we do not need to do it here.
-          co_await scheduler_->apply_committed_block_hog_ages(
+          co_await scheduler_->apply_committed_block_native_token_ages(
               commit_plan.committed_cache->txs,
               commit_plan.committed_cache->db_tip.value.proposal_header
                   .block_height);
@@ -3313,22 +3385,22 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  // HogDb commit publishes transfer deltas, and MempoolDbRpc writes average hog
-  // ages to DB after processing those deltas. Keep this lock held until the
-  // scheduler has applied pending hog ages and DB commit is complete, matching
-  // the synchronization the pre-DAG code relied on.
-  auto release_hog_age_node =
-      commit_dag.async<void>("release pending hog age update",
+  // HogDb commit publishes transfer deltas, and MempoolDbRpc writes average
+  // native-token ages to DB after processing those deltas. Keep this lock held
+  // until the scheduler has applied pending native-token ages and DB commit is
+  // complete, matching the synchronization the pre-DAG code relied on.
+  auto release_native_token_age_node =
+      commit_dag.async<void>("release pending native-token age update",
                              commit_dag.after(scheduler_update_node,
                                               commit_block_node),
-                             [hog_age_guard]() -> x23::Async<void> {
-                               (*hog_age_guard).reset();
+                             [native_token_age_guard]() -> x23::Async<void> {
+                               (*native_token_age_guard).reset();
                                co_return;
                              });
 
   commit_dag.async<void>(
       "finalize commit",
-      commit_dag.after(release_hog_age_node, abandon_snapshots_node,
+      commit_dag.after(release_native_token_age_node, abandon_snapshots_node,
                        abandon_events_node, measure_block_node),
       [&]() -> x23::Async<void> {
         if (invalid_consensus_value) {
@@ -3370,6 +3442,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
             static_cast<double>(committed_tx_count));
         MempoolMetrics::instance().block_transaction_bytes.record(
             static_cast<double>(measure_block_node.get()));
+        // Read [last_commit_] only here, under [commit_lock_]: an attempt that
+        // reads it before closing the validation gate races the previous
+        // commit's write below, and only a commit has an interval to record.
+        MempoolMetrics::instance().last_commit_interval_ms.record(
+            std::chrono::duration_cast<std::chrono::milliseconds>(
+                commit_started_at - last_commit_)
+                .count());
         // Skip the first commit after start and the genesis ceremony (height
         // 1): neither is a round.
         if (last_commit_started_) {
@@ -3416,8 +3495,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
 // I do not need to check this in add_txs--this is all kept in sync by the
 // [auth_data_changed] callback.
 x23::Async<void>
-MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
-                                         KeyChangeBatch key_changes)
+MempoolCoordinatorRpc::auth_data_changed(
+    BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes)
 {
   // Count this callback among the coordinator's pending coroutines so that
   // ~MempoolCoordinatorRpc waits for it to finish before the member
@@ -3439,7 +3518,24 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
   });
 
   CHECK(initialized_.load(std::memory_order_acquire));
-  const BlockHeight current_height = auth_data_height_.load();
+  // The auth server forwards heights concurrently, so a height can arrive
+  // while an earlier height's callback is still re-verifying. Wait for the
+  // earlier height to be applied first. Once [disconnect_auth_callback] stops
+  // admission, that height may never be admitted, so give up instead of
+  // keeping the drain waiting on us. The flag is read while the awaiter holds
+  // [auth_data_height_]'s waiter lock, so the disconnect's broadcast either
+  // finds us waiting or happens before we read the flag.
+  BlockHeight current_height;
+  while ((current_height = auth_data_height_.load()) < height - 1) {
+    if (auth_data_wait_test_hook_) {
+      auth_data_wait_test_hook_(height);
+    }
+    auto awaiter = auth_data_height_.wait(current_height);
+    if (auth_callback_disconnecting_.load(std::memory_order_acquire)) {
+      co_return;
+    }
+    co_await awaiter;
+  }
   if (height <= current_height) {
     // An auth server that subscribes after the database has committed its
     // current tip sends an empty synchronization callback for that tip.  A
@@ -3449,7 +3545,6 @@ MempoolCoordinatorRpc::auth_data_changed(BlockHeight height,
          height, current_height);
     co_return;
   }
-  CHECK_EQ(height, current_height + 1);
 
   x23::CoroGuard cg;
   co_await cg(commit_lock_);

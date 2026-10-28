@@ -66,7 +66,6 @@ target_link_libraries(
   runtime_test_lib
   runtime
   runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
-  db_interface
   hog_db
   GTest::gtest
 )
@@ -89,6 +88,7 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc
+  erc165_probe_test.cc
   erc20_permit_parity_test.cc
   event_test.cc
   faucet_scenario_test.cc
@@ -192,7 +192,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -229,7 +228,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -268,7 +266,6 @@ if(BUILD_BENCHMARKS)
     runtime
     runtime_test_lib
     runtime_test_util
-    db_interface
     hog_db
     storage_cost
     model_checker
@@ -359,7 +356,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -384,7 +380,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -411,7 +406,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -442,7 +436,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker

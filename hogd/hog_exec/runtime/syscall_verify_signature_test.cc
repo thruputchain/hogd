@@ -234,8 +234,7 @@ class VerifySignatureEntryTest : public ::testing::Test,
 public:
   VerifySignatureEntryTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true)
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true)
   {}
 };
 

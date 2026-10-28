@@ -7,12 +7,6 @@ cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std
 cd "${ROOT_DIR}/built_contracts" && cargo fetch -Zbuild-std --target riscv32im-unknown-none-elf
 cd "${ROOT_DIR}/hogd/rust" && cargo fetch
 
-# loadgen_localhost builds this separate workspace after the C++ build.
-# Fetch it before installing tools, while the installation token is fresh.
-if [[ "${HOGD_FETCH_HOGX:-0}" == "1" ]]; then
-  cargo fetch --locked --manifest-path "${ROOT_DIR}/hogx/Cargo.toml"
-fi
-
 set -ex
 
 # The release tools depend on crates with rust-version 1.96, which is newer than
@@ -20,17 +14,14 @@ set -ex
 TOOL_RUST=1.96.0
 rustup toolchain install "${TOOL_RUST}" --profile minimal --no-self-update
 
-# thruput-cli's published deps still resolve from the legacy index, which
-# needs auth; name it so cargo can match a token to the URL.
-export CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX:-sparse+https://groundhog.dev/crates/api/v1/crates/}"
-# xtrace expands the token into the job log, so drop tracing here.
-set +x
-if [ -n "${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN:-}}" ]; then
-  export CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN:-${CARGO_REGISTRIES_GROUNDHOG_TOKEN}}"
-  export CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER="${CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER:-cargo:token}"
+# The CLI is `thruput` on crates.io. Keep this version in step with the gates
+# in built_contracts/build_risc.sh and hogd/loadgen/hackathon/build_contracts.py.
+# --force: ~/.cargo may hold `thruput` from the old `thruput-cli` package,
+# which cargo will not overwrite otherwise. Skip the install when the CLI is
+# already current, so --force does not rebuild it on every run.
+THRUPUT_CLI_VERSION=0.42.0
+THRUPUT_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/thruput"
+if [ "$("$THRUPUT_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUPUT_CLI_VERSION}" ]; then
+  echo "Installing the thruput CLI..."
+  cargo "+${TOOL_RUST}" install --locked --force "thruput@${THRUPUT_CLI_VERSION}"
 fi
-set -x
-
-echo "Installing thruput-cli..."
-CARGO_REGISTRIES_GROUNDHOG_INDEX=sparse+https://crates.thruput.network/api/v1/crates/ \
-  cargo "+${TOOL_RUST}" install --locked --registry groundhog thruput-cli@0.30.0

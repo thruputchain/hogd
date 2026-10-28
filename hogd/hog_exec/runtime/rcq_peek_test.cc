@@ -36,12 +36,15 @@ class SyscallRcqPeekTest : public ::testing::Test,
 public:
   SyscallRcqPeekTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   static constexpr StorageKeyContractData kStorageKey =
       NativeContractTestFramework::make_storage_key("rcq_peek");
+
+  // Far more than any test here spends on storage, and far below INT128_MAX
+  // so storage refunds credited back to it cannot overflow.
+  static constexpr int128_t kAmpleStorageTokens = 1'000'000'000'000'000'000;
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -570,8 +573,7 @@ TEST_F(SyscallRcqPeekTest,
        ObservationCapReturnsSyscallErrorInsteadOfTerminating)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr, kAmpleStorageTokens);
 
   constexpr uint32_t kObservationCount = kMaxConcurrentRcqReadsPerTx + 1;
 
@@ -678,8 +680,7 @@ TEST_F(SyscallRcqPeekTest,
 TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr, kAmpleStorageTokens);
 
   NativeContractBuilder builder;
   // method 10: insert two entries into target queue T, plus one entry into each
@@ -799,13 +800,13 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
   {
     auto insert_handler = make_new_system_call_handler(insert_tx, *context);
     ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
-    insert_proposal_data = insert_handler.get_proposal_data();
+    insert_proposal_data = insert_handler.extract_proposal_data();
     ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler = make_new_system_call_handler(consume_tx, *context);
     ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
-    consume_proposal_data = consume_handler.get_proposal_data();
+    consume_proposal_data = consume_handler.extract_proposal_data();
     // The cap-crossing consume logs a nondeterministic bit but records no
     // observation: the sequence stops at the cap while the bit count is one
     // greater.
@@ -857,8 +858,7 @@ TEST_F(SyscallRcqPeekTest, ConsumeCapErrorAgreesProposalAndValidationDbHash)
 TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr, kAmpleStorageTokens);
 
   NativeContractBuilder builder;
   // method 12: insert one entry into each of kMaxConcurrentRcqReadsPerTx + 1
@@ -1002,8 +1002,7 @@ TEST_F(SyscallRcqPeekTest, SelfConsumeSucceedsAtObservationCap)
 TEST_F(SyscallRcqPeekTest, PastBlockConsumeSucceedsAtObservationCap)
 {
   auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, int128_t{kHogDivisibility} *
-                                               int128_t{kTotalHogSupply});
+  setup_grant_storage_token(contract_addr, kAmpleStorageTokens);
 
   NativeContractBuilder builder;
   // method 20: insert a two-byte past-block entry into the target queue.

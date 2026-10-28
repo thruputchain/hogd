@@ -12,7 +12,7 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="thruput 0.30.0"
+EXPECTED_VERSION="thruput 0.42.0"
 ACTUAL_VERSION="$(thruput --version 2>/dev/null || true)"
 ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
 if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then

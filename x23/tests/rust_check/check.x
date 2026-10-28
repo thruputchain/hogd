@@ -24,6 +24,9 @@ struct Tx {
 typedef Tx TxBatch<MAX_BATCH>;
 typedef unsigned hyper Amount;
 
+// A schema type with the name a generic parameter would most likely take.
+typedef int T;
+
 union Outcome switch (Status status) {
 case OK:
   Hash hash;
@@ -43,5 +46,7 @@ program check {
     Outcome submit(TxBatch, bool) = 2;
     Receipt credit(Amount, Tx) = 3;
     bool verify(Hash) = 4;
+    TxBatch pending(void) = 5;
+    T scale(T) = 6;
   } = 1;
 } = 0x20000003;

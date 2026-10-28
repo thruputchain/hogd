@@ -52,8 +52,7 @@ class RcqObservationOnFaultTest : public ::testing::Test,
 public:
   RcqObservationOnFaultTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override
@@ -133,12 +132,12 @@ TEST_F(RcqObservationOnFaultTest, HonestObservationOnFaultClosesBlock)
   {
     auto h_ins = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
-    insert_p = h_ins.get_proposal_data();
+    insert_p = h_ins.extract_proposal_data();
     ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler(tx_observe_fault, *ctx);
     ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
-    observe_p = h_obs.get_proposal_data();
+    observe_p = h_obs.extract_proposal_data();
     // The faulting tx is still included (deterministic error), having recorded
     // its observation.
     ASSERT_EQ(h_obs.try_commit_transaction()(),
@@ -182,12 +181,12 @@ TEST_F(RcqObservationOnFaultTest, ForgedObservationOnFaultRejectedAtBlockClose)
   {
     auto h_ins = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
-    insert_p = h_ins.get_proposal_data();
+    insert_p = h_ins.extract_proposal_data();
     ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler(tx_observe_fault, *ctx);
     ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
-    observe_p = h_obs.get_proposal_data();
+    observe_p = h_obs.extract_proposal_data();
     ASSERT_EQ(h_obs.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }

@@ -47,8 +47,7 @@ class BalanceCostTrackingTest : public ::testing::Test,
 public:
   BalanceCostTrackingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -56,7 +55,7 @@ protected:
   {
     // Set up the preset native token contract
     auto token_contract = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token_contract);
     write_deployment(kNativeTokenContractAddress, token_contract);
   }
@@ -123,7 +122,7 @@ TEST_F(BalanceCostTrackingTest, TransferToNewAddressDeductsBalanceCost)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto test_runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -230,7 +229,7 @@ TEST_F(BalanceCostTrackingTest, TwoTransfersToSameNewAddressCostOnce)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto test_runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -424,7 +423,7 @@ TEST_F(BalanceCostTrackingTest, TryInvokeBalanceCostTracking)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto test_runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -547,7 +546,7 @@ TEST_F(BalanceCostTrackingTest, NegativeBalanceReadbackReturnsDeterministic)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -649,7 +648,7 @@ TEST_F(BalanceCostTrackingTest,
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -753,7 +752,7 @@ TEST_F(BalanceCostTrackingTest, OverspendTransferAbortsAndBalanceReadsClean)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -862,7 +861,7 @@ TEST_F(BalanceCostTrackingTest,
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1023,7 +1022,7 @@ TEST_F(BalanceCostTrackingTest, TransferFundedByInTxCreditSucceeds)
   contract_map.emplace(kReceiverNativeId, std::move(receiver_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1135,7 +1134,7 @@ TEST_F(BalanceCostTrackingTest, BalanceReadbackAfterNonOverspendStillSucceeds)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1227,7 +1226,7 @@ TEST_F(BalanceCostTrackingTest, FreshReceiverInTxReadReturnsGrossAmount)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1331,7 +1330,7 @@ TEST_F(BalanceCostTrackingTest,
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1419,7 +1418,7 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto test_runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1454,32 +1453,34 @@ TEST_F(BalanceCostTrackingTest, NewBalanceDeltaToSchedulerDeductsBalanceCost)
 
   advance_block();
 
-  auto hogs_transferred = get_hogs_transferred(committed_height);
+  auto native_tokens_transferred =
+      get_native_tokens_transferred(committed_height);
 
   // The receiver is a brand-new balance, so the delta forwarded to the
   // scheduler must be discounted by the balance creation cost to match the
   // value actually committed to the DB.
-  ASSERT_TRUE(hogs_transferred.contains(kReceiverAddr));
-  EXPECT_EQ(hogs_transferred.at(kReceiverAddr), kTransferAmount - balance_cost);
+  ASSERT_TRUE(native_tokens_transferred.contains(kReceiverAddr));
+  EXPECT_EQ(native_tokens_transferred.at(kReceiverAddr),
+            kTransferAmount - balance_cost);
 
   // The sender is a pre-existing balance, so its delta is unaffected by the
   // balance creation cost -- but it is the invoked address, so it also pays the
   // replay-nonce cost, which is folded into its delta to the scheduler.
-  ASSERT_TRUE(hogs_transferred.contains(kSenderAddr));
-  EXPECT_EQ(hogs_transferred.at(kSenderAddr),
+  ASSERT_TRUE(native_tokens_transferred.contains(kSenderAddr));
+  EXPECT_EQ(native_tokens_transferred.at(kSenderAddr),
             -kTransferAmount - replay_cache_cost_charged(1));
 }
 
-// Characterization test (issue #2135): the native HOG precompile treats the
+// Characterization test (issue #2135): the native-token precompile treats the
 // all-zero address as an ordinary balance key, so transfer(ContractAddress{},
 // amount) credits the zero address rather than burning. The zero-recipient
 // transfer leaves total_supply() unchanged and emits a standard
 // Transfer(sender, zero, amount) event --- a real burn goes through burn() and
 // emits its own Burn event. This is working
-// as intended: it locks in that the native HOG token does NOT special-case the
+// as intended: it locks in that the native token does NOT special-case the
 // zero address as a supply-reducing burn.
 TEST_F(BalanceCostTrackingTest,
-       NativeHogZeroRecipientTransferCreditsZeroAddressWithoutReducingSupply)
+       NativeTokenZeroRecipientTransferCreditsZeroAddressWithoutReducingSupply)
 {
   auto const *cost_model = get_default_cost_model();
   int128_t balance_cost = cost_model->get_balance_cost();
@@ -1538,7 +1539,7 @@ TEST_F(BalanceCostTrackingTest,
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1669,7 +1670,7 @@ TEST_F(BalanceCostTrackingTest, RepeatTransfersChargeForBothBalanceMutations)
   contract_map.emplace(kSenderNativeId, std::move(sender_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1752,7 +1753,7 @@ TEST_F(BalanceCostTrackingTest, UnderfundedBalanceReadFaultsWithoutLoading)
                        std::make_unique<NativeContract>(std::move(fns)));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1857,7 +1858,7 @@ TEST_F(BalanceCostTrackingTest,
                        std::make_unique<NativeContract>(std::move(fns)));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -1954,7 +1955,7 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
   contract_map.emplace(kCallerNativeId, std::move(caller_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto runtime_context =
       std::make_unique<NativeContext>(std::move(contract_map));

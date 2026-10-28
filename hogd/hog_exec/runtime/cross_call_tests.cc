@@ -18,12 +18,12 @@
 
 namespace hogd {
 
-class CrossCallTests : public ::testing::TestWithParam<TestDB>,
+class CrossCallTests : public ::testing::Test,
                        public NativeContractTestFramework {
 public:
   CrossCallTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -75,7 +75,7 @@ protected:
   }
 };
 
-TEST_P(CrossCallTests, CrossCallNoGasLimit)
+TEST_F(CrossCallTests, CrossCallNoGasLimit)
 {
 
   initialize_fibonacci_caller();
@@ -114,7 +114,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
   }
 }
 
-TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
+TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
 {
   initialize_fibonacci_caller();
 
@@ -134,7 +134,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
   }
 }
 
-TEST_P(CrossCallTests, LowOverallGasPropagates)
+TEST_F(CrossCallTests, LowOverallGasPropagates)
 {
   initialize_fibonacci_caller();
 
@@ -153,7 +153,7 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
   }
 }
 
-TEST_P(CrossCallTests, ExpectOutOfGas)
+TEST_F(CrossCallTests, ExpectOutOfGas)
 {
   initialize_fibonacci_caller();
 
@@ -197,10 +197,5 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
 
   ASSERT_EQ(gas_consumed_1 + 10, gas_consumed_2);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, CrossCallTests,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

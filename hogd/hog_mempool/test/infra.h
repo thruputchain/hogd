@@ -60,8 +60,9 @@
 
 namespace hogd {
 
-// The mempool tests exercise hog accounting with transactions budgeting 5B gas
-// each (txs.h), past the default max_tx_gas, so their chain states no cap.
+// The mempool tests exercise native-token age accounting with transactions
+// budgeting 5B gas each (txs.h), past the default max_tx_gas, so their chain
+// states no cap.
 inline NetworkConfig
 mempool_test_network_config()
 {
@@ -164,23 +165,25 @@ public:
     }
   }
 
-  void set_hogs(const ContractAddress &account, int group, BlockHeight age,
-                uint128_t num_hogs)
+  void set_native_tokens(const ContractAddress &account, int group,
+                         BlockHeight age, uint128_t num_native_tokens)
   {
     CHECK_GE(group, 0);
-    CHECK_LT(group, kHogAgeNumGroups);
+    CHECK_LT(group, kNativeTokenAgeNumGroups);
 
-    HogAge average;
+    NativeTokenAge average;
     memset(&average, 0, sizeof(average));
-    HogDbStatus<HogAge> res = get_db().read_address_average_hog_age(account);
+    HogDbStatus<NativeTokenAge> res =
+        get_db().read_address_average_native_token_age(account);
     if (res.has_value()) {
       average = *res;
     }
 
     average.address = account;
     average.average_ages[group] = age;
-    average.num_hogs[group] = to_xdr(num_hogs);
-    CHECK(get_db().write_address_average_hog_age({average}).has_value());
+    average.num_native_tokens[group] = to_xdr(num_native_tokens);
+    CHECK(
+        get_db().write_address_average_native_token_age({average}).has_value());
   }
 
   void set_address_auth_data(const ContractAddress &account,
@@ -392,16 +395,14 @@ private:
   void grant_initial_tokens_for_account(const ContractAddress &address)
   {
     static_assert(kStorageTokenAmount >= 0);
-    static_assert(kStorageTokenAmount <=
-                  uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
     CHECK(get_db()
               .write_address_balance(address, kStorageTokenAmount)
               .has_value());
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
-    // account unlimited hogs with UINT128_MAX.
-    set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
-             /*age=*/0, /*num_hogs=*/5'000'000'000 * 10);
+    // account unlimited native tokens with UINT128_MAX.
+    set_native_tokens(address, /*group=*/kNativeTokenAgeGroupToSchedule,
+                      /*age=*/0, /*num_native_tokens=*/5'000'000'000 * 10);
   }
 
   void register_db_with_mempool()
@@ -458,9 +459,8 @@ private:
             make_address(kAddress, auth_db_server_.port()).c_str(),
         .address_for_mempool =
             make_address(kAddress, auth_mempool_server_.port()).c_str()};
-    client.mempoolauth_intro_auth(auth_card)();
     auth_server_->set_mempool_client(std::move(client));
-    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+    auth_server_->subscribe_and_register(std::move(auth_card))();
   }
 
   void register_executor_with_mempool()

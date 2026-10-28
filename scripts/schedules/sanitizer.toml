@@ -65,7 +65,7 @@ echo 'build clang asan'
 ./scripts/build.sh -d build/llvm_asan -c clang -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm tests'
-ctest --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/llvm_asan --parallel --timeout 100 --output-on-failure
 
 # `set -e` aborts the script on a failing ctest, so every rm below is reached
 # only once that tree's tests have passed. A tree whose tests failed survives
@@ -76,7 +76,7 @@ echo 'build clang asan release'
 ./scripts/build.sh -d build/llvm_asan_release -c clang -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF"
 
 echo 'run llvm asan tests release'
-ctest --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/llvm_asan_release --parallel --timeout 100 --output-on-failure
 
 rm -rf build/llvm_asan_release
 
@@ -88,7 +88,7 @@ echo 'run llvm ubsan tests'
 export UBSAN_OPTIONS=print_stacktrace=1
 export HOG_DEVNODE_EXIT_TIMEOUT_SECS=30
 export HOG_DEVNODE_SHUTDOWN_TIMEOUT_SECS=60
-ctest --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/llvm_ubsan --parallel --timeout 100 --output-on-failure
 
 rm -rf build/llvm_ubsan
 
@@ -107,14 +107,6 @@ fi
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 sanitizer_clang = "?"
@@ -180,7 +172,7 @@ echo 'build gcc asan'
 ./scripts/build.sh -d build/gcc_asan -c gcc -f "-fsanitize=address" -t Debug -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests'
-ctest --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/gcc_asan --parallel --timeout 100 --output-on-failure
 
 # `set -e` aborts the script on a failing ctest, so both rms here are reached
 # only once that tree's tests have passed. A tree whose tests failed survives
@@ -192,7 +184,7 @@ echo 'build gcc asan release'
 ./scripts/build.sh -d build/gcc_asan_release -c gcc -f "-fsanitize=address" -t Release -j 64 -x "-DENABLE_TEST_FFI=ON" -x "-DBUILD_BENCHMARKS=OFF" -x "$GCC_ASAN_ARCH"
 
 echo 'run gcc tests release'
-ctest --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/gcc_asan_release --parallel --timeout 100 --output-on-failure
 
 rm -rf build/gcc_asan_release
 
@@ -211,14 +203,6 @@ fi
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 sanitizer_gcc = "?"

@@ -430,13 +430,17 @@ GenRs::process(const vector<Definition> &defs)
   }
 }
 
-// Generate the trait that the server implements to support the rpc
+// Generate the trait that the server implements to support the rpc.  Each
+// handler's reply is any type that encodes like the wire type, so a server can
+// answer from borrowed or shared data instead of building an owned copy.
 void
 GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
 {
   prtop(R"(
+/// Each handler replies with anything that encodes like the reply type.
+/// Implementations can be plain `async fn`s returning a concrete reply type
+/// under `#[allow(refining_impl_trait)]`.
 #[allow(non_camel_case_types)]
-#[async_trait::async_trait]
 pub trait {}_{}: Send + Sync {{)",
         prog_name, vers.id);
 
@@ -448,7 +452,9 @@ pub trait {}_{}: Send + Sync {{)",
       args.push_back(std::format("arg{} : {}", i, map_type(proc.arg_types[i])));
     }
     prtop("    {}\n", proc.comment);
-    prtop("    async fn {}({}) -> Result<{}, ::rpc_api::ProgramError>;\n",
+    prtop("    fn {}({}) -> impl ::core::future::Future<Output = "
+          "Result<impl xdrs::EncodesAs<{}>, ::thruput_rpc_api::ProgramError>> "
+          "+ Send;\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
   }
 
@@ -459,24 +465,27 @@ void
 GenRs::show_server_dispatch(VersDef const &vers, std::string const &prog_name,
                             std::string const &prog_id)
 {
+  // The handler parameter shares a scope with the schema's type names, which
+  // the arms below use unqualified. Names starting with "__" are reserved in
+  // the C++ that x23 also generates, so no schema can use this one.
   prtop(R"(
 #[allow(non_camel_case_types)]
-pub struct {0}_{1}_Dispatcher {{
-  inner: Box<dyn {0}_{1}>,
+pub struct {0}_{1}_Dispatcher<__Handler> {{
+  inner: Box<__Handler>,
 }}
 
-impl {0}_{1}_Dispatcher {{
-  pub fn new(inner: Box<dyn {0}_{1}>) -> Self {{
+impl<__Handler: {0}_{1}> {0}_{1}_Dispatcher<__Handler> {{
+  pub fn new(inner: Box<__Handler>) -> Self {{
     Self {{ inner }}
   }}
 }}
 
 #[async_trait::async_trait]
-impl ::rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
-    fn prog_vers(&self) -> ::rpc_api::ProgVers {{
-        ::rpc_api::ProgVers::new({2}, {3})
+impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__Handler> {{
+    fn prog_vers(&self) -> ::thruput_rpc_api::ProgVers {{
+        ::thruput_rpc_api::ProgVers::new({2}, {3})
     }}
-    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::rpc_api::RpcError> {{
+    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::thruput_rpc_api::RpcError> {{
         match proc {{
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -500,17 +509,18 @@ impl ::rpc_api::RpcHandler for {0}_{1}_Dispatcher {{
     prtop("            {} => {{\n", proc.val);
     prtop("                let args: ({}) =\n", type_args);
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
-          "::rpc_api::RpcError::GarbageArguments)?;\n");
+          "::thruput_rpc_api::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
     prtop("                let res = self.inner.{}({}).await.map_err(|_| "
-          "::rpc_api::RpcError::SystemError)?;\n",
+          "::thruput_rpc_api::RpcError::SystemError)?;\n",
           proc.id, detuple);
     prtop("                xdrs::txs::encode(&res).map_err(|_| "
-          "::rpc_api::RpcError::SystemError)\n");
+          "::thruput_rpc_api::RpcError::SystemError)\n");
     prtop("            }}\n");
   }
 
-  prtop("            _ => Err(::rpc_api::RpcError::InvalidProcedure),\n");
+  prtop(
+      "            _ => Err(::thruput_rpc_api::RpcError::InvalidProcedure),\n");
 
   prtop("        }}\n"); // close match
   prtop("    }}\n");     // close fn
@@ -525,16 +535,16 @@ GenRs::show_vers_client(const VersDef &vers, const std::string &prog_name,
   prtop(R"(
 #[derive(Clone)]
 pub struct {0}_{1}_Client {{
-    handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>,
+    handle: ::std::sync::Arc<dyn ::thruput_rpc_api::RpcSender>,
 }}
 
 impl {0}_{1}_Client {{
-    pub fn new(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
+    pub fn new(handle: ::std::sync::Arc<dyn ::thruput_rpc_api::RpcSender>) -> Self {{
         Self {{ handle }}
     }}
 
-    fn prog_vers() -> ::rpc_api::ProgVers {{
-        ::rpc_api::ProgVers::new({2}, {3})
+    fn prog_vers() -> ::thruput_rpc_api::ProgVers {{
+        ::thruput_rpc_api::ProgVers::new({2}, {3})
     }}
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -557,12 +567,14 @@ impl {0}_{1}_Client {{
       args.push_back(std::format("arg{} : {}", i, arg_type(proc.arg_types[i])));
       call_args.push_back(std::format("arg{}", i));
     }
-    prtop("    pub async fn {}({}) -> Result<{}, ::rpc_api::RpcError> {{\n",
+    prtop("    pub async fn {}({}) -> Result<{}, ::thruput_rpc_api::RpcError> "
+          "{{\n",
           proc.id, join(args, ", "), map_proc_return_type(proc.return_type));
     // Encode the arguments straight into a CallBuf so the driver frames the
     // call in place instead of copying the payload behind its header. The
-    // serializer call is emitted here rather than offered by rpc_api, which
-    // has no xdrs dependency, so an xdrs release never forces an rpc_api one.
+    // serializer call is emitted here rather than offered by thruput_rpc_api,
+    // which has no xdrs dependency, so an xdrs release never forces a
+    // thruput_rpc_api one.
     prtop("         let mut call = self.handle.call_buf();\n");
     prtop("         call.append_with(|buf| {{\n");
     prtop("             let mut w = xdrs::txs::buf_writer::BufWriter::from("
@@ -571,19 +583,38 @@ impl {0}_{1}_Client {{
           join(call_args, ", "));
     prtop("             *buf = w.into();\n");
     prtop("             r\n");
-    prtop(
-        "         }}).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;\n");
-    prtop("         let buf = self.handle.send_call(Self::prog_vers(), {}, "
-          "call).await?;\n",
+    prtop("         }}).map_err(|_| "
+          "::thruput_rpc_api::RpcError::GarbageArguments)?;\n");
+    // Decode the reply wherever the sender has it, which for driver
+    // connections is straight out of the reader's receive buffer, so the
+    // payload is never copied into an owned response first.
+    prtop("         let mut out = ::core::option::Option::None;\n");
+    prtop("         let mut decode = |reply: &[u8]| -> "
+          "::core::result::Result<(), "
+          "::thruput_rpc_api::RpcError> {{\n");
+    prtop("             out = ::core::option::Option::Some("
+          "xdrs::txs::decode(reply).map_err(|_| "
+          "::thruput_rpc_api::RpcError::SystemError)?);\n");
+    prtop("             Ok(())\n");
+    prtop("         }};\n");
+    prtop("         // SAFETY: the call future is awaited right here, so it "
+          "lives in\n");
+    prtop("         // this method's future along with `out` and `decode`. "
+          "Once that\n");
+    prtop("         // is polled it is pinned, so neither can be freed "
+          "without the\n");
+    prtop("         // call future being dropped first. Decoding never "
+          "blocks.\n");
+    prtop("         unsafe {{ self.handle.send_call_decoded(Self::prog_vers(), "
+          "{}, call, &mut decode) }}.await?;\n",
           proc.val);
-    prtop("         xdrs::txs::decode(&buf).map_err(|_| "
-          "::rpc_api::RpcError::SystemError)\n");
+    prtop("         out.ok_or(::thruput_rpc_api::RpcError::SystemError)\n");
     prtop("    }}\n");
   }
   prtop("}}\n");
   prtop(R"(
-impl From<::std::sync::Arc<dyn ::rpc_api::RpcSender>> for {0}_{1}_Client {{
-    fn from(handle: ::std::sync::Arc<dyn ::rpc_api::RpcSender>) -> Self {{
+impl From<::std::sync::Arc<dyn ::thruput_rpc_api::RpcSender>> for {0}_{1}_Client {{
+    fn from(handle: ::std::sync::Arc<dyn ::thruput_rpc_api::RpcSender>) -> Self {{
         Self::new(handle)
     }}
 }}
@@ -1079,8 +1110,11 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
                   kEnumBaseType);
   std::string converted_read = convert_i32(unsafe_read);
 
+  // Without a default arm the match holds only the wildcard, which clippy
+  // flags; keeping one shape for both cases is simpler than special-casing.
   bottom_ +=
       std::format(R"(impl {0} {{
+    #[allow(clippy::match_single_binding)]
     pub fn {2}(&self) -> {3} {{
         match self {{
             {1}
@@ -1326,7 +1360,8 @@ GenRs::type_name(const Declaration &d, bool generate,
 }
 
 string
-gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
+gen_rs(vector<Definition> *defs, string const &header,
+       std::set<std::string> const &recursive_types,
        std::set<std::string> const &rust_features,
        std::set<std::string> const &rust_no_features)
 {
@@ -1336,10 +1371,10 @@ gen_rs(vector<Definition> *defs, std::set<std::string> const &recursive_types,
 // Generated Code: DO NOT CHECK IN
 
 // Generated from xdrc commit: )" +
-      x23::git_commit_hash() +
-      std::format(R"(
-
-#![allow(non_camel_case_types)]
+      x23::git_commit_hash() + "\n\n";
+  if (!header.empty())
+    preamble += header + '\n';
+  preamble += std::format(R"(#![allow(non_camel_case_types)]
 #![allow(non_snake_case)]
 #![allow(non_upper_case_globals)]
 #![allow(unused_imports)]
@@ -1353,9 +1388,9 @@ use core::ops::{{Deref, DerefMut}};
 
 {0}{1}{2}
 )",
-                  gs.cfg("std", "use std::io::{Read, Write};"),
-                  gs.cfg("xdrs", "use xdrs::*;"),
-                  gs.cfg("spec", "use xdrs::xdr_repr::*;"));
+                          gs.cfg("std", "use std::io::{Read, Write};"),
+                          gs.cfg("xdrs", "use xdrs::*;"),
+                          gs.cfg("spec", "use xdrs::xdr_repr::*;"));
 
   gs.process(*defs);
 

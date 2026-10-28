@@ -8,7 +8,6 @@ members = [
     "integration_test_contracts/calldata_wrapper",
     "integration_test_contracts/cxs_roundtrip",
     "integration_test_contracts/default_wallet",
-    "integration_test_contracts/dev_wallet",
     "integration_test_contracts/deploy_and_transfer",
     "integration_test_contracts/delegate_call_test",
     "integration_test_contracts/ed25519_verify_wrapper",
@@ -41,6 +40,7 @@ members = [
     "local_test_contracts/airdrop_faucet",
     "local_test_contracts/auth_weight_test",
     "local_test_contracts/drip_faucet",
+    "local_test_contracts/erc165_probe",
     "local_test_contracts/faucet_caller",
     "local_test_contracts/invoke_malformed_tokens_test",
     "local_test_contracts/itc_erc20_permit",
@@ -50,39 +50,41 @@ members = [
 
 [workspace.package]
 version = "0.2.0"
-authors = ["Groundhog Team"]
+authors = ["Thruput Team"]
 license = "Apache-2.0"
-publish = ["groundhog"]
-repository = "https://github.com/groundhogchain/example-contracts.git"
-homepage = "https://github.com/groundhogchain/example-contracts.git"
-keywords = ["groundhog"]
+publish = false
+repository = "https://github.com/thruputchain/thruput-integration-test-contracts.git"
+homepage = "https://github.com/thruputchain/thruput-integration-test-contracts.git"
+keywords = ["thruput"]
 categories = ["blockchain"]
 edition = "2024"
 
 [workspace.dependencies]
-thruput-sdk = { registry = "groundhog", version = "0.52.0" }
-thruput-rv32-runtime = { registry = "groundhog", version = "0.52.0" }
+# SDK and protocol crates, all from crates.io.
+thruput-sdk = { version = "0.58.0" }
+thruput-rv32-runtime = { version = "0.58.0" }
 # default features include std, which cannot build for the on-chain targets
-thruput-domain-separator = { registry = "groundhog", version = "0.52.0", default-features = false }
-thruput-xdr = { registry = "groundhog", version = "0.56.1", features = ["xdrs", "syscalls"] }
-thruput-syscall = { registry = "groundhog", version = "0.56.1" }
-xdrs = { registry = "groundhog", version = "0.12.0", features = ["int128", "heapless"] }
+thruput-domain-separator = { version = "0.58.0", default-features = false }
+thruput-xdr = { version = "0.63.0", features = ["xdrs", "syscalls"] }
+thruput-syscall = { version = "0.63.0" }
+# Published on crates.io as thruput-xdrs; the dependency key keeps the library
+# name contracts import.
+xdrs = { package = "thruput-xdrs", version = "0.17.1", features = ["int128", "heapless"] }
 sha2 = { version = "0.11.0", default-features = false }
 thiserror = { version = "2.0.12", default-features = false }
 hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
 # Standard interface crates.
-thruput-erc20-if = { registry = "groundhog", version = "0.1.59" }
-thruput-erc20-permit-if = { registry = "groundhog", version = "0.1.59" }
-thruput-erc165-if = { registry = "groundhog", version = "0.1.59" }
+thruput-erc20-if = { version = "0.1.71" }
+thruput-erc20-permit-if = { version = "0.1.71" }
+thruput-erc165-if = { version = "0.1.71" }
 
 # Standard test crates. Only reached through optional contract features that
-# nothing here enables, but cargo resolves optional deps regardless.
-bottle-test-if = { registry = "groundhog", version = "0.52.0" }
-erc20-test = { registry = "groundhog", version = "0.52.0" }
-erc20-bottle-test = { registry = "groundhog", version = "0.52.0" }
-erc20-native-test = { registry = "groundhog", version = "0.52.0" }
+# nothing here enables, but cargo resolves optional deps regardless. Published
+# as thruput-erc20-*; the keys keep the names the contracts use.
+erc20-test = { package = "thruput-erc20-test", version = "0.58.0" }
+erc20-native-test = { package = "thruput-erc20-native-test", version = "0.58.0" }
 
 [profile.release]
 trim-paths = "all" # unstable

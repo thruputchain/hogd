@@ -54,12 +54,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class SelectiveDeploymentTest : public ::testing::TestWithParam<TestDB>,
+class SelectiveDeploymentTest : public ::testing::Test,
                                 public NativeContractTestFramework {
 public:
   SelectiveDeploymentTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -112,7 +112,7 @@ public:
 // then after commit:
 // - The first contract is in the database
 // - The second contract is NOT in the database
-TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
+TEST_F(SelectiveDeploymentTest, DeployOnlyFirstContract)
 {
   // Create two contracts to add to contracts_to_deploy
   Contract contract_to_deploy_1(ContractType::kRv32);
@@ -222,9 +222,9 @@ TEST_P(SelectiveDeploymentTest, DeployOnlyFirstContract)
 }
 
 // Test that verifies attempting to deploy a precompiled (native) contract fails
-// with kSyscallErrorCodeInvalidSyscallInput. Native contracts like the HOG
+// with kSyscallErrorCodeInvalidSyscallInput. Native contracts like the native
 // token are set up at genesis and should not be redeployable.
-TEST_P(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
+TEST_F(SelectiveDeploymentTest, CannotDeployPrecompiledNativeContract)
 {
   // Create a native contract (the precompiled token contract)
   auto native_token_contract = make_native_contract(0);
@@ -317,7 +317,7 @@ make_untranslatable_rv32_contract()
 // rv32 twin of MalformedImportAbiRejectedBeforeExecution: a transaction that
 // attaches an untranslatable rv32 contract must be rejected at initial
 // validation, before root_invoke executes, so nothing reaches deployment.
-TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
+TEST_F(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
 {
   Contract malformed_contract = make_untranslatable_rv32_contract();
   auto malformed_hash = sha256(malformed_contract);
@@ -394,7 +394,7 @@ TEST_P(SelectiveDeploymentTest, MalformedRv32RejectedBeforeExecution)
 // rv32 twin of InitialValidationContractFailureChecksUnusedProposalBits: the
 // early reject of an untranslatable attached rv32 contract must still run the
 // unused-proposal-bit check in validation mode.
-TEST_P(SelectiveDeploymentTest,
+TEST_F(SelectiveDeploymentTest,
        InitialValidationRv32FailureChecksUnusedProposalBits)
 {
   Contract malformed_contract = make_untranslatable_rv32_contract();
@@ -480,7 +480,7 @@ TEST_P(SelectiveDeploymentTest,
 // transaction. The attachment is translated once, when initial validation
 // verifies it, and both invokes borrow that image from the tx-local cache --
 // no invocation retranslates the artifact (#3536).
-TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
+TEST_F(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
 {
   Contract fib_contract(ContractType::kRv32);
   fib_contract.rv32_contract() = load_contract_blob("fibonacci.rv32a");
@@ -613,7 +613,7 @@ TEST_P(SelectiveDeploymentTest, DeployedRv32ContractInvokableInSameTransaction)
 // A deployed contract whose type has no registered runtime context should be
 // impossible (verify_contract rejects unknown types before deployment), so
 // invoking one is Unrecoverable, consuming no gas.
-TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
+TEST_F(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
 {
   auto contract = std::make_shared<Contract>(ContractType::kMockTest);
   contract->mock_contract_id() = 42;
@@ -651,7 +651,7 @@ TEST_P(SelectiveDeploymentTest, InvokeOfUnregisteredContractTypeIsUnrecoverable)
 // end-to-end: hog_db stores the row chunked, transparently to hog_exec
 // (#2569). 100 KiB is between the ~64 KiB single-item ceiling and the stock
 // max_contract_size_bytes.
-TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
+TEST_F(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 {
   Contract big_contract(ContractType::kRv32);
   big_contract.rv32_contract().data.resize_uninitialized(100_KiB);
@@ -736,7 +736,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractLargerThanOneStorageItem)
 // only exercises the tx-local lookup; dropping the snapshot check would pass
 // it while letting a cross-block redeploy re-stage over a committed
 // deployment.
-TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
+TEST_F(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 {
   // A real artifact, not placeholder bytes: the second deploy reads the
   // committed contract back through the snapshot cache, which fails a stored
@@ -859,7 +859,7 @@ TEST_P(SelectiveDeploymentTest, CrossBlockRedeployRejectedAtOccupiedAddress)
 // drop the child's new_contract_deployments_. The probe is a same-tx redeploy
 // of the identical (sender, nonce, hash) from a fresh child frame -- it only
 // succeeds if the earlier deployments were really rolled back.
-TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
+TEST_F(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
 {
   Contract blob(ContractType::kRv32);
   blob.rv32_contract().data.resize_uninitialized(64);
@@ -1010,7 +1010,7 @@ TEST_P(SelectiveDeploymentTest, ChildFrameFailureRollsBackDeployment)
 // outcomes: they commit with the transaction when every enclosing frame
 // succeeds, and are popped by mark_frame_as_failed when a LATER fault of the
 // try-invoking frame is caught by its parent (the root still commits).
-TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
+TEST_F(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
 {
   Contract blob(ContractType::kRv32);
   blob.rv32_contract().data.resize_uninitialized(64);
@@ -1192,7 +1192,7 @@ TEST_P(SelectiveDeploymentTest, TryInvokeDeploymentFollowsFrameOutcome)
 // GetDeployAddress arm selection and output values: the null caller arm uses
 // the calling frame's own address, the explicit arm uses the supplied
 // address, and the null-arm result is exactly where DeployContract lands.
-TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
+TEST_F(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
 {
   Contract blob(ContractType::kRv32);
   blob.rv32_contract().data.resize_uninitialized(64);
@@ -1304,7 +1304,7 @@ TEST_P(SelectiveDeploymentTest, GetDeployAddressArmsMatchActualDeployment)
 // and the deploy commits through the chunked-row path. Pins the accept side
 // of the boundary whose reject side is RejectsAttachedContractAboveSizeLimit;
 // a > -> >= drift would reject transactions other validators accept.
-TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
+TEST_F(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 {
   Contract limit_contract(ContractType::kRv32);
   limit_contract.rv32_contract().data.resize_uninitialized(
@@ -1389,7 +1389,7 @@ TEST_P(SelectiveDeploymentTest, DeploysContractAtExactSizeLimit)
 // rejected as a ValidationFailure during initial validation (malformed
 // transactions are dropped, not included): the body never runs and nothing
 // is deployed (#2569).
-TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
+TEST_F(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 {
   Contract oversized(ContractType::kRv32);
   oversized.rv32_contract().data.resize_uninitialized(
@@ -1444,7 +1444,7 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedContractAboveSizeLimit)
 
 // Rejected during initial validation, before the body runs -- at final commit
 // the same failure reports as unrecoverable (#2190).
-TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
+TEST_F(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 {
   const uint32_t limit =
       NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
@@ -1508,7 +1508,7 @@ TEST_P(SelectiveDeploymentTest, RejectsMoreAttachedContractsThanChainAdmits)
 
 // Rejected rather than deduplicated: two different transaction encodings would
 // otherwise have identical effect.
-TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
+TEST_F(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 {
   Contract contract(ContractType::kRv32);
   contract.rv32_contract().data.append_range(std::string("duplicated"));
@@ -1561,7 +1561,7 @@ TEST_P(SelectiveDeploymentTest, RejectsDuplicateAttachedContract)
 
 // Exactly max_new_contracts_per_tx attached contracts passes the count gate:
 // the bound is inclusive, so a transaction at the limit still runs its body.
-TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
+TEST_F(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 {
   const uint32_t limit =
       NetworkConfigParams(stock_network_config().v0()).max_new_contracts_per_tx;
@@ -1623,7 +1623,7 @@ TEST_P(SelectiveDeploymentTest, AcceptsAttachedContractsAtChainLimit)
 // malformed, and malformed transactions are dropped (ValidationFailure), not
 // included in the block as failures. The contract here is registered in the
 // NativeContext, so it is rejected for being native, not for being unknown.
-TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
+TEST_F(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 {
   // A distinct id from the deployer's, so the attachment is registered in the
   // context but does not hash to a contract already in the db.
@@ -1690,13 +1690,13 @@ TEST_P(SelectiveDeploymentTest, RejectsAttachedNativeContract)
 constexpr uint32_t kRaisedContractSizeBytes = 1_MiB;
 static_assert(kRaisedContractSizeBytes < kContractSizeCeilingBytes);
 
-class RaisedContractSizeLimitTest : public ::testing::TestWithParam<TestDB>,
+class RaisedContractSizeLimitTest : public ::testing::Test,
                                     public NativeContractTestFramework {
 public:
   RaisedContractSizeLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
-          true, std::nullopt, raised_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, raised_network_config())
   {}
 
 protected:
@@ -1803,7 +1803,7 @@ private:
 // A blob at the raised limit -- twice what the stock configuration admits --
 // is accepted, executed, and committed through the chunked-row path: raising
 // the parameter is all it takes to deploy larger contracts.
-TEST_P(RaisedContractSizeLimitTest, DeploysContractAtRaisedLimit)
+TEST_F(RaisedContractSizeLimitTest, DeploysContractAtRaisedLimit)
 {
   const AttachOutcome outcome =
       attach_and_deploy(kRaisedContractSizeBytes, /*nonce_seed=*/71);
@@ -1814,7 +1814,7 @@ TEST_P(RaisedContractSizeLimitTest, DeploysContractAtRaisedLimit)
 
 // The gate moves with the parameter rather than vanishing: one byte past the
 // raised limit is still refused before the body runs.
-TEST_P(RaisedContractSizeLimitTest, RejectsAttachedContractAboveRaisedLimit)
+TEST_F(RaisedContractSizeLimitTest, RejectsAttachedContractAboveRaisedLimit)
 {
   const AttachOutcome outcome =
       attach_and_deploy(kRaisedContractSizeBytes + 1, /*nonce_seed=*/72);
@@ -1822,16 +1822,6 @@ TEST_P(RaisedContractSizeLimitTest, RejectsAttachedContractAboveRaisedLimit)
   EXPECT_EQ(outcome.commit, ExecResult::ExecResultTxValidationFailure);
   EXPECT_FALSE(outcome.deployed);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RaisedContractSizeLimitTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, SelectiveDeploymentTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

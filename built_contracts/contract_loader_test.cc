@@ -21,8 +21,8 @@ TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
 {
   ContractArtifactDirectoryGuard guard;
   std::vector<std::filesystem::path> user_dirs{
-      "/tmp/groundhog-contracts-a",
-      "/tmp/groundhog-contracts-b",
+      "/tmp/thruput-contracts-a",
+      "/tmp/thruput-contracts-b",
   };
   set_contract_artifact_directories(user_dirs);
 
@@ -35,18 +35,18 @@ TEST(ContractLoaderTest, SearchOrderIncludesUserDirsAndDefaults)
                          "contracts");
 }
 
-TEST(ContractLoaderTest, LoadsDevWalletFromBuildTree)
+TEST(ContractLoaderTest, LoadsDefaultWalletFromBuildTree)
 {
   ContractArtifactDirectoryGuard guard;
 
-  auto rv32_blob = load_contract_blob("dev_wallet.rv32a");
+  auto rv32_blob = load_contract_blob("default_wallet.rv32a");
   EXPECT_FALSE(rv32_blob.data.empty());
 }
 
 TEST(ContractLoaderTest, MissingArtifactNamesSearchPathsAndOverride)
 {
   ContractArtifactDirectoryGuard guard;
-  set_contract_artifact_directories({"/tmp/groundhog-missing-contracts"});
+  set_contract_artifact_directories({"/tmp/thruput-missing-contracts"});
 
   X23_EXPECT_DEATH(
       {
@@ -54,7 +54,7 @@ TEST(ContractLoaderTest, MissingArtifactNamesSearchPathsAndOverride)
         (void)load_contract_blob("missing-contract.rv32a");
       },
       "failed to load contract artifact: missing-contract\\.rv32a; searched "
-      "directories: .*groundhog-missing-contracts.*--contract-artifacts-dir");
+      "directories: .*thruput-missing-contracts.*--contract-artifacts-dir");
 }
 
 } // namespace

@@ -44,7 +44,7 @@ echo 'build gcc debug'
 
 export DEFAULT_THREADPOOL_SIZE=1
 echo 'run gcc tests'
-ctest --test-dir build/gcc --parallel --timeout 100 --output-on-failure
+./scripts/ci/ctest_replay.py --test-dir build/gcc --parallel --timeout 100 --output-on-failure
 unset DEFAULT_THREADPOOL_SIZE
 
 """
@@ -62,14 +62,6 @@ fi
 [jobs.env]
 GIT_REPO = "{{ .git_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 stress_1 = "?"

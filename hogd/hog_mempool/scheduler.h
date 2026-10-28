@@ -33,6 +33,10 @@ class Scheduler {
 public:
   static constexpr BlockHeight kTransactionOutcomeBlockLifetime = 50;
   static constexpr size_t kMaxTransactionOutcomes = 50'000'000;
+  // The most native-token ages one DbSched1 record carries, requested or
+  // written. A NativeTokenAge is 104 bytes on the wire, so a record stays near
+  // 7 MiB, under x23's 16 MiB default record cap, whichever way it travels.
+  static constexpr size_t kMaxNativeTokenAgesPerRecord = size_t{1} << 16;
 
   Scheduler(BlockHeight current_block,
             std::shared_ptr<db_sched_client_t> db_sched_client)
@@ -68,9 +72,10 @@ public:
   //
   // This method will cycle the groups for an account if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
-  // the average age of the [kHogAgeGroupToSchedule] group or (2) the
-  // [kHogAgeGroupToSchedule] group does not have enough hogs to schedule the
-  // tx but cycling will add enough hogs to this group to schedule it.
+  // the average age of the [kNativeTokenAgeGroupToSchedule] group or (2) the
+  // [kNativeTokenAgeGroupToSchedule] group does not have enough native tokens
+  // to schedule the tx but cycling will add enough native tokens to this group
+  // to schedule it.
   //
   // [signed_tx_hashes] holds each tx's [SignedTransactionHash], aligned with
   // [txs] and [tx_hashes]. [on_variant] decides between a submission and a
@@ -93,16 +98,20 @@ public:
   // the block that is being scheduled. [block_size] is the maximum number of
   // txs that will be included in the next block, though fewer txs than
   // [block_size] may be included.
+  //
+  // Appends each scheduled tx to [txs], its [TransactionHash] to [tx_hashes]
+  // and the [SignedTransactionHash] of its cached encoding to
+  // [signed_tx_hashes], keeping the three aligned.
   x23::Async<void> schedule(size_t num_txs,
                             x23::XdrVec<TransactionHash> &tx_hashes,
+                            SignedTransactionHashBatch &signed_tx_hashes,
                             x23::XdrVec<SignedTransaction> &txs);
 
   void start_pending_nomination(BlockID block_id);
   x23::Async<void> commit_pending_nomination(BlockID block_id);
   x23::Async<void> abandon_pending_nomination(BlockID block_id);
-  x23::Async<void>
-  apply_committed_block_hog_ages(const x23::XdrVec<SignedTransaction> &txs,
-                                 BlockHeight block_height);
+  x23::Async<void> apply_committed_block_native_token_ages(
+      const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height);
 
   std::shared_ptr<const SignedTransaction>
   find_tx(const TransactionHash &tx_hash)
@@ -116,12 +125,17 @@ public:
   }
 
   // The cached tx with this exact signed encoding, or null if its body is not
-  // cached or is cached under a different encoding.
+  // cached or is cached under a different encoding. When the tx is found and
+  // [tx_hash] is non-null, sets [*tx_hash] to the tx's [TransactionHash].
   std::shared_ptr<const SignedTransaction>
-  find_signed_tx(const SignedTransactionHash &signed_tx_hash)
+  find_signed_tx(const SignedTransactionHash &signed_tx_hash,
+                 TransactionHash *tx_hash = nullptr)
   {
     auto [tx_value_ptr, _] = txs_.find(signed_tx_hash);
     if (tx_value_ptr) {
+      if (tx_hash) {
+        *tx_hash = (*tx_value_ptr)->tx_hash;
+      }
       return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
                                                       &(*tx_value_ptr)->tx);
     }
@@ -210,36 +224,45 @@ public:
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
 
-  std::pair<HogAge *, std::unique_lock<std::mutex>>
-  get_cached_hog_age(const ContractAddress &address);
+  std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
+  get_cached_native_token_age(const ContractAddress &address);
 
-  x23::Async<void> write_all_average_hog_ages_to_db();
+  x23::Async<void> write_all_average_native_token_ages_to_db();
 
-  struct ReadAverageHogAgesResult {
+  // Bounds the native-token ages per DbSched1 record read or written;
+  // production keeps the default.
+  void
+  set_max_native_token_ages_per_record(size_t max_native_token_ages_per_record)
+  {
+    CHECK_GT(max_native_token_ages_per_record, size_t{0});
+    max_native_token_ages_per_record_ = max_native_token_ages_per_record;
+  }
+
+  struct ReadAverageNativeTokenAgesResult {
     std::unordered_set<ContractAddress, SipHash24Hasher> found;
     std::unordered_set<ContractAddress, SipHash24Hasher> missing;
   };
-  x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts);
-  x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs);
-  x23::Async<ReadAverageHogAgesResult>
-  read_average_hog_ages(const BlockTransfers &transfers);
+  x23::Async<ReadAverageNativeTokenAgesResult>
+  read_average_native_token_ages(const x23::XdrVec<ContractAddress> &accounts);
+  x23::Async<ReadAverageNativeTokenAgesResult>
+  read_average_native_token_ages(const x23::XdrVec<SignedTransaction> &txs);
+  x23::Async<ReadAverageNativeTokenAgesResult>
+  read_average_native_token_ages(const BlockTransfers &transfers);
 
-  // Moves the hogs between groups as specified by the scheduling protocol.
-  // Specifically:
-  // 1. Hogs in the [kHogAgeGroupAlreadyScheduled] group are moved to the
-  // [kHogAgeGroupToSchedule] group.
-  // 2. Then, hogs in the [kHogAgeGroupReceived] group are moved to the
-  // [kHogAgeGroupAlreadyScheduled] group.
-  // So this has the visual effect of:
-  //     [kHogAgeGroupReceived]
-  // --> [kHogAgeGroupAlreadyScheduled]
-  // --> [kHogAgeGroupToSchedule].
+  // Moves the native tokens between groups as specified by the scheduling
+  // protocol. Specifically:
+  // 1. Native tokens in the [kNativeTokenAgeGroupAlreadyScheduled] group are
+  // moved to the [kNativeTokenAgeGroupToSchedule] group.
+  // 2. Then, native tokens in the [kNativeTokenAgeGroupReceived] group are
+  // moved to the [kNativeTokenAgeGroupAlreadyScheduled] group. So this has the
+  // visual effect of:
+  //     [kNativeTokenAgeGroupReceived]
+  // --> [kNativeTokenAgeGroupAlreadyScheduled]
+  // --> [kNativeTokenAgeGroupToSchedule].
   //
-  // Note that the average ages of these groups change when hogs are moved
-  // between them.
-  static void cycle_groups(HogAge &current_averages);
+  // Note that the average ages of these groups change when native tokens are
+  // moved between them.
+  static void cycle_groups(NativeTokenAge &current_averages);
 
   BlockHeight current_block() const
   {
@@ -268,9 +291,9 @@ public:
     return tx_cache_size_.load(std::memory_order_relaxed);
   }
 
-  // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize hog age
-  // updates.
-  x23::CoroLock pending_hog_age_update_lock_;
+  // Used by [MempoolCoordinatorRpc] and [MempoolDbRpc] to synchronize
+  // native-token age updates.
+  x23::CoroLock pending_native_token_age_update_lock_;
   x23::CoroFutex<int64_t> transfer_finished_{-1};
 
   x23::CoroLock global_lock_;
@@ -352,18 +375,21 @@ private:
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
+    // The hash of [tx]'s body, its key in [txs_by_body_].
+    TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
   };
 
   struct AccountState {
-    HogAge hog_age{};
+    NativeTokenAge native_token_age{};
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
   };
 
   struct PendingNominationState {
     BlockID block_id = 0;
-    std::unordered_map<ContractAddress, HogAge, SipHash24Hasher> hog_ages;
+    std::unordered_map<ContractAddress, NativeTokenAge, SipHash24Hasher>
+        native_token_ages;
     std::unordered_set<ContractAddress, SipHash24Hasher> touched_accounts;
     std::unordered_set<ContractAddress, SipHash24Hasher>
         accounts_excluded_from_block;
@@ -373,20 +399,20 @@ private:
     void clear()
     {
       block_id = 0;
-      hog_ages.clear();
+      native_token_ages.clear();
       touched_accounts.clear();
       accounts_excluded_from_block.clear();
     }
   };
 
   struct AccountKey {
-    BlockHeight average_hog_age;
+    BlockHeight average_native_token_age;
     ContractAddress account;
 
     bool operator<(const AccountKey &other) const noexcept
     {
-      if (average_hog_age != other.average_hog_age) {
-        return average_hog_age < other.average_hog_age;
+      if (average_native_token_age != other.average_native_token_age) {
+        return average_native_token_age < other.average_native_token_age;
       }
       // [std::array] implements lexicographic comparison.
       return account < other.account;
@@ -413,10 +439,9 @@ private:
 
   void process_transfers_helper(const Delta &delta,
                                 BlockHeight block_height) noexcept;
-  static bool apply_committed_tx_hog_age(const SignedTransaction &tx,
-                                         HogAge &hog_age,
-                                         uint128_t &hogs_spent_by_this_account,
-                                         BlockHeight block_height);
+  static bool apply_committed_tx_native_token_age(
+      const SignedTransaction &tx, NativeTokenAge &native_token_age,
+      uint128_t &native_tokens_spent_by_this_account, BlockHeight block_height);
 
   std::pair<AccountState *, std::unique_lock<std::mutex>>
   get_account_state(const ContractAddress &address);
@@ -430,15 +455,16 @@ private:
 
   // This method will cycle the groups for [account] if doing so gives the
   // account an advantage in scheduling. This happens when (1) cycling increases
-  // the average age of the [kHogAgeGroupToSchedule] group or (2) no txs are
-  // currently on the runqueue for [account] and the [kHogAgeGroupToSchedule]
-  // group does not have enough hogs to schedule a tx with a gas limit of
-  // [gas_limit].
+  // the average age of the [kNativeTokenAgeGroupToSchedule] group or (2) no txs
+  // are currently on the runqueue for [account] and the
+  // [kNativeTokenAgeGroupToSchedule] group does not have enough native tokens
+  // to schedule a tx with a gas limit of [gas_limit].
   void cycle_if_needed(const ContractAddress &account, GasAmount gas_limit);
-  static bool cycle_if_needed(HogAge &hog_age, GasAmount gas_limit);
-  HogAge *get_hog_age_from_pending_nomination_create_if_needed(
+  static bool cycle_if_needed(NativeTokenAge &native_token_age,
+                              GasAmount gas_limit);
+  NativeTokenAge *get_native_token_age_from_pending_nomination_create_if_needed(
       AccountState &account_state, const ContractAddress &account);
-  const HogAge &get_hog_age_from_pending_nomination_if_exists(
+  const NativeTokenAge &get_native_token_age_from_pending_nomination_if_exists(
       const AccountState &account_state, const ContractAddress &account) const;
   x23::Async<void> refresh_ready_accounts(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts);
@@ -473,7 +499,8 @@ private:
       txs_;
   SynchronizedMap<TransactionHash, std::shared_ptr<TxValue>, SipHash24Hasher>
       txs_by_body_;
-  // Per-account scheduler state, including hog ages and the account runqueue.
+  // Per-account scheduler state, including native-token ages and the account
+  // runqueue.
   SynchronizedMap<ContractAddress, AccountState, SipHash24Hasher> accounts_;
 
   // The number of txs on the runqueue. [size_] is signed because it can
@@ -494,9 +521,10 @@ private:
       transaction_outcome_shards_;
 
   // The RPC client that the scheduler uses to talk to the database. The
-  // scheduler uses this to read/write the number of hogs and hog ages for
-  // accounts.
+  // scheduler uses this to read/write the number of native tokens and
+  // native-token ages for accounts.
   std::shared_ptr<db_sched_client_t> db_sched_client_;
+  size_t max_native_token_ages_per_record_ = kMaxNativeTokenAgesPerRecord;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 };

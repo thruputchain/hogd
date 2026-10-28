@@ -72,15 +72,14 @@ public:
   x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
   schedgateway_lookup_tx(TransactionHashBatch tx_hashes)
   {
-    co_return co_await coord_->schedcoord_lookup_transactions(tx_hashes);
+    co_return co_await coord_->lookup_transactions_by_body(tx_hashes);
   }
 
   x23::Async<SchedulerTransactionOutcomeBatch>
-  schedgateway_lookup_transaction_outcomes(
-      const TransactionHashBatch &tx_hashes)
+  schedgateway_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
   {
     co_return co_await coord_->schedcoord_lookup_transaction_outcomes(
-        tx_hashes);
+        std::move(tx_hashes));
   }
 
   x23::Async<PendingTxCount> schedgateway_pending_tx_count()

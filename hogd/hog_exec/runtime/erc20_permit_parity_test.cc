@@ -178,13 +178,13 @@ abort_bytes(uint64_t selector, Exn const &exn)
 Record
 erc20_abort(itc_erc20_permit::ERC20Error error)
 {
-  return abort_bytes(0xb19947acb2fa14ffULL, error);
+  return abort_bytes(0xf63c8b1f5e7e2fe0ULL, error);
 }
 
 Record
 permit_abort(itc_erc20_permit::ERC20PermitError error)
 {
-  return abort_bytes(0xe8abb072f5171148ULL, error);
+  return abort_bytes(0x1aaf2b9becb7ddc4ULL, error);
 }
 
 Record
@@ -223,7 +223,7 @@ protected:
       std::optional<StorageCostModelXdr> const &cost_model)
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/true, cost_model)
+          /*empty_genesis=*/true, cost_model)
   {}
 
   // Actors, identical across the two legs so the only legitimate difference
@@ -276,7 +276,7 @@ protected:
     write_deployment(kRv32Token, rv32_token);
 
     auto native_token = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(native_token);
     write_deployment(kNativeToken, native_token);
 
@@ -534,7 +534,7 @@ protected:
     native_map.emplace(kDriverId, make_driver(token, scenarios));
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();

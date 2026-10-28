@@ -17,6 +17,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -30,6 +31,7 @@
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "sched_exec.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
@@ -134,6 +136,16 @@ ViewGatewayRpc::run_batch_attempt(ViewGatewayBatchQuery const &query,
   batch.payload().height = state.tip.value.proposal_header.block_height;
   const auto response_limit =
       std::min<std::size_t>(query.max_response_bytes, kBulkRpcMaxMessageSize);
+  // The calls share one budget: together they may spend no more than a single
+  // transaction could. Refused rather than clamped, as a transaction is.
+  GasAmount gas_remaining =
+      state.snapshot_cache.get_network_config_params().max_tx_gas;
+  for (auto const &call : query.calls) {
+    if (call.invocation.gas_limit > gas_remaining) {
+      co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchInvalidRequest);
+    }
+    gas_remaining -= call.invocation.gas_limit;
+  }
   auto response_bytes = x23::xdr_size(batch);
   if (response_bytes > response_limit) {
     co_return ViewGatewayBatchResult(Outcome::ViewGatewayBatchResponseTooLarge);
@@ -241,8 +253,12 @@ ViewGatewayRpc::shut_down()
   // Called from the node's control path on its own thread, never an x23
   // ThreadPool worker, so it blocks on the coroutine that does the work -- and
   // it must be a coroutine, because taking view_state_lock_ requires awaiting.
+  // Clearing the pin belongs to that coroutine for the same reason: every
+  // other access to [current_view_block_id_] is under [view_state_lock_], and
+  // request_stop() above only asks the refresh worker to stop rather than
+  // waiting for it, so the worker can still be inside current_view_pin()
+  // reading the pin while we are here.
   close_all_view_states()();
-  current_view_block_id_ = 0;
 }
 
 x23::Async<void>
@@ -263,6 +279,7 @@ ViewGatewayRpc::close_all_view_states()
       ++it;
     }
   }
+  current_view_block_id_ = 0;
   co_await g.reset_and_return();
   panic("unreachable");
 }
@@ -542,6 +559,17 @@ x23::Async<ViewGatewayResult>
 ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
                                  DbTip const &tip, ViewState &view_state)
 {
+  // A public caller's gas is a claim on this server's workers, so it is capped
+  // by the chain's per-transaction maximum. Refused rather than clamped, as a
+  // transaction is.
+  if (query.invocation.gas_limit >
+      view_state.snapshot_cache.get_network_config_params().max_tx_gas) {
+    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayInvalidInput);
+    result.error_code() =
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+    co_return result;
+  }
+
   static thread_local auto context = make_hog_exec_context();
 
   // WAI: empty nondeterministic data causes ViewingModeData to default

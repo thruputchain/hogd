@@ -290,16 +290,16 @@ print_usage(FILE *stream, char *argv[])
 {
   std::println(stream, R"(Usage: {} [OPTIONS]
 
-Start a local Groundhog development node.
+Start a local Thruput development node.
 
 Typical use:
   hog-devnode serves only hogd's internal x23 RPC, bound to loopback, and prints
   one readiness JSON line on stdout. It is not the public JSON-RPC endpoint.
-  Contract developers normally run it through the groundhog CLI, which
+  Contract developers normally run it through the thruput CLI, which
   supervises this process and serves JSON-RPC (port 9545 by default):
 
-    export GROUNDHOG_DEVNODE_BINARY=/path/to/hog-devnode
-    groundhog node
+    export THRUPUT_DEVNODE_BINARY=/path/to/hog-devnode
+    thruput node
 
 Options:
   --listen-host <ip>             Host/interface for internal x23 services
@@ -315,7 +315,7 @@ Options:
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
-  --bootstrap-manifest <path>    Required schema-4 public bootstrap intent.
+  --bootstrap-manifest <path>    Required schema-5 public bootstrap intent.
                                  Include the faucet and explicit allocations.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are
@@ -505,7 +505,7 @@ parse_args(int argc, char *argv[])
     usage(argv);
   }
   if (!bootstrap_manifest_path.has_value()) {
-    hogd::arg_error("--bootstrap-manifest is required; use groundhog node for "
+    hogd::arg_error("--bootstrap-manifest is required; use thruput node for "
                     "supervised local development",
                     argv, usage);
   }

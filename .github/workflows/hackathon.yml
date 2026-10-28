@@ -30,13 +30,6 @@ on:
                 required: true
                 default: 3
                 type: number
-env:
-    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    # Published crates and pinned submodules retain the legacy registry identity.
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 jobs:
     benchmark:
@@ -64,13 +57,6 @@ jobs:
                 app-id: ${{ vars.COMPONENT_READER_APP_ID }}
                 private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
                 extra-repositories: thruput-tools
-                ssh-private-key: |
-                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-                  ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_XDR_RPC }}
-                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
             - name: Run hog schedule
               env:
@@ -89,6 +75,12 @@ jobs:
                       exit 1
                     fi
                   done
+                  # hog_sched forwards the job's ssh-agent to the hog hosts. The
+                  # clones there use the HTTPS token rewrite and nothing here
+                  # writes metrics_history, so the agent holds no keys; it only
+                  # needs to exist.
+                  eval "$(ssh-agent -s)" > /dev/null
+                  trap 'ssh-agent -k > /dev/null' EXIT
                   hog_sched \
                     --timeout-sec=7200 \
                     --i="${{ github.event.repository.name }}-${{ github.run_id }}" \
@@ -96,8 +88,6 @@ jobs:
                     --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                     --key=git_commit --value=${{ github.sha }} \
                     --key=git_branch --value="$BRANCH_NAME" \
-                    --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                    --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                     --key=hackathon_users --value="$HACKATHON_USERS" \
                     --key=hackathon_rate_multiplier --value="$HACKATHON_RATE_MULTIPLIER" \
                     --key=hackathon_outstanding --value="$HACKATHON_OUTSTANDING" \

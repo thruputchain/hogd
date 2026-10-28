@@ -14,8 +14,8 @@
 #include "hogd/hog_db/rpc_from_sched.h"
 #include "hogd/hog_exec/runtime/test_util/test_sched_db_server.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "sched_db.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/rpc.h"
 #include "x23/rpc_common.h"
@@ -24,6 +24,8 @@ namespace hogd {
 
 class HogdbWrapper {
 public:
+  constexpr static size_t kDefaultHeapSize = 10 * 1024 * 1024;
+
   // [heap_bytes] sizes the ramdb heap. The allocator fails a write rather than
   // growing, so a caller seeding many items has to raise it.
   explicit HogdbWrapper(size_t heap_bytes = kDefaultHeapSize)
@@ -40,8 +42,7 @@ public:
 
   void grant_storage_token(ContractAddress const &address, int128_t amount);
 
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> const &item);
+  void write_item(AddressAndKey const &addrkey, WireStorageItem const &item);
 
   void write_contract(ContractAddress const &addr,
                       std::shared_ptr<const Contract> const &contract);
@@ -49,10 +50,12 @@ public:
                         DeployedContractHash const &deployment,
                         StorageCostModel const *cost_model);
 
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  std::map<ContractAddress, int128_t>
+  get_native_tokens_transferred(BlockHeight height)
   {
-    test_sched_db_server_->impl()->wait_for_hog_transferred_height(height);
-    return test_sched_db_server_->impl()->get_hogs_transferred(height);
+    test_sched_db_server_->impl()->wait_for_native_token_transferred_height(
+        height);
+    return test_sched_db_server_->impl()->get_native_tokens_transferred(height);
   }
 
   auto &get_db() { return ctx_.get_db(); }
@@ -63,7 +66,6 @@ public:
   }
 
 private:
-  constexpr static size_t kDefaultHeapSize = 10 * 1024 * 1024;
   static HogDbDAO open_db(size_t heap_bytes);
   std::unique_ptr<SchedDb1::client<x23::RpcStream<x23::RpcLogger>::ClientRef>>
   make_sched_db_client();

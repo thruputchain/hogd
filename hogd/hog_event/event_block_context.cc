@@ -18,6 +18,7 @@
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <sys/uio.h> // IWYU pragma: keep
 #include <type_traits>
 #include <unistd.h>
 #include <utility>
@@ -50,23 +51,17 @@ namespace hogd {
 
 constexpr static size_t kBufferThreshold = 500_KiB;
 
-void
-EventBlockContext::open_events_file()
+x23::UniqueFd
+EventBlockContext::create_events_file(std::string_view work_directory,
+                                      BlockID block_id)
 {
-  auto dir = Directory::open(work_directory_);
+  auto dir = Directory::open(work_directory);
   if (!dir) {
     panic("failed to open work directory: {}", dir.error());
   }
-  auto filename = temp_events_filename(work_directory_, block_id_);
-  // The temp name is only unique among live blocks: block ids are
-  // process-local, so a crash can leave a temp file behind under a name a
-  // later run reuses.  Worse than a stale tail, that leftover can be a hard
-  // link to a PUBLISHED events file -- publish_file() links the final name
-  // before unlinking the temp name, and a crash between the two leaves both
-  // names on one inode -- so opening it in place (with O_TRUNC or otherwise)
-  // would corrupt the published file through the shared inode.  Unlinking the
-  // stale name first breaks any such link, and O_EXCL guarantees this block
-  // writes a fresh, empty inode of its own.
+  auto filename = temp_events_filename(work_directory, block_id);
+  // See the declaration for why a stale name is unlinked rather than opened
+  // in place.
   // NOLINTNEXTLINE(misc-include-cleaner)
   int fd = open(filename.c_str(), O_CREAT | O_EXCL | O_WRONLY, 0666);
   if (fd == -1 && errno == EEXIST) {
@@ -80,15 +75,18 @@ EventBlockContext::open_events_file()
   if (fd == -1) {
     panic("failed to open events file: {}", strerror(errno));
   }
-  events_file_ = x23::UniqueFd(fd);
+  return x23::UniqueFd(fd);
 }
 
 EventBlockContext::EventBlockContext(std::string_view work_directory,
                                      BlockID block_id,
-                                     ReusableEventBlockContextData data)
+                                     ReusableEventBlockContextData data,
+                                     x23::UniqueFd events_file)
   : trie_(std::move(data.trie)), work_directory_(work_directory),
-    block_id_(block_id), buffers_(std::move(data.buffers))
+    block_id_(block_id), buffers_(std::move(data.buffers)),
+    events_file_(std::move(events_file))
 {
+  CHECK(static_cast<bool>(events_file_));
   trie_->clear();
   {
     auto ul = buffers_.lock_threads();
@@ -97,7 +95,6 @@ EventBlockContext::EventBlockContext(std::string_view work_directory,
       ctx.event_count = 0;
     });
   }
-  open_events_file();
 }
 
 ReusableEventBlockContextData
@@ -314,8 +311,10 @@ EventBlockContext::finish_file_write()
 
   auto ts = x23::fastclock::now();
   size_t total_bytes = 0;
+  size_t buffers = 0;
 
   co_await await_pending_writes_done();
+  auto ts2 = x23::fastclock::now();
 
   x23::CoroGuard g;
   co_await g(lock_);
@@ -325,17 +324,26 @@ EventBlockContext::finish_file_write()
   {
     auto ul = buffers_.lock_threads();
 
-    buffers_.for_each(ul, [this, &total_bytes](detail::EventContext &context) {
-      total_bytes += context.buf.size();
-      auto r = x23::fullwrite(events_file_, x23::BufView(context.buf));
-      if (!r) [[unlikely]] {
-        panic("failed to write events to file: {}", r.error());
-      }
+    // Every thread's residual buffer in one writev() where IOV_MAX allows,
+    // rather than a write() per thread.
+    std::vector<iovec> iov; // NOLINT(misc-include-cleaner)
+    buffers_.for_each(ul, [&iov](detail::EventContext &context) {
+      iov.push_back({context.buf.data(), context.buf.size()});
     });
+    for (const iovec &piece : iov) {
+      total_bytes += piece.iov_len;
+      buffers += piece.iov_len != 0 ? 1 : 0;
+    }
+    auto r = x23::fullwritev(events_file_, iov);
+    if (!r) [[unlikely]] {
+      panic("failed to write events to file: {}", r.error());
+    }
   }
 
   auto ts3 = x23::fastclock::now();
-  info("time to write events: {} ns total bytes at end: {}", (ts3 - ts).count(),
+  info("time to write events: {} ns (pending writes {} ns, residual {} ns in "
+       "{} buffers) total bytes at end: {}",
+       (ts3 - ts).count(), (ts2 - ts).count(), (ts3 - ts2).count(), buffers,
        total_bytes);
 
   sync_file(g);

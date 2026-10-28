@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <limits>
 #include <memory>
@@ -272,6 +273,56 @@ TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUnregisteredContractType)
   ASSERT_TRUE(recovered.has_value());
   EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
                                                   cost_model_));
+}
+
+// A retained code hash with a rewritten kRv32 type and a recomputed config hash
+// passes the earlier guards, so startup must still refuse the type mismatch
+// against the decoded code row (#4306).
+TEST_F(RecoveredTipTest, RejectsDefaultWalletTypeMismatchingContractRow)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  tip->default_wallet.contract_type = ContractType::kRv32;
+  // Recompute so the config-hash guard passes and the type check is what bites.
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  HogDbDAO recovered_db = reopen();
+  const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  // The native wallet's code row is still present under the retained hash, so
+  // the rejection is the type mismatch rather than a missing row.
+  ASSERT_TRUE(recovered_db.read_contract_code(recovered->default_wallet.hash)
+                  .has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                  cost_model_));
+}
+
+// A wallet code row that cannot be decoded as a Contract is corrupt recovered
+// state. Startup must reject the tip rather than let the decode error escape
+// into the first default-wallet fallback (#4306).
+TEST_F(RecoveredTipTest, RejectsDefaultWalletWithUndecodableContractRow)
+{
+  HogDbDAO db = reopen();
+  const HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  // Overwrite the native wallet's code row with bytes too short to decode as a
+  // Contract, leaving the config-hash-committed native metadata in place.
+  constexpr std::array<std::byte, 3> kTruncatedContractXdr{std::byte{0},
+                                                           std::byte{0},
+                                                           std::byte{0}};
+  ASSERT_TRUE(db.write_contract_code(native_default_wallet_hash().hash,
+                                     kTruncatedContractXdr)
+                  .has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  EXPECT_FALSE(StartupValidation::tip_is_servable(db, *tip, cost_model_));
 }
 
 // A CRC-valid tip rewrite can set max_savepoint_depth outside the genesis

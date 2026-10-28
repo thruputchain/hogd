@@ -88,7 +88,7 @@ TEST(InvokeTxLeakTest, OversizedFinalCommitAbortsInvokeTx)
   // x23::default_max_message_size, which racing server threads also read.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*empty_genesis=*/false,
       /*genesis_cost_model=*/std::nullopt,
       /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/4096);
   fw.run_genesis_initialization(

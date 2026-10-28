@@ -1,4 +1,4 @@
-Build Status : ![build status](https://github.com/groundhogchain/hogd/actions/workflows/cpp.yml/badge.svg)
+Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp.yml/badge.svg)
 
 # Installation Instructions
 
@@ -69,33 +69,8 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     cargo install --force cbindgen
     ~~~~
 
-1. Configure cargo to authenticate with the groundhog crate registry.
-   First, ensure `~/.cargo/config.toml` includes:
-
-    ~~~~ .toml
-    [registry]
-    global-credential-providers = ["cargo:token"]
-    ~~~~
-
-   Then add your token to `~/.cargo/credentials.toml`:
-
-    ~~~~ .toml
-    [registries.groundhog]
-    token = "Bearer <your-token>"
-    ~~~~
-
-   You can get an access token by logging in at
-   [crates.thruput.network](https://crates.thruput.network).
-
-   Alternatively, you can authenticate using environment variables (this
-   is how CI is configured):
-
-    ~~~~ .sh
-    export CARGO_REGISTRIES_GROUNDHOG_TOKEN="<your-token>"
-    export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="cargo:token"
-    ~~~~
-
-1. Fetch rust crate dependencies.
+1. Fetch rust crate dependencies. They all come from crates.io, so this needs
+   no registry credentials.
     ~~~~ .sh
     ./scripts/fetch.sh
     ~~~~
@@ -125,33 +100,32 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
 
 ## Building `hog-devnode` for contract development
 
-Contract authors normally do not build this repository. The `groundhog` CLI
-(from [groundhog-rpc](https://github.com/groundhogchain/groundhog-rpc)) drives
+Contract authors normally do not build this repository. The `thruput` CLI
+(from [thruput-tools](https://github.com/thruputchain/thruput-tools)) drives
 a local node through the `hog-devnode` binary, which ships in the
-`groundhog-client` release archive; see
-[Develop Locally](https://docs.groundhog.dev/tutorials/develop-locally/) on the
-developer docs site.
+`thruput-client` release archive; run `thruput docs` to browse the bundled
+developer documentation.
 
 If you do want to build `hog-devnode` from source, configure as above and build
 just that target:
 
 ~~~~ .sh
 make devnode
-export GROUNDHOG_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog-devnode"
-groundhog node
+export THRUPUT_DEVNODE_BINARY="$PWD/build/hogd/devnode/hog-devnode"
+thruput node
 ~~~~
 
 `hog-devnode` itself serves only hogd's internal x23 RPC on loopback and prints
 one readiness line on stdout. The public JSON-RPC endpoint that clients and the
-CLI talk to (port 9545 by default) is served by `groundhog node`, which
+CLI talk to (port 9545 by default) is served by `thruput node`, which
 supervises the devnode process. Run `hog-devnode --help` for its options.
 Fresh local chains allow up to 256 KiB of RV32 code and 512 KiB per complete
 contract artifact by default; no network-config overrides are needed.
 
 Fresh local and hosted bootstrap accounts use the native default wallet at
 nonce zero. Genesis funds their public-key-derived addresses directly; runtime
-bundles need `genesis_root.rv32a` but no `dev_wallet.rv32a`. Bootstrap and runtime
-manifests use schema 3; hosted bootstrap metadata uses schema 2.
+bundles need only `genesis_root.rv32a`. Bootstrap and runtime manifests use
+schema 5; hosted bootstrap metadata uses schema 3.
 
 Persistent local directories from the older dev-wallet bootstrap are not migrated
 in place. Keep the original CLI/runtime to open those directories, or explicitly

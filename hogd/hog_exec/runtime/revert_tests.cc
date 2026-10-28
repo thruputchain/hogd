@@ -23,7 +23,7 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -38,12 +38,11 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class RevertTest : public ::testing::TestWithParam<TestDB>,
-                   public NativeContractTestFramework {
+class RevertTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   RevertTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -51,7 +50,7 @@ public:
 
 // Check on how a root frame reverts,
 // when the reverting frame is the root frame.
-TEST_P(RevertTest, RootFrameReverts)
+TEST_F(RevertTest, RootFrameReverts)
 {
   // Native contract with one method.  The method performs a bytestring write,
   // and then the contract reverts.
@@ -142,7 +141,7 @@ TEST_P(RevertTest, RootFrameReverts)
 // verify the bytestrings are absent from their own storage.
 //
 // Post-commit: neither bytestring is written.
-TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
+TEST_F(RevertTest, NestedFrameWithTryInvokeReverts)
 {
   ContractAddress addr_0 = make_contract_address(0);
   ContractAddress addr_1 = make_contract_address(1);
@@ -389,7 +388,7 @@ TEST_P(RevertTest, NestedFrameWithTryInvokeReverts)
   ASSERT_FALSE(data_item2_opt.has_value());
 }
 
-TEST_P(RevertTest, GetReturnBufferOnFault)
+TEST_F(RevertTest, GetReturnBufferOnFault)
 {
   // Two native contracts (no self-reentrance):
   //
@@ -507,7 +506,7 @@ TEST_P(RevertTest, GetReturnBufferOnFault)
 // wrote storage should report frame status Abort + abort payload regardless of
 // whether another transaction holds a conflicting reservation on the
 // discarded key.
-TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
+TEST_F(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
 {
   constexpr ContractAddress kAddrParent = make_contract_address(10);
   constexpr ContractAddress kAddrChild = make_contract_address(11);
@@ -640,7 +639,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeWithConflictPreservesAbortBuffer)
 // Regression test for issue 1745: proposal mode should not log a
 // nondeterministic bit for a manually-reverted TryInvoke child's discarded
 // writes, and validation mode should agree.
-TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
+TEST_F(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
 {
   constexpr ContractAddress kAddrParent = make_contract_address(20);
   constexpr ContractAddress kAddrChild = make_contract_address(21);
@@ -721,7 +720,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
   auto proposal_handler = make_new_system_call_handler(tx, *runtime_context);
   auto proposal_res = proposal_handler.root_invoke()();
   ASSERT_TRUE(proposal_res.is_root_success());
-  auto proposal_data = proposal_handler.get_proposal_data();
+  auto proposal_data = proposal_handler.extract_proposal_data();
   ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
 
   // No nondeterministic bit should have been logged.
@@ -753,7 +752,7 @@ TEST_P(RevertTest, ManualRevertTryInvokeProposalValidationAgreement)
 //
 // Both reads live in addr_1 because a storage key is scoped to the contract
 // that reads it; the same key string in addr_0 would be a different key.
-TEST_P(RevertTest, RepeatedLoadAfterRevertChargedOnce)
+TEST_F(RevertTest, RepeatedLoadAfterRevertChargedOnce)
 {
   ContractAddress addr_0 = make_contract_address(0);
   ContractAddress addr_1 = make_contract_address(1);
@@ -761,8 +760,7 @@ TEST_P(RevertTest, RepeatedLoadAfterRevertChargedOnce)
 
   // Seed the key so the loads have a real row to find.
   write_item(make_contract_data_addrkey(addr_1, "cold"),
-             std::make_shared<const StorageItemWrapper>(
-                 make_bytestring("value"), get_default_cost_model()));
+             make_bytestring_item(make_bytestring("value")));
 
   // addr_0: two try_invokes of addr_1, each of which reverts.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
@@ -862,15 +860,14 @@ TEST_P(RevertTest, RepeatedLoadAfterRevertChargedOnce)
 // This is the case the charge has to get right in the other direction from
 // RepeatedLoadAfterRevertChargedOnce: an earlier touch that never reached the
 // database must not consume the transaction's one paid load.
-TEST_P(RevertTest, DeleteMasksLoadUntilFrameReverts)
+TEST_F(RevertTest, DeleteMasksLoadUntilFrameReverts)
 {
   ContractAddress addr_0 = make_contract_address(0);
   ContractAddress addr_1 = make_contract_address(1);
   auto key = make_storage_key("cold");
 
   write_item(make_contract_data_addrkey(addr_1, "cold"),
-             std::make_shared<const StorageItemWrapper>(
-                 make_bytestring("value"), get_default_cost_model()));
+             make_bytestring_item(make_bytestring("value")));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
@@ -986,11 +983,6 @@ TEST_P(RevertTest, DeleteMasksLoadUntilFrameReverts)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RevertTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

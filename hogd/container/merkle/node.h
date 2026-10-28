@@ -10,6 +10,7 @@
 #include <format>
 #include <optional>
 #include <ostream>
+#include <span>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -72,6 +73,8 @@ public:
   };
 
   struct LeafPayload {
+    // Complete key, unchanged when ancestors split or collapse. Extension
+    // paths remain relative fragments; the leaf encoding commits to this key.
     HexArray path;
     std::optional<SHA256Hash> value_hash;
   };
@@ -200,7 +203,16 @@ public:
     return node;
   }
 
-  // Returns an encoding of the node as a byte vector.
+  // Hashes a complete key and raw value once, before publishing the leaf:
+  //   0x02 || uint64LE(key nibble count) || packed key ||
+  //   uint64LE(value byte count) || value bytes.
+  // The last nibble of an odd-length key is padded with zero in the low half.
+  // Branch values use the same commitment when a key is a prefix of another.
+  static SHA256Hash compute_value_commitment(const HexArray &key,
+                                             std::span<const std::byte> value);
+
+  // Returns the proof encoding of the node. A leaf carries its full key and
+  // stored key/value commitment; its encoding is not the hash preimage.
   std::vector<std::byte> &get_node_encoding() const;
 
   // This reads a raw node representation from [encodings] starting at index
@@ -208,6 +220,8 @@ public:
   static bool get_node_from_encoding(const std::vector<std::byte> &encodings,
                                      size_t &idx, Node::Raw &node);
 
+  // Hashes branch/extension encodings; returns the stored commitment for
+  // leaves.
   SHA256Hash compute_node_hash() const;
 
   void clear()
@@ -220,6 +234,9 @@ public:
     payload_.branch.child.fill(nullptr);
   }
 
+  // The stored commitment to both the complete key and value (not SHA256 of
+  // just the value). Leaves use it directly as their hash; branches include it
+  // in their encoding. Raw values are not retained by the trie.
   std::optional<SHA256Hash> &value_hash()
   {
     switch (type) {

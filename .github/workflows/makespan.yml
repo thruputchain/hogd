@@ -1,7 +1,8 @@
 name: Makespan Benchmark (hog_sched)
 
 # Manual: the makespan bench with every knob exposed, for experiments on a
-# branch. combined_metrics runs it with the defaults below as a tracked metric.
+# branch. Combined Metrics (thruputchain/benchmarks, started by benchmarks.yml)
+# runs it with the defaults below as a tracked metric.
 # See hogd/hog_exec/bench/makespan_runner.cc.
 on:
     workflow_dispatch:
@@ -38,13 +39,6 @@ on:
                 description: Trials per scenario
                 type: string
                 default: "5"
-env:
-    CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    # Published crates and pinned submodules retain the legacy registry identity.
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-    CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
-    CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
 
 # The benchmark owns its hosts, so runs queue behind a running benchmark
 # rather than overlapping it.
@@ -76,11 +70,7 @@ jobs:
                 app-id: ${{ vars.COMPONENT_READER_APP_ID }}
                 private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
                 ssh-private-key: |
-                  ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
                   ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-                  ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-                  ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
 
             - name: Run hog schedule
               env:
@@ -108,8 +98,6 @@ jobs:
                   --key=git_token --value=${{ steps.private-sources.outputs.token }} \
                   --key=git_commit --value=${{ github.sha }} \
                   --key=git_branch --value=$BRANCH_NAME \
-                  --key=cargo_registry_token --value=${{ secrets.GROUNDHOG_REGISTRY_TOKEN }} \
-                  --key=cargo_registry_global_credential_providers --value=${{ env.CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS }} \
                   --key=executors --value="$EXECUTORS" \
                   --key=fib_n --value="$FIB_N" \
                   --key=heavy_reads --value="$HEAVY_READS" \

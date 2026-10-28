@@ -3,12 +3,14 @@
 #pragma once
 
 #include <filesystem>
+#include <span>
 #include <utility>
 
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <x23/cleanup.h>
@@ -104,6 +106,11 @@ readfile(std::filesystem::path p)
 }
 
 std::expected<void, Errno> fullwrite(BorrowedFd fd, BufView buf);
+
+// Writes every byte of `iov`, in order, with as few writev() calls as
+// IOV_MAX allows. Consumes `iov`: entries are advanced past what has been
+// written, so its contents are unspecified afterward.
+std::expected<void, Errno> fullwritev(BorrowedFd fd, std::span<iovec> iov);
 
 std::expected<void, Errno> writefile(const std::filesystem::path &p,
                                      BufView buf, bool sync = false,

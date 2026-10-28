@@ -47,8 +47,8 @@ cmake --build release --parallel "$(nproc)" > build2.log 2>&1 || (cat build2.log
 # These build scripts place the binaries in the current working directory, so we
 # [pushd release] so that the binaries are placed in the [release] directory.
 pushd release >/dev/null
-../groundhog-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
-../groundhog-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
+../thruput-go/chuckd/scripts/build_chuckd.sh > build3.log 2>&1 || (cat build3.log && exit 1)
+../thruput-go/chuckd/scripts/build_scpd.sh > build4.log 2>&1 || (cat build4.log && exit 1)
 popd >/dev/null
 
 echo 'set port env vars'
@@ -75,14 +75,6 @@ fi
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 bench_1 = "hog6"
@@ -193,14 +185,6 @@ fi
 GIT_REPO = "{{ .github_repo }}"
 GIT_COMMIT = "{{ .git_commit }}"
 GIT_BRANCH = "{{ .git_branch }}"
-CARGO_REGISTRIES_GROUNDHOG_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS = "{{ .cargo_registry_global_credential_providers }}"
-CARGO_REGISTRIES_GROUNDHOG_INDEX = "sparse+https://crates.thruput.network/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_SOURCE = "sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX = "sparse+https://groundhog.dev/crates/api/v1/crates/"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN = "{{ .cargo_registry_token }}"
-CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER = "cargo:token"
 
 [jobs.host]
 metrics_1 = "hog10"

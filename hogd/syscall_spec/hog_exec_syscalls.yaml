@@ -28,6 +28,7 @@ syscalls:
   BytestringGet:
     async: true
   BytestringSet:
+    needs_gas: true
     async: true
   NonnegativeIntGet:
     async: true

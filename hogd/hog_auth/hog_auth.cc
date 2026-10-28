@@ -47,12 +47,10 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
     panic("Invalid mempool address: {}", mempool_address);
   }
 
-  // Auth forwards the same committed KeyChangeBatch it received over the
-  // bulk-capped AuthDB1 link to mempool over this client. HogDb's AuthDB1
-  // client and mempool's MempoolAuthRpc server both use kBulkRpcMaxMessageSize,
-  // so this client must too — otherwise a valid oversized batch fails the
-  // downstream send, HogDb erases the auth subscriber, and subsequent heights
-  // are never delivered (issue #3572).
+  // Match mempool's MempoolAuthRpc server cap. Key changes go to the mempool
+  // as KeyChangeChunk records sized under the default cap, so this is headroom
+  // rather than a requirement; the whole-batch forward it was added for
+  // (issue #3572) is gone.
   auto mempool_client_res =
       make_rpc_client<MempoolAuth1>(host_port, /*retry=*/true,
                                     kBulkRpcMaxMessageSize)();
@@ -84,15 +82,18 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
                      .upid = {},
                      .address_for_db = auth_db_address.c_str(),
                      .address_for_mempool = auth_mempool_address.c_str()};
-  IntroAuthResult intro = mempool_client.mempoolauth_intro_auth(auth_card)();
-  if (intro.outcome() != IntroAuthOutcome::kSuccess) {
-    panic("Failed to introduce auth server to mempool: {}", intro.outcome());
+  // Registering comes last, in subscribe_and_register(); this only finds the
+  // db to subscribe to.
+  IntroAuthResult auth_info =
+      mempool_client.mempoolauth_get_auth_info(version::kHogdProtocol())();
+  if (auth_info.outcome() != IntroAuthOutcome::kSuccess) {
+    panic("Failed to get auth info from mempool: {}", auth_info.outcome());
   }
-  if (intro.success().shards.empty()) {
+  if (auth_info.success().shards.empty()) {
     panic("No db shards registered with mempool");
   }
-  ShardCard &shard = intro.success().shards[0];
-  CHECK_EQ(intro.success().shards.size(),
+  ShardCard &shard = auth_info.success().shards[0];
+  CHECK_EQ(auth_info.success().shards.size(),
            1U); // multiple shards not supported yet
   const std::string address_for_auth = shard.address_for_auth.c_str();
   auto dbauth_res = make_dbauth_client(address_for_auth)();
@@ -101,7 +102,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
           dbauth_res.error().error_code().message());
   dbauth_client_t dbauth_client = std::move(*dbauth_res);
   AuthServer auth_server(std::move(dbauth_client),
-                         intro.success().network_hash);
+                         auth_info.success().network_hash);
 
   auth_server.set_mempool_client(std::move(mempool_client));
   auth_db_rpc->impl()->set_auth_server(auth_server);
@@ -110,7 +111,10 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   auth_db_rpc.start_accepting(std::move(db_lfd));
   auth_mempool_rpc.start_accepting(std::move(mempool_lfd));
 
-  auth_server.subscribe_to_auth_data_changes(auth_card)();
+  IntroAuthResult intro = auth_server.subscribe_and_register(auth_card)();
+  if (intro.outcome() != IntroAuthOutcome::kSuccess) {
+    panic("Failed to introduce auth server to mempool: {}", intro.outcome());
+  }
 
   Health::instance().set_status(Health::Status::kOk)();
   info("auth server initialization complete.");

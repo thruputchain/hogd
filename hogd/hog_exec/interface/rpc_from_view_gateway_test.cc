@@ -200,8 +200,8 @@ public:
 
   // For a chain whose genesis states `network_config`.
   explicit ViewGatewayRefreshTest(NetworkConfig const &network_config)
-    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal,
-                 TestDB::kHogDb, true, std::nullopt, network_config)
+    : framework_(false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+                 std::nullopt, network_config)
   {}
 
   void SetUp() override
@@ -327,6 +327,44 @@ TEST_F(ViewGatewayRefreshTest, RefreshWithNoNewBlockIsHarmless)
   EXPECT_EQ(r3.payload().height, h1);
 
   gateway.shut_down();
+}
+
+// shut_down() used to clear [current_view_block_id_] after
+// close_all_view_states() returned, outside [view_state_lock_] -- the one
+// access to that field not under the lock. request_stop() does not wait for
+// the refresh worker, so the worker could be inside current_view_pin(),
+// reading the pin under the lock, while shut_down() wrote it from the control
+// thread. TSan called it a data race in the TSAN nightly (#4605); it took a
+// whole devnode to hit, because the refresh worker has to have probed
+// recently for the two accesses to land in the same shadow window.
+//
+// Pin a view, let the worker take at least one probe, then shut down: that is
+// the devnode's shape without the devnode. Under TSan this fails if the write
+// ever leaves the lock again; otherwise it just pins that shutdown-while-
+// refreshing serves a clean shutdown rather than a hang.
+TEST_F(ViewGatewayRefreshTest, ShutdownDuringRefreshClearsPinUnderTheLock)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+
+  std::string db_addr =
+      std::format("localhost:{}", framework_.get_db_exec_port());
+  ViewGatewayRpc gateway(db_addr, "localhost",
+                         framework_.get_event_exec_port());
+
+  // A view pins [current_view_block_id_] to a non-zero id, so the worker's
+  // read of it is the one that matters rather than an early-out on zero.
+  ViewGatewayResult pinned = gateway.viewgateway_view(make_read_query())();
+  ASSERT_EQ(pinned.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+
+  // kRefreshProbeInterval is 100ms, so this is at least one full probe.
+  std::this_thread::sleep_for(std::chrono::milliseconds(150));
+
+  gateway.shut_down();
+
+  // A view after shutdown is refused, not served from the cleared pin.
+  ViewGatewayResult after = gateway.viewgateway_view(make_read_query())();
+  EXPECT_EQ(after.outcome(), ViewGatewayOutcome::ViewGatewayInternalError);
 }
 
 // viewgateway_intro: only the exact protocol commit is accepted; anything
@@ -504,6 +542,101 @@ TEST_F(ViewGatewayDeepTokenTest, ViewRpcAdmitsTheChainsTokenDepth)
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
 
   server.impl()->shut_down();
+}
+
+// A chain permitting more gas per transaction than the default, so the cap a
+// view meets is visibly the chain's and not the constant.
+class ViewGatewayGasCapTest : public ViewGatewayRefreshTest {
+public:
+  static constexpr GasAmount kChainMaxTxGas = 2 * kDefaultMaxTxGas;
+
+  ViewGatewayGasCapTest() : ViewGatewayRefreshTest(gas_cap_config()) {}
+
+  static NetworkConfig gas_cap_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                   kChainMaxTxGas);
+    return config;
+  }
+
+  static TransactionViewQuery make_read_query_with_gas(GasAmount gas)
+  {
+    auto query = make_read_query();
+    query.invocation.gas_limit = gas;
+    return query;
+  }
+
+  static ViewGatewayBatchQuery make_batch_with_gas(GasAmount first,
+                                                   GasAmount second)
+  {
+    return ViewGatewayBatchQuery{.calls = {make_read_query_with_gas(first),
+                                           make_read_query_with_gas(second)},
+                                 .min_height = {},
+                                 .budget_millis = 30'000,
+                                 .max_response_bytes = 1'048'576};
+  }
+};
+
+TEST_F(ViewGatewayGasCapTest, ViewGasIsCappedAtTheChainsMaxTxGas)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  ViewGatewayResult at_cap =
+      gateway.viewgateway_view(make_read_query_with_gas(kChainMaxTxGas))();
+  ASSERT_EQ(at_cap.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+  EXPECT_EQ(at_cap.payload().output.status_code(),
+            InvocationFrameStatusCode::Return);
+
+  for (GasAmount over :
+       {kChainMaxTxGas + 1, std::numeric_limits<GasAmount>::max()}) {
+    ViewGatewayResult refused =
+        gateway.viewgateway_view(make_read_query_with_gas(over))();
+    ASSERT_EQ(refused.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+    EXPECT_EQ(refused.error_code(),
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+  }
+}
+
+// A batch's calls share the one cap a single view gets, rather than each
+// taking it.
+TEST_F(ViewGatewayGasCapTest, BatchGasIsCappedInAggregate)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  constexpr GasAmount kHalf = kChainMaxTxGas / 2;
+  auto at_cap = gateway.viewgateway_view_batch(
+      make_batch_with_gas(kHalf, kChainMaxTxGas - kHalf))();
+  ASSERT_EQ(at_cap.outcome(), ViewGatewayBatchOutcome::ViewGatewayBatchOk);
+  EXPECT_EQ(at_cap.payload().results.size(), 2U);
+
+  // Each call alone is within the cap; together they are not.
+  EXPECT_EQ(gateway
+                .viewgateway_view_batch(
+                    make_batch_with_gas(kHalf, kChainMaxTxGas - kHalf + 1))()
+                .outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  EXPECT_EQ(
+      gateway.viewgateway_view_batch(make_batch_with_gas(kChainMaxTxGas, 1))()
+          .outcome(),
+      ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
+  // A sum that would wrap is refused, not admitted modulo 2^64.
+  EXPECT_EQ(gateway
+                .viewgateway_view_batch(
+                    make_batch_with_gas(std::numeric_limits<GasAmount>::max(),
+                                        2))()
+                .outcome(),
+            ViewGatewayBatchOutcome::ViewGatewayBatchInvalidRequest);
 }
 
 } // namespace

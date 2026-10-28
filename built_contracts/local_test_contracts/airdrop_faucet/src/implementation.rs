@@ -33,7 +33,7 @@ pub struct AirdropFaucetContract;
 impl AirdropFaucet for AirdropFaucetContract {
     fn claim(amount: i128) {
         let receiver = get_caller();
-        let token_address = thruput_sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN;
+        let token_address = thruput_sdk::types::genesis_addresses::ADDRESS_NATIVE_TOKEN;
         let token = ERC20Client::new(&token_address);
 
         let bootstrapped = non_negative_int_try_get(&bootstrap_key())

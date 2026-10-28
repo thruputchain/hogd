@@ -49,13 +49,13 @@
 namespace hogd {
 
 using ERC20Exception =
-    ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 
 namespace {
 
 // Compute an event-signature topic the same way the SDK does:
 // sha256("<major_version>::<crate_name>::<type_name>"). See
-// groundhog_contract_util::event_signature in the SDK.
+// thruput_contract_util::event_signature in the SDK.
 //
 // The preimage is taken from a `u8"..."` literal so its bytes are the UTF-8
 // (== ASCII, for these names) encoding mandated by the standard, independent of
@@ -405,10 +405,11 @@ move_balance(NativeSyscallContext &ctx, ContractAddress const &owner,
     co_return ResultT::make_err(Erc20ExceptionT{erc20_error_t::TooLarge});
   }
 
-  // No credit-side overflow check: total supply (~2^59) keeps any reachable
-  // receiver balance + amount far below INT128_MAX, so the reference's
-  // checked add on the credit leg cannot fire. HogDb's commit-time
-  // add-capacity bound remains the backstop for hand-crafted states.
+  // No credit-side overflow check: the receiver balance and [amount] are both
+  // part of total supply, which never exceeds INT128_MAX, so their sum cannot
+  // overflow and the reference's checked add on the credit leg cannot fire.
+  // HogDb's commit-time add-capacity bound remains the backstop for
+  // hand-crafted states.
 
   if (auto moved = co_await native_token_unchecked_transfer(ctx, owner,
                                                             receiver, amount);
@@ -648,15 +649,17 @@ delete_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
   co_return Result<void, ERC20Exception>::make_ok();
 }
 
-// ERC20Permit (groundhog-erc20-permit-if): approvals that arrive as auth
+// ERC20Permit (thruput-erc20-permit-if): approvals that arrive as auth
 // tokens rather than as a transaction from the owner. The RV32 reference is
 // itc_erc20_permit, which is itc_erc20 with this interface on top.
 
 using PermitErc20Exception =
-    ContractException<itc_erc20_permit::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20_permit::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 using PermitException = ContractException<itc_erc20_permit::ERC20PermitError,
-                                          0xe8abb072f5171148ULL>;
-using PermitResult = Result<void, PermitErc20Exception, PermitException>;
+                                          0x1aaf2b9becb7ddc4ULL>;
+// Error order follows the generated itc_erc20_permit header, which lists a
+// method's exceptions in the spec's throws order (by selector).
+using PermitResult = Result<void, PermitException, PermitErc20Exception>;
 
 static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
               "ERC20Error must reject identically through either interface");
@@ -936,15 +939,15 @@ Topic const &
 native_token_transfer_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::TransferEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::TransferEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_change_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceChangeEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceChangeEvent");
   return kSignature;
 }
 
@@ -952,15 +955,15 @@ Topic const &
 native_token_mint_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::MintEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::MintEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_delete_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceDeleteEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceDeleteEvent");
   return kSignature;
 }
 
