@@ -1,6 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <semaphore>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <utility>
@@ -90,6 +92,60 @@ TEST(SynchronizedMap, Parallel)
         atmp += value.second;
       });
   EXPECT_EQ(atmp, kInsertions * kThreads);
+}
+
+using CoroMap =
+    SynchronizedMap<int, int, std::hash<int>, std::equal_to<int>,
+                    std::allocator<std::pair<const int, int>>, x23::CoroLock>;
+
+TEST(SynchronizedMap, CoroContentionAndGuardReuse)
+{
+  auto run = []() -> x23::Async<void> {
+    CoroMap map(1);
+    x23::CoroGuard guard;
+    auto *value = co_await map.insert(1, guard, 10);
+    EXPECT_EQ(map.find(1, std::as_const(guard)), value);
+    bool resumed = false;
+    auto waiter = [&]() -> x23::Async<void> {
+      x23::CoroGuard next;
+      auto *found = co_await map.find(1, next);
+      EXPECT_EQ(*found, 20);
+      resumed = true;
+    };
+    auto pending = waiter();
+    EXPECT_FALSE(resumed);
+    *value = 20;
+    guard.reset();
+    co_await pending;
+    EXPECT_TRUE(resumed);
+    co_await map.for_each([](auto &entry) { ++entry.second; });
+    EXPECT_EQ(co_await map.size(), 1);
+    EXPECT_EQ(*(co_await map.find(1, guard)), 21);
+    guard.reset();
+    co_await map.clear();
+    EXPECT_EQ(co_await map.size(), 0);
+  };
+  run()();
+}
+
+TEST(SynchronizedMap, CoroParallelDrainsAfterException)
+{
+  CoroMap map({{0, 0}, {1, 0}, {2, 0}}, 4);
+  WorkerPool pool(1);
+  std::binary_semaphore start(0);
+  // Keep every chunk queued until the caller has started awaiting the jobs.
+  pool.submit_detached([&] { start.acquire(); });
+  std::atomic<int> visited = 0;
+  auto pending = map.for_each_parallel(
+      [&](auto &entry) {
+        if (entry.first == 0)
+          throw std::runtime_error("callback failure");
+        ++visited;
+      },
+      1, pool);
+  start.release();
+  EXPECT_THROW(pending(), std::runtime_error);
+  EXPECT_EQ(visited.load(), 2);
 }
 
 } // namespace hogd
