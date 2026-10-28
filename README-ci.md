@@ -66,15 +66,13 @@ CI calls `.github/actions/private-sources` after checking out hogd with
 `persist-credentials: false`, before initializing submodules or fetching Cargo
 dependencies. Callers pass secret `READ_ACCESS_PAT`, a fine-grained personal
 access token with Contents: read. App installation tokens always expire after
-one hour, which long or queued hog_sched runs outlive; the PAT is used instead
+one hour, which long or queued jobs can outlive; the PAT is used instead
 whenever it is set. If it is empty, the action falls back to minting a token
 from repository variable `COMPONENT_READER_APP_ID` and secret
 `COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
 The PAT, or the App installation, needs Contents: read on hogd, chuckd, thruput-protocol,
 thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
-thruput-integration-test-contracts, scp, and thruput-sdk-rs. The hackathon
-workflow additionally needs Contents: read on thruput-tools to build its
-RPC gateway; with the App fallback, other callers keep the base repository scope.
+thruput-integration-test-contracts, scp, and thruput-sdk-rs.
 
 The action maps legacy and canonical repository URLs to authenticated HTTPS.
 It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
@@ -102,29 +100,32 @@ abort_rs, bcs, serde_arrays, xdr_common, xdrs and xdr_rpc keys
 obsolete bcs_rs key and all transferred-repository keys, including the hogd
 self key, are no longer referenced and can be deleted from the repository's
 secrets. The composite's `ssh-private-key` input is optional: without it no
-agent is started, so a hog_sched job that needs none starts an empty
-`ssh-agent` for hog_sched to forward (see `hackathon.yml`).
+agent is started.
 
 Release publication and protocol-rs workflow dispatch keep their existing
 write credentials. The read-only component token never rewrites metrics_history.
-The hog_sched workflows pass the minted token as the `git_token` template value
-using `--key=git_token`. Every fetching worker job creates its own private
-`GIT_CONFIG_GLOBAL` file, bootstraps the hogd checkout via an HTTPS rewrite,
-and runs `.github/actions/private-sources/git-config.sh` after checkout for
-the same legacy and canonical URL map as the composite. Stored remote URLs
-remain token-free. Worker EXIT traps remove the config; the forwarded SSH agent
-serves metrics_history. Cargo uses the Git CLI on workers.
 
-For manual launches, set `GIT_TOKEN` to a private-source read token before running
-`scripts/schedules/launch.sh <xid> <schedule_toml>`. The launcher passes it as
-`git_token`. An unset/empty token or a missing template value (`<no value>`)
-skips token rewrites and uses the existing SSH authentication.
+## Cluster workflows
 
-Installation tokens expire after one hour (and are revoked when the runner job
-finishes). Long builds can delay subsequent Cargo/Go dependency fetches beyond
-that window, particularly sequential ccache warmup variants and Go service
-builds after C++ builds in the multi-node/combined metrics lanes. Those late
-fetches need qualification; workers do not renew tokens.
+Nothing in this repository runs on the self-hosted hog runners. Everything
+that did, the hog_sched workflows and their `scripts/schedules/*.toml`, lives
+in the private `thruputchain/benchmarks` repository: one `hogd-<name>.yml` and
+one `hogd/<name>.toml` per job, with hogd's triggers. The nightly ones run on
+that repository's schedule against hogd `main`. Combined Metrics and the
+ccache warmup are dispatched by `.github/workflows/benchmarks.yml` here on
+each push to `main`. The rest are dispatched there by hand for a hogd commit:
+
+```sh
+gh workflow run hogd-<name>.yml -R thruputchain/benchmarks \
+  -f sha=<hogd commit> -f branch=<hogd branch containing it>
+```
+
+The suites, build and publish scripts the schedules run stay here
+(`scripts/ci/`, `scripts/commit_metrics.sh`, ...), so they change with the
+code they exercise. The schedules make the same URL rewrites as
+`.github/actions/private-sources/git-config.sh` with their own copy, so the
+credential handling never comes from the commit being run; benchmarks'
+`hogd/README.md` covers the setup and `hogd/launch.sh` for manual launches.
 
 ## Runner provisioning
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
@@ -150,23 +151,27 @@ to the appropriate values for that machine.
 
 ## Hackathon workload: one validator
 
-The manual **Hackathon workload (single validator)** workflow runs the existing
+The manual **Hackathon workload (single validator)** workflow
+(`hogd-hackathon.yml` in `thruputchain/benchmarks`) runs the existing
 single-validator topology on hog4–hog11. It adds the public JSON-RPC gateway on
 hog4 and a concurrent replay client on hog7. The schedule fetches a pinned
 `thruput-tools` revision on hog4 and compiles `hog-gateway` in Release mode,
 with heap profiling enabled, before building hogd. Its Rust toolchain and Cargo
 lockfile come from that source checkout. No preinstalled gateway or gateway
 workflow inputs are required. The pins live beside the build commands in
-`scripts/schedules/hackathon.toml`.
+`hogd/hackathon.toml` in `thruputchain/benchmarks`, which needs Contents: read
+on thruput-tools as well to build the gateway.
 Use exclusively allocated benchmark hosts with matching control servers.
-Launch it from **Actions → Hackathon workload (single validator) → Run workflow**
-after the workflow has been added to the default branch.
+Launch it from benchmarks' **Actions → hogd Hackathon workload (single
+validator) → Run workflow**, giving the hogd commit and branch.
 The job prints reports in its logs and uploads a `hackathon-results-<attempt>`
 artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with
 results and signed corpora retained even after a replay fails. A copy also stays
 under `WORK_DIR` and, when set, the worker's `HOG_DUMP_DIR`; the exact paths
 appear in the job log.
-This job does not publish to `metrics_history` and does not load its deploy key.
+This job does not publish to `metrics_history`. Like every cluster job it still
+forwards that repository's deploy key: the hosts read hogd's public submodules
+over SSH.
 The gateway source and qualified hogd protocol revision are pinned together.
 The schedule fails before building if the protocol pin no longer matches hogd;
 update both pins after checking wire compatibility. The qualified pin uses
@@ -226,7 +231,8 @@ maximum capacity. Inspect service metrics and receipt lag alongside throughput.
 
 The benchmark implementation lives in `hogd/loadgen/hackathon`: the corpus builder,
 contract fixtures, Python harness and reports, tests, and standalone Go replay tool.
-The CI launcher and host schedule remain in `scripts/ci` and `scripts/schedules`.
+The CI launcher stays in `scripts/ci`; the host schedule is `hogd/hackathon.toml`
+in `thruputchain/benchmarks`.
 The standalone `hackathon-replay` tool lives in `hogd/loadgen/hackathon/replay`.
 Its `bootstrap` command supplies only the saved genesis configuration and ceremony
 over chuckd's existing loadgen interface, keeping the internal work stream open

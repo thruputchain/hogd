@@ -1,10 +1,12 @@
 name: Benchmarks
 
-# Starts the Combined Metrics run for each push to main. The run itself happens
-# in the private thruputchain/benchmarks repository, on its benchmark cluster
-# (hogd-combined-metrics.yml with hogd/combined-metrics.toml there); this job
-# only asks for it, on a GitHub-hosted runner. It replaces combined_metrics.yml,
-# which ran the schedule from this repository on a self-hosted runner.
+# Starts the cluster runs that follow each push to main: Combined Metrics and
+# the ccache warmup. They run in the private thruputchain/benchmarks repository,
+# on its benchmark cluster (hogd-combined-metrics.yml and hogd-ccache-warmup.yml
+# there); this job only asks for them, on a GitHub-hosted runner. Everything
+# that used to run on the self-hosted runners from this repository lives
+# there now, the nightly ones on its own schedule; see hogd/README.md in that
+# repository.
 #
 # It dispatches as a GitHub App whose only permission is Actions: read and
 # write, installed only on thruputchain/benchmarks. Its client ID and key
@@ -12,9 +14,8 @@ name: Benchmarks
 # environment, whose deployment branches must be limited to main, so only
 # workflows already merged to main can use them; a workflow on any other
 # branch or a fork PR never sees them. The App's runs show as <app>[bot]: the
-# benchmarks repository accepts them only for metrics of hogd main commits.
-# To measure another branch, dispatch hogd-combined-metrics.yml there by hand;
-# see hogd/README.md in that repository.
+# benchmarks repository accepts them only for hogd main commits. To run
+# another branch, dispatch the workflow there by hand.
 
 on:
   push:
@@ -25,7 +26,7 @@ permissions:
 
 jobs:
   dispatch:
-    name: Dispatch Combined Metrics
+    name: Dispatch cluster runs
     # Forks have no App key and no business starting runs.
     if: github.repository == 'thruputchain/hogd'
     environment: benchmarks
@@ -42,14 +43,24 @@ jobs:
           repositories: benchmarks
           permission-actions: write
 
-      - name: Dispatch hogd-combined-metrics.yml
+      - name: Dispatch hogd-combined-metrics.yml and hogd-ccache-warmup.yml
         env:
           GH_TOKEN: ${{ steps.app.outputs.token }}
           SHA: ${{ github.sha }}
         run: |
           # The REST dispatch endpoint needs only Actions: write. `gh workflow
           # run` would first look up the default branch, which needs Contents.
-          gh api --method POST \
-            repos/thruputchain/benchmarks/actions/workflows/hogd-combined-metrics.yml/dispatches \
-            -f ref=main -f "inputs[sha]=$SHA"
-          echo "Dispatched Combined Metrics for $SHA (thruputchain/benchmarks)" >> "$GITHUB_STEP_SUMMARY"
+          # Try both before failing, so one missing workflow doesn't cost the
+          # other its run.
+          status=0
+          for workflow in hogd-combined-metrics.yml hogd-ccache-warmup.yml; do
+            if gh api --method POST \
+              "repos/thruputchain/benchmarks/actions/workflows/$workflow/dispatches" \
+              -f ref=main -f "inputs[sha]=$SHA"; then
+              echo "Dispatched $workflow for $SHA (thruputchain/benchmarks)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Could not dispatch $workflow"
+              status=1
+            fi
+          done
+          exit "$status"

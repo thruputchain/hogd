@@ -87,8 +87,8 @@ python3 -m unittest discover -s scripts -p test_publish_test_ffi.py
 
 ## SDK migration and old mirror
 
-The existing `sync_release_mirror.yml` remains independent of S3 publication,
-so the current SDK can continue downloading from `groundhog.dev`. After public
-S3 delivery and the SDK download change are verified, disable the old mirror
-workflow while retaining its existing files for older SDK versions. Keep
-`release_test_ffi.yml`: it remains the FFI build and GitHub release producer.
+The SDK downloads test_ffi from public S3. The old `sync_release_mirror.yml`,
+which copied release assets to `groundhog.dev` from a self-hosted runner, is
+removed; the files it already mirrored stay there for older SDK versions.
+`release_test_ffi.yml` remains the FFI build and GitHub release producer, with
+every platform on Namespace runners.
