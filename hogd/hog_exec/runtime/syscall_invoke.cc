@@ -266,6 +266,13 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
+  // Refuse here, while the child can still fault, rather than at the merge,
+  // which cannot fail (#4688).
+  if (!syscall_handler.check_parent_can_take_auth_tokens(
+          returned_auth_tokens->ids().size())) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   ReturnBuffer buffer;
   buffer.resize_uninitialized(input_buffer.size());
   if (!input_buffer.empty()) {
