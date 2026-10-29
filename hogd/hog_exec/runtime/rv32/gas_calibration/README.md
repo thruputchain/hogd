@@ -162,8 +162,9 @@ this is a coarse regression alarm. Ratios are host-class specific. Regenerate
 references only after reviewing the change and deciding whether prices need to
 follow it.
 
-The RV32 Gas Calibration workflow and `scripts/schedules/rv32_gas_calibration.toml`
-run the checks on a selected bench host. `mode=reference` skips comparison with
+The RV32 Gas Calibration workflow and schedule (`hogd-rv32-gas-calibration.yml`
+and `hogd/rv32-gas-calibration.toml` in `thruputchain/benchmarks`) run the
+checks on a selected bench host. `mode=reference` skips comparison with
 committed references; workload execution, coverage, and bound checks still
 apply. JSON is stored in `metrics_history` under `metrics/rv32-gas-calibration/`;
 repeated runs of one commit replace that commit's sample.
