@@ -20,12 +20,65 @@ which remains the reference.
 | `src/Hogd/Crypto*` | The `hogd/crypto` layer the executor uses (SHA-256, SipHash, Ed25519, ML-DSA-65) |
 | `cbits/` | mldsa-native (vendored from `external/mldsa-native`) and its two hogd builds |
 | `test/` | hspec test suite |
+| `e2e/` | Runs hogd's `hog-devnode` integration tests with `hog-exec-hs` as the executor |
 
 Module names follow the C++ file they port:
 `hogd/hog_exec/runtime/rv32/machine.cc` -> `Hogd.Exec.Runtime.Rv32.Machine`.
 Code that the C++ executor takes from elsewhere in hogd (`hogd/base`,
 `hogd/crypto`, `hogd/storage_cost`, ...) lives under `Hogd.Base`,
 `Hogd.Crypto`, `Hogd.StorageCost`, and so on.
+
+## Running
+
+```sh
+hog-exec-hs --coordinator-addr <host:port> --bind-ip <ip> [--mempool-port <port>] \
+  [--metrics-port <port>] [--db-executor-addr <host:port> \
+  --event-executor-addr <host:port> --view-gateway-port <port>]
+```
+
+The flags, startup order and log lines (`PORT hog_exec.mempool=...`) are
+those of `hog-exec`: bind, register with the coordinator (`SchedExec`), connect
+to the database shard and event server named in the reply, then serve
+`ExecutorSched`. With the three view-gateway flags it also serves
+`ViewGateway`. `GET /metrics` and `GET /health` are served on the metrics port.
+`HOGD_LOG_FORMAT=json` switches logs to JSON lines.
+
+## Executor structure
+
+| C++ | Haskell |
+|---|---|
+| `interface/executor*.{h,cc}`, `rpc_from_coord.*` | `Hogd.Exec.Interface.Executor` |
+| `interface/rpc_from_view_gateway.*` | `Hogd.Exec.Interface.ViewGateway` |
+| `runtime/syscall_handler.*` | `Hogd.Exec.Runtime.SyscallHandler` |
+| `runtime/invocation_frame.*` | `Hogd.Exec.Runtime.InvocationFrame` |
+| `runtime/syscall_entry*.h`, `syscall_arg_params.h`, `alias_guard.h` | `Hogd.Exec.Runtime.SyscallEntry` |
+| `runtime/syscall_*.cc` | `Hogd.Exec.Runtime.Syscalls` |
+| `runtime/native_runtime.*`, `multiplexed_context.*` | `Hogd.Exec.Runtime.NativeRuntime` |
+| `runtime/rv32/rv32_contract.cc` (`Rv32Context`, `Rv32Runtime`) | `Hogd.Exec.Runtime.Rv32Runtime` |
+| `runtime/rv32/*` (VM) | `Hogd.Exec.Runtime.Rv32.*` |
+| `runtime/item/*` | `Hogd.Exec.Runtime.Item.*` |
+| `components/execution_mode.*` | `Hogd.Exec.Components.ExecutionMode` |
+| `precompiles/*` | `Hogd.Exec.Precompiles.*` |
+
+Differences in mechanism, not behavior:
+
+* C++ coroutines and the x23 thread pool become GHC threads: every RPC call
+  runs on its own thread, and a database read simply blocks that thread.
+  `CoroLock`s become `MVar`s; `PerThreadARC` becomes an `IORef` count.
+* The C++ mutates item views in place through pointers; here views are
+  values that the frame stack stores back after each operation.
+* `SystemStatus<T>` / `SyscallStatus<T>` are nested `Either`s over the
+  generated error enums.
+* The RV32 VM is the canonical per-instruction interpreter. Its observable
+  results (trap kind, gas at every ecall and exit) equal the production
+  threaded engine's; see `Hogd.Exec.Runtime.Rv32.Machine`.
+* Iteration orders that are unspecified in the C++ (hash-map order of deltas
+  in a push, of auth-key changes) are `Map` order here. hog_db treats the
+  order as irrelevant (the C++ debug build shuffles it).
+
+Not ported: the syscall tracing (`InvocationFrameTrace`) and transaction
+statistics, which only the test FFI library enables; the debug-only RV32
+stack-usage diagnostic; benchmarks.
 
 ## Generated XDR representation
 
