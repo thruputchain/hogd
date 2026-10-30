@@ -20,4 +20,6 @@ fi
 cmake --build "$BUILD_DIR" --target hog-devnode hog_devnode_test
 (cd "$HERE/.." && cabal build -v0 exe:hog-exec-hs)
 EXE=$(cd "$HERE/.." && cabal list-bin hog-exec-hs)
-HOGD_DEVNODE_EXTERNAL_EXECUTOR="$EXE" "$BUILD_DIR/hogd/devnode/hog_devnode_test" "$@"
+HOGD_DEVNODE_EXTERNAL_EXECUTOR="$EXE" \
+  HOGD_DEVNODE_EXTERNAL_EXECUTOR_LOG="${HOGD_DEVNODE_EXTERNAL_EXECUTOR_LOG:-/dev/null}" \
+  "$BUILD_DIR/hogd/devnode/hog_devnode_test" "$@"

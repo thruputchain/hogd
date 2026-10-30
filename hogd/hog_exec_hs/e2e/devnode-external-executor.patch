@@ -1,26 +1,104 @@
 diff --git a/hogd/devnode/hog_devnode_node.cc b/hogd/devnode/hog_devnode_node.cc
-index 3b5dcba..993e7ce 100644
+index 3b5dcba..3bdad41 100644
 --- a/hogd/devnode/hog_devnode_node.cc
 +++ b/hogd/devnode/hog_devnode_node.cc
-@@ -1229,7 +1229,28 @@ HogDevnodeNode::register_executor_with_mempool()
+@@ -63,7 +63,13 @@
+ #include "hogd/hog_indexer/rpc_from_block_explorer.h"
+ #include "hogd/hog_indexer/status.h"
+ #include "hogd/hog_mempool/registration.h"
++#include "hogd/hog_mempool/registration.h"
+ #include "hogd/hog_mempool/rpc_from_coord.h"
++#include <csignal>
++#include <fcntl.h>
++#include <sys/wait.h>
++#include <thread>
++#include <unistd.h>
+ #include "hogd/hog_mempool/scheduler.h"
+ #include "hogd/hog_mempool/shared.h"
+ #include "hogd/ramdb/db.h"
+@@ -83,6 +89,29 @@
+ 
+ namespace hogd {
+ 
++namespace {
++
++// The external executor started by the test hook, if any.
++pid_t &
++external_executor_pid()
++{
++  static pid_t pid = 0;
++  return pid;
++}
++
++void
++stop_external_executor()
++{
++  pid_t &pid = external_executor_pid();
++  if (pid > 0) {
++    kill(pid, SIGTERM);
++    waitpid(pid, nullptr, 0);
++    pid = 0;
++  }
++}
++
++} // namespace
++
+ namespace {
+ constexpr char kIndexerDbSubdir[] = "indexer-db";
+ constexpr char kDataDirMetadataFile[] = "hog-devnode-data.json";
+@@ -688,6 +717,7 @@ HogDevnodeNode::~HogDevnodeNode()
+     // servers do not yet have a coordinated clean-shutdown API, but executor
+     // shutdown is required so the [Executor] destructor does not block.
+     executor_.shut_down();
++    stop_external_executor();
+ 
+     view_gateway_server_->impl()->shut_down();
+     view_gateway_server_.reset();
+@@ -738,6 +768,7 @@ HogDevnodeNode::prepare_for_failed_construction() noexcept
+       scheduler->shut_down()();
+     }
+     executor_.shut_down();
++    stop_external_executor();
+     if (view_gateway_server_ != nullptr) {
+       view_gateway_server_->impl()->shut_down();
+     }
+@@ -1229,7 +1260,46 @@ HogDevnodeNode::register_executor_with_mempool()
  {
    const sockaddr_storage coordinator_sockaddr =
        host_port_to_sockaddr(bind_host_, sched_exec_server_.port());
 -  executor_.start(bind_host_, /*self_port=*/0, coordinator_sockaddr);
 +  // Test hook: HOGD_DEVNODE_EXTERNAL_EXECUTOR names an executor binary to run
 +  // in place of the in-process one (e.g. hog-exec-hs). It is started with
-+  // --coordinator-addr/--bind-ip and must register before init continues.
++  // --coordinator-addr/--bind-ip and must register before init continues; its
++  // output goes to HOGD_DEVNODE_EXTERNAL_EXECUTOR_LOG (default /dev/null), and
++  // it is killed when the node is torn down.
 +  if (const char *external = std::getenv("HOGD_DEVNODE_EXTERNAL_EXECUTOR");
 +      external != nullptr && *external != '\0') {
 +    const std::string coord = format_advertised_address(
 +        bind_host_, sched_exec_server_.port());
++    const char *log_path = std::getenv("HOGD_DEVNODE_EXTERNAL_EXECUTOR_LOG");
++    if (log_path == nullptr || *log_path == '\0') {
++      log_path = "/dev/null";
++    }
 +    const pid_t pid = fork();
 +    CHECK(pid >= 0);
 +    if (pid == 0) {
++      // The node's threads block the signals it handles; give the executor
++      // a clean mask so SIGTERM stops it.
++      sigset_t none;
++      sigemptyset(&none);
++      sigprocmask(SIG_SETMASK, &none, nullptr);
++      const int fd = open(log_path, O_WRONLY | O_CREAT | O_APPEND, 0644);
++      if (fd >= 0) {
++        dup2(fd, STDOUT_FILENO);
++        dup2(fd, STDERR_FILENO);
++        close(fd);
++      }
 +      execl(external, external, "--coordinator-addr", coord.c_str(),
 +            "--bind-ip", bind_host_.c_str(), static_cast<char *>(nullptr));
 +      _exit(127);
 +    }
++    external_executor_pid() = pid;
 +    info("devnode: started external executor {} (pid {})", external, pid);
 +    while (Registration::registration().executors_registered(nullptr) < 1) {
 +      std::this_thread::sleep_for(std::chrono::milliseconds(20));
