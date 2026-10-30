@@ -19,8 +19,7 @@ module Hogd.Exec.Runtime.SyscallMeta
 
 import Data.Int (Int32)
 import Hogd.Exec.Runtime.SyscallArgParams (SyscallArgKind (..), kNumInputs)
-import Hogd.Xdr.Syscall
-import Hogd.Xdr.SyscallError
+import Hogd.Xdr
 
 -- | One input or output of a syscall.
 data SyscallArg = SyscallArg

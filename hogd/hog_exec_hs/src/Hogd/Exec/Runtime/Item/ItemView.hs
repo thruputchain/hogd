@@ -33,11 +33,7 @@ import Hogd.Exec.Common.Status
 import Hogd.Exec.Components.ExecutionMode
 import Hogd.Exec.Log
 import Hogd.Exec.Runtime.Item.SnapshotStorageItem
-import Hogd.Xdr.AddressAuth (PublicKeyConfigOpt)
-import Hogd.Xdr.AuthClaim (Weight)
-import Hogd.Xdr.RetrocausalQueue
-import Hogd.Xdr.StorageItem
-import Hogd.Xdr.Transaction (Uniquifier)
+import Hogd.Xdr
 
 -- | The pending state of an item, one constructor per C++ item class.
 data ItemState

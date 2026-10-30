@@ -7,7 +7,7 @@ module Hogd.Exec.Runtime.PreparedContract
   , emptyPreparedContract
   ) where
 
-import Hogd.Exec.Runtime.Rv32.Contract (Rv32Contract)
+import Hogd.Exec.Runtime.Rv32Runtime (Rv32Contract)
 
 newtype PreparedContract = PreparedContract {pcRv32 :: Maybe Rv32Contract}
 

@@ -34,8 +34,7 @@ import Hogd.Exec.Runtime.SyscallEntry
 import Hogd.Exec.Runtime.SyscallHandler
 import Hogd.Exec.Runtime.Types
 import Hogd.Exec.Util (showByteArray)
-import Hogd.Xdr.Contract
-import Hogd.Xdr.Types (ContractAddress)
+import Hogd.Xdr
 
 -- | Routes native contract syscalls through 'wrapAfterParse', so they get
 -- read-only enforcement and gas accounting like guest contracts.

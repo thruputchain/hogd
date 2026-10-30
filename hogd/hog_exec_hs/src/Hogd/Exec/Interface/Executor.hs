@@ -40,13 +40,9 @@ import Hogd.Exec.Runtime.EventServerProxy
 import Hogd.Exec.Runtime.Item.DatabaseProxy
 import Hogd.Exec.Runtime.Item.StorageSnapshotCache
 import Hogd.Exec.Runtime.SyscallHandler
-import Hogd.Exec.Runtime.Types (RuntimeContext)
+import Hogd.Exec.Runtime.Types (RuntimeContext, SystemCallHandler)
 import Hogd.Version (protocolToken)
-import Hogd.Xdr.ExecResult
-import Hogd.Xdr.ExecSched
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.SchedExec
-import Hogd.Xdr.Transaction
+import Hogd.Xdr
 import X23.Rpc
 import X23.Xdr (xdrSize)
 

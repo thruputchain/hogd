@@ -60,7 +60,7 @@ import Control.Exception (assert)
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import Data.Word (Word64)
-import Hogd.Xdr.Types (GasAmount)
+import Hogd.Xdr
 
 -- | Every syscall pays this: the crossing itself. The ecall instruction
 -- already charges 1 gas, so this is the remainder.

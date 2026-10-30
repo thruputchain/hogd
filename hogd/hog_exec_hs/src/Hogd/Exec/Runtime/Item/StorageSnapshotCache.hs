@@ -28,18 +28,15 @@ module Hogd.Exec.Runtime.Item.StorageSnapshotCache
 
 import Data.IORef
 import qualified Data.Map.Strict as M
-import Hogd.Base.NetworkConfigParams (NetworkConfigParams, networkConfigParamsFromV0)
+import Hogd.Base.NetworkConfigParams (NetworkConfigParams, networkConfigParams)
 import Hogd.Exec.Common.Status
 import Hogd.Exec.Log
 import Hogd.Exec.Util (showByteArray)
 import Hogd.Exec.Runtime.Item.DatabaseProxy
 import Hogd.Exec.Runtime.Item.SnapshotStorageItem
 import Hogd.Exec.Runtime.PreparedContract
-import Hogd.Exec.Runtime.Rv32.Contract (prepareStoredRv32)
-import Hogd.Xdr.Contract
-import Hogd.Xdr.NetworkConfig (NetworkConfig (..))
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.Types
+import Hogd.Exec.Runtime.Rv32Runtime (prepareStoredRv32)
+import Hogd.Xdr
 
 -- | A cached contract: the code plus its eagerly built image.
 data ContractCacheEntry = ContractCacheEntry
@@ -161,7 +158,7 @@ loadDbTip :: StorageSnapshotCache -> IO (SystemStatus ())
 loadDbTip c = do
   bid <- sscBlockId c
   ctx <- readIORef (sscExecCtx c)
-  r <- getDbTip (sscDbProxy c) bid ctx.block_height
+  r <- dbGetDbTip (sscDbProxy c) bid ctx.block_height
   case r of
     Left e -> pure (Left e)
     Right tip -> do
@@ -180,7 +177,7 @@ setDbTip c tip = do
   ctx <- readIORef (sscExecCtx c)
   checkM (ctx.block_height == tip.value.proposal_header.block_height + 1) "db tip height mismatch"
   params <- case tip.network_config of
-    NetworkConfig_v0 v0 -> pure (networkConfigParamsFromV0 v0)
+    NetworkConfig_v0 v0 -> pure (networkConfigParams v0)
   writeIORef (sscTip c) (Just (Tip tip params))
 
 hasDbTip :: StorageSnapshotCache -> IO Bool

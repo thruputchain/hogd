@@ -15,7 +15,7 @@ module Hogd.Exec.Common.Int128
 import Data.Bits
 import qualified Data.ByteString as B
 import Data.Word
-import Hogd.Xdr.Types (X_int128_xdr (..))
+import Hogd.Xdr
 
 int128Min, int128Max, uint128Max :: Integer
 int128Min = negate (2 ^ (127 :: Int))

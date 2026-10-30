@@ -32,13 +32,7 @@ import Hogd.Exec.Runtime.Item.StorageSnapshotCache
 import Hogd.Exec.Runtime.Types (RuntimeContext)
 import Hogd.Exec.Runtime.View
 import Hogd.Version (protocolToken)
-import Hogd.Xdr.Consensus (ConsensusValue (..))
-import Hogd.Xdr.Header (ProposalHeader (..))
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.SchedDb (ShardCard (..))
-import Hogd.Xdr.Transaction
-import Hogd.Xdr.View
-import Hogd.Xdr.ViewGateway
+import Hogd.Xdr
 import X23.Rpc (parseHostPort)
 import X23.Xdr (xdrSize)
 
@@ -444,7 +438,7 @@ probeRefreshTip g =
   currentViewPin g >>= \case
     Nothing -> pure ()
     Just (bid, viewHeight) -> do
-      tipRes <- getDbTip (vgDb g) bid (viewHeight + 1)
+      tipRes <- dbGetDbTip (vgDb g) bid (viewHeight + 1)
       let newer = case tipRes of
             Left _ -> True
             Right t -> t.value.proposal_header.block_height > viewHeight

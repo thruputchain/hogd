@@ -26,12 +26,7 @@ import Hogd.Exec.Runtime.Item.DatabaseProxy
 import Hogd.Exec.Runtime.Item.ItemView
 import Hogd.Exec.Runtime.Item.StorageSnapshotCache
 import Hogd.Exec.Runtime.PreparedContract
-import Hogd.Xdr.AuthClaim (AuthClaim)
-import Hogd.Xdr.AuthToken (AuthToken)
-import Hogd.Xdr.Contract
-import Hogd.Xdr.Event (TxEmittedEvent)
-import Hogd.Xdr.Transaction
-import Hogd.Xdr.Types
+import Hogd.Xdr
 
 -- | The 8-byte entrypoint id, read big-endian.
 type MethodID = Word64

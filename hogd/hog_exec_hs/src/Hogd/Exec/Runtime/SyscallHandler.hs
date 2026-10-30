@@ -96,31 +96,17 @@ import Hogd.Exec.Common.Status
 import Hogd.Exec.Components.ExecutionMode
 import Hogd.Exec.Log
 import qualified Hogd.Exec.Metrics as Metrics
-import Hogd.Exec.Runtime.EventServerProxy
+import Hogd.Exec.Runtime.EventServerProxy (PerTransactionEventServerProxy, ptxEmitEvents, ptxReportTxFailure)
 import Hogd.Exec.Runtime.GasCostTable (kDBRPCCost)
 import Hogd.Exec.Runtime.InvocationFrame
-import Hogd.Exec.Runtime.Item.DatabaseProxy
+import Hogd.Exec.Runtime.Item.DatabaseProxy (PerTransactionDatabaseProxy, ptxAbortTransaction, ptxAddDelta, ptxCommitTransaction, ptxLastPushConflict, ptxTryPushCurrentSubtransaction)
 import Hogd.Exec.Runtime.Item.ItemView
 import Hogd.Exec.Runtime.Item.SnapshotStorageItem
 import Hogd.Exec.Runtime.Item.StorageSnapshotCache
 import Hogd.Exec.Runtime.PreparedContract
 import Hogd.Exec.Runtime.Types
 import Hogd.Exec.Util (showByteArray)
-import Hogd.Xdr.AddressAuth (PublicKeyConfigOpt)
-import Hogd.Xdr.AuthClaim (AuthClaim, Weight, kMaxSigners)
-import Hogd.Xdr.AuthToken
-import Hogd.Xdr.Consensus (ConsensusValue (..))
-import Hogd.Xdr.Contract
-import Hogd.Xdr.DbConflict
-import Hogd.Xdr.Event
-import Hogd.Xdr.ExecResult
-import Hogd.Xdr.Header (ProposalHeader (..))
-import Hogd.Xdr.InvokeFlag
-import Hogd.Xdr.RetrocausalQueue
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.StorageItem
-import Hogd.Xdr.Transaction
-import Hogd.Xdr.Types
+import Hogd.Xdr
 import X23.Xdr (xdrEncodeStrict)
 
 ------------------------------------------------------------------------------
@@ -224,7 +210,7 @@ newSystemCallHandler rc cache db ev ctor tx = do
   case ctor of
     ViewingModeCtor _ -> panic "CHECK failed: viewing mode handler built from a transaction"
     _ -> pure ()
-  baseHandler rc cache db ev ctor tx.auth_claim (sha256Xdr tx) (Just tx.invocation) tx.uniquifier tx.contracts_to_deploy
+  baseHandler rc cache db ev ctor tx.auth_claim (sha256Xdr tx) (Just tx.invocation) (Just tx.uniquifier) tx.contracts_to_deploy
 
 -- | The transaction-less handler (views and test harnesses): no root
 -- invocation, uniquifier or attachments.

@@ -10,7 +10,7 @@ module Hogd.Exec.Runtime.SyscallTypes
   ( WrappedGasAmount (..)
   ) where
 
-import Hogd.Xdr.Types (GasAmount)
+import Hogd.Xdr
 
 -- | @WrappedGasAmount@: a gas amount passed to or returned from an inner
 -- syscall body, wrapped so it cannot be confused with another integer.

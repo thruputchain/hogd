@@ -72,18 +72,13 @@ import Hogd.Crypto.MlDsa (mldsa65Verify)
 import Hogd.Exec.Common.Int128
 import Hogd.Exec.Common.Status
 import Hogd.Exec.Log
-import Hogd.Exec.Runtime.GasCostTable
+import Hogd.Exec.Runtime.GasCostTable (kNoSyscallCost, kSHA256HashBlockCost, kSHA256StreamCost, kStorageAccessCost)
+import qualified Hogd.Exec.Runtime.GasCostTable as Gas
 import Hogd.Exec.Runtime.InvocationFrame (ConsumeAuthTokenResult (..))
 import Hogd.Exec.Runtime.SyscallEntry
 import Hogd.Exec.Runtime.SyscallHandler
 import Hogd.Exec.Runtime.Types
-import Hogd.Xdr.AddressAuth (PublicKeyConfig (..))
-import Hogd.Xdr.AuthClaim
-import Hogd.Xdr.AuthToken
-import Hogd.Xdr.InvokeFlag (InvokeFlag (..), pattern TryInvoke, pattern ReadOnly)
-import Hogd.Xdr.Syscall
-import Hogd.Xdr.Transaction
-import Hogd.Xdr.Types
+import Hogd.Xdr
 import X23.Xdr (xdrDecodeWith)
 
 ------------------------------------------------------------------------------
@@ -121,7 +116,7 @@ sysErr e = (Left (systemToHostFn e), 0)
 
 sysSHA256 :: SystemCallHandler -> Word64 -> B.ByteString -> IO (InnerResult, SHA256Hash)
 sysSHA256 _ remaining input = do
-  let required = gasSha256Hash (fromIntegral (B.length input))
+  let required = Gas.sha256Hash (fromIntegral (B.length input))
   if remaining <= required
     then pure (hostErr HostFnErrorCode_OutOfGas remaining, zeroHash)
     else pure (ok required, sha256 input)
@@ -131,7 +126,7 @@ zeroHash = B.replicate 32 0
 
 sysSHA256Update :: SystemCallHandler -> Word64 -> Word32 -> B.ByteString -> Bool -> IO (InnerResult, ())
 sysSHA256Update h remaining idx input reset = do
-  let required = gasSha256Update (fromIntegral (B.length input))
+  let required = Gas.sha256Update (fromIntegral (B.length input))
   if remaining <= required
     then pure (hostErr HostFnErrorCode_OutOfGas remaining, ())
     else do
@@ -161,7 +156,7 @@ sysVerifySignature remaining scheme sig pk msg = pure (go, ())
       Ed25519
         | B.length pk /= 32 || B.length sig /= 64 -> err KSyscallErrorCodeInvalidSyscallInput 0
         | otherwise ->
-            let gas = gasVerifySignature (fromIntegral (B.length msg))
+            let gas = Gas.verifySignature (fromIntegral (B.length msg))
              in if remaining <= gas
                   then hostErr HostFnErrorCode_OutOfGas remaining
                   else
@@ -171,7 +166,7 @@ sysVerifySignature remaining scheme sig pk msg = pure (go, ())
       MlDsa65
         | B.length pk /= 1952 || B.length sig /= 3309 -> err KSyscallErrorCodeInvalidSyscallInput 0
         | otherwise ->
-            let gas = gasVerifySignatureMlDsa65 (fromIntegral (B.length msg))
+            let gas = Gas.verifySignatureMlDsa65 (fromIntegral (B.length msg))
              in if remaining <= gas
                   then hostErr HostFnErrorCode_OutOfGas remaining
                   else
@@ -345,12 +340,12 @@ sysBytestringGet h key out = do
     Right (StorageRead (Right b) lg) -> do
       written <- copyToGuestBuffer out b
       -- The bytes copied, not the buffer offered.
-      let gas = gasBytestringGet (fromIntegral (min (osLen out) (B.length b))) + lg
+      let gas = Gas.bytestringGet (fromIntegral (min (osLen out) (B.length b))) + lg
       pure (ok gas, written)
 
 sysBytestringSet :: SystemCallHandler -> Word64 -> StorageKeyContractData -> B.ByteString -> IO (InnerResult, ())
 sysBytestringSet h remaining key bytes = do
-  let required = gasBytestringSet (fromIntegral (B.length bytes))
+  let required = Gas.bytestringSet (fromIntegral (B.length bytes))
   if remaining <= required
     then pure (hostErr HostFnErrorCode_OutOfGas remaining, ())
     else do
@@ -493,7 +488,7 @@ authClaimFfiBytes = \case
 sysGetAuthClaim :: SystemCallHandler -> IO (InnerResult, B.ByteString)
 sysGetAuthClaim h = pure (ok 0, authClaimFfiBytes (getAuthClaim h))
 
-sysMintAuthToken :: SystemCallHandler -> Word64 -> B.ByteString -> IO (InnerResult, Word32)
+sysMintAuthToken :: SystemCallHandler -> BlockHeight -> B.ByteString -> IO (InnerResult, Word32)
 sysMintAuthToken h expiry serialized = do
   me <- getCurrentAddress h
   height <- getBlockHeight h
@@ -521,7 +516,7 @@ sysConsumeAuthToken h tid out = do
 ------------------------------------------------------------------------------
 -- Block data
 
-sysGetBlockHeight :: SystemCallHandler -> IO (InnerResult, Word64)
+sysGetBlockHeight :: SystemCallHandler -> IO (InnerResult, BlockHeight)
 sysGetBlockHeight h = (\x -> (ok 0, x)) <$> getBlockHeight h
 
 sysGetNetworkHash :: SystemCallHandler -> IO (InnerResult, NetworkHash)
@@ -633,11 +628,11 @@ syscallTable =
         (`out1` id) <$> sysSHA256Finalize h i
     , entry KWriteAddressRequiredWeight (rw KWriteAddressRequiredWeight) pWord32 $ \h _ w ->
         (\(r, ()) -> (r, [])) <$> sysWriteAddressRequiredWeight h w
-    , entry KGetBlockHeight (roMeta KGetBlockHeight) (pRefOut 8) $ \h _ _ -> (`out1` le64) <$> sysGetBlockHeight h
+    , entry KGetBlockHeight (roMeta KGetBlockHeight) (pRefOut 8) $ \h _ _ -> (`out1` (le64 . fromIntegral)) <$> sysGetBlockHeight h
     , entry KRetrocausalQueuePeekLen (rw KRetrocausalQueuePeekLen) ((,) <$> storageKey <*> pRefOut 4) $ \h _ (k, _) ->
         (`out1` le32) <$> sysRetrocausalQueuePeekLen h k
     , entry KMintAuthToken (rw KMintAuthToken) ((,,) <$> pRefIn 8 <*> pSpanIn <*> pRefOut 4) $ \h _ (e, s, _) ->
-        (`out1` le32) <$> sysMintAuthToken h (fromLE64 e) s
+        (`out1` le32) <$> sysMintAuthToken h (fromIntegral (fromLE64 e)) s
     , entry
         KConsumeAuthToken
         (rw KConsumeAuthToken)

@@ -47,9 +47,7 @@ import Data.Sequence (Seq, (|>))
 import qualified Data.Sequence as Seq
 import Data.Word
 import Hogd.Exec.Log (checkM)
-import Hogd.Xdr.RetrocausalQueue (QueueEntry, kMaxConcurrentRcqReadsPerTx)
-import Hogd.Xdr.Transaction (NondeterministicProposalData (..))
-import Hogd.Xdr.Types (AddressAndKey)
+import Hogd.Xdr
 
 data ExecutionMode = Proposing | Validating | Viewing
   deriving (Eq, Show)

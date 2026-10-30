@@ -54,15 +54,7 @@ import Hogd.Exec.Log
 import Hogd.Exec.Runtime.Item.DatabaseProxy
 import Hogd.Exec.Runtime.Item.ItemView
 import Hogd.Exec.Runtime.Types
-import Hogd.Xdr.AuthToken
-import Hogd.Xdr.Contract
-import Hogd.Xdr.DbConflict (DbConflictResult (..))
-import Hogd.Xdr.Event (TxEmittedEvent (..))
-import Hogd.Xdr.InvokeFlag
-import Hogd.Xdr.RetrocausalQueue (QueueEntry)
-import Hogd.Xdr.StorageItem
-import Hogd.Xdr.Transaction
-import Hogd.Xdr.Types
+import Hogd.Xdr
 
 newFrame
   :: ContractAddress -> Calldata -> InvokeFlagSet -> Int -> [AuthToken] -> Word32 -> NetworkConfigParams -> InvocationFrame

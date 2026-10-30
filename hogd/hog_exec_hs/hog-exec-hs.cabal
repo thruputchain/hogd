@@ -55,6 +55,7 @@ library
     Hogd.Exec.Interface.ViewGateway
     Hogd.Exec.Log
     Hogd.Exec.Metrics
+    Hogd.Exec.Precompiles.Context
     Hogd.Exec.Runtime.EventServerProxy
     Hogd.Exec.Runtime.GasCostTable
     Hogd.Exec.Runtime.InvocationFrame
@@ -64,6 +65,7 @@ library
     Hogd.Exec.Runtime.Item.StorageSnapshotCache
     Hogd.Exec.Runtime.NativeRuntime
     Hogd.Exec.Runtime.PreparedContract
+    Hogd.Exec.Runtime.Rv32Runtime
     Hogd.Exec.Runtime.SyscallArgParams
     Hogd.Exec.Runtime.SyscallEntry
     Hogd.Exec.Runtime.SyscallHandler
@@ -76,6 +78,7 @@ library
     Hogd.Genesis.Configuration
     Hogd.Genesis.Constants
     Hogd.StorageCost.Model
+    Hogd.Version
     Hogd.Xdr
     Hogd.Xdr.AddressAuth
     Hogd.Xdr.AuthCard

@@ -22,10 +22,7 @@ import Data.IORef
 import Data.Word (Word16)
 import Hogd.Exec.Common.Status
 import Hogd.Exec.Log
-import Hogd.Xdr.EventRpc
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.SchedEvent (EventCard (..))
-import Hogd.Xdr.Transaction (ProposedTransaction, TransactionHash)
+import Hogd.Xdr
 import X23.Rpc
 
 newtype EventServerProxy = EventServerProxy RpcClient

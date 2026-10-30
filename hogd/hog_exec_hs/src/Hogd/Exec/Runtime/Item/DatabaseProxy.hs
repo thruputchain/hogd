@@ -17,7 +17,7 @@ module Hogd.Exec.Runtime.Item.DatabaseProxy
   , commitTransaction
   , abortTransaction
   , popSubtransactions
-  , getDbTip
+  , dbGetDbTip
   , openViewingSnapshot
   , closeViewingSnapshot
     -- * Per transaction
@@ -47,15 +47,7 @@ import Data.Word
 import GHC.Conc (numCapabilities)
 import Hogd.Exec.Common.Status
 import Hogd.Exec.Log
-import Hogd.Xdr.Contract (Contract)
-import Hogd.Xdr.DbConflict
-import Hogd.Xdr.ExecutorToDbRpc
-import Hogd.Xdr.RetrocausalQueue
-import Hogd.Xdr.RpcMsg (xdrMax_X_rpc_msg)
-import Hogd.Xdr.RpcTypes
-import Hogd.Xdr.SchedDb (ShardCard (..))
-import Hogd.Xdr.StorageItem
-import Hogd.Xdr.Types
+import Hogd.Xdr
 import X23.Rpc
 
 data DatabaseIdentifier
@@ -204,8 +196,8 @@ popSubtransactions dp bid tx n = do
 
 -- | The tip the block at @height@ builds on.  A tip whose id equals the
 -- block being loaded is refused.
-getDbTip :: DatabaseProxy -> BlockID -> BlockHeight -> IO (SystemStatus DbTip)
-getDbTip dp bid height = do
+dbGetDbTip :: DatabaseProxy -> BlockID -> BlockHeight -> IO (SystemStatus DbTip)
+dbGetDbTip dp bid height = do
   r <- guarded "get_db_tip" (\c -> call_get_db_tip c bid height) dp
   bindSys r $ \reply -> do
     t <- case reply of

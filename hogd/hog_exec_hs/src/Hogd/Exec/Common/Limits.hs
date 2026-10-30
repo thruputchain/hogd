@@ -32,9 +32,7 @@ module Hogd.Exec.Common.Limits
 import Data.Word (Word32)
 import Hogd.Base.NetworkConfigParams
 import Hogd.Base.Types (SizeT, kiB)
-import Hogd.Xdr.HogExecConstants (kMaxSavepointDepth)
-import Hogd.Xdr.NetworkConfig (NetworkConfig (..))
-import Hogd.Xdr.StorageItem (kBytestringCeilingLen)
+import Hogd.Xdr
 
 -- | Cap on the Transaction body, what TransactionHash commits to (#3844).
 -- Below @kMaxBytesSignedTransaction@ (2'000'000), as limits.h

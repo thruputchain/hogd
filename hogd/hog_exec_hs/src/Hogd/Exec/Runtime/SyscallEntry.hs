@@ -45,7 +45,7 @@ import Hogd.Exec.Log
 import Hogd.Exec.Runtime.GasCostTable (kGenericBadSyscallCost, kSyscallBaseCost)
 import Hogd.Exec.Runtime.SyscallHandler (isReadOnly)
 import Hogd.Exec.Runtime.Types
-import Hogd.Xdr.Syscall (SyscallNo)
+import Hogd.Xdr
 
 -- | A contract's linear memory.
 data GuestMemory = GuestMemory
