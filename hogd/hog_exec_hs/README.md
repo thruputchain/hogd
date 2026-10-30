@@ -18,7 +18,7 @@ which remains the reference.
 | `src/Hogd/Exec/Runtime/SyscallMeta.hs` | Generated syscall table (`gen_syscalls.py --syscall_meta_hs`; do not edit) |
 | `app/` | The `hog-exec-hs` executable (`hog_exec.cc`) |
 | `src/Hogd/Crypto*` | The `hogd/crypto` layer the executor uses (SHA-256, SipHash, Ed25519, ML-DSA-65) |
-| `cbits/` | mldsa-native (vendored from `external/mldsa-native`) and its two hogd builds |
+| `cbits/` | The two hogd builds of mldsa-native; `cbits/mldsa-native` links to the `external/mldsa-native` submodule |
 | `src/Hogd/BuiltContracts/*` | The contract traits the precompiles implement (what `built_contracts/generate_header.py` generates in C++), written out from the interface crates' sources |
 | `test/` | hspec test suite |
 | `e2e/` | Runs hogd's `hog-devnode` integration tests with `hog-exec-hs` as the executor |

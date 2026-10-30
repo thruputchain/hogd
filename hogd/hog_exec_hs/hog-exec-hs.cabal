@@ -5,7 +5,6 @@ synopsis:      Haskell implementation of the hogd transaction executor (hog_exec
 license:       NONE
 build-type:    Simple
 extra-source-files:
-  cbits/mldsa-native/LICENSE
   cbits/mldsa-native/*.c
   cbits/mldsa-native/*.h
   cbits/mldsa-native/src/*.c
@@ -37,6 +36,7 @@ library
   -- mldsa-native, built twice as hogd/crypto/CMakeLists.txt does: once to
   -- verify (Hogd.Crypto.MlDsa) and once to sign (Hogd.Crypto.MlDsaSigner).
   -- Each wrapper sets its MLD_CONFIG_* and includes mldsa_native.c.
+  -- cbits/mldsa-native links to the external/mldsa-native submodule.
   c-sources:
     cbits/hogd_mldsa65_verify.c
     cbits/hogd_mldsa65_signer.c
