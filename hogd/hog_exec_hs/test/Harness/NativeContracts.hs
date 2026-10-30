@@ -15,6 +15,7 @@ module Harness.NativeContracts
     forwarder
   , forwarderCalldata
   , invokeRecord
+  , invokeRecordGas
   , permitDriver
   , mintAuthToken
     -- * Simple callees
@@ -56,10 +57,14 @@ forwarderCalldata target method inner = target <> entrypointFromMethodId method 
 -- | Invoke @method@ on @target@ (unbounded gas, no flags) with the given
 -- auth-token ids and return the outcome record.
 invokeRecord :: NativeSyscallContext -> ContractAddress -> MethodID -> Calldata -> [Word32] -> IO B.ByteString
-invokeRecord ctx target method inner tokens = do
+invokeRecord ctx = invokeRecordGas ctx maxBound
+
+-- | 'invokeRecord' with a gas limit for the child.
+invokeRecordGas :: NativeSyscallContext -> Word64 -> ContractAddress -> MethodID -> Calldata -> [Word32] -> IO B.ByteString
+invokeRecordGas ctx gas target method inner tokens = do
   let h = nscHandler ctx
       tokenBytes = B.concat (map le32 tokens)
-  (r, outs) <- nscSyscall ctx KInvoke zeroInvokeOutputs $ \g -> sysInvoke h g target inner tokenBytes (method, maxBound, 0)
+  (r, outs) <- nscSyscall ctx KInvoke zeroInvokeOutputs $ \g -> sysInvoke h g target inner tokenBytes (method, gas, 0)
   case r of
     Left (HostFnErrorCode e) -> pure (B.pack [0xEE, fromIntegral e])
     Right c@(SyscallErrorCode code)

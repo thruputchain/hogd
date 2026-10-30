@@ -163,12 +163,14 @@ test-suite hog-exec-hs-test
   other-modules:
     ContractTraitSpec
     CryptoSpec
+    DefaultWalletSpec
     Ed25519EdgeCases
     Harness.Env
     Harness.FakeDb
     Harness.FakeEventServer
     Harness.NativeContracts
     MiniJson
+    NativeTokenSpec
     TablesSpec
     XdrSpec
   build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck, crypton, memory, directory, base16-bytestring

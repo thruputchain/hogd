@@ -252,7 +252,7 @@ makeTip :: BlockID -> BlockHeight -> DbTip
 makeTip bid height =
   DbTip
     { id = bid
-    , storage_long_hash = B.replicate 32 0
+    , storage_long_hash = B.replicate 2048 0
     , value = consensusValueAt height
     , default_wallet = nativeDefaultWalletHash
     , network_config = statedDefaults
