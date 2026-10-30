@@ -1,0 +1,34 @@
+diff --git a/hogd/devnode/hog_devnode_node.cc b/hogd/devnode/hog_devnode_node.cc
+index 3b5dcba..993e7ce 100644
+--- a/hogd/devnode/hog_devnode_node.cc
++++ b/hogd/devnode/hog_devnode_node.cc
+@@ -1229,7 +1229,28 @@ HogDevnodeNode::register_executor_with_mempool()
+ {
+   const sockaddr_storage coordinator_sockaddr =
+       host_port_to_sockaddr(bind_host_, sched_exec_server_.port());
+-  executor_.start(bind_host_, /*self_port=*/0, coordinator_sockaddr);
++  // Test hook: HOGD_DEVNODE_EXTERNAL_EXECUTOR names an executor binary to run
++  // in place of the in-process one (e.g. hog-exec-hs). It is started with
++  // --coordinator-addr/--bind-ip and must register before init continues.
++  if (const char *external = std::getenv("HOGD_DEVNODE_EXTERNAL_EXECUTOR");
++      external != nullptr && *external != '\0') {
++    const std::string coord = format_advertised_address(
++        bind_host_, sched_exec_server_.port());
++    const pid_t pid = fork();
++    CHECK(pid >= 0);
++    if (pid == 0) {
++      execl(external, external, "--coordinator-addr", coord.c_str(),
++            "--bind-ip", bind_host_.c_str(), static_cast<char *>(nullptr));
++      _exit(127);
++    }
++    info("devnode: started external executor {} (pid {})", external, pid);
++    while (Registration::registration().executors_registered(nullptr) < 1) {
++      std::this_thread::sleep_for(std::chrono::milliseconds(20));
++    }
++  }
++  else {
++    executor_.start(bind_host_, /*self_port=*/0, coordinator_sockaddr);
++  }
+   mempool_coord_server_->impl()->finish_runtime_init()();
+ }
+ 
