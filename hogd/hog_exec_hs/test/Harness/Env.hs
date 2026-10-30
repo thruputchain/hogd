@@ -23,9 +23,13 @@ module Harness.Env
   , withTestEnv
     -- * Blocks and transactions
   , advanceBlock
+  , discardBlock
+  , PendingState (..)
   , currentBlockId
   , newUniquifier
   , newHandler
+  , newHandlerWith
+  , newValidationHandler
   , TxRun (..)
   , runTx
   , runTxWith
@@ -120,6 +124,16 @@ advanceBlock env = do
   cache <- openCache (teDb env) (teDbProxy env)
   writeIORef (teCache env) cache
 
+-- | Abandon the open block (C++ discard_block): reopen one at the same
+-- height over the same snapshot, so the block can be replayed (e.g. in
+-- validation mode).  Returns what the abandoned block had committed.
+discardBlock :: TestEnv -> IO PendingState
+discardBlock env = do
+  st <- fdDiscardBlock (teDb env)
+  cache <- openCache (teDb env) (teDbProxy env)
+  writeIORef (teCache env) cache
+  pure st
+
 currentBlockId :: TestEnv -> IO BlockID
 currentBlockId = fdOpenBlockId . teDb
 
@@ -132,7 +146,15 @@ newUniquifier env = do
 -- | A proposal-mode handler for a transaction (C++
 -- make_new_system_call_handler), with its transaction id.
 newHandler :: TestEnv -> RuntimeContext -> Transaction -> IO (SystemCallHandler, TransactionID)
-newHandler env rc tx = do
+newHandler env rc = newHandlerWith env rc ProposalModeCtor
+
+-- | A validation-mode handler replaying the given proposal data (C++
+-- make_new_system_call_handler_validation).
+newValidationHandler :: TestEnv -> RuntimeContext -> NondeterministicProposalData -> Transaction -> IO (SystemCallHandler, TransactionID)
+newValidationHandler env rc d = newHandlerWith env rc (ValidationModeCtor d)
+
+newHandlerWith :: TestEnv -> RuntimeContext -> ExecutionModeCtor -> Transaction -> IO (SystemCallHandler, TransactionID)
+newHandlerWith env rc mode tx = do
   cache <- readIORef (teCache env)
   loaded <- hasDbTip cache
   if loaded
@@ -142,7 +164,7 @@ newHandler env rc tx = do
   txid <- atomicModifyIORef' (teNextTx env) (\n -> (n + 1, n))
   db <- newPerTransactionDatabaseProxy (teDbProxy env) bid txid
   ev <- newPerTransactionEventServerProxy (teEventProxy env) bid txid
-  h <- newSystemCallHandler rc cache db ev ProposalModeCtor tx
+  h <- newSystemCallHandler rc cache db ev mode tx
   pure (h, txid)
 
 -- | Everything a test usually checks about one transaction.

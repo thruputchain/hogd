@@ -191,6 +191,7 @@ test-suite hog-exec-hs-test
     Harness.NativeContracts
     MiniJson
     NativeTokenSpec
+    ProposeValidateSpec
     Rv32Fixture
     Rv32Model
     Rv32Spec

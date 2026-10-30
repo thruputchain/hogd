@@ -115,9 +115,9 @@ stack-usage diagnostic; benchmarks.
 
 `Hogd.Exec.Precompiles.Context.makeHogExecContext` multiplexes the native
 precompiles (native token, default wallet) with the RV32 runtime.  The RV32
-context is supplied through `makeHogExecContextWith (Just rv32Context)`;
-`makeHogExecContext` currently passes `Nothing`, so RV32 contracts have no
-runtime until that hook is wired.
+context is supplied through `makeHogExecContextWith`; `makeHogExecContext`
+passes `Just rv32Context` (tests can pass `Nothing` for a native-only
+context).
 
 ## Testing against an in-memory ledger
 
@@ -128,7 +128,23 @@ code and deployment, default wallet code) and opens block 1.  Seed state with
 `deployContract` / `writeItem` / `grantNativeTokens`, run transactions with
 `runTx` (root invoke, commit, event emission), `advanceBlock` to make commits
 visible, and inspect with `lookupItem` / `nativeBalance` / `lookupDeployment`.
-See the module headers for what the fake database does and does not model.
+`discardBlock` abandons the open block and reopens one over the same
+snapshot, so a block can be replayed; `newValidationHandler` builds a
+validation-mode handler for the replay.  See the module headers for what the
+fake database does and does not model (retrocausal queues are modelled:
+concurrent entries, past blocks, consume cursors).
+
+## Verification
+
+* `cabal test`: unit and harness tests (XDR, execution modes, syscall entry,
+  crypto, gas tables, the RV32 engine, contract traits, the native token and
+  default wallet, and the propose → validate round trips of
+  `runtime/propose_validate_roundtrip_test.cc`, including tampered proposal
+  data and retrocausal-queue replay).
+* `e2e/run-devnode-tests.sh`: hogd's `hog-devnode` integration suite with
+  `hog-exec-hs` as the executor (91/91 pass, the same as with the C++
+  executor); the committed genesis block's transaction, event and database
+  hashes are byte-identical between the two executors.
 
 ## Building
 

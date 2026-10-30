@@ -13,14 +13,21 @@
 --   the block's /pending/ state.
 -- * 'fdAdvanceBlock' folds the pending state into the snapshot and moves
 --   the tip, so commits become visible to the next block (as they do in
---   hog_db).
+--   hog_db); 'fdDiscardBlock' abandons the open block and reopens one at
+--   the same height over the same snapshot.
+-- * Retrocausal queues: a committed transaction's inserts become the
+--   block's concurrent entries (@get_concurrent_retrocausal_queue_entry@,
+--   in commit order); at block close the entries nobody consumed form the
+--   queue's next past block (sorted), the last consume delta's cursor
+--   becomes the queue metadata's consume state, and fully consumed past
+--   blocks are dropped.
 --
 -- Concurrency control is reduced to a range check: a push whose deltas
 -- would leave an nnint or native token balance outside @0..INT128_MAX@
 -- (over the pending state plus the transaction's earlier pushes) is refused
--- as a conflict.  Storage-cost accounting, retrocausal queues, auth-data
--- changes and replay-cache records are not modelled (their deltas are
--- accepted and dropped).
+-- as a conflict.  Storage-cost accounting, auth-data changes, replay-cache
+-- records and the db's check that consumed concurrent entries were really
+-- inserted are not modelled (their deltas are accepted and dropped).
 module Harness.FakeDb
   ( FakeDb
   , startFakeDb
@@ -37,6 +44,8 @@ module Harness.FakeDb
   , fdLookupDeployment
   , fdLookupContract
   , fdAdvanceBlock
+  , fdDiscardBlock
+  , PendingState (..)
   , fdCalls
     -- * Delta application (exposed for tests)
   , applyDelta
@@ -44,6 +53,7 @@ module Harness.FakeDb
 
 import Control.Concurrent.MVar
 import qualified Data.ByteString as B
+import Data.List (sort, (\\))
 import qualified Data.Map.Strict as M
 import Data.Word
 import Hogd.Base.NetworkConfigParams (statedDefaults)
@@ -61,8 +71,15 @@ data DbState = DbState
   -- ^ Nothing: deleted
   , dsPendingContracts :: M.Map SHA256Hash Contract
   , dsPendingDeployments :: M.Map ContractAddress DeployedContractHash
+  , dsQueueBlocks :: M.Map AddressAndKey (M.Map Word64 [QueueEntry])
+  -- ^ retrocausal queues' live past blocks, by block number
+  , dsPendingQueueInserts :: M.Map AddressAndKey [QueueEntry]
+  -- ^ entries committed transactions of the open block inserted, in order
+  , dsPendingQueueConsumes :: M.Map AddressAndKey [RetrocausalQueueConsumeDelta]
+  -- ^ committed consume deltas of the open block, newest first
   , dsTxs :: M.Map (BlockID, TransactionID) [[FlaggedStorageDelta]]
   -- ^ pushed subtransactions, newest first
+  , dsTipId :: BlockID
   , dsBlockId :: BlockID
   , dsHeight :: BlockHeight
   -- ^ the height of the open block (the tip's plus one)
@@ -81,7 +98,7 @@ fdPort = rpcServerPort . fdServer
 -- | Start serving, with block 1 (height 1) open over an empty ledger.
 startFakeDb :: IO FakeDb
 startFakeDb = do
-  st <- newMVar (DbState M.empty M.empty M.empty M.empty M.empty M.empty M.empty 1 1 [])
+  st <- newMVar (DbState M.empty M.empty M.empty M.empty M.empty M.empty M.empty M.empty M.empty M.empty 0 1 1 [])
   srv <- bindRpcServer "127.0.0.1" 0
   let db = FakeDb st srv
   startAccepting srv defaultMaxMessageSize [databaseToExecutorInterfaceV1_service (service db)]
@@ -137,18 +154,79 @@ fdLookupContract db h = M.lookup h . dsContracts <$> readMVar (fdState db)
 -- next one.
 fdAdvanceBlock :: FakeDb -> IO ()
 fdAdvanceBlock db = modifyMVar_ (fdState db) $ \s ->
+  let queueKeys = M.keys (M.union (() <$ dsPendingQueueInserts s) (() <$ dsPendingQueueConsumes s))
+      items0 = M.foldrWithKey (\k v m -> maybe (M.delete k m) (\i -> M.insert k i m) v) (dsItems s) (dsPendingItems s)
+      (items1, queues1) = foldl (closeQueue s) (items0, dsQueueBlocks s) queueKeys
+   in pure
+        (clearPending s)
+          { dsItems = items1
+          , dsQueueBlocks = queues1
+          , dsContracts = M.union (dsPendingContracts s) (dsContracts s)
+          , dsDeployments = M.union (dsPendingDeployments s) (dsDeployments s)
+          , dsTipId = dsBlockId s
+          , dsBlockId = dsBlockId s + 1
+          , dsHeight = dsHeight s + 1
+          }
+
+-- | What the open block's committed transactions did, for comparing two
+-- runs of a block.
+data PendingState = PendingState
+  { psItems :: M.Map AddressAndKey (Maybe WireStorageItem)
+  , psDeployments :: M.Map ContractAddress DeployedContractHash
+  , psQueueInserts :: M.Map AddressAndKey [QueueEntry]
+  , psQueueConsumes :: M.Map AddressAndKey [RetrocausalQueueConsumeDelta]
+  }
+  deriving (Eq, Show)
+
+-- | Abandon the open block without committing it (C++ discard_block) and
+-- open a new block at the same height over the unchanged snapshot.
+-- Returns what the abandoned block had committed.
+fdDiscardBlock :: FakeDb -> IO PendingState
+fdDiscardBlock db = modifyMVar (fdState db) $ \s ->
   pure
-    s
-      { dsItems = M.foldrWithKey (\k v m -> maybe (M.delete k m) (\i -> M.insert k i m) v) (dsItems s) (dsPendingItems s)
-      , dsContracts = M.union (dsPendingContracts s) (dsContracts s)
-      , dsDeployments = M.union (dsPendingDeployments s) (dsDeployments s)
-      , dsPendingItems = M.empty
-      , dsPendingContracts = M.empty
-      , dsPendingDeployments = M.empty
-      , dsTxs = M.empty
-      , dsBlockId = dsBlockId s + 1
-      , dsHeight = dsHeight s + 1
-      }
+    ( (clearPending s) {dsBlockId = dsBlockId s + 1}
+    , PendingState (dsPendingItems s) (dsPendingDeployments s) (dsPendingQueueInserts s) (dsPendingQueueConsumes s)
+    )
+
+clearPending :: DbState -> DbState
+clearPending s =
+  s
+    { dsPendingItems = M.empty
+    , dsPendingContracts = M.empty
+    , dsPendingDeployments = M.empty
+    , dsPendingQueueInserts = M.empty
+    , dsPendingQueueConsumes = M.empty
+    , dsTxs = M.empty
+    }
+
+-- | Close one retrocausal queue at the end of the open block.
+closeQueue
+  :: DbState
+  -> (M.Map AddressAndKey WireStorageItem, M.Map AddressAndKey (M.Map Word64 [QueueEntry]))
+  -> AddressAndKey
+  -> (M.Map AddressAndKey WireStorageItem, M.Map AddressAndKey (M.Map Word64 [QueueEntry]))
+closeQueue s (items, queues) ak =
+  let meta0 = case M.lookup ak items of
+        Just (WireStorageItem_metadata m) -> m
+        _ ->
+          RetrocausalQueueMetadata
+            { consume_state = RetrocausalQueuePastBlockConsumeDelta {max_fully_consumed_block_number = 0, partial_consumed_number = 0}
+            , max_live_block_num = 0
+            , live_entries = 0
+            }
+      consumes = M.findWithDefault [] ak (dsPendingQueueConsumes s)
+      cursor = case consumes of
+        c : _ -> c.past_block_consume
+        [] -> meta0.consume_state
+      inserted = M.findWithDefault [] ak (dsPendingQueueInserts s)
+      fresh = sort (inserted \\ concatMap (\c -> c.current_block_consumed) consumes)
+      live0 = M.filterWithKey (\n _ -> n > cursor.max_fully_consumed_block_number) (M.findWithDefault M.empty ak queues)
+      (live, maxLive)
+        | null fresh = (live0, meta0.max_live_block_num)
+        | otherwise = let n = meta0.max_live_block_num + 1 in (M.insert n fresh live0, n)
+      liveCount = fromIntegral (sum (map length (M.elems live))) - cursor.partial_consumed_number
+      meta = RetrocausalQueueMetadata {consume_state = cursor, max_live_block_num = maxLive, live_entries = liveCount}
+   in (M.insert ak (WireStorageItem_metadata meta) items, M.insert ak live queues)
 
 visible :: DbState -> AddressAndKey -> Maybe WireStorageItem
 visible s ak = case M.lookup ak (dsPendingItems s) of
@@ -215,8 +293,13 @@ service db =
          in case applyBatch (visible s) (concat (reverse stack)) of
               Left _ -> (s, KRPCStorageWriteFailed)
               Right (items, deps) ->
-                ( s
+                let rcq = [(fd.addrkey, q) | fd <- concat (reverse stack), StorageDelta_retrocausal_queue q <- [fd.delta]]
+                 in ( s
                     { dsPendingItems = M.union items (dsPendingItems s)
+                    , dsPendingQueueInserts =
+                        foldl (\m (ak, q) -> M.insertWith (flip (++)) ak q.insert.added_entries m) (dsPendingQueueInserts s) rcq
+                    , dsPendingQueueConsumes =
+                        foldl (\m (ak, q) -> maybe m (\c -> M.insertWith (++) ak [c] m) q.consume) (dsPendingQueueConsumes s) rcq
                     , dsPendingDeployments = M.union deps (dsPendingDeployments s)
                     , dsPendingContracts = M.union (M.fromList [(sha256Xdr c, c) | c <- contracts]) (dsPendingContracts s)
                     , dsTxs = M.delete (bid, tx) (dsTxs s)
@@ -229,17 +312,25 @@ service db =
          in (s {dsTxs = M.insert (bid, tx) (drop (fromIntegral n) stack) (dsTxs s)}, KRPCNone)
     , get_snapshot_item = \_ ak -> withState "get_snapshot_item" $ \s ->
         (s, maybe (ExpectedStorageItem_default KRPCNotFound) ExpectedStorageItem_item (M.lookup ak (dsItems s)))
-    , get_next_retrocausal_queue_block = \_ _ _ -> withState "get_next_retrocausal_queue_block" $ \s ->
-        (s, ExpectedRetrocausalQueueBlock_default KRPCNotFound)
-    , get_concurrent_retrocausal_queue_entry = \_ _ _ -> withState "get_concurrent_retrocausal_queue_entry" $ \s ->
-        (s, ExpectedQueueEntry_default KRPCNotFound)
+    , get_next_retrocausal_queue_block = \_ ak start -> withState "get_next_retrocausal_queue_block" $ \s ->
+        ( s
+        , case M.lookupGE start (M.findWithDefault M.empty ak (dsQueueBlocks s)) of
+            Just (n, es) -> ExpectedRetrocausalQueueBlock_queue_block RetrocausalQueueBlock {entries = es, block_number = n}
+            Nothing -> ExpectedRetrocausalQueueBlock_default KRPCNotFound
+        )
+    , get_concurrent_retrocausal_queue_entry = \_ ak index -> withState "get_concurrent_retrocausal_queue_entry" $ \s ->
+        ( s
+        , case drop (fromIntegral index) (M.findWithDefault [] ak (dsPendingQueueInserts s)) of
+            e : _ -> ExpectedQueueEntry_queue_entry e
+            [] -> ExpectedQueueEntry_default KRPCNotFound
+        )
     , get_contract = \_ h -> withState "get_contract" $ \s ->
         (s, maybe (ExpectedContract_default KRPCNotFound) ExpectedContract_contract (M.lookup h (dsContracts s)))
     , get_deployment = \_ addr -> withState "get_deployment" $ \s ->
         (s, maybe (ExpectedDeployment_default KRPCNotFound) ExpectedDeployment_deployed_hash (M.lookup addr (dsDeployments s)))
-    , get_db_tip = \bid height -> withState "get_db_tip" $ \s -> (s, ExpectedDBTip_db_tip (makeTip (bid - 1) (height - 1)))
+    , get_db_tip = \_ height -> withState "get_db_tip" $ \s -> (s, ExpectedDBTip_db_tip (makeTip (dsTipId s) (height - 1)))
     , open_viewing_snapshot = withState "open_viewing_snapshot" $ \s ->
-        (s, ExpectedViewingSnapshot_snapshot ViewingSnapshot {viewing_block_id = dsBlockId s, tip = makeTip (dsBlockId s - 1) (dsHeight s - 1)})
+        (s, ExpectedViewingSnapshot_snapshot ViewingSnapshot {viewing_block_id = dsBlockId s, tip = makeTip (dsTipId s) (dsHeight s - 1)})
     , close_viewing_snapshot = \_ -> withState "close_viewing_snapshot" $ \s -> (s, KRPCNone)
     }
   where

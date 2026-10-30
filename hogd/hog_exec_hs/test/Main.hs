@@ -5,6 +5,7 @@ import qualified ContractTraitSpec
 import qualified CryptoSpec
 import qualified DefaultWalletSpec
 import qualified NativeTokenSpec
+import qualified ProposeValidateSpec
 import qualified TablesSpec
 import qualified ExecutionModeSpec
 import qualified SyscallEntrySpec
@@ -22,3 +23,4 @@ main = hspec $ do
   describe "ContractTrait" ContractTraitSpec.spec
   describe "NativeToken" NativeTokenSpec.spec
   describe "DefaultWallet" DefaultWalletSpec.spec
+  describe "ProposeValidate" ProposeValidateSpec.spec
