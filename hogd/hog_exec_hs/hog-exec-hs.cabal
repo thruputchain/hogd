@@ -46,6 +46,9 @@ library
     Hogd.Base.NetworkConfigParams
     Hogd.Base.Types
     Hogd.Base.XdrUtil
+    Hogd.BuiltContracts.Codec
+    Hogd.BuiltContracts.DefaultWallet
+    Hogd.BuiltContracts.ItcErc20
     Hogd.Crypto
     Hogd.Crypto.DomainSeparators
     Hogd.Crypto.Ed25519
@@ -54,6 +57,7 @@ library
     Hogd.Exec.Common.Int128
     Hogd.Exec.Common.Limits
     Hogd.Exec.Common.Status
+    Hogd.Exec.Components.ContractResult
     Hogd.Exec.Components.ExecutionMode
     Hogd.Exec.Http
     Hogd.Exec.Interface.Executor
@@ -61,6 +65,11 @@ library
     Hogd.Exec.Log
     Hogd.Exec.Metrics
     Hogd.Exec.Precompiles.Context
+    Hogd.Exec.Precompiles.NativeContractBuilder
+    Hogd.Exec.Precompiles.PrecompileDefaultWallet
+    Hogd.Exec.Precompiles.PrecompileNativeToken
+    Hogd.Exec.Runtime.ContractTrait
+    Hogd.Exec.Runtime.ContractTraitClient
     Hogd.Exec.Runtime.EventServerProxy
     Hogd.Exec.Runtime.GasCostTable
     Hogd.Exec.Runtime.InvocationFrame
@@ -89,6 +98,7 @@ library
     Hogd.Exec.Util
     Hogd.Genesis.Configuration
     Hogd.Genesis.Constants
+    Hogd.HogEvent.Utilities
     Hogd.StorageCost.Model
     Hogd.Version
     Hogd.Xdr
@@ -170,10 +180,17 @@ test-suite hog-exec-hs-test
   main-is:        Main.hs
   ghc-options:    -threaded
   other-modules:
+    ContractTraitSpec
     CryptoSpec
+    DefaultWalletSpec
     Ed25519EdgeCases
     ExecutionModeSpec
+    Harness.Env
+    Harness.FakeDb
+    Harness.FakeEventServer
+    Harness.NativeContracts
     MiniJson
+    NativeTokenSpec
     Rv32Fixture
     Rv32Model
     Rv32Spec
@@ -183,4 +200,4 @@ test-suite hog-exec-hs-test
     TablesSpec
     XdrSpec
   build-depends:
-    hog-exec-hs, bytestring, containers, hspec, QuickCheck, vector, crypton, memory, directory
+    hog-exec-hs, bytestring, containers, hspec, QuickCheck, vector, crypton, memory, directory, base16-bytestring, network, stm
