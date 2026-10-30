@@ -8,6 +8,7 @@ build-type:    Simple
 common shared
   default-language: GHC2021
   ghc-options:      -Wall -Wno-name-shadowing -Wno-unused-do-bind
+  default-extensions: DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
   build-depends:    base >=4.17 && <5
 
 executable xdrgen
@@ -85,3 +86,12 @@ library
     Hogd.Xdr.ViewGateway
     X23.Rpc
     X23.Xdr
+
+test-suite hog-exec-hs-test
+  import:         shared
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Main.hs
+  other-modules:
+    XdrSpec
+  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck
