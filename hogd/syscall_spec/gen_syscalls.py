@@ -646,7 +646,8 @@ kSyscallInputCount = {syscall_input_count}
 
 -- | Argument slots a syscall consumes (inputs, then outputs).
 syscallArgSlots :: SyscallMeta -> Int
-syscallArgSlots m = sum (map (\\a -> kNumInputs a.kind) (m.inputs ++ m.outputs))
+syscallArgSlots m =
+  sum (map (\\a -> kNumInputs a.kind) (m.inputs ++ m.outputs))
 
 -- | 'syscallMeta' by name.
 syscallMetaByName :: String -> Maybe SyscallMeta

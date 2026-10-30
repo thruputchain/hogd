@@ -19,7 +19,8 @@ module Hogd.Exec.Runtime.SyscallMeta
 
 import Data.Int (Int32)
 import Hogd.Exec.Runtime.SyscallArgParams (SyscallArgKind (..), kNumInputs)
-import Hogd.Xdr
+import Hogd.Xdr.Syscall
+import Hogd.Xdr.SyscallError
 
 -- | One input or output of a syscall.
 data SyscallArg = SyscallArg
@@ -61,7 +62,8 @@ kSyscallInputCount = 7
 
 -- | Argument slots a syscall consumes (inputs, then outputs).
 syscallArgSlots :: SyscallMeta -> Int
-syscallArgSlots m = sum (map (\a -> kNumInputs a.kind) (m.inputs ++ m.outputs))
+syscallArgSlots m =
+  sum (map (\a -> kNumInputs a.kind) (m.inputs ++ m.outputs))
 
 -- | 'syscallMeta' by name.
 syscallMetaByName :: String -> Maybe SyscallMeta
