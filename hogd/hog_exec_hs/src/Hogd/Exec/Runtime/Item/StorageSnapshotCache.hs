@@ -35,7 +35,6 @@ import Hogd.Exec.Util (showByteArray)
 import Hogd.Exec.Runtime.Item.DatabaseProxy
 import Hogd.Exec.Runtime.Item.SnapshotStorageItem
 import Hogd.Exec.Runtime.PreparedContract
-import Hogd.Exec.Runtime.Rv32Runtime (prepareStoredRv32)
 import Hogd.Xdr
 
 -- | A cached contract: the code plus its eagerly built image.

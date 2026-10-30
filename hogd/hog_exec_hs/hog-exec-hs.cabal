@@ -19,6 +19,9 @@ common shared
   ghc-options:      -Wall -Wno-name-shadowing -Wno-unused-do-bind
   build-depends:    base >=4.17 && <5
 
+common exts
+  default-extensions: DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
+
 executable xdrgen
   import:         shared
   hs-source-dirs: xdrgen
@@ -26,10 +29,11 @@ executable xdrgen
   build-depends:  containers, directory, filepath, parsec
 
 library
-  import:          shared
-  default-extensions:  DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
+  import:          shared, exts
   hs-source-dirs:  src
-  build-depends:   bytestring, containers, network, async, stm, crypton >=1.0.6 && <1.1, memory >=0.18 && <0.19, base16-bytestring, time, unix, vector, primitive
+  build-depends:
+    bytestring, containers, network, async, stm, time, unix, vector, primitive,
+    base16-bytestring, crypton >=1.0.6 && <1.1, memory >=0.18 && <0.19
   -- mldsa-native, built twice as hogd/crypto/CMakeLists.txt does: once to
   -- verify (Hogd.Crypto.MlDsa) and once to sign (Hogd.Crypto.MlDsaSigner).
   -- Each wrapper sets its MLD_CONFIG_* and includes mldsa_native.c.
@@ -66,6 +70,13 @@ library
     Hogd.Exec.Runtime.Item.StorageSnapshotCache
     Hogd.Exec.Runtime.NativeRuntime
     Hogd.Exec.Runtime.PreparedContract
+    Hogd.Exec.Runtime.Rv32.Artifact
+    Hogd.Exec.Runtime.Rv32.Encoding
+    Hogd.Exec.Runtime.Rv32.Host
+    Hogd.Exec.Runtime.Rv32.IsaOps
+    Hogd.Exec.Runtime.Rv32.Machine
+    Hogd.Exec.Runtime.Rv32.Program
+    Hogd.Exec.Runtime.Rv32.Rv32Contract
     Hogd.Exec.Runtime.Rv32Runtime
     Hogd.Exec.Runtime.SyscallArgParams
     Hogd.Exec.Runtime.SyscallEntry
@@ -145,26 +156,31 @@ library
     X23.Rpc
     X23.Xdr
 
-test-suite hog-exec-hs-test
-  import:         shared
-  type:           exitcode-stdio-1.0
-  default-extensions: DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
-  hs-source-dirs: test
-  main-is:        Main.hs
-  other-modules:
-    CryptoSpec
-    ExecutionModeSpec
-    SyscallEntrySpec
-    Ed25519EdgeCases
-    MiniJson
-    TablesSpec
-    XdrSpec
-  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck, crypton, memory, directory
-
 executable hog-exec-hs
-  import:         shared
-  default-extensions: DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
+  import:         shared, exts
   hs-source-dirs: app
   main-is:        Main.hs
   ghc-options:    -threaded -rtsopts "-with-rtsopts=-N"
   build-depends:  hog-exec-hs
+
+test-suite hog-exec-hs-test
+  import:         shared, exts
+  type:           exitcode-stdio-1.0
+  hs-source-dirs: test
+  main-is:        Main.hs
+  ghc-options:    -threaded
+  other-modules:
+    CryptoSpec
+    Ed25519EdgeCases
+    ExecutionModeSpec
+    MiniJson
+    Rv32Fixture
+    Rv32Model
+    Rv32Spec
+    Rv32Support
+    Rv32Vectors
+    SyscallEntrySpec
+    TablesSpec
+    XdrSpec
+  build-depends:
+    hog-exec-hs, bytestring, containers, hspec, QuickCheck, vector, crypton, memory, directory

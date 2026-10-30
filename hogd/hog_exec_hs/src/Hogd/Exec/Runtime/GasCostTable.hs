@@ -52,6 +52,9 @@ module Hogd.Exec.Runtime.GasCostTable
     -- * The hashed schedule
   , SyscallGasCostEntry (..)
   , kSyscallGasCostSchedule
+  , syscallGasCostSchedule
+  , syscallGasName
+  , syscallGasCost
     -- * Gas accumulation (syscall_entry_outer.h)
   , saturatingAddGas
   ) where
@@ -245,3 +248,13 @@ saturatingAddGas :: GasAmount -> GasAmount -> GasAmount
 saturatingAddGas a b =
   let s = a + b
    in if s < a then maxBound else s
+
+-- | Aliases used by the RV32 gas-schedule digest.
+syscallGasCostSchedule :: [SyscallGasCostEntry]
+syscallGasCostSchedule = kSyscallGasCostSchedule
+
+syscallGasName :: SyscallGasCostEntry -> B.ByteString
+syscallGasName (SyscallGasCostEntry n _) = n
+
+syscallGasCost :: SyscallGasCostEntry -> Word64
+syscallGasCost (SyscallGasCostEntry _ c) = c
