@@ -17,8 +17,6 @@ For macOS users, an automated setup script is available that installs all depend
 
 The setup script installs all required dependencies including LLVM, CMake, Python packages, Rust toolchains, and development tools.
 
-**Note:** An SSH agent must be running to fetch private submodules. Configure your SSH keys with GitHub before running the build.
-
 ## Docker
 
 For development and testing in a containerized environment, use the Docker-based CI setup:
@@ -34,7 +32,7 @@ For development and testing in a containerized environment, use the Docker-based
 ./docker/local-ci.sh shell
 ~~~~
 
-See `docker/README.md` for detailed usage, including SSH agent setup for private submodules, tidy checks, and more.
+See `docker/README.md` for detailed usage, including tidy checks and image builds.
 
 ## Manual Installation (All Platforms)
 

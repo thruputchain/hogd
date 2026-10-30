@@ -60,50 +60,20 @@ debugging from elsewhere, GDB can map them with
 Run `python3 scripts/test_ccache_launcher.py` for isolated GCC/Clang cache and
 dependency checks, including Ninja and Make integration when installed.
 
-## Private source authentication
+## Source access
 
-CI calls `.github/actions/private-sources` after checking out hogd with
-`persist-credentials: false`, before initializing submodules or fetching Cargo
-dependencies. Callers pass secret `READ_ACCESS_PAT`, a fine-grained personal
-access token with Contents: read. App installation tokens always expire after
-one hour, which long or queued jobs can outlive; the PAT is used instead
-whenever it is set. If it is empty, the action falls back to minting a token
-from repository variable `COMPONENT_READER_APP_ID` and secret
-`COMPONENT_READER_PRIVATE_KEY` for the `thruput-component-reader` GitHub App.
-The PAT, or the App installation, needs Contents: read on hogd, chuckd, thruput-protocol,
-thruput-protocol-go, thruput-protocol-rs, lib-go, thruput-go,
-thruput-integration-test-contracts, scp, and thruput-sdk-rs.
+Every submodule and Rust dependency hogd builds from is public, so CI jobs
+check out and fetch without credentials. Checkouts still use
+`persist-credentials: false`. Release publication and workflow dispatch keep
+their own write credentials.
 
-The action maps legacy and canonical repository URLs to authenticated HTTPS.
-It creates a private config under `RUNNER_TEMP` and exports `GIT_CONFIG_GLOBAL`,
-so neither the App token nor its rewrites enter the runner's `~/.gitconfig`.
-The job-local config includes the existing XDG Git config and `~/.gitconfig`
-before adding token rewrites, preserving deploy-key rewrites for remaining repos.
-Git chooses the longest matching `insteadOf` prefix regardless of file order.
-Repository-specific token rules beat organization-wide deploy-key rules; an
-included rule with an identical or longer repository prefix can take precedence
-and must be removed or narrowed on the worker/runner for transferred repos.
-Each caller removes the config in an `always()` cleanup step; with the App
-fallback, the token action revokes the installation token at job completion.
-Rotate `READ_ACCESS_PAT` before it expires. Existing pre-checkout
-`.gitconfig` cleanup steps still remove stale runner configuration. Cargo uses
-the Git CLI. Go module paths remain unchanged; this tree has no go.mod/go.work
-or workflow GOPRIVATE/GOFLAGS settings to migrate.
-
-The only deploy key still passed is metrics_history's
-(`HOGD_TO_METRICS_HISTORY_KEY`), the one repository in groundhogchain that hogd
-still uses; the metrics scripts fetch and write it. hogd's Rust dependencies,
-xdrs and xdr_rpc included, come from crates.io and need no key or token. The
-abort_rs, bcs, serde_arrays, xdr_common, xdrs and xdr_rpc keys
-(`HOGD_TO_ABORT_RS_KEY`, `HOGD_TO_BCS_ACCESS_KEY`, `HOGD_TO_SERDE_ARRAYS`,
-`HOGD_TO_XDR_COMMON_ACCESS_KEY`, `HOGD_XDRS_ACCESS_KEY`, `HOGD_TO_XDR_RPC`), the
-obsolete bcs_rs key and all transferred-repository keys, including the hogd
-self key, are no longer referenced and can be deleted from the repository's
-secrets. The composite's `ssh-private-key` input is optional: without it no
-agent is started.
-
-Release publication and protocol-rs workflow dispatch keep their existing
-write credentials. The read-only component token never rewrites metrics_history.
+The repository secrets and variables that the removed
+`.github/actions/private-sources` action used (`READ_ACCESS_PAT`,
+`COMPONENT_READER_APP_ID`, `COMPONENT_READER_PRIVATE_KEY` and
+`HOGD_TO_METRICS_HISTORY_KEY`) are no longer referenced by any workflow here.
+The metrics scripts in `scripts/` still clone `groundhogchain/metrics_history`;
+they run only from `thruputchain/benchmarks`, which supplies its own
+credentials.
 
 ## Cluster workflows
 
@@ -122,10 +92,9 @@ gh workflow run hogd-<name>.yml -R thruputchain/benchmarks \
 
 The suites, build and publish scripts the schedules run stay here
 (`scripts/ci/`, `scripts/commit_metrics.sh`, ...), so they change with the
-code they exercise. The schedules make the same URL rewrites as
-`.github/actions/private-sources/git-config.sh` with their own copy, so the
-credential handling never comes from the commit being run; benchmarks'
-`hogd/README.md` covers the setup and `hogd/launch.sh` for manual launches.
+code they exercise. Credential handling for the schedules lives in benchmarks,
+never in the commit being run; benchmarks' `hogd/README.md` covers the setup
+and `hogd/launch.sh` for manual launches.
 
 ## Runner provisioning
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
