@@ -20,8 +20,16 @@ executable xdrgen
 library
   import:          shared
   hs-source-dirs:  src
-  build-depends:   bytestring, containers, network, async, stm
+  build-depends:   bytestring, containers, network, async, stm, primitive, vector, crypton, memory
   exposed-modules:
+    Hogd.Exec.Runtime.GasCostTable
+    Hogd.Exec.Runtime.Rv32.Artifact
+    Hogd.Exec.Runtime.Rv32.Encoding
+    Hogd.Exec.Runtime.Rv32.Host
+    Hogd.Exec.Runtime.Rv32.IsaOps
+    Hogd.Exec.Runtime.Rv32.Machine
+    Hogd.Exec.Runtime.Rv32.Program
+    Hogd.Exec.Runtime.Rv32.Rv32Contract
     Hogd.Xdr
     Hogd.Xdr.AddressAuth
     Hogd.Xdr.AuthCard
@@ -93,5 +101,10 @@ test-suite hog-exec-hs-test
   hs-source-dirs: test
   main-is:        Main.hs
   other-modules:
+    Rv32Fixture
+    Rv32Model
+    Rv32Spec
+    Rv32Support
+    Rv32Vectors
     XdrSpec
-  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck
+  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck, vector, crypton, memory
