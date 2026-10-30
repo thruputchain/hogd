@@ -19,7 +19,9 @@ which remains the reference.
 | `app/` | The `hog-exec-hs` executable (`hog_exec.cc`) |
 | `src/Hogd/Crypto*` | The `hogd/crypto` layer the executor uses (SHA-256, SipHash, Ed25519, ML-DSA-65) |
 | `cbits/` | mldsa-native (vendored from `external/mldsa-native`) and its two hogd builds |
+| `src/Hogd/BuiltContracts/*` | The contract traits the precompiles implement (what `built_contracts/generate_header.py` generates in C++), written out from the interface crates' sources |
 | `test/` | hspec test suite |
+| `test/Harness/` | In-memory hog_db (`FakeDb`) and event server (`FakeEventServer`) served over ONC RPC, a transaction-driving environment (`Env`) and test contracts (`NativeContracts`) |
 
 Module names follow the C++ file they port:
 `hogd/hog_exec/runtime/rv32/machine.cc` -> `Hogd.Exec.Runtime.Rv32.Machine`.
@@ -55,6 +57,25 @@ Code that the C++ executor takes from elsewhere in hogd (`hogd/base`,
 * **program** -> per version a record of handlers (`<Version>`), a
   dispatcher `<version>_service :: <Version> -> RpcService`, and client stubs
   `call_<proc> :: RpcClient -> args -> IO result`.
+
+## Precompiles
+
+`Hogd.Exec.Precompiles.Context.makeHogExecContext` multiplexes the native
+precompiles (native token, default wallet) with the RV32 runtime.  The RV32
+context is supplied through `makeHogExecContextWith (Just rv32Context)`;
+`makeHogExecContext` currently passes `Nothing`, so RV32 contracts have no
+runtime until that hook is wired.
+
+## Testing against an in-memory ledger
+
+`Harness.Env.withTestEnv` starts a `FakeDb` and a `FakeEventServer` on
+localhost, connects the executor's own `DatabaseProxy` and
+`EventServerProxy` to them, seeds the genesis prerequisites (native token
+code and deployment, default wallet code) and opens block 1.  Seed state with
+`deployContract` / `writeItem` / `grantNativeTokens`, run transactions with
+`runTx` (root invoke, commit, event emission), `advanceBlock` to make commits
+visible, and inspect with `lookupItem` / `nativeBalance` / `lookupDeployment`.
+See the module headers for what the fake database does and does not model.
 
 ## Building
 

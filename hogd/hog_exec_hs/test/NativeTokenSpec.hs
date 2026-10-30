@@ -25,6 +25,7 @@ import Hogd.Exec.Runtime.ContractTrait
 import Hogd.Exec.Runtime.NativeRuntime
 import Hogd.Exec.Runtime.SyscallHandler (setReturnBuffer)
 import Hogd.Exec.Runtime.Types (RuntimeContext)
+import Hogd.Exec.Runtime.GasCostTable (kDBRPCCost, kStorageAccessCost, kSyscallBaseCost, sha256Hash)
 import Hogd.Genesis.Constants
 import Hogd.Xdr
 import Test.Hspec
@@ -116,6 +117,7 @@ spec = around withTestEnv $ do
   dispatchSpec
   permitSpec
   erc165Spec
+  gasSpec
 
 allowanceSpec :: SpecWith TestEnv
 allowanceSpec = describe "allowances" $ do
@@ -511,3 +513,42 @@ erc165Spec = describe "ERC165" $ do
     rec `shouldBe` returned (encodeC Cxs interfaceSupportC [True, False, True])
     (_, tooMany) <- call env alice erc165Trait "supports_interfaces" (encodeC Cxs (vecC 33 interfaceIdC) (replicate 33 (B.replicate 8 0)))
     tooMany `shouldBe` aborted decodingArgsAbortBytes
+
+-- | Gas boundaries: the smallest budget each method completes with is its
+-- exact charge plus one (a native frame that uses its whole budget reports
+-- OutOfGas).
+gasSpec :: SpecWith TestEnv
+gasSpec = describe "gas charges" $ do
+  let attempt env gas method cd = do
+        let driver = singleMethod $ \ctx -> do
+              rec <- invokeRecordGas ctx gas token method cd []
+              setReturnBuffer (nscHandler ctx) rec False []
+              pure (Right ())
+        deployContract env alice (nativeContractXdr kForwarderId)
+        tx <- rootTransaction env alice 0 ""
+        run <- runTx env (nativeTestContext [(kForwarderId, driver)]) tx
+        advanceBlock env
+        pure $ case trOutput run of
+          InvocationFrameOutput_return_buffer b -> parseRecord b
+          _ -> RecMalformed B.empty
+      boundary env charge method cd expected = do
+        attempt env charge method cd `shouldReturn` faulted
+        attempt env (charge + 1) method cd `shouldReturn` expected
+
+  it "charges supports_interface 500 and supports_interfaces 2500" $ \env -> do
+    boundary env kSupportsInterfaceGas (traitMethodId erc165Trait "supports_interface") (B.replicate 8 0) (returned "\0")
+    boundary env kSupportsInterfacesGas (traitMethodId erc165Trait "supports_interfaces") (encodeC Cxs interfaceIdsC []) (returned "\0")
+
+  it "charges a transfer its syscalls, balance load and writes" $ \env -> do
+    grantNativeTokens env alice 1000
+    -- 1 + GetMsgSender + LogEvent crossings + balance read (access + first
+    -- load) + two balance writes.
+    let charge = 1 + 2 * kSyscallBaseCost + 3 * kStorageAccessCost + kDBRPCCost
+    boundary env charge (erc20 "transfer") (addrAmount bob 10) (returned "")
+    nativeBalance env bob `shouldReturn` 10
+
+  it "charges allowance() for the key derivation's SHA-256" $ \env -> do
+    -- 1 + kSHA256 (crossing + 64-byte digest) + kNonnegativeIntGet
+    -- (crossing + access + first load).
+    let charge = 1 + kSyscallBaseCost + sha256Hash 64 + kSyscallBaseCost + kStorageAccessCost + kDBRPCCost
+    boundary env charge (erc20 "allowance") (encodeC Cxs (pairC addressC addressC) (alice, bob)) (returned (amountC 0))
