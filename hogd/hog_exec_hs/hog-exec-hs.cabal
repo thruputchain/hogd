@@ -20,8 +20,19 @@ executable xdrgen
 library
   import:          shared
   hs-source-dirs:  src
-  build-depends:   bytestring, containers, network, async, stm
+  build-depends:   bytestring, containers, network, async, stm, crypton >=1.0 && <1.1, memory
   exposed-modules:
+    Hogd.Base.NetworkConfigParams
+    Hogd.Base.Types
+    Hogd.Base.XdrUtil
+    Hogd.Exec.Common.Limits
+    Hogd.Exec.Runtime.GasCostTable
+    Hogd.Exec.Runtime.SyscallArgParams
+    Hogd.Exec.Runtime.SyscallMeta
+    Hogd.Exec.Runtime.SyscallTypes
+    Hogd.Genesis.Configuration
+    Hogd.Genesis.Constants
+    Hogd.StorageCost.Model
     Hogd.Xdr
     Hogd.Xdr.AddressAuth
     Hogd.Xdr.AuthCard
@@ -93,5 +104,6 @@ test-suite hog-exec-hs-test
   hs-source-dirs: test
   main-is:        Main.hs
   other-modules:
+    TablesSpec
     XdrSpec
   build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck
