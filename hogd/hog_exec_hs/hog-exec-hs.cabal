@@ -153,6 +153,8 @@ test-suite hog-exec-hs-test
   main-is:        Main.hs
   other-modules:
     CryptoSpec
+    ExecutionModeSpec
+    SyscallEntrySpec
     Ed25519EdgeCases
     MiniJson
     TablesSpec
