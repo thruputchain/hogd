@@ -71,10 +71,15 @@ jobs:
           fi
 
       - name: Fetch Changed-File Base
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$TIDY_SCOPE" = "changed" ]; then
-            git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
-            git fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
+            # The checkout does not persist credentials; pass the job token to
+            # these two fetches only, while hogd itself is still private.
+            auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
           fi
 
       - name: Use Full Scope for Tidy Infrastructure Changes
