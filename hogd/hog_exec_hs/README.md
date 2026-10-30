@@ -16,6 +16,8 @@ which remains the reference.
 | `src/Hogd/Xdr/*` | Generated protocol types (do not edit) |
 | `src/Hogd/Exec/*` | The executor; module paths mirror `hogd/hog_exec/*` |
 | `app/` | The `hog-exec-hs` executable (`hog_exec.cc`) |
+| `src/Hogd/Crypto*` | The `hogd/crypto` layer the executor uses (SHA-256, SipHash, Ed25519, ML-DSA-65) |
+| `cbits/` | mldsa-native (vendored from `external/mldsa-native`) and its two hogd builds |
 | `test/` | hspec test suite |
 
 Module names follow the C++ file they port:

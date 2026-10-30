@@ -4,6 +4,15 @@ version:       0.1.0.0
 synopsis:      Haskell implementation of the hogd transaction executor (hog_exec)
 license:       NONE
 build-type:    Simple
+extra-source-files:
+  cbits/mldsa-native/LICENSE
+  cbits/mldsa-native/*.c
+  cbits/mldsa-native/*.h
+  cbits/mldsa-native/src/*.c
+  cbits/mldsa-native/src/*.h
+  cbits/mldsa-native/src/*.inc
+  cbits/mldsa-native/src/fips202/*.c
+  cbits/mldsa-native/src/fips202/*.h
 
 common shared
   default-language: GHC2021
@@ -20,8 +29,21 @@ executable xdrgen
 library
   import:          shared
   hs-source-dirs:  src
-  build-depends:   bytestring, containers, network, async, stm
+  build-depends:   bytestring, containers, network, async, stm, crypton >=1.0.6 && <1.1, memory >=0.18 && <0.19
+  -- mldsa-native, built twice as hogd/crypto/CMakeLists.txt does: once to
+  -- verify (Hogd.Crypto.MlDsa) and once to sign (Hogd.Crypto.MlDsaSigner).
+  -- Each wrapper sets its MLD_CONFIG_* and includes mldsa_native.c.
+  c-sources:
+    cbits/hogd_mldsa65_verify.c
+    cbits/hogd_mldsa65_signer.c
+  include-dirs:    cbits/mldsa-native
+  cc-options:      -O2 -std=c99
   exposed-modules:
+    Hogd.Crypto
+    Hogd.Crypto.DomainSeparators
+    Hogd.Crypto.Ed25519
+    Hogd.Crypto.MlDsa
+    Hogd.Crypto.MlDsaSigner
     Hogd.Xdr
     Hogd.Xdr.AddressAuth
     Hogd.Xdr.AuthCard
@@ -93,5 +115,8 @@ test-suite hog-exec-hs-test
   hs-source-dirs: test
   main-is:        Main.hs
   other-modules:
+    CryptoSpec
+    Ed25519EdgeCases
+    MiniJson
     XdrSpec
-  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck
+  build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck, crypton, memory, directory
