@@ -1,0 +1,87 @@
+cabal-version: 2.4
+name:          hog-exec-hs
+version:       0.1.0.0
+synopsis:      Haskell implementation of the hogd transaction executor (hog_exec)
+license:       NONE
+build-type:    Simple
+
+common shared
+  default-language: GHC2021
+  ghc-options:      -Wall -Wno-name-shadowing -Wno-unused-do-bind
+  build-depends:    base >=4.17 && <5
+
+executable xdrgen
+  import:         shared
+  hs-source-dirs: xdrgen
+  main-is:        Main.hs
+  build-depends:  containers, directory, filepath, parsec
+
+library
+  import:          shared
+  hs-source-dirs:  src
+  build-depends:   bytestring, containers, network, async, stm
+  exposed-modules:
+    Hogd.Xdr
+    Hogd.Xdr.AddressAuth
+    Hogd.Xdr.AuthCard
+    Hogd.Xdr.AuthClaim
+    Hogd.Xdr.AuthRpc
+    Hogd.Xdr.AuthToken
+    Hogd.Xdr.Batch
+    Hogd.Xdr.BlockQueryInternal
+    Hogd.Xdr.Catchup
+    Hogd.Xdr.CiServer
+    Hogd.Xdr.Consensus
+    Hogd.Xdr.Contract
+    Hogd.Xdr.CoordSched
+    Hogd.Xdr.DbConflict
+    Hogd.Xdr.DbGateway
+    Hogd.Xdr.DbSched
+    Hogd.Xdr.Event
+    Hogd.Xdr.EventCursorInternal
+    Hogd.Xdr.EventOutboxInternal
+    Hogd.Xdr.EventRpc
+    Hogd.Xdr.ExecResult
+    Hogd.Xdr.ExecSched
+    Hogd.Xdr.ExecutorToDbRpc
+    Hogd.Xdr.FfiEnums
+    Hogd.Xdr.Genesis
+    Hogd.Xdr.Header
+    Hogd.Xdr.HogExecConstants
+    Hogd.Xdr.Indexer
+    Hogd.Xdr.Integration
+    Hogd.Xdr.InvokeArgs
+    Hogd.Xdr.InvokeFlag
+    Hogd.Xdr.LibraryException
+    Hogd.Xdr.Loadgen
+    Hogd.Xdr.Network
+    Hogd.Xdr.NetworkConfig
+    Hogd.Xdr.Pagination
+    Hogd.Xdr.Parallel
+    Hogd.Xdr.Precompiles
+    Hogd.Xdr.Preimage
+    Hogd.Xdr.Proposal
+    Hogd.Xdr.RetrocausalQueue
+    Hogd.Xdr.RpcMsg
+    Hogd.Xdr.RpcTypes
+    Hogd.Xdr.ScTypes
+    Hogd.Xdr.ScVal
+    Hogd.Xdr.SchedCoord
+    Hogd.Xdr.SchedDb
+    Hogd.Xdr.SchedEvent
+    Hogd.Xdr.SchedExec
+    Hogd.Xdr.SchedGateway
+    Hogd.Xdr.Scp
+    Hogd.Xdr.StandardAssetEvents
+    Hogd.Xdr.StorageCost
+    Hogd.Xdr.StorageItem
+    Hogd.Xdr.Syscall
+    Hogd.Xdr.SyscallError
+    Hogd.Xdr.Transaction
+    Hogd.Xdr.TransactionTrace
+    Hogd.Xdr.Types
+    Hogd.Xdr.Validator
+    Hogd.Xdr.View
+    Hogd.Xdr.ViewGateway
+    X23.Rpc
+    X23.Xdr
