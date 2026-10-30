@@ -10,11 +10,12 @@ which remains the reference.
 | Path | Contents |
 |---|---|
 | `xdrgen/` | XDR compiler: x23-dialect `.x` -> Haskell |
-| `gen-xdr.sh` | Regenerates `src/Hogd/Xdr*` from `protocol/` and `hogd/xdr/` |
+| `gen-xdr.sh` | Regenerates `src/Hogd/Xdr*` from `protocol/` and `hogd/xdr/`, and `SyscallMeta.hs` |
 | `src/X23/Xdr.hs` | XDR and CXS encodings (x23 semantics) |
 | `src/X23/Rpc.hs` | ONC RPC over TCP (x23 RpcStream compatible) |
 | `src/Hogd/Xdr/*` | Generated protocol types (do not edit) |
 | `src/Hogd/Exec/*` | The executor; module paths mirror `hogd/hog_exec/*` |
+| `src/Hogd/Exec/Runtime/SyscallMeta.hs` | Generated syscall table (`gen_syscalls.py --syscall_meta_hs`; do not edit) |
 | `app/` | The `hog-exec-hs` executable (`hog_exec.cc`) |
 | `src/Hogd/Crypto*` | The `hogd/crypto` layer the executor uses (SHA-256, SipHash, Ed25519, ML-DSA-65) |
 | `cbits/` | mldsa-native (vendored from `external/mldsa-native`) and its two hogd builds |

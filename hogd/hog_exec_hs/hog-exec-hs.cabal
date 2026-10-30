@@ -29,7 +29,7 @@ library
   import:          shared
   default-extensions:  DuplicateRecordFields, OverloadedRecordDot, PatternSynonyms, LambdaCase, OverloadedStrings
   hs-source-dirs:  src
-  build-depends:   bytestring, containers, network, async, stm, crypton >=1.0.6 && <1.1, memory >=0.18 && <0.19
+  build-depends:   bytestring, containers, network, async, stm, crypton >=1.0.6 && <1.1, memory >=0.18 && <0.19, base16-bytestring, time, unix, vector, primitive
   -- mldsa-native, built twice as hogd/crypto/CMakeLists.txt does: once to
   -- verify (Hogd.Crypto.MlDsa) and once to sign (Hogd.Crypto.MlDsaSigner).
   -- Each wrapper sets its MLD_CONFIG_* and includes mldsa_native.c.
@@ -39,11 +39,43 @@ library
   include-dirs:    cbits/mldsa-native
   cc-options:      -O2 -std=c99
   exposed-modules:
+    Hogd.Base.NetworkConfigParams
+    Hogd.Base.Types
+    Hogd.Base.XdrUtil
     Hogd.Crypto
     Hogd.Crypto.DomainSeparators
     Hogd.Crypto.Ed25519
     Hogd.Crypto.MlDsa
     Hogd.Crypto.MlDsaSigner
+    Hogd.Exec.Common.Int128
+    Hogd.Exec.Common.Limits
+    Hogd.Exec.Common.Status
+    Hogd.Exec.Components.ExecutionMode
+    Hogd.Exec.Interface.Executor
+    Hogd.Exec.Interface.ViewGateway
+    Hogd.Exec.Log
+    Hogd.Exec.Metrics
+    Hogd.Exec.Runtime.EventServerProxy
+    Hogd.Exec.Runtime.GasCostTable
+    Hogd.Exec.Runtime.InvocationFrame
+    Hogd.Exec.Runtime.Item.DatabaseProxy
+    Hogd.Exec.Runtime.Item.ItemView
+    Hogd.Exec.Runtime.Item.SnapshotStorageItem
+    Hogd.Exec.Runtime.Item.StorageSnapshotCache
+    Hogd.Exec.Runtime.NativeRuntime
+    Hogd.Exec.Runtime.PreparedContract
+    Hogd.Exec.Runtime.SyscallArgParams
+    Hogd.Exec.Runtime.SyscallEntry
+    Hogd.Exec.Runtime.SyscallHandler
+    Hogd.Exec.Runtime.SyscallMeta
+    Hogd.Exec.Runtime.SyscallTypes
+    Hogd.Exec.Runtime.Syscalls
+    Hogd.Exec.Runtime.Types
+    Hogd.Exec.Runtime.View
+    Hogd.Exec.Util
+    Hogd.Genesis.Configuration
+    Hogd.Genesis.Constants
+    Hogd.StorageCost.Model
     Hogd.Xdr
     Hogd.Xdr.AddressAuth
     Hogd.Xdr.AuthCard
@@ -119,5 +151,6 @@ test-suite hog-exec-hs-test
     CryptoSpec
     Ed25519EdgeCases
     MiniJson
+    TablesSpec
     XdrSpec
   build-depends:  hog-exec-hs, bytestring, containers, hspec, QuickCheck, crypton, memory, directory
