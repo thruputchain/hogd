@@ -32,6 +32,10 @@ cxsPut_SerializedAuthToken = (cxsPutVarOpaque 0xffffffff)
 cxsGet_SerializedAuthToken :: Get SerializedAuthToken
 cxsGet_SerializedAuthToken = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SerializedAuthToken, xdrMax_SerializedAuthToken :: Integer
+xdrMin_SerializedAuthToken = 4
+xdrMax_SerializedAuthToken = 4294967300
+
 data TransactionViewQuery = TransactionViewQuery
   { invocation :: Invocation
   , parent_address :: (Maybe ContractAddress)
@@ -47,6 +51,10 @@ instance XdrType TransactionViewQuery where
   cxsPut (TransactionViewQuery x1 x2 x3 x4 x5) = cxsPut x1 <> (cxsPutOptional cxsPut_ContractAddress) x2 <> cxsPut x3 <> (cxsPutVarArray 0xffffffff cxsPut_SerializedAuthToken) x4 <> cxsPut_InvokeFlagSet x5
   cxsGet = TransactionViewQuery <$> cxsGet <*> (cxsGetOptional cxsGet_ContractAddress) <*> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet_SerializedAuthToken) <*> cxsGet_InvokeFlagSet
 
+xdrMin_TransactionViewQuery, xdrMax_TransactionViewQuery :: Integer
+xdrMin_TransactionViewQuery = 76
+xdrMax_TransactionViewQuery = 18446744090889420936
+
 data TransactionViewResult = TransactionViewResult
   { output :: InvocationFrameOutput
   , gas_consumed :: GasAmount
@@ -59,6 +67,10 @@ instance XdrType TransactionViewResult where
   xdrGet = TransactionViewResult <$> xdrGet <*> get_GasAmount <*> (getVarArray 0xffffffff xdrGet)
   cxsPut (TransactionViewResult x1 x2 x3) = cxsPut x1 <> cxsPut_GasAmount x2 <> (cxsPutVarArray 0xffffffff cxsPut) x3
   cxsGet = TransactionViewResult <$> cxsGet <*> cxsGet_GasAmount <*> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_TransactionViewResult, xdrMax_TransactionViewResult :: Integer
+xdrMin_TransactionViewResult = 16
+xdrMax_TransactionViewResult = 4574140169196
 
 newtype TransactionViewStatus = TransactionViewStatus Int32
   deriving (Eq, Ord)
@@ -92,6 +104,10 @@ instance XdrType TransactionViewStatus where
 -- | Every declared value of 'TransactionViewStatus'.
 transactionViewStatus_values :: [TransactionViewStatus]
 transactionViewStatus_values = [Ok, Abandoned, InternalError, InvalidInput, NondeterministicDataValidationFailure]
+
+xdrMin_TransactionViewStatus, xdrMax_TransactionViewStatus :: Integer
+xdrMin_TransactionViewStatus = 4
+xdrMax_TransactionViewStatus = 4
 
 data ExpectedViewResult
   = ExpectedViewResult_result TransactionViewResult
@@ -134,4 +150,8 @@ discriminant_ExpectedViewResult :: ExpectedViewResult -> TransactionViewStatus
 discriminant_ExpectedViewResult (ExpectedViewResult_result _) = (TransactionViewStatus (0))
 discriminant_ExpectedViewResult (ExpectedViewResult_error_code _) = (TransactionViewStatus (3))
 discriminant_ExpectedViewResult (ExpectedViewResult_Abandoned d) = d
+
+xdrMin_ExpectedViewResult, xdrMax_ExpectedViewResult :: Integer
+xdrMin_ExpectedViewResult = 4
+xdrMax_ExpectedViewResult = 4574140169200
 

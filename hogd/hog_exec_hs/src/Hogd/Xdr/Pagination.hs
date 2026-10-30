@@ -37,6 +37,10 @@ instance XdrType IterationOrder where
 iterationOrder_values :: [IterationOrder]
 iterationOrder_values = [IterationOrderAscending, IterationOrderDescending]
 
+xdrMin_IterationOrder, xdrMax_IterationOrder :: Integer
+xdrMin_IterationOrder = 4
+xdrMax_IterationOrder = 4
+
 newtype BlockAnchorKind = BlockAnchorKind Int32
   deriving (Eq, Ord)
 
@@ -63,6 +67,10 @@ instance XdrType BlockAnchorKind where
 -- | Every declared value of 'BlockAnchorKind'.
 blockAnchorKind_values :: [BlockAnchorKind]
 blockAnchorKind_values = [AnchorAtBeginning, AnchorAtEnd, AnchorAtHeight]
+
+xdrMin_BlockAnchorKind, xdrMax_BlockAnchorKind :: Integer
+xdrMin_BlockAnchorKind = 4
+xdrMax_BlockAnchorKind = 4
 
 data BlockAnchor
   = BlockAnchor_AnchorAtBeginning BlockAnchorKind
@@ -98,6 +106,10 @@ discriminant_BlockAnchor :: BlockAnchor -> BlockAnchorKind
 discriminant_BlockAnchor (BlockAnchor_AnchorAtBeginning d) = d
 discriminant_BlockAnchor (BlockAnchor_height _) = (BlockAnchorKind (2))
 
+xdrMin_BlockAnchor, xdrMax_BlockAnchor :: Integer
+xdrMin_BlockAnchor = 4
+xdrMax_BlockAnchor = 12
+
 type PaginationCursor = ByteString
 
 put_PaginationCursor :: PaginationCursor -> Builder
@@ -111,4 +123,8 @@ cxsPut_PaginationCursor = (cxsPutVarOpaque 0xffffffff)
 
 cxsGet_PaginationCursor :: Get PaginationCursor
 cxsGet_PaginationCursor = (cxsGetVarOpaque 0xffffffff)
+
+xdrMin_PaginationCursor, xdrMax_PaginationCursor :: Integer
+xdrMin_PaginationCursor = 4
+xdrMax_PaginationCursor = 4294967300
 

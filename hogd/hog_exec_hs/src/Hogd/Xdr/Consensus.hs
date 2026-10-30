@@ -29,6 +29,10 @@ cxsPut_Upgrade = (cxsPutVarOpaque 128)
 cxsGet_Upgrade :: Get Upgrade
 cxsGet_Upgrade = (cxsGetVarOpaque 128)
 
+xdrMin_Upgrade, xdrMax_Upgrade :: Integer
+xdrMin_Upgrade = 4
+xdrMax_Upgrade = 132
+
 data ConsensusValue = ConsensusValue
   { protocol :: Protocol
   , ext :: ExtensionPoint
@@ -45,6 +49,10 @@ instance XdrType ConsensusValue where
   cxsPut (ConsensusValue x1 x2 x3 x4 x5 x6) = cxsPut_Protocol x1 <> cxsPut x2 <> cxsPut_ConsensusValueHash x3 <> cxsPut x4 <> cxsPut_ProposalTxsHash x5 <> (cxsPutVarArray 6 cxsPut_Upgrade) x6
   cxsGet = ConsensusValue <$> cxsGet_Protocol <*> cxsGet <*> cxsGet_ConsensusValueHash <*> cxsGet <*> cxsGet_ProposalTxsHash <*> (cxsGetVarArray 6 cxsGet_Upgrade)
 
+xdrMin_ConsensusValue, xdrMax_ConsensusValue :: Integer
+xdrMin_ConsensusValue = 288
+xdrMax_ConsensusValue = 1080
+
 data ConsensusBasis = ConsensusBasis
   { ext :: ExtensionPoint
   , value :: ConsensusValue
@@ -57,4 +65,8 @@ instance XdrType ConsensusBasis where
   xdrGet = ConsensusBasis <$> xdrGet <*> xdrGet <*> xdrGet
   cxsPut (ConsensusBasis x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = ConsensusBasis <$> cxsGet <*> cxsGet <*> cxsGet
+
+xdrMin_ConsensusBasis, xdrMax_ConsensusBasis :: Integer
+xdrMin_ConsensusBasis = 320
+xdrMax_ConsensusBasis = 77309412424
 

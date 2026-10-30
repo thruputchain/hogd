@@ -19,6 +19,7 @@ module X23.Rpc
   , RpcException (..)
   , connectRpcClient
   , connectRpcClientRetry
+  , connectRpcClientWith
   , closeRpcClient
   , rpcCall
     -- * Addresses
@@ -248,14 +249,16 @@ data RpcClient = RpcClient
   }
 
 connectRpcClient :: String -> Word16 -> IO RpcClient
-connectRpcClient = connectWith False
+connectRpcClient = connectRpcClientWith False defaultMaxMessageSize
 
 -- | Connect, retrying while the peer refuses connections.
 connectRpcClientRetry :: String -> Word16 -> IO RpcClient
-connectRpcClientRetry = connectWith True
+connectRpcClientRetry = connectRpcClientWith True defaultMaxMessageSize
 
-connectWith :: Bool -> String -> Word16 -> IO RpcClient
-connectWith retry host port = do
+-- | Connect with an explicit retry policy and message-size cap (which bounds
+-- both requests sent and replies accepted).
+connectRpcClientWith :: Bool -> Int -> String -> Word16 -> IO RpcClient
+connectRpcClientWith retry maxMsg host port = do
   addr <- resolveHostPort host port
   let attempt = do
         sock <- socket (addrFamily addr) Stream defaultProtocol
@@ -271,7 +274,7 @@ connectWith retry host port = do
   xidRef <- newIORef 1
   pending <- newMVar (Just IM.empty)
   readerRef <- newIORef Nothing
-  let client = RpcClient sock wl xidRef pending defaultMaxMessageSize readerRef
+  let client = RpcClient sock wl xidRef pending maxMsg readerRef
   tid <- forkIO (clientReader client)
   writeIORef readerRef (Just tid)
   pure client

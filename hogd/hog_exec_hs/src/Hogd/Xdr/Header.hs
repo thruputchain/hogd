@@ -27,6 +27,10 @@ instance XdrType ProposalContext where
   cxsPut (ProposalContext x1 x2 x3) = cxsPut_Protocol x1 <> cxsPut_ValidatorID x2 <> cxsPut_TimePoint x3
   cxsGet = ProposalContext <$> cxsGet_Protocol <*> cxsGet_ValidatorID <*> cxsGet_TimePoint
 
+xdrMin_ProposalContext, xdrMax_ProposalContext :: Integer
+xdrMin_ProposalContext = 44
+xdrMax_ProposalContext = 44
+
 data ProposalHeader = ProposalHeader
   { ext :: ExtensionPoint
   , network_hash :: NetworkHash
@@ -45,4 +49,8 @@ instance XdrType ProposalHeader where
   xdrGet = ProposalHeader <$> xdrGet <*> get_NetworkHash <*> get_ConfigHash <*> get_ValidatorID <*> get_TimePoint <*> get_BlockHeight <*> get_TxsHash <*> get_StorageShortHash <*> get_EventsHash
   cxsPut (ProposalHeader x1 x2 x3 x4 x5 x6 x7 x8 x9) = cxsPut x1 <> cxsPut_NetworkHash x2 <> cxsPut_ConfigHash x3 <> cxsPut_ValidatorID x4 <> cxsPut_TimePoint x5 <> cxsPut_BlockHeight x6 <> cxsPut_TxsHash x7 <> cxsPut_StorageShortHash x8 <> cxsPut_EventsHash x9
   cxsGet = ProposalHeader <$> cxsGet <*> cxsGet_NetworkHash <*> cxsGet_ConfigHash <*> cxsGet_ValidatorID <*> cxsGet_TimePoint <*> cxsGet_BlockHeight <*> cxsGet_TxsHash <*> cxsGet_StorageShortHash <*> cxsGet_EventsHash
+
+xdrMin_ProposalHeader, xdrMax_ProposalHeader :: Integer
+xdrMin_ProposalHeader = 212
+xdrMax_ProposalHeader = 212
 

@@ -48,6 +48,10 @@ discriminant_ExpectedStorageItem :: ExpectedStorageItem -> RPCError
 discriminant_ExpectedStorageItem (ExpectedStorageItem_item _) = (RPCError (0))
 discriminant_ExpectedStorageItem (ExpectedStorageItem_default d) = d
 
+xdrMin_ExpectedStorageItem, xdrMax_ExpectedStorageItem :: Integer
+xdrMin_ExpectedStorageItem = 4
+xdrMax_ExpectedStorageItem = 65012
+
 type StorageDeltaBatch = [FlaggedStorageDelta]
 
 put_StorageDeltaBatch :: StorageDeltaBatch -> Builder
@@ -62,6 +66,10 @@ cxsPut_StorageDeltaBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_StorageDeltaBatch :: Get StorageDeltaBatch
 cxsGet_StorageDeltaBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_StorageDeltaBatch, xdrMax_StorageDeltaBatch :: Integer
+xdrMin_StorageDeltaBatch = 4
+xdrMax_StorageDeltaBatch = 18854683086750664
+
 type NewContractBatch = [Contract]
 
 put_NewContractBatch :: NewContractBatch -> Builder
@@ -75,6 +83,10 @@ cxsPut_NewContractBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_NewContractBatch :: Get NewContractBatch
 cxsGet_NewContractBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_NewContractBatch, xdrMax_NewContractBatch :: Integer
+xdrMin_NewContractBatch = 4
+xdrMax_NewContractBatch = 18446744103774322684
 
 data TryPushSubtransactionResult
   = TryPushSubtransactionResult_conflict DbConflictResult
@@ -105,6 +117,10 @@ instance XdrType TryPushSubtransactionResult where
 discriminant_TryPushSubtransactionResult :: TryPushSubtransactionResult -> RPCError
 discriminant_TryPushSubtransactionResult (TryPushSubtransactionResult_conflict _) = (RPCError (4))
 discriminant_TryPushSubtransactionResult (TryPushSubtransactionResult_default d) = d
+
+xdrMin_TryPushSubtransactionResult, xdrMax_TryPushSubtransactionResult :: Integer
+xdrMin_TryPushSubtransactionResult = 4
+xdrMax_TryPushSubtransactionResult = 309237645252
 
 databaseToExecutorInterface_program :: Word32
 databaseToExecutorInterface_program = 44444444

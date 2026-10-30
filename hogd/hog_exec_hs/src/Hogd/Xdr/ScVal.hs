@@ -80,6 +80,10 @@ instance XdrType SCValType where
 sCValType_values :: [SCValType]
 sCValType_values = [SCV_BOOL, SCV_VOID, SCV_U32, SCV_I32, SCV_U64, SCV_I64, SCV_TIMEPOINT, SCV_DURATION, SCV_U128, SCV_I128, SCV_U256, SCV_I256, SCV_BYTES, SCV_STRING, SCV_SYMBOL, SCV_ADDRESS]
 
+xdrMin_SCValType, xdrMax_SCValType :: Integer
+xdrMin_SCValType = 4
+xdrMax_SCValType = 4
+
 data UInt128Parts = UInt128Parts
   { hi :: X_uint64
   , lo :: X_uint64
@@ -92,6 +96,10 @@ instance XdrType UInt128Parts where
   cxsPut (UInt128Parts x1 x2) = cxsPut_X_uint64 x1 <> cxsPut_X_uint64 x2
   cxsGet = UInt128Parts <$> cxsGet_X_uint64 <*> cxsGet_X_uint64
 
+xdrMin_UInt128Parts, xdrMax_UInt128Parts :: Integer
+xdrMin_UInt128Parts = 16
+xdrMax_UInt128Parts = 16
+
 data Int128Parts = Int128Parts
   { hi :: X_int64
   , lo :: X_uint64
@@ -103,6 +111,10 @@ instance XdrType Int128Parts where
   xdrGet = Int128Parts <$> get_X_int64 <*> get_X_uint64
   cxsPut (Int128Parts x1 x2) = cxsPut_X_int64 x1 <> cxsPut_X_uint64 x2
   cxsGet = Int128Parts <$> cxsGet_X_int64 <*> cxsGet_X_uint64
+
+xdrMin_Int128Parts, xdrMax_Int128Parts :: Integer
+xdrMin_Int128Parts = 16
+xdrMax_Int128Parts = 16
 
 data UInt256Parts = UInt256Parts
   { hi_hi :: X_uint64
@@ -118,6 +130,10 @@ instance XdrType UInt256Parts where
   cxsPut (UInt256Parts x1 x2 x3 x4) = cxsPut_X_uint64 x1 <> cxsPut_X_uint64 x2 <> cxsPut_X_uint64 x3 <> cxsPut_X_uint64 x4
   cxsGet = UInt256Parts <$> cxsGet_X_uint64 <*> cxsGet_X_uint64 <*> cxsGet_X_uint64 <*> cxsGet_X_uint64
 
+xdrMin_UInt256Parts, xdrMax_UInt256Parts :: Integer
+xdrMin_UInt256Parts = 32
+xdrMax_UInt256Parts = 32
+
 data Int256Parts = Int256Parts
   { hi_hi :: X_int64
   , hi_lo :: X_uint64
@@ -131,6 +147,10 @@ instance XdrType Int256Parts where
   xdrGet = Int256Parts <$> get_X_int64 <*> get_X_uint64 <*> get_X_uint64 <*> get_X_uint64
   cxsPut (Int256Parts x1 x2 x3 x4) = cxsPut_X_int64 x1 <> cxsPut_X_uint64 x2 <> cxsPut_X_uint64 x3 <> cxsPut_X_uint64 x4
   cxsGet = Int256Parts <$> cxsGet_X_int64 <*> cxsGet_X_uint64 <*> cxsGet_X_uint64 <*> cxsGet_X_uint64
+
+xdrMin_Int256Parts, xdrMax_Int256Parts :: Integer
+xdrMin_Int256Parts = 32
+xdrMax_Int256Parts = 32
 
 newtype SCAddressType = SCAddressType Int32
   deriving (Eq, Ord)
@@ -152,6 +172,10 @@ instance XdrType SCAddressType where
 -- | Every declared value of 'SCAddressType'.
 sCAddressType_values :: [SCAddressType]
 sCAddressType_values = [SC_ADDRESS_TYPE_CONTRACT]
+
+xdrMin_SCAddressType, xdrMax_SCAddressType :: Integer
+xdrMin_SCAddressType = 4
+xdrMax_SCAddressType = 4
 
 data SCAddress
   = SCAddress_contractId ContractID
@@ -175,6 +199,10 @@ instance XdrType SCAddress where
 discriminant_SCAddress :: SCAddress -> SCAddressType
 discriminant_SCAddress (SCAddress_contractId _) = (SCAddressType (1))
 
+xdrMin_SCAddress, xdrMax_SCAddress :: Integer
+xdrMin_SCAddress = 36
+xdrMax_SCAddress = 36
+
 c_SCSYMBOL_LIMIT :: Num a => a
 c_SCSYMBOL_LIMIT = 32
 
@@ -192,6 +220,10 @@ cxsPut_SCBytes = (cxsPutVarOpaque 0xffffffff)
 cxsGet_SCBytes :: Get SCBytes
 cxsGet_SCBytes = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SCBytes, xdrMax_SCBytes :: Integer
+xdrMin_SCBytes = 4
+xdrMax_SCBytes = 4294967300
+
 type SCString = ByteString
 
 put_SCString :: SCString -> Builder
@@ -206,6 +238,10 @@ cxsPut_SCString = (cxsPutVarOpaque 0xffffffff)
 cxsGet_SCString :: Get SCString
 cxsGet_SCString = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SCString, xdrMax_SCString :: Integer
+xdrMin_SCString = 4
+xdrMax_SCString = 4294967300
+
 type SCSymbol = ByteString
 
 put_SCSymbol :: SCSymbol -> Builder
@@ -219,6 +255,10 @@ cxsPut_SCSymbol = (cxsPutVarOpaque 32)
 
 cxsGet_SCSymbol :: Get SCSymbol
 cxsGet_SCSymbol = (cxsGetVarOpaque 32)
+
+xdrMin_SCSymbol, xdrMax_SCSymbol :: Integer
+xdrMin_SCSymbol = 4
+xdrMax_SCSymbol = 36
 
 data SCVal
   = SCVal_b Bool
@@ -331,4 +371,8 @@ discriminant_SCVal (SCVal_bytes _) = (SCValType (13))
 discriminant_SCVal (SCVal_str _) = (SCValType (14))
 discriminant_SCVal (SCVal_sym _) = (SCValType (15))
 discriminant_SCVal (SCVal_address _) = (SCValType (18))
+
+xdrMin_SCVal, xdrMax_SCVal :: Integer
+xdrMin_SCVal = 4
+xdrMax_SCVal = 4294967304
 

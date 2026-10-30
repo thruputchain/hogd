@@ -147,6 +147,10 @@ instance XdrType SyscallNo where
 syscallNo_values :: [SyscallNo]
 syscallNo_values = [KSHA256, KGetMsgSender, KGetCalldataLen, KGetCalldata, KConsoleLog, KInvoke, KReturn, KGetReturnedBuffer, KExit, KGetDeployAddress, KDeployContract, KGetSourceTransactionHash, KVerifySignature, KBytestringGetLen, KBytestringGet, KBytestringSet, KNonnegativeIntGet, KNonnegativeIntSetAdd, KDeleteObject, KGetCurrentAddress, KRetrocausalQueueInsert, KRetrocausalQueueConsume, KGetTransactionStatistics, KChangePublicKeyRegistration, KLogEvent, KGetAuthClaim, KSHA256Update, KSHA256Finalize, KWriteAddressRequiredWeight, KGetBlockHeight, KRetrocausalQueuePeekLen, KMintAuthToken, KConsumeAuthToken, KSHA256Copy, KGetNetworkHash, KGetBlockTimepoint, KSetStorageFlags, KGetStorageFlags, KClearStorageFlags]
 
+xdrMin_SyscallNo, xdrMax_SyscallNo :: Integer
+xdrMin_SyscallNo = 4
+xdrMax_SyscallNo = 4
+
 kSyscallCount :: Num a => a
 kSyscallCount = 39
 

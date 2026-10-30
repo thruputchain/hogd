@@ -42,6 +42,10 @@ instance XdrType InvokeFlag where
 invokeFlag_values :: [InvokeFlag]
 invokeFlag_values = [InvokeFlag_None, TryInvoke, ReadOnly, DelegateCall]
 
+xdrMin_InvokeFlag, xdrMax_InvokeFlag :: Integer
+xdrMin_InvokeFlag = 4
+xdrMax_InvokeFlag = 4
+
 type InvokeFlagSet = Word32
 
 put_InvokeFlagSet :: InvokeFlagSet -> Builder
@@ -55,4 +59,8 @@ cxsPut_InvokeFlagSet = cxsPut
 
 cxsGet_InvokeFlagSet :: Get InvokeFlagSet
 cxsGet_InvokeFlagSet = cxsGet
+
+xdrMin_InvokeFlagSet, xdrMax_InvokeFlagSet :: Integer
+xdrMin_InvokeFlagSet = 4
+xdrMax_InvokeFlagSet = 4
 

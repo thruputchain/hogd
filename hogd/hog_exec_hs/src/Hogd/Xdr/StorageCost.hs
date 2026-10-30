@@ -32,3 +32,7 @@ instance XdrType StorageCostModelXdr where
   cxsPut (StorageCostModelXdr x1 x2 x3 x4 x5 x6 x7 x8 x9) = cxsPut x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut x4 <> cxsPut x5 <> cxsPut x6 <> cxsPut x7 <> cxsPut x8 <> cxsPut x9
   cxsGet = StorageCostModelXdr <$> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_StorageCostModelXdr, xdrMax_StorageCostModelXdr :: Integer
+xdrMin_StorageCostModelXdr = 64
+xdrMax_StorageCostModelXdr = 64
+

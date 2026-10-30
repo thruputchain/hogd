@@ -325,6 +325,7 @@ data Env = Env
   -- ^ enum name -> resolved tags
   , envPatName :: M.Map (String, String) String
   -- ^ (enum, tag) -> Haskell pattern synonym name
+  , envDefs :: M.Map String Def
   }
 
 defName :: Def -> Maybe String
@@ -413,7 +414,8 @@ buildEnv files = env
         , n `S.member` reach n
         ]
     isSU = \case DefStruct _ _ -> True; DefUnion _ _ -> True; _ -> False
-    env = Env kinds consts fileOf recursive enumTags patNames
+    env = Env kinds consts fileOf recursive enumTags patNames defsMap
+    defsMap = M.fromList [(n, d) | (_, d) <- allDefs, Just n <- [defName d]]
 
 ------------------------------------------------------------------------------
 -- Naming
@@ -584,7 +586,69 @@ deriv :: String
 deriv = "  deriving (Eq, Ord, Show)"
 
 genDef :: Env -> Def -> Out
-genDef env = \case
+genDef env d = genDef' env d <> genBounds env d
+
+-- | Encoded-size bounds (x23's xdr_size_bounds) for non-recursive types.
+genBounds :: Env -> Def -> Out
+genBounds env d = case defName d of
+  Just n | not (isConstDef d) -> case typeBounds env S.empty (BNamed n) of
+    Just (lo, hi) ->
+      emit
+        [ "xdrMin_" ++ hsType n ++ ", xdrMax_" ++ hsType n ++ " :: Integer"
+        , "xdrMin_" ++ hsType n ++ " = " ++ show lo
+        , "xdrMax_" ++ hsType n ++ " = " ++ show hi
+        , ""
+        ]
+    Nothing -> mempty
+  _ -> mempty
+  where
+    isConstDef = \case DefConst _ _ -> True; _ -> False
+
+pad4 :: Integer -> Integer
+pad4 x = (x + 3) `div` 4 * 4
+
+typeBounds :: Env -> S.Set String -> Base -> Maybe (Integer, Integer)
+typeBounds env seen = \case
+  BInt -> Just (4, 4)
+  BUInt -> Just (4, 4)
+  BBool -> Just (4, 4)
+  BFloat -> Just (4, 4)
+  BHyper -> Just (8, 8)
+  BUHyper -> Just (8, 8)
+  BDouble -> Just (8, 8)
+  BNamed n
+    | n `S.member` seen -> Nothing
+    | otherwise -> case M.lookup n (envDefs env) of
+        Just (DefEnum _ _) -> Just (4, 4)
+        Just (DefTypedef dcl) -> declBounds env (S.insert n seen) dcl
+        Just (DefStruct _ ds) -> do
+          bs <- mapM (declBounds env (S.insert n seen)) ds
+          pure (sum (map fst bs), sum (map snd bs))
+        Just (DefUnion _ (UnionBody _ _ arms)) -> do
+          bs <- mapM (declBounds env (S.insert n seen) . armDecl) arms
+          pure (4 + minimum (map fst bs), 4 + maximum (map snd bs))
+        _ -> Nothing
+  _ -> Nothing
+
+declBounds :: Env -> S.Set String -> Decl -> Maybe (Integer, Integer)
+declBounds _ _ DVoid = Just (0, 0)
+declBounds env seen (Decl b _ q) = case (b, q) of
+  (BOpaque, QArray n) -> let k = pad4 (constVal env n) in Just (k, k)
+  (BOpaque, QVec bnd) -> Just (4, 4 + pad4 (vecBound bnd))
+  (BString, QVec bnd) -> Just (4, 4 + pad4 (vecBound bnd))
+  (_, QPlain) -> typeBounds env seen b
+  (_, QPtr) -> do (_, hi) <- typeBounds env seen b; pure (4, 4 + hi)
+  (_, QArray n) -> do
+    (lo, hi) <- typeBounds env seen b
+    let k = constVal env n
+    pure (k * lo, k * hi)
+  (_, QVec bnd) -> do (_, hi) <- typeBounds env seen b; pure (4, 4 + vecBound bnd * hi)
+  _ -> Nothing
+  where
+    vecBound = maybe 0xffffffff (constVal env)
+
+genDef' :: Env -> Def -> Out
+genDef' env = \case
   DefConst n v ->
     emit
       [ hsConst n ++ " :: Num a => a"

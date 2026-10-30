@@ -26,6 +26,10 @@ cxsPut_SysErr = cxsPut
 cxsGet_SysErr :: Get SysErr
 cxsGet_SysErr = cxsGet
 
+xdrMin_SysErr, xdrMax_SysErr :: Integer
+xdrMin_SysErr = 4
+xdrMax_SysErr = 4
+
 data SyscallExn = SyscallExn
   { call_number :: Word32
   , err_number :: SysErr
@@ -37,6 +41,10 @@ instance XdrType SyscallExn where
   xdrGet = SyscallExn <$> xdrGet <*> get_SysErr
   cxsPut (SyscallExn x1 x2) = cxsPut x1 <> cxsPut_SysErr x2
   cxsGet = SyscallExn <$> cxsGet <*> cxsGet_SysErr
+
+xdrMin_SyscallExn, xdrMax_SyscallExn :: Integer
+xdrMin_SyscallExn = 8
+xdrMax_SyscallExn = 8
 
 newtype HandlingErrorKind = HandlingErrorKind Int32
   deriving (Eq, Ord)
@@ -67,6 +75,10 @@ instance XdrType HandlingErrorKind where
 -- | Every declared value of 'HandlingErrorKind'.
 handlingErrorKind_values :: [HandlingErrorKind]
 handlingErrorKind_values = [KHandlingDecodingArgs, KHandlingEncodingSuccess, KHandlingEncodingException, KHandlingEncodingEvent]
+
+xdrMin_HandlingErrorKind, xdrMax_HandlingErrorKind :: Integer
+xdrMin_HandlingErrorKind = 4
+xdrMax_HandlingErrorKind = 4
 
 data HandlingError
   = HandlingError_kHandlingDecodingArgs
@@ -108,6 +120,10 @@ discriminant_HandlingError HandlingError_kHandlingEncodingSuccess = (HandlingErr
 discriminant_HandlingError HandlingError_kHandlingEncodingException = (HandlingErrorKind (2))
 discriminant_HandlingError HandlingError_kHandlingEncodingEvent = (HandlingErrorKind (3))
 
+xdrMin_HandlingError, xdrMax_HandlingError :: Integer
+xdrMin_HandlingError = 4
+xdrMax_HandlingError = 4
+
 newtype CallingErrorKind = CallingErrorKind Int32
   deriving (Eq, Ord)
 
@@ -137,6 +153,10 @@ instance XdrType CallingErrorKind where
 -- | Every declared value of 'CallingErrorKind'.
 callingErrorKind_values :: [CallingErrorKind]
 callingErrorKind_values = [KCallingDecodingSuccess, KCallingDecodingException, KCallingEncodingArgs, KCallingSyscall]
+
+xdrMin_CallingErrorKind, xdrMax_CallingErrorKind :: Integer
+xdrMin_CallingErrorKind = 4
+xdrMax_CallingErrorKind = 4
 
 data CallingError
   = CallingError_kCallingDecodingSuccess
@@ -178,6 +198,10 @@ discriminant_CallingError CallingError_kCallingDecodingException = (CallingError
 discriminant_CallingError CallingError_kCallingEncodingArgs = (CallingErrorKind (2))
 discriminant_CallingError (CallingError_syscall_err _) = (CallingErrorKind (3))
 
+xdrMin_CallingError, xdrMax_CallingError :: Integer
+xdrMin_CallingError = 4
+xdrMax_CallingError = 8
+
 newtype AuthTokenErrorKind = AuthTokenErrorKind Int32
   deriving (Eq, Ord)
 
@@ -204,6 +228,10 @@ instance XdrType AuthTokenErrorKind where
 -- | Every declared value of 'AuthTokenErrorKind'.
 authTokenErrorKind_values :: [AuthTokenErrorKind]
 authTokenErrorKind_values = [KAuthTokenMintEncodeFailure, KAuthTokenConsumeDecodeFailure, KAuthTokenReceiveAuthHandlesFailure]
+
+xdrMin_AuthTokenErrorKind, xdrMax_AuthTokenErrorKind :: Integer
+xdrMin_AuthTokenErrorKind = 4
+xdrMax_AuthTokenErrorKind = 4
 
 data AuthTokenError
   = AuthTokenError_kAuthTokenMintEncodeFailure
@@ -239,6 +267,10 @@ discriminant_AuthTokenError AuthTokenError_kAuthTokenMintEncodeFailure = (AuthTo
 discriminant_AuthTokenError AuthTokenError_kAuthTokenConsumeDecodeFailure = (AuthTokenErrorKind (1))
 discriminant_AuthTokenError AuthTokenError_kAuthTokenReceiveAuthHandlesFailure = (AuthTokenErrorKind (2))
 
+xdrMin_AuthTokenError, xdrMax_AuthTokenError :: Integer
+xdrMin_AuthTokenError = 4
+xdrMax_AuthTokenError = 4
+
 data LibraryExnBytestringWrongSize = LibraryExnBytestringWrongSize
   { expected :: Word32
   , found :: Word32
@@ -250,6 +282,10 @@ instance XdrType LibraryExnBytestringWrongSize where
   xdrGet = LibraryExnBytestringWrongSize <$> xdrGet <*> xdrGet
   cxsPut (LibraryExnBytestringWrongSize x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = LibraryExnBytestringWrongSize <$> cxsGet <*> cxsGet
+
+xdrMin_LibraryExnBytestringWrongSize, xdrMax_LibraryExnBytestringWrongSize :: Integer
+xdrMin_LibraryExnBytestringWrongSize = 8
+xdrMax_LibraryExnBytestringWrongSize = 8
 
 data LibraryExnStorageIndexOutOfBounds = LibraryExnStorageIndexOutOfBounds
   { len :: Word64
@@ -263,6 +299,10 @@ instance XdrType LibraryExnStorageIndexOutOfBounds where
   cxsPut (LibraryExnStorageIndexOutOfBounds x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = LibraryExnStorageIndexOutOfBounds <$> cxsGet <*> cxsGet
 
+xdrMin_LibraryExnStorageIndexOutOfBounds, xdrMax_LibraryExnStorageIndexOutOfBounds :: Integer
+xdrMin_LibraryExnStorageIndexOutOfBounds = 16
+xdrMax_LibraryExnStorageIndexOutOfBounds = 16
+
 data LibraryExnRetrocausalQueueEntryWrongSize = LibraryExnRetrocausalQueueEntryWrongSize
   { expected :: Word32
   , found :: Word32
@@ -274,6 +314,10 @@ instance XdrType LibraryExnRetrocausalQueueEntryWrongSize where
   xdrGet = LibraryExnRetrocausalQueueEntryWrongSize <$> xdrGet <*> xdrGet
   cxsPut (LibraryExnRetrocausalQueueEntryWrongSize x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = LibraryExnRetrocausalQueueEntryWrongSize <$> cxsGet <*> cxsGet
+
+xdrMin_LibraryExnRetrocausalQueueEntryWrongSize, xdrMax_LibraryExnRetrocausalQueueEntryWrongSize :: Integer
+xdrMin_LibraryExnRetrocausalQueueEntryWrongSize = 8
+xdrMax_LibraryExnRetrocausalQueueEntryWrongSize = 8
 
 newtype LibraryExnKind = LibraryExnKind Int32
   deriving (Eq, Ord)
@@ -334,6 +378,10 @@ instance XdrType LibraryExnKind where
 -- | Every declared value of 'LibraryExnKind'.
 libraryExnKind_values :: [LibraryExnKind]
 libraryExnKind_values = [KLibraryExnSyscall, KLibraryExnHandling, KLibraryExnCalling, KLibraryExnCalled, KLibraryExnAuthToken, KLibraryExnBytestringWrongSize, KLibraryExnNonNegativeIntUnderflow, KLibraryExnNonNegativeIntOverflow, KLibraryExnStorageSerialization, KLibraryExnStorageIndexOutOfBounds, KLibraryExnStorageKeypathOverflow, KLibraryExnRetrocausalQueueEntryWrongSize, KLibraryExnCapacityConstraintAlreadyWritten, KLibraryExnUnknownMethod]
+
+xdrMin_LibraryExnKind, xdrMax_LibraryExnKind :: Integer
+xdrMin_LibraryExnKind = 4
+xdrMax_LibraryExnKind = 4
 
 data LibraryExn
   = LibraryExn_syscall_exn SyscallExn
@@ -434,4 +482,8 @@ discriminant_LibraryExn LibraryExn_kLibraryExnStorageKeypathOverflow = (LibraryE
 discriminant_LibraryExn (LibraryExn_entry_wrong_size _) = (LibraryExnKind (11))
 discriminant_LibraryExn LibraryExn_kLibraryExnCapacityConstraintAlreadyWritten = (LibraryExnKind (12))
 discriminant_LibraryExn LibraryExn_kLibraryExnUnknownMethod = (LibraryExnKind (13))
+
+xdrMin_LibraryExn, xdrMax_LibraryExn :: Integer
+xdrMin_LibraryExn = 4
+xdrMax_LibraryExn = 20
 

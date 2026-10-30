@@ -48,6 +48,10 @@ instance XdrType InvokeErrorCode where
 invokeErrorCode_values :: [InvokeErrorCode]
 invokeErrorCode_values = [InvokeErrorCode_None, Deterministic, InvokeErrorCode_OutOfGas, InvokeErrorCode_Unrecoverable, InvokeErrorCode_ValidationFailure, InvokeErrorCode_Abandon]
 
+xdrMin_InvokeErrorCode, xdrMax_InvokeErrorCode :: Integer
+xdrMin_InvokeErrorCode = 4
+xdrMax_InvokeErrorCode = 4
+
 newtype HostFnErrorCode = HostFnErrorCode Int32
   deriving (Eq, Ord)
 
@@ -87,6 +91,10 @@ instance XdrType HostFnErrorCode where
 hostFnErrorCode_values :: [HostFnErrorCode]
 hostFnErrorCode_values = [NoneOrRecoverable, HostFnErrorCode_OutOfGas, HostFnErrorCode_Unrecoverable, HostFnErrorCode_Return, Exit, HostFnErrorCode_ValidationFailure, HostFnErrorCode_Abandon]
 
+xdrMin_HostFnErrorCode, xdrMax_HostFnErrorCode :: Integer
+xdrMin_HostFnErrorCode = 4
+xdrMax_HostFnErrorCode = 4
+
 newtype SystemErrorCode = SystemErrorCode Int32
   deriving (Eq, Ord)
 
@@ -113,4 +121,8 @@ instance XdrType SystemErrorCode where
 -- | Every declared value of 'SystemErrorCode'.
 systemErrorCode_values :: [SystemErrorCode]
 systemErrorCode_values = [SystemErrorCode_Unrecoverable, SystemErrorCode_Abandon, SystemErrorCode_ValidationFailure]
+
+xdrMin_SystemErrorCode, xdrMax_SystemErrorCode :: Integer
+xdrMin_SystemErrorCode = 4
+xdrMax_SystemErrorCode = 4
 

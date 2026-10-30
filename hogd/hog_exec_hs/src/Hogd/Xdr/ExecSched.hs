@@ -54,6 +54,10 @@ discriminant_ExecProposeResult :: ExecProposeResult -> ExecResult
 discriminant_ExecProposeResult (ExecProposeResult_proposal_data d _) = d
 discriminant_ExecProposeResult (ExecProposeResult_default d) = d
 
+xdrMin_ExecProposeResult, xdrMax_ExecProposeResult :: Integer
+xdrMin_ExecProposeResult = 4
+xdrMax_ExecProposeResult = 4299227152
+
 type ExecProposeBatchResult = [ExecProposeResult]
 
 put_ExecProposeBatchResult :: ExecProposeBatchResult -> Builder
@@ -68,6 +72,10 @@ cxsPut_ExecProposeBatchResult = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_ExecProposeBatchResult :: Get ExecProposeBatchResult
 cxsGet_ExecProposeBatchResult = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_ExecProposeBatchResult, xdrMax_ExecProposeBatchResult :: Integer
+xdrMin_ExecProposeBatchResult = 4
+xdrMax_ExecProposeBatchResult = 18465040011615993844
+
 type ExecValidateBatchResult = [ExecResult]
 
 put_ExecValidateBatchResult :: ExecValidateBatchResult -> Builder
@@ -81,6 +89,10 @@ cxsPut_ExecValidateBatchResult = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_ExecValidateBatchResult :: Get ExecValidateBatchResult
 cxsGet_ExecValidateBatchResult = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_ExecValidateBatchResult, xdrMax_ExecValidateBatchResult :: Integer
+xdrMin_ExecValidateBatchResult = 4
+xdrMax_ExecValidateBatchResult = 17179869184
 
 executorSched_program :: Word32
 executorSched_program = 2129107353

@@ -28,6 +28,10 @@ instance XdrType ProposalTxs where
   cxsPut (ProposalTxs x1 x2 x3) = cxsPut x1 <> cxsPut_ParallelSignedTransactionHashBatch x2 <> cxsPut_ParallelNondeterministicProposalDataBatch x3
   cxsGet = ProposalTxs <$> cxsGet <*> cxsGet_ParallelSignedTransactionHashBatch <*> cxsGet_ParallelNondeterministicProposalDataBatch
 
+xdrMin_ProposalTxs, xdrMax_ProposalTxs :: Integer
+xdrMin_ProposalTxs = 28
+xdrMax_ProposalTxs = 77309411340
+
 type ProposalTxsHash = SHA256Hash
 
 put_ProposalTxsHash :: ProposalTxsHash -> Builder
@@ -42,6 +46,10 @@ cxsPut_ProposalTxsHash = cxsPut_SHA256Hash
 cxsGet_ProposalTxsHash :: Get ProposalTxsHash
 cxsGet_ProposalTxsHash = cxsGet_SHA256Hash
 
+xdrMin_ProposalTxsHash, xdrMax_ProposalTxsHash :: Integer
+xdrMin_ProposalTxsHash = 32
+xdrMax_ProposalTxsHash = 32
+
 data Proposal = Proposal
   { header :: ProposalHeader
   , transactions :: ProposalTxs
@@ -53,6 +61,10 @@ instance XdrType Proposal where
   xdrGet = Proposal <$> xdrGet <*> xdrGet
   cxsPut (Proposal x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = Proposal <$> cxsGet <*> cxsGet
+
+xdrMin_Proposal, xdrMax_Proposal :: Integer
+xdrMin_Proposal = 240
+xdrMax_Proposal = 77309411552
 
 type OptProposal = Maybe Proposal
 
@@ -68,6 +80,10 @@ cxsPut_OptProposal = (cxsPutOptional cxsPut)
 cxsGet_OptProposal :: Get OptProposal
 cxsGet_OptProposal = (cxsGetOptional cxsGet)
 
+xdrMin_OptProposal, xdrMax_OptProposal :: Integer
+xdrMin_OptProposal = 4
+xdrMax_OptProposal = 77309411556
+
 data PrevProposalSummary = PrevProposalSummary
   { value_hash :: ConsensusValueHash
   }
@@ -78,4 +94,8 @@ instance XdrType PrevProposalSummary where
   xdrGet = PrevProposalSummary <$> get_ConsensusValueHash
   cxsPut (PrevProposalSummary x1) = cxsPut_ConsensusValueHash x1
   cxsGet = PrevProposalSummary <$> cxsGet_ConsensusValueHash
+
+xdrMin_PrevProposalSummary, xdrMax_PrevProposalSummary :: Integer
+xdrMin_PrevProposalSummary = 32
+xdrMax_PrevProposalSummary = 32
 

@@ -38,6 +38,10 @@ cxsPut_Topic = (cxsPutFixedOpaque 32)
 cxsGet_Topic :: Get Topic
 cxsGet_Topic = (cxsGetFixedOpaque 32)
 
+xdrMin_Topic, xdrMax_Topic :: Integer
+xdrMin_Topic = 32
+xdrMax_Topic = 32
+
 data TxEmittedEvent = TxEmittedEvent
   { contract_address :: ContractAddress
   , num_topics :: Word32
@@ -50,6 +54,10 @@ instance XdrType TxEmittedEvent where
   xdrGet = TxEmittedEvent <$> get_ContractAddress <*> xdrGet <*> (getVarOpaque 1024)
   cxsPut (TxEmittedEvent x1 x2 x3) = cxsPut_ContractAddress x1 <> cxsPut x2 <> (cxsPutVarOpaque 1024) x3
   cxsGet = TxEmittedEvent <$> cxsGet_ContractAddress <*> cxsGet <*> (cxsGetVarOpaque 1024)
+
+xdrMin_TxEmittedEvent, xdrMax_TxEmittedEvent :: Integer
+xdrMin_TxEmittedEvent = 40
+xdrMax_TxEmittedEvent = 1064
 
 data TxEventLog = TxEventLog
   { tx_hash :: TransactionHash
@@ -66,6 +74,10 @@ instance XdrType TxEventLog where
   cxsPut (TxEventLog x1 x2 x3 x4 x5) = cxsPut_TransactionHash x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut_GasAmount x4 <> (cxsPutVarArray 1000 cxsPut) x5
   cxsGet = TxEventLog <$> cxsGet_TransactionHash <*> cxsGet <*> cxsGet <*> cxsGet_GasAmount <*> (cxsGetVarArray 1000 cxsGet)
 
+xdrMin_TxEventLog, xdrMax_TxEventLog :: Integer
+xdrMin_TxEventLog = 52
+xdrMax_TxEventLog = 4296031352
+
 data IdentifiedEvent = IdentifiedEvent
   { tx_hash :: TransactionHash
   , block_height :: BlockHeight
@@ -79,4 +91,8 @@ instance XdrType IdentifiedEvent where
   xdrGet = IdentifiedEvent <$> get_TransactionHash <*> get_BlockHeight <*> xdrGet <*> xdrGet
   cxsPut (IdentifiedEvent x1 x2 x3 x4) = cxsPut_TransactionHash x1 <> cxsPut_BlockHeight x2 <> cxsPut x3 <> cxsPut x4
   cxsGet = IdentifiedEvent <$> cxsGet_TransactionHash <*> cxsGet_BlockHeight <*> cxsGet <*> cxsGet
+
+xdrMin_IdentifiedEvent, xdrMax_IdentifiedEvent :: Integer
+xdrMin_IdentifiedEvent = 84
+xdrMax_IdentifiedEvent = 1108
 

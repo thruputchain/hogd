@@ -33,6 +33,10 @@ instance XdrType ViewGatewayPayload where
   cxsPut (ViewGatewayPayload x1 x2 x3 x4) = cxsPut_BlockHeight x1 <> cxsPut x2 <> cxsPut_GasAmount x3 <> (cxsPutVarArray 0xffffffff cxsPut) x4
   cxsGet = ViewGatewayPayload <$> cxsGet_BlockHeight <*> cxsGet <*> cxsGet_GasAmount <*> (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_ViewGatewayPayload, xdrMax_ViewGatewayPayload :: Integer
+xdrMin_ViewGatewayPayload = 24
+xdrMax_ViewGatewayPayload = 4574140169204
+
 newtype ViewGatewayOutcome = ViewGatewayOutcome Int32
   deriving (Eq, Ord)
 
@@ -62,6 +66,10 @@ instance XdrType ViewGatewayOutcome where
 -- | Every declared value of 'ViewGatewayOutcome'.
 viewGatewayOutcome_values :: [ViewGatewayOutcome]
 viewGatewayOutcome_values = [ViewGatewayOk, ViewGatewayAbandoned, ViewGatewayInternalError, ViewGatewayInvalidInput]
+
+xdrMin_ViewGatewayOutcome, xdrMax_ViewGatewayOutcome :: Integer
+xdrMin_ViewGatewayOutcome = 4
+xdrMax_ViewGatewayOutcome = 4
 
 data ViewGatewayResult
   = ViewGatewayResult_payload ViewGatewayPayload
@@ -111,6 +119,10 @@ discriminant_ViewGatewayResult ViewGatewayResult_ViewGatewayInternalError = (Vie
 discriminant_ViewGatewayResult (ViewGatewayResult_error_code _) = (ViewGatewayOutcome (3))
 discriminant_ViewGatewayResult (ViewGatewayResult_default d) = d
 
+xdrMin_ViewGatewayResult, xdrMax_ViewGatewayResult :: Integer
+xdrMin_ViewGatewayResult = 4
+xdrMax_ViewGatewayResult = 4574140169208
+
 newtype ViewGatewayIntroOutcome = ViewGatewayIntroOutcome Int32
   deriving (Eq, Ord)
 
@@ -135,6 +147,10 @@ instance XdrType ViewGatewayIntroOutcome where
 viewGatewayIntroOutcome_values :: [ViewGatewayIntroOutcome]
 viewGatewayIntroOutcome_values = [ViewGatewayIntroSuccess, ViewGatewayIntroMismatchedProtocol]
 
+xdrMin_ViewGatewayIntroOutcome, xdrMax_ViewGatewayIntroOutcome :: Integer
+xdrMin_ViewGatewayIntroOutcome = 4
+xdrMax_ViewGatewayIntroOutcome = 4
+
 data ViewGatewayBatchQuery = ViewGatewayBatchQuery
   { calls :: [TransactionViewQuery]
   , min_height :: (Maybe BlockHeight)
@@ -149,6 +165,10 @@ instance XdrType ViewGatewayBatchQuery where
   cxsPut (ViewGatewayBatchQuery x1 x2 x3 x4) = (cxsPutVarArray 0xffffffff cxsPut) x1 <> (cxsPutOptional cxsPut_BlockHeight) x2 <> cxsPut x3 <> cxsPut x4
   cxsGet = ViewGatewayBatchQuery <$> (cxsGetVarArray 0xffffffff cxsGet) <*> (cxsGetOptional cxsGet_BlockHeight) <*> cxsGet <*> cxsGet
 
+xdrMin_ViewGatewayBatchQuery, xdrMax_ViewGatewayBatchQuery :: Integer
+xdrMin_ViewGatewayBatchQuery = 16
+xdrMax_ViewGatewayBatchQuery = 79228162569604570381608288144
+
 data ViewGatewayBatchPayload = ViewGatewayBatchPayload
   { height :: BlockHeight
   , results :: [TransactionViewResult]
@@ -161,6 +181,10 @@ instance XdrType ViewGatewayBatchPayload where
   cxsPut (ViewGatewayBatchPayload x1 x2) = cxsPut_BlockHeight x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2
   cxsGet = ViewGatewayBatchPayload <$> cxsGet_BlockHeight <*> (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_ViewGatewayBatchPayload, xdrMax_ViewGatewayBatchPayload :: Integer
+xdrMin_ViewGatewayBatchPayload = 12
+xdrMax_ViewGatewayBatchPayload = 19645782429442586444832
+
 data ViewGatewayHeightUnavailable = ViewGatewayHeightUnavailable
   { requested :: BlockHeight
   , observed :: BlockHeight
@@ -172,6 +196,10 @@ instance XdrType ViewGatewayHeightUnavailable where
   xdrGet = ViewGatewayHeightUnavailable <$> get_BlockHeight <*> get_BlockHeight
   cxsPut (ViewGatewayHeightUnavailable x1 x2) = cxsPut_BlockHeight x1 <> cxsPut_BlockHeight x2
   cxsGet = ViewGatewayHeightUnavailable <$> cxsGet_BlockHeight <*> cxsGet_BlockHeight
+
+xdrMin_ViewGatewayHeightUnavailable, xdrMax_ViewGatewayHeightUnavailable :: Integer
+xdrMin_ViewGatewayHeightUnavailable = 16
+xdrMax_ViewGatewayHeightUnavailable = 16
 
 newtype ViewGatewayBatchOutcome = ViewGatewayBatchOutcome Int32
   deriving (Eq, Ord)
@@ -212,6 +240,10 @@ instance XdrType ViewGatewayBatchOutcome where
 viewGatewayBatchOutcome_values :: [ViewGatewayBatchOutcome]
 viewGatewayBatchOutcome_values = [ViewGatewayBatchOk, ViewGatewayBatchInvalidRequest, ViewGatewayBatchHeightUnavailable, ViewGatewayBatchAbandoned, ViewGatewayBatchDeadlineExceeded, ViewGatewayBatchResponseTooLarge, ViewGatewayBatchInternalError]
 
+xdrMin_ViewGatewayBatchOutcome, xdrMax_ViewGatewayBatchOutcome :: Integer
+xdrMin_ViewGatewayBatchOutcome = 4
+xdrMax_ViewGatewayBatchOutcome = 4
+
 data ViewGatewayBatchResult
   = ViewGatewayBatchResult_payload ViewGatewayBatchPayload
   | ViewGatewayBatchResult_height_unavailable ViewGatewayHeightUnavailable
@@ -247,6 +279,10 @@ discriminant_ViewGatewayBatchResult :: ViewGatewayBatchResult -> ViewGatewayBatc
 discriminant_ViewGatewayBatchResult (ViewGatewayBatchResult_payload _) = (ViewGatewayBatchOutcome (0))
 discriminant_ViewGatewayBatchResult (ViewGatewayBatchResult_height_unavailable _) = (ViewGatewayBatchOutcome (2))
 discriminant_ViewGatewayBatchResult (ViewGatewayBatchResult_default d) = d
+
+xdrMin_ViewGatewayBatchResult, xdrMax_ViewGatewayBatchResult :: Integer
+xdrMin_ViewGatewayBatchResult = 4
+xdrMax_ViewGatewayBatchResult = 19645782429442586444836
 
 viewGateway_program :: Word32
 viewGateway_program = 1447515993

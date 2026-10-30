@@ -28,6 +28,10 @@ instance XdrType ContractBlob where
   cxsPut (ContractBlob x1) = (cxsPutVarOpaque 0xffffffff) x1
   cxsGet = ContractBlob <$> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_ContractBlob, xdrMax_ContractBlob :: Integer
+xdrMin_ContractBlob = 4
+xdrMax_ContractBlob = 4294967300
+
 newtype ContractType = ContractType Int32
   deriving (Eq, Ord)
 
@@ -54,6 +58,10 @@ instance XdrType ContractType where
 -- | Every declared value of 'ContractType'.
 contractType_values :: [ContractType]
 contractType_values = [KNative, KMockTest, KRv32]
+
+xdrMin_ContractType, xdrMax_ContractType :: Integer
+xdrMin_ContractType = 4
+xdrMax_ContractType = 4
 
 data Contract
   = Contract_native_contract_id HogexecPrecompiledNativeContracts
@@ -89,6 +97,10 @@ discriminant_Contract (Contract_native_contract_id _) = (ContractType (1))
 discriminant_Contract (Contract_mock_contract_id _) = (ContractType (2))
 discriminant_Contract (Contract_rv32_contract _) = (ContractType (3))
 
+xdrMin_Contract, xdrMax_Contract :: Integer
+xdrMin_Contract = 8
+xdrMax_Contract = 4294967304
+
 data ContractDeploymentHashPreimage = ContractDeploymentHashPreimage
   { deployer_address :: ContractAddress
   , nonce :: SHA256Hash
@@ -101,6 +113,10 @@ instance XdrType ContractDeploymentHashPreimage where
   xdrGet = ContractDeploymentHashPreimage <$> get_ContractAddress <*> get_SHA256Hash <*> get_SHA256Hash
   cxsPut (ContractDeploymentHashPreimage x1 x2 x3) = cxsPut_ContractAddress x1 <> cxsPut_SHA256Hash x2 <> cxsPut_SHA256Hash x3
   cxsGet = ContractDeploymentHashPreimage <$> cxsGet_ContractAddress <*> cxsGet_SHA256Hash <*> cxsGet_SHA256Hash
+
+xdrMin_ContractDeploymentHashPreimage, xdrMax_ContractDeploymentHashPreimage :: Integer
+xdrMin_ContractDeploymentHashPreimage = 96
+xdrMax_ContractDeploymentHashPreimage = 96
 
 type ContractEntrypointID = ByteString
 
@@ -116,6 +132,10 @@ cxsPut_ContractEntrypointID = (cxsPutFixedOpaque 8)
 cxsGet_ContractEntrypointID :: Get ContractEntrypointID
 cxsGet_ContractEntrypointID = (cxsGetFixedOpaque 8)
 
+xdrMin_ContractEntrypointID, xdrMax_ContractEntrypointID :: Integer
+xdrMin_ContractEntrypointID = 8
+xdrMax_ContractEntrypointID = 8
+
 data DeployedContractHash = DeployedContractHash
   { hash :: SHA256Hash
   , contract_size :: Word32
@@ -128,4 +148,8 @@ instance XdrType DeployedContractHash where
   xdrGet = DeployedContractHash <$> get_SHA256Hash <*> xdrGet <*> xdrGet
   cxsPut (DeployedContractHash x1 x2 x3) = cxsPut_SHA256Hash x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = DeployedContractHash <$> cxsGet_SHA256Hash <*> cxsGet <*> cxsGet
+
+xdrMin_DeployedContractHash, xdrMax_DeployedContractHash :: Integer
+xdrMin_DeployedContractHash = 40
+xdrMax_DeployedContractHash = 40
 

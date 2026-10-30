@@ -28,6 +28,10 @@ instance XdrType BlockQueryRecord where
   cxsPut (BlockQueryRecord x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = BlockQueryRecord <$> cxsGet <*> cxsGet
 
+xdrMin_BlockQueryRecord, xdrMax_BlockQueryRecord :: Integer
+xdrMin_BlockQueryRecord = 296
+xdrMax_BlockQueryRecord = 1088
+
 data BlockQueryCursor = BlockQueryCursor
   { format :: Word32
   , height :: BlockHeight
@@ -42,4 +46,8 @@ instance XdrType BlockQueryCursor where
   xdrGet = BlockQueryCursor <$> xdrGet <*> get_BlockHeight <*> get_ConsensusValueHash <*> xdrGet <*> get_TransactionHash
   cxsPut (BlockQueryCursor x1 x2 x3 x4 x5) = cxsPut x1 <> cxsPut_BlockHeight x2 <> cxsPut_ConsensusValueHash x3 <> cxsPut x4 <> cxsPut_TransactionHash x5
   cxsGet = BlockQueryCursor <$> cxsGet <*> cxsGet_BlockHeight <*> cxsGet_ConsensusValueHash <*> cxsGet <*> cxsGet_TransactionHash
+
+xdrMin_BlockQueryCursor, xdrMax_BlockQueryCursor :: Integer
+xdrMin_BlockQueryCursor = 80
+xdrMax_BlockQueryCursor = 80
 

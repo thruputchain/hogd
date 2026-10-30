@@ -114,6 +114,10 @@ discriminant_EventBlockResult :: EventBlockResult -> RPCError
 discriminant_EventBlockResult (EventBlockResult_root_hash _) = (RPCError (0))
 discriminant_EventBlockResult (EventBlockResult_default d) = d
 
+xdrMin_EventBlockResult, xdrMax_EventBlockResult :: Integer
+xdrMin_EventBlockResult = 4
+xdrMax_EventBlockResult = 36
+
 eventSched_program :: Word32
 eventSched_program = 2326270502
 

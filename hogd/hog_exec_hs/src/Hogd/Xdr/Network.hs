@@ -26,6 +26,10 @@ cxsPut_ServerAddress = (cxsPutVarOpaque 0xffffffff)
 cxsGet_ServerAddress :: Get ServerAddress
 cxsGet_ServerAddress = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_ServerAddress, xdrMax_ServerAddress :: Integer
+xdrMin_ServerAddress = 4
+xdrMax_ServerAddress = 4294967300
+
 type UPID = ByteString
 
 put_UPID :: UPID -> Builder
@@ -40,6 +44,10 @@ cxsPut_UPID = (cxsPutFixedOpaque 8)
 cxsGet_UPID :: Get UPID
 cxsGet_UPID = (cxsGetFixedOpaque 8)
 
+xdrMin_UPID, xdrMax_UPID :: Integer
+xdrMin_UPID = 8
+xdrMax_UPID = 8
+
 type ProtocolCommit = ByteString
 
 put_ProtocolCommit :: ProtocolCommit -> Builder
@@ -53,4 +61,8 @@ cxsPut_ProtocolCommit = (cxsPutFixedOpaque 20)
 
 cxsGet_ProtocolCommit :: Get ProtocolCommit
 cxsGet_ProtocolCommit = (cxsGetFixedOpaque 20)
+
+xdrMin_ProtocolCommit, xdrMax_ProtocolCommit :: Integer
+xdrMin_ProtocolCommit = 20
+xdrMax_ProtocolCommit = 20
 

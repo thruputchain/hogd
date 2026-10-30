@@ -51,6 +51,10 @@ instance XdrType CoordinatorRegistrationOutcome where
 coordinatorRegistrationOutcome_values :: [CoordinatorRegistrationOutcome]
 coordinatorRegistrationOutcome_values = [CoordinatorRegistrationOK, CoordinatorRegistrationInvalidProtocol, CoordinatorRegistrationAlreadyRegistered]
 
+xdrMin_CoordinatorRegistrationOutcome, xdrMax_CoordinatorRegistrationOutcome :: Integer
+xdrMin_CoordinatorRegistrationOutcome = 4
+xdrMax_CoordinatorRegistrationOutcome = 4
+
 data CoordCard = CoordCard
   { protocol :: ProtocolCommit
   , address_for_sched :: ServerAddress
@@ -62,6 +66,10 @@ instance XdrType CoordCard where
   xdrGet = CoordCard <$> get_ProtocolCommit <*> get_ServerAddress
   cxsPut (CoordCard x1 x2) = cxsPut_ProtocolCommit x1 <> cxsPut_ServerAddress x2
   cxsGet = CoordCard <$> cxsGet_ProtocolCommit <*> cxsGet_ServerAddress
+
+xdrMin_CoordCard, xdrMax_CoordCard :: Integer
+xdrMin_CoordCard = 24
+xdrMax_CoordCard = 4294967320
 
 newtype SchedulerProposalOutcome = SchedulerProposalOutcome Int32
   deriving (Eq, Ord)
@@ -87,6 +95,10 @@ instance XdrType SchedulerProposalOutcome where
 schedulerProposalOutcome_values :: [SchedulerProposalOutcome]
 schedulerProposalOutcome_values = [SchedulerProposalOK, SchedulerProposalError]
 
+xdrMin_SchedulerProposalOutcome, xdrMax_SchedulerProposalOutcome :: Integer
+xdrMin_SchedulerProposalOutcome = 4
+xdrMax_SchedulerProposalOutcome = 4
+
 data SchedulerProposedBlock = SchedulerProposedBlock
   { block_id :: BlockID
   , txs :: ParallelSignedTransactionBatch
@@ -99,6 +111,10 @@ instance XdrType SchedulerProposedBlock where
   xdrGet = SchedulerProposedBlock <$> get_BlockID <*> get_ParallelSignedTransactionBatch <*> xdrGet
   cxsPut (SchedulerProposedBlock x1 x2 x3) = cxsPut_BlockID x1 <> cxsPut_ParallelSignedTransactionBatch x2 <> cxsPut x3
   cxsGet = SchedulerProposedBlock <$> cxsGet_BlockID <*> cxsGet_ParallelSignedTransactionBatch <*> cxsGet
+
+xdrMin_SchedulerProposedBlock, xdrMax_SchedulerProposedBlock :: Integer
+xdrMin_SchedulerProposedBlock = 260
+xdrMax_SchedulerProposedBlock = 115964117228
 
 data SchedulerProposalResult
   = SchedulerProposalResult_proposed_block SchedulerProposedBlock
@@ -127,6 +143,10 @@ instance XdrType SchedulerProposalResult where
 discriminant_SchedulerProposalResult :: SchedulerProposalResult -> SchedulerProposalOutcome
 discriminant_SchedulerProposalResult (SchedulerProposalResult_proposed_block _) = (SchedulerProposalOutcome (0))
 discriminant_SchedulerProposalResult SchedulerProposalResult_SchedulerProposalError = (SchedulerProposalOutcome (1))
+
+xdrMin_SchedulerProposalResult, xdrMax_SchedulerProposalResult :: Integer
+xdrMin_SchedulerProposalResult = 4
+xdrMax_SchedulerProposalResult = 115964117232
 
 newtype SchedulerValidationOutcome = SchedulerValidationOutcome Int32
   deriving (Eq, Ord)
@@ -170,6 +190,10 @@ instance XdrType SchedulerValidationOutcome where
 schedulerValidationOutcome_values :: [SchedulerValidationOutcome]
 schedulerValidationOutcome_values = [SchedulerValidationOK, SchedulerValidationInvalid, SchedulerValidationMissingTxs, SchedulerValidationDbFailed, SchedulerValidationExecutorFailed, SchedulerValidationTooLateToValidate, SchedulerValidationUnknownParentBlock, SchedulerValidationMalformed]
 
+xdrMin_SchedulerValidationOutcome, xdrMax_SchedulerValidationOutcome :: Integer
+xdrMin_SchedulerValidationOutcome = 4
+xdrMax_SchedulerValidationOutcome = 4
+
 data SchedulerValidationBlock = SchedulerValidationBlock
   { block_id :: BlockID
   , signed_transactions :: ParallelSignedTransactionBatch
@@ -181,6 +205,10 @@ instance XdrType SchedulerValidationBlock where
   xdrGet = SchedulerValidationBlock <$> get_BlockID <*> get_ParallelSignedTransactionBatch
   cxsPut (SchedulerValidationBlock x1 x2) = cxsPut_BlockID x1 <> cxsPut_ParallelSignedTransactionBatch x2
   cxsGet = SchedulerValidationBlock <$> cxsGet_BlockID <*> cxsGet_ParallelSignedTransactionBatch
+
+xdrMin_SchedulerValidationBlock, xdrMax_SchedulerValidationBlock :: Integer
+xdrMin_SchedulerValidationBlock = 20
+xdrMax_SchedulerValidationBlock = 38654705676
 
 data SchedulerValidationResult
   = SchedulerValidationResult_block SchedulerValidationBlock
@@ -230,6 +258,10 @@ discriminant_SchedulerValidationResult (SchedulerValidationResult_block _) = (Sc
 discriminant_SchedulerValidationResult (SchedulerValidationResult_missing_signed_tx_hashes _) = (SchedulerValidationOutcome (2))
 discriminant_SchedulerValidationResult (SchedulerValidationResult_SchedulerValidationDbFailed d) = d
 
+xdrMin_SchedulerValidationResult, xdrMax_SchedulerValidationResult :: Integer
+xdrMin_SchedulerValidationResult = 4
+xdrMax_SchedulerValidationResult = 137438953448
+
 newtype SchedulerCommitOutcome = SchedulerCommitOutcome Int32
   deriving (Eq, Ord)
 
@@ -260,6 +292,10 @@ instance XdrType SchedulerCommitOutcome where
 schedulerCommitOutcome_values :: [SchedulerCommitOutcome]
 schedulerCommitOutcome_values = [SchedulerCommitOK, SchedulerCommitBlockNotFound, SchedulerCommitInvalidConsensusValue, SchedulerConcurrentCommit]
 
+xdrMin_SchedulerCommitOutcome, xdrMax_SchedulerCommitOutcome :: Integer
+xdrMin_SchedulerCommitOutcome = 4
+xdrMax_SchedulerCommitOutcome = 4
+
 newtype SchedulerGetTipOutcome = SchedulerGetTipOutcome Int32
   deriving (Eq, Ord)
 
@@ -283,6 +319,10 @@ instance XdrType SchedulerGetTipOutcome where
 -- | Every declared value of 'SchedulerGetTipOutcome'.
 schedulerGetTipOutcome_values :: [SchedulerGetTipOutcome]
 schedulerGetTipOutcome_values = [SchedulerGetTipOK, SchedulerGetTipNoGenesisBlock]
+
+xdrMin_SchedulerGetTipOutcome, xdrMax_SchedulerGetTipOutcome :: Integer
+xdrMin_SchedulerGetTipOutcome = 4
+xdrMax_SchedulerGetTipOutcome = 4
 
 data SchedulerGetTipResult
   = SchedulerGetTipResult_db_tip DbTip
@@ -312,6 +352,10 @@ discriminant_SchedulerGetTipResult :: SchedulerGetTipResult -> SchedulerGetTipOu
 discriminant_SchedulerGetTipResult (SchedulerGetTipResult_db_tip _) = (SchedulerGetTipOutcome (0))
 discriminant_SchedulerGetTipResult SchedulerGetTipResult_SchedulerGetTipNoGenesisBlock = (SchedulerGetTipOutcome (1))
 
+xdrMin_SchedulerGetTipResult, xdrMax_SchedulerGetTipResult :: Integer
+xdrMin_SchedulerGetTipResult = 4
+xdrMax_SchedulerGetTipResult = 51539610728
+
 data GenesisCeremonyRequest = GenesisCeremonyRequest
   { expected_parent_height :: BlockHeight
   , expected_parent_value_hash :: ConsensusValueHash
@@ -325,6 +369,10 @@ instance XdrType GenesisCeremonyRequest where
   xdrGet = GenesisCeremonyRequest <$> get_BlockHeight <*> get_ConsensusValueHash <*> xdrGet <*> get_ParallelSignedTransactionBatch
   cxsPut (GenesisCeremonyRequest x1 x2 x3 x4) = cxsPut_BlockHeight x1 <> cxsPut_ConsensusValueHash x2 <> cxsPut x3 <> cxsPut_ParallelSignedTransactionBatch x4
   cxsGet = GenesisCeremonyRequest <$> cxsGet_BlockHeight <*> cxsGet_ConsensusValueHash <*> cxsGet <*> cxsGet_ParallelSignedTransactionBatch
+
+xdrMin_GenesisCeremonyRequest, xdrMax_GenesisCeremonyRequest :: Integer
+xdrMin_GenesisCeremonyRequest = 96
+xdrMax_GenesisCeremonyRequest = 38654705752
 
 newtype GenesisCeremonyOutcome = GenesisCeremonyOutcome Int32
   deriving (Eq, Ord)
@@ -359,6 +407,10 @@ instance XdrType GenesisCeremonyOutcome where
 genesisCeremonyOutcome_values :: [GenesisCeremonyOutcome]
 genesisCeremonyOutcome_values = [GenesisCeremonyCommitted, GenesisCeremonyParentMismatch, GenesisCeremonyBatchMismatch, GenesisCeremonyInvalidTransaction, GenesisCeremonyExecutionFailed]
 
+xdrMin_GenesisCeremonyOutcome, xdrMax_GenesisCeremonyOutcome :: Integer
+xdrMin_GenesisCeremonyOutcome = 4
+xdrMax_GenesisCeremonyOutcome = 4
+
 data GenesisCeremonyCommit = GenesisCeremonyCommit
   { db_tip :: DbTip
   , proposal_txs :: ProposalTxs
@@ -370,6 +422,10 @@ instance XdrType GenesisCeremonyCommit where
   xdrGet = GenesisCeremonyCommit <$> xdrGet <*> xdrGet
   cxsPut (GenesisCeremonyCommit x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = GenesisCeremonyCommit <$> cxsGet <*> cxsGet
+
+xdrMin_GenesisCeremonyCommit, xdrMax_GenesisCeremonyCommit :: Integer
+xdrMin_GenesisCeremonyCommit = 2420
+xdrMax_GenesisCeremonyCommit = 128849022064
 
 newtype SchedulerTransactionStatus = SchedulerTransactionStatus Int32
   deriving (Eq, Ord)
@@ -404,6 +460,10 @@ instance XdrType SchedulerTransactionStatus where
 schedulerTransactionStatus_values :: [SchedulerTransactionStatus]
 schedulerTransactionStatus_values = [SchedulerTransactionNotFound, SchedulerTransactionPending, SchedulerTransactionSucceeded, SchedulerTransactionRetry, SchedulerTransactionDropped]
 
+xdrMin_SchedulerTransactionStatus, xdrMax_SchedulerTransactionStatus :: Integer
+xdrMin_SchedulerTransactionStatus = 4
+xdrMax_SchedulerTransactionStatus = 4
+
 newtype SchedulerTransactionErrorSource = SchedulerTransactionErrorSource Int32
   deriving (Eq, Ord)
 
@@ -433,6 +493,10 @@ instance XdrType SchedulerTransactionErrorSource where
 -- | Every declared value of 'SchedulerTransactionErrorSource'.
 schedulerTransactionErrorSource_values :: [SchedulerTransactionErrorSource]
 schedulerTransactionErrorSource_values = [SchedulerTransactionErrorNone, SchedulerTransactionErrorAuth, SchedulerTransactionErrorScheduler, SchedulerTransactionErrorExecutor]
+
+xdrMin_SchedulerTransactionErrorSource, xdrMax_SchedulerTransactionErrorSource :: Integer
+xdrMin_SchedulerTransactionErrorSource = 4
+xdrMax_SchedulerTransactionErrorSource = 4
 
 newtype SchedulerErrorCode = SchedulerErrorCode Int32
   deriving (Eq, Ord)
@@ -464,6 +528,10 @@ instance XdrType SchedulerErrorCode where
 schedulerErrorCode_values :: [SchedulerErrorCode]
 schedulerErrorCode_values = [SchedulerErrorCapacity, SchedulerErrorNativeTokenAgeUnavailable, SchedulerErrorExpired, SchedulerErrorInsufficientNativeTokens]
 
+xdrMin_SchedulerErrorCode, xdrMax_SchedulerErrorCode :: Integer
+xdrMin_SchedulerErrorCode = 4
+xdrMax_SchedulerErrorCode = 4
+
 data SchedulerTransactionOutcome = SchedulerTransactionOutcome
   { status :: SchedulerTransactionStatus
   , error_source :: SchedulerTransactionErrorSource
@@ -478,6 +546,10 @@ instance XdrType SchedulerTransactionOutcome where
   cxsPut (SchedulerTransactionOutcome x1 x2 x3 x4) = cxsPut x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut_BlockHeight x4
   cxsGet = SchedulerTransactionOutcome <$> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet_BlockHeight
 
+xdrMin_SchedulerTransactionOutcome, xdrMax_SchedulerTransactionOutcome :: Integer
+xdrMin_SchedulerTransactionOutcome = 20
+xdrMax_SchedulerTransactionOutcome = 20
+
 type SchedulerTransactionOutcomeBatch = [SchedulerTransactionOutcome]
 
 put_SchedulerTransactionOutcomeBatch :: SchedulerTransactionOutcomeBatch -> Builder
@@ -491,6 +563,10 @@ cxsPut_SchedulerTransactionOutcomeBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_SchedulerTransactionOutcomeBatch :: Get SchedulerTransactionOutcomeBatch
 cxsGet_SchedulerTransactionOutcomeBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_SchedulerTransactionOutcomeBatch, xdrMax_SchedulerTransactionOutcomeBatch :: Integer
+xdrMin_SchedulerTransactionOutcomeBatch = 4
+xdrMax_SchedulerTransactionOutcomeBatch = 85899345904
 
 data GenesisCeremonyResult
   = GenesisCeremonyResult_commit GenesisCeremonyCommit
@@ -521,6 +597,10 @@ instance XdrType GenesisCeremonyResult where
 discriminant_GenesisCeremonyResult :: GenesisCeremonyResult -> GenesisCeremonyOutcome
 discriminant_GenesisCeremonyResult (GenesisCeremonyResult_commit _) = (GenesisCeremonyOutcome (0))
 discriminant_GenesisCeremonyResult (GenesisCeremonyResult_default d) = d
+
+xdrMin_GenesisCeremonyResult, xdrMax_GenesisCeremonyResult :: Integer
+xdrMin_GenesisCeremonyResult = 4
+xdrMax_GenesisCeremonyResult = 128849022068
 
 schedulerCoord_program :: Word32
 schedulerCoord_program = 1986466065

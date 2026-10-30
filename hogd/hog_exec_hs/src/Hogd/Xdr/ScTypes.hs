@@ -27,6 +27,10 @@ cxsPut_X_uint32 = cxsPut
 cxsGet_X_uint32 :: Get X_uint32
 cxsGet_X_uint32 = cxsGet
 
+xdrMin_X_uint32, xdrMax_X_uint32 :: Integer
+xdrMin_X_uint32 = 4
+xdrMax_X_uint32 = 4
+
 type X_int32 = Int32
 
 put_X_int32 :: X_int32 -> Builder
@@ -40,6 +44,10 @@ cxsPut_X_int32 = cxsPut
 
 cxsGet_X_int32 :: Get X_int32
 cxsGet_X_int32 = cxsGet
+
+xdrMin_X_int32, xdrMax_X_int32 :: Integer
+xdrMin_X_int32 = 4
+xdrMax_X_int32 = 4
 
 type X_uint64 = Word64
 
@@ -55,6 +63,10 @@ cxsPut_X_uint64 = cxsPut
 cxsGet_X_uint64 :: Get X_uint64
 cxsGet_X_uint64 = cxsGet
 
+xdrMin_X_uint64, xdrMax_X_uint64 :: Integer
+xdrMin_X_uint64 = 8
+xdrMax_X_uint64 = 8
+
 type X_int64 = Int64
 
 put_X_int64 :: X_int64 -> Builder
@@ -68,6 +80,10 @@ cxsPut_X_int64 = cxsPut
 
 cxsGet_X_int64 :: Get X_int64
 cxsGet_X_int64 = cxsGet
+
+xdrMin_X_int64, xdrMax_X_int64 :: Integer
+xdrMin_X_int64 = 8
+xdrMax_X_int64 = 8
 
 type Duration = X_uint64
 
@@ -83,6 +99,10 @@ cxsPut_Duration = cxsPut_X_uint64
 cxsGet_Duration :: Get Duration
 cxsGet_Duration = cxsGet_X_uint64
 
+xdrMin_Duration, xdrMax_Duration :: Integer
+xdrMin_Duration = 8
+xdrMax_Duration = 8
+
 type ContractID = SHA256Hash
 
 put_ContractID :: ContractID -> Builder
@@ -96,4 +116,8 @@ cxsPut_ContractID = cxsPut_SHA256Hash
 
 cxsGet_ContractID :: Get ContractID
 cxsGet_ContractID = cxsGet_SHA256Hash
+
+xdrMin_ContractID, xdrMax_ContractID :: Integer
+xdrMin_ContractID = 32
+xdrMax_ContractID = 32
 

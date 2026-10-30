@@ -45,6 +45,10 @@ instance XdrType IndexerOutboxRecordKind where
 indexerOutboxRecordKind_values :: [IndexerOutboxRecordKind]
 indexerOutboxRecordKind_values = [IndexerOutboxCandidate, IndexerOutboxCommitted, IndexerOutboxRecordKind_IndexerOutboxEpochOrigin]
 
+xdrMin_IndexerOutboxRecordKind, xdrMax_IndexerOutboxRecordKind :: Integer
+xdrMin_IndexerOutboxRecordKind = 4
+xdrMax_IndexerOutboxRecordKind = 4
+
 data IndexerOutboxEpochOrigin = IndexerOutboxEpochOrigin
   { format_version :: Word32
   , epoch_sequence :: Word64
@@ -57,6 +61,10 @@ instance XdrType IndexerOutboxEpochOrigin where
   xdrGet = IndexerOutboxEpochOrigin <$> xdrGet <*> xdrGet <*> xdrGet
   cxsPut (IndexerOutboxEpochOrigin x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = IndexerOutboxEpochOrigin <$> cxsGet <*> cxsGet <*> cxsGet
+
+xdrMin_IndexerOutboxEpochOrigin, xdrMax_IndexerOutboxEpochOrigin :: Integer
+xdrMin_IndexerOutboxEpochOrigin = 80
+xdrMax_IndexerOutboxEpochOrigin = 80
 
 data IndexerOutboxRecordIdentity
   = IndexerOutboxRecordIdentity_candidate_block_id BlockID
@@ -88,6 +96,10 @@ discriminant_IndexerOutboxRecordIdentity :: IndexerOutboxRecordIdentity -> Index
 discriminant_IndexerOutboxRecordIdentity (IndexerOutboxRecordIdentity_candidate_block_id _) = (IndexerOutboxRecordKind (0))
 discriminant_IndexerOutboxRecordIdentity (IndexerOutboxRecordIdentity_default d) = d
 
+xdrMin_IndexerOutboxRecordIdentity, xdrMax_IndexerOutboxRecordIdentity :: Integer
+xdrMin_IndexerOutboxRecordIdentity = 4
+xdrMax_IndexerOutboxRecordIdentity = 12
+
 data IndexerOutboxRecordHeader = IndexerOutboxRecordHeader
   { format_version :: Word32
   , record_identity :: IndexerOutboxRecordIdentity
@@ -109,6 +121,10 @@ instance XdrType IndexerOutboxRecordHeader where
   cxsPut (IndexerOutboxRecordHeader x1 x2 x3 x4 x5 x6 x7 x8 x9 x10 x11) = cxsPut x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut_BlockHeight x4 <> cxsPut_ProtocolCommit x5 <> cxsPut x6 <> cxsPut_SHA256Hash x7 <> cxsPut_ConsensusValueHash x8 <> cxsPut_ConsensusValueHash x9 <> cxsPut_EventsHash x10 <> cxsPut_SHA256Hash x11
   cxsGet = IndexerOutboxRecordHeader <$> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet_BlockHeight <*> cxsGet_ProtocolCommit <*> cxsGet <*> cxsGet_SHA256Hash <*> cxsGet_ConsensusValueHash <*> cxsGet_ConsensusValueHash <*> cxsGet_EventsHash <*> cxsGet_SHA256Hash
 
+xdrMin_IndexerOutboxRecordHeader, xdrMax_IndexerOutboxRecordHeader :: Integer
+xdrMin_IndexerOutboxRecordHeader = 212
+xdrMax_IndexerOutboxRecordHeader = 220
+
 data IndexerOutboxCandidatePayload = IndexerOutboxCandidatePayload
   { format_version :: Word32
   , block_id :: BlockID
@@ -125,6 +141,10 @@ instance XdrType IndexerOutboxCandidatePayload where
   cxsPut (IndexerOutboxCandidatePayload x1 x2 x3 x4 x5 x6) = cxsPut x1 <> cxsPut_BlockID x2 <> cxsPut_BlockHeight x3 <> cxsPut_EventsHash x4 <> cxsPut_TxEventLogBatch x5 <> cxsPut_ProposedTransactionBatch x6
   cxsGet = IndexerOutboxCandidatePayload <$> cxsGet <*> cxsGet_BlockID <*> cxsGet_BlockHeight <*> cxsGet_EventsHash <*> cxsGet_TxEventLogBatch <*> cxsGet_ProposedTransactionBatch
 
+xdrMin_IndexerOutboxCandidatePayload, xdrMax_IndexerOutboxCandidatePayload :: Integer
+xdrMin_IndexerOutboxCandidatePayload = 60
+xdrMax_IndexerOutboxCandidatePayload = 79228223923498205321022589080
+
 type IndexerOutboxCommittedPayload = IndexerCommittedBlockPayload
 
 put_IndexerOutboxCommittedPayload :: IndexerOutboxCommittedPayload -> Builder
@@ -139,6 +159,10 @@ cxsPut_IndexerOutboxCommittedPayload = cxsPut
 cxsGet_IndexerOutboxCommittedPayload :: Get IndexerOutboxCommittedPayload
 cxsGet_IndexerOutboxCommittedPayload = cxsGet
 
+xdrMin_IndexerOutboxCommittedPayload, xdrMax_IndexerOutboxCommittedPayload :: Integer
+xdrMin_IndexerOutboxCommittedPayload = 300
+xdrMax_IndexerOutboxCommittedPayload = 79228223923498205321022590112
+
 data IndexerOutboxCommittedStoredPayload = IndexerOutboxCommittedStoredPayload
   { format_version :: Word32
   , consensus_value :: ConsensusValue
@@ -150,4 +174,8 @@ instance XdrType IndexerOutboxCommittedStoredPayload where
   xdrGet = IndexerOutboxCommittedStoredPayload <$> xdrGet <*> xdrGet
   cxsPut (IndexerOutboxCommittedStoredPayload x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = IndexerOutboxCommittedStoredPayload <$> cxsGet <*> cxsGet
+
+xdrMin_IndexerOutboxCommittedStoredPayload, xdrMax_IndexerOutboxCommittedStoredPayload :: Integer
+xdrMin_IndexerOutboxCommittedStoredPayload = 292
+xdrMax_IndexerOutboxCommittedStoredPayload = 1084
 

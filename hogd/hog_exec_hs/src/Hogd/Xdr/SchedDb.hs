@@ -31,6 +31,10 @@ instance XdrType ShardCard where
   cxsPut (ShardCard x1 x2 x3 x4 x5 x6) = cxsPut_ProtocolCommit x1 <> cxsPut_UPID x2 <> cxsPut_BlockHeight x3 <> cxsPut_ServerAddress x4 <> cxsPut_ServerAddress x5 <> cxsPut_ServerAddress x6
   cxsGet = ShardCard <$> cxsGet_ProtocolCommit <*> cxsGet_UPID <*> cxsGet_BlockHeight <*> cxsGet_ServerAddress <*> cxsGet_ServerAddress <*> cxsGet_ServerAddress
 
+xdrMin_ShardCard, xdrMax_ShardCard :: Integer
+xdrMin_ShardCard = 48
+xdrMax_ShardCard = 12884901936
+
 data Delta = Delta
   { address :: ContractAddress
   , native_token_delta :: X_int128_xdr
@@ -42,6 +46,10 @@ instance XdrType Delta where
   xdrGet = Delta <$> get_ContractAddress <*> xdrGet
   cxsPut (Delta x1 x2) = cxsPut_ContractAddress x1 <> cxsPut x2
   cxsGet = Delta <$> cxsGet_ContractAddress <*> cxsGet
+
+xdrMin_Delta, xdrMax_Delta :: Integer
+xdrMin_Delta = 48
+xdrMax_Delta = 48
 
 data NativeTokensTransferredChunk = NativeTokensTransferredChunk
   { block :: BlockHeight
@@ -56,6 +64,10 @@ instance XdrType NativeTokensTransferredChunk where
   xdrGet = NativeTokensTransferredChunk <$> get_BlockHeight <*> xdrGet <*> xdrGet <*> (getVarArray 0xffffffff xdrGet)
   cxsPut (NativeTokensTransferredChunk x1 x2 x3 x4) = cxsPut_BlockHeight x1 <> cxsPut x2 <> cxsPut x3 <> (cxsPutVarArray 0xffffffff cxsPut) x4
   cxsGet = NativeTokensTransferredChunk <$> cxsGet_BlockHeight <*> cxsGet <*> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_NativeTokensTransferredChunk, xdrMax_NativeTokensTransferredChunk :: Integer
+xdrMin_NativeTokensTransferredChunk = 20
+xdrMax_NativeTokensTransferredChunk = 206158430180
 
 schedDb_program :: Word32
 schedDb_program = 2129107352

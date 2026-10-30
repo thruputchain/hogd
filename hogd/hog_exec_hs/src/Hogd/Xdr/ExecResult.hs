@@ -57,3 +57,7 @@ instance XdrType ExecResult where
 execResult_values :: [ExecResult]
 execResult_values = [ExecResultOK, ExecResultTxDeterministicError, ExecResultTxRootFrameReverted, ExecResultTxNonDeterministicError, ExecResultFailedGasSponsorship, ExecResultTxValidationFailure, ExecResultMalformedTransaction, ExecResultSystemError, ExecResultUnrecoverable]
 
+xdrMin_ExecResult, xdrMax_ExecResult :: Integer
+xdrMin_ExecResult = 4
+xdrMax_ExecResult = 4
+

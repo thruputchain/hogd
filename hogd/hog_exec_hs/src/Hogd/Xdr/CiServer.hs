@@ -27,6 +27,10 @@ cxsPut_ProgramArg = (cxsPutVarOpaque 0xffffffff)
 cxsGet_ProgramArg :: Get ProgramArg
 cxsGet_ProgramArg = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_ProgramArg, xdrMax_ProgramArg :: Integer
+xdrMin_ProgramArg = 4
+xdrMax_ProgramArg = 4294967300
+
 data ServerConfig = ServerConfig
   { program_name :: ByteString
   , program_args :: [ProgramArg]
@@ -39,6 +43,10 @@ instance XdrType ServerConfig where
   xdrGet = ServerConfig <$> (getVarOpaque 0xffffffff) <*> (getVarArray 0xffffffff get_ProgramArg) <*> (getVarOpaque 0xffffffff)
   cxsPut (ServerConfig x1 x2 x3) = (cxsPutVarOpaque 0xffffffff) x1 <> (cxsPutVarArray 0xffffffff cxsPut_ProgramArg) x2 <> (cxsPutVarOpaque 0xffffffff) x3
   cxsGet = ServerConfig <$> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetVarArray 0xffffffff cxsGet_ProgramArg) <*> (cxsGetVarOpaque 0xffffffff)
+
+xdrMin_ServerConfig, xdrMax_ServerConfig :: Integer
+xdrMin_ServerConfig = 12
+xdrMax_ServerConfig = 18446744095184388104
 
 type HogdGitHash = ByteString
 
@@ -53,6 +61,10 @@ cxsPut_HogdGitHash = (cxsPutVarOpaque 0xffffffff)
 
 cxsGet_HogdGitHash :: Get HogdGitHash
 cxsGet_HogdGitHash = (cxsGetVarOpaque 0xffffffff)
+
+xdrMin_HogdGitHash, xdrMax_HogdGitHash :: Integer
+xdrMin_HogdGitHash = 4
+xdrMax_HogdGitHash = 4294967300
 
 newtype CIServerErrorCode = CIServerErrorCode Int32
   deriving (Eq, Ord)
@@ -84,6 +96,10 @@ instance XdrType CIServerErrorCode where
 cIServerErrorCode_values :: [CIServerErrorCode]
 cIServerErrorCode_values = [KCIServerErrorCodeOK, KCIServerErrorCodeAlreadyRunning, KCIServerErrorCodeInternal, KCIServerErrorCodeVersionMismatch]
 
+xdrMin_CIServerErrorCode, xdrMax_CIServerErrorCode :: Integer
+xdrMin_CIServerErrorCode = 4
+xdrMax_CIServerErrorCode = 4
+
 data CIProcStatus
   = CIProcStatus_exit_code Int32
   | CIProcStatus_default CIServerErrorCode
@@ -113,6 +129,10 @@ instance XdrType CIProcStatus where
 discriminant_CIProcStatus :: CIProcStatus -> CIServerErrorCode
 discriminant_CIProcStatus (CIProcStatus_exit_code _) = (CIServerErrorCode (0))
 discriminant_CIProcStatus (CIProcStatus_default d) = d
+
+xdrMin_CIProcStatus, xdrMax_CIProcStatus :: Integer
+xdrMin_CIProcStatus = 4
+xdrMax_CIProcStatus = 8
 
 data CIWorkDirStatus
   = CIWorkDirStatus_work_dir ByteString
@@ -144,6 +164,10 @@ discriminant_CIWorkDirStatus :: CIWorkDirStatus -> CIServerErrorCode
 discriminant_CIWorkDirStatus (CIWorkDirStatus_work_dir _) = (CIServerErrorCode (0))
 discriminant_CIWorkDirStatus (CIWorkDirStatus_default d) = d
 
+xdrMin_CIWorkDirStatus, xdrMax_CIWorkDirStatus :: Integer
+xdrMin_CIWorkDirStatus = 4
+xdrMax_CIWorkDirStatus = 4294967304
+
 data CIStartPaths = CIStartPaths
   { stdout_path :: ByteString
   , stderr_path :: ByteString
@@ -155,6 +179,10 @@ instance XdrType CIStartPaths where
   xdrGet = CIStartPaths <$> (getVarOpaque 0xffffffff) <*> (getVarOpaque 0xffffffff)
   cxsPut (CIStartPaths x1 x2) = (cxsPutVarOpaque 0xffffffff) x1 <> (cxsPutVarOpaque 0xffffffff) x2
   cxsGet = CIStartPaths <$> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetVarOpaque 0xffffffff)
+
+xdrMin_CIStartPaths, xdrMax_CIStartPaths :: Integer
+xdrMin_CIStartPaths = 8
+xdrMax_CIStartPaths = 8589934600
 
 data CIStartStatus
   = CIStartStatus_paths CIStartPaths
@@ -185,6 +213,10 @@ instance XdrType CIStartStatus where
 discriminant_CIStartStatus :: CIStartStatus -> CIServerErrorCode
 discriminant_CIStartStatus (CIStartStatus_paths _) = (CIServerErrorCode (0))
 discriminant_CIStartStatus (CIStartStatus_default d) = d
+
+xdrMin_CIStartStatus, xdrMax_CIStartStatus :: Integer
+xdrMin_CIStartStatus = 4
+xdrMax_CIStartStatus = 8589934604
 
 kCIControlServerPort :: Num a => a
 kCIControlServerPort = 11111

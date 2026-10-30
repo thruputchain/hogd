@@ -26,6 +26,10 @@ instance XdrType TransferEvent where
   cxsPut (TransferEvent x1 x2 x3) = cxsPut_ContractAddress x1 <> cxsPut_ContractAddress x2 <> cxsPut x3
   cxsGet = TransferEvent <$> cxsGet_ContractAddress <*> cxsGet_ContractAddress <*> cxsGet
 
+xdrMin_TransferEvent, xdrMax_TransferEvent :: Integer
+xdrMin_TransferEvent = 80
+xdrMax_TransferEvent = 80
+
 data ApprovalEvent = ApprovalEvent
   { owner_address :: ContractAddress
   , spender_address :: ContractAddress
@@ -38,4 +42,8 @@ instance XdrType ApprovalEvent where
   xdrGet = ApprovalEvent <$> get_ContractAddress <*> get_ContractAddress <*> xdrGet
   cxsPut (ApprovalEvent x1 x2 x3) = cxsPut_ContractAddress x1 <> cxsPut_ContractAddress x2 <> cxsPut x3
   cxsGet = ApprovalEvent <$> cxsGet_ContractAddress <*> cxsGet_ContractAddress <*> cxsGet
+
+xdrMin_ApprovalEvent, xdrMax_ApprovalEvent :: Integer
+xdrMin_ApprovalEvent = 80
+xdrMax_ApprovalEvent = 80
 

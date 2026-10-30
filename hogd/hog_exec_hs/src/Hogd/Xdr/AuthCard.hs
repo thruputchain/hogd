@@ -27,3 +27,7 @@ instance XdrType AuthCard where
   cxsPut (AuthCard x1 x2 x3 x4) = cxsPut_ProtocolCommit x1 <> cxsPut_UPID x2 <> cxsPut_ServerAddress x3 <> cxsPut_ServerAddress x4
   cxsGet = AuthCard <$> cxsGet_ProtocolCommit <*> cxsGet_UPID <*> cxsGet_ServerAddress <*> cxsGet_ServerAddress
 
+xdrMin_AuthCard, xdrMax_AuthCard :: Integer
+xdrMin_AuthCard = 36
+xdrMax_AuthCard = 8589934628
+

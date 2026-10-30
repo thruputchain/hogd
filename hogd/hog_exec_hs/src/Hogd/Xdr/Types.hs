@@ -24,6 +24,10 @@ instance XdrType X_uint128_xdr where
   cxsPut (X_uint128_xdr x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_uint128_xdr <$> cxsGet <*> cxsGet
 
+xdrMin_X_uint128_xdr, xdrMax_X_uint128_xdr :: Integer
+xdrMin_X_uint128_xdr = 16
+xdrMax_X_uint128_xdr = 16
+
 data X_int128_xdr = X_int128_xdr
   { highbits :: Int64
   , lowbits :: Word64
@@ -35,6 +39,10 @@ instance XdrType X_int128_xdr where
   xdrGet = X_int128_xdr <$> xdrGet <*> xdrGet
   cxsPut (X_int128_xdr x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_int128_xdr <$> cxsGet <*> cxsGet
+
+xdrMin_X_int128_xdr, xdrMax_X_int128_xdr :: Integer
+xdrMin_X_int128_xdr = 16
+xdrMax_X_int128_xdr = 16
 
 type Protocol = Word32
 
@@ -50,6 +58,10 @@ cxsPut_Protocol = cxsPut
 cxsGet_Protocol :: Get Protocol
 cxsGet_Protocol = cxsGet
 
+xdrMin_Protocol, xdrMax_Protocol :: Integer
+xdrMin_Protocol = 4
+xdrMax_Protocol = 4
+
 type TimePoint = Word64
 
 put_TimePoint :: TimePoint -> Builder
@@ -63,6 +75,10 @@ cxsPut_TimePoint = cxsPut
 
 cxsGet_TimePoint :: Get TimePoint
 cxsGet_TimePoint = cxsGet
+
+xdrMin_TimePoint, xdrMax_TimePoint :: Integer
+xdrMin_TimePoint = 8
+xdrMax_TimePoint = 8
 
 type RuntimeMemoryLength = Word32
 
@@ -78,6 +94,10 @@ cxsPut_RuntimeMemoryLength = cxsPut
 cxsGet_RuntimeMemoryLength :: Get RuntimeMemoryLength
 cxsGet_RuntimeMemoryLength = cxsGet
 
+xdrMin_RuntimeMemoryLength, xdrMax_RuntimeMemoryLength :: Integer
+xdrMin_RuntimeMemoryLength = 4
+xdrMax_RuntimeMemoryLength = 4
+
 type GasAmount = Word64
 
 put_GasAmount :: GasAmount -> Builder
@@ -91,6 +111,10 @@ cxsPut_GasAmount = cxsPut
 
 cxsGet_GasAmount :: Get GasAmount
 cxsGet_GasAmount = cxsGet
+
+xdrMin_GasAmount, xdrMax_GasAmount :: Integer
+xdrMin_GasAmount = 8
+xdrMax_GasAmount = 8
 
 type Ed25519Signature = ByteString
 
@@ -106,6 +130,10 @@ cxsPut_Ed25519Signature = (cxsPutFixedOpaque 64)
 cxsGet_Ed25519Signature :: Get Ed25519Signature
 cxsGet_Ed25519Signature = (cxsGetFixedOpaque 64)
 
+xdrMin_Ed25519Signature, xdrMax_Ed25519Signature :: Integer
+xdrMin_Ed25519Signature = 64
+xdrMax_Ed25519Signature = 64
+
 type Ed25519PublicKey = ByteString
 
 put_Ed25519PublicKey :: Ed25519PublicKey -> Builder
@@ -119,6 +147,10 @@ cxsPut_Ed25519PublicKey = (cxsPutFixedOpaque 32)
 
 cxsGet_Ed25519PublicKey :: Get Ed25519PublicKey
 cxsGet_Ed25519PublicKey = (cxsGetFixedOpaque 32)
+
+xdrMin_Ed25519PublicKey, xdrMax_Ed25519PublicKey :: Integer
+xdrMin_Ed25519PublicKey = 32
+xdrMax_Ed25519PublicKey = 32
 
 type Ed25519SecretKey = ByteString
 
@@ -134,6 +166,10 @@ cxsPut_Ed25519SecretKey = (cxsPutFixedOpaque 64)
 cxsGet_Ed25519SecretKey :: Get Ed25519SecretKey
 cxsGet_Ed25519SecretKey = (cxsGetFixedOpaque 64)
 
+xdrMin_Ed25519SecretKey, xdrMax_Ed25519SecretKey :: Integer
+xdrMin_Ed25519SecretKey = 64
+xdrMax_Ed25519SecretKey = 64
+
 type MlDsa65Signature = ByteString
 
 put_MlDsa65Signature :: MlDsa65Signature -> Builder
@@ -147,6 +183,10 @@ cxsPut_MlDsa65Signature = (cxsPutFixedOpaque 3309)
 
 cxsGet_MlDsa65Signature :: Get MlDsa65Signature
 cxsGet_MlDsa65Signature = (cxsGetFixedOpaque 3309)
+
+xdrMin_MlDsa65Signature, xdrMax_MlDsa65Signature :: Integer
+xdrMin_MlDsa65Signature = 3312
+xdrMax_MlDsa65Signature = 3312
 
 type MlDsa65PublicKey = ByteString
 
@@ -162,6 +202,10 @@ cxsPut_MlDsa65PublicKey = (cxsPutFixedOpaque 1952)
 cxsGet_MlDsa65PublicKey :: Get MlDsa65PublicKey
 cxsGet_MlDsa65PublicKey = (cxsGetFixedOpaque 1952)
 
+xdrMin_MlDsa65PublicKey, xdrMax_MlDsa65PublicKey :: Integer
+xdrMin_MlDsa65PublicKey = 1952
+xdrMax_MlDsa65PublicKey = 1952
+
 type MlDsa65SecretKey = ByteString
 
 put_MlDsa65SecretKey :: MlDsa65SecretKey -> Builder
@@ -175,6 +219,10 @@ cxsPut_MlDsa65SecretKey = (cxsPutFixedOpaque 4032)
 
 cxsGet_MlDsa65SecretKey :: Get MlDsa65SecretKey
 cxsGet_MlDsa65SecretKey = (cxsGetFixedOpaque 4032)
+
+xdrMin_MlDsa65SecretKey, xdrMax_MlDsa65SecretKey :: Integer
+xdrMin_MlDsa65SecretKey = 4032
+xdrMax_MlDsa65SecretKey = 4032
 
 newtype CryptographicScheme = CryptographicScheme Int32
   deriving (Eq, Ord)
@@ -199,6 +247,10 @@ instance XdrType CryptographicScheme where
 -- | Every declared value of 'CryptographicScheme'.
 cryptographicScheme_values :: [CryptographicScheme]
 cryptographicScheme_values = [Ed25519, MlDsa65]
+
+xdrMin_CryptographicScheme, xdrMax_CryptographicScheme :: Integer
+xdrMin_CryptographicScheme = 4
+xdrMax_CryptographicScheme = 4
 
 data Signature
   = Signature_ed25519 Ed25519Signature
@@ -228,6 +280,10 @@ discriminant_Signature :: Signature -> CryptographicScheme
 discriminant_Signature (Signature_ed25519 _) = (CryptographicScheme (0))
 discriminant_Signature (Signature_mldsa65 _) = (CryptographicScheme (1))
 
+xdrMin_Signature, xdrMax_Signature :: Integer
+xdrMin_Signature = 68
+xdrMax_Signature = 3316
+
 data PublicKey
   = PublicKey_ed25519 Ed25519PublicKey
   | PublicKey_mldsa65 MlDsa65PublicKey
@@ -256,6 +312,10 @@ discriminant_PublicKey :: PublicKey -> CryptographicScheme
 discriminant_PublicKey (PublicKey_ed25519 _) = (CryptographicScheme (0))
 discriminant_PublicKey (PublicKey_mldsa65 _) = (CryptographicScheme (1))
 
+xdrMin_PublicKey, xdrMax_PublicKey :: Integer
+xdrMin_PublicKey = 36
+xdrMax_PublicKey = 1956
+
 type PublicKeyHash = ByteString
 
 put_PublicKeyHash :: PublicKeyHash -> Builder
@@ -269,6 +329,10 @@ cxsPut_PublicKeyHash = (cxsPutFixedOpaque 32)
 
 cxsGet_PublicKeyHash :: Get PublicKeyHash
 cxsGet_PublicKeyHash = (cxsGetFixedOpaque 32)
+
+xdrMin_PublicKeyHash, xdrMax_PublicKeyHash :: Integer
+xdrMin_PublicKeyHash = 32
+xdrMax_PublicKeyHash = 32
 
 data SecretKey
   = SecretKey_ed25519 Ed25519SecretKey
@@ -298,6 +362,10 @@ discriminant_SecretKey :: SecretKey -> CryptographicScheme
 discriminant_SecretKey (SecretKey_ed25519 _) = (CryptographicScheme (0))
 discriminant_SecretKey (SecretKey_mldsa65 _) = (CryptographicScheme (1))
 
+xdrMin_SecretKey, xdrMax_SecretKey :: Integer
+xdrMin_SecretKey = 68
+xdrMax_SecretKey = 4036
+
 data ExtensionPoint
   = ExtensionPoint_0
   deriving (Eq, Ord, Show)
@@ -320,6 +388,10 @@ instance XdrType ExtensionPoint where
 discriminant_ExtensionPoint :: ExtensionPoint -> Int32
 discriminant_ExtensionPoint ExtensionPoint_0 = (0)
 
+xdrMin_ExtensionPoint, xdrMax_ExtensionPoint :: Integer
+xdrMin_ExtensionPoint = 4
+xdrMax_ExtensionPoint = 4
+
 type SHA256Hash = ByteString
 
 put_SHA256Hash :: SHA256Hash -> Builder
@@ -333,6 +405,10 @@ cxsPut_SHA256Hash = (cxsPutFixedOpaque 32)
 
 cxsGet_SHA256Hash :: Get SHA256Hash
 cxsGet_SHA256Hash = (cxsGetFixedOpaque 32)
+
+xdrMin_SHA256Hash, xdrMax_SHA256Hash :: Integer
+xdrMin_SHA256Hash = 32
+xdrMax_SHA256Hash = 32
 
 type ConsensusValueHash = SHA256Hash
 
@@ -348,6 +424,10 @@ cxsPut_ConsensusValueHash = cxsPut_SHA256Hash
 cxsGet_ConsensusValueHash :: Get ConsensusValueHash
 cxsGet_ConsensusValueHash = cxsGet_SHA256Hash
 
+xdrMin_ConsensusValueHash, xdrMax_ConsensusValueHash :: Integer
+xdrMin_ConsensusValueHash = 32
+xdrMax_ConsensusValueHash = 32
+
 type NetworkHash = SHA256Hash
 
 put_NetworkHash :: NetworkHash -> Builder
@@ -361,6 +441,10 @@ cxsPut_NetworkHash = cxsPut_SHA256Hash
 
 cxsGet_NetworkHash :: Get NetworkHash
 cxsGet_NetworkHash = cxsGet_SHA256Hash
+
+xdrMin_NetworkHash, xdrMax_NetworkHash :: Integer
+xdrMin_NetworkHash = 32
+xdrMax_NetworkHash = 32
 
 type ConfigHash = SHA256Hash
 
@@ -376,6 +460,10 @@ cxsPut_ConfigHash = cxsPut_SHA256Hash
 cxsGet_ConfigHash :: Get ConfigHash
 cxsGet_ConfigHash = cxsGet_SHA256Hash
 
+xdrMin_ConfigHash, xdrMax_ConfigHash :: Integer
+xdrMin_ConfigHash = 32
+xdrMax_ConfigHash = 32
+
 type StorageLongHash = ByteString
 
 put_StorageLongHash :: StorageLongHash -> Builder
@@ -389,6 +477,10 @@ cxsPut_StorageLongHash = (cxsPutFixedOpaque 2048)
 
 cxsGet_StorageLongHash :: Get StorageLongHash
 cxsGet_StorageLongHash = (cxsGetFixedOpaque 2048)
+
+xdrMin_StorageLongHash, xdrMax_StorageLongHash :: Integer
+xdrMin_StorageLongHash = 2048
+xdrMax_StorageLongHash = 2048
 
 type StorageShortHash = SHA256Hash
 
@@ -404,6 +496,10 @@ cxsPut_StorageShortHash = cxsPut_SHA256Hash
 cxsGet_StorageShortHash :: Get StorageShortHash
 cxsGet_StorageShortHash = cxsGet_SHA256Hash
 
+xdrMin_StorageShortHash, xdrMax_StorageShortHash :: Integer
+xdrMin_StorageShortHash = 32
+xdrMax_StorageShortHash = 32
+
 type TxsHash = SHA256Hash
 
 put_TxsHash :: TxsHash -> Builder
@@ -417,6 +513,10 @@ cxsPut_TxsHash = cxsPut_SHA256Hash
 
 cxsGet_TxsHash :: Get TxsHash
 cxsGet_TxsHash = cxsGet_SHA256Hash
+
+xdrMin_TxsHash, xdrMax_TxsHash :: Integer
+xdrMin_TxsHash = 32
+xdrMax_TxsHash = 32
 
 type EventsHash = SHA256Hash
 
@@ -432,6 +532,10 @@ cxsPut_EventsHash = cxsPut_SHA256Hash
 cxsGet_EventsHash :: Get EventsHash
 cxsGet_EventsHash = cxsGet_SHA256Hash
 
+xdrMin_EventsHash, xdrMax_EventsHash :: Integer
+xdrMin_EventsHash = 32
+xdrMax_EventsHash = 32
+
 type ProposalHeaderHash = SHA256Hash
 
 put_ProposalHeaderHash :: ProposalHeaderHash -> Builder
@@ -446,6 +550,10 @@ cxsPut_ProposalHeaderHash = cxsPut_SHA256Hash
 cxsGet_ProposalHeaderHash :: Get ProposalHeaderHash
 cxsGet_ProposalHeaderHash = cxsGet_SHA256Hash
 
+xdrMin_ProposalHeaderHash, xdrMax_ProposalHeaderHash :: Integer
+xdrMin_ProposalHeaderHash = 32
+xdrMax_ProposalHeaderHash = 32
+
 type ContractAddress = ByteString
 
 put_ContractAddress :: ContractAddress -> Builder
@@ -459,6 +567,10 @@ cxsPut_ContractAddress = (cxsPutFixedOpaque 32)
 
 cxsGet_ContractAddress :: Get ContractAddress
 cxsGet_ContractAddress = (cxsGetFixedOpaque 32)
+
+xdrMin_ContractAddress, xdrMax_ContractAddress :: Integer
+xdrMin_ContractAddress = 32
+xdrMax_ContractAddress = 32
 
 newtype StorageKeyType = StorageKeyType Int32
   deriving (Eq, Ord)
@@ -493,6 +605,10 @@ instance XdrType StorageKeyType where
 storageKeyType_values :: [StorageKeyType]
 storageKeyType_values = [ContractData, FreeNativeTokenBalance, AuthData, Metadata, ReplayCache]
 
+xdrMin_StorageKeyType, xdrMax_StorageKeyType :: Integer
+xdrMin_StorageKeyType = 4
+xdrMax_StorageKeyType = 4
+
 type StorageKeyContractData = ByteString
 
 put_StorageKeyContractData :: StorageKeyContractData -> Builder
@@ -506,6 +622,10 @@ cxsPut_StorageKeyContractData = (cxsPutFixedOpaque 32)
 
 cxsGet_StorageKeyContractData :: Get StorageKeyContractData
 cxsGet_StorageKeyContractData = (cxsGetFixedOpaque 32)
+
+xdrMin_StorageKeyContractData, xdrMax_StorageKeyContractData :: Integer
+xdrMin_StorageKeyContractData = 32
+xdrMax_StorageKeyContractData = 32
 
 data StorageKey
   = StorageKey_contract_data_key StorageKeyContractData
@@ -553,6 +673,10 @@ discriminant_StorageKey StorageKey_AuthData = (StorageKeyType (2))
 discriminant_StorageKey StorageKey_Metadata = (StorageKeyType (3))
 discriminant_StorageKey StorageKey_ReplayCache = (StorageKeyType (4))
 
+xdrMin_StorageKey, xdrMax_StorageKey :: Integer
+xdrMin_StorageKey = 4
+xdrMax_StorageKey = 36
+
 kNativeTokenDivisibility :: Num a => a
 kNativeTokenDivisibility = 10000000
 
@@ -568,6 +692,10 @@ instance XdrType AddressAndKey where
   cxsPut (AddressAndKey x1 x2) = cxsPut_ContractAddress x1 <> cxsPut x2
   cxsGet = AddressAndKey <$> cxsGet_ContractAddress <*> cxsGet
 
+xdrMin_AddressAndKey, xdrMax_AddressAndKey :: Integer
+xdrMin_AddressAndKey = 36
+xdrMax_AddressAndKey = 68
+
 type BlockHeight = Int64
 
 put_BlockHeight :: BlockHeight -> Builder
@@ -581,4 +709,8 @@ cxsPut_BlockHeight = cxsPut
 
 cxsGet_BlockHeight :: Get BlockHeight
 cxsGet_BlockHeight = cxsGet
+
+xdrMin_BlockHeight, xdrMax_BlockHeight :: Integer
+xdrMin_BlockHeight = 8
+xdrMax_BlockHeight = 8
 

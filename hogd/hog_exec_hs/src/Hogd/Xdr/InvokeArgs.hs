@@ -29,6 +29,10 @@ instance XdrType CopyableInvokeInputs where
   cxsPut (CopyableInvokeInputs x1 x2 x3 x4) = cxsPut x1 <> cxsPut_GasAmount x2 <> cxsPut_InvokeFlagSet x3 <> cxsPut x4
   cxsGet = CopyableInvokeInputs <$> cxsGet <*> cxsGet_GasAmount <*> cxsGet_InvokeFlagSet <*> cxsGet
 
+xdrMin_CopyableInvokeInputs, xdrMax_CopyableInvokeInputs :: Integer
+xdrMin_CopyableInvokeInputs = 24
+xdrMax_CopyableInvokeInputs = 24
+
 data CopyableInvokeOutputs = CopyableInvokeOutputs
   { return_buffer_len :: RuntimeMemoryLength
   , returned_auth_token_count :: Word32
@@ -41,4 +45,8 @@ instance XdrType CopyableInvokeOutputs where
   xdrGet = CopyableInvokeOutputs <$> get_RuntimeMemoryLength <*> xdrGet <*> xdrGet
   cxsPut (CopyableInvokeOutputs x1 x2 x3) = cxsPut_RuntimeMemoryLength x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = CopyableInvokeOutputs <$> cxsGet_RuntimeMemoryLength <*> cxsGet <*> cxsGet
+
+xdrMin_CopyableInvokeOutputs, xdrMax_CopyableInvokeOutputs :: Integer
+xdrMin_CopyableInvokeOutputs = 12
+xdrMax_CopyableInvokeOutputs = 12
 

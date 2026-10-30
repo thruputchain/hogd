@@ -33,6 +33,10 @@ cxsPut_AddressAndKeyBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_AddressAndKeyBatch :: Get AddressAndKeyBatch
 cxsGet_AddressAndKeyBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_AddressAndKeyBatch, xdrMax_AddressAndKeyBatch :: Integer
+xdrMin_AddressAndKeyBatch = 4
+xdrMax_AddressAndKeyBatch = 292057776064
+
 data DbGatewayItemResult
   = DbGatewayItemResult_item WireStorageItem
   | DbGatewayItemResult_default RPCError
@@ -63,6 +67,10 @@ discriminant_DbGatewayItemResult :: DbGatewayItemResult -> RPCError
 discriminant_DbGatewayItemResult (DbGatewayItemResult_item _) = (RPCError (0))
 discriminant_DbGatewayItemResult (DbGatewayItemResult_default d) = d
 
+xdrMin_DbGatewayItemResult, xdrMax_DbGatewayItemResult :: Integer
+xdrMin_DbGatewayItemResult = 4
+xdrMax_DbGatewayItemResult = 65012
+
 type DbGatewayItemBatch = [DbGatewayItemResult]
 
 put_DbGatewayItemBatch :: DbGatewayItemBatch -> Builder
@@ -77,6 +85,10 @@ cxsPut_DbGatewayItemBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_DbGatewayItemBatch :: Get DbGatewayItemBatch
 cxsGet_DbGatewayItemBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_DbGatewayItemBatch, xdrMax_DbGatewayItemBatch :: Integer
+xdrMin_DbGatewayItemBatch = 4
+xdrMax_DbGatewayItemBatch = 279224413782544
+
 data DbGatewayPayload = DbGatewayPayload
   { block_height :: BlockHeight
   , items :: DbGatewayItemBatch
@@ -88,6 +100,10 @@ instance XdrType DbGatewayPayload where
   xdrGet = DbGatewayPayload <$> get_BlockHeight <*> get_DbGatewayItemBatch
   cxsPut (DbGatewayPayload x1 x2) = cxsPut_BlockHeight x1 <> cxsPut_DbGatewayItemBatch x2
   cxsGet = DbGatewayPayload <$> cxsGet_BlockHeight <*> cxsGet_DbGatewayItemBatch
+
+xdrMin_DbGatewayPayload, xdrMax_DbGatewayPayload :: Integer
+xdrMin_DbGatewayPayload = 12
+xdrMax_DbGatewayPayload = 279224413782552
 
 data DbGatewayResult
   = DbGatewayResult_payload DbGatewayPayload
@@ -119,6 +135,10 @@ discriminant_DbGatewayResult :: DbGatewayResult -> RPCError
 discriminant_DbGatewayResult (DbGatewayResult_payload _) = (RPCError (0))
 discriminant_DbGatewayResult (DbGatewayResult_default d) = d
 
+xdrMin_DbGatewayResult, xdrMax_DbGatewayResult :: Integer
+xdrMin_DbGatewayResult = 4
+xdrMax_DbGatewayResult = 279224413782556
+
 data DbGatewayConfig = DbGatewayConfig
   { tip :: DbTip
   , effective_config :: NetworkConfig
@@ -131,6 +151,10 @@ instance XdrType DbGatewayConfig where
   xdrGet = DbGatewayConfig <$> xdrGet <*> xdrGet <*> xdrGet
   cxsPut (DbGatewayConfig x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = DbGatewayConfig <$> cxsGet <*> cxsGet <*> cxsGet
+
+xdrMin_DbGatewayConfig, xdrMax_DbGatewayConfig :: Integer
+xdrMin_DbGatewayConfig = 2464
+xdrMax_DbGatewayConfig = 103079218336
 
 data DbGatewayConfigResult
   = DbGatewayConfigResult_config DbGatewayConfig
@@ -162,6 +186,10 @@ discriminant_DbGatewayConfigResult :: DbGatewayConfigResult -> RPCError
 discriminant_DbGatewayConfigResult (DbGatewayConfigResult_config _) = (RPCError (0))
 discriminant_DbGatewayConfigResult (DbGatewayConfigResult_default d) = d
 
+xdrMin_DbGatewayConfigResult, xdrMax_DbGatewayConfigResult :: Integer
+xdrMin_DbGatewayConfigResult = 4
+xdrMax_DbGatewayConfigResult = 103079218340
+
 newtype DbGatewayIntroOutcome = DbGatewayIntroOutcome Int32
   deriving (Eq, Ord)
 
@@ -185,6 +213,10 @@ instance XdrType DbGatewayIntroOutcome where
 -- | Every declared value of 'DbGatewayIntroOutcome'.
 dbGatewayIntroOutcome_values :: [DbGatewayIntroOutcome]
 dbGatewayIntroOutcome_values = [DbGatewayIntroSuccess, DbGatewayIntroMismatchedProtocol]
+
+xdrMin_DbGatewayIntroOutcome, xdrMax_DbGatewayIntroOutcome :: Integer
+xdrMin_DbGatewayIntroOutcome = 4
+xdrMax_DbGatewayIntroOutcome = 4
 
 dbGateway_program :: Word32
 dbGateway_program = 1145194327

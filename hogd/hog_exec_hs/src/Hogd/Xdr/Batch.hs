@@ -24,3 +24,7 @@ instance XdrType SubmittedTransactions where
   cxsPut (SubmittedTransactions x1) = cxsPut_ParallelSignedTransactionBatch x1
   cxsGet = SubmittedTransactions <$> cxsGet_ParallelSignedTransactionBatch
 
+xdrMin_SubmittedTransactions, xdrMax_SubmittedTransactions :: Integer
+xdrMin_SubmittedTransactions = 12
+xdrMax_SubmittedTransactions = 38654705668
+

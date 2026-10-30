@@ -32,6 +32,10 @@ cxsPut_BlockID = cxsPut
 cxsGet_BlockID :: Get BlockID
 cxsGet_BlockID = cxsGet
 
+xdrMin_BlockID, xdrMax_BlockID :: Integer
+xdrMin_BlockID = 8
+xdrMax_BlockID = 8
+
 data BlockExecutionContext = BlockExecutionContext
   { block_height :: BlockHeight
   , block_timepoint :: TimePoint
@@ -43,6 +47,10 @@ instance XdrType BlockExecutionContext where
   xdrGet = BlockExecutionContext <$> get_BlockHeight <*> get_TimePoint
   cxsPut (BlockExecutionContext x1 x2) = cxsPut_BlockHeight x1 <> cxsPut_TimePoint x2
   cxsGet = BlockExecutionContext <$> cxsGet_BlockHeight <*> cxsGet_TimePoint
+
+xdrMin_BlockExecutionContext, xdrMax_BlockExecutionContext :: Integer
+xdrMin_BlockExecutionContext = 16
+xdrMax_BlockExecutionContext = 16
 
 data DbTip = DbTip
   { id :: BlockID
@@ -59,6 +67,10 @@ instance XdrType DbTip where
   cxsPut (DbTip x1 x2 x3 x4 x5) = cxsPut_BlockID x1 <> cxsPut_StorageLongHash x2 <> cxsPut x3 <> cxsPut x4 <> cxsPut x5
   cxsGet = DbTip <$> cxsGet_BlockID <*> cxsGet_StorageLongHash <*> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_DbTip, xdrMax_DbTip :: Integer
+xdrMin_DbTip = 2392
+xdrMax_DbTip = 51539610724
+
 type TransactionID = Word64
 
 put_TransactionID :: TransactionID -> Builder
@@ -72,6 +84,10 @@ cxsPut_TransactionID = cxsPut
 
 cxsGet_TransactionID :: Get TransactionID
 cxsGet_TransactionID = cxsGet
+
+xdrMin_TransactionID, xdrMax_TransactionID :: Integer
+xdrMin_TransactionID = 8
+xdrMax_TransactionID = 8
 
 newtype RPCError = RPCError Int32
   deriving (Eq, Ord)
@@ -112,6 +128,10 @@ instance XdrType RPCError where
 rPCError_values :: [RPCError]
 rPCError_values = [KRPCNone, KRPCNotFound, KRPCBadBlockID, KRPCStorageWriteFailed, KRPCTransactionFailed, KRPCUnimplemented, KRPCUnrecoverable]
 
+xdrMin_RPCError, xdrMax_RPCError :: Integer
+xdrMin_RPCError = 4
+xdrMax_RPCError = 4
+
 newtype BlockExecutionMode = BlockExecutionMode Int32
   deriving (Eq, Ord)
 
@@ -139,6 +159,10 @@ instance XdrType BlockExecutionMode where
 blockExecutionMode_values :: [BlockExecutionMode]
 blockExecutionMode_values = [KBlockExecutionModeValidation, KBlockExecutionModeProposal, KBlockExecutionModeViewing]
 
+xdrMin_BlockExecutionMode, xdrMax_BlockExecutionMode :: Integer
+xdrMin_BlockExecutionMode = 4
+xdrMax_BlockExecutionMode = 4
+
 type StorageCost = X_int128_xdr
 
 put_StorageCost :: StorageCost -> Builder
@@ -152,6 +176,10 @@ cxsPut_StorageCost = cxsPut
 
 cxsGet_StorageCost :: Get StorageCost
 cxsGet_StorageCost = cxsGet
+
+xdrMin_StorageCost, xdrMax_StorageCost :: Integer
+xdrMin_StorageCost = 16
+xdrMax_StorageCost = 16
 
 data ExpectedStorageCost
   = ExpectedStorageCost_storage_cost StorageCost
@@ -183,6 +211,10 @@ discriminant_ExpectedStorageCost :: ExpectedStorageCost -> RPCError
 discriminant_ExpectedStorageCost (ExpectedStorageCost_storage_cost _) = (RPCError (0))
 discriminant_ExpectedStorageCost (ExpectedStorageCost_default d) = d
 
+xdrMin_ExpectedStorageCost, xdrMax_ExpectedStorageCost :: Integer
+xdrMin_ExpectedStorageCost = 4
+xdrMax_ExpectedStorageCost = 20
+
 data ExpectedContract
   = ExpectedContract_contract Contract
   | ExpectedContract_default RPCError
@@ -212,6 +244,10 @@ instance XdrType ExpectedContract where
 discriminant_ExpectedContract :: ExpectedContract -> RPCError
 discriminant_ExpectedContract (ExpectedContract_contract _) = (RPCError (0))
 discriminant_ExpectedContract (ExpectedContract_default d) = d
+
+xdrMin_ExpectedContract, xdrMax_ExpectedContract :: Integer
+xdrMin_ExpectedContract = 4
+xdrMax_ExpectedContract = 4294967308
 
 data ExpectedDeployment
   = ExpectedDeployment_deployed_hash DeployedContractHash
@@ -243,6 +279,10 @@ discriminant_ExpectedDeployment :: ExpectedDeployment -> RPCError
 discriminant_ExpectedDeployment (ExpectedDeployment_deployed_hash _) = (RPCError (0))
 discriminant_ExpectedDeployment (ExpectedDeployment_default d) = d
 
+xdrMin_ExpectedDeployment, xdrMax_ExpectedDeployment :: Integer
+xdrMin_ExpectedDeployment = 4
+xdrMax_ExpectedDeployment = 44
+
 data ExpectedProposalData
   = ExpectedProposalData_proposal_data NondeterministicProposalData
   | ExpectedProposalData_default RPCError
@@ -272,6 +312,10 @@ instance XdrType ExpectedProposalData where
 discriminant_ExpectedProposalData :: ExpectedProposalData -> RPCError
 discriminant_ExpectedProposalData (ExpectedProposalData_proposal_data _) = (RPCError (0))
 discriminant_ExpectedProposalData (ExpectedProposalData_default d) = d
+
+xdrMin_ExpectedProposalData, xdrMax_ExpectedProposalData :: Integer
+xdrMin_ExpectedProposalData = 4
+xdrMax_ExpectedProposalData = 4299227152
 
 data ExpectedRetrocausalQueueBlock
   = ExpectedRetrocausalQueueBlock_queue_block RetrocausalQueueBlock
@@ -303,6 +347,10 @@ discriminant_ExpectedRetrocausalQueueBlock :: ExpectedRetrocausalQueueBlock -> R
 discriminant_ExpectedRetrocausalQueueBlock (ExpectedRetrocausalQueueBlock_queue_block _) = (RPCError (0))
 discriminant_ExpectedRetrocausalQueueBlock (ExpectedRetrocausalQueueBlock_default d) = d
 
+xdrMin_ExpectedRetrocausalQueueBlock, xdrMax_ExpectedRetrocausalQueueBlock :: Integer
+xdrMin_ExpectedRetrocausalQueueBlock = 4
+xdrMax_ExpectedRetrocausalQueueBlock = 1116691496716
+
 data ExpectedQueueEntry
   = ExpectedQueueEntry_queue_entry QueueEntry
   | ExpectedQueueEntry_default RPCError
@@ -332,6 +380,10 @@ instance XdrType ExpectedQueueEntry where
 discriminant_ExpectedQueueEntry :: ExpectedQueueEntry -> RPCError
 discriminant_ExpectedQueueEntry (ExpectedQueueEntry_queue_entry _) = (RPCError (0))
 discriminant_ExpectedQueueEntry (ExpectedQueueEntry_default d) = d
+
+xdrMin_ExpectedQueueEntry, xdrMax_ExpectedQueueEntry :: Integer
+xdrMin_ExpectedQueueEntry = 4
+xdrMax_ExpectedQueueEntry = 264
 
 data ExpectedDBTip
   = ExpectedDBTip_db_tip DbTip
@@ -363,6 +415,10 @@ discriminant_ExpectedDBTip :: ExpectedDBTip -> RPCError
 discriminant_ExpectedDBTip (ExpectedDBTip_db_tip _) = (RPCError (0))
 discriminant_ExpectedDBTip (ExpectedDBTip_default d) = d
 
+xdrMin_ExpectedDBTip, xdrMax_ExpectedDBTip :: Integer
+xdrMin_ExpectedDBTip = 4
+xdrMax_ExpectedDBTip = 51539610728
+
 data ViewingSnapshot = ViewingSnapshot
   { viewing_block_id :: BlockID
   , tip :: DbTip
@@ -374,6 +430,10 @@ instance XdrType ViewingSnapshot where
   xdrGet = ViewingSnapshot <$> get_BlockID <*> xdrGet
   cxsPut (ViewingSnapshot x1 x2) = cxsPut_BlockID x1 <> cxsPut x2
   cxsGet = ViewingSnapshot <$> cxsGet_BlockID <*> cxsGet
+
+xdrMin_ViewingSnapshot, xdrMax_ViewingSnapshot :: Integer
+xdrMin_ViewingSnapshot = 2400
+xdrMax_ViewingSnapshot = 51539610732
 
 data ExpectedViewingSnapshot
   = ExpectedViewingSnapshot_snapshot ViewingSnapshot
@@ -405,6 +465,10 @@ discriminant_ExpectedViewingSnapshot :: ExpectedViewingSnapshot -> RPCError
 discriminant_ExpectedViewingSnapshot (ExpectedViewingSnapshot_snapshot _) = (RPCError (0))
 discriminant_ExpectedViewingSnapshot (ExpectedViewingSnapshot_default d) = d
 
+xdrMin_ExpectedViewingSnapshot, xdrMax_ExpectedViewingSnapshot :: Integer
+xdrMin_ExpectedViewingSnapshot = 4
+xdrMax_ExpectedViewingSnapshot = 51539610736
+
 type ContractAddressBatch = [ContractAddress]
 
 put_ContractAddressBatch :: ContractAddressBatch -> Builder
@@ -418,4 +482,8 @@ cxsPut_ContractAddressBatch = (cxsPutVarArray 0xffffffff cxsPut_ContractAddress)
 
 cxsGet_ContractAddressBatch :: Get ContractAddressBatch
 cxsGet_ContractAddressBatch = (cxsGetVarArray 0xffffffff cxsGet_ContractAddress)
+
+xdrMin_ContractAddressBatch, xdrMax_ContractAddressBatch :: Integer
+xdrMin_ContractAddressBatch = 4
+xdrMax_ContractAddressBatch = 137438953444
 

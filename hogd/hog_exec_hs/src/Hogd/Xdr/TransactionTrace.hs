@@ -35,6 +35,10 @@ instance XdrType SyscallSHA256Inputs where
   cxsPut (SyscallSHA256Inputs x1) = (cxsPutVarOpaque 0xffffffff) x1
   cxsGet = SyscallSHA256Inputs <$> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallSHA256Inputs, xdrMax_SyscallSHA256Inputs :: Integer
+xdrMin_SyscallSHA256Inputs = 4
+xdrMax_SyscallSHA256Inputs = 4294967300
+
 data SyscallSHA256Outputs = SyscallSHA256Outputs
   { hash :: SHA256Hash
   }
@@ -45,6 +49,10 @@ instance XdrType SyscallSHA256Outputs where
   xdrGet = SyscallSHA256Outputs <$> get_SHA256Hash
   cxsPut (SyscallSHA256Outputs x1) = cxsPut_SHA256Hash x1
   cxsGet = SyscallSHA256Outputs <$> cxsGet_SHA256Hash
+
+xdrMin_SyscallSHA256Outputs, xdrMax_SyscallSHA256Outputs :: Integer
+xdrMin_SyscallSHA256Outputs = 32
+xdrMax_SyscallSHA256Outputs = 32
 
 data SyscallSHA256Trace = SyscallSHA256Trace
   { inputs :: SyscallSHA256Inputs
@@ -58,6 +66,10 @@ instance XdrType SyscallSHA256Trace where
   cxsPut (SyscallSHA256Trace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallSHA256Trace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallSHA256Trace, xdrMax_SyscallSHA256Trace :: Integer
+xdrMin_SyscallSHA256Trace = 8
+xdrMax_SyscallSHA256Trace = 4294967336
+
 data SyscallGetMsgSenderInputs = SyscallGetMsgSenderInputs
   deriving (Eq, Ord, Show)
 
@@ -66,6 +78,10 @@ instance XdrType SyscallGetMsgSenderInputs where
   xdrGet = pure SyscallGetMsgSenderInputs
   cxsPut SyscallGetMsgSenderInputs = mempty
   cxsGet = pure SyscallGetMsgSenderInputs
+
+xdrMin_SyscallGetMsgSenderInputs, xdrMax_SyscallGetMsgSenderInputs :: Integer
+xdrMin_SyscallGetMsgSenderInputs = 0
+xdrMax_SyscallGetMsgSenderInputs = 0
 
 data SyscallGetMsgSenderOutputs = SyscallGetMsgSenderOutputs
   { sender :: ContractAddress
@@ -77,6 +93,10 @@ instance XdrType SyscallGetMsgSenderOutputs where
   xdrGet = SyscallGetMsgSenderOutputs <$> get_ContractAddress
   cxsPut (SyscallGetMsgSenderOutputs x1) = cxsPut_ContractAddress x1
   cxsGet = SyscallGetMsgSenderOutputs <$> cxsGet_ContractAddress
+
+xdrMin_SyscallGetMsgSenderOutputs, xdrMax_SyscallGetMsgSenderOutputs :: Integer
+xdrMin_SyscallGetMsgSenderOutputs = 32
+xdrMax_SyscallGetMsgSenderOutputs = 32
 
 data SyscallGetMsgSenderTrace = SyscallGetMsgSenderTrace
   { inputs :: SyscallGetMsgSenderInputs
@@ -90,6 +110,10 @@ instance XdrType SyscallGetMsgSenderTrace where
   cxsPut (SyscallGetMsgSenderTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetMsgSenderTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetMsgSenderTrace, xdrMax_SyscallGetMsgSenderTrace :: Integer
+xdrMin_SyscallGetMsgSenderTrace = 4
+xdrMax_SyscallGetMsgSenderTrace = 36
+
 data SyscallGetCalldataLenInputs = SyscallGetCalldataLenInputs
   deriving (Eq, Ord, Show)
 
@@ -98,6 +122,10 @@ instance XdrType SyscallGetCalldataLenInputs where
   xdrGet = pure SyscallGetCalldataLenInputs
   cxsPut SyscallGetCalldataLenInputs = mempty
   cxsGet = pure SyscallGetCalldataLenInputs
+
+xdrMin_SyscallGetCalldataLenInputs, xdrMax_SyscallGetCalldataLenInputs :: Integer
+xdrMin_SyscallGetCalldataLenInputs = 0
+xdrMax_SyscallGetCalldataLenInputs = 0
 
 data SyscallGetCalldataLenOutputs = SyscallGetCalldataLenOutputs
   { len :: Word32
@@ -111,6 +139,10 @@ instance XdrType SyscallGetCalldataLenOutputs where
   cxsPut (SyscallGetCalldataLenOutputs x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = SyscallGetCalldataLenOutputs <$> cxsGet <*> cxsGet
 
+xdrMin_SyscallGetCalldataLenOutputs, xdrMax_SyscallGetCalldataLenOutputs :: Integer
+xdrMin_SyscallGetCalldataLenOutputs = 8
+xdrMax_SyscallGetCalldataLenOutputs = 8
+
 data SyscallGetCalldataLenTrace = SyscallGetCalldataLenTrace
   { inputs :: SyscallGetCalldataLenInputs
   , outputs :: (Maybe SyscallGetCalldataLenOutputs)
@@ -123,6 +155,10 @@ instance XdrType SyscallGetCalldataLenTrace where
   cxsPut (SyscallGetCalldataLenTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetCalldataLenTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetCalldataLenTrace, xdrMax_SyscallGetCalldataLenTrace :: Integer
+xdrMin_SyscallGetCalldataLenTrace = 4
+xdrMax_SyscallGetCalldataLenTrace = 12
+
 data SyscallGetCalldataInputs = SyscallGetCalldataInputs
   deriving (Eq, Ord, Show)
 
@@ -131,6 +167,10 @@ instance XdrType SyscallGetCalldataInputs where
   xdrGet = pure SyscallGetCalldataInputs
   cxsPut SyscallGetCalldataInputs = mempty
   cxsGet = pure SyscallGetCalldataInputs
+
+xdrMin_SyscallGetCalldataInputs, xdrMax_SyscallGetCalldataInputs :: Integer
+xdrMin_SyscallGetCalldataInputs = 0
+xdrMax_SyscallGetCalldataInputs = 0
 
 data SyscallGetCalldataOutputs = SyscallGetCalldataOutputs
   { calldata :: ByteString
@@ -144,6 +184,10 @@ instance XdrType SyscallGetCalldataOutputs where
   cxsPut (SyscallGetCalldataOutputs x1 x2) = (cxsPutVarOpaque 0xffffffff) x1 <> cxsPut x2
   cxsGet = SyscallGetCalldataOutputs <$> (cxsGetVarOpaque 0xffffffff) <*> cxsGet
 
+xdrMin_SyscallGetCalldataOutputs, xdrMax_SyscallGetCalldataOutputs :: Integer
+xdrMin_SyscallGetCalldataOutputs = 8
+xdrMax_SyscallGetCalldataOutputs = 4294967304
+
 data SyscallGetCalldataTrace = SyscallGetCalldataTrace
   { inputs :: SyscallGetCalldataInputs
   , outputs :: (Maybe SyscallGetCalldataOutputs)
@@ -156,6 +200,10 @@ instance XdrType SyscallGetCalldataTrace where
   cxsPut (SyscallGetCalldataTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetCalldataTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetCalldataTrace, xdrMax_SyscallGetCalldataTrace :: Integer
+xdrMin_SyscallGetCalldataTrace = 4
+xdrMax_SyscallGetCalldataTrace = 4294967308
+
 data SyscallConsoleLogInputs = SyscallConsoleLogInputs
   { buffer :: ByteString
   }
@@ -167,6 +215,10 @@ instance XdrType SyscallConsoleLogInputs where
   cxsPut (SyscallConsoleLogInputs x1) = (cxsPutVarOpaque 0xffffffff) x1
   cxsGet = SyscallConsoleLogInputs <$> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallConsoleLogInputs, xdrMax_SyscallConsoleLogInputs :: Integer
+xdrMin_SyscallConsoleLogInputs = 4
+xdrMax_SyscallConsoleLogInputs = 4294967300
+
 data SyscallConsoleLogOutputs = SyscallConsoleLogOutputs
   deriving (Eq, Ord, Show)
 
@@ -175,6 +227,10 @@ instance XdrType SyscallConsoleLogOutputs where
   xdrGet = pure SyscallConsoleLogOutputs
   cxsPut SyscallConsoleLogOutputs = mempty
   cxsGet = pure SyscallConsoleLogOutputs
+
+xdrMin_SyscallConsoleLogOutputs, xdrMax_SyscallConsoleLogOutputs :: Integer
+xdrMin_SyscallConsoleLogOutputs = 0
+xdrMax_SyscallConsoleLogOutputs = 0
 
 data SyscallConsoleLogTrace = SyscallConsoleLogTrace
   { inputs :: SyscallConsoleLogInputs
@@ -187,6 +243,10 @@ instance XdrType SyscallConsoleLogTrace where
   xdrGet = SyscallConsoleLogTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallConsoleLogTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallConsoleLogTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallConsoleLogTrace, xdrMax_SyscallConsoleLogTrace :: Integer
+xdrMin_SyscallConsoleLogTrace = 8
+xdrMax_SyscallConsoleLogTrace = 4294967304
 
 data SyscallInvokeInputs = SyscallInvokeInputs
   { address :: ContractAddress
@@ -201,6 +261,10 @@ instance XdrType SyscallInvokeInputs where
   xdrGet = SyscallInvokeInputs <$> get_ContractAddress <*> (getVarOpaque 0xffffffff) <*> (getVarOpaque 0xffffffff) <*> xdrGet
   cxsPut (SyscallInvokeInputs x1 x2 x3 x4) = cxsPut_ContractAddress x1 <> (cxsPutVarOpaque 0xffffffff) x2 <> (cxsPutVarOpaque 0xffffffff) x3 <> cxsPut x4
   cxsGet = SyscallInvokeInputs <$> cxsGet_ContractAddress <*> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetVarOpaque 0xffffffff) <*> cxsGet
+
+xdrMin_SyscallInvokeInputs, xdrMax_SyscallInvokeInputs :: Integer
+xdrMin_SyscallInvokeInputs = 64
+xdrMax_SyscallInvokeInputs = 8589934656
 
 data SyscallInvokeOutputs = SyscallInvokeOutputs
   { child_trace :: (Maybe InvocationFrameTrace)
@@ -237,6 +301,10 @@ instance XdrType SyscallReturnInputs where
   cxsPut (SyscallReturnInputs x1 x2) = (cxsPutVarOpaque 0xffffffff) x1 <> cxsPut x2
   cxsGet = SyscallReturnInputs <$> (cxsGetVarOpaque 0xffffffff) <*> cxsGet
 
+xdrMin_SyscallReturnInputs, xdrMax_SyscallReturnInputs :: Integer
+xdrMin_SyscallReturnInputs = 8
+xdrMax_SyscallReturnInputs = 4294967304
+
 data SyscallReturnOutputs = SyscallReturnOutputs
   deriving (Eq, Ord, Show)
 
@@ -245,6 +313,10 @@ instance XdrType SyscallReturnOutputs where
   xdrGet = pure SyscallReturnOutputs
   cxsPut SyscallReturnOutputs = mempty
   cxsGet = pure SyscallReturnOutputs
+
+xdrMin_SyscallReturnOutputs, xdrMax_SyscallReturnOutputs :: Integer
+xdrMin_SyscallReturnOutputs = 0
+xdrMax_SyscallReturnOutputs = 0
 
 data SyscallReturnTrace = SyscallReturnTrace
   { inputs :: SyscallReturnInputs
@@ -258,6 +330,10 @@ instance XdrType SyscallReturnTrace where
   cxsPut (SyscallReturnTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallReturnTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallReturnTrace, xdrMax_SyscallReturnTrace :: Integer
+xdrMin_SyscallReturnTrace = 12
+xdrMax_SyscallReturnTrace = 4294967308
+
 data SyscallGetReturnedBufferInputs = SyscallGetReturnedBufferInputs
   deriving (Eq, Ord, Show)
 
@@ -266,6 +342,10 @@ instance XdrType SyscallGetReturnedBufferInputs where
   xdrGet = pure SyscallGetReturnedBufferInputs
   cxsPut SyscallGetReturnedBufferInputs = mempty
   cxsGet = pure SyscallGetReturnedBufferInputs
+
+xdrMin_SyscallGetReturnedBufferInputs, xdrMax_SyscallGetReturnedBufferInputs :: Integer
+xdrMin_SyscallGetReturnedBufferInputs = 0
+xdrMax_SyscallGetReturnedBufferInputs = 0
 
 data SyscallGetReturnedBufferOutputs = SyscallGetReturnedBufferOutputs
   { buffer :: ReturnBuffer
@@ -280,6 +360,10 @@ instance XdrType SyscallGetReturnedBufferOutputs where
   cxsPut (SyscallGetReturnedBufferOutputs x1 x2 x3) = cxsPut_ReturnBuffer x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = SyscallGetReturnedBufferOutputs <$> cxsGet_ReturnBuffer <*> cxsGet <*> cxsGet
 
+xdrMin_SyscallGetReturnedBufferOutputs, xdrMax_SyscallGetReturnedBufferOutputs :: Integer
+xdrMin_SyscallGetReturnedBufferOutputs = 12
+xdrMax_SyscallGetReturnedBufferOutputs = 4294967308
+
 data SyscallGetReturnedBufferTrace = SyscallGetReturnedBufferTrace
   { inputs :: SyscallGetReturnedBufferInputs
   , outputs :: (Maybe SyscallGetReturnedBufferOutputs)
@@ -292,6 +376,10 @@ instance XdrType SyscallGetReturnedBufferTrace where
   cxsPut (SyscallGetReturnedBufferTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetReturnedBufferTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetReturnedBufferTrace, xdrMax_SyscallGetReturnedBufferTrace :: Integer
+xdrMin_SyscallGetReturnedBufferTrace = 4
+xdrMax_SyscallGetReturnedBufferTrace = 4294967312
+
 data SyscallExitInputs = SyscallExitInputs
   deriving (Eq, Ord, Show)
 
@@ -301,6 +389,10 @@ instance XdrType SyscallExitInputs where
   cxsPut SyscallExitInputs = mempty
   cxsGet = pure SyscallExitInputs
 
+xdrMin_SyscallExitInputs, xdrMax_SyscallExitInputs :: Integer
+xdrMin_SyscallExitInputs = 0
+xdrMax_SyscallExitInputs = 0
+
 data SyscallExitOutputs = SyscallExitOutputs
   deriving (Eq, Ord, Show)
 
@@ -309,6 +401,10 @@ instance XdrType SyscallExitOutputs where
   xdrGet = pure SyscallExitOutputs
   cxsPut SyscallExitOutputs = mempty
   cxsGet = pure SyscallExitOutputs
+
+xdrMin_SyscallExitOutputs, xdrMax_SyscallExitOutputs :: Integer
+xdrMin_SyscallExitOutputs = 0
+xdrMax_SyscallExitOutputs = 0
 
 data SyscallExitTrace = SyscallExitTrace
   { inputs :: SyscallExitInputs
@@ -321,6 +417,10 @@ instance XdrType SyscallExitTrace where
   xdrGet = SyscallExitTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallExitTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallExitTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallExitTrace, xdrMax_SyscallExitTrace :: Integer
+xdrMin_SyscallExitTrace = 4
+xdrMax_SyscallExitTrace = 4
 
 data SyscallGetDeployAddressInputs = SyscallGetDeployAddressInputs
   { caller_address :: (Maybe ContractAddress)
@@ -335,6 +435,10 @@ instance XdrType SyscallGetDeployAddressInputs where
   cxsPut (SyscallGetDeployAddressInputs x1 x2 x3) = (cxsPutOptional cxsPut_ContractAddress) x1 <> cxsPut_SHA256Hash x2 <> cxsPut_SHA256Hash x3
   cxsGet = SyscallGetDeployAddressInputs <$> (cxsGetOptional cxsGet_ContractAddress) <*> cxsGet_SHA256Hash <*> cxsGet_SHA256Hash
 
+xdrMin_SyscallGetDeployAddressInputs, xdrMax_SyscallGetDeployAddressInputs :: Integer
+xdrMin_SyscallGetDeployAddressInputs = 68
+xdrMax_SyscallGetDeployAddressInputs = 100
+
 data SyscallGetDeployAddressOutputs = SyscallGetDeployAddressOutputs
   { to_be_deployed :: ContractAddress
   }
@@ -345,6 +449,10 @@ instance XdrType SyscallGetDeployAddressOutputs where
   xdrGet = SyscallGetDeployAddressOutputs <$> get_ContractAddress
   cxsPut (SyscallGetDeployAddressOutputs x1) = cxsPut_ContractAddress x1
   cxsGet = SyscallGetDeployAddressOutputs <$> cxsGet_ContractAddress
+
+xdrMin_SyscallGetDeployAddressOutputs, xdrMax_SyscallGetDeployAddressOutputs :: Integer
+xdrMin_SyscallGetDeployAddressOutputs = 32
+xdrMax_SyscallGetDeployAddressOutputs = 32
 
 data SyscallGetDeployAddressTrace = SyscallGetDeployAddressTrace
   { inputs :: SyscallGetDeployAddressInputs
@@ -358,6 +466,10 @@ instance XdrType SyscallGetDeployAddressTrace where
   cxsPut (SyscallGetDeployAddressTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetDeployAddressTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetDeployAddressTrace, xdrMax_SyscallGetDeployAddressTrace :: Integer
+xdrMin_SyscallGetDeployAddressTrace = 72
+xdrMax_SyscallGetDeployAddressTrace = 136
+
 data SyscallDeployContractInputs = SyscallDeployContractInputs
   { nonce :: SHA256Hash
   , contract_hash :: SHA256Hash
@@ -370,6 +482,10 @@ instance XdrType SyscallDeployContractInputs where
   cxsPut (SyscallDeployContractInputs x1 x2) = cxsPut_SHA256Hash x1 <> cxsPut_SHA256Hash x2
   cxsGet = SyscallDeployContractInputs <$> cxsGet_SHA256Hash <*> cxsGet_SHA256Hash
 
+xdrMin_SyscallDeployContractInputs, xdrMax_SyscallDeployContractInputs :: Integer
+xdrMin_SyscallDeployContractInputs = 64
+xdrMax_SyscallDeployContractInputs = 64
+
 data SyscallDeployContractOutputs = SyscallDeployContractOutputs
   { deployed_address :: ContractAddress
   }
@@ -380,6 +496,10 @@ instance XdrType SyscallDeployContractOutputs where
   xdrGet = SyscallDeployContractOutputs <$> get_ContractAddress
   cxsPut (SyscallDeployContractOutputs x1) = cxsPut_ContractAddress x1
   cxsGet = SyscallDeployContractOutputs <$> cxsGet_ContractAddress
+
+xdrMin_SyscallDeployContractOutputs, xdrMax_SyscallDeployContractOutputs :: Integer
+xdrMin_SyscallDeployContractOutputs = 32
+xdrMax_SyscallDeployContractOutputs = 32
 
 data SyscallDeployContractTrace = SyscallDeployContractTrace
   { inputs :: SyscallDeployContractInputs
@@ -393,6 +513,10 @@ instance XdrType SyscallDeployContractTrace where
   cxsPut (SyscallDeployContractTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallDeployContractTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallDeployContractTrace, xdrMax_SyscallDeployContractTrace :: Integer
+xdrMin_SyscallDeployContractTrace = 68
+xdrMax_SyscallDeployContractTrace = 100
+
 data SyscallGetSourceTransactionHashInputs = SyscallGetSourceTransactionHashInputs
   deriving (Eq, Ord, Show)
 
@@ -401,6 +525,10 @@ instance XdrType SyscallGetSourceTransactionHashInputs where
   xdrGet = pure SyscallGetSourceTransactionHashInputs
   cxsPut SyscallGetSourceTransactionHashInputs = mempty
   cxsGet = pure SyscallGetSourceTransactionHashInputs
+
+xdrMin_SyscallGetSourceTransactionHashInputs, xdrMax_SyscallGetSourceTransactionHashInputs :: Integer
+xdrMin_SyscallGetSourceTransactionHashInputs = 0
+xdrMax_SyscallGetSourceTransactionHashInputs = 0
 
 data SyscallGetSourceTransactionHashOutputs = SyscallGetSourceTransactionHashOutputs
   { source_tx_hash :: SHA256Hash
@@ -413,6 +541,10 @@ instance XdrType SyscallGetSourceTransactionHashOutputs where
   cxsPut (SyscallGetSourceTransactionHashOutputs x1) = cxsPut_SHA256Hash x1
   cxsGet = SyscallGetSourceTransactionHashOutputs <$> cxsGet_SHA256Hash
 
+xdrMin_SyscallGetSourceTransactionHashOutputs, xdrMax_SyscallGetSourceTransactionHashOutputs :: Integer
+xdrMin_SyscallGetSourceTransactionHashOutputs = 32
+xdrMax_SyscallGetSourceTransactionHashOutputs = 32
+
 data SyscallGetSourceTransactionHashTrace = SyscallGetSourceTransactionHashTrace
   { inputs :: SyscallGetSourceTransactionHashInputs
   , outputs :: (Maybe SyscallGetSourceTransactionHashOutputs)
@@ -424,6 +556,10 @@ instance XdrType SyscallGetSourceTransactionHashTrace where
   xdrGet = SyscallGetSourceTransactionHashTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallGetSourceTransactionHashTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetSourceTransactionHashTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallGetSourceTransactionHashTrace, xdrMax_SyscallGetSourceTransactionHashTrace :: Integer
+xdrMin_SyscallGetSourceTransactionHashTrace = 4
+xdrMax_SyscallGetSourceTransactionHashTrace = 36
 
 data SyscallVerifySignatureInputs = SyscallVerifySignatureInputs
   { scheme :: Int32
@@ -439,6 +575,10 @@ instance XdrType SyscallVerifySignatureInputs where
   cxsPut (SyscallVerifySignatureInputs x1 x2 x3 x4) = cxsPut x1 <> (cxsPutVarOpaque 0xffffffff) x2 <> (cxsPutVarOpaque 0xffffffff) x3 <> (cxsPutVarOpaque 0xffffffff) x4
   cxsGet = SyscallVerifySignatureInputs <$> cxsGet <*> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallVerifySignatureInputs, xdrMax_SyscallVerifySignatureInputs :: Integer
+xdrMin_SyscallVerifySignatureInputs = 16
+xdrMax_SyscallVerifySignatureInputs = 12884901904
+
 data SyscallVerifySignatureOutputs = SyscallVerifySignatureOutputs
   deriving (Eq, Ord, Show)
 
@@ -447,6 +587,10 @@ instance XdrType SyscallVerifySignatureOutputs where
   xdrGet = pure SyscallVerifySignatureOutputs
   cxsPut SyscallVerifySignatureOutputs = mempty
   cxsGet = pure SyscallVerifySignatureOutputs
+
+xdrMin_SyscallVerifySignatureOutputs, xdrMax_SyscallVerifySignatureOutputs :: Integer
+xdrMin_SyscallVerifySignatureOutputs = 0
+xdrMax_SyscallVerifySignatureOutputs = 0
 
 data SyscallVerifySignatureTrace = SyscallVerifySignatureTrace
   { inputs :: SyscallVerifySignatureInputs
@@ -460,6 +604,10 @@ instance XdrType SyscallVerifySignatureTrace where
   cxsPut (SyscallVerifySignatureTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallVerifySignatureTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallVerifySignatureTrace, xdrMax_SyscallVerifySignatureTrace :: Integer
+xdrMin_SyscallVerifySignatureTrace = 20
+xdrMax_SyscallVerifySignatureTrace = 12884901908
+
 data SyscallBytestringGetLenInputs = SyscallBytestringGetLenInputs
   { key :: StorageKeyContractData
   }
@@ -471,6 +619,10 @@ instance XdrType SyscallBytestringGetLenInputs where
   cxsPut (SyscallBytestringGetLenInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallBytestringGetLenInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallBytestringGetLenInputs, xdrMax_SyscallBytestringGetLenInputs :: Integer
+xdrMin_SyscallBytestringGetLenInputs = 32
+xdrMax_SyscallBytestringGetLenInputs = 32
+
 data SyscallBytestringGetLenOutputs = SyscallBytestringGetLenOutputs
   { length :: Word32
   }
@@ -481,6 +633,10 @@ instance XdrType SyscallBytestringGetLenOutputs where
   xdrGet = SyscallBytestringGetLenOutputs <$> xdrGet
   cxsPut (SyscallBytestringGetLenOutputs x1) = cxsPut x1
   cxsGet = SyscallBytestringGetLenOutputs <$> cxsGet
+
+xdrMin_SyscallBytestringGetLenOutputs, xdrMax_SyscallBytestringGetLenOutputs :: Integer
+xdrMin_SyscallBytestringGetLenOutputs = 4
+xdrMax_SyscallBytestringGetLenOutputs = 4
 
 data SyscallBytestringGetLenTrace = SyscallBytestringGetLenTrace
   { inputs :: SyscallBytestringGetLenInputs
@@ -494,6 +650,10 @@ instance XdrType SyscallBytestringGetLenTrace where
   cxsPut (SyscallBytestringGetLenTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallBytestringGetLenTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallBytestringGetLenTrace, xdrMax_SyscallBytestringGetLenTrace :: Integer
+xdrMin_SyscallBytestringGetLenTrace = 36
+xdrMax_SyscallBytestringGetLenTrace = 40
+
 data SyscallBytestringGetInputs = SyscallBytestringGetInputs
   { key :: StorageKeyContractData
   }
@@ -505,6 +665,10 @@ instance XdrType SyscallBytestringGetInputs where
   cxsPut (SyscallBytestringGetInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallBytestringGetInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallBytestringGetInputs, xdrMax_SyscallBytestringGetInputs :: Integer
+xdrMin_SyscallBytestringGetInputs = 32
+xdrMax_SyscallBytestringGetInputs = 32
+
 data SyscallBytestringGetOutputs = SyscallBytestringGetOutputs
   { bytestring :: Bytestring
   }
@@ -515,6 +679,10 @@ instance XdrType SyscallBytestringGetOutputs where
   xdrGet = SyscallBytestringGetOutputs <$> get_Bytestring
   cxsPut (SyscallBytestringGetOutputs x1) = cxsPut_Bytestring x1
   cxsGet = SyscallBytestringGetOutputs <$> cxsGet_Bytestring
+
+xdrMin_SyscallBytestringGetOutputs, xdrMax_SyscallBytestringGetOutputs :: Integer
+xdrMin_SyscallBytestringGetOutputs = 4
+xdrMax_SyscallBytestringGetOutputs = 65004
 
 data SyscallBytestringGetTrace = SyscallBytestringGetTrace
   { inputs :: SyscallBytestringGetInputs
@@ -528,6 +696,10 @@ instance XdrType SyscallBytestringGetTrace where
   cxsPut (SyscallBytestringGetTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallBytestringGetTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallBytestringGetTrace, xdrMax_SyscallBytestringGetTrace :: Integer
+xdrMin_SyscallBytestringGetTrace = 36
+xdrMax_SyscallBytestringGetTrace = 65040
+
 data SyscallBytestringSetInputs = SyscallBytestringSetInputs
   { key :: StorageKeyContractData
   , bytestring :: ByteString
@@ -540,6 +712,10 @@ instance XdrType SyscallBytestringSetInputs where
   cxsPut (SyscallBytestringSetInputs x1 x2) = cxsPut_StorageKeyContractData x1 <> (cxsPutVarOpaque 0xffffffff) x2
   cxsGet = SyscallBytestringSetInputs <$> cxsGet_StorageKeyContractData <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallBytestringSetInputs, xdrMax_SyscallBytestringSetInputs :: Integer
+xdrMin_SyscallBytestringSetInputs = 36
+xdrMax_SyscallBytestringSetInputs = 4294967332
+
 data SyscallBytestringSetOutputs = SyscallBytestringSetOutputs
   deriving (Eq, Ord, Show)
 
@@ -548,6 +724,10 @@ instance XdrType SyscallBytestringSetOutputs where
   xdrGet = pure SyscallBytestringSetOutputs
   cxsPut SyscallBytestringSetOutputs = mempty
   cxsGet = pure SyscallBytestringSetOutputs
+
+xdrMin_SyscallBytestringSetOutputs, xdrMax_SyscallBytestringSetOutputs :: Integer
+xdrMin_SyscallBytestringSetOutputs = 0
+xdrMax_SyscallBytestringSetOutputs = 0
 
 data SyscallBytestringSetTrace = SyscallBytestringSetTrace
   { inputs :: SyscallBytestringSetInputs
@@ -561,6 +741,10 @@ instance XdrType SyscallBytestringSetTrace where
   cxsPut (SyscallBytestringSetTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallBytestringSetTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallBytestringSetTrace, xdrMax_SyscallBytestringSetTrace :: Integer
+xdrMin_SyscallBytestringSetTrace = 40
+xdrMax_SyscallBytestringSetTrace = 4294967336
+
 data SyscallNonnegativeIntGetInputs = SyscallNonnegativeIntGetInputs
   { key :: StorageKeyContractData
   , force_load :: Bool
@@ -572,6 +756,10 @@ instance XdrType SyscallNonnegativeIntGetInputs where
   xdrGet = SyscallNonnegativeIntGetInputs <$> get_StorageKeyContractData <*> xdrGet
   cxsPut (SyscallNonnegativeIntGetInputs x1 x2) = cxsPut_StorageKeyContractData x1 <> cxsPut x2
   cxsGet = SyscallNonnegativeIntGetInputs <$> cxsGet_StorageKeyContractData <*> cxsGet
+
+xdrMin_SyscallNonnegativeIntGetInputs, xdrMax_SyscallNonnegativeIntGetInputs :: Integer
+xdrMin_SyscallNonnegativeIntGetInputs = 36
+xdrMax_SyscallNonnegativeIntGetInputs = 36
 
 data SyscallNonnegativeIntGetOutputs = SyscallNonnegativeIntGetOutputs
   { current_set :: (Maybe X_int128_xdr)
@@ -585,6 +773,10 @@ instance XdrType SyscallNonnegativeIntGetOutputs where
   cxsPut (SyscallNonnegativeIntGetOutputs x1 x2) = (cxsPutOptional cxsPut) x1 <> cxsPut x2
   cxsGet = SyscallNonnegativeIntGetOutputs <$> (cxsGetOptional cxsGet) <*> cxsGet
 
+xdrMin_SyscallNonnegativeIntGetOutputs, xdrMax_SyscallNonnegativeIntGetOutputs :: Integer
+xdrMin_SyscallNonnegativeIntGetOutputs = 20
+xdrMax_SyscallNonnegativeIntGetOutputs = 36
+
 data SyscallNonnegativeIntGetTrace = SyscallNonnegativeIntGetTrace
   { inputs :: SyscallNonnegativeIntGetInputs
   , outputs :: (Maybe SyscallNonnegativeIntGetOutputs)
@@ -596,6 +788,10 @@ instance XdrType SyscallNonnegativeIntGetTrace where
   xdrGet = SyscallNonnegativeIntGetTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallNonnegativeIntGetTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallNonnegativeIntGetTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallNonnegativeIntGetTrace, xdrMax_SyscallNonnegativeIntGetTrace :: Integer
+xdrMin_SyscallNonnegativeIntGetTrace = 40
+xdrMax_SyscallNonnegativeIntGetTrace = 76
 
 data SyscallNonnegativeIntSetAddInputs = SyscallNonnegativeIntSetAddInputs
   { key :: StorageKeyContractData
@@ -610,6 +806,10 @@ instance XdrType SyscallNonnegativeIntSetAddInputs where
   cxsPut (SyscallNonnegativeIntSetAddInputs x1 x2 x3) = cxsPut_StorageKeyContractData x1 <> (cxsPutOptional cxsPut) x2 <> cxsPut x3
   cxsGet = SyscallNonnegativeIntSetAddInputs <$> cxsGet_StorageKeyContractData <*> (cxsGetOptional cxsGet) <*> cxsGet
 
+xdrMin_SyscallNonnegativeIntSetAddInputs, xdrMax_SyscallNonnegativeIntSetAddInputs :: Integer
+xdrMin_SyscallNonnegativeIntSetAddInputs = 52
+xdrMax_SyscallNonnegativeIntSetAddInputs = 68
+
 data SyscallNonnegativeIntSetAddOutputs = SyscallNonnegativeIntSetAddOutputs
   deriving (Eq, Ord, Show)
 
@@ -618,6 +818,10 @@ instance XdrType SyscallNonnegativeIntSetAddOutputs where
   xdrGet = pure SyscallNonnegativeIntSetAddOutputs
   cxsPut SyscallNonnegativeIntSetAddOutputs = mempty
   cxsGet = pure SyscallNonnegativeIntSetAddOutputs
+
+xdrMin_SyscallNonnegativeIntSetAddOutputs, xdrMax_SyscallNonnegativeIntSetAddOutputs :: Integer
+xdrMin_SyscallNonnegativeIntSetAddOutputs = 0
+xdrMax_SyscallNonnegativeIntSetAddOutputs = 0
 
 data SyscallNonnegativeIntSetAddTrace = SyscallNonnegativeIntSetAddTrace
   { inputs :: SyscallNonnegativeIntSetAddInputs
@@ -631,6 +835,10 @@ instance XdrType SyscallNonnegativeIntSetAddTrace where
   cxsPut (SyscallNonnegativeIntSetAddTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallNonnegativeIntSetAddTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallNonnegativeIntSetAddTrace, xdrMax_SyscallNonnegativeIntSetAddTrace :: Integer
+xdrMin_SyscallNonnegativeIntSetAddTrace = 56
+xdrMax_SyscallNonnegativeIntSetAddTrace = 72
+
 data SyscallDeleteObjectInputs = SyscallDeleteObjectInputs
   { key :: StorageKeyContractData
   }
@@ -642,6 +850,10 @@ instance XdrType SyscallDeleteObjectInputs where
   cxsPut (SyscallDeleteObjectInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallDeleteObjectInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallDeleteObjectInputs, xdrMax_SyscallDeleteObjectInputs :: Integer
+xdrMin_SyscallDeleteObjectInputs = 32
+xdrMax_SyscallDeleteObjectInputs = 32
+
 data SyscallDeleteObjectOutputs = SyscallDeleteObjectOutputs
   deriving (Eq, Ord, Show)
 
@@ -650,6 +862,10 @@ instance XdrType SyscallDeleteObjectOutputs where
   xdrGet = pure SyscallDeleteObjectOutputs
   cxsPut SyscallDeleteObjectOutputs = mempty
   cxsGet = pure SyscallDeleteObjectOutputs
+
+xdrMin_SyscallDeleteObjectOutputs, xdrMax_SyscallDeleteObjectOutputs :: Integer
+xdrMin_SyscallDeleteObjectOutputs = 0
+xdrMax_SyscallDeleteObjectOutputs = 0
 
 data SyscallDeleteObjectTrace = SyscallDeleteObjectTrace
   { inputs :: SyscallDeleteObjectInputs
@@ -663,6 +879,10 @@ instance XdrType SyscallDeleteObjectTrace where
   cxsPut (SyscallDeleteObjectTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallDeleteObjectTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallDeleteObjectTrace, xdrMax_SyscallDeleteObjectTrace :: Integer
+xdrMin_SyscallDeleteObjectTrace = 36
+xdrMax_SyscallDeleteObjectTrace = 36
+
 data SyscallGetCurrentAddressInputs = SyscallGetCurrentAddressInputs
   deriving (Eq, Ord, Show)
 
@@ -671,6 +891,10 @@ instance XdrType SyscallGetCurrentAddressInputs where
   xdrGet = pure SyscallGetCurrentAddressInputs
   cxsPut SyscallGetCurrentAddressInputs = mempty
   cxsGet = pure SyscallGetCurrentAddressInputs
+
+xdrMin_SyscallGetCurrentAddressInputs, xdrMax_SyscallGetCurrentAddressInputs :: Integer
+xdrMin_SyscallGetCurrentAddressInputs = 0
+xdrMax_SyscallGetCurrentAddressInputs = 0
 
 data SyscallGetCurrentAddressOutputs = SyscallGetCurrentAddressOutputs
   { address :: ContractAddress
@@ -682,6 +906,10 @@ instance XdrType SyscallGetCurrentAddressOutputs where
   xdrGet = SyscallGetCurrentAddressOutputs <$> get_ContractAddress
   cxsPut (SyscallGetCurrentAddressOutputs x1) = cxsPut_ContractAddress x1
   cxsGet = SyscallGetCurrentAddressOutputs <$> cxsGet_ContractAddress
+
+xdrMin_SyscallGetCurrentAddressOutputs, xdrMax_SyscallGetCurrentAddressOutputs :: Integer
+xdrMin_SyscallGetCurrentAddressOutputs = 32
+xdrMax_SyscallGetCurrentAddressOutputs = 32
 
 data SyscallGetCurrentAddressTrace = SyscallGetCurrentAddressTrace
   { inputs :: SyscallGetCurrentAddressInputs
@@ -695,6 +923,10 @@ instance XdrType SyscallGetCurrentAddressTrace where
   cxsPut (SyscallGetCurrentAddressTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetCurrentAddressTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetCurrentAddressTrace, xdrMax_SyscallGetCurrentAddressTrace :: Integer
+xdrMin_SyscallGetCurrentAddressTrace = 4
+xdrMax_SyscallGetCurrentAddressTrace = 36
+
 data SyscallRetrocausalQueueInsertInputs = SyscallRetrocausalQueueInsertInputs
   { key :: StorageKeyContractData
   , queue_entry :: ByteString
@@ -707,6 +939,10 @@ instance XdrType SyscallRetrocausalQueueInsertInputs where
   cxsPut (SyscallRetrocausalQueueInsertInputs x1 x2) = cxsPut_StorageKeyContractData x1 <> (cxsPutVarOpaque 0xffffffff) x2
   cxsGet = SyscallRetrocausalQueueInsertInputs <$> cxsGet_StorageKeyContractData <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallRetrocausalQueueInsertInputs, xdrMax_SyscallRetrocausalQueueInsertInputs :: Integer
+xdrMin_SyscallRetrocausalQueueInsertInputs = 36
+xdrMax_SyscallRetrocausalQueueInsertInputs = 4294967332
+
 data SyscallRetrocausalQueueInsertOutputs = SyscallRetrocausalQueueInsertOutputs
   deriving (Eq, Ord, Show)
 
@@ -715,6 +951,10 @@ instance XdrType SyscallRetrocausalQueueInsertOutputs where
   xdrGet = pure SyscallRetrocausalQueueInsertOutputs
   cxsPut SyscallRetrocausalQueueInsertOutputs = mempty
   cxsGet = pure SyscallRetrocausalQueueInsertOutputs
+
+xdrMin_SyscallRetrocausalQueueInsertOutputs, xdrMax_SyscallRetrocausalQueueInsertOutputs :: Integer
+xdrMin_SyscallRetrocausalQueueInsertOutputs = 0
+xdrMax_SyscallRetrocausalQueueInsertOutputs = 0
 
 data SyscallRetrocausalQueueInsertTrace = SyscallRetrocausalQueueInsertTrace
   { inputs :: SyscallRetrocausalQueueInsertInputs
@@ -728,6 +968,10 @@ instance XdrType SyscallRetrocausalQueueInsertTrace where
   cxsPut (SyscallRetrocausalQueueInsertTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallRetrocausalQueueInsertTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallRetrocausalQueueInsertTrace, xdrMax_SyscallRetrocausalQueueInsertTrace :: Integer
+xdrMin_SyscallRetrocausalQueueInsertTrace = 40
+xdrMax_SyscallRetrocausalQueueInsertTrace = 4294967336
+
 data SyscallRetrocausalQueueConsumeInputs = SyscallRetrocausalQueueConsumeInputs
   { key :: StorageKeyContractData
   , peek :: Bool
@@ -740,6 +984,10 @@ instance XdrType SyscallRetrocausalQueueConsumeInputs where
   cxsPut (SyscallRetrocausalQueueConsumeInputs x1 x2) = cxsPut_StorageKeyContractData x1 <> cxsPut x2
   cxsGet = SyscallRetrocausalQueueConsumeInputs <$> cxsGet_StorageKeyContractData <*> cxsGet
 
+xdrMin_SyscallRetrocausalQueueConsumeInputs, xdrMax_SyscallRetrocausalQueueConsumeInputs :: Integer
+xdrMin_SyscallRetrocausalQueueConsumeInputs = 36
+xdrMax_SyscallRetrocausalQueueConsumeInputs = 36
+
 data SyscallRetrocausalQueueConsumeOutputs = SyscallRetrocausalQueueConsumeOutputs
   { queue_entry :: QueueEntry
   }
@@ -750,6 +998,10 @@ instance XdrType SyscallRetrocausalQueueConsumeOutputs where
   xdrGet = SyscallRetrocausalQueueConsumeOutputs <$> get_QueueEntry
   cxsPut (SyscallRetrocausalQueueConsumeOutputs x1) = cxsPut_QueueEntry x1
   cxsGet = SyscallRetrocausalQueueConsumeOutputs <$> cxsGet_QueueEntry
+
+xdrMin_SyscallRetrocausalQueueConsumeOutputs, xdrMax_SyscallRetrocausalQueueConsumeOutputs :: Integer
+xdrMin_SyscallRetrocausalQueueConsumeOutputs = 4
+xdrMax_SyscallRetrocausalQueueConsumeOutputs = 260
 
 data SyscallRetrocausalQueueConsumeTrace = SyscallRetrocausalQueueConsumeTrace
   { inputs :: SyscallRetrocausalQueueConsumeInputs
@@ -763,6 +1015,10 @@ instance XdrType SyscallRetrocausalQueueConsumeTrace where
   cxsPut (SyscallRetrocausalQueueConsumeTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallRetrocausalQueueConsumeTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallRetrocausalQueueConsumeTrace, xdrMax_SyscallRetrocausalQueueConsumeTrace :: Integer
+xdrMin_SyscallRetrocausalQueueConsumeTrace = 40
+xdrMax_SyscallRetrocausalQueueConsumeTrace = 300
+
 data SyscallGetTransactionStatisticsInputs = SyscallGetTransactionStatisticsInputs
   { statistic :: TransactionStatistic
   }
@@ -773,6 +1029,10 @@ instance XdrType SyscallGetTransactionStatisticsInputs where
   xdrGet = SyscallGetTransactionStatisticsInputs <$> xdrGet
   cxsPut (SyscallGetTransactionStatisticsInputs x1) = cxsPut x1
   cxsGet = SyscallGetTransactionStatisticsInputs <$> cxsGet
+
+xdrMin_SyscallGetTransactionStatisticsInputs, xdrMax_SyscallGetTransactionStatisticsInputs :: Integer
+xdrMin_SyscallGetTransactionStatisticsInputs = 4
+xdrMax_SyscallGetTransactionStatisticsInputs = 4
 
 data SyscallGetTransactionStatisticsOutputs = SyscallGetTransactionStatisticsOutputs
   { result :: Word64
@@ -785,6 +1045,10 @@ instance XdrType SyscallGetTransactionStatisticsOutputs where
   cxsPut (SyscallGetTransactionStatisticsOutputs x1) = cxsPut x1
   cxsGet = SyscallGetTransactionStatisticsOutputs <$> cxsGet
 
+xdrMin_SyscallGetTransactionStatisticsOutputs, xdrMax_SyscallGetTransactionStatisticsOutputs :: Integer
+xdrMin_SyscallGetTransactionStatisticsOutputs = 8
+xdrMax_SyscallGetTransactionStatisticsOutputs = 8
+
 data SyscallGetTransactionStatisticsTrace = SyscallGetTransactionStatisticsTrace
   { inputs :: SyscallGetTransactionStatisticsInputs
   , outputs :: (Maybe SyscallGetTransactionStatisticsOutputs)
@@ -796,6 +1060,10 @@ instance XdrType SyscallGetTransactionStatisticsTrace where
   xdrGet = SyscallGetTransactionStatisticsTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallGetTransactionStatisticsTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetTransactionStatisticsTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallGetTransactionStatisticsTrace, xdrMax_SyscallGetTransactionStatisticsTrace :: Integer
+xdrMin_SyscallGetTransactionStatisticsTrace = 8
+xdrMax_SyscallGetTransactionStatisticsTrace = 16
 
 data SyscallChangePublicKeyRegistrationInputs = SyscallChangePublicKeyRegistrationInputs
   { key_index :: Word32
@@ -811,6 +1079,10 @@ instance XdrType SyscallChangePublicKeyRegistrationInputs where
   cxsPut (SyscallChangePublicKeyRegistrationInputs x1 x2 x3 x4) = cxsPut x1 <> (cxsPutOptional cxsPut) x2 <> (cxsPutVarOpaque 0xffffffff) x3 <> (cxsPutOptional cxsPut) x4
   cxsGet = SyscallChangePublicKeyRegistrationInputs <$> cxsGet <*> (cxsGetOptional cxsGet) <*> (cxsGetVarOpaque 0xffffffff) <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallChangePublicKeyRegistrationInputs, xdrMax_SyscallChangePublicKeyRegistrationInputs :: Integer
+xdrMin_SyscallChangePublicKeyRegistrationInputs = 16
+xdrMax_SyscallChangePublicKeyRegistrationInputs = 4294967320
+
 data SyscallChangePublicKeyRegistrationOutputs = SyscallChangePublicKeyRegistrationOutputs
   deriving (Eq, Ord, Show)
 
@@ -819,6 +1091,10 @@ instance XdrType SyscallChangePublicKeyRegistrationOutputs where
   xdrGet = pure SyscallChangePublicKeyRegistrationOutputs
   cxsPut SyscallChangePublicKeyRegistrationOutputs = mempty
   cxsGet = pure SyscallChangePublicKeyRegistrationOutputs
+
+xdrMin_SyscallChangePublicKeyRegistrationOutputs, xdrMax_SyscallChangePublicKeyRegistrationOutputs :: Integer
+xdrMin_SyscallChangePublicKeyRegistrationOutputs = 0
+xdrMax_SyscallChangePublicKeyRegistrationOutputs = 0
 
 data SyscallChangePublicKeyRegistrationTrace = SyscallChangePublicKeyRegistrationTrace
   { inputs :: SyscallChangePublicKeyRegistrationInputs
@@ -831,6 +1107,10 @@ instance XdrType SyscallChangePublicKeyRegistrationTrace where
   xdrGet = SyscallChangePublicKeyRegistrationTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallChangePublicKeyRegistrationTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallChangePublicKeyRegistrationTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallChangePublicKeyRegistrationTrace, xdrMax_SyscallChangePublicKeyRegistrationTrace :: Integer
+xdrMin_SyscallChangePublicKeyRegistrationTrace = 20
+xdrMax_SyscallChangePublicKeyRegistrationTrace = 4294967324
 
 data SyscallLogEventInputs = SyscallLogEventInputs
   { topic0 :: (Maybe Topic)
@@ -846,6 +1126,10 @@ instance XdrType SyscallLogEventInputs where
   cxsPut (SyscallLogEventInputs x1 x2 x3 x4) = (cxsPutOptional cxsPut_Topic) x1 <> (cxsPutOptional cxsPut_Topic) x2 <> (cxsPutOptional cxsPut_Topic) x3 <> (cxsPutVarOpaque 0xffffffff) x4
   cxsGet = SyscallLogEventInputs <$> (cxsGetOptional cxsGet_Topic) <*> (cxsGetOptional cxsGet_Topic) <*> (cxsGetOptional cxsGet_Topic) <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallLogEventInputs, xdrMax_SyscallLogEventInputs :: Integer
+xdrMin_SyscallLogEventInputs = 16
+xdrMax_SyscallLogEventInputs = 4294967408
+
 data SyscallLogEventOutputs = SyscallLogEventOutputs
   deriving (Eq, Ord, Show)
 
@@ -854,6 +1138,10 @@ instance XdrType SyscallLogEventOutputs where
   xdrGet = pure SyscallLogEventOutputs
   cxsPut SyscallLogEventOutputs = mempty
   cxsGet = pure SyscallLogEventOutputs
+
+xdrMin_SyscallLogEventOutputs, xdrMax_SyscallLogEventOutputs :: Integer
+xdrMin_SyscallLogEventOutputs = 0
+xdrMax_SyscallLogEventOutputs = 0
 
 data SyscallLogEventTrace = SyscallLogEventTrace
   { inputs :: SyscallLogEventInputs
@@ -867,6 +1155,10 @@ instance XdrType SyscallLogEventTrace where
   cxsPut (SyscallLogEventTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallLogEventTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallLogEventTrace, xdrMax_SyscallLogEventTrace :: Integer
+xdrMin_SyscallLogEventTrace = 20
+xdrMax_SyscallLogEventTrace = 4294967412
+
 data SyscallGetAuthClaimInputs = SyscallGetAuthClaimInputs
   deriving (Eq, Ord, Show)
 
@@ -875,6 +1167,10 @@ instance XdrType SyscallGetAuthClaimInputs where
   xdrGet = pure SyscallGetAuthClaimInputs
   cxsPut SyscallGetAuthClaimInputs = mempty
   cxsGet = pure SyscallGetAuthClaimInputs
+
+xdrMin_SyscallGetAuthClaimInputs, xdrMax_SyscallGetAuthClaimInputs :: Integer
+xdrMin_SyscallGetAuthClaimInputs = 0
+xdrMax_SyscallGetAuthClaimInputs = 0
 
 data SyscallGetAuthClaimOutputs = SyscallGetAuthClaimOutputs
   { auth_claim :: AuthClaim
@@ -887,6 +1183,10 @@ instance XdrType SyscallGetAuthClaimOutputs where
   cxsPut (SyscallGetAuthClaimOutputs x1) = cxsPut x1
   cxsGet = SyscallGetAuthClaimOutputs <$> cxsGet
 
+xdrMin_SyscallGetAuthClaimOutputs, xdrMax_SyscallGetAuthClaimOutputs :: Integer
+xdrMin_SyscallGetAuthClaimOutputs = 12
+xdrMax_SyscallGetAuthClaimOutputs = 44
+
 data SyscallGetAuthClaimTrace = SyscallGetAuthClaimTrace
   { inputs :: SyscallGetAuthClaimInputs
   , outputs :: (Maybe SyscallGetAuthClaimOutputs)
@@ -898,6 +1198,10 @@ instance XdrType SyscallGetAuthClaimTrace where
   xdrGet = SyscallGetAuthClaimTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallGetAuthClaimTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetAuthClaimTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallGetAuthClaimTrace, xdrMax_SyscallGetAuthClaimTrace :: Integer
+xdrMin_SyscallGetAuthClaimTrace = 4
+xdrMax_SyscallGetAuthClaimTrace = 48
 
 data SyscallSHA256UpdateInputs = SyscallSHA256UpdateInputs
   { index :: Word32
@@ -912,6 +1216,10 @@ instance XdrType SyscallSHA256UpdateInputs where
   cxsPut (SyscallSHA256UpdateInputs x1 x2 x3) = cxsPut x1 <> (cxsPutVarOpaque 0xffffffff) x2 <> cxsPut x3
   cxsGet = SyscallSHA256UpdateInputs <$> cxsGet <*> (cxsGetVarOpaque 0xffffffff) <*> cxsGet
 
+xdrMin_SyscallSHA256UpdateInputs, xdrMax_SyscallSHA256UpdateInputs :: Integer
+xdrMin_SyscallSHA256UpdateInputs = 12
+xdrMax_SyscallSHA256UpdateInputs = 4294967308
+
 data SyscallSHA256UpdateOutputs = SyscallSHA256UpdateOutputs
   deriving (Eq, Ord, Show)
 
@@ -920,6 +1228,10 @@ instance XdrType SyscallSHA256UpdateOutputs where
   xdrGet = pure SyscallSHA256UpdateOutputs
   cxsPut SyscallSHA256UpdateOutputs = mempty
   cxsGet = pure SyscallSHA256UpdateOutputs
+
+xdrMin_SyscallSHA256UpdateOutputs, xdrMax_SyscallSHA256UpdateOutputs :: Integer
+xdrMin_SyscallSHA256UpdateOutputs = 0
+xdrMax_SyscallSHA256UpdateOutputs = 0
 
 data SyscallSHA256UpdateTrace = SyscallSHA256UpdateTrace
   { inputs :: SyscallSHA256UpdateInputs
@@ -933,6 +1245,10 @@ instance XdrType SyscallSHA256UpdateTrace where
   cxsPut (SyscallSHA256UpdateTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallSHA256UpdateTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallSHA256UpdateTrace, xdrMax_SyscallSHA256UpdateTrace :: Integer
+xdrMin_SyscallSHA256UpdateTrace = 16
+xdrMax_SyscallSHA256UpdateTrace = 4294967312
+
 data SyscallSHA256FinalizeInputs = SyscallSHA256FinalizeInputs
   { index :: Word32
   }
@@ -944,6 +1260,10 @@ instance XdrType SyscallSHA256FinalizeInputs where
   cxsPut (SyscallSHA256FinalizeInputs x1) = cxsPut x1
   cxsGet = SyscallSHA256FinalizeInputs <$> cxsGet
 
+xdrMin_SyscallSHA256FinalizeInputs, xdrMax_SyscallSHA256FinalizeInputs :: Integer
+xdrMin_SyscallSHA256FinalizeInputs = 4
+xdrMax_SyscallSHA256FinalizeInputs = 4
+
 data SyscallSHA256FinalizeOutputs = SyscallSHA256FinalizeOutputs
   { hash :: SHA256Hash
   }
@@ -954,6 +1274,10 @@ instance XdrType SyscallSHA256FinalizeOutputs where
   xdrGet = SyscallSHA256FinalizeOutputs <$> get_SHA256Hash
   cxsPut (SyscallSHA256FinalizeOutputs x1) = cxsPut_SHA256Hash x1
   cxsGet = SyscallSHA256FinalizeOutputs <$> cxsGet_SHA256Hash
+
+xdrMin_SyscallSHA256FinalizeOutputs, xdrMax_SyscallSHA256FinalizeOutputs :: Integer
+xdrMin_SyscallSHA256FinalizeOutputs = 32
+xdrMax_SyscallSHA256FinalizeOutputs = 32
 
 data SyscallSHA256FinalizeTrace = SyscallSHA256FinalizeTrace
   { inputs :: SyscallSHA256FinalizeInputs
@@ -967,6 +1291,10 @@ instance XdrType SyscallSHA256FinalizeTrace where
   cxsPut (SyscallSHA256FinalizeTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallSHA256FinalizeTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallSHA256FinalizeTrace, xdrMax_SyscallSHA256FinalizeTrace :: Integer
+xdrMin_SyscallSHA256FinalizeTrace = 8
+xdrMax_SyscallSHA256FinalizeTrace = 40
+
 data SyscallWriteAddressRequiredWeightInputs = SyscallWriteAddressRequiredWeightInputs
   { required_weight :: Weight
   }
@@ -978,6 +1306,10 @@ instance XdrType SyscallWriteAddressRequiredWeightInputs where
   cxsPut (SyscallWriteAddressRequiredWeightInputs x1) = cxsPut_Weight x1
   cxsGet = SyscallWriteAddressRequiredWeightInputs <$> cxsGet_Weight
 
+xdrMin_SyscallWriteAddressRequiredWeightInputs, xdrMax_SyscallWriteAddressRequiredWeightInputs :: Integer
+xdrMin_SyscallWriteAddressRequiredWeightInputs = 4
+xdrMax_SyscallWriteAddressRequiredWeightInputs = 4
+
 data SyscallWriteAddressRequiredWeightOutputs = SyscallWriteAddressRequiredWeightOutputs
   deriving (Eq, Ord, Show)
 
@@ -986,6 +1318,10 @@ instance XdrType SyscallWriteAddressRequiredWeightOutputs where
   xdrGet = pure SyscallWriteAddressRequiredWeightOutputs
   cxsPut SyscallWriteAddressRequiredWeightOutputs = mempty
   cxsGet = pure SyscallWriteAddressRequiredWeightOutputs
+
+xdrMin_SyscallWriteAddressRequiredWeightOutputs, xdrMax_SyscallWriteAddressRequiredWeightOutputs :: Integer
+xdrMin_SyscallWriteAddressRequiredWeightOutputs = 0
+xdrMax_SyscallWriteAddressRequiredWeightOutputs = 0
 
 data SyscallWriteAddressRequiredWeightTrace = SyscallWriteAddressRequiredWeightTrace
   { inputs :: SyscallWriteAddressRequiredWeightInputs
@@ -999,6 +1335,10 @@ instance XdrType SyscallWriteAddressRequiredWeightTrace where
   cxsPut (SyscallWriteAddressRequiredWeightTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallWriteAddressRequiredWeightTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallWriteAddressRequiredWeightTrace, xdrMax_SyscallWriteAddressRequiredWeightTrace :: Integer
+xdrMin_SyscallWriteAddressRequiredWeightTrace = 8
+xdrMax_SyscallWriteAddressRequiredWeightTrace = 8
+
 data SyscallGetBlockHeightInputs = SyscallGetBlockHeightInputs
   deriving (Eq, Ord, Show)
 
@@ -1007,6 +1347,10 @@ instance XdrType SyscallGetBlockHeightInputs where
   xdrGet = pure SyscallGetBlockHeightInputs
   cxsPut SyscallGetBlockHeightInputs = mempty
   cxsGet = pure SyscallGetBlockHeightInputs
+
+xdrMin_SyscallGetBlockHeightInputs, xdrMax_SyscallGetBlockHeightInputs :: Integer
+xdrMin_SyscallGetBlockHeightInputs = 0
+xdrMax_SyscallGetBlockHeightInputs = 0
 
 data SyscallGetBlockHeightOutputs = SyscallGetBlockHeightOutputs
   { result :: BlockHeight
@@ -1018,6 +1362,10 @@ instance XdrType SyscallGetBlockHeightOutputs where
   xdrGet = SyscallGetBlockHeightOutputs <$> get_BlockHeight
   cxsPut (SyscallGetBlockHeightOutputs x1) = cxsPut_BlockHeight x1
   cxsGet = SyscallGetBlockHeightOutputs <$> cxsGet_BlockHeight
+
+xdrMin_SyscallGetBlockHeightOutputs, xdrMax_SyscallGetBlockHeightOutputs :: Integer
+xdrMin_SyscallGetBlockHeightOutputs = 8
+xdrMax_SyscallGetBlockHeightOutputs = 8
 
 data SyscallGetBlockHeightTrace = SyscallGetBlockHeightTrace
   { inputs :: SyscallGetBlockHeightInputs
@@ -1031,6 +1379,10 @@ instance XdrType SyscallGetBlockHeightTrace where
   cxsPut (SyscallGetBlockHeightTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetBlockHeightTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetBlockHeightTrace, xdrMax_SyscallGetBlockHeightTrace :: Integer
+xdrMin_SyscallGetBlockHeightTrace = 4
+xdrMax_SyscallGetBlockHeightTrace = 12
+
 data SyscallRetrocausalQueuePeekLenInputs = SyscallRetrocausalQueuePeekLenInputs
   { key :: StorageKeyContractData
   }
@@ -1042,6 +1394,10 @@ instance XdrType SyscallRetrocausalQueuePeekLenInputs where
   cxsPut (SyscallRetrocausalQueuePeekLenInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallRetrocausalQueuePeekLenInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallRetrocausalQueuePeekLenInputs, xdrMax_SyscallRetrocausalQueuePeekLenInputs :: Integer
+xdrMin_SyscallRetrocausalQueuePeekLenInputs = 32
+xdrMax_SyscallRetrocausalQueuePeekLenInputs = 32
+
 data SyscallRetrocausalQueuePeekLenOutputs = SyscallRetrocausalQueuePeekLenOutputs
   { len :: RuntimeMemoryLength
   }
@@ -1052,6 +1408,10 @@ instance XdrType SyscallRetrocausalQueuePeekLenOutputs where
   xdrGet = SyscallRetrocausalQueuePeekLenOutputs <$> get_RuntimeMemoryLength
   cxsPut (SyscallRetrocausalQueuePeekLenOutputs x1) = cxsPut_RuntimeMemoryLength x1
   cxsGet = SyscallRetrocausalQueuePeekLenOutputs <$> cxsGet_RuntimeMemoryLength
+
+xdrMin_SyscallRetrocausalQueuePeekLenOutputs, xdrMax_SyscallRetrocausalQueuePeekLenOutputs :: Integer
+xdrMin_SyscallRetrocausalQueuePeekLenOutputs = 4
+xdrMax_SyscallRetrocausalQueuePeekLenOutputs = 4
 
 data SyscallRetrocausalQueuePeekLenTrace = SyscallRetrocausalQueuePeekLenTrace
   { inputs :: SyscallRetrocausalQueuePeekLenInputs
@@ -1065,6 +1425,10 @@ instance XdrType SyscallRetrocausalQueuePeekLenTrace where
   cxsPut (SyscallRetrocausalQueuePeekLenTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallRetrocausalQueuePeekLenTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallRetrocausalQueuePeekLenTrace, xdrMax_SyscallRetrocausalQueuePeekLenTrace :: Integer
+xdrMin_SyscallRetrocausalQueuePeekLenTrace = 36
+xdrMax_SyscallRetrocausalQueuePeekLenTrace = 40
+
 data SyscallMintAuthTokenInputs = SyscallMintAuthTokenInputs
   { expiry_height :: BlockHeight
   , serialized_auth_token :: ByteString
@@ -1077,6 +1441,10 @@ instance XdrType SyscallMintAuthTokenInputs where
   cxsPut (SyscallMintAuthTokenInputs x1 x2) = cxsPut_BlockHeight x1 <> (cxsPutVarOpaque 0xffffffff) x2
   cxsGet = SyscallMintAuthTokenInputs <$> cxsGet_BlockHeight <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SyscallMintAuthTokenInputs, xdrMax_SyscallMintAuthTokenInputs :: Integer
+xdrMin_SyscallMintAuthTokenInputs = 12
+xdrMax_SyscallMintAuthTokenInputs = 4294967308
+
 data SyscallMintAuthTokenOutputs = SyscallMintAuthTokenOutputs
   { token_id :: Word32
   }
@@ -1087,6 +1455,10 @@ instance XdrType SyscallMintAuthTokenOutputs where
   xdrGet = SyscallMintAuthTokenOutputs <$> xdrGet
   cxsPut (SyscallMintAuthTokenOutputs x1) = cxsPut x1
   cxsGet = SyscallMintAuthTokenOutputs <$> cxsGet
+
+xdrMin_SyscallMintAuthTokenOutputs, xdrMax_SyscallMintAuthTokenOutputs :: Integer
+xdrMin_SyscallMintAuthTokenOutputs = 4
+xdrMax_SyscallMintAuthTokenOutputs = 4
 
 data SyscallMintAuthTokenTrace = SyscallMintAuthTokenTrace
   { inputs :: SyscallMintAuthTokenInputs
@@ -1100,6 +1472,10 @@ instance XdrType SyscallMintAuthTokenTrace where
   cxsPut (SyscallMintAuthTokenTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallMintAuthTokenTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallMintAuthTokenTrace, xdrMax_SyscallMintAuthTokenTrace :: Integer
+xdrMin_SyscallMintAuthTokenTrace = 16
+xdrMax_SyscallMintAuthTokenTrace = 4294967316
+
 data SyscallConsumeAuthTokenInputs = SyscallConsumeAuthTokenInputs
   { token_id :: Word32
   }
@@ -1110,6 +1486,10 @@ instance XdrType SyscallConsumeAuthTokenInputs where
   xdrGet = SyscallConsumeAuthTokenInputs <$> xdrGet
   cxsPut (SyscallConsumeAuthTokenInputs x1) = cxsPut x1
   cxsGet = SyscallConsumeAuthTokenInputs <$> cxsGet
+
+xdrMin_SyscallConsumeAuthTokenInputs, xdrMax_SyscallConsumeAuthTokenInputs :: Integer
+xdrMin_SyscallConsumeAuthTokenInputs = 4
+xdrMax_SyscallConsumeAuthTokenInputs = 4
 
 data SyscallConsumeAuthTokenOutputs = SyscallConsumeAuthTokenOutputs
   { payload :: AuthTokenPayload
@@ -1126,6 +1506,10 @@ instance XdrType SyscallConsumeAuthTokenOutputs where
   cxsPut (SyscallConsumeAuthTokenOutputs x1 x2 x3 x4 x5) = cxsPut_AuthTokenPayload x1 <> cxsPut_ContractAddress x2 <> cxsPut_RuntimeMemoryLength x3 <> cxsPut x4 <> cxsPut x5
   cxsGet = SyscallConsumeAuthTokenOutputs <$> cxsGet_AuthTokenPayload <*> cxsGet_ContractAddress <*> cxsGet_RuntimeMemoryLength <*> cxsGet <*> cxsGet
 
+xdrMin_SyscallConsumeAuthTokenOutputs, xdrMax_SyscallConsumeAuthTokenOutputs :: Integer
+xdrMin_SyscallConsumeAuthTokenOutputs = 48
+xdrMax_SyscallConsumeAuthTokenOutputs = 304
+
 data SyscallConsumeAuthTokenTrace = SyscallConsumeAuthTokenTrace
   { inputs :: SyscallConsumeAuthTokenInputs
   , outputs :: (Maybe SyscallConsumeAuthTokenOutputs)
@@ -1137,6 +1521,10 @@ instance XdrType SyscallConsumeAuthTokenTrace where
   xdrGet = SyscallConsumeAuthTokenTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallConsumeAuthTokenTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallConsumeAuthTokenTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallConsumeAuthTokenTrace, xdrMax_SyscallConsumeAuthTokenTrace :: Integer
+xdrMin_SyscallConsumeAuthTokenTrace = 8
+xdrMax_SyscallConsumeAuthTokenTrace = 312
 
 data SyscallSHA256CopyInputs = SyscallSHA256CopyInputs
   { src_index :: Word32
@@ -1150,6 +1538,10 @@ instance XdrType SyscallSHA256CopyInputs where
   cxsPut (SyscallSHA256CopyInputs x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = SyscallSHA256CopyInputs <$> cxsGet <*> cxsGet
 
+xdrMin_SyscallSHA256CopyInputs, xdrMax_SyscallSHA256CopyInputs :: Integer
+xdrMin_SyscallSHA256CopyInputs = 8
+xdrMax_SyscallSHA256CopyInputs = 8
+
 data SyscallSHA256CopyOutputs = SyscallSHA256CopyOutputs
   deriving (Eq, Ord, Show)
 
@@ -1158,6 +1550,10 @@ instance XdrType SyscallSHA256CopyOutputs where
   xdrGet = pure SyscallSHA256CopyOutputs
   cxsPut SyscallSHA256CopyOutputs = mempty
   cxsGet = pure SyscallSHA256CopyOutputs
+
+xdrMin_SyscallSHA256CopyOutputs, xdrMax_SyscallSHA256CopyOutputs :: Integer
+xdrMin_SyscallSHA256CopyOutputs = 0
+xdrMax_SyscallSHA256CopyOutputs = 0
 
 data SyscallSHA256CopyTrace = SyscallSHA256CopyTrace
   { inputs :: SyscallSHA256CopyInputs
@@ -1171,6 +1567,10 @@ instance XdrType SyscallSHA256CopyTrace where
   cxsPut (SyscallSHA256CopyTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallSHA256CopyTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallSHA256CopyTrace, xdrMax_SyscallSHA256CopyTrace :: Integer
+xdrMin_SyscallSHA256CopyTrace = 12
+xdrMax_SyscallSHA256CopyTrace = 12
+
 data SyscallGetNetworkHashInputs = SyscallGetNetworkHashInputs
   deriving (Eq, Ord, Show)
 
@@ -1179,6 +1579,10 @@ instance XdrType SyscallGetNetworkHashInputs where
   xdrGet = pure SyscallGetNetworkHashInputs
   cxsPut SyscallGetNetworkHashInputs = mempty
   cxsGet = pure SyscallGetNetworkHashInputs
+
+xdrMin_SyscallGetNetworkHashInputs, xdrMax_SyscallGetNetworkHashInputs :: Integer
+xdrMin_SyscallGetNetworkHashInputs = 0
+xdrMax_SyscallGetNetworkHashInputs = 0
 
 data SyscallGetNetworkHashOutputs = SyscallGetNetworkHashOutputs
   { network_hash :: NetworkHash
@@ -1190,6 +1594,10 @@ instance XdrType SyscallGetNetworkHashOutputs where
   xdrGet = SyscallGetNetworkHashOutputs <$> get_NetworkHash
   cxsPut (SyscallGetNetworkHashOutputs x1) = cxsPut_NetworkHash x1
   cxsGet = SyscallGetNetworkHashOutputs <$> cxsGet_NetworkHash
+
+xdrMin_SyscallGetNetworkHashOutputs, xdrMax_SyscallGetNetworkHashOutputs :: Integer
+xdrMin_SyscallGetNetworkHashOutputs = 32
+xdrMax_SyscallGetNetworkHashOutputs = 32
 
 data SyscallGetNetworkHashTrace = SyscallGetNetworkHashTrace
   { inputs :: SyscallGetNetworkHashInputs
@@ -1203,6 +1611,10 @@ instance XdrType SyscallGetNetworkHashTrace where
   cxsPut (SyscallGetNetworkHashTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetNetworkHashTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetNetworkHashTrace, xdrMax_SyscallGetNetworkHashTrace :: Integer
+xdrMin_SyscallGetNetworkHashTrace = 4
+xdrMax_SyscallGetNetworkHashTrace = 36
+
 data SyscallGetBlockTimepointInputs = SyscallGetBlockTimepointInputs
   deriving (Eq, Ord, Show)
 
@@ -1211,6 +1623,10 @@ instance XdrType SyscallGetBlockTimepointInputs where
   xdrGet = pure SyscallGetBlockTimepointInputs
   cxsPut SyscallGetBlockTimepointInputs = mempty
   cxsGet = pure SyscallGetBlockTimepointInputs
+
+xdrMin_SyscallGetBlockTimepointInputs, xdrMax_SyscallGetBlockTimepointInputs :: Integer
+xdrMin_SyscallGetBlockTimepointInputs = 0
+xdrMax_SyscallGetBlockTimepointInputs = 0
 
 data SyscallGetBlockTimepointOutputs = SyscallGetBlockTimepointOutputs
   { block_timepoint :: TimePoint
@@ -1222,6 +1638,10 @@ instance XdrType SyscallGetBlockTimepointOutputs where
   xdrGet = SyscallGetBlockTimepointOutputs <$> get_TimePoint
   cxsPut (SyscallGetBlockTimepointOutputs x1) = cxsPut_TimePoint x1
   cxsGet = SyscallGetBlockTimepointOutputs <$> cxsGet_TimePoint
+
+xdrMin_SyscallGetBlockTimepointOutputs, xdrMax_SyscallGetBlockTimepointOutputs :: Integer
+xdrMin_SyscallGetBlockTimepointOutputs = 8
+xdrMax_SyscallGetBlockTimepointOutputs = 8
 
 data SyscallGetBlockTimepointTrace = SyscallGetBlockTimepointTrace
   { inputs :: SyscallGetBlockTimepointInputs
@@ -1235,6 +1655,10 @@ instance XdrType SyscallGetBlockTimepointTrace where
   cxsPut (SyscallGetBlockTimepointTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetBlockTimepointTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetBlockTimepointTrace, xdrMax_SyscallGetBlockTimepointTrace :: Integer
+xdrMin_SyscallGetBlockTimepointTrace = 4
+xdrMax_SyscallGetBlockTimepointTrace = 12
+
 data SyscallSetStorageFlagsInputs = SyscallSetStorageFlagsInputs
   { key :: StorageKeyContractData
   , flags :: StorageDeltaFlagSet
@@ -1247,6 +1671,10 @@ instance XdrType SyscallSetStorageFlagsInputs where
   cxsPut (SyscallSetStorageFlagsInputs x1 x2) = cxsPut_StorageKeyContractData x1 <> cxsPut_StorageDeltaFlagSet x2
   cxsGet = SyscallSetStorageFlagsInputs <$> cxsGet_StorageKeyContractData <*> cxsGet_StorageDeltaFlagSet
 
+xdrMin_SyscallSetStorageFlagsInputs, xdrMax_SyscallSetStorageFlagsInputs :: Integer
+xdrMin_SyscallSetStorageFlagsInputs = 36
+xdrMax_SyscallSetStorageFlagsInputs = 36
+
 data SyscallSetStorageFlagsOutputs = SyscallSetStorageFlagsOutputs
   deriving (Eq, Ord, Show)
 
@@ -1255,6 +1683,10 @@ instance XdrType SyscallSetStorageFlagsOutputs where
   xdrGet = pure SyscallSetStorageFlagsOutputs
   cxsPut SyscallSetStorageFlagsOutputs = mempty
   cxsGet = pure SyscallSetStorageFlagsOutputs
+
+xdrMin_SyscallSetStorageFlagsOutputs, xdrMax_SyscallSetStorageFlagsOutputs :: Integer
+xdrMin_SyscallSetStorageFlagsOutputs = 0
+xdrMax_SyscallSetStorageFlagsOutputs = 0
 
 data SyscallSetStorageFlagsTrace = SyscallSetStorageFlagsTrace
   { inputs :: SyscallSetStorageFlagsInputs
@@ -1268,6 +1700,10 @@ instance XdrType SyscallSetStorageFlagsTrace where
   cxsPut (SyscallSetStorageFlagsTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallSetStorageFlagsTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallSetStorageFlagsTrace, xdrMax_SyscallSetStorageFlagsTrace :: Integer
+xdrMin_SyscallSetStorageFlagsTrace = 40
+xdrMax_SyscallSetStorageFlagsTrace = 40
+
 data SyscallGetStorageFlagsInputs = SyscallGetStorageFlagsInputs
   { key :: StorageKeyContractData
   }
@@ -1279,6 +1715,10 @@ instance XdrType SyscallGetStorageFlagsInputs where
   cxsPut (SyscallGetStorageFlagsInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallGetStorageFlagsInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallGetStorageFlagsInputs, xdrMax_SyscallGetStorageFlagsInputs :: Integer
+xdrMin_SyscallGetStorageFlagsInputs = 32
+xdrMax_SyscallGetStorageFlagsInputs = 32
+
 data SyscallGetStorageFlagsOutputs = SyscallGetStorageFlagsOutputs
   { flags :: StorageDeltaFlagSet
   }
@@ -1289,6 +1729,10 @@ instance XdrType SyscallGetStorageFlagsOutputs where
   xdrGet = SyscallGetStorageFlagsOutputs <$> get_StorageDeltaFlagSet
   cxsPut (SyscallGetStorageFlagsOutputs x1) = cxsPut_StorageDeltaFlagSet x1
   cxsGet = SyscallGetStorageFlagsOutputs <$> cxsGet_StorageDeltaFlagSet
+
+xdrMin_SyscallGetStorageFlagsOutputs, xdrMax_SyscallGetStorageFlagsOutputs :: Integer
+xdrMin_SyscallGetStorageFlagsOutputs = 4
+xdrMax_SyscallGetStorageFlagsOutputs = 4
 
 data SyscallGetStorageFlagsTrace = SyscallGetStorageFlagsTrace
   { inputs :: SyscallGetStorageFlagsInputs
@@ -1302,6 +1746,10 @@ instance XdrType SyscallGetStorageFlagsTrace where
   cxsPut (SyscallGetStorageFlagsTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallGetStorageFlagsTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
 
+xdrMin_SyscallGetStorageFlagsTrace, xdrMax_SyscallGetStorageFlagsTrace :: Integer
+xdrMin_SyscallGetStorageFlagsTrace = 36
+xdrMax_SyscallGetStorageFlagsTrace = 40
+
 data SyscallClearStorageFlagsInputs = SyscallClearStorageFlagsInputs
   { key :: StorageKeyContractData
   }
@@ -1313,6 +1761,10 @@ instance XdrType SyscallClearStorageFlagsInputs where
   cxsPut (SyscallClearStorageFlagsInputs x1) = cxsPut_StorageKeyContractData x1
   cxsGet = SyscallClearStorageFlagsInputs <$> cxsGet_StorageKeyContractData
 
+xdrMin_SyscallClearStorageFlagsInputs, xdrMax_SyscallClearStorageFlagsInputs :: Integer
+xdrMin_SyscallClearStorageFlagsInputs = 32
+xdrMax_SyscallClearStorageFlagsInputs = 32
+
 data SyscallClearStorageFlagsOutputs = SyscallClearStorageFlagsOutputs
   deriving (Eq, Ord, Show)
 
@@ -1321,6 +1773,10 @@ instance XdrType SyscallClearStorageFlagsOutputs where
   xdrGet = pure SyscallClearStorageFlagsOutputs
   cxsPut SyscallClearStorageFlagsOutputs = mempty
   cxsGet = pure SyscallClearStorageFlagsOutputs
+
+xdrMin_SyscallClearStorageFlagsOutputs, xdrMax_SyscallClearStorageFlagsOutputs :: Integer
+xdrMin_SyscallClearStorageFlagsOutputs = 0
+xdrMax_SyscallClearStorageFlagsOutputs = 0
 
 data SyscallClearStorageFlagsTrace = SyscallClearStorageFlagsTrace
   { inputs :: SyscallClearStorageFlagsInputs
@@ -1333,6 +1789,10 @@ instance XdrType SyscallClearStorageFlagsTrace where
   xdrGet = SyscallClearStorageFlagsTrace <$> xdrGet <*> (getOptional xdrGet)
   cxsPut (SyscallClearStorageFlagsTrace x1 x2) = cxsPut x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = SyscallClearStorageFlagsTrace <$> cxsGet <*> (cxsGetOptional cxsGet)
+
+xdrMin_SyscallClearStorageFlagsTrace, xdrMax_SyscallClearStorageFlagsTrace :: Integer
+xdrMin_SyscallClearStorageFlagsTrace = 36
+xdrMax_SyscallClearStorageFlagsTrace = 36
 
 data SyscallTraceBody
   = SyscallTraceBody_sha256 SyscallSHA256Trace
@@ -1621,6 +2081,10 @@ instance XdrType HostFunctionStatusXdr where
 discriminant_HostFunctionStatusXdr :: HostFunctionStatusXdr -> HostFnErrorCode
 discriminant_HostFunctionStatusXdr (HostFunctionStatusXdr_syscall_return_code _) = (HostFnErrorCode (0))
 discriminant_HostFunctionStatusXdr (HostFunctionStatusXdr_default d) = d
+
+xdrMin_HostFunctionStatusXdr, xdrMax_HostFunctionStatusXdr :: Integer
+xdrMin_HostFunctionStatusXdr = 4
+xdrMax_HostFunctionStatusXdr = 8
 
 data SyscallTrace = SyscallTrace
   { gas_remaining_at_start :: GasAmount

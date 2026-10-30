@@ -66,3 +66,7 @@ instance XdrType SyscallErrorCode where
 syscallErrorCode_values :: [SyscallErrorCode]
 syscallErrorCode_values = [KSyscallErrorCodeNone, KSyscallErrorCodeFault, KSyscallErrorCodeNoSyscall, KSyscallErrorCodeIsRootTransaction, KSyscallErrorCodeReentrance, KSyscallErrorCodeContractAlreadyDeployed, KSyscallErrorCodeNoReturnBufferAvailable, KSyscallErrorCodeInvalidSyscallInput, KSyscallErrorCodeStorageKeyNotExist, KSyscallErrorCodeNoRetrocausalQueueEntry, KSyscallErrorCodeRetrocausalQueueReadLimitReached, KSyscallErrorCodeInvokeDepthExceeded]
 
+xdrMin_SyscallErrorCode, xdrMax_SyscallErrorCode :: Integer
+xdrMin_SyscallErrorCode = 4
+xdrMax_SyscallErrorCode = 4
+

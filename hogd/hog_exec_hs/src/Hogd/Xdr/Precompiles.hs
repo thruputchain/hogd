@@ -36,3 +36,7 @@ instance XdrType HogexecPrecompiledNativeContracts where
 hogexecPrecompiledNativeContracts_values :: [HogexecPrecompiledNativeContracts]
 hogexecPrecompiledNativeContracts_values = [KNativeContractNativeToken, KNativeContractDefaultWallet]
 
+xdrMin_HogexecPrecompiledNativeContracts, xdrMax_HogexecPrecompiledNativeContracts :: Integer
+xdrMin_HogexecPrecompiledNativeContracts = 4
+xdrMax_HogexecPrecompiledNativeContracts = 4
+

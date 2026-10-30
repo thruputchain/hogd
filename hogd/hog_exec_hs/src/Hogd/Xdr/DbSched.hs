@@ -46,6 +46,10 @@ instance XdrType DbSchedResult where
 dbSchedResult_values :: [DbSchedResult]
 dbSchedResult_values = [DbSchedResultOK, DbSchedResultError, DbSchedResultInvalidParentId]
 
+xdrMin_DbSchedResult, xdrMax_DbSchedResult :: Integer
+xdrMin_DbSchedResult = 4
+xdrMax_DbSchedResult = 4
+
 kNativeTokenAgeGroupToSchedule :: Num a => a
 kNativeTokenAgeGroupToSchedule = 0
 
@@ -71,6 +75,10 @@ instance XdrType NativeTokenAge where
   cxsPut (NativeTokenAge x1 x2 x3) = cxsPut_ContractAddress x1 <> (cxsPutFixedArray 3 cxsPut) x2 <> (cxsPutFixedArray 3 cxsPut_BlockHeight) x3
   cxsGet = NativeTokenAge <$> cxsGet_ContractAddress <*> (cxsGetFixedArray 3 cxsGet) <*> (cxsGetFixedArray 3 cxsGet_BlockHeight)
 
+xdrMin_NativeTokenAge, xdrMax_NativeTokenAge :: Integer
+xdrMin_NativeTokenAge = 104
+xdrMax_NativeTokenAge = 104
+
 type NativeTokenAgeBatch = [NativeTokenAge]
 
 put_NativeTokenAgeBatch :: NativeTokenAgeBatch -> Builder
@@ -84,6 +92,10 @@ cxsPut_NativeTokenAgeBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_NativeTokenAgeBatch :: Get NativeTokenAgeBatch
 cxsGet_NativeTokenAgeBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_NativeTokenAgeBatch, xdrMax_NativeTokenAgeBatch :: Integer
+xdrMin_NativeTokenAgeBatch = 4
+xdrMax_NativeTokenAgeBatch = 446676598684
 
 data NativeTokenAgeResult
   = NativeTokenAgeResult_native_token_age NativeTokenAge
@@ -115,6 +127,10 @@ discriminant_NativeTokenAgeResult :: NativeTokenAgeResult -> DbSchedResult
 discriminant_NativeTokenAgeResult (NativeTokenAgeResult_native_token_age _) = (DbSchedResult (0))
 discriminant_NativeTokenAgeResult (NativeTokenAgeResult_default d) = d
 
+xdrMin_NativeTokenAgeResult, xdrMax_NativeTokenAgeResult :: Integer
+xdrMin_NativeTokenAgeResult = 4
+xdrMax_NativeTokenAgeResult = 108
+
 type NativeTokenAgeResults = [NativeTokenAgeResult]
 
 put_NativeTokenAgeResults :: NativeTokenAgeResults -> Builder
@@ -128,6 +144,10 @@ cxsPut_NativeTokenAgeResults = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_NativeTokenAgeResults :: Get NativeTokenAgeResults
 cxsGet_NativeTokenAgeResults = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_NativeTokenAgeResults, xdrMax_NativeTokenAgeResults :: Integer
+xdrMin_NativeTokenAgeResults = 4
+xdrMax_NativeTokenAgeResults = 463856467864
 
 data DbAddressAuthDataBatchResult
   = DbAddressAuthDataBatchResult_address_auth_data_batch [AddressAuthData]
@@ -159,6 +179,10 @@ discriminant_DbAddressAuthDataBatchResult :: DbAddressAuthDataBatchResult -> DbS
 discriminant_DbAddressAuthDataBatchResult (DbAddressAuthDataBatchResult_address_auth_data_batch _) = (DbSchedResult (0))
 discriminant_DbAddressAuthDataBatchResult (DbAddressAuthDataBatchResult_default d) = d
 
+xdrMin_DbAddressAuthDataBatchResult, xdrMax_DbAddressAuthDataBatchResult :: Integer
+xdrMin_DbAddressAuthDataBatchResult = 4
+xdrMax_DbAddressAuthDataBatchResult = 177193170722528
+
 data DbBlockOk = DbBlockOk
   { storage_hash :: StorageShortHash
   , storage_long_hash :: StorageLongHash
@@ -171,6 +195,10 @@ instance XdrType DbBlockOk where
   xdrGet = DbBlockOk <$> get_StorageShortHash <*> get_StorageLongHash <*> xdrGet
   cxsPut (DbBlockOk x1 x2 x3) = cxsPut_StorageShortHash x1 <> cxsPut_StorageLongHash x2 <> cxsPut x3
   cxsGet = DbBlockOk <$> cxsGet_StorageShortHash <*> cxsGet_StorageLongHash <*> cxsGet
+
+xdrMin_DbBlockOk, xdrMax_DbBlockOk :: Integer
+xdrMin_DbBlockOk = 2192
+xdrMax_DbBlockOk = 51539609732
 
 data DbBlockResult
   = DbBlockResult_block DbBlockOk
@@ -202,6 +230,10 @@ discriminant_DbBlockResult :: DbBlockResult -> DbSchedResult
 discriminant_DbBlockResult (DbBlockResult_block _) = (DbSchedResult (0))
 discriminant_DbBlockResult (DbBlockResult_default d) = d
 
+xdrMin_DbBlockResult, xdrMax_DbBlockResult :: Integer
+xdrMin_DbBlockResult = 4
+xdrMax_DbBlockResult = 51539609736
+
 newtype DbShardResult = DbShardResult Int32
   deriving (Eq, Ord)
 
@@ -222,6 +254,10 @@ instance XdrType DbShardResult where
 -- | Every declared value of 'DbShardResult'.
 dbShardResult_values :: [DbShardResult]
 dbShardResult_values = [ShardOK]
+
+xdrMin_DbShardResult, xdrMax_DbShardResult :: Integer
+xdrMin_DbShardResult = 4
+xdrMax_DbShardResult = 4
 
 data DbTipResult
   = DbTipResult_db_tip DbTip
@@ -252,6 +288,10 @@ instance XdrType DbTipResult where
 discriminant_DbTipResult :: DbTipResult -> DbSchedResult
 discriminant_DbTipResult (DbTipResult_db_tip _) = (DbSchedResult (0))
 discriminant_DbTipResult (DbTipResult_default d) = d
+
+xdrMin_DbTipResult, xdrMax_DbTipResult :: Integer
+xdrMin_DbTipResult = 4
+xdrMax_DbTipResult = 51539610728
 
 dbSched_program :: Word32
 dbSched_program = 2290646759

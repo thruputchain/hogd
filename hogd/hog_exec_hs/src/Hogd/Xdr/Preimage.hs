@@ -25,3 +25,7 @@ instance XdrType DomainSeparator where
   cxsPut (DomainSeparator x1 x2) = cxsPut x1 <> (cxsPutVarOpaque 256) x2
   cxsGet = DomainSeparator <$> cxsGet <*> (cxsGetVarOpaque 256)
 
+xdrMin_DomainSeparator, xdrMax_DomainSeparator :: Integer
+xdrMin_DomainSeparator = 8
+xdrMax_DomainSeparator = 264
+

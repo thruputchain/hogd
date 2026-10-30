@@ -41,6 +41,10 @@ instance XdrType ExperimentType where
 experimentType_values :: [ExperimentType]
 experimentType_values = [KExperimentTypeERC20Payments, KExperimentTypeERC20BasicAuthPayments]
 
+xdrMin_ExperimentType, xdrMax_ExperimentType :: Integer
+xdrMin_ExperimentType = 4
+xdrMax_ExperimentType = 4
+
 data ERC20PaymentsConfig = ERC20PaymentsConfig
   { num_addresses :: Word64
   , network_hash :: NetworkHash
@@ -52,6 +56,10 @@ instance XdrType ERC20PaymentsConfig where
   xdrGet = ERC20PaymentsConfig <$> xdrGet <*> get_NetworkHash
   cxsPut (ERC20PaymentsConfig x1 x2) = cxsPut x1 <> cxsPut_NetworkHash x2
   cxsGet = ERC20PaymentsConfig <$> cxsGet <*> cxsGet_NetworkHash
+
+xdrMin_ERC20PaymentsConfig, xdrMax_ERC20PaymentsConfig :: Integer
+xdrMin_ERC20PaymentsConfig = 40
+xdrMax_ERC20PaymentsConfig = 40
 
 data ExperimentConfig
   = ExperimentConfig_erc20_payments ExperimentType ERC20PaymentsConfig
@@ -81,6 +89,10 @@ instance XdrType ExperimentConfig where
 discriminant_ExperimentConfig :: ExperimentConfig -> ExperimentType
 discriminant_ExperimentConfig (ExperimentConfig_erc20_payments d _) = d
 
+xdrMin_ExperimentConfig, xdrMax_ExperimentConfig :: Integer
+xdrMin_ExperimentConfig = 44
+xdrMax_ExperimentConfig = 44
+
 type InitializationBlock = [SignedTransaction]
 
 put_InitializationBlock :: InitializationBlock -> Builder
@@ -94,6 +106,10 @@ cxsPut_InitializationBlock = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_InitializationBlock :: Get InitializationBlock
 cxsGet_InitializationBlock = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_InitializationBlock, xdrMax_InitializationBlock :: Integer
+xdrMin_InitializationBlock = 4
+xdrMax_InitializationBlock = 79228223886581851171451831524
 
 type LoadgenContextID = Word64
 
@@ -109,6 +125,10 @@ cxsPut_LoadgenContextID = cxsPut
 cxsGet_LoadgenContextID :: Get LoadgenContextID
 cxsGet_LoadgenContextID = cxsGet
 
+xdrMin_LoadgenContextID, xdrMax_LoadgenContextID :: Integer
+xdrMin_LoadgenContextID = 8
+xdrMax_LoadgenContextID = 8
+
 data LoadgenSuccessResult = LoadgenSuccessResult
   { genesis_configuration :: GenesisConfiguration
   , genesis_ceremony_txs :: InitializationBlock
@@ -123,6 +143,10 @@ instance XdrType LoadgenSuccessResult where
   cxsPut (LoadgenSuccessResult x1 x2 x3 x4) = cxsPut x1 <> cxsPut_InitializationBlock x2 <> (cxsPutVarArray 0xffffffff cxsPut_InitializationBlock) x3 <> cxsPut_LoadgenContextID x4
   cxsGet = LoadgenSuccessResult <$> cxsGet <*> cxsGet_InitializationBlock <*> (cxsGetVarArray 0xffffffff cxsGet_InitializationBlock) <*> cxsGet_LoadgenContextID
 
+xdrMin_LoadgenSuccessResult, xdrMax_LoadgenSuccessResult :: Integer
+xdrMin_LoadgenSuccessResult = 168
+xdrMax_LoadgenSuccessResult = 340282630513035064008524905290716414104
+
 data LoadgenExtension = LoadgenExtension
   { work_txs :: ParallelSignedTransactionBatch
   }
@@ -133,6 +157,10 @@ instance XdrType LoadgenExtension where
   xdrGet = LoadgenExtension <$> get_ParallelSignedTransactionBatch
   cxsPut (LoadgenExtension x1) = cxsPut_ParallelSignedTransactionBatch x1
   cxsGet = LoadgenExtension <$> cxsGet_ParallelSignedTransactionBatch
+
+xdrMin_LoadgenExtension, xdrMax_LoadgenExtension :: Integer
+xdrMin_LoadgenExtension = 12
+xdrMax_LoadgenExtension = 38654705668
 
 newtype LoadgenRPCError = LoadgenRPCError Int32
   deriving (Eq, Ord)
@@ -160,6 +188,10 @@ instance XdrType LoadgenRPCError where
 -- | Every declared value of 'LoadgenRPCError'.
 loadgenRPCError_values :: [LoadgenRPCError]
 loadgenRPCError_values = [KLoadgenRPCErrorOK, KLoadgenRPCErrorInvalidConfig, KLoadgenRPCErrorInvalidContext]
+
+xdrMin_LoadgenRPCError, xdrMax_LoadgenRPCError :: Integer
+xdrMin_LoadgenRPCError = 4
+xdrMax_LoadgenRPCError = 4
 
 data LoadgenResult
   = LoadgenResult_success LoadgenSuccessResult
@@ -191,6 +223,10 @@ discriminant_LoadgenResult :: LoadgenResult -> LoadgenRPCError
 discriminant_LoadgenResult (LoadgenResult_success _) = (LoadgenRPCError (0))
 discriminant_LoadgenResult (LoadgenResult_default d) = d
 
+xdrMin_LoadgenResult, xdrMax_LoadgenResult :: Integer
+xdrMin_LoadgenResult = 4
+xdrMax_LoadgenResult = 340282630513035064008524905290716414108
+
 data LoadgenExtensionResult
   = LoadgenExtensionResult_success LoadgenExtension
   | LoadgenExtensionResult_default LoadgenRPCError
@@ -220,6 +256,10 @@ instance XdrType LoadgenExtensionResult where
 discriminant_LoadgenExtensionResult :: LoadgenExtensionResult -> LoadgenRPCError
 discriminant_LoadgenExtensionResult (LoadgenExtensionResult_success _) = (LoadgenRPCError (0))
 discriminant_LoadgenExtensionResult (LoadgenExtensionResult_default d) = d
+
+xdrMin_LoadgenExtensionResult, xdrMax_LoadgenExtensionResult :: Integer
+xdrMin_LoadgenExtensionResult = 4
+xdrMax_LoadgenExtensionResult = 38654705672
 
 loadgenInterface_program :: Word32
 loadgenInterface_program = 12341234

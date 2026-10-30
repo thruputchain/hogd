@@ -57,6 +57,10 @@ instance XdrType StorageItemType where
 storageItemType_values :: [StorageItemType]
 storageItemType_values = [KItemTypeBytestring, KItemTypeNonnegativeInt, KItemTypeRetrocausalQueue, KItemTypeReplayCacheData, KItemTypeAuthData, KItemTypeDeployedContractHash, KItemTypeDeleted]
 
+xdrMin_StorageItemType, xdrMax_StorageItemType :: Integer
+xdrMin_StorageItemType = 4
+xdrMax_StorageItemType = 4
+
 kBytestringCeilingLen :: Num a => a
 kBytestringCeilingLen = 65000
 
@@ -76,6 +80,10 @@ cxsPut_Bytestring = (cxsPutVarOpaque 65000)
 
 cxsGet_Bytestring :: Get Bytestring
 cxsGet_Bytestring = (cxsGetVarOpaque 65000)
+
+xdrMin_Bytestring, xdrMax_Bytestring :: Integer
+xdrMin_Bytestring = 4
+xdrMax_Bytestring = 65004
 
 data StorageItem
   = StorageItem_bytestring Bytestring
@@ -129,6 +137,10 @@ discriminant_StorageItem (StorageItem_active_uniquifiers _) = (StorageItemType (
 discriminant_StorageItem (StorageItem_auth_data _) = (StorageItemType (4))
 discriminant_StorageItem (StorageItem_deployed_contract_hash _) = (StorageItemType (5))
 
+xdrMin_StorageItem, xdrMax_StorageItem :: Integer
+xdrMin_StorageItem = 8
+xdrMax_StorageItem = 1116691496708
+
 data WireStorageItem
   = WireStorageItem_bytestring Bytestring
   | WireStorageItem_nnint X_int128_xdr
@@ -181,6 +193,10 @@ discriminant_WireStorageItem (WireStorageItem_metadata _) = (StorageItemType (2)
 discriminant_WireStorageItem WireStorageItem_kItemTypeReplayCacheData = (StorageItemType (3))
 discriminant_WireStorageItem (WireStorageItem_deployed_contract_hash _) = (StorageItemType (5))
 
+xdrMin_WireStorageItem, xdrMax_WireStorageItem :: Integer
+xdrMin_WireStorageItem = 4
+xdrMax_WireStorageItem = 65008
+
 newtype StorageDeltaType = StorageDeltaType Int32
   deriving (Eq, Ord)
 
@@ -223,6 +239,10 @@ instance XdrType StorageDeltaType where
 storageDeltaType_values :: [StorageDeltaType]
 storageDeltaType_values = [KDeltaTypeBytestringSet, KDeltaTypeNonnegativeIntSetAdd, KDeltaTypeDelete, KDeltaTypeRetrocausalQueue, KDeltaTypeNonnegativeIntAdd, KDeltaTypeAuthDataChange, KDeltaTypeDeployContract, KDeltaTypeConsumeUniquifier]
 
+xdrMin_StorageDeltaType, xdrMax_StorageDeltaType :: Integer
+xdrMin_StorageDeltaType = 4
+xdrMax_StorageDeltaType = 4
+
 data AuthDataChangeSigner = AuthDataChangeSigner
   { public_key_id :: Word32
   , public_key :: PublicKeyConfigOpt
@@ -234,6 +254,10 @@ instance XdrType AuthDataChangeSigner where
   xdrGet = AuthDataChangeSigner <$> xdrGet <*> get_PublicKeyConfigOpt
   cxsPut (AuthDataChangeSigner x1 x2) = cxsPut x1 <> cxsPut_PublicKeyConfigOpt x2
   cxsGet = AuthDataChangeSigner <$> cxsGet <*> cxsGet_PublicKeyConfigOpt
+
+xdrMin_AuthDataChangeSigner, xdrMax_AuthDataChangeSigner :: Integer
+xdrMin_AuthDataChangeSigner = 8
+xdrMax_AuthDataChangeSigner = 1968
 
 data AuthDataChangeArgs = AuthDataChangeArgs
   { auth_data_change_signers :: [AuthDataChangeSigner]
@@ -247,6 +271,10 @@ instance XdrType AuthDataChangeArgs where
   cxsPut (AuthDataChangeArgs x1 x2) = (cxsPutVarArray 21 cxsPut) x1 <> (cxsPutOptional cxsPut_Weight) x2
   cxsGet = AuthDataChangeArgs <$> (cxsGetVarArray 21 cxsGet) <*> (cxsGetOptional cxsGet_Weight)
 
+xdrMin_AuthDataChangeArgs, xdrMax_AuthDataChangeArgs :: Integer
+xdrMin_AuthDataChangeArgs = 8
+xdrMax_AuthDataChangeArgs = 41340
+
 data NonnegativeInt128SetAddArgs = NonnegativeInt128SetAddArgs
   { set_value :: X_int128_xdr
   , add_value :: X_int128_xdr
@@ -259,6 +287,10 @@ instance XdrType NonnegativeInt128SetAddArgs where
   cxsPut (NonnegativeInt128SetAddArgs x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = NonnegativeInt128SetAddArgs <$> cxsGet <*> cxsGet
 
+xdrMin_NonnegativeInt128SetAddArgs, xdrMax_NonnegativeInt128SetAddArgs :: Integer
+xdrMin_NonnegativeInt128SetAddArgs = 32
+xdrMax_NonnegativeInt128SetAddArgs = 32
+
 data ConsumeUniquifierArgs = ConsumeUniquifierArgs
   { uniquifier :: Uniquifier
   }
@@ -269,6 +301,10 @@ instance XdrType ConsumeUniquifierArgs where
   xdrGet = ConsumeUniquifierArgs <$> xdrGet
   cxsPut (ConsumeUniquifierArgs x1) = cxsPut x1
   cxsGet = ConsumeUniquifierArgs <$> cxsGet
+
+xdrMin_ConsumeUniquifierArgs, xdrMax_ConsumeUniquifierArgs :: Integer
+xdrMin_ConsumeUniquifierArgs = 16
+xdrMax_ConsumeUniquifierArgs = 16
 
 data StorageDelta
   = StorageDelta_bytestring Bytestring
@@ -334,6 +370,10 @@ discriminant_StorageDelta (StorageDelta_auth_data_change _) = (StorageDeltaType 
 discriminant_StorageDelta (StorageDelta_deployed_contract_hash _) = (StorageDeltaType (7))
 discriminant_StorageDelta (StorageDelta_consume_uniquifier_args _) = (StorageDeltaType (8))
 
+xdrMin_StorageDelta, xdrMax_StorageDelta :: Integer
+xdrMin_StorageDelta = 4
+xdrMax_StorageDelta = 4389876
+
 kReplayCacheHeightsMaxLen :: Num a => a
 kReplayCacheHeightsMaxLen = 4000
 
@@ -352,6 +392,10 @@ instance XdrType ReplayCacheHeightCount where
   cxsPut (ReplayCacheHeightCount x1 x2) = cxsPut_BlockHeight x1 <> cxsPut x2
   cxsGet = ReplayCacheHeightCount <$> cxsGet_BlockHeight <*> cxsGet
 
+xdrMin_ReplayCacheHeightCount, xdrMax_ReplayCacheHeightCount :: Integer
+xdrMin_ReplayCacheHeightCount = 12
+xdrMax_ReplayCacheHeightCount = 12
+
 data ReplayCacheMetadata = ReplayCacheMetadata
   { size :: Int64
   , heights :: [ReplayCacheHeightCount]
@@ -364,6 +408,10 @@ instance XdrType ReplayCacheMetadata where
   cxsPut (ReplayCacheMetadata x1 x2) = cxsPut x1 <> (cxsPutVarArray 8000 cxsPut) x2
   cxsGet = ReplayCacheMetadata <$> cxsGet <*> (cxsGetVarArray 8000 cxsGet)
 
+xdrMin_ReplayCacheMetadata, xdrMax_ReplayCacheMetadata :: Integer
+xdrMin_ReplayCacheMetadata = 12
+xdrMax_ReplayCacheMetadata = 96012
+
 data ReplayCacheData = ReplayCacheData
   { nonces :: [Word64]
   }
@@ -374,6 +422,10 @@ instance XdrType ReplayCacheData where
   xdrGet = ReplayCacheData <$> (getVarArray 8000 xdrGet)
   cxsPut (ReplayCacheData x1) = (cxsPutVarArray 8000 cxsPut) x1
   cxsGet = ReplayCacheData <$> (cxsGetVarArray 8000 cxsGet)
+
+xdrMin_ReplayCacheData, xdrMax_ReplayCacheData :: Integer
+xdrMin_ReplayCacheData = 4
+xdrMax_ReplayCacheData = 64004
 
 newtype StorageDeltaFlags = StorageDeltaFlags Int32
   deriving (Eq, Ord)
@@ -399,6 +451,10 @@ instance XdrType StorageDeltaFlags where
 storageDeltaFlags_values :: [StorageDeltaFlags]
 storageDeltaFlags_values = [StorageDeltaFlags_None, ExclusiveLock]
 
+xdrMin_StorageDeltaFlags, xdrMax_StorageDeltaFlags :: Integer
+xdrMin_StorageDeltaFlags = 4
+xdrMax_StorageDeltaFlags = 4
+
 type StorageDeltaFlagSet = Word32
 
 put_StorageDeltaFlagSet :: StorageDeltaFlagSet -> Builder
@@ -413,6 +469,10 @@ cxsPut_StorageDeltaFlagSet = cxsPut
 cxsGet_StorageDeltaFlagSet :: Get StorageDeltaFlagSet
 cxsGet_StorageDeltaFlagSet = cxsGet
 
+xdrMin_StorageDeltaFlagSet, xdrMax_StorageDeltaFlagSet :: Integer
+xdrMin_StorageDeltaFlagSet = 4
+xdrMax_StorageDeltaFlagSet = 4
+
 data FlaggedStorageDelta = FlaggedStorageDelta
   { addrkey :: AddressAndKey
   , delta :: StorageDelta
@@ -425,4 +485,8 @@ instance XdrType FlaggedStorageDelta where
   xdrGet = FlaggedStorageDelta <$> xdrGet <*> xdrGet <*> get_StorageDeltaFlagSet
   cxsPut (FlaggedStorageDelta x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut_StorageDeltaFlagSet x3
   cxsGet = FlaggedStorageDelta <$> cxsGet <*> cxsGet <*> cxsGet_StorageDeltaFlagSet
+
+xdrMin_FlaggedStorageDelta, xdrMax_FlaggedStorageDelta :: Integer
+xdrMin_FlaggedStorageDelta = 44
+xdrMax_FlaggedStorageDelta = 4389948
 

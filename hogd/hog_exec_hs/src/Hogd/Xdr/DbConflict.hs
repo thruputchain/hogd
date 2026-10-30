@@ -61,6 +61,10 @@ instance XdrType DbConflictCode where
 dbConflictCode_values :: [DbConflictCode]
 dbConflictCode_values = [ExclusiveLockDenied, TypeMismatch, ValueMismatch, BoundsExceeded, Overflow, ReplayProtection, QueueConsumer, CapacityExceeded, InsufficientFunds, DuplicateSigner]
 
+xdrMin_DbConflictCode, xdrMax_DbConflictCode :: Integer
+xdrMin_DbConflictCode = 4
+xdrMax_DbConflictCode = 4
+
 newtype DbDiagnosticLevel = DbDiagnosticLevel Int32
   deriving (Eq, Ord)
 
@@ -88,6 +92,10 @@ instance XdrType DbDiagnosticLevel where
 dbDiagnosticLevel_values :: [DbDiagnosticLevel]
 dbDiagnosticLevel_values = [KDbDiagnosticNone, KDbDiagnosticFirst, KDbDiagnosticAll]
 
+xdrMin_DbDiagnosticLevel, xdrMax_DbDiagnosticLevel :: Integer
+xdrMin_DbDiagnosticLevel = 4
+xdrMax_DbDiagnosticLevel = 4
+
 data DbConflictDiagnostic = DbConflictDiagnostic
   { addrkey :: AddressAndKey
   , code :: DbConflictCode
@@ -99,6 +107,10 @@ instance XdrType DbConflictDiagnostic where
   xdrGet = DbConflictDiagnostic <$> xdrGet <*> xdrGet
   cxsPut (DbConflictDiagnostic x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = DbConflictDiagnostic <$> cxsGet <*> cxsGet
+
+xdrMin_DbConflictDiagnostic, xdrMax_DbConflictDiagnostic :: Integer
+xdrMin_DbConflictDiagnostic = 40
+xdrMax_DbConflictDiagnostic = 72
 
 data DbConflictResult
   = DbConflictResult_kDbDiagnosticNone
@@ -133,6 +145,10 @@ discriminant_DbConflictResult :: DbConflictResult -> DbDiagnosticLevel
 discriminant_DbConflictResult DbConflictResult_kDbDiagnosticNone = (DbDiagnosticLevel (0))
 discriminant_DbConflictResult (DbConflictResult_first _) = (DbDiagnosticLevel (1))
 discriminant_DbConflictResult (DbConflictResult_conflicts _) = (DbDiagnosticLevel (2))
+
+xdrMin_DbConflictResult, xdrMax_DbConflictResult :: Integer
+xdrMin_DbConflictResult = 4
+xdrMax_DbConflictResult = 309237645248
 
 newtype ContractRejectCode = ContractRejectCode Int32
   deriving (Eq, Ord)
@@ -191,6 +207,10 @@ instance XdrType ContractRejectCode where
 contractRejectCode_values :: [ContractRejectCode]
 contractRejectCode_values = [ContractRejectTooMany, ContractRejectBlobTooLarge, ContractRejectNotDeployable, ContractRejectDuplicate, ContractRejectMalformedArtifact, ContractRejectUnsupportedFormat, ContractRejectUnsupportedAbi, ContractRejectGasScheduleMismatch, ContractRejectMemoryTooLarge, ContractRejectCodeSizeInvalid, ContractRejectInitialMemoryInvalid, ContractRejectDigestMismatch, ContractRejectInvalidProgram]
 
+xdrMin_ContractRejectCode, xdrMax_ContractRejectCode :: Integer
+xdrMin_ContractRejectCode = 4
+xdrMax_ContractRejectCode = 4
+
 data ContractRejectDiagnostic = ContractRejectDiagnostic
   { contract_index :: Word32
   , code :: ContractRejectCode
@@ -202,6 +222,10 @@ instance XdrType ContractRejectDiagnostic where
   xdrGet = ContractRejectDiagnostic <$> xdrGet <*> xdrGet
   cxsPut (ContractRejectDiagnostic x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = ContractRejectDiagnostic <$> cxsGet <*> cxsGet
+
+xdrMin_ContractRejectDiagnostic, xdrMax_ContractRejectDiagnostic :: Integer
+xdrMin_ContractRejectDiagnostic = 8
+xdrMax_ContractRejectDiagnostic = 8
 
 newtype TxFailureKind = TxFailureKind Int32
   deriving (Eq, Ord)
@@ -226,6 +250,10 @@ instance XdrType TxFailureKind where
 -- | Every declared value of 'TxFailureKind'.
 txFailureKind_values :: [TxFailureKind]
 txFailureKind_values = [TxFailureDbConflict, TxFailureContractRejected]
+
+xdrMin_TxFailureKind, xdrMax_TxFailureKind :: Integer
+xdrMin_TxFailureKind = 4
+xdrMax_TxFailureKind = 4
 
 data TxFailureCause
   = TxFailureCause_conflict DbConflictDiagnostic
@@ -255,6 +283,10 @@ discriminant_TxFailureCause :: TxFailureCause -> TxFailureKind
 discriminant_TxFailureCause (TxFailureCause_conflict _) = (TxFailureKind (0))
 discriminant_TxFailureCause (TxFailureCause_contract _) = (TxFailureKind (1))
 
+xdrMin_TxFailureCause, xdrMax_TxFailureCause :: Integer
+xdrMin_TxFailureCause = 12
+xdrMax_TxFailureCause = 76
+
 data TxFailureDiagnostic = TxFailureDiagnostic
   { attempt_height :: BlockHeight
   , cause :: TxFailureCause
@@ -266,4 +298,8 @@ instance XdrType TxFailureDiagnostic where
   xdrGet = TxFailureDiagnostic <$> get_BlockHeight <*> xdrGet
   cxsPut (TxFailureDiagnostic x1 x2) = cxsPut_BlockHeight x1 <> cxsPut x2
   cxsGet = TxFailureDiagnostic <$> cxsGet_BlockHeight <*> cxsGet
+
+xdrMin_TxFailureDiagnostic, xdrMax_TxFailureDiagnostic :: Integer
+xdrMin_TxFailureDiagnostic = 20
+xdrMax_TxFailureDiagnostic = 84
 

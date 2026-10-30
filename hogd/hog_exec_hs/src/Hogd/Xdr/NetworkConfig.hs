@@ -75,6 +75,10 @@ instance XdrType ConfigParamID where
 configParamID_values :: [ConfigParamID]
 configParamID_values = [KConfigParamMaxSHA256Buffers, KConfigParamMaxCrossInvokeDepth, KConfigParamMaxNewContractsPerTx, KConfigParamMaxBytestringLen, KConfigParamMaxContractSizeBytes, KConfigParamMaxSavepointDepth, KConfigParamMaxSHA256BufferBytes, KConfigParamMaxAuthTokenDepth, KConfigParamMaxRv32CodeBytes, KConfigParamMaxRv32MemoryBytes, KConfigParamMaxAuthTokens, KConfigParamMaxCalldataLen, KConfigParamMaxReturnBufferLen, KConfigParamMaxTxGas]
 
+xdrMin_ConfigParamID, xdrMax_ConfigParamID :: Integer
+xdrMin_ConfigParamID = 4
+xdrMax_ConfigParamID = 4
+
 data ConfigParam
   = ConfigParam_max_sha256_buffers Word32
   | ConfigParam_max_cross_invoke_depth Word32
@@ -175,6 +179,10 @@ discriminant_ConfigParam (ConfigParam_max_calldata_len _) = (ConfigParamID (11))
 discriminant_ConfigParam (ConfigParam_max_return_buffer_len _) = (ConfigParamID (12))
 discriminant_ConfigParam (ConfigParam_max_tx_gas _) = (ConfigParamID (13))
 
+xdrMin_ConfigParam, xdrMax_ConfigParam :: Integer
+xdrMin_ConfigParam = 8
+xdrMax_ConfigParam = 12
+
 data NetworkConfigV0 = NetworkConfigV0
   { params :: [ConfigParam]
   }
@@ -185,6 +193,10 @@ instance XdrType NetworkConfigV0 where
   xdrGet = NetworkConfigV0 <$> (getVarArray 0xffffffff xdrGet)
   cxsPut (NetworkConfigV0 x1) = (cxsPutVarArray 0xffffffff cxsPut) x1
   cxsGet = NetworkConfigV0 <$> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_NetworkConfigV0, xdrMax_NetworkConfigV0 :: Integer
+xdrMin_NetworkConfigV0 = 4
+xdrMax_NetworkConfigV0 = 51539607544
 
 data NetworkConfig
   = NetworkConfig_v0 NetworkConfigV0
@@ -208,6 +220,10 @@ instance XdrType NetworkConfig where
 discriminant_NetworkConfig :: NetworkConfig -> Int32
 discriminant_NetworkConfig (NetworkConfig_v0 _) = (0)
 
+xdrMin_NetworkConfig, xdrMax_NetworkConfig :: Integer
+xdrMin_NetworkConfig = 8
+xdrMax_NetworkConfig = 51539607548
+
 data ConfigHashPreimage = ConfigHashPreimage
   { storage_cost_model :: StorageCostModelXdr
   , network_config :: NetworkConfig
@@ -220,4 +236,8 @@ instance XdrType ConfigHashPreimage where
   xdrGet = ConfigHashPreimage <$> xdrGet <*> xdrGet <*> xdrGet
   cxsPut (ConfigHashPreimage x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = ConfigHashPreimage <$> cxsGet <*> cxsGet <*> cxsGet
+
+xdrMin_ConfigHashPreimage, xdrMax_ConfigHashPreimage :: Integer
+xdrMin_ConfigHashPreimage = 112
+xdrMax_ConfigHashPreimage = 51539607652
 

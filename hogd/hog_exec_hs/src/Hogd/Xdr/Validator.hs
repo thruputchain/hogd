@@ -28,6 +28,10 @@ cxsPut_ValidatorID = (cxsPutFixedOpaque 32)
 cxsGet_ValidatorID :: Get ValidatorID
 cxsGet_ValidatorID = (cxsGetFixedOpaque 32)
 
+xdrMin_ValidatorID, xdrMax_ValidatorID :: Integer
+xdrMin_ValidatorID = 32
+xdrMax_ValidatorID = 32
+
 type ValidatorPublicKey = PublicKey
 
 put_ValidatorPublicKey :: ValidatorPublicKey -> Builder
@@ -41,6 +45,10 @@ cxsPut_ValidatorPublicKey = cxsPut
 
 cxsGet_ValidatorPublicKey :: Get ValidatorPublicKey
 cxsGet_ValidatorPublicKey = cxsGet
+
+xdrMin_ValidatorPublicKey, xdrMax_ValidatorPublicKey :: Integer
+xdrMin_ValidatorPublicKey = 36
+xdrMax_ValidatorPublicKey = 1956
 
 type ValidatorSecretKey = SecretKey
 
@@ -56,6 +64,10 @@ cxsPut_ValidatorSecretKey = cxsPut
 cxsGet_ValidatorSecretKey :: Get ValidatorSecretKey
 cxsGet_ValidatorSecretKey = cxsGet
 
+xdrMin_ValidatorSecretKey, xdrMax_ValidatorSecretKey :: Integer
+xdrMin_ValidatorSecretKey = 68
+xdrMax_ValidatorSecretKey = 4036
+
 data ValidatorPublicInfo = ValidatorPublicInfo
   { public_key :: ValidatorPublicKey
   , address :: ServerAddress
@@ -68,6 +80,10 @@ instance XdrType ValidatorPublicInfo where
   cxsPut (ValidatorPublicInfo x1 x2) = cxsPut_ValidatorPublicKey x1 <> cxsPut_ServerAddress x2
   cxsGet = ValidatorPublicInfo <$> cxsGet_ValidatorPublicKey <*> cxsGet_ServerAddress
 
+xdrMin_ValidatorPublicInfo, xdrMax_ValidatorPublicInfo :: Integer
+xdrMin_ValidatorPublicInfo = 40
+xdrMax_ValidatorPublicInfo = 4294969256
+
 data ValidatorPrivateInfo = ValidatorPrivateInfo
   { public_info :: ValidatorPublicInfo
   , secret_key :: ValidatorSecretKey
@@ -79,4 +95,8 @@ instance XdrType ValidatorPrivateInfo where
   xdrGet = ValidatorPrivateInfo <$> xdrGet <*> get_ValidatorSecretKey
   cxsPut (ValidatorPrivateInfo x1 x2) = cxsPut x1 <> cxsPut_ValidatorSecretKey x2
   cxsGet = ValidatorPrivateInfo <$> cxsGet <*> cxsGet_ValidatorSecretKey
+
+xdrMin_ValidatorPrivateInfo, xdrMax_ValidatorPrivateInfo :: Integer
+xdrMin_ValidatorPrivateInfo = 108
+xdrMax_ValidatorPrivateInfo = 4294973292
 

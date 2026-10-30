@@ -31,6 +31,10 @@ instance XdrType GenesisConfiguration where
   cxsPut (GenesisConfiguration x1 x2 x3 x4 x5) = cxsPut_NetworkHash x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut x4 <> cxsPut x5
   cxsGet = GenesisConfiguration <$> cxsGet_NetworkHash <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_GenesisConfiguration, xdrMax_GenesisConfiguration :: Integer
+xdrMin_GenesisConfiguration = 152
+xdrMax_GenesisConfiguration = 55834574988
+
 newtype GenesisContractAddresses = GenesisContractAddresses Int32
   deriving (Eq, Ord)
 
@@ -57,4 +61,8 @@ instance XdrType GenesisContractAddresses where
 -- | Every declared value of 'GenesisContractAddresses'.
 genesisContractAddresses_values :: [GenesisContractAddresses]
 genesisContractAddresses_values = [KAddressNull, KAddressNativeToken, KAddressGenesisRoot]
+
+xdrMin_GenesisContractAddresses, xdrMax_GenesisContractAddresses :: Integer
+xdrMin_GenesisContractAddresses = 4
+xdrMax_GenesisContractAddresses = 4
 

@@ -45,6 +45,10 @@ instance XdrType X_auth_flavor where
 x_auth_flavor_values :: [X_auth_flavor]
 x_auth_flavor_values = [AUTH_NONE, AUTH_SYS, AUTH_SHORT, AUTH_DH, RPCSEC_GSS]
 
+xdrMin_X_auth_flavor, xdrMax_X_auth_flavor :: Integer
+xdrMin_X_auth_flavor = 4
+xdrMax_X_auth_flavor = 4
+
 data X_opaque_auth = X_opaque_auth
   { flavor :: X_auth_flavor
   , body :: ByteString
@@ -56,6 +60,10 @@ instance XdrType X_opaque_auth where
   xdrGet = X_opaque_auth <$> xdrGet <*> (getVarOpaque 400)
   cxsPut (X_opaque_auth x1 x2) = cxsPut x1 <> (cxsPutVarOpaque 400) x2
   cxsGet = X_opaque_auth <$> cxsGet <*> (cxsGetVarOpaque 400)
+
+xdrMin_X_opaque_auth, xdrMax_X_opaque_auth :: Integer
+xdrMin_X_opaque_auth = 8
+xdrMax_X_opaque_auth = 408
 
 newtype X_msg_type = X_msg_type Int32
   deriving (Eq, Ord)
@@ -81,6 +89,10 @@ instance XdrType X_msg_type where
 x_msg_type_values :: [X_msg_type]
 x_msg_type_values = [CALL, REPLY]
 
+xdrMin_X_msg_type, xdrMax_X_msg_type :: Integer
+xdrMin_X_msg_type = 4
+xdrMax_X_msg_type = 4
+
 newtype X_reply_stat = X_reply_stat Int32
   deriving (Eq, Ord)
 
@@ -104,6 +116,10 @@ instance XdrType X_reply_stat where
 -- | Every declared value of 'X_reply_stat'.
 x_reply_stat_values :: [X_reply_stat]
 x_reply_stat_values = [MSG_ACCEPTED, MSG_DENIED]
+
+xdrMin_X_reply_stat, xdrMax_X_reply_stat :: Integer
+xdrMin_X_reply_stat = 4
+xdrMax_X_reply_stat = 4
 
 newtype X_accept_stat = X_accept_stat Int32
   deriving (Eq, Ord)
@@ -141,6 +157,10 @@ instance XdrType X_accept_stat where
 x_accept_stat_values :: [X_accept_stat]
 x_accept_stat_values = [SUCCESS, PROG_UNAVAIL, PROG_MISMATCH, PROC_UNAVAIL, GARBAGE_ARGS, SYSTEM_ERR]
 
+xdrMin_X_accept_stat, xdrMax_X_accept_stat :: Integer
+xdrMin_X_accept_stat = 4
+xdrMax_X_accept_stat = 4
+
 newtype X_reject_stat = X_reject_stat Int32
   deriving (Eq, Ord)
 
@@ -164,6 +184,10 @@ instance XdrType X_reject_stat where
 -- | Every declared value of 'X_reject_stat'.
 x_reject_stat_values :: [X_reject_stat]
 x_reject_stat_values = [RPC_MISMATCH, AUTH_ERROR]
+
+xdrMin_X_reject_stat, xdrMax_X_reject_stat :: Integer
+xdrMin_X_reject_stat = 4
+xdrMax_X_reject_stat = 4
 
 newtype X_auth_stat = X_auth_stat Int32
   deriving (Eq, Ord)
@@ -228,6 +252,10 @@ instance XdrType X_auth_stat where
 x_auth_stat_values :: [X_auth_stat]
 x_auth_stat_values = [AUTH_OK, AUTH_BADCRED, AUTH_REJECTEDCRED, AUTH_BADVERF, AUTH_REJECTEDVERF, AUTH_TOOWEAK, AUTH_INVALIDRESP, AUTH_FAILED, AUTH_KERB_GENERIC, AUTH_TIMEEXPIRE, AUTH_TKT_FILE, AUTH_DECODE, AUTH_NET_ADDR, RPCSEC_GSS_CREDPROBLEM, RPCSEC_GSS_CTXPROBLEM]
 
+xdrMin_X_auth_stat, xdrMax_X_auth_stat :: Integer
+xdrMin_X_auth_stat = 4
+xdrMax_X_auth_stat = 4
+
 data X_call_body = X_call_body
   { rpcvers :: Word32
   , prog :: Word32
@@ -244,6 +272,10 @@ instance XdrType X_call_body where
   cxsPut (X_call_body x1 x2 x3 x4 x5 x6) = cxsPut x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut x4 <> cxsPut x5 <> cxsPut x6
   cxsGet = X_call_body <$> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_X_call_body, xdrMax_X_call_body :: Integer
+xdrMin_X_call_body = 32
+xdrMax_X_call_body = 832
+
 data X_accepted_reply_reply_data_t_mismatch_info_t = X_accepted_reply_reply_data_t_mismatch_info_t
   { low :: Word32
   , high :: Word32
@@ -255,6 +287,10 @@ instance XdrType X_accepted_reply_reply_data_t_mismatch_info_t where
   xdrGet = X_accepted_reply_reply_data_t_mismatch_info_t <$> xdrGet <*> xdrGet
   cxsPut (X_accepted_reply_reply_data_t_mismatch_info_t x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_accepted_reply_reply_data_t_mismatch_info_t <$> cxsGet <*> cxsGet
+
+xdrMin_X_accepted_reply_reply_data_t_mismatch_info_t, xdrMax_X_accepted_reply_reply_data_t_mismatch_info_t :: Integer
+xdrMin_X_accepted_reply_reply_data_t_mismatch_info_t = 8
+xdrMax_X_accepted_reply_reply_data_t_mismatch_info_t = 8
 
 data X_accepted_reply_reply_data_t
   = X_accepted_reply_reply_data_t_results ByteString
@@ -292,6 +328,10 @@ discriminant_X_accepted_reply_reply_data_t (X_accepted_reply_reply_data_t_result
 discriminant_X_accepted_reply_reply_data_t (X_accepted_reply_reply_data_t_mismatch_info _) = (X_accept_stat (2))
 discriminant_X_accepted_reply_reply_data_t (X_accepted_reply_reply_data_t_default d) = d
 
+xdrMin_X_accepted_reply_reply_data_t, xdrMax_X_accepted_reply_reply_data_t :: Integer
+xdrMin_X_accepted_reply_reply_data_t = 4
+xdrMax_X_accepted_reply_reply_data_t = 12
+
 data X_accepted_reply = X_accepted_reply
   { verf :: X_opaque_auth
   , reply_data :: X_accepted_reply_reply_data_t
@@ -304,6 +344,10 @@ instance XdrType X_accepted_reply where
   cxsPut (X_accepted_reply x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_accepted_reply <$> cxsGet <*> cxsGet
 
+xdrMin_X_accepted_reply, xdrMax_X_accepted_reply :: Integer
+xdrMin_X_accepted_reply = 12
+xdrMax_X_accepted_reply = 420
+
 data X_rejected_reply_mismatch_info_t = X_rejected_reply_mismatch_info_t
   { low :: Word32
   , high :: Word32
@@ -315,6 +359,10 @@ instance XdrType X_rejected_reply_mismatch_info_t where
   xdrGet = X_rejected_reply_mismatch_info_t <$> xdrGet <*> xdrGet
   cxsPut (X_rejected_reply_mismatch_info_t x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_rejected_reply_mismatch_info_t <$> cxsGet <*> cxsGet
+
+xdrMin_X_rejected_reply_mismatch_info_t, xdrMax_X_rejected_reply_mismatch_info_t :: Integer
+xdrMin_X_rejected_reply_mismatch_info_t = 8
+xdrMax_X_rejected_reply_mismatch_info_t = 8
 
 data X_rejected_reply
   = X_rejected_reply_mismatch_info X_rejected_reply_mismatch_info_t
@@ -344,6 +392,10 @@ discriminant_X_rejected_reply :: X_rejected_reply -> X_reject_stat
 discriminant_X_rejected_reply (X_rejected_reply_mismatch_info _) = (X_reject_stat (0))
 discriminant_X_rejected_reply (X_rejected_reply_rj_why _) = (X_reject_stat (1))
 
+xdrMin_X_rejected_reply, xdrMax_X_rejected_reply :: Integer
+xdrMin_X_rejected_reply = 8
+xdrMax_X_rejected_reply = 12
+
 data X_reply_body
   = X_reply_body_areply X_accepted_reply
   | X_reply_body_rreply X_rejected_reply
@@ -371,6 +423,10 @@ instance XdrType X_reply_body where
 discriminant_X_reply_body :: X_reply_body -> X_reply_stat
 discriminant_X_reply_body (X_reply_body_areply _) = (X_reply_stat (0))
 discriminant_X_reply_body (X_reply_body_rreply _) = (X_reply_stat (1))
+
+xdrMin_X_reply_body, xdrMax_X_reply_body :: Integer
+xdrMin_X_reply_body = 12
+xdrMax_X_reply_body = 424
 
 data X_rpc_msg_body_t
   = X_rpc_msg_body_t_cbody X_call_body
@@ -400,6 +456,10 @@ discriminant_X_rpc_msg_body_t :: X_rpc_msg_body_t -> X_msg_type
 discriminant_X_rpc_msg_body_t (X_rpc_msg_body_t_cbody _) = (X_msg_type (0))
 discriminant_X_rpc_msg_body_t (X_rpc_msg_body_t_rbody _) = (X_msg_type (1))
 
+xdrMin_X_rpc_msg_body_t, xdrMax_X_rpc_msg_body_t :: Integer
+xdrMin_X_rpc_msg_body_t = 16
+xdrMax_X_rpc_msg_body_t = 836
+
 data X_rpc_msg = X_rpc_msg
   { xid :: Word32
   , body :: X_rpc_msg_body_t
@@ -411,4 +471,8 @@ instance XdrType X_rpc_msg where
   xdrGet = X_rpc_msg <$> xdrGet <*> xdrGet
   cxsPut (X_rpc_msg x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = X_rpc_msg <$> cxsGet <*> cxsGet
+
+xdrMin_X_rpc_msg, xdrMax_X_rpc_msg :: Integer
+xdrMin_X_rpc_msg = 20
+xdrMax_X_rpc_msg = 840
 

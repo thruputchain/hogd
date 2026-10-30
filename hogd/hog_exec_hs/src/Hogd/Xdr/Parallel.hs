@@ -25,6 +25,10 @@ instance XdrType ParallelBatch where
   cxsPut (ParallelBatch x1 x2 x3) = (cxsPutVarArray 0xffffffff cxsPut) x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2 <> (cxsPutVarOpaque 0xffffffff) x3
   cxsGet = ParallelBatch <$> (cxsGetVarArray 0xffffffff cxsGet) <*> (cxsGetVarArray 0xffffffff cxsGet) <*> (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_ParallelBatch, xdrMax_ParallelBatch :: Integer
+xdrMin_ParallelBatch = 12
+xdrMax_ParallelBatch = 38654705668
+
 type ParallelSignedTransactionBatch = ParallelBatch
 
 put_ParallelSignedTransactionBatch :: ParallelSignedTransactionBatch -> Builder
@@ -38,6 +42,10 @@ cxsPut_ParallelSignedTransactionBatch = cxsPut
 
 cxsGet_ParallelSignedTransactionBatch :: Get ParallelSignedTransactionBatch
 cxsGet_ParallelSignedTransactionBatch = cxsGet
+
+xdrMin_ParallelSignedTransactionBatch, xdrMax_ParallelSignedTransactionBatch :: Integer
+xdrMin_ParallelSignedTransactionBatch = 12
+xdrMax_ParallelSignedTransactionBatch = 38654705668
 
 type ParallelSignedTransactionHashBatch = ParallelBatch
 
@@ -53,6 +61,10 @@ cxsPut_ParallelSignedTransactionHashBatch = cxsPut
 cxsGet_ParallelSignedTransactionHashBatch :: Get ParallelSignedTransactionHashBatch
 cxsGet_ParallelSignedTransactionHashBatch = cxsGet
 
+xdrMin_ParallelSignedTransactionHashBatch, xdrMax_ParallelSignedTransactionHashBatch :: Integer
+xdrMin_ParallelSignedTransactionHashBatch = 12
+xdrMax_ParallelSignedTransactionHashBatch = 38654705668
+
 type ParallelNondeterministicProposalDataBatch = ParallelBatch
 
 put_ParallelNondeterministicProposalDataBatch :: ParallelNondeterministicProposalDataBatch -> Builder
@@ -66,4 +78,8 @@ cxsPut_ParallelNondeterministicProposalDataBatch = cxsPut
 
 cxsGet_ParallelNondeterministicProposalDataBatch :: Get ParallelNondeterministicProposalDataBatch
 cxsGet_ParallelNondeterministicProposalDataBatch = cxsGet
+
+xdrMin_ParallelNondeterministicProposalDataBatch, xdrMax_ParallelNondeterministicProposalDataBatch :: Integer
+xdrMin_ParallelNondeterministicProposalDataBatch = 12
+xdrMax_ParallelNondeterministicProposalDataBatch = 38654705668
 

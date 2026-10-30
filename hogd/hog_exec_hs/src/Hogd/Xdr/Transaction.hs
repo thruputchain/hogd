@@ -30,6 +30,10 @@ cxsPut_Calldata = (cxsPutVarOpaque 0xffffffff)
 cxsGet_Calldata :: Get Calldata
 cxsGet_Calldata = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_Calldata, xdrMax_Calldata :: Integer
+xdrMin_Calldata = 4
+xdrMax_Calldata = 4294967300
+
 type ReturnBuffer = ByteString
 
 put_ReturnBuffer :: ReturnBuffer -> Builder
@@ -44,6 +48,10 @@ cxsPut_ReturnBuffer = (cxsPutVarOpaque 0xffffffff)
 cxsGet_ReturnBuffer :: Get ReturnBuffer
 cxsGet_ReturnBuffer = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_ReturnBuffer, xdrMax_ReturnBuffer :: Integer
+xdrMin_ReturnBuffer = 4
+xdrMax_ReturnBuffer = 4294967300
+
 data Invocation = Invocation
   { invoked_address :: ContractAddress
   , entrypoint :: ContractEntrypointID
@@ -57,6 +65,10 @@ instance XdrType Invocation where
   xdrGet = Invocation <$> get_ContractAddress <*> get_ContractEntrypointID <*> get_GasAmount <*> get_Calldata
   cxsPut (Invocation x1 x2 x3 x4) = cxsPut_ContractAddress x1 <> cxsPut_ContractEntrypointID x2 <> cxsPut_GasAmount x3 <> cxsPut_Calldata x4
   cxsGet = Invocation <$> cxsGet_ContractAddress <*> cxsGet_ContractEntrypointID <*> cxsGet_GasAmount <*> cxsGet_Calldata
+
+xdrMin_Invocation, xdrMax_Invocation :: Integer
+xdrMin_Invocation = 52
+xdrMax_Invocation = 4294967348
 
 newtype InvocationFrameStatusCode = InvocationFrameStatusCode Int32
   deriving (Eq, Ord)
@@ -84,6 +96,10 @@ instance XdrType InvocationFrameStatusCode where
 -- | Every declared value of 'InvocationFrameStatusCode'.
 invocationFrameStatusCode_values :: [InvocationFrameStatusCode]
 invocationFrameStatusCode_values = [InvocationFrameStatusCode_Return, Fault, Abort]
+
+xdrMin_InvocationFrameStatusCode, xdrMax_InvocationFrameStatusCode :: Integer
+xdrMin_InvocationFrameStatusCode = 4
+xdrMax_InvocationFrameStatusCode = 4
 
 data InvocationFrameOutput
   = InvocationFrameOutput_return_buffer ReturnBuffer
@@ -119,6 +135,10 @@ discriminant_InvocationFrameOutput (InvocationFrameOutput_return_buffer _) = (In
 discriminant_InvocationFrameOutput (InvocationFrameOutput_abort_buffer _) = (InvocationFrameStatusCode (2))
 discriminant_InvocationFrameOutput InvocationFrameOutput_Fault = (InvocationFrameStatusCode (1))
 
+xdrMin_InvocationFrameOutput, xdrMax_InvocationFrameOutput :: Integer
+xdrMin_InvocationFrameOutput = 4
+xdrMax_InvocationFrameOutput = 4294967304
+
 data Uniquifier = Uniquifier
   { block_expiry_height :: BlockHeight
   , nonce :: Word64
@@ -130,6 +150,10 @@ instance XdrType Uniquifier where
   xdrGet = Uniquifier <$> get_BlockHeight <*> xdrGet
   cxsPut (Uniquifier x1 x2) = cxsPut_BlockHeight x1 <> cxsPut x2
   cxsGet = Uniquifier <$> cxsGet_BlockHeight <*> cxsGet
+
+xdrMin_Uniquifier, xdrMax_Uniquifier :: Integer
+xdrMin_Uniquifier = 16
+xdrMax_Uniquifier = 16
 
 data Transaction = Transaction
   { invocation :: Invocation
@@ -145,6 +169,10 @@ instance XdrType Transaction where
   cxsPut (Transaction x1 x2 x3 x4) = cxsPut x1 <> cxsPut x2 <> (cxsPutVarArray 0xffffffff cxsPut) x3 <> cxsPut x4
   cxsGet = Transaction <$> cxsGet <*> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet) <*> cxsGet
 
+xdrMin_Transaction, xdrMax_Transaction :: Integer
+xdrMin_Transaction = 84
+xdrMax_Transaction = 18446744108069290092
+
 data DecoratedSignature = DecoratedSignature
   { public_key_id :: Word32
   , signature :: Signature
@@ -156,6 +184,10 @@ instance XdrType DecoratedSignature where
   xdrGet = DecoratedSignature <$> xdrGet <*> xdrGet
   cxsPut (DecoratedSignature x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = DecoratedSignature <$> cxsGet <*> cxsGet
+
+xdrMin_DecoratedSignature, xdrMax_DecoratedSignature :: Integer
+xdrMin_DecoratedSignature = 72
+xdrMax_DecoratedSignature = 3320
 
 type TransactionHash = SHA256Hash
 
@@ -171,6 +203,10 @@ cxsPut_TransactionHash = cxsPut_SHA256Hash
 cxsGet_TransactionHash :: Get TransactionHash
 cxsGet_TransactionHash = cxsGet_SHA256Hash
 
+xdrMin_TransactionHash, xdrMax_TransactionHash :: Integer
+xdrMin_TransactionHash = 32
+xdrMax_TransactionHash = 32
+
 type SignedTransactionHash = SHA256Hash
 
 put_SignedTransactionHash :: SignedTransactionHash -> Builder
@@ -185,6 +221,10 @@ cxsPut_SignedTransactionHash = cxsPut_SHA256Hash
 cxsGet_SignedTransactionHash :: Get SignedTransactionHash
 cxsGet_SignedTransactionHash = cxsGet_SHA256Hash
 
+xdrMin_SignedTransactionHash, xdrMax_SignedTransactionHash :: Integer
+xdrMin_SignedTransactionHash = 32
+xdrMax_SignedTransactionHash = 32
+
 data SignedTransaction = SignedTransaction
   { tx :: Transaction
   , signatures :: [DecoratedSignature]
@@ -197,6 +237,10 @@ instance XdrType SignedTransaction where
   xdrGet = SignedTransaction <$> xdrGet <*> (getVarArray 0xffffffff xdrGet) <*> (getOptional xdrGet)
   cxsPut (SignedTransaction x1 x2 x3) = cxsPut x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2 <> (cxsPutOptional cxsPut) x3
   cxsGet = SignedTransaction <$> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet) <*> (cxsGetOptional cxsGet)
+
+xdrMin_SignedTransaction, xdrMax_SignedTransaction :: Integer
+xdrMin_SignedTransaction = 92
+xdrMax_SignedTransaction = 18446758367360711456
 
 type TransactionBatch = [Transaction]
 
@@ -212,6 +256,10 @@ cxsPut_TransactionBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_TransactionBatch :: Get TransactionBatch
 cxsGet_TransactionBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_TransactionBatch, xdrMax_TransactionBatch :: Integer
+xdrMin_TransactionBatch = 4
+xdrMax_TransactionBatch = 79228162643391546539007541144
+
 type SignedTransactionBatch = [SignedTransaction]
 
 put_SignedTransactionBatch :: SignedTransactionBatch -> Builder
@@ -225,6 +273,10 @@ cxsPut_SignedTransactionBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_SignedTransactionBatch :: Get SignedTransactionBatch
 cxsGet_SignedTransactionBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_SignedTransactionBatch, xdrMax_SignedTransactionBatch :: Integer
+xdrMin_SignedTransactionBatch = 4
+xdrMax_SignedTransactionBatch = 79228223886581851171451831524
 
 type OptSignedTransaction = Maybe SignedTransaction
 
@@ -240,6 +292,10 @@ cxsPut_OptSignedTransaction = (cxsPutOptional cxsPut)
 cxsGet_OptSignedTransaction :: Get OptSignedTransaction
 cxsGet_OptSignedTransaction = (cxsGetOptional cxsGet)
 
+xdrMin_OptSignedTransaction, xdrMax_OptSignedTransaction :: Integer
+xdrMin_OptSignedTransaction = 4
+xdrMax_OptSignedTransaction = 18446758367360711460
+
 type OptSignedTransactionBatch = [OptSignedTransaction]
 
 put_OptSignedTransactionBatch :: OptSignedTransactionBatch -> Builder
@@ -253,6 +309,10 @@ cxsPut_OptSignedTransactionBatch = (cxsPutVarArray 0xffffffff cxsPut_OptSignedTr
 
 cxsGet_OptSignedTransactionBatch :: Get OptSignedTransactionBatch
 cxsGet_OptSignedTransactionBatch = (cxsGetVarArray 0xffffffff cxsGet_OptSignedTransaction)
+
+xdrMin_OptSignedTransactionBatch, xdrMax_OptSignedTransactionBatch :: Integer
+xdrMin_OptSignedTransactionBatch = 4
+xdrMax_OptSignedTransactionBatch = 79228223886581851188631700704
 
 type TransactionHashBatch = [TransactionHash]
 
@@ -268,6 +328,10 @@ cxsPut_TransactionHashBatch = (cxsPutVarArray 0xffffffff cxsPut_TransactionHash)
 cxsGet_TransactionHashBatch :: Get TransactionHashBatch
 cxsGet_TransactionHashBatch = (cxsGetVarArray 0xffffffff cxsGet_TransactionHash)
 
+xdrMin_TransactionHashBatch, xdrMax_TransactionHashBatch :: Integer
+xdrMin_TransactionHashBatch = 4
+xdrMax_TransactionHashBatch = 137438953444
+
 type SignedTransactionHashBatch = [SignedTransactionHash]
 
 put_SignedTransactionHashBatch :: SignedTransactionHashBatch -> Builder
@@ -282,6 +346,10 @@ cxsPut_SignedTransactionHashBatch = (cxsPutVarArray 0xffffffff cxsPut_SignedTran
 cxsGet_SignedTransactionHashBatch :: Get SignedTransactionHashBatch
 cxsGet_SignedTransactionHashBatch = (cxsGetVarArray 0xffffffff cxsGet_SignedTransactionHash)
 
+xdrMin_SignedTransactionHashBatch, xdrMax_SignedTransactionHashBatch :: Integer
+xdrMin_SignedTransactionHashBatch = 4
+xdrMax_SignedTransactionHashBatch = 137438953444
+
 data NondeterministicProposalData = NondeterministicProposalData
   { nondeterministic_bits :: ByteString
   , nondeterministic_bit_count :: Word32
@@ -295,6 +363,10 @@ instance XdrType NondeterministicProposalData where
   cxsPut (NondeterministicProposalData x1 x2 x3) = (cxsPutVarOpaque 0xffffffff) x1 <> cxsPut x2 <> (cxsPutVarArray 16384 cxsPut_QueueEntry) x3
   cxsGet = NondeterministicProposalData <$> (cxsGetVarOpaque 0xffffffff) <*> cxsGet <*> (cxsGetVarArray 16384 cxsGet_QueueEntry)
 
+xdrMin_NondeterministicProposalData, xdrMax_NondeterministicProposalData :: Integer
+xdrMin_NondeterministicProposalData = 12
+xdrMax_NondeterministicProposalData = 4299227148
+
 data ProposedTransaction = ProposedTransaction
   { signed_tx :: SignedTransaction
   , nondeterministic_proposal_data :: NondeterministicProposalData
@@ -306,6 +378,10 @@ instance XdrType ProposedTransaction where
   xdrGet = ProposedTransaction <$> xdrGet <*> xdrGet
   cxsPut (ProposedTransaction x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = ProposedTransaction <$> cxsGet <*> cxsGet
+
+xdrMin_ProposedTransaction, xdrMax_ProposedTransaction :: Integer
+xdrMin_ProposedTransaction = 104
+xdrMax_ProposedTransaction = 18446758371659938604
 
 type ProposedTransactionBatch = [ProposedTransaction]
 
@@ -320,6 +396,10 @@ cxsPut_ProposedTransactionBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_ProposedTransactionBatch :: Get ProposedTransactionBatch
 cxsGet_ProposedTransactionBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_ProposedTransactionBatch, xdrMax_ProposedTransactionBatch :: Integer
+xdrMin_ProposedTransactionBatch = 4
+xdrMax_ProposedTransactionBatch = 79228223905046891165887956184
 
 newtype TransactionStatistic = TransactionStatistic Int32
   deriving (Eq, Ord)
@@ -341,4 +421,8 @@ instance XdrType TransactionStatistic where
 -- | Every declared value of 'TransactionStatistic'.
 transactionStatistic_values :: [TransactionStatistic]
 transactionStatistic_values = [GasRemaining]
+
+xdrMin_TransactionStatistic, xdrMax_TransactionStatistic :: Integer
+xdrMin_TransactionStatistic = 4
+xdrMax_TransactionStatistic = 4
 

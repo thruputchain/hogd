@@ -33,6 +33,10 @@ instance XdrType TxInfo where
   cxsPut (TxInfo x1 x2 x3) = cxsPut_BlockHeight x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = TxInfo <$> cxsGet_BlockHeight <*> cxsGet <*> cxsGet
 
+xdrMin_TxInfo, xdrMax_TxInfo :: Integer
+xdrMin_TxInfo = 164
+xdrMax_TxInfo = 18446758375955969964
+
 newtype TxInfoOutcome = TxInfoOutcome Int32
   deriving (Eq, Ord)
 
@@ -59,6 +63,10 @@ instance XdrType TxInfoOutcome where
 -- | Every declared value of 'TxInfoOutcome'.
 txInfoOutcome_values :: [TxInfoOutcome]
 txInfoOutcome_values = [TxInfoFound, TxInfoNotFound, TxInfoRecentFailure]
+
+xdrMin_TxInfoOutcome, xdrMax_TxInfoOutcome :: Integer
+xdrMin_TxInfoOutcome = 4
+xdrMax_TxInfoOutcome = 4
 
 data TxInfoResult
   = TxInfoResult_info TxInfo
@@ -96,6 +104,10 @@ discriminant_TxInfoResult (TxInfoResult_info _) = (TxInfoOutcome (0))
 discriminant_TxInfoResult (TxInfoResult_recent_failure _) = (TxInfoOutcome (2))
 discriminant_TxInfoResult (TxInfoResult_default d) = d
 
+xdrMin_TxInfoResult, xdrMax_TxInfoResult :: Integer
+xdrMin_TxInfoResult = 4
+xdrMax_TxInfoResult = 18446758375955969968
+
 newtype BlockLookupOutcome = BlockLookupOutcome Int32
   deriving (Eq, Ord)
 
@@ -119,6 +131,10 @@ instance XdrType BlockLookupOutcome where
 -- | Every declared value of 'BlockLookupOutcome'.
 blockLookupOutcome_values :: [BlockLookupOutcome]
 blockLookupOutcome_values = [BlockFound, BlockNotFound]
+
+xdrMin_BlockLookupOutcome, xdrMax_BlockLookupOutcome :: Integer
+xdrMin_BlockLookupOutcome = 4
+xdrMax_BlockLookupOutcome = 4
 
 data BlockLookupResult
   = BlockLookupResult_value ConsensusValue
@@ -150,6 +166,10 @@ discriminant_BlockLookupResult :: BlockLookupResult -> BlockLookupOutcome
 discriminant_BlockLookupResult (BlockLookupResult_value _) = (BlockLookupOutcome (0))
 discriminant_BlockLookupResult (BlockLookupResult_default d) = d
 
+xdrMin_BlockLookupResult, xdrMax_BlockLookupResult :: Integer
+xdrMin_BlockLookupResult = 4
+xdrMax_BlockLookupResult = 1084
+
 type IdentifiedEventBatch = [IdentifiedEvent]
 
 put_IdentifiedEventBatch :: IdentifiedEventBatch -> Builder
@@ -164,6 +184,10 @@ cxsPut_IdentifiedEventBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_IdentifiedEventBatch :: Get IdentifiedEventBatch
 cxsGet_IdentifiedEventBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_IdentifiedEventBatch, xdrMax_IdentifiedEventBatch :: Integer
+xdrMin_IdentifiedEventBatch = 4
+xdrMax_IdentifiedEventBatch = 4758823762864
+
 type TxInfoBatch = [TxInfo]
 
 put_TxInfoBatch :: TxInfoBatch -> Builder
@@ -177,6 +201,10 @@ cxsPut_TxInfoBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_TxInfoBatch :: Get TxInfoBatch
 cxsGet_TxInfoBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_TxInfoBatch, xdrMax_TxInfoBatch :: Integer
+xdrMin_TxInfoBatch = 4
+xdrMax_TxInfoBatch = 79228223923498205355382327384
 
 kMaxContractAddressesPerEventFilter :: Num a => a
 kMaxContractAddressesPerEventFilter = 5
@@ -198,6 +226,10 @@ cxsPut_ContractAddressList = (cxsPutVarArray 5 cxsPut_ContractAddress)
 cxsGet_ContractAddressList :: Get ContractAddressList
 cxsGet_ContractAddressList = (cxsGetVarArray 5 cxsGet_ContractAddress)
 
+xdrMin_ContractAddressList, xdrMax_ContractAddressList :: Integer
+xdrMin_ContractAddressList = 4
+xdrMax_ContractAddressList = 164
+
 data EventTopicFilter = EventTopicFilter
   { topic0 :: [Topic]
   , topic1 :: [Topic]
@@ -211,6 +243,10 @@ instance XdrType EventTopicFilter where
   cxsPut (EventTopicFilter x1 x2 x3) = (cxsPutVarArray 0xffffffff cxsPut_Topic) x1 <> (cxsPutVarArray 0xffffffff cxsPut_Topic) x2 <> (cxsPutVarArray 0xffffffff cxsPut_Topic) x3
   cxsGet = EventTopicFilter <$> (cxsGetVarArray 0xffffffff cxsGet_Topic) <*> (cxsGetVarArray 0xffffffff cxsGet_Topic) <*> (cxsGetVarArray 0xffffffff cxsGet_Topic)
 
+xdrMin_EventTopicFilter, xdrMax_EventTopicFilter :: Integer
+xdrMin_EventTopicFilter = 12
+xdrMax_EventTopicFilter = 412316860332
+
 data EventFilter = EventFilter
   { contract_addresses :: ContractAddressList
   , topics :: EventTopicFilter
@@ -222,6 +258,10 @@ instance XdrType EventFilter where
   xdrGet = EventFilter <$> get_ContractAddressList <*> xdrGet
   cxsPut (EventFilter x1 x2) = cxsPut_ContractAddressList x1 <> cxsPut x2
   cxsGet = EventFilter <$> cxsGet_ContractAddressList <*> cxsGet
+
+xdrMin_EventFilter, xdrMax_EventFilter :: Integer
+xdrMin_EventFilter = 16
+xdrMax_EventFilter = 412316860496
 
 type EventFilterList = [EventFilter]
 
@@ -236,6 +276,10 @@ cxsPut_EventFilterList = (cxsPutVarArray 5 cxsPut)
 
 cxsGet_EventFilterList :: Get EventFilterList
 cxsGet_EventFilterList = (cxsGetVarArray 5 cxsGet)
+
+xdrMin_EventFilterList, xdrMax_EventFilterList :: Integer
+xdrMin_EventFilterList = 4
+xdrMax_EventFilterList = 2061584302484
 
 data EventQuery = EventQuery
   { filters :: EventFilterList
@@ -252,6 +296,10 @@ instance XdrType EventQuery where
   cxsPut (EventQuery x1 x2 x3 x4 x5) = cxsPut_EventFilterList x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut_PaginationCursor x4 <> cxsPut x5
   cxsGet = EventQuery <$> cxsGet_EventFilterList <*> cxsGet <*> cxsGet <*> cxsGet_PaginationCursor <*> cxsGet
 
+xdrMin_EventQuery, xdrMax_EventQuery :: Integer
+xdrMin_EventQuery = 20
+xdrMax_EventQuery = 2065879269804
+
 data EventPage = EventPage
   { events :: IdentifiedEventBatch
   , cursor :: PaginationCursor
@@ -265,6 +313,10 @@ instance XdrType EventPage where
   xdrGet = EventPage <$> get_IdentifiedEventBatch <*> get_PaginationCursor <*> get_BlockHeight <*> get_BlockHeight
   cxsPut (EventPage x1 x2 x3 x4) = cxsPut_IdentifiedEventBatch x1 <> cxsPut_PaginationCursor x2 <> cxsPut_BlockHeight x3 <> cxsPut_BlockHeight x4
   cxsGet = EventPage <$> cxsGet_IdentifiedEventBatch <*> cxsGet_PaginationCursor <*> cxsGet_BlockHeight <*> cxsGet_BlockHeight
+
+xdrMin_EventPage, xdrMax_EventPage :: Integer
+xdrMin_EventPage = 24
+xdrMax_EventPage = 4763118730180
 
 data TransactionQuery = TransactionQuery
   { order :: IterationOrder
@@ -280,6 +332,10 @@ instance XdrType TransactionQuery where
   cxsPut (TransactionQuery x1 x2 x3 x4) = cxsPut x1 <> cxsPut x2 <> cxsPut_PaginationCursor x3 <> cxsPut x4
   cxsGet = TransactionQuery <$> cxsGet <*> cxsGet <*> cxsGet_PaginationCursor <*> cxsGet
 
+xdrMin_TransactionQuery, xdrMax_TransactionQuery :: Integer
+xdrMin_TransactionQuery = 16
+xdrMax_TransactionQuery = 4294967320
+
 data TransactionPage = TransactionPage
   { transactions :: TxInfoBatch
   , cursor :: PaginationCursor
@@ -294,6 +350,10 @@ instance XdrType TransactionPage where
   cxsPut (TransactionPage x1 x2 x3 x4) = cxsPut_TxInfoBatch x1 <> cxsPut_PaginationCursor x2 <> cxsPut_BlockHeight x3 <> cxsPut_BlockHeight x4
   cxsGet = TransactionPage <$> cxsGet_TxInfoBatch <*> cxsGet_PaginationCursor <*> cxsGet_BlockHeight <*> cxsGet_BlockHeight
 
+xdrMin_TransactionPage, xdrMax_TransactionPage :: Integer
+xdrMin_TransactionPage = 24
+xdrMax_TransactionPage = 79228223923498205359677294700
+
 data TransactionRef = TransactionRef
   { tx_hash :: TransactionHash
   , height :: BlockHeight
@@ -305,6 +365,10 @@ instance XdrType TransactionRef where
   xdrGet = TransactionRef <$> get_TransactionHash <*> get_BlockHeight
   cxsPut (TransactionRef x1 x2) = cxsPut_TransactionHash x1 <> cxsPut_BlockHeight x2
   cxsGet = TransactionRef <$> cxsGet_TransactionHash <*> cxsGet_BlockHeight
+
+xdrMin_TransactionRef, xdrMax_TransactionRef :: Integer
+xdrMin_TransactionRef = 40
+xdrMax_TransactionRef = 40
 
 type TransactionRefBatch = [TransactionRef]
 
@@ -319,6 +383,10 @@ cxsPut_TransactionRefBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_TransactionRefBatch :: Get TransactionRefBatch
 cxsGet_TransactionRefBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_TransactionRefBatch, xdrMax_TransactionRefBatch :: Integer
+xdrMin_TransactionRefBatch = 4
+xdrMax_TransactionRefBatch = 171798691804
 
 data AddressTransactionQuery = AddressTransactionQuery
   { address :: ContractAddress
@@ -335,6 +403,10 @@ instance XdrType AddressTransactionQuery where
   cxsPut (AddressTransactionQuery x1 x2 x3 x4 x5) = cxsPut_ContractAddress x1 <> cxsPut x2 <> cxsPut x3 <> cxsPut_PaginationCursor x4 <> cxsPut x5
   cxsGet = AddressTransactionQuery <$> cxsGet_ContractAddress <*> cxsGet <*> cxsGet <*> cxsGet_PaginationCursor <*> cxsGet
 
+xdrMin_AddressTransactionQuery, xdrMax_AddressTransactionQuery :: Integer
+xdrMin_AddressTransactionQuery = 48
+xdrMax_AddressTransactionQuery = 4294967352
+
 data BlockTransactionQuery = BlockTransactionQuery
   { height :: BlockHeight
   , order :: IterationOrder
@@ -349,6 +421,10 @@ instance XdrType BlockTransactionQuery where
   cxsPut (BlockTransactionQuery x1 x2 x3 x4) = cxsPut_BlockHeight x1 <> cxsPut x2 <> cxsPut_PaginationCursor x3 <> cxsPut x4
   cxsGet = BlockTransactionQuery <$> cxsGet_BlockHeight <*> cxsGet <*> cxsGet_PaginationCursor <*> cxsGet
 
+xdrMin_BlockTransactionQuery, xdrMax_BlockTransactionQuery :: Integer
+xdrMin_BlockTransactionQuery = 20
+xdrMax_BlockTransactionQuery = 4294967316
+
 data TransactionRefPage = TransactionRefPage
   { refs :: TransactionRefBatch
   , cursor :: PaginationCursor
@@ -362,6 +438,10 @@ instance XdrType TransactionRefPage where
   xdrGet = TransactionRefPage <$> get_TransactionRefBatch <*> get_PaginationCursor <*> get_BlockHeight <*> get_BlockHeight
   cxsPut (TransactionRefPage x1 x2 x3 x4) = cxsPut_TransactionRefBatch x1 <> cxsPut_PaginationCursor x2 <> cxsPut_BlockHeight x3 <> cxsPut_BlockHeight x4
   cxsGet = TransactionRefPage <$> cxsGet_TransactionRefBatch <*> cxsGet_PaginationCursor <*> cxsGet_BlockHeight <*> cxsGet_BlockHeight
+
+xdrMin_TransactionRefPage, xdrMax_TransactionRefPage :: Integer
+xdrMin_TransactionRefPage = 24
+xdrMax_TransactionRefPage = 176093659120
 
 newtype IndexerQueryOutcome = IndexerQueryOutcome Int32
   deriving (Eq, Ord)
@@ -396,6 +476,10 @@ instance XdrType IndexerQueryOutcome where
 indexerQueryOutcome_values :: [IndexerQueryOutcome]
 indexerQueryOutcome_values = [IndexerQueryOk, IndexerQueryNotReady, IndexerQueryInternalFailure, IndexerQueryInvalidCursor, IndexerQueryHistoryUnavailable]
 
+xdrMin_IndexerQueryOutcome, xdrMax_IndexerQueryOutcome :: Integer
+xdrMin_IndexerQueryOutcome = 4
+xdrMax_IndexerQueryOutcome = 4
+
 data EventPageResult
   = EventPageResult_page EventPage
   | EventPageResult_default IndexerQueryOutcome
@@ -425,6 +509,10 @@ instance XdrType EventPageResult where
 discriminant_EventPageResult :: EventPageResult -> IndexerQueryOutcome
 discriminant_EventPageResult (EventPageResult_page _) = (IndexerQueryOutcome (0))
 discriminant_EventPageResult (EventPageResult_default d) = d
+
+xdrMin_EventPageResult, xdrMax_EventPageResult :: Integer
+xdrMin_EventPageResult = 4
+xdrMax_EventPageResult = 4763118730184
 
 data TransactionPageResult
   = TransactionPageResult_page TransactionPage
@@ -456,6 +544,10 @@ discriminant_TransactionPageResult :: TransactionPageResult -> IndexerQueryOutco
 discriminant_TransactionPageResult (TransactionPageResult_page _) = (IndexerQueryOutcome (0))
 discriminant_TransactionPageResult (TransactionPageResult_default d) = d
 
+xdrMin_TransactionPageResult, xdrMax_TransactionPageResult :: Integer
+xdrMin_TransactionPageResult = 4
+xdrMax_TransactionPageResult = 79228223923498205359677294704
+
 data TransactionRefPageResult
   = TransactionRefPageResult_page TransactionRefPage
   | TransactionRefPageResult_default IndexerQueryOutcome
@@ -486,6 +578,10 @@ discriminant_TransactionRefPageResult :: TransactionRefPageResult -> IndexerQuer
 discriminant_TransactionRefPageResult (TransactionRefPageResult_page _) = (IndexerQueryOutcome (0))
 discriminant_TransactionRefPageResult (TransactionRefPageResult_default d) = d
 
+xdrMin_TransactionRefPageResult, xdrMax_TransactionRefPageResult :: Integer
+xdrMin_TransactionRefPageResult = 4
+xdrMax_TransactionRefPageResult = 176093659124
+
 newtype IndexerBlockExplorerIntroOutcome = IndexerBlockExplorerIntroOutcome Int32
   deriving (Eq, Ord)
 
@@ -509,6 +605,10 @@ instance XdrType IndexerBlockExplorerIntroOutcome where
 -- | Every declared value of 'IndexerBlockExplorerIntroOutcome'.
 indexerBlockExplorerIntroOutcome_values :: [IndexerBlockExplorerIntroOutcome]
 indexerBlockExplorerIntroOutcome_values = [IntroSuccess, IntroMismatchedProtocol]
+
+xdrMin_IndexerBlockExplorerIntroOutcome, xdrMax_IndexerBlockExplorerIntroOutcome :: Integer
+xdrMin_IndexerBlockExplorerIntroOutcome = 4
+xdrMax_IndexerBlockExplorerIntroOutcome = 4
 
 indexerBlockExplorer_program :: Word32
 indexerBlockExplorer_program = 1126279850
@@ -604,6 +704,10 @@ cxsPut_TxEventLogBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_TxEventLogBatch :: Get TxEventLogBatch
 cxsGet_TxEventLogBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_TxEventLogBatch, xdrMax_TxEventLogBatch :: Integer
+xdrMin_TxEventLogBatch = 4
+xdrMax_TxEventLogBatch = 18451314155134632844
+
 data IndexerOutboxOrigin = IndexerOutboxOrigin
   { protocol :: ProtocolCommit
   , epoch_sequence :: Word64
@@ -617,6 +721,10 @@ instance XdrType IndexerOutboxOrigin where
   xdrGet = IndexerOutboxOrigin <$> get_ProtocolCommit <*> xdrGet <*> get_BlockHeight <*> get_ConsensusValueHash
   cxsPut (IndexerOutboxOrigin x1 x2 x3 x4) = cxsPut_ProtocolCommit x1 <> cxsPut x2 <> cxsPut_BlockHeight x3 <> cxsPut_ConsensusValueHash x4
   cxsGet = IndexerOutboxOrigin <$> cxsGet_ProtocolCommit <*> cxsGet <*> cxsGet_BlockHeight <*> cxsGet_ConsensusValueHash
+
+xdrMin_IndexerOutboxOrigin, xdrMax_IndexerOutboxOrigin :: Integer
+xdrMin_IndexerOutboxOrigin = 68
+xdrMax_IndexerOutboxOrigin = 68
 
 data IndexerCommittedBlockPayload = IndexerCommittedBlockPayload
   { format_version :: Word32
@@ -632,6 +740,10 @@ instance XdrType IndexerCommittedBlockPayload where
   cxsPut (IndexerCommittedBlockPayload x1 x2 x3 x4) = cxsPut x1 <> cxsPut x2 <> cxsPut_TxEventLogBatch x3 <> cxsPut_ProposedTransactionBatch x4
   cxsGet = IndexerCommittedBlockPayload <$> cxsGet <*> cxsGet <*> cxsGet_TxEventLogBatch <*> cxsGet_ProposedTransactionBatch
 
+xdrMin_IndexerCommittedBlockPayload, xdrMax_IndexerCommittedBlockPayload :: Integer
+xdrMin_IndexerCommittedBlockPayload = 300
+xdrMax_IndexerCommittedBlockPayload = 79228223923498205321022590112
+
 data IndexerCommittedBlockIdentity = IndexerCommittedBlockIdentity
   { consensus_hash :: ConsensusValueHash
   }
@@ -642,6 +754,10 @@ instance XdrType IndexerCommittedBlockIdentity where
   xdrGet = IndexerCommittedBlockIdentity <$> get_ConsensusValueHash
   cxsPut (IndexerCommittedBlockIdentity x1) = cxsPut_ConsensusValueHash x1
   cxsGet = IndexerCommittedBlockIdentity <$> cxsGet_ConsensusValueHash
+
+xdrMin_IndexerCommittedBlockIdentity, xdrMax_IndexerCommittedBlockIdentity :: Integer
+xdrMin_IndexerCommittedBlockIdentity = 32
+xdrMax_IndexerCommittedBlockIdentity = 32
 
 data IndexerCommittedBlock = IndexerCommittedBlock
   { payload :: IndexerCommittedBlockPayload
@@ -655,6 +771,10 @@ instance XdrType IndexerCommittedBlock where
   cxsPut (IndexerCommittedBlock x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = IndexerCommittedBlock <$> cxsGet <*> cxsGet
 
+xdrMin_IndexerCommittedBlock, xdrMax_IndexerCommittedBlock :: Integer
+xdrMin_IndexerCommittedBlock = 332
+xdrMax_IndexerCommittedBlock = 79228223923498205321022590144
+
 data IndexerInitializedProgress = IndexerInitializedProgress
   { origin :: IndexerOutboxOrigin
   , contiguous_height :: BlockHeight
@@ -667,6 +787,10 @@ instance XdrType IndexerInitializedProgress where
   xdrGet = IndexerInitializedProgress <$> xdrGet <*> get_BlockHeight <*> get_ConsensusValueHash
   cxsPut (IndexerInitializedProgress x1 x2 x3) = cxsPut x1 <> cxsPut_BlockHeight x2 <> cxsPut_ConsensusValueHash x3
   cxsGet = IndexerInitializedProgress <$> cxsGet <*> cxsGet_BlockHeight <*> cxsGet_ConsensusValueHash
+
+xdrMin_IndexerInitializedProgress, xdrMax_IndexerInitializedProgress :: Integer
+xdrMin_IndexerInitializedProgress = 108
+xdrMax_IndexerInitializedProgress = 108
 
 newtype IndexerProgressState = IndexerProgressState Int32
   deriving (Eq, Ord)
@@ -694,6 +818,10 @@ instance XdrType IndexerProgressState where
 -- | Every declared value of 'IndexerProgressState'.
 indexerProgressState_values :: [IndexerProgressState]
 indexerProgressState_values = [IndexerProgressUninitialized, IndexerProgressInitialized, IndexerProgressCaughtUp]
+
+xdrMin_IndexerProgressState, xdrMax_IndexerProgressState :: Integer
+xdrMin_IndexerProgressState = 4
+xdrMax_IndexerProgressState = 4
 
 data IndexerProgress
   = IndexerProgress_initialized IndexerProgressState IndexerInitializedProgress
@@ -731,6 +859,10 @@ discriminant_IndexerProgress :: IndexerProgress -> IndexerProgressState
 discriminant_IndexerProgress (IndexerProgress_initialized d _) = d
 discriminant_IndexerProgress (IndexerProgress_default d) = d
 
+xdrMin_IndexerProgress, xdrMax_IndexerProgress :: Integer
+xdrMin_IndexerProgress = 4
+xdrMax_IndexerProgress = 112
+
 type IndexerFailureMessage = ByteString
 
 put_IndexerFailureMessage :: IndexerFailureMessage -> Builder
@@ -744,6 +876,10 @@ cxsPut_IndexerFailureMessage = (cxsPutVarOpaque 1024)
 
 cxsGet_IndexerFailureMessage :: Get IndexerFailureMessage
 cxsGet_IndexerFailureMessage = (cxsGetVarOpaque 1024)
+
+xdrMin_IndexerFailureMessage, xdrMax_IndexerFailureMessage :: Integer
+xdrMin_IndexerFailureMessage = 4
+xdrMax_IndexerFailureMessage = 1028
 
 newtype IndexerEpochOutcome = IndexerEpochOutcome Int32
   deriving (Eq, Ord)
@@ -774,6 +910,10 @@ instance XdrType IndexerEpochOutcome where
 -- | Every declared value of 'IndexerEpochOutcome'.
 indexerEpochOutcome_values :: [IndexerEpochOutcome]
 indexerEpochOutcome_values = [IndexerEpochInitialized, IndexerEpochUnchanged, IndexerEpochConflict, IndexerEpochInternalFailure]
+
+xdrMin_IndexerEpochOutcome, xdrMax_IndexerEpochOutcome :: Integer
+xdrMin_IndexerEpochOutcome = 4
+xdrMax_IndexerEpochOutcome = 4
 
 data IndexerEpochResult
   = IndexerEpochResult_progress IndexerEpochOutcome IndexerInitializedProgress
@@ -811,6 +951,10 @@ discriminant_IndexerEpochResult :: IndexerEpochResult -> IndexerEpochOutcome
 discriminant_IndexerEpochResult (IndexerEpochResult_progress d _) = d
 discriminant_IndexerEpochResult (IndexerEpochResult_diagnostic d _) = d
 
+xdrMin_IndexerEpochResult, xdrMax_IndexerEpochResult :: Integer
+xdrMin_IndexerEpochResult = 8
+xdrMax_IndexerEpochResult = 1032
+
 data IndexerHeightGap = IndexerHeightGap
   { expected_height :: BlockHeight
   }
@@ -821,6 +965,10 @@ instance XdrType IndexerHeightGap where
   xdrGet = IndexerHeightGap <$> get_BlockHeight
   cxsPut (IndexerHeightGap x1) = cxsPut_BlockHeight x1
   cxsGet = IndexerHeightGap <$> cxsGet_BlockHeight
+
+xdrMin_IndexerHeightGap, xdrMax_IndexerHeightGap :: Integer
+xdrMin_IndexerHeightGap = 8
+xdrMax_IndexerHeightGap = 8
 
 newtype IndexerBlockApplyOutcome = IndexerBlockApplyOutcome Int32
   deriving (Eq, Ord)
@@ -857,6 +1005,10 @@ instance XdrType IndexerBlockApplyOutcome where
 -- | Every declared value of 'IndexerBlockApplyOutcome'.
 indexerBlockApplyOutcome_values :: [IndexerBlockApplyOutcome]
 indexerBlockApplyOutcome_values = [IndexerBlockApplied, IndexerBlockDuplicate, IndexerBlockGap, IndexerBlockOriginMismatch, IndexerBlockContentConflict, IndexerBlockInternalFailure]
+
+xdrMin_IndexerBlockApplyOutcome, xdrMax_IndexerBlockApplyOutcome :: Integer
+xdrMin_IndexerBlockApplyOutcome = 4
+xdrMax_IndexerBlockApplyOutcome = 4
 
 data IndexerBlockApplyResult
   = IndexerBlockApplyResult_progress IndexerBlockApplyOutcome IndexerInitializedProgress
@@ -900,6 +1052,10 @@ discriminant_IndexerBlockApplyResult (IndexerBlockApplyResult_progress d _) = d
 discriminant_IndexerBlockApplyResult (IndexerBlockApplyResult_gap _) = (IndexerBlockApplyOutcome (2))
 discriminant_IndexerBlockApplyResult (IndexerBlockApplyResult_diagnostic d _) = d
 
+xdrMin_IndexerBlockApplyResult, xdrMax_IndexerBlockApplyResult :: Integer
+xdrMin_IndexerBlockApplyResult = 8
+xdrMax_IndexerBlockApplyResult = 1032
+
 data EventIndexerPullRequest = EventIndexerPullRequest
   { protocol :: ProtocolCommit
   , progress :: IndexerProgress
@@ -912,6 +1068,10 @@ instance XdrType EventIndexerPullRequest where
   cxsPut (EventIndexerPullRequest x1 x2) = cxsPut_ProtocolCommit x1 <> cxsPut x2
   cxsGet = EventIndexerPullRequest <$> cxsGet_ProtocolCommit <*> cxsGet
 
+xdrMin_EventIndexerPullRequest, xdrMax_EventIndexerPullRequest :: Integer
+xdrMin_EventIndexerPullRequest = 24
+xdrMax_EventIndexerPullRequest = 132
+
 data EventIndexerPulledBlock = EventIndexerPulledBlock
   { origin :: IndexerOutboxOrigin
   , block :: IndexerCommittedBlock
@@ -923,6 +1083,10 @@ instance XdrType EventIndexerPulledBlock where
   xdrGet = EventIndexerPulledBlock <$> xdrGet <*> xdrGet
   cxsPut (EventIndexerPulledBlock x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = EventIndexerPulledBlock <$> cxsGet <*> cxsGet
+
+xdrMin_EventIndexerPulledBlock, xdrMax_EventIndexerPulledBlock :: Integer
+xdrMin_EventIndexerPulledBlock = 400
+xdrMax_EventIndexerPulledBlock = 79228223923498205321022590212
 
 newtype EventIndexerPullOutcome = EventIndexerPullOutcome Int32
   deriving (Eq, Ord)
@@ -960,6 +1124,10 @@ instance XdrType EventIndexerPullOutcome where
 eventIndexerPullOutcome_values :: [EventIndexerPullOutcome]
 eventIndexerPullOutcome_values = [EventIndexerPullBlock, EventIndexerPullCaughtUp, EventIndexerPullNotReady, EventIndexerPullMismatchedProtocol, EventIndexerPullProgressConflict, EventIndexerPullInternalFailure]
 
+xdrMin_EventIndexerPullOutcome, xdrMax_EventIndexerPullOutcome :: Integer
+xdrMin_EventIndexerPullOutcome = 4
+xdrMax_EventIndexerPullOutcome = 4
+
 data EventIndexerPullResult
   = EventIndexerPullResult_pulled_block EventIndexerPulledBlock
   | EventIndexerPullResult_origin IndexerOutboxOrigin
@@ -996,6 +1164,10 @@ discriminant_EventIndexerPullResult (EventIndexerPullResult_pulled_block _) = (E
 discriminant_EventIndexerPullResult (EventIndexerPullResult_origin _) = (EventIndexerPullOutcome (1))
 discriminant_EventIndexerPullResult (EventIndexerPullResult_diagnostic d _) = d
 
+xdrMin_EventIndexerPullResult, xdrMax_EventIndexerPullResult :: Integer
+xdrMin_EventIndexerPullResult = 8
+xdrMax_EventIndexerPullResult = 79228223923498205321022590216
+
 data IndexerTxFailureNotice = IndexerTxFailureNotice
   { tx_hash :: TransactionHash
   , diagnostic :: TxFailureDiagnostic
@@ -1007,6 +1179,10 @@ instance XdrType IndexerTxFailureNotice where
   xdrGet = IndexerTxFailureNotice <$> get_TransactionHash <*> xdrGet
   cxsPut (IndexerTxFailureNotice x1 x2) = cxsPut_TransactionHash x1 <> cxsPut x2
   cxsGet = IndexerTxFailureNotice <$> cxsGet_TransactionHash <*> cxsGet
+
+xdrMin_IndexerTxFailureNotice, xdrMax_IndexerTxFailureNotice :: Integer
+xdrMin_IndexerTxFailureNotice = 52
+xdrMax_IndexerTxFailureNotice = 116
 
 type IndexerTxFailureNoticeBatch = [IndexerTxFailureNotice]
 
@@ -1021,6 +1197,10 @@ cxsPut_IndexerTxFailureNoticeBatch = (cxsPutVarArray 256 cxsPut)
 
 cxsGet_IndexerTxFailureNoticeBatch :: Get IndexerTxFailureNoticeBatch
 cxsGet_IndexerTxFailureNoticeBatch = (cxsGetVarArray 256 cxsGet)
+
+xdrMin_IndexerTxFailureNoticeBatch, xdrMax_IndexerTxFailureNoticeBatch :: Integer
+xdrMin_IndexerTxFailureNoticeBatch = 4
+xdrMax_IndexerTxFailureNoticeBatch = 29700
 
 eventIndexer_program :: Word32
 eventIndexer_program = 1126279852

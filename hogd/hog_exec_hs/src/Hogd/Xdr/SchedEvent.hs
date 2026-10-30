@@ -30,6 +30,10 @@ instance XdrType EventCard where
   cxsPut (EventCard x1 x2 x3 x4) = cxsPut_ProtocolCommit x1 <> cxsPut_UPID x2 <> cxsPut_ServerAddress x3 <> cxsPut_ServerAddress x4
   cxsGet = EventCard <$> cxsGet_ProtocolCommit <*> cxsGet_UPID <*> cxsGet_ServerAddress <*> cxsGet_ServerAddress
 
+xdrMin_EventCard, xdrMax_EventCard :: Integer
+xdrMin_EventCard = 36
+xdrMax_EventCard = 8589934628
+
 data EventCanonicalTip = EventCanonicalTip
   { block_id :: BlockID
   , consensus_value :: ConsensusValue
@@ -42,6 +46,10 @@ instance XdrType EventCanonicalTip where
   cxsPut (EventCanonicalTip x1 x2) = cxsPut_BlockID x1 <> cxsPut x2
   cxsGet = EventCanonicalTip <$> cxsGet_BlockID <*> cxsGet
 
+xdrMin_EventCanonicalTip, xdrMax_EventCanonicalTip :: Integer
+xdrMin_EventCanonicalTip = 296
+xdrMax_EventCanonicalTip = 1088
+
 data EventRegistrationSnapshot = EventRegistrationSnapshot
   { tip :: EventCanonicalTip
   , token :: Word64
@@ -53,6 +61,10 @@ instance XdrType EventRegistrationSnapshot where
   xdrGet = EventRegistrationSnapshot <$> xdrGet <*> xdrGet
   cxsPut (EventRegistrationSnapshot x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = EventRegistrationSnapshot <$> cxsGet <*> cxsGet
+
+xdrMin_EventRegistrationSnapshot, xdrMax_EventRegistrationSnapshot :: Integer
+xdrMin_EventRegistrationSnapshot = 304
+xdrMax_EventRegistrationSnapshot = 1096
 
 newtype EventPrepareOutcome = EventPrepareOutcome Int32
   deriving (Eq, Ord)
@@ -80,6 +92,10 @@ instance XdrType EventPrepareOutcome where
 -- | Every declared value of 'EventPrepareOutcome'.
 eventPrepareOutcome_values :: [EventPrepareOutcome]
 eventPrepareOutcome_values = [EventPrepareOK, EventPrepareNotReady, EventPrepareError]
+
+xdrMin_EventPrepareOutcome, xdrMax_EventPrepareOutcome :: Integer
+xdrMin_EventPrepareOutcome = 4
+xdrMax_EventPrepareOutcome = 4
 
 data EventPrepareResult
   = EventPrepareResult_snapshot EventRegistrationSnapshot
@@ -111,6 +127,10 @@ discriminant_EventPrepareResult :: EventPrepareResult -> EventPrepareOutcome
 discriminant_EventPrepareResult (EventPrepareResult_snapshot _) = (EventPrepareOutcome (0))
 discriminant_EventPrepareResult (EventPrepareResult_default d) = d
 
+xdrMin_EventPrepareResult, xdrMax_EventPrepareResult :: Integer
+xdrMin_EventPrepareResult = 4
+xdrMax_EventPrepareResult = 1100
+
 newtype EventActivationOutcome = EventActivationOutcome Int32
   deriving (Eq, Ord)
 
@@ -137,6 +157,10 @@ instance XdrType EventActivationOutcome where
 -- | Every declared value of 'EventActivationOutcome'.
 eventActivationOutcome_values :: [EventActivationOutcome]
 eventActivationOutcome_values = [EventActivationOK, EventActivationRetry, EventActivationError]
+
+xdrMin_EventActivationOutcome, xdrMax_EventActivationOutcome :: Integer
+xdrMin_EventActivationOutcome = 4
+xdrMax_EventActivationOutcome = 4
 
 data EventActivationResult
   = EventActivationResult_current_tip EventCanonicalTip
@@ -167,6 +191,10 @@ instance XdrType EventActivationResult where
 discriminant_EventActivationResult :: EventActivationResult -> EventActivationOutcome
 discriminant_EventActivationResult (EventActivationResult_current_tip _) = (EventActivationOutcome (1))
 discriminant_EventActivationResult (EventActivationResult_default d) = d
+
+xdrMin_EventActivationResult, xdrMax_EventActivationResult :: Integer
+xdrMin_EventActivationResult = 4
+xdrMax_EventActivationResult = 1092
 
 schedEvent_program :: Word32
 schedEvent_program = 2129107350

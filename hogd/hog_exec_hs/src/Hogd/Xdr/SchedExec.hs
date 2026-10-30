@@ -29,6 +29,10 @@ instance XdrType ExecCard where
   cxsPut (ExecCard x1 x2 x3) = cxsPut_ProtocolCommit x1 <> cxsPut_UPID x2 <> cxsPut_ServerAddress x3
   cxsGet = ExecCard <$> cxsGet_ProtocolCommit <*> cxsGet_UPID <*> cxsGet_ServerAddress
 
+xdrMin_ExecCard, xdrMax_ExecCard :: Integer
+xdrMin_ExecCard = 32
+xdrMax_ExecCard = 4294967328
+
 data IntroExecResult = IntroExecResult
   { exec_id :: Word64
   , shards :: [ShardCard]
@@ -41,6 +45,10 @@ instance XdrType IntroExecResult where
   xdrGet = IntroExecResult <$> xdrGet <*> (getVarArray 0xffffffff xdrGet) <*> xdrGet
   cxsPut (IntroExecResult x1 x2 x3) = cxsPut x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2 <> cxsPut x3
   cxsGet = IntroExecResult <$> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet) <*> cxsGet
+
+xdrMin_IntroExecResult, xdrMax_IntroExecResult :: Integer
+xdrMin_IntroExecResult = 48
+xdrMax_IntroExecResult = 55340232422992117760
 
 schedExec_program :: Word32
 schedExec_program = 2129107351

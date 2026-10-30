@@ -41,6 +41,10 @@ instance XdrType HistoryCursorMethod where
 historyCursorMethod_values :: [HistoryCursorMethod]
 historyCursorMethod_values = [CursorEvents, CursorTransactions, CursorAddressTransactions]
 
+xdrMin_HistoryCursorMethod, xdrMax_HistoryCursorMethod :: Integer
+xdrMin_HistoryCursorMethod = 4
+xdrMax_HistoryCursorMethod = 4
+
 data EventCursorPayload = EventCursorPayload
   { schema_version :: Word32
   , method :: HistoryCursorMethod
@@ -58,4 +62,8 @@ instance XdrType EventCursorPayload where
   xdrGet = EventCursorPayload <$> xdrGet <*> xdrGet <*> get_SHA256Hash <*> xdrGet <*> get_BlockHeight <*> get_SHA256Hash <*> xdrGet <*> get_BlockHeight
   cxsPut (EventCursorPayload x1 x2 x3 x4 x5 x6 x7 x8) = cxsPut x1 <> cxsPut x2 <> cxsPut_SHA256Hash x3 <> cxsPut x4 <> cxsPut_BlockHeight x5 <> cxsPut_SHA256Hash x6 <> cxsPut x7 <> cxsPut_BlockHeight x8
   cxsGet = EventCursorPayload <$> cxsGet <*> cxsGet <*> cxsGet_SHA256Hash <*> cxsGet <*> cxsGet_BlockHeight <*> cxsGet_SHA256Hash <*> cxsGet <*> cxsGet_BlockHeight
+
+xdrMin_EventCursorPayload, xdrMax_EventCursorPayload :: Integer
+xdrMin_EventCursorPayload = 96
+xdrMax_EventCursorPayload = 96
 

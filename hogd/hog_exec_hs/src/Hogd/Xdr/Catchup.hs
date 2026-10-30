@@ -29,6 +29,10 @@ instance XdrType CatchupBlock where
   cxsPut (CatchupBlock x1 x2) = cxsPut x1 <> cxsPut_ParallelSignedTransactionBatch x2
   cxsGet = CatchupBlock <$> cxsGet <*> cxsGet_ParallelSignedTransactionBatch
 
+xdrMin_CatchupBlock, xdrMax_CatchupBlock :: Integer
+xdrMin_CatchupBlock = 332
+xdrMax_CatchupBlock = 115964118092
+
 data CatchupSpan = CatchupSpan
   { from_block_height :: BlockHeight
   , to_block_height :: BlockHeight
@@ -41,6 +45,10 @@ instance XdrType CatchupSpan where
   cxsPut (CatchupSpan x1 x2) = cxsPut_BlockHeight x1 <> cxsPut_BlockHeight x2
   cxsGet = CatchupSpan <$> cxsGet_BlockHeight <*> cxsGet_BlockHeight
 
+xdrMin_CatchupSpan, xdrMax_CatchupSpan :: Integer
+xdrMin_CatchupSpan = 16
+xdrMax_CatchupSpan = 16
+
 data CatchupBlocksRequest = CatchupBlocksRequest
   { timestamp :: TimePoint
   , spans :: [CatchupSpan]
@@ -52,6 +60,10 @@ instance XdrType CatchupBlocksRequest where
   xdrGet = CatchupBlocksRequest <$> get_TimePoint <*> (getVarArray 0xffffffff xdrGet)
   cxsPut (CatchupBlocksRequest x1 x2) = cxsPut_TimePoint x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2
   cxsGet = CatchupBlocksRequest <$> cxsGet_TimePoint <*> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_CatchupBlocksRequest, xdrMax_CatchupBlocksRequest :: Integer
+xdrMin_CatchupBlocksRequest = 12
+xdrMax_CatchupBlocksRequest = 68719476732
 
 data SignedCatchupBlocksRequest = SignedCatchupBlocksRequest
   { signer :: ValidatorPublicInfo
@@ -66,6 +78,10 @@ instance XdrType SignedCatchupBlocksRequest where
   cxsPut (SignedCatchupBlocksRequest x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = SignedCatchupBlocksRequest <$> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_SignedCatchupBlocksRequest, xdrMax_SignedCatchupBlocksRequest :: Integer
+xdrMin_SignedCatchupBlocksRequest = 120
+xdrMax_SignedCatchupBlocksRequest = 73014449304
+
 data CatchupBlocksResult = CatchupBlocksResult
   { timestamp :: TimePoint
   , blocks :: [CatchupBlock]
@@ -77,6 +93,10 @@ instance XdrType CatchupBlocksResult where
   xdrGet = CatchupBlocksResult <$> get_TimePoint <*> (getVarArray 0xffffffff xdrGet)
   cxsPut (CatchupBlocksResult x1 x2) = cxsPut_TimePoint x1 <> (cxsPutVarArray 0xffffffff cxsPut) x2
   cxsGet = CatchupBlocksResult <$> cxsGet_TimePoint <*> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_CatchupBlocksResult, xdrMax_CatchupBlocksResult :: Integer
+xdrMin_CatchupBlocksResult = 12
+xdrMax_CatchupBlocksResult = 498062094598657801152
 
 data SignedCatchupBlocksResult = SignedCatchupBlocksResult
   { signer :: ValidatorPublicInfo
@@ -90,6 +110,10 @@ instance XdrType SignedCatchupBlocksResult where
   xdrGet = SignedCatchupBlocksResult <$> xdrGet <*> xdrGet <*> xdrGet
   cxsPut (SignedCatchupBlocksResult x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = SignedCatchupBlocksResult <$> cxsGet <*> cxsGet <*> cxsGet
+
+xdrMin_SignedCatchupBlocksResult, xdrMax_SignedCatchupBlocksResult :: Integer
+xdrMin_SignedCatchupBlocksResult = 120
+xdrMax_SignedCatchupBlocksResult = 498062094602952773724
 
 catchup_program :: Word32
 catchup_program = 1126280141

@@ -42,6 +42,10 @@ instance XdrType SchedGatewayIntroOutcome where
 schedGatewayIntroOutcome_values :: [SchedGatewayIntroOutcome]
 schedGatewayIntroOutcome_values = [SchedGatewayIntroSuccess, SchedGatewayIntroMismatchedProtocol]
 
+xdrMin_SchedGatewayIntroOutcome, xdrMax_SchedGatewayIntroOutcome :: Integer
+xdrMin_SchedGatewayIntroOutcome = 4
+xdrMax_SchedGatewayIntroOutcome = 4
+
 newtype SchedGatewaySubmitOutcome = SchedGatewaySubmitOutcome Int32
   deriving (Eq, Ord)
 
@@ -72,6 +76,10 @@ instance XdrType SchedGatewaySubmitOutcome where
 schedGatewaySubmitOutcome_values :: [SchedGatewaySubmitOutcome]
 schedGatewaySubmitOutcome_values = [SchedGatewaySubmitAdmitted, SchedGatewaySubmitAuthenticationRejected, SchedGatewaySubmitRetryable, SchedGatewaySubmitInternalError]
 
+xdrMin_SchedGatewaySubmitOutcome, xdrMax_SchedGatewaySubmitOutcome :: Integer
+xdrMin_SchedGatewaySubmitOutcome = 4
+xdrMax_SchedGatewaySubmitOutcome = 4
+
 type SchedGatewaySubmitOutcomeBatch = [SchedGatewaySubmitOutcome]
 
 put_SchedGatewaySubmitOutcomeBatch :: SchedGatewaySubmitOutcomeBatch -> Builder
@@ -86,6 +94,10 @@ cxsPut_SchedGatewaySubmitOutcomeBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_SchedGatewaySubmitOutcomeBatch :: Get SchedGatewaySubmitOutcomeBatch
 cxsGet_SchedGatewaySubmitOutcomeBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_SchedGatewaySubmitOutcomeBatch, xdrMax_SchedGatewaySubmitOutcomeBatch :: Integer
+xdrMin_SchedGatewaySubmitOutcomeBatch = 4
+xdrMax_SchedGatewaySubmitOutcomeBatch = 17179869184
+
 type PendingTxCount = Int64
 
 put_PendingTxCount :: PendingTxCount -> Builder
@@ -99,6 +111,10 @@ cxsPut_PendingTxCount = cxsPut
 
 cxsGet_PendingTxCount :: Get PendingTxCount
 cxsGet_PendingTxCount = cxsGet
+
+xdrMin_PendingTxCount, xdrMax_PendingTxCount :: Integer
+xdrMin_PendingTxCount = 8
+xdrMax_PendingTxCount = 8
 
 schedGateway_program :: Word32
 schedGateway_program = 2129111722

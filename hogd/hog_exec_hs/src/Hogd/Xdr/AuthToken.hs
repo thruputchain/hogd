@@ -36,6 +36,10 @@ cxsPut_AuthTokenPayload = (cxsPutVarOpaque 256)
 cxsGet_AuthTokenPayload :: Get AuthTokenPayload
 cxsGet_AuthTokenPayload = (cxsGetVarOpaque 256)
 
+xdrMin_AuthTokenPayload, xdrMax_AuthTokenPayload :: Integer
+xdrMin_AuthTokenPayload = 4
+xdrMax_AuthTokenPayload = 260
+
 data AuthTokenNode = AuthTokenNode
   { consumer_address :: ContractAddress
   , payload :: AuthTokenPayload

@@ -50,6 +50,10 @@ instance XdrType AuthErrorCode where
 authErrorCode_values :: [AuthErrorCode]
 authErrorCode_values = [KAuthSuccess, KAuthFailed, KAuthStaleBlockHeight, KAuthInternal]
 
+xdrMin_AuthErrorCode, xdrMax_AuthErrorCode :: Integer
+xdrMin_AuthErrorCode = 4
+xdrMax_AuthErrorCode = 4
+
 type AuthErrorCodeBatch = [AuthErrorCode]
 
 put_AuthErrorCodeBatch :: AuthErrorCodeBatch -> Builder
@@ -63,6 +67,10 @@ cxsPut_AuthErrorCodeBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_AuthErrorCodeBatch :: Get AuthErrorCodeBatch
 cxsGet_AuthErrorCodeBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_AuthErrorCodeBatch, xdrMax_AuthErrorCodeBatch :: Integer
+xdrMin_AuthErrorCodeBatch = 4
+xdrMax_AuthErrorCodeBatch = 17179869184
 
 authMempool_program :: Word32
 authMempool_program = 2326297255
@@ -113,6 +121,10 @@ instance XdrType KeyChange where
   cxsPut (KeyChange x1 x2) = cxsPut_ContractAddress x1 <> (cxsPutOptional cxsPut) x2
   cxsGet = KeyChange <$> cxsGet_ContractAddress <*> (cxsGetOptional cxsGet)
 
+xdrMin_KeyChange, xdrMax_KeyChange :: Integer
+xdrMin_KeyChange = 36
+xdrMax_KeyChange = 41292
+
 type KeyChangeBatch = [KeyChange]
 
 put_KeyChangeBatch :: KeyChangeBatch -> Builder
@@ -127,6 +139,10 @@ cxsPut_KeyChangeBatch = (cxsPutVarArray 0xffffffff cxsPut)
 cxsGet_KeyChangeBatch :: Get KeyChangeBatch
 cxsGet_KeyChangeBatch = (cxsGetVarArray 0xffffffff cxsGet)
 
+xdrMin_KeyChangeBatch, xdrMax_KeyChangeBatch :: Integer
+xdrMin_KeyChangeBatch = 4
+xdrMax_KeyChangeBatch = 177347789545144
+
 data KeyChangeChunk = KeyChangeChunk
   { height :: BlockHeight
   , chunk_index :: Word32
@@ -140,6 +156,10 @@ instance XdrType KeyChangeChunk where
   xdrGet = KeyChangeChunk <$> get_BlockHeight <*> xdrGet <*> xdrGet <*> (getVarArray 0xffffffff xdrGet)
   cxsPut (KeyChangeChunk x1 x2 x3 x4) = cxsPut_BlockHeight x1 <> cxsPut x2 <> cxsPut x3 <> (cxsPutVarArray 0xffffffff cxsPut) x4
   cxsGet = KeyChangeChunk <$> cxsGet_BlockHeight <*> cxsGet <*> cxsGet <*> (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_KeyChangeChunk, xdrMax_KeyChangeChunk :: Integer
+xdrMin_KeyChangeChunk = 20
+xdrMax_KeyChangeChunk = 177347789545160
 
 authDB_program :: Word32
 authDB_program = 2326297256
@@ -197,6 +217,10 @@ instance XdrType DBAuthError where
 dBAuthError_values :: [DBAuthError]
 dBAuthError_values = [KDBAuthSuccess, KDBAuthNotFound, KDBAuthStaleBlockHeight, KDBAuthInternal]
 
+xdrMin_DBAuthError, xdrMax_DBAuthError :: Integer
+xdrMin_DBAuthError = 4
+xdrMax_DBAuthError = 4
+
 data DBAuthResult
   = DBAuthResult_auth_data AddressAuthData
   | DBAuthResult_default DBAuthError
@@ -227,6 +251,10 @@ discriminant_DBAuthResult :: DBAuthResult -> DBAuthError
 discriminant_DBAuthResult (DBAuthResult_auth_data _) = (DBAuthError (0))
 discriminant_DBAuthResult (DBAuthResult_default d) = d
 
+xdrMin_DBAuthResult, xdrMax_DBAuthResult :: Integer
+xdrMin_DBAuthResult = 4
+xdrMax_DBAuthResult = 41260
+
 newtype DBAuthIntroOutcome = DBAuthIntroOutcome Int32
   deriving (Eq, Ord)
 
@@ -250,6 +278,10 @@ instance XdrType DBAuthIntroOutcome where
 -- | Every declared value of 'DBAuthIntroOutcome'.
 dBAuthIntroOutcome_values :: [DBAuthIntroOutcome]
 dBAuthIntroOutcome_values = [KIntroSuccess, KIntroFailure]
+
+xdrMin_DBAuthIntroOutcome, xdrMax_DBAuthIntroOutcome :: Integer
+xdrMin_DBAuthIntroOutcome = 4
+xdrMax_DBAuthIntroOutcome = 4
 
 data DBAuthIntroResult
   = DBAuthIntroResult_current_height BlockHeight
@@ -281,6 +313,10 @@ discriminant_DBAuthIntroResult :: DBAuthIntroResult -> DBAuthIntroOutcome
 discriminant_DBAuthIntroResult (DBAuthIntroResult_current_height _) = (DBAuthIntroOutcome (0))
 discriminant_DBAuthIntroResult (DBAuthIntroResult_default d) = d
 
+xdrMin_DBAuthIntroResult, xdrMax_DBAuthIntroResult :: Integer
+xdrMin_DBAuthIntroResult = 4
+xdrMax_DBAuthIntroResult = 12
+
 type DBAuthResultBatch = [DBAuthResult]
 
 put_DBAuthResultBatch :: DBAuthResultBatch -> Builder
@@ -294,6 +330,10 @@ cxsPut_DBAuthResultBatch = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_DBAuthResultBatch :: Get DBAuthResultBatch
 cxsGet_DBAuthResultBatch = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_DBAuthResultBatch, xdrMax_DBAuthResultBatch :: Integer
+xdrMin_DBAuthResultBatch = 4
+xdrMax_DBAuthResultBatch = 177210350591704
 
 dBAuth_program :: Word32
 dBAuth_program = 2326297257
@@ -365,6 +405,10 @@ instance XdrType IntroAuthOutcome where
 introAuthOutcome_values :: [IntroAuthOutcome]
 introAuthOutcome_values = [KSuccess, KFailure]
 
+xdrMin_IntroAuthOutcome, xdrMax_IntroAuthOutcome :: Integer
+xdrMin_IntroAuthOutcome = 4
+xdrMax_IntroAuthOutcome = 4
+
 data MempoolAuthIntroSuccess = MempoolAuthIntroSuccess
   { shards :: [ShardCard]
   , network_hash :: NetworkHash
@@ -376,6 +420,10 @@ instance XdrType MempoolAuthIntroSuccess where
   xdrGet = MempoolAuthIntroSuccess <$> (getVarArray 0xffffffff xdrGet) <*> get_NetworkHash
   cxsPut (MempoolAuthIntroSuccess x1 x2) = (cxsPutVarArray 0xffffffff cxsPut) x1 <> cxsPut_NetworkHash x2
   cxsGet = MempoolAuthIntroSuccess <$> (cxsGetVarArray 0xffffffff cxsGet) <*> cxsGet_NetworkHash
+
+xdrMin_MempoolAuthIntroSuccess, xdrMax_MempoolAuthIntroSuccess :: Integer
+xdrMin_MempoolAuthIntroSuccess = 36
+xdrMax_MempoolAuthIntroSuccess = 55340232414402183156
 
 data IntroAuthResult
   = IntroAuthResult_success MempoolAuthIntroSuccess
@@ -406,6 +454,10 @@ instance XdrType IntroAuthResult where
 discriminant_IntroAuthResult :: IntroAuthResult -> IntroAuthOutcome
 discriminant_IntroAuthResult (IntroAuthResult_success _) = (IntroAuthOutcome (0))
 discriminant_IntroAuthResult (IntroAuthResult_default d) = d
+
+xdrMin_IntroAuthResult, xdrMax_IntroAuthResult :: Integer
+xdrMin_IntroAuthResult = 4
+xdrMax_IntroAuthResult = 55340232414402183160
 
 mempoolAuth_program :: Word32
 mempoolAuth_program = 2326297258

@@ -27,6 +27,10 @@ cxsPut_Weight = cxsPut
 cxsGet_Weight :: Get Weight
 cxsGet_Weight = cxsGet
 
+xdrMin_Weight, xdrMax_Weight :: Integer
+xdrMin_Weight = 4
+xdrMax_Weight = 4
+
 type BitMap = Word32
 
 put_BitMap :: BitMap -> Builder
@@ -41,6 +45,10 @@ cxsPut_BitMap = cxsPut
 cxsGet_BitMap :: Get BitMap
 cxsGet_BitMap = cxsGet
 
+xdrMin_BitMap, xdrMax_BitMap :: Integer
+xdrMin_BitMap = 4
+xdrMax_BitMap = 4
+
 type KeyID = Word32
 
 put_KeyID :: KeyID -> Builder
@@ -54,6 +62,10 @@ cxsPut_KeyID = cxsPut
 
 cxsGet_KeyID :: Get KeyID
 cxsGet_KeyID = cxsGet
+
+xdrMin_KeyID, xdrMax_KeyID :: Integer
+xdrMin_KeyID = 4
+xdrMax_KeyID = 4
 
 kMaxSigners :: Num a => a
 kMaxSigners = 21
@@ -82,6 +94,10 @@ instance XdrType AuthClaimType where
 authClaimType_values :: [AuthClaimType]
 authClaimType_values = [KSourceAddressAuthData, KPubkeySignature]
 
+xdrMin_AuthClaimType, xdrMax_AuthClaimType :: Integer
+xdrMin_AuthClaimType = 4
+xdrMax_AuthClaimType = 4
+
 data PubkeyAccountPreimage = PubkeyAccountPreimage
   { pubkey_hash :: PublicKeyHash
   , nonce :: Word64
@@ -94,6 +110,10 @@ instance XdrType PubkeyAccountPreimage where
   cxsPut (PubkeyAccountPreimage x1 x2) = cxsPut_PublicKeyHash x1 <> cxsPut x2
   cxsGet = PubkeyAccountPreimage <$> cxsGet_PublicKeyHash <*> cxsGet
 
+xdrMin_PubkeyAccountPreimage, xdrMax_PubkeyAccountPreimage :: Integer
+xdrMin_PubkeyAccountPreimage = 40
+xdrMax_PubkeyAccountPreimage = 40
+
 data AuthClaim_source_address_claim_t = AuthClaim_source_address_claim_t
   { allowed_keys :: BitMap
   , required_weight :: Weight
@@ -105,6 +125,10 @@ instance XdrType AuthClaim_source_address_claim_t where
   xdrGet = AuthClaim_source_address_claim_t <$> get_BitMap <*> get_Weight
   cxsPut (AuthClaim_source_address_claim_t x1 x2) = cxsPut_BitMap x1 <> cxsPut_Weight x2
   cxsGet = AuthClaim_source_address_claim_t <$> cxsGet_BitMap <*> cxsGet_Weight
+
+xdrMin_AuthClaim_source_address_claim_t, xdrMax_AuthClaim_source_address_claim_t :: Integer
+xdrMin_AuthClaim_source_address_claim_t = 8
+xdrMax_AuthClaim_source_address_claim_t = 8
 
 data AuthClaim
   = AuthClaim_source_address_claim AuthClaim_source_address_claim_t
@@ -134,6 +158,10 @@ discriminant_AuthClaim :: AuthClaim -> AuthClaimType
 discriminant_AuthClaim (AuthClaim_source_address_claim _) = (AuthClaimType (0))
 discriminant_AuthClaim (AuthClaim_pubkey_preimage _) = (AuthClaimType (1))
 
+xdrMin_AuthClaim, xdrMax_AuthClaim :: Integer
+xdrMin_AuthClaim = 12
+xdrMax_AuthClaim = 44
+
 newtype AuthVerifyErrorCode = AuthVerifyErrorCode Int32
   deriving (Eq, Ord)
 
@@ -160,4 +188,8 @@ instance XdrType AuthVerifyErrorCode where
 -- | Every declared value of 'AuthVerifyErrorCode'.
 authVerifyErrorCode_values :: [AuthVerifyErrorCode]
 authVerifyErrorCode_values = [KAuthMalformed, KSignatureVerificationFailed, KAuthDataMismatch]
+
+xdrMin_AuthVerifyErrorCode, xdrMax_AuthVerifyErrorCode :: Integer
+xdrMin_AuthVerifyErrorCode = 4
+xdrMax_AuthVerifyErrorCode = 4
 

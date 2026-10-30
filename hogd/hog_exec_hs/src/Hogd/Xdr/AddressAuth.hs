@@ -26,6 +26,10 @@ instance XdrType PublicKeyConfig where
   cxsPut (PublicKeyConfig x1 x2) = cxsPut x1 <> cxsPut_Weight x2
   cxsGet = PublicKeyConfig <$> cxsGet <*> cxsGet_Weight
 
+xdrMin_PublicKeyConfig, xdrMax_PublicKeyConfig :: Integer
+xdrMin_PublicKeyConfig = 40
+xdrMax_PublicKeyConfig = 1960
+
 type PublicKeyConfigOpt = Maybe PublicKeyConfig
 
 put_PublicKeyConfigOpt :: PublicKeyConfigOpt -> Builder
@@ -39,6 +43,10 @@ cxsPut_PublicKeyConfigOpt = (cxsPutOptional cxsPut)
 
 cxsGet_PublicKeyConfigOpt :: Get PublicKeyConfigOpt
 cxsGet_PublicKeyConfigOpt = (cxsGetOptional cxsGet)
+
+xdrMin_PublicKeyConfigOpt, xdrMax_PublicKeyConfigOpt :: Integer
+xdrMin_PublicKeyConfigOpt = 4
+xdrMax_PublicKeyConfigOpt = 1964
 
 kDefaultNewAddressRequiredWeight :: Num a => a
 kDefaultNewAddressRequiredWeight = 1
@@ -58,4 +66,8 @@ instance XdrType AddressAuthData where
   xdrGet = AddressAuthData <$> (getFixedArray 21 get_PublicKeyConfigOpt) <*> get_Weight <*> get_BlockHeight
   cxsPut (AddressAuthData x1 x2 x3) = (cxsPutFixedArray 21 cxsPut_PublicKeyConfigOpt) x1 <> cxsPut_Weight x2 <> cxsPut_BlockHeight x3
   cxsGet = AddressAuthData <$> (cxsGetFixedArray 21 cxsGet_PublicKeyConfigOpt) <*> cxsGet_Weight <*> cxsGet_BlockHeight
+
+xdrMin_AddressAuthData, xdrMax_AddressAuthData :: Integer
+xdrMin_AddressAuthData = 96
+xdrMax_AddressAuthData = 41256
 

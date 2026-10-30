@@ -27,6 +27,10 @@ cxsPut_SCPHash = (cxsPutFixedOpaque 32)
 cxsGet_SCPHash :: Get SCPHash
 cxsGet_SCPHash = (cxsGetFixedOpaque 32)
 
+xdrMin_SCPHash, xdrMax_SCPHash :: Integer
+xdrMin_SCPHash = 32
+xdrMax_SCPHash = 32
+
 type SCPNodeID = PublicKey
 
 put_SCPNodeID :: SCPNodeID -> Builder
@@ -40,6 +44,10 @@ cxsPut_SCPNodeID = cxsPut
 
 cxsGet_SCPNodeID :: Get SCPNodeID
 cxsGet_SCPNodeID = cxsGet
+
+xdrMin_SCPNodeID, xdrMax_SCPNodeID :: Integer
+xdrMin_SCPNodeID = 36
+xdrMax_SCPNodeID = 1956
 
 type SCPCount = Word32
 
@@ -55,6 +63,10 @@ cxsPut_SCPCount = cxsPut
 cxsGet_SCPCount :: Get SCPCount
 cxsGet_SCPCount = cxsGet
 
+xdrMin_SCPCount, xdrMax_SCPCount :: Integer
+xdrMin_SCPCount = 4
+xdrMax_SCPCount = 4
+
 type SCPSlotIndex = Word64
 
 put_SCPSlotIndex :: SCPSlotIndex -> Builder
@@ -68,6 +80,10 @@ cxsPut_SCPSlotIndex = cxsPut
 
 cxsGet_SCPSlotIndex :: Get SCPSlotIndex
 cxsGet_SCPSlotIndex = cxsGet
+
+xdrMin_SCPSlotIndex, xdrMax_SCPSlotIndex :: Integer
+xdrMin_SCPSlotIndex = 8
+xdrMax_SCPSlotIndex = 8
 
 type SCPValue = ByteString
 
@@ -83,6 +99,10 @@ cxsPut_SCPValue = (cxsPutVarOpaque 0xffffffff)
 cxsGet_SCPValue :: Get SCPValue
 cxsGet_SCPValue = (cxsGetVarOpaque 0xffffffff)
 
+xdrMin_SCPValue, xdrMax_SCPValue :: Integer
+xdrMin_SCPValue = 4
+xdrMax_SCPValue = 4294967300
+
 type SCPValues = [SCPValue]
 
 put_SCPValues :: SCPValues -> Builder
@@ -96,6 +116,10 @@ cxsPut_SCPValues = (cxsPutVarArray 0xffffffff cxsPut_SCPValue)
 
 cxsGet_SCPValues :: Get SCPValues
 cxsGet_SCPValues = (cxsGetVarArray 0xffffffff cxsGet_SCPValue)
+
+xdrMin_SCPValues, xdrMax_SCPValues :: Integer
+xdrMin_SCPValues = 4
+xdrMax_SCPValues = 18446744086594453504
 
 type SCPOptValue = Maybe SCPValue
 
@@ -111,6 +135,10 @@ cxsPut_SCPOptValue = (cxsPutOptional cxsPut_SCPValue)
 cxsGet_SCPOptValue :: Get SCPOptValue
 cxsGet_SCPOptValue = (cxsGetOptional cxsGet_SCPValue)
 
+xdrMin_SCPOptValue, xdrMax_SCPOptValue :: Integer
+xdrMin_SCPOptValue = 4
+xdrMax_SCPOptValue = 4294967304
+
 data SCPBallot = SCPBallot
   { counter :: SCPCount
   , value :: SCPValue
@@ -122,6 +150,10 @@ instance XdrType SCPBallot where
   xdrGet = SCPBallot <$> get_SCPCount <*> get_SCPValue
   cxsPut (SCPBallot x1 x2) = cxsPut_SCPCount x1 <> cxsPut_SCPValue x2
   cxsGet = SCPBallot <$> cxsGet_SCPCount <*> cxsGet_SCPValue
+
+xdrMin_SCPBallot, xdrMax_SCPBallot :: Integer
+xdrMin_SCPBallot = 8
+xdrMax_SCPBallot = 4294967304
 
 newtype SCPStatementType = SCPStatementType Int32
   deriving (Eq, Ord)
@@ -153,6 +185,10 @@ instance XdrType SCPStatementType where
 sCPStatementType_values :: [SCPStatementType]
 sCPStatementType_values = [SCP_ST_PREPARE, SCP_ST_CONFIRM, SCP_ST_EXTERNALIZE, SCP_ST_NOMINATE]
 
+xdrMin_SCPStatementType, xdrMax_SCPStatementType :: Integer
+xdrMin_SCPStatementType = 4
+xdrMax_SCPStatementType = 4
+
 data SCPStatementNominate = SCPStatementNominate
   { quorum_set_hash :: SCPHash
   , votes :: [SCPValue]
@@ -165,6 +201,10 @@ instance XdrType SCPStatementNominate where
   xdrGet = SCPStatementNominate <$> get_SCPHash <*> (getVarArray 0xffffffff get_SCPValue) <*> (getVarArray 0xffffffff get_SCPValue)
   cxsPut (SCPStatementNominate x1 x2 x3) = cxsPut_SCPHash x1 <> (cxsPutVarArray 0xffffffff cxsPut_SCPValue) x2 <> (cxsPutVarArray 0xffffffff cxsPut_SCPValue) x3
   cxsGet = SCPStatementNominate <$> cxsGet_SCPHash <*> (cxsGetVarArray 0xffffffff cxsGet_SCPValue) <*> (cxsGetVarArray 0xffffffff cxsGet_SCPValue)
+
+xdrMin_SCPStatementNominate, xdrMax_SCPStatementNominate :: Integer
+xdrMin_SCPStatementNominate = 40
+xdrMax_SCPStatementNominate = 36893488173188907040
 
 data SCPStatementPrepare = SCPStatementPrepare
   { quorum_set_hash :: SCPHash
@@ -182,6 +222,10 @@ instance XdrType SCPStatementPrepare where
   cxsPut (SCPStatementPrepare x1 x2 x3 x4 x5 x6) = cxsPut_SCPHash x1 <> cxsPut x2 <> (cxsPutOptional cxsPut) x3 <> (cxsPutOptional cxsPut) x4 <> cxsPut_SCPCount x5 <> cxsPut_SCPCount x6
   cxsGet = SCPStatementPrepare <$> cxsGet_SCPHash <*> cxsGet <*> (cxsGetOptional cxsGet) <*> (cxsGetOptional cxsGet) <*> cxsGet_SCPCount <*> cxsGet_SCPCount
 
+xdrMin_SCPStatementPrepare, xdrMax_SCPStatementPrepare :: Integer
+xdrMin_SCPStatementPrepare = 56
+xdrMax_SCPStatementPrepare = 12884901960
+
 data SCPStatementConfirm = SCPStatementConfirm
   { ballot :: SCPBallot
   , n_prepared :: SCPCount
@@ -197,6 +241,10 @@ instance XdrType SCPStatementConfirm where
   cxsPut (SCPStatementConfirm x1 x2 x3 x4 x5) = cxsPut x1 <> cxsPut_SCPCount x2 <> cxsPut_SCPCount x3 <> cxsPut_SCPCount x4 <> cxsPut_SCPHash x5
   cxsGet = SCPStatementConfirm <$> cxsGet <*> cxsGet_SCPCount <*> cxsGet_SCPCount <*> cxsGet_SCPCount <*> cxsGet_SCPHash
 
+xdrMin_SCPStatementConfirm, xdrMax_SCPStatementConfirm :: Integer
+xdrMin_SCPStatementConfirm = 52
+xdrMax_SCPStatementConfirm = 4294967348
+
 data SCPStatementExternalize = SCPStatementExternalize
   { commit :: SCPBallot
   , n_h :: SCPCount
@@ -209,6 +257,10 @@ instance XdrType SCPStatementExternalize where
   xdrGet = SCPStatementExternalize <$> xdrGet <*> get_SCPCount <*> get_SCPHash
   cxsPut (SCPStatementExternalize x1 x2 x3) = cxsPut x1 <> cxsPut_SCPCount x2 <> cxsPut_SCPHash x3
   cxsGet = SCPStatementExternalize <$> cxsGet <*> cxsGet_SCPCount <*> cxsGet_SCPHash
+
+xdrMin_SCPStatementExternalize, xdrMax_SCPStatementExternalize :: Integer
+xdrMin_SCPStatementExternalize = 44
+xdrMax_SCPStatementExternalize = 4294967340
 
 data SCPStatement_pledges_t
   = SCPStatement_pledges_t_prepare SCPStatementPrepare
@@ -250,6 +302,10 @@ discriminant_SCPStatement_pledges_t (SCPStatement_pledges_t_confirm _) = (SCPSta
 discriminant_SCPStatement_pledges_t (SCPStatement_pledges_t_externalize _) = (SCPStatementType (2))
 discriminant_SCPStatement_pledges_t (SCPStatement_pledges_t_nominate _) = (SCPStatementType (3))
 
+xdrMin_SCPStatement_pledges_t, xdrMax_SCPStatement_pledges_t :: Integer
+xdrMin_SCPStatement_pledges_t = 44
+xdrMax_SCPStatement_pledges_t = 36893488173188907044
+
 data SCPStatement = SCPStatement
   { node_id :: SCPNodeID
   , slot_index :: SCPSlotIndex
@@ -263,6 +319,10 @@ instance XdrType SCPStatement where
   cxsPut (SCPStatement x1 x2 x3) = cxsPut_SCPNodeID x1 <> cxsPut_SCPSlotIndex x2 <> cxsPut x3
   cxsGet = SCPStatement <$> cxsGet_SCPNodeID <*> cxsGet_SCPSlotIndex <*> cxsGet
 
+xdrMin_SCPStatement, xdrMax_SCPStatement :: Integer
+xdrMin_SCPStatement = 88
+xdrMax_SCPStatement = 36893488173188909008
+
 data SCPEnvelope = SCPEnvelope
   { statement :: SCPStatement
   , signature :: Signature
@@ -274,6 +334,10 @@ instance XdrType SCPEnvelope where
   xdrGet = SCPEnvelope <$> xdrGet <*> xdrGet
   cxsPut (SCPEnvelope x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = SCPEnvelope <$> cxsGet <*> cxsGet
+
+xdrMin_SCPEnvelope, xdrMax_SCPEnvelope :: Integer
+xdrMin_SCPEnvelope = 156
+xdrMax_SCPEnvelope = 36893488173188912324
 
 type SCPEnvelopes = [SCPEnvelope]
 
@@ -288,6 +352,10 @@ cxsPut_SCPEnvelopes = (cxsPutVarArray 0xffffffff cxsPut)
 
 cxsGet_SCPEnvelopes :: Get SCPEnvelopes
 cxsGet_SCPEnvelopes = (cxsGetVarArray 0xffffffff cxsGet)
+
+xdrMin_SCPEnvelopes, xdrMax_SCPEnvelopes :: Integer
+xdrMin_SCPEnvelopes = 4
+xdrMax_SCPEnvelopes = 158456325102315674288202443584
 
 data SCPQuorumSet = SCPQuorumSet
   { threshold :: SCPCount

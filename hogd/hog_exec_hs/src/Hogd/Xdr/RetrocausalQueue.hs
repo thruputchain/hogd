@@ -29,6 +29,10 @@ cxsPut_QueueEntry = (cxsPutVarOpaque 256)
 cxsGet_QueueEntry :: Get QueueEntry
 cxsGet_QueueEntry = (cxsGetVarOpaque 256)
 
+xdrMin_QueueEntry, xdrMax_QueueEntry :: Integer
+xdrMin_QueueEntry = 4
+xdrMax_QueueEntry = 260
+
 kMaxConcurrentRcqReadsPerTx :: Num a => a
 kMaxConcurrentRcqReadsPerTx = 16384
 
@@ -47,6 +51,10 @@ instance XdrType RetrocausalQueueBlock where
   cxsPut (RetrocausalQueueBlock x1 x2) = (cxsPutVarArray 0xffffffff cxsPut_QueueEntry) x1 <> cxsPut x2
   cxsGet = RetrocausalQueueBlock <$> (cxsGetVarArray 0xffffffff cxsGet_QueueEntry) <*> cxsGet
 
+xdrMin_RetrocausalQueueBlock, xdrMax_RetrocausalQueueBlock :: Integer
+xdrMin_RetrocausalQueueBlock = 12
+xdrMax_RetrocausalQueueBlock = 1116691496712
+
 data RetrocausalQueuePastBlockConsumeDelta = RetrocausalQueuePastBlockConsumeDelta
   { max_fully_consumed_block_number :: Word64
   , partial_consumed_number :: Word64
@@ -58,6 +66,10 @@ instance XdrType RetrocausalQueuePastBlockConsumeDelta where
   xdrGet = RetrocausalQueuePastBlockConsumeDelta <$> xdrGet <*> xdrGet
   cxsPut (RetrocausalQueuePastBlockConsumeDelta x1 x2) = cxsPut x1 <> cxsPut x2
   cxsGet = RetrocausalQueuePastBlockConsumeDelta <$> cxsGet <*> cxsGet
+
+xdrMin_RetrocausalQueuePastBlockConsumeDelta, xdrMax_RetrocausalQueuePastBlockConsumeDelta :: Integer
+xdrMin_RetrocausalQueuePastBlockConsumeDelta = 16
+xdrMax_RetrocausalQueuePastBlockConsumeDelta = 16
 
 data RetrocausalQueueMetadata = RetrocausalQueueMetadata
   { consume_state :: RetrocausalQueuePastBlockConsumeDelta
@@ -72,6 +84,10 @@ instance XdrType RetrocausalQueueMetadata where
   cxsPut (RetrocausalQueueMetadata x1 x2 x3) = cxsPut x1 <> cxsPut x2 <> cxsPut x3
   cxsGet = RetrocausalQueueMetadata <$> cxsGet <*> cxsGet <*> cxsGet
 
+xdrMin_RetrocausalQueueMetadata, xdrMax_RetrocausalQueueMetadata :: Integer
+xdrMin_RetrocausalQueueMetadata = 32
+xdrMax_RetrocausalQueueMetadata = 32
+
 data RetrocausalQueueConsumeDelta = RetrocausalQueueConsumeDelta
   { past_block_consume :: RetrocausalQueuePastBlockConsumeDelta
   , current_block_consumed :: [QueueEntry]
@@ -84,6 +100,10 @@ instance XdrType RetrocausalQueueConsumeDelta where
   cxsPut (RetrocausalQueueConsumeDelta x1 x2) = cxsPut x1 <> (cxsPutVarArray 250 cxsPut_QueueEntry) x2
   cxsGet = RetrocausalQueueConsumeDelta <$> cxsGet <*> (cxsGetVarArray 250 cxsGet_QueueEntry)
 
+xdrMin_RetrocausalQueueConsumeDelta, xdrMax_RetrocausalQueueConsumeDelta :: Integer
+xdrMin_RetrocausalQueueConsumeDelta = 20
+xdrMax_RetrocausalQueueConsumeDelta = 65020
+
 data RetrocausalQueueInsertDelta = RetrocausalQueueInsertDelta
   { added_entries :: [QueueEntry]
   }
@@ -94,6 +114,10 @@ instance XdrType RetrocausalQueueInsertDelta where
   xdrGet = RetrocausalQueueInsertDelta <$> (getVarArray 250 get_QueueEntry)
   cxsPut (RetrocausalQueueInsertDelta x1) = (cxsPutVarArray 250 cxsPut_QueueEntry) x1
   cxsGet = RetrocausalQueueInsertDelta <$> (cxsGetVarArray 250 cxsGet_QueueEntry)
+
+xdrMin_RetrocausalQueueInsertDelta, xdrMax_RetrocausalQueueInsertDelta :: Integer
+xdrMin_RetrocausalQueueInsertDelta = 4
+xdrMax_RetrocausalQueueInsertDelta = 65004
 
 data RetrocausalQueueDelta = RetrocausalQueueDelta
   { consume :: (Maybe RetrocausalQueueConsumeDelta)
@@ -107,4 +131,8 @@ instance XdrType RetrocausalQueueDelta where
   xdrGet = RetrocausalQueueDelta <$> (getOptional xdrGet) <*> xdrGet <*> (getVarArray 16384 get_QueueEntry)
   cxsPut (RetrocausalQueueDelta x1 x2 x3) = (cxsPutOptional cxsPut) x1 <> cxsPut x2 <> (cxsPutVarArray 16384 cxsPut_QueueEntry) x3
   cxsGet = RetrocausalQueueDelta <$> (cxsGetOptional cxsGet) <*> cxsGet <*> (cxsGetVarArray 16384 cxsGet_QueueEntry)
+
+xdrMin_RetrocausalQueueDelta, xdrMax_RetrocausalQueueDelta :: Integer
+xdrMin_RetrocausalQueueDelta = 12
+xdrMax_RetrocausalQueueDelta = 4389872
 
