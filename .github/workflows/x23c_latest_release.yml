@@ -2,16 +2,17 @@ name: x23c latest release
 
 on:
   workflow_dispatch:
-  pull_request_target:
-    types: [closed]
+  push:
     branches: [main]
     paths:
       - 'x23/x23c/**'
 
+# Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
+  HOGD_SCCACHE_REMOTE: "0"
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_BUILD_JOBS: "6"
-  X23C_RELEASE_SHA: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+  X23C_RELEASE_SHA: ${{ github.sha }}
 
 permissions:
   contents: write
@@ -23,18 +24,17 @@ concurrency:
 
 jobs:
   build-linux:
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
     strategy:
       fail-fast: false
       matrix:
         include:
           - architecture: x86_64
-            runner: namespace-profile-hogd-linux-2604
+            runner: namespace-profile-hogd-release-linux-x64
             machine: x86_64
             build_architecture: x86-64-v2
             nproc: 18
           - architecture: arm64
-            runner: namespace-profile-hogd-linux-arm64
+            runner: namespace-profile-hogd-release-linux-arm64
             machine: aarch64
             build_architecture: armv8.2-a
             # 16 vCPU / 32 GB runner; leave memory headroom for -O3 -g TUs.
@@ -45,50 +45,9 @@ jobs:
       actions: read
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -143,64 +102,15 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   build-macos:
-    if: github.event_name != 'pull_request_target' || github.event.pull_request.merged == true
-    runs-on: namespace-profile-hogd-arm64-macos
+    runs-on: namespace-profile-hogd-release-macos-arm64
     permissions:
       contents: read
       actions: read
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-          ref: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-
-      - name: Configure ccache
-        run: |
-          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
-          # the cache volume. Point it at the cached path, as the Linux jobs do.
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -251,7 +161,7 @@ jobs:
 
   publish:
     needs: [build-linux, build-macos]
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
@@ -302,7 +212,7 @@ jobs:
         uses: softprops/action-gh-release@v3
         with:
           tag_name: latest-x23c
-          target_commitish: ${{ github.event.pull_request.merge_commit_sha || github.sha }}
+          target_commitish: ${{ github.sha }}
           name: x23c latest
           body_path: artifacts/release_notes.md
           overwrite_files: true
