@@ -13,9 +13,11 @@
 #include <utility>
 
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "x23/async.h"
 #include "x23/cleanup.h"
+#include "x23/err.h"
 #include "x23/event.h"
 #include "x23/refcnt.h"
 #include "x23/sockio.h"
@@ -184,7 +186,11 @@ HttpServer::start_server(x23::HostPort bind_addr)
   CHECK(addr.has_value());
 
   int backlog = 5 + cp_.pool_.nthreads_;
-  x23::UniqueFd lfd = x23::tcplisten(*addr, backlog);
+  std::expected<x23::UniqueFd, x23::Errno> listened =
+      x23::try_tcplisten(*addr, backlog);
+  if (!listened)
+    exit_cannot_listen(bind_addr, listened.error());
+  x23::UniqueFd lfd = std::move(*listened);
   port_ = x23::get_port(x23::local_addr(lfd));
   listen_fd_ = lfd.get();
 
