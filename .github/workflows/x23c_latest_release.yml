@@ -4,7 +4,7 @@ on:
   workflow_dispatch:
     inputs:
       dry_run:
-        description: Build and upload artifacts without publishing latest-x23c
+        description: Build and package x23c without uploading or publishing
         type: boolean
         default: true
   push:
@@ -14,7 +14,7 @@ on:
 
 # Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
-  HOGD_SCCACHE_REMOTE: "0"
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_BUILD_JOBS: "6"
   X23C_RELEASE_SHA: ${{ github.sha }}
@@ -74,14 +74,13 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Build x23c
         run: |
           ./scripts/build.sh \
             -d build/release \
             -t Release \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             x23c
 
@@ -91,6 +90,7 @@ jobs:
             build/release/x23/x23c/x23c artifacts linux-${{ matrix.architecture }}
 
       - name: Upload artifact
+        if: github.event_name == 'push' || !inputs.dry_run
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           if-no-files-found: error
@@ -99,9 +99,7 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()
@@ -134,14 +132,13 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Build x23c
         run: |
           ./scripts/build.sh \
             -d build/release \
             -t Release \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             x23c
 
       - name: Package x23c artifacts
@@ -150,6 +147,7 @@ jobs:
             build/release/x23/x23c/x23c artifacts macos-arm64
 
       - name: Upload artifact
+        if: github.event_name == 'push' || !inputs.dry_run
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           if-no-files-found: error
@@ -158,9 +156,7 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()

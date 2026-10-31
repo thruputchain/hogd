@@ -17,7 +17,7 @@ on:
 
 # Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
-  HOGD_SCCACHE_REMOTE: "0"
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   
 jobs:
@@ -47,13 +47,12 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
@@ -87,11 +86,10 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
@@ -128,13 +126,12 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=armv8.2-a" \
@@ -168,11 +165,10 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
@@ -213,14 +209,13 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh \
             -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=armv8.5-a" \
@@ -255,11 +250,10 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error

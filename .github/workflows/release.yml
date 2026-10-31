@@ -5,11 +5,11 @@ on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:  # Build and upload artifacts only. Tag pushes publish.
+  workflow_dispatch:  # Dry run. Only tag pushes upload and publish.
 
 # Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
-  HOGD_SCCACHE_REMOTE: "0"
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_BUILD_JOBS: "6"
   # Reuse RV32 intermediates across builds within this job.
@@ -50,8 +50,6 @@ jobs:
         with:
           persist-credentials: false
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
@@ -84,6 +82,7 @@ jobs:
             -d build/release \
             -t Release \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
@@ -96,6 +95,7 @@ jobs:
             -d build/debug \
             -t Debug \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
@@ -169,6 +169,7 @@ jobs:
         run: |
           ./scripts/build.sh \
             -d build/znver5 -t Release -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=znver5" \
@@ -180,6 +181,7 @@ jobs:
             build/znver5 artifacts release x86_64 znver5
 
       - name: Upload Linux artifacts
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           if-no-files-found: error
@@ -188,9 +190,7 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()
@@ -206,8 +206,6 @@ jobs:
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-
-      - uses: ./.github/actions/setup-sccache
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -231,6 +229,7 @@ jobs:
             -d build/release \
             -t Release \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             hog-devnode
 
@@ -436,6 +435,7 @@ jobs:
           grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
           if-no-files-found: error
@@ -444,9 +444,7 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()
