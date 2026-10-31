@@ -22,7 +22,7 @@ env:
   
 jobs:
   build-linux-x86_64:
-    runs-on: namespace-profile-hogd-release-linux-x64
+    runs-on: namespace-profile-release-x86
     permissions:
       contents: read
       actions: read
@@ -94,6 +94,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
 
@@ -102,7 +103,7 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   build-linux-arm64:
-    runs-on: namespace-profile-hogd-release-linux-arm64
+    runs-on: namespace-profile-release-arm64
     permissions:
       contents: read
       actions: read
@@ -174,6 +175,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-linux-arm64
           path: release_artifacts/libtest_ffi-linux-arm64.tar.gz*
 
@@ -182,7 +184,7 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   build-macos-arm64:
-    runs-on: namespace-profile-hogd-release-macos-arm64
+    runs-on: namespace-profile-release-macos-arm64
     permissions:
       contents: read
       actions: read
@@ -260,6 +262,7 @@ jobs:
       - name: Upload Artifact
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
 
