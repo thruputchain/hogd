@@ -49,6 +49,17 @@ jobs:
       contents: read
       actions: read
     steps:
+      - name: Check Linux release image
+        if: github.event_name == 'workflow_dispatch' && inputs.dry_run
+        run: |
+          . /etc/os-release
+          printf 'Image: %s (%s)\n' "$PRETTY_NAME" "$(dpkg --print-architecture)"
+          dpkg-query -W -f='${binary:Package} ${Status} ${Version}\n' \
+            libjemalloc-dev ccache ninja-build cbindgen || true
+          type -a cmake gcc-15 ccache ninja || true
+          printf '#include <jemalloc/jemalloc.h>\nint main(void) { malloc_stats_print(0, 0, 0); }\n' |
+            gcc-15 -x c - -o "$RUNNER_TEMP/check-jemalloc" -ljemalloc
+
       - name: Checkout
         uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
