@@ -130,14 +130,14 @@ Two Namespace.so-optimized workflows are available:
 
 ```bash
 # Tag for GitHub Container Registry
-podman tag localhost/hogd-ci:latest ghcr.io/groundhogchain/hogd-ci:latest
+podman tag localhost/hogd-ci:latest ghcr.io/thruputchain/hogd-ci:latest
 # Login (need a GitHub PAT with packages:write)
 podman login ghcr.io
 # Push
-podman push ghcr.io/groundhogchain/hogd-ci:latest
+podman push ghcr.io/thruputchain/hogd-ci:latest
 ```
 
-Then reference `ghcr.io/groundhogchain/hogd-ci:latest` in Namespace.so profile.
+Then reference `ghcr.io/thruputchain/hogd-ci:latest` in Namespace.so profile.
 
 ### Workflow Simplification
 
