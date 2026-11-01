@@ -451,7 +451,7 @@ x23_f64_encode(x23_writer *w, const double *v)
  *
  * P_box: a value that is always present, encoded exactly as a plain T, but
  * held like a P_opt.  The generator uses it for fields annotated
- * #[cpp(box)] or #[rust(box_ptr)]: types that contain themselves by value.
+ * #[cpp(box)]: types that contain themselves by value.
  */
 
 #define X23_VIEW_TYPES(P, T)                                                   \

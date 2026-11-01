@@ -16,8 +16,9 @@
 //   3. T_XDR_SIZE macros and prototypes of every encode/decode function
 //   4. function definitions
 //
-// A field annotated #[cpp(box)] or #[rust(box_ptr)], which is how the .x
-// files mark a type that contains itself by value, is stored as a T_box view.
+// A field annotated #[cpp(box)], which is how the .x files mark a type that
+// contains itself by value (and what gen_hh boxes), is stored as a T_box
+// view.
 
 #include <algorithm>
 #include <cctype>
@@ -233,14 +234,13 @@ struct GenC {
   static string size_expr(const Declaration &d);
   static string comment_block(const string &comment, const string &indent);
 
-  // A field the .x file marks as boxed, as it must be when its type
-  // contains the field's struct or union by value.  C cannot nest a struct
-  // in itself, so it is held as a T_box view.
+  // A field the .x file marks #[cpp(box)], as it must when the field's type
+  // contains its struct or union by value.  C cannot nest a struct in
+  // itself, so it is held as a T_box view.  Same annotation as gen_hh, so C
+  // and C++ box the same fields.
   static bool boxed(const Declaration &d)
   {
-    return d.qual == kScalar &&
-           (d.comment.find("#[cpp(box)]") != string::npos ||
-            d.comment.find("#[rust(box_ptr)]") != string::npos);
+    return d.qual == kScalar && d.comment.find("#[cpp(box)]") != string::npos;
   }
 };
 
