@@ -12,18 +12,16 @@
 //
 //   1. forward declarations of every struct and union, and of the view
 //      types (T_vec, T_opt, T_box) of every struct, union and enum
-//   2. constants and enums in source order, then the other types, each after
-//      the types it holds by value
+//   2. constants and type definitions, in source order
 //   3. T_XDR_SIZE macros and prototypes of every encode/decode function
 //   4. function definitions
 //
-// A field that would make a struct contain itself by value (possible through
-// union arms) is stored as a T_box view instead; see find_boxed.
+// A field annotated #[cpp(box)] or #[rust(box_ptr)], which is how the .x
+// files mark a type that contains itself by value, is stored as a T_box view.
 
 #include <algorithm>
 #include <cctype>
 #include <format>
-#include <functional>
 #include <map>
 #include <regex>
 #include <set>
@@ -169,13 +167,6 @@ struct GenC {
   // definition, so every Declaration's type is a type name.
   vector<Definition> defs_;
   std::map<string, const Definition *> local_; // named local types
-  std::set<string> recursive_;
-  // Fields that hold their type by value on a cycle of by-value fields.  C
-  // cannot nest a struct in itself, so these are stored as T_box views.
-  std::set<const Declaration *> boxed_;
-  // The type definitions (Typedef, StructDecl, UnionDecl) in an order where
-  // each follows those it holds by value.
-  vector<const Definition *> type_order_;
 
   string fwd_;    // section 1
   string types_;  // section 2
@@ -185,9 +176,6 @@ struct GenC {
   void flatten(const vector<Definition> &in);
   void hoist(Declaration &d, const string &name, string comment);
   void hoist_body(TypeSpecifier &ts, const string &name);
-  void find_recursive();
-  void find_boxed();
-  void order_types();
 
   void gen();
   void gen_const(const ConstDef &c);
@@ -245,17 +233,14 @@ struct GenC {
   static string size_expr(const Declaration &d);
   static string comment_block(const string &comment, const string &indent);
 
-  string depth_enter(const string &name) const
+  // A field the .x file marks as boxed, as it must be when its type
+  // contains the field's struct or union by value.  C cannot nest a struct
+  // in itself, so it is held as a T_box view.
+  static bool boxed(const Declaration &d)
   {
-    if (!recursive_.contains(name))
-      return {};
-    return "  if (r->depth == 0)\n"
-           "    return X23_ERR_DEPTH;\n"
-           "  --r->depth;\n";
-  }
-  string depth_leave(const string &name) const
-  {
-    return recursive_.contains(name) ? "  ++r->depth;\n" : "";
+    return d.qual == kScalar &&
+           (d.comment.find("#[cpp(box)]") != string::npos ||
+            d.comment.find("#[rust(box_ptr)]") != string::npos);
   }
 };
 
@@ -346,167 +331,6 @@ GenC::flatten(const vector<Definition> &in)
   }
 }
 
-// A struct or union is recursive if it can contain itself, which is when
-// the x23 C++ deserializer charges it against the recursion limit.  Types
-// from other files cannot refer back to this one, so looking only at local
-// types finds every cycle.
-void
-GenC::find_recursive()
-{
-  std::map<string, std::set<string>> edges;
-  const auto add = [&](const string &from, const Declaration &d) {
-    if (d.qual != kVoid && local_.contains(type_of(d)))
-      edges[from].insert(type_of(d));
-  };
-  for (const auto &[name, def] : local_) {
-    if (auto *s = std::get_if<StructDecl>(def))
-      for (const auto &d : s->body)
-        add(name, d);
-    else if (auto *u = std::get_if<UnionDecl>(def))
-      for (const auto &a : u->body.arms)
-        add(name, a.decl);
-    else if (auto *t = std::get_if<Typedef>(def))
-      add(name, *t);
-  }
-  for (const auto &[name, def] : local_) {
-    if (!holds_alternative<StructDecl>(*def) &&
-        !holds_alternative<UnionDecl>(*def))
-      continue;
-    std::set<string> seen;
-    vector<string> stack(edges[name].begin(), edges[name].end());
-    while (!stack.empty()) {
-      string n = std::move(stack.back());
-      stack.pop_back();
-      if (n == name) {
-        recursive_.insert(name);
-        break;
-      }
-      if (seen.insert(n).second)
-        for (const auto &m : edges[n])
-          stack.push_back(m);
-    }
-  }
-}
-
-// XDR allows a struct to contain itself by value through union arms (as
-// contract_spec.x's ContractType does), which the C++ and Rust bindings box
-// by annotation.  Here a by-value field on a by-value cycle is boxed when it
-// refers to its own type or one defined later in the source, which breaks
-// every cycle while leaving the other fields on it plain.
-void
-GenC::find_boxed()
-{
-  std::map<string, std::set<string>> edges;
-  const auto by_value = [&](const Declaration &d) {
-    return (d.qual == kScalar || d.qual == kArray) &&
-           local_.contains(type_of(d));
-  };
-  for (const auto &[name, def] : local_) {
-    if (auto *s = std::get_if<StructDecl>(def)) {
-      for (const auto &d : s->body)
-        if (by_value(d))
-          edges[name].insert(type_of(d));
-    }
-    else if (auto *u = std::get_if<UnionDecl>(def)) {
-      for (const auto &a : u->body.arms)
-        if (by_value(a.decl))
-          edges[name].insert(type_of(a.decl));
-    }
-    else if (auto *t = std::get_if<Typedef>(def)) {
-      if (by_value(*t))
-        edges[name].insert(type_of(*t));
-    }
-  }
-  const auto reaches = [&](const string &from, const string &to) {
-    std::set<string> seen;
-    vector<string> stack{from};
-    while (!stack.empty()) {
-      string n = std::move(stack.back());
-      stack.pop_back();
-      if (n == to)
-        return true;
-      if (seen.insert(n).second)
-        for (const auto &m : edges[n])
-          stack.push_back(m);
-    }
-    return false;
-  };
-  std::map<string, size_t> index;
-  for (size_t i = 0; i < defs_.size(); ++i)
-    std::visit(
-        [&]<typename T>(const T &v) {
-          if constexpr (requires { v.id; } && !std::is_same_v<T, ConstDef>)
-            index[v.id] = i;
-        },
-        defs_[i]);
-  const auto check = [&](const string &owner, const Declaration &d) {
-    if (!by_value(d) || index[type_of(d)] < index[owner] ||
-        !reaches(type_of(d), owner))
-      return;
-    if (d.qual == kArray)
-      throw std::runtime_error(std::format(
-          "{}.{}: the C backend cannot nest a fixed-length array of {} in "
-          "itself",
-          owner, d.id, type_of(d)));
-    boxed_.insert(&d);
-  };
-  for (const auto &def : defs_) {
-    if (auto *s = std::get_if<StructDecl>(&def))
-      for (const auto &d : s->body)
-        check(s->id, d);
-    else if (auto *u = std::get_if<UnionDecl>(&def))
-      for (const auto &a : u->body.arms)
-        check(u->id, a.decl);
-  }
-}
-
-// C needs a type defined before another holds it by value.  XDR source
-// order usually already does that, but not around recursive types.
-void
-GenC::order_types()
-{
-  // Views (T_vec, T_opt, T_box) of structs, unions and enums are declared
-  // up front, so only a typedef's views wait for the typedef.
-  const auto deps = [&](const Definition &def) {
-    vector<string> out;
-    const auto add = [&](const Declaration &d) {
-      if (d.qual == kVoid || !local_.contains(type_of(d)))
-        return;
-      const bool view = d.qual == kVec || d.qual == kPtr || d.qual == kString ||
-                        boxed_.contains(&d);
-      if (!view || holds_alternative<Typedef>(*local_.at(type_of(d))))
-        out.push_back(type_of(d));
-    };
-    if (auto *s = std::get_if<StructDecl>(&def))
-      for (const auto &d : s->body)
-        add(d);
-    else if (auto *u = std::get_if<UnionDecl>(&def)) {
-      Declaration disc{.type = u->body.switch_type};
-      add(disc);
-      for (const auto &a : u->body.arms)
-        add(a.decl);
-    }
-    else if (auto *t = std::get_if<Typedef>(&def))
-      add(*t);
-    return out;
-  };
-  std::set<const Definition *> done, active;
-  std::function<void(const Definition *)> visit = [&](const Definition *def) {
-    if (done.contains(def) || !active.insert(def).second)
-      return;
-    for (const auto &n : deps(*def))
-      if (const Definition *d = local_.at(n); !holds_alternative<EnumDecl>(*d))
-        visit(d);
-    active.erase(def);
-    done.insert(def);
-    type_order_.push_back(def);
-  };
-  for (const auto &def : defs_)
-    if (holds_alternative<Typedef>(def) || holds_alternative<StructDecl>(def) ||
-        holds_alternative<UnionDecl>(def))
-      visit(&def);
-}
-
 string
 GenC::comment_block(const string &comment, const string &indent)
 {
@@ -545,7 +369,7 @@ GenC::field(const Declaration &d, const string &indent) const
   case kVoid:
     return {};
   case kScalar:
-    if (boxed_.contains(&d))
+    if (boxed(d))
       out += std::format("{}{}_box {};\n", indent, c_type(t).prefix, id);
     else
       out += std::format("{}{} {};\n", indent, c_type(t).ctype, id);
@@ -584,7 +408,7 @@ GenC::decode_stmt(const Declaration &d, const string &lv,
     return {};
   case kScalar:
     return std::format("{}X23_TRY({}_{}decode(r, &{}));\n", in,
-                       c_type(t).prefix, boxed_.contains(&d) ? "box_" : "", lv);
+                       c_type(t).prefix, boxed(d) ? "box_" : "", lv);
   case kArray:
     if (t == "opaque")
       return std::format("{0}{{\n"
@@ -623,7 +447,7 @@ GenC::encode_stmt(const Declaration &d, const string &rv,
     return {};
   case kScalar:
     return std::format("{}X23_TRY({}_{}encode(w, &{}));\n", in,
-                       c_type(t).prefix, boxed_.contains(&d) ? "box_" : "", rv);
+                       c_type(t).prefix, boxed(d) ? "box_" : "", rv);
   case kArray:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_put_opaque(w, {}, {}));\n", in, rv,
@@ -756,6 +580,8 @@ GenC::gen_enum(const EnumDecl &e, const string &comment)
     valid += std::format("{}v == {}", valid.empty() ? "" : " ||\n         ",
                          enum_const(e.id, c.id));
   protos_ += std::format("static inline bool {}_valid(int32_t v);\n", e.id);
+  // Like the C++ and Rust bindings, decoding accepts any value; _valid is
+  // for callers that care.
   funcs_ += std::format(R"(static inline bool
 {0}_valid(int32_t v)
 {{
@@ -764,14 +590,11 @@ GenC::gen_enum(const EnumDecl &e, const string &comment)
 static inline x23_status
 {0}_decode(x23_reader *r, {0} *out)
 {{
-  X23_TRY(x23_i32_decode(r, out));
-  return {0}_valid(*out) ? X23_OK : X23_ERR_ENUM;
+  return x23_i32_decode(r, out);
 }}
 static inline x23_status
 {0}_encode(x23_writer *w, const {0} *v)
 {{
-  if (!{0}_valid(*v))
-    return X23_ERR_ENUM;
   return x23_i32_encode(w, v);
 }}
 )",
@@ -812,15 +635,15 @@ GenC::gen_struct(const StructDecl &s, const string &comment)
   funcs_ += std::format(R"(static inline x23_status
 {0}_decode(x23_reader *r, {0} *out)
 {{
-{1}{2}{3}  return X23_OK;
+{1}  return X23_OK;
 }}
 static inline x23_status
 {0}_encode(x23_writer *w, const {0} *v)
 {{
-{4}  return X23_OK;
+{2}  return X23_OK;
 }}
 )",
-                        s.id, depth_enter(s.id), dec, depth_leave(s.id), enc);
+                        s.id, dec, enc);
   // A struct with no fields encodes to nothing, which "0" (varies) still
   // handles correctly, if more slowly.
   gen_common(s.id, sum_sizes(sizes));
@@ -886,22 +709,21 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
   funcs_ += std::format(R"(static inline x23_status
 {0}_decode(x23_reader *r, {0} *out)
 {{
-{1}  X23_TRY({2}_decode(r, &out->{3}));
-  switch ({7}out->{3}) {{
-{4}  }}
-{5}  return X23_OK;
+  X23_TRY({1}_decode(r, &out->{2}));
+  switch ({5}out->{2}) {{
+{3}  }}
+  return X23_OK;
 }}
 static inline x23_status
 {0}_encode(x23_writer *w, const {0} *v)
 {{
-  X23_TRY({2}_encode(w, &v->{3}));
-  switch ({7}v->{3}) {{
-{6}  }}
+  X23_TRY({1}_encode(w, &v->{2}));
+  switch ({5}v->{2}) {{
+{4}  }}
   return X23_OK;
 }}
 )",
-                        u.id, depth_enter(u.id), disc.prefix, disc_id, dec,
-                        depth_leave(u.id), enc, sw);
+                        u.id, disc.prefix, disc_id, dec, enc, sw);
 
   // Fixed size only when every arm has the same fixed size.
   string size = "0";
@@ -993,11 +815,6 @@ static inline x23_status
 void
 GenC::gen()
 {
-  find_recursive();
-  find_boxed();
-  order_types();
-  // Constants and enums depend on nothing but other constants, so they keep
-  // their source order and go first.
   for (const auto &def : defs_) {
     if (auto *c = std::get_if<ConstDef>(&def))
       gen_const(*c);
@@ -1005,14 +822,12 @@ GenC::gen()
       gen_literal(*l);
     else if (auto *e = std::get_if<EnumDecl>(&def))
       gen_enum(*e, def.comment);
-  }
-  for (const Definition *def : type_order_) {
-    if (auto *s = std::get_if<StructDecl>(def))
-      gen_struct(*s, def->comment);
-    else if (auto *u = std::get_if<UnionDecl>(def))
-      gen_union(*u, def->comment);
-    else if (auto *t = std::get_if<Typedef>(def))
-      gen_typedef(*t, def->comment);
+    else if (auto *s = std::get_if<StructDecl>(&def))
+      gen_struct(*s, def.comment);
+    else if (auto *u = std::get_if<UnionDecl>(&def))
+      gen_union(*u, def.comment);
+    else if (auto *t = std::get_if<Typedef>(&def))
+      gen_typedef(*t, def.comment);
   }
 }
 

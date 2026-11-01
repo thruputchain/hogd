@@ -6,9 +6,9 @@
 //   - C encodes values it builds itself (native arrays, not views) to the
 //     bytes C++ encodes.
 //   - For corrupted encodings, C accepts exactly what C++ accepts, except
-//     that C also rejects unknown enum values and non-canonical bool union
-//     discriminants, and anything C accepts it re-encodes to the same bytes.
-//   - Both enforce the same recursion limit.
+//     that C (like Rust) rejects bool union discriminants other than 0 or 1,
+//     and anything C accepts it re-encodes to the same bytes.
+//   - C bounds view nesting (X23_NESTING_LIMIT).
 
 #include <cmath>
 #include <cstdint>
@@ -558,11 +558,10 @@ mutate(std::mt19937_64 &rng, const Bytes &good)
     CHECK(c_encode(c, Everything_to_xdr) == b);
   }
   else if (cpp_ok) {
-    // C rejects unknown enum values, which C++ accepts.  C++ also accepts a
-    // bool union discriminant other than 0 or 1, which C rejects as it does
-    // any other bad bool: an encoding C++ would not produce.
-    CHECK(st == X23_ERR_ENUM ||
-          (st == X23_ERR_BOOL && cpp_reencode<ctest::Everything>(b) != b));
+    // C++ accepts a bool union discriminant other than 0 or 1, which C (like
+    // Rust) rejects as it does any other bad bool: an encoding C++ would not
+    // produce.
+    CHECK(st == X23_ERR_BOOL && cpp_reencode<ctest::Everything>(b) != b);
   }
 }
 
@@ -590,12 +589,13 @@ random_tests(int n)
   }
 }
 
-// C++ charges each recursive struct or union against the limit; so must C.
+// Each optional or box level counts against the nesting limit, so a chain
+// of n values nests n - 1 deep.
 void
-recursion_limit_tests()
+nesting_limit_tests()
 {
   seed = 0;
-  for (size_t n = 1; n <= X23_RECURSION_LIMIT + 2; ++n) {
+  for (size_t n = 1; n <= X23_NESTING_LIMIT + 3; ++n) {
     ctest::Node list{.value = 0};
     ctest::Node *tail = &list;
     for (size_t i = 1; i < n; ++i) {
@@ -605,8 +605,7 @@ recursion_limit_tests()
     Bytes b = to_bytes(x23::serialize(list));
     Node c;
     x23_status st = Node_from_xdr(b.data(), uint32_t(b.size()), &c);
-    CHECK(cpp_accepts<ctest::Node>(b) == (st == X23_OK));
-    CHECK(st == (n <= X23_RECURSION_LIMIT ? X23_OK : X23_ERR_DEPTH));
+    CHECK(st == (n - 1 <= X23_NESTING_LIMIT ? X23_OK : X23_ERR_DEPTH));
 
     ctest::TypeT t(ctest::Kind::K_VOID);
     for (size_t i = 1; i < n; ++i) {
@@ -617,8 +616,7 @@ recursion_limit_tests()
     b = to_bytes(x23::serialize(t));
     TypeT ct;
     st = TypeT_from_xdr(b.data(), uint32_t(b.size()), &ct);
-    CHECK(cpp_accepts<ctest::TypeT>(b) == (st == X23_OK));
-    CHECK(st == (n <= X23_RECURSION_LIMIT ? X23_OK : X23_ERR_DEPTH));
+    CHECK(st == (n - 1 <= X23_NESTING_LIMIT ? X23_OK : X23_ERR_DEPTH));
   }
 }
 
@@ -638,13 +636,21 @@ misc_tests()
   // Enum constants are prefixed, so reusing a name across enums is fine.
   static_assert(Color_RED == 0 && Shade_RED == 7 && Color_BLUE == -5);
 
-  // Encoding rejects what decoding would.
+  // An enum holds any int32, as in C++ and Rust; a union discriminant must
+  // still select an arm.
+  static_assert(Color_XDR_SIZE == 4);
+  CHECK(!Shade_valid(0) && Shade_valid(Shade_DARK));
+  const uint8_t shade_99[] = {0, 0, 0, 99};
+  Shade sh;
+  CHECK_OK(Shade_from_xdr(shade_99, 4, &sh));
+  CHECK(sh == 99);
+  uint32_t n;
+  CHECK_OK(Shade_to_xdr(&sh, nullptr, 0, &n));
+  CHECK(cpp_accepts<ctest::Shade>(Bytes(shade_99, shade_99 + 4)));
   Shape s{};
   s.kind = 3;
-  uint32_t n;
-  CHECK(Shape_to_xdr(&s, nullptr, 0, &n) == X23_ERR_ENUM);
+  CHECK(Shape_to_xdr(&s, nullptr, 0, &n) == X23_ERR_UNION);
   Everything e{};
-  e.prims.shade = Shade_DARK; // 0 is not a Shade
   CHECK_OK(Everything_to_xdr(&e, nullptr, 0, &n));
   e.type.k = Kind_K_OPT; // a box holding nothing
   CHECK(Everything_to_xdr(&e, nullptr, 0, &n) == X23_ERR_RANGE);
@@ -672,7 +678,7 @@ int
 main()
 {
   misc_tests();
-  recursion_limit_tests();
+  nesting_limit_tests();
   random_tests(5000);
   std::printf("c_backend: ok\n");
   return 0;

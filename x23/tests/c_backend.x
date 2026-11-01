@@ -67,7 +67,7 @@ case FALSE:
 };
 
 // Recursive by value through union arms, as contract_spec.x's ContractType
-// is.  C++ needs the boxes; C finds the cycle itself.
+// is.  Both C++ and C box the annotated fields.
 enum Kind { K_VOID = 0, K_OPT = 1, K_ARRAY = 2, K_TUPLE = 3 };
 
 % struct TypeT;

@@ -28,10 +28,12 @@
  * NULL).  A view that came from decoding (xdr != NULL) re-encodes by copying
  * its already-validated bytes.
  *
- * Decoding accepts exactly the encodings that the x23 C++ deserializer
- * accepts, with one deliberate difference: an enum value that is not one of
- * the enum's declared constants is rejected (X23_ERR_ENUM), as the Rust
- * bindings do, rather than accepted.
+ * Decoding accepts the encodings that the x23 C++ deserializer accepts, with
+ * two differences: a bool union discriminant must be 0 or 1 (X23_ERR_BOOL),
+ * as in the Rust bindings, whereas C++ takes any nonzero value as TRUE; and
+ * nesting is bounded by X23_NESTING_LIMIT rather than C++'s recursion limit.
+ * As in both, an enum holds any int32, declared or not; the generated
+ * T_valid() tells whether it is one of T's constants.
  */
 
 #ifndef X23_XDR_C_H
@@ -54,22 +56,23 @@ X23_C_LINKAGE_BEGIN
 /* Status codes.  Every encode and decode function returns one. */
 typedef int32_t x23_status;
 #define X23_OK 0
-#define X23_ERR_SHORT 1     /* input ended before the value did */
-#define X23_ERR_PADDING 2   /* nonzero padding byte */
-#define X23_ERR_BOOL 3      /* bool (or optional flag) other than 0 or 1 */
-#define X23_ERR_ENUM 4      /* value is not a declared constant of the enum */
-#define X23_ERR_UNION 5     /* union discriminant selects no arm */
-#define X23_ERR_LENGTH 6    /* length exceeds the declared bound */
-#define X23_ERR_DEPTH 7     /* recursive types nested beyond the limit */
-#define X23_ERR_TRAILING 8  /* bytes left over after a complete value */
-#define X23_ERR_ALIGN 9     /* input length not a multiple of 4 */
-#define X23_ERR_OVERFLOW 10 /* output buffer too small */
-#define X23_ERR_RANGE 11    /* vec index out of range, or absent optional */
+#define X23_ERR_SHORT 1    /* input ended before the value did */
+#define X23_ERR_PADDING 2  /* nonzero padding byte */
+#define X23_ERR_BOOL 3     /* bool (or optional flag) other than 0 or 1 */
+#define X23_ERR_UNION 4    /* union discriminant selects no arm */
+#define X23_ERR_LENGTH 5   /* length exceeds the declared bound */
+#define X23_ERR_DEPTH 6    /* views nested beyond X23_NESTING_LIMIT */
+#define X23_ERR_TRAILING 7 /* bytes left over after a complete value */
+#define X23_ERR_ALIGN 8    /* input length not a multiple of 4 */
+#define X23_ERR_OVERFLOW 9 /* output buffer too small */
+#define X23_ERR_RANGE 10   /* vec index out of range, or absent optional */
 
-/* Maximum nesting of recursive structs and unions while decoding; the same
- * default as the x23 C++ deserializer. */
-#ifndef X23_RECURSION_LIMIT
-#define X23_RECURSION_LIMIT 16
+/* Maximum nesting of views (T_vec, T_opt, T_box) while decoding.  Types can
+ * recurse only through views, and decoding one recurses on the C stack, so
+ * this bounds the stack that hostile input can use.  It counts every view
+ * level, recursive or not, so it is not the x23 C++ deserializer's limit. */
+#ifndef X23_NESTING_LIMIT
+#define X23_NESTING_LIMIT 32
 #endif
 
 #define X23_TRY(expr)                                                          \
@@ -85,7 +88,7 @@ typedef int32_t x23_status;
 typedef struct x23_reader {
   const uint8_t *p;
   const uint8_t *end;
-  uint32_t depth; /* remaining recursion budget */
+  uint32_t depth; /* remaining nesting budget */
 } x23_reader;
 
 /* A writer with buf == NULL writes nothing and only counts bytes into pos,
@@ -114,7 +117,7 @@ x23_reader_init(const uint8_t *buf, uint32_t len)
   x23_reader r;
   r.p = buf;
   r.end = buf + len;
-  r.depth = X23_RECURSION_LIMIT;
+  r.depth = X23_NESTING_LIMIT;
   return r;
 }
 
@@ -149,6 +152,21 @@ static inline uint32_t
 x23_remaining(const x23_reader *r)
 {
   return (uint32_t)(r->end - r->p);
+}
+
+static inline x23_status
+x23_nest(x23_reader *r)
+{
+  if (r->depth == 0)
+    return X23_ERR_DEPTH;
+  --r->depth;
+  return X23_OK;
+}
+
+static inline void
+x23_unnest(x23_reader *r)
+{
+  ++r->depth;
 }
 
 /* Reading */
@@ -432,8 +450,8 @@ x23_f64_encode(x23_writer *w, const double *v)
  * at xdr; otherwise it is present iff ptr != NULL.
  *
  * P_box: a value that is always present, encoded exactly as a plain T, but
- * held like a P_opt.  The generator uses it for a field that would otherwise
- * make a struct contain itself (a by-value cycle through union arms).
+ * held like a P_opt.  The generator uses it for fields annotated
+ * #[cpp(box)] or #[rust(box_ptr)]: types that contain themselves by value.
  */
 
 #define X23_VIEW_TYPES(P, T)                                                   \
@@ -484,9 +502,13 @@ x23_f64_encode(x23_writer *w, const double *v)
         n > x23_remaining(r) / (P##_XDR_SIZE ? P##_XDR_SIZE : 1))              \
       return X23_ERR_SHORT;                                                    \
     const uint8_t *start = r->p;                                               \
-    for (uint32_t i = 0; i < n; ++i) {                                         \
-      T tmp;                                                                   \
-      X23_TRY(P##_decode(r, &tmp));                                            \
+    if (n) {                                                                   \
+      X23_TRY(x23_nest(r));                                                    \
+      for (uint32_t i = 0; i < n; ++i) {                                       \
+        T tmp;                                                                 \
+        X23_TRY(P##_decode(r, &tmp));                                          \
+      }                                                                        \
+      x23_unnest(r);                                                           \
     }                                                                          \
     out->xdr = start;                                                          \
     out->xdr_len = (uint32_t)(r->p - start);                                   \
@@ -527,7 +549,7 @@ x23_f64_encode(x23_writer *w, const double *v)
   static inline void P##_vec_iter_init(P##_vec_iter *it, const P##_vec *v)     \
   {                                                                            \
     it->r.p = it->r.end = v->xdr;                                              \
-    it->r.depth = X23_RECURSION_LIMIT;                                         \
+    it->r.depth = X23_NESTING_LIMIT;                                           \
     if (v->xdr)                                                                \
       it->r.end = v->xdr + v->xdr_len;                                         \
     it->elems = v->xdr ? NULL : v->elems;                                      \
@@ -575,7 +597,9 @@ x23_f64_encode(x23_writer *w, const double *v)
     if (present) {                                                             \
       const uint8_t *start = r->p;                                             \
       T tmp;                                                                   \
+      X23_TRY(x23_nest(r));                                                    \
       X23_TRY(P##_decode(r, &tmp));                                            \
+      x23_unnest(r);                                                           \
       out->xdr = start;                                                        \
       out->xdr_len = (uint32_t)(r->p - start);                                 \
     }                                                                          \
@@ -605,7 +629,9 @@ x23_f64_encode(x23_writer *w, const double *v)
   {                                                                            \
     const uint8_t *start = r->p;                                               \
     T tmp;                                                                     \
+    X23_TRY(x23_nest(r));                                                      \
     X23_TRY(P##_decode(r, &tmp));                                              \
+    x23_unnest(r);                                                             \
     out->xdr = start;                                                          \
     out->xdr_len = (uint32_t)(r->p - start);                                   \
     out->ptr = NULL;                                                           \
