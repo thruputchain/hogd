@@ -150,6 +150,35 @@ function(add_xdr_rs target_name output_folder)
   add_dependencies(${target_name} build_${target_name})
 endfunction()
 
+# C headers (x23c --c) for C code, such as freestanding contracts.  The
+# headers need only x23/xdr_c.h, not libx23.
+function(add_xdr_c target_name)
+  set(xdr_headers)
+  foreach(xdr_file IN LISTS ARGN)
+    set(xdr_file_ "${CMAKE_CURRENT_SOURCE_DIR}/${xdr_file}")
+    if (EXISTS ${xdr_file_})
+    else()
+      set(xdr_file_ "${CMAKE_CURRENT_BINARY_DIR}/${xdr_file}")
+    endif()
+    get_filename_component(base_name ${xdr_file_} NAME_WLE)
+    set(output_file "${CMAKE_CURRENT_BINARY_DIR}/${base_name}.h")
+    add_custom_command(
+      OUTPUT ${output_file}
+      COMMAND ${X23C_EXECUTABLE} --c -o ${output_file} ${xdr_file_}
+      DEPENDS ${xdr_file_} ${X23C_EXECUTABLE}
+      COMMENT "Generating ${output_file} from ${xdr_file_}"
+    )
+    list(APPEND xdr_headers ${output_file})
+  endforeach()
+
+  add_library(${target_name} INTERFACE)
+  target_include_directories(${target_name}
+    INTERFACE "${CMAKE_CURRENT_BINARY_DIR}" "${X23_SOURCE_DIR}")
+
+  add_custom_target(build_${target_name} ALL DEPENDS ${xdr_headers})
+  add_dependencies(${target_name} build_${target_name})
+endfunction()
+
 function(use_x23 target)
   get_target_property(target_sources ${target} SOURCES)
   set(generated_headers)

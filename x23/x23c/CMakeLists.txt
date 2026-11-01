@@ -48,6 +48,7 @@ add_executable(x23c
   gen_hh.cc
   gen_rs.cc
   gen_ts.cc
+  gen_c.cc
   x23c.cc
 )
 

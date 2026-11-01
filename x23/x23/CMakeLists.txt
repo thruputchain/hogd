@@ -52,6 +52,7 @@ add_library(x23
   uiobuf.h
   utility.h
   vec.h
+  xdr_c.h
   x23.h
 )
 # Mark the implementation files as headers so they're included in IDE projects

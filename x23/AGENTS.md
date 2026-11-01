@@ -5,7 +5,7 @@ This file provides guidance to LLM agents like Codex and Claude Code when workin
 ## What is x23
 
 C++23 implementation of XDR (External Data Representation) and RPC (Remote Procedure Call). Includes:
-- **x23c** — compiler that generates C++ headers (`.hh`) and Rust (`.rs`) from `.x` XDR interface definitions
+- **x23c** — compiler that generates C++ headers (`.hh`), Rust (`.rs`), TypeScript (`.ts`) and C headers (`.h`) from `.x` XDR interface definitions
 - **libx23** — async RPC runtime built on C++23 coroutines, epoll, and a work-stealing thread pool
 - Used by the hogd project (Thruput)
 
@@ -49,6 +49,8 @@ ctest --test-dir build --output-on-failure --parallel  # run tests only
 
 Tests live in `tests/`. The `add_x23_test(name)` CMake macro creates `test_<name>` from `<name>.cc`, linked against libx23 and the xdrtest XDR library. GTest-based tests use `add_x23_gtest(name)` and require googletest (auto-detected from git submodules).
 
+x23c's C output is checked by the `c_backend` test, which compares it with the C++ codec on random and corrupted encodings of the types in `tests/c_backend.x`; the `c_backend_c` target also compiles it as freestanding C11.
+
 x23c's Rust output is checked outside ctest, since it needs cargo and crates.io: `tests/rust_check/check.sh build/x23c/x23c` generates Rust from `tests/rust_check/check.x` and runs `cargo check` on it. CI runs it (`x23c_rust_check.yml`) when x23c changes.
 
 ## Code generation
@@ -57,11 +59,14 @@ XDR files (`.x`) are compiled by x23c into `.hh` headers:
 ```
 x23c -o output.hh input.x        # C++ header
 x23c --rust -o output.rs input.x  # Rust
+x23c --c -o output.h input.x      # C (types only; RPC programs are skipped)
 ```
 
-CMake functions: `add_xdr(target files...)` creates an interface library from `.x` files. `use_x23(target)` processes any `.x` files in the target's sources.
+CMake functions: `add_xdr(target files...)` creates an interface library from `.x` files (`add_xdr_c` likewise for C headers). `use_x23(target)` processes any `.x` files in the target's sources.
 
 Generated headers define structs, enums, unions, and RPC program interfaces with `xdr_meta<T>` specializations for serialization.
+
+C headers (`gen_c.cc`) need only `x23/xdr_c.h`, which needs only the freestanding headers: no libc, no allocator. Decoding is zero-copy where XDR allows it: `opaque<N>`/`string<N>` are views into the input; `T<N>`, `T*` and recursion-breaking boxes are views of their validated encoding (`T_vec`, `T_opt`, `T_box`) that decode elements on demand; everything else decodes to native fields. Enum constants are prefixed with their enum's name (`Color_RED`), since XDR scopes them. See the comment at the top of `x23/xdr_c.h`.
 
 ## Architecture
 
