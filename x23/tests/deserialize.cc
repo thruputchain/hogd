@@ -148,6 +148,34 @@ TEST(Deserialize, CxsBadDiscriminant)
   EXPECT_EQ(status.error(), CxsErrorCode::kBadDiscriminant);
 }
 
+TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
+{
+  // Valid discriminants still decode.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool_both_arms v;
+    x23::deserialize(&v, buf);
+    EXPECT_TRUE(v.b());
+  }
+  // RFC4506 4.4: a bool is enum { FALSE = 0, TRUE = 1 }.  Any other value
+  // must be rejected rather than collapsed to true (and re-serialized as 1).
+  for (uint8_t d : {2, 0xff}) {
+    x23::Vec<uint8_t> buf{0, 0, 0, d, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool_both_arms v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput) << int(d);
+  }
+  {
+    x23::Vec<uint8_t> buf{0x80, 0, 0, 1, 0, 0, 0, 7};
+    uptr v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 7};
+    uptr v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
+}
+
 TEST(Deserialize, CxsTrailingData)
 {
   uint8_t input[] = {1, 2};

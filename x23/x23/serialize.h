@@ -935,7 +935,18 @@ struct Deserializer
     if constexpr (CheckRecursion && is_recursive_xdr<X>)
       this->recurse();
     using ops = union_ops<X>;
-    auto d = static_cast<typename ops::discriminant_type>(get32<Safe>());
+    typename ops::discriminant_type d;
+    if constexpr (std::is_same_v<typename ops::discriminant_type, bool>) {
+      // Don't let static_cast collapse every nonzero value to true: that
+      // would accept non-canonical encodings and re-serialize them as 1.
+      if (auto raw = get32<Safe>(); raw > 1) [[unlikely]]
+        raise("Bad discriminant {} deserializing {}", raw,
+              ops::meta::type_name);
+      else
+        d = raw;
+    }
+    else
+      d = static_cast<typename ops::discriminant_type>(get32<Safe>());
     union_set_discriminant(x, d);
     if (ops::index(x) == -1) [[unlikely]]
       raise("Bad discriminant {} deserializing {}", get<0>(x),

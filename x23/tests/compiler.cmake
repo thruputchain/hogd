@@ -233,3 +233,19 @@ file(WRITE "${TEST_DIR}/duplicate.x"
   "struct Same { int value; };\nstruct Same { int other; };\n")
 run_compiler(1 -o duplicate.hh duplicate.x)
 require_text("${error}" "Duplicate declaration of struct Same")
+
+# A bool has only two legal values, so a default arm in a bool-switched
+# union is redundant or dead, and could not carry an unknown discriminant
+# through a round trip.  Reject it, whether or not both cases are listed.
+file(WRITE "${TEST_DIR}/bool_default.x"
+  "union BoolDefault switch (bool b) {\ncase TRUE:\n  int v;\ndefault:\n  void;\n};\n")
+run_compiler(1 -o bool_default.hh bool_default.x)
+require_text("${error}" "default arm not allowed in union switched on bool")
+file(WRITE "${TEST_DIR}/bool_default_dead.x"
+  "union BoolDead switch (bool b) {\ncase FALSE:\n  int x;\ncase TRUE:\n  int y;\ndefault:\n  void;\n};\n")
+run_compiler(1 --rust -o bool_default_dead.rs bool_default_dead.x)
+require_text("${error}" "default arm not allowed in union switched on bool")
+# An enum-switched union may still have a default arm.
+file(WRITE "${TEST_DIR}/enum_default.x"
+  "enum Kind { A = 0, B = 1 };\nunion EnumDefault switch (Kind k) {\ncase A:\n  int v;\ndefault:\n  void;\n};\n")
+run_compiler(0 --strict -o enum_default.hh enum_default.x)

@@ -213,6 +213,15 @@ case_specs:
 union_body: T_SWITCH '(' scalar_type[type] T_ID[id] ')' '{' case_specs '}' {
     $$ = UnionBody{ .switch_type = $type->text, .switch_id = $id->text,
        	 	    .arms = $case_specs.move().arms };
+    // A bool discriminant has exactly two legal values (RFC4506 4.4), so a
+    // default arm is either redundant or dead.  Worse, unlike open enums, a
+    // bool discriminant cannot carry an unknown value through a round trip
+    // (C++ stores it as bool), so a default arm could not preserve it.
+    if ($type->text == "bool")
+      for (const auto &arm : $$->arms)
+        if (arm.has_default)
+          yyerror(&@type, xc,
+                  "default arm not allowed in union switched on bool", false);
   }
 ;
 
