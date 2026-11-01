@@ -122,7 +122,7 @@ struct Randomizer {
     }
     else if constexpr (x23::is_xdr_struct<X>) {
       ++depth;
-      x23::visit_fields([this](auto &f) { go(f); }, x);
+      x23::visit_fields([&](auto &f) { go(f); }, x);
       --depth;
     }
     else if constexpr (x23::is_xdr_union<X>) {
@@ -144,7 +144,7 @@ struct Randomizer {
           continue;
         break;
       }
-      x23::union_visit_arm([this](auto &a) { go(a); }, x);
+      x23::union_visit_arm([&](auto &a) { go(a); }, x);
       --depth;
     }
     else
