@@ -40,8 +40,11 @@ if(CMAKE_C_COMPILER)
     ${CMAKE_CURRENT_BINARY_DIR}/c_backend.h)
   set_target_properties(c_backend_c PROPERTIES
     C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  # A parent project's C++-only options (hogd's -stdlib=libc++) reach C
+  # sources too, where Clang reports them as unused.
   target_compile_options(c_backend_c PRIVATE
-    -ffreestanding -Wall -Wextra -Wpedantic -Werror)
+    -ffreestanding -Wall -Wextra -Wpedantic -Werror
+    $<$<C_COMPILER_ID:Clang>:-Wno-unused-command-line-argument>)
   target_include_directories(c_backend_c PRIVATE
     ${X23_SOURCE_DIR} ${X23_BINARY_DIR})
   list(APPEND TEST_EXECUTABLES c_backend_c)
