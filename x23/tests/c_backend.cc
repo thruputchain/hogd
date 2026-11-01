@@ -594,6 +594,8 @@ misc_tests()
   seed = 0;
   // Fixed sizes: known where the encoding cannot vary.
   static_assert(Point_XDR_SIZE == 8);
+  static_assert(Grid_XDR_SIZE == 2 * 8 + 4);
+  static_assert(Names_XDR_SIZE == 0);
   static_assert(Hash_XDR_SIZE == 32);
   static_assert(Odd_XDR_SIZE == 8);
   static_assert(Color_XDR_SIZE == 4);

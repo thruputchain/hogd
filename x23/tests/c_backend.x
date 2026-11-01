@@ -21,6 +21,18 @@ struct Point {
   unsigned int y;
 };
 
+// Sizes that are products: a fixed array of a fixed-size struct, and one of
+// a variable-size type, whose size macro is a literal 0.
+struct Grid {
+  Point cells[2];
+  int tag;
+};
+
+struct Names {
+  Label names[2];
+  int tag;
+};
+
 struct Prims {
   int i;
   unsigned int u;

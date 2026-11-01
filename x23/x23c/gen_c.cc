@@ -509,7 +509,7 @@ sum_sizes(const vector<string> &sizes)
     return parts[0];
   string all, sum;
   for (const auto &p : parts) {
-    all += (all.empty() ? "" : " && ") + p;
+    all += std::format("{}({}) != 0", all.empty() ? "" : " && ", p);
     sum += (sum.empty() ? "" : " + ") + p;
   }
   return std::format("(({}) ? ({}) : 0)", all, sum);
