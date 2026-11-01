@@ -164,13 +164,15 @@ TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
     bool_both_arms v;
     EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput) << int(d);
   }
+  // uptr's TRUE arm is an optional int, so a trailing 0 is a valid null
+  // pointer and rejection must come from the discriminant itself.
   {
-    x23::Vec<uint8_t> buf{0x80, 0, 0, 1, 0, 0, 0, 7};
+    x23::Vec<uint8_t> buf{0x80, 0, 0, 1, 0, 0, 0, 0};
     uptr v;
     EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
   }
   {
-    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 7};
+    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
     uptr v;
     EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
   }
