@@ -8,7 +8,6 @@
 //   - For corrupted encodings, C accepts exactly what C++ accepts, except
 //     that C (like Rust) rejects bool union discriminants other than 0 or 1,
 //     and anything C accepts it re-encodes to the same bytes.
-//   - C bounds view nesting (X23_NESTING_LIMIT).
 
 #include <cmath>
 #include <cstdint>
@@ -589,37 +588,6 @@ random_tests(int n)
   }
 }
 
-// Each optional or box level counts against the nesting limit, so a chain
-// of n values nests n - 1 deep.
-void
-nesting_limit_tests()
-{
-  seed = 0;
-  for (size_t n = 1; n <= X23_NESTING_LIMIT + 3; ++n) {
-    ctest::Node list{.value = 0};
-    ctest::Node *tail = &list;
-    for (size_t i = 1; i < n; ++i) {
-      tail->next = x23::Ptr(ctest::Node{.value = int32_t(i)});
-      tail = &*tail->next;
-    }
-    Bytes b = to_bytes(x23::serialize(list));
-    Node c;
-    x23_status st = Node_from_xdr(b.data(), uint32_t(b.size()), &c);
-    CHECK(st == (n - 1 <= X23_NESTING_LIMIT ? X23_OK : X23_ERR_DEPTH));
-
-    ctest::TypeT t(ctest::Kind::K_VOID);
-    for (size_t i = 1; i < n; ++i) {
-      ctest::TypeT outer(ctest::Kind::K_OPT);
-      outer.inner() = x23::Box<ctest::TypeT>(std::move(t));
-      t = std::move(outer);
-    }
-    b = to_bytes(x23::serialize(t));
-    TypeT ct;
-    st = TypeT_from_xdr(b.data(), uint32_t(b.size()), &ct);
-    CHECK(st == (n - 1 <= X23_NESTING_LIMIT ? X23_OK : X23_ERR_DEPTH));
-  }
-}
-
 void
 misc_tests()
 {
@@ -678,7 +646,6 @@ int
 main()
 {
   misc_tests();
-  nesting_limit_tests();
   random_tests(5000);
   std::printf("c_backend: ok\n");
   return 0;

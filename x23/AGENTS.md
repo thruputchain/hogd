@@ -66,7 +66,7 @@ CMake functions: `add_xdr(target files...)` creates an interface library from `.
 
 Generated headers define structs, enums, unions, and RPC program interfaces with `xdr_meta<T>` specializations for serialization.
 
-C headers (`gen_c.cc`) need only `x23/xdr_c.h`, which needs only the freestanding headers: no libc, no allocator. Decoding is zero-copy where XDR allows it: `opaque<N>`/`string<N>` are views into the input; `T<N>`, `T*` and fields annotated `#[cpp(box)]` are views of their validated encoding (`T_vec`, `T_opt`, `T_box`) that decode elements on demand; everything else decodes to native fields. Enum constants are prefixed with their enum's name (`Color_RED`), since XDR scopes them. As in C++ and Rust, an enum decodes any int32; a bool union discriminant must be 0 or 1, as in Rust (C++ takes any nonzero value as TRUE). Decoding bounds view nesting with `X23_NESTING_LIMIT` instead of C++'s per-recursive-type limit. See the comment at the top of `x23/xdr_c.h`.
+C headers (`gen_c.cc`) need only `x23/xdr_c.h`, which needs only the freestanding headers: no libc, no allocator. Decoding is zero-copy where XDR allows it: `opaque<N>`/`string<N>` are views into the input; `T<N>`, `T*` and fields annotated `#[cpp(box)]` are views of their validated encoding (`T_vec`, `T_opt`, `T_box`) that decode elements on demand; everything else decodes to native fields. Enum constants are prefixed with their enum's name (`Color_RED`), since XDR scopes them. As in C++ and Rust, an enum decodes any int32; a bool union discriminant must be 0 or 1, as in Rust (C++ takes any nonzero value as TRUE). Decoding has no recursion limit. See the comment at the top of `x23/xdr_c.h`.
 
 ## Architecture
 
