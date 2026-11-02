@@ -128,9 +128,8 @@ is_number(const string &v)
                         v[0] == '-' || v[0] == '+');
 }
 
-// XDR enum constants are scoped to their enum (x23's C++ enums are enum
-// class), and the protocol reuses names across enums, so in C each constant
-// is prefixed with its enum's name.
+// XDR scopes enum constants and the protocol reuses names, so C prefixes each
+// with its enum's name.
 string
 enum_const(const string &enum_name, const string &c)
 {
@@ -144,9 +143,8 @@ type_of(const Declaration &d)
 }
 
 struct GenC {
-  // Flattened definitions: only Typedef, EnumDecl, StructDecl, UnionDecl,
-  // ConstDef and Literal, with every anonymous body hoisted out to a named
-  // definition, so every Declaration's type is a type name.
+  // Flattened definitions: anonymous bodies hoisted out, so every
+  // Declaration's type is a type name.
   vector<Definition> defs_;
   std::map<string, const Definition *> local_; // named local types
 
@@ -167,9 +165,7 @@ struct GenC {
   void gen_union(const UnionDecl &u, const string &comment);
   void gen_typedef(const Typedef &t, const string &comment);
 
-  // Whether a discriminant type is an enum.  Types from other files are
-  // assumed to be enums unless primitive, as union discriminants almost
-  // always are.
+  // Non-primitive discriminant types from other files are assumed to be enums.
   bool is_enum(const string &t) const
   {
     if (t == "bool" || t == "int" || t == "unsigned int" || t == "hyper" ||
@@ -217,10 +213,8 @@ struct GenC {
   static string size_expr(const Declaration &d);
   static string comment_block(const string &comment, const string &indent);
 
-  // A field the .x file marks #[cpp(box)], as it must when the field's type
-  // contains its struct or union by value.  C cannot nest a struct in
-  // itself, so it is held as a T *.  Same annotation as gen_hh, so C and C++
-  // box the same fields.
+  // #[cpp(box)] fields are held as T *, matching gen_hh so C and C++ box the
+  // same fields.
   static bool boxed(const Declaration &d)
   {
     return d.qual == kScalar && d.comment.find("#[cpp(box)]") != string::npos;

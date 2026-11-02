@@ -503,9 +503,8 @@ mutate(std::mt19937_64 &rng, const Bytes &good)
     Everything_free(&c);
   }
   else if (cpp_ok) {
-    // C++ accepts a bool union discriminant other than 0 or 1, which C (like
-    // Rust) rejects as it does any other bad bool: an encoding C++ would not
-    // produce.
+    // C++ accepts a bool discriminant other than 0 or 1; C (like Rust)
+    // rejects it.
     CHECK(st == X23_ERR_BOOL && cpp_reencode<ctest::Everything>(b) != b);
   }
 }
