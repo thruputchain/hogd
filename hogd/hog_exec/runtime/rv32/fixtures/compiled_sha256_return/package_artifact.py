@@ -227,7 +227,9 @@ def parse_artifact(path):
         raise FixtureError(f"unexpected memory size {memory_bytes}")
     # v6 derives section positions from the canonical order: the only
     # structural degree of freedom is total size.
-    expected_size = ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes + spec_size
+    expected_size = (
+        ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes + spec_size
+    )
     if len(artifact) != expected_size:
         raise FixtureError("artifact size does not match header sections")
     if initial_memory_start + initial_memory_bytes > memory_bytes:
@@ -235,8 +237,8 @@ def parse_artifact(path):
     if initial_memory_bytes == 0 and initial_memory_start != 0:
         raise FixtureError("empty initial memory must have start 0")
     code = artifact[ARTIFACT_HEADER_BYTES:ARTIFACT_HEADER_BYTES + code_bytes]
-    memory = artifact[ARTIFACT_HEADER_BYTES + code_bytes:
-                      ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes]
+    memory_start = ARTIFACT_HEADER_BYTES + code_bytes
+    memory = artifact[memory_start:memory_start + initial_memory_bytes]
     if code_digest != hashlib.sha256(code).digest():
         raise FixtureError("code section digest mismatch")
     if initial_memory_digest != hashlib.sha256(memory).digest():
