@@ -820,11 +820,8 @@ TEST_F(ItemViewTest, ReplacementItemNeedsNoSnapshotForOwnEntries)
 // even once the snapshot is attached for concurrent reads.
 TEST_F(ItemViewTest, ReplacementItemSkipsSnapshotBlocks)
 {
-  StorageCostModel model(100, 7, 5, 5, 0);
   auto stored = make_queue({{make_test_queue_entry(1)}});
-  server_->impl()->setup_create_item(AddressAndKey{},
-                                     StorageItemWrapper(std::move(stored),
-                                                        &model));
+  server_->impl()->setup_create_queue(AddressAndKey{}, std::move(stored));
   server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
                                                  make_test_queue_entry(5));
 

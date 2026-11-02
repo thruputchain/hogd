@@ -2963,7 +2963,7 @@ TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 // Replacing a nonempty queue twice in one transaction, with a self consume in
 // between, still consumes the committed queue: the transaction remains the
 // block's consumer and the committed entry is gone.
-TEST_P(RCQDeleteTest, ReplaceTwiceStillConsumesNonEmptyQueue)
+TEST_F(RCQDeleteTest, ReplaceTwiceStillConsumesNonEmptyQueue)
 {
   insert(42);
 

@@ -1633,8 +1633,8 @@ TEST(ItemLockTest, RCQConsumeAllocationFailureWithSiblingLeavesConsumerFree)
 #else
   auto make_consume = [] {
     RetrocausalQueueDelta delta;
-    delta.consume = x23::Ptr<RetrocausalQueueConsumeDelta>(
-        new RetrocausalQueueConsumeDelta{});
+    delta.consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+        RetrocausalQueueConsumeDelta{};
     return ItemChange(RetrocausalQueueIt(std::move(delta)));
   };
 
