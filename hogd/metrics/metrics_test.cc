@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <format>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -11,6 +12,7 @@
 #include "hogd/base/types.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
+#include "hogd/metrics/byte_histogram.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/metrics/shared.h"
 
@@ -78,6 +80,49 @@ TEST_F(MetricsTest, ComponentNamesFormatAsPrometheusPrefixes)
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kExecutor), "executor");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kDb), "db");
   EXPECT_EQ(std::format("{}", Metrics::ComponentName::kMempool), "mempool");
+  EXPECT_EQ(std::format("{}", Metrics::ComponentName::kEvent), "event");
+  EXPECT_EQ(std::format("{}", Metrics::ComponentName::kIndexer), "indexer");
+  EXPECT_EQ(std::format("{}", Metrics::ComponentName::kAuth), "auth");
+}
+
+TEST_F(MetricsTest, PowerOfTwoByteHistogramIncludesFirehoseEdges)
+{
+  Metrics &metrics = Metrics::instance();
+  Metrics::Histogram record_bytes =
+      metrics.histogram(Metrics::ComponentName::kEvent, "record_bytes",
+                        "event pull record bytes", power_of_two_byte_bounds);
+  metrics.mark_done_with_init(Metrics::ComponentName::kEvent);
+  // 3 MiB sits strictly between the 2 MiB and 4 MiB edges.
+  record_bytes.record(static_cast<double>(3 * 1024 * 1024));
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  expect_dump_contains(dump, "event_record_bytes_bucket{le=\"2097152\"} 0");
+  expect_dump_contains(dump, "event_record_bytes_bucket{le=\"4194304\"} 1");
+  expect_dump_contains(dump, "event_record_bytes_count 1");
+}
+
+TEST_F(MetricsTest, ScrapeSamplesResidentBytes)
+{
+  Metrics &metrics = Metrics::instance();
+  register_resident_bytes(Metrics::ComponentName::kAuth);
+  metrics.mark_done_with_init(Metrics::ComponentName::kAuth);
+  sample_resident_bytes();
+
+  const std::string dump = metrics.dump_to_prometheus_string();
+  EXPECT_NE(dump.find("auth_resident_bytes "), std::string::npos) << dump;
+  EXPECT_EQ(dump.find("auth_resident_bytes 0\n"), std::string::npos) << dump;
+}
+
+TEST_F(MetricsTest, SamplingSkipsResidentBytesWhileInitializing)
+{
+  Metrics &metrics = Metrics::instance();
+  register_resident_bytes(Metrics::ComponentName::kAuth);
+  sample_resident_bytes();
+
+  EXPECT_TRUE(metrics.dump_to_prometheus_string().empty());
+  metrics.mark_done_with_init(Metrics::ComponentName::kAuth);
+  expect_dump_contains(metrics.dump_to_prometheus_string(),
+                       "auth_resident_bytes 0");
 }
 
 TEST_F(MetricsTest, DumpIncludesRecordedGaugeForComponent)
@@ -128,7 +173,7 @@ TEST_F(MetricsTest, CounterFactoryReturnsHandle)
   tx_count.increment();
   tx_count.increment(3);
 
-  EXPECT_EQ(tx_count.value(), 4);
+  EXPECT_EQ(tx_count.value(), 4U);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -161,7 +206,7 @@ TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
     std::this_thread::yield();
   }
 
-  EXPECT_EQ(tx_count.value(), 7);
+  EXPECT_EQ(tx_count.value(), 7U);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(
@@ -171,6 +216,50 @@ TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
 
   done.store(true, std::memory_order_release);
   worker.join();
+}
+
+// Regression for #2829: cumulative counters (e.g. executor gas) can exceed
+// the signed range when summed across live per-thread shards.
+TEST_F(MetricsTest, PerThreadCounterAggregatesBeyondSignedRange)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter gas_consumed =
+      metrics.per_thread_counter(Metrics::ComponentName::kExecutor,
+                                 "metrics_test_per_thread_gas_consumed",
+                                 "Executor gas consumed.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  constexpr uint64_t kShardGas =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / 2) + 1;
+
+  std::atomic<size_t> recorded = 0;
+  std::atomic<bool> done = false;
+  auto record_shard = [&] {
+    gas_consumed.increment(kShardGas);
+    recorded.fetch_add(1, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  };
+
+  std::thread worker_1(record_shard);
+  std::thread worker_2(record_shard);
+  while (recorded.load(std::memory_order_acquire) != 2) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_EQ(gas_consumed.value(), 2 * kShardGas);
+  expect_dump_contains(
+      metrics.dump_to_prometheus_string(),
+      std::format("executor_metrics_test_per_thread_gas_consumed {}",
+                  2 * kShardGas));
+
+  done.store(true, std::memory_order_release);
+  worker_1.join();
+  worker_2.join();
+
+  EXPECT_EQ(gas_consumed.value(), 2 * kShardGas);
 }
 
 TEST_F(MetricsTest, HistogramFactoryReturnsHandle)

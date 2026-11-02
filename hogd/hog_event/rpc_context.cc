@@ -42,6 +42,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
@@ -155,35 +156,54 @@ x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
 {
   info("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
-  x23::CoroGuard g;
-  co_await g(lock_);
-  info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
-  if (block_operations_.contains(block_id)) {
-    co_return EventError{EventErrorCode::kExists};
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
+    // Reserve the id before creating its file.  A duplicate open must not
+    // reach create_events_file(): that unlinks and recreates the temp name,
+    // which would pull the live block's file out from under it and fail its
+    // publish.  While reserved as kOpening, a close/commit/abandon of this id
+    // fails its own reservation, as it should for a block that is not open.
+    if (block_operations_.contains(block_id) ||
+        event_block_contexts_.contains(block_id)) {
+      co_return EventError{EventErrorCode::kExists};
+    }
+    block_operations_.emplace(block_id, BlockOperation::kOpening);
+  }
+  if (open_reserved_test_hook_) {
+    open_reserved_test_hook_(block_id);
   }
 
+  // The only disk I/O on the open path.  Done outside lock_ so a slow
+  // filesystem delays this open alone, not every operation on the context.
+  x23::UniqueFd events_file =
+      EventBlockContext::create_events_file(work_directory_, block_id);
+
+  x23::CoroGuard g;
+  co_await g(lock_);
   // try_emplace, not emplace: emplace may construct the context node before
   // discovering the key exists (libstdc++ does), and destroying that
   // still-kActive context trips the assert in ~EventBlockContext. try_emplace
   // guarantees no construction -- and no move from cached_blocks_.back() --
-  // unless the insertion happens.
+  // unless the insertion happens.  The id is reserved, so it does.
   bool inserted = false;
   if (!cached_blocks_.empty()) {
     std::tie(std::ignore, inserted) =
         event_block_contexts_.try_emplace(block_id, work_directory_, block_id,
-                                          std::move(cached_blocks_.back()));
+                                          std::move(cached_blocks_.back()),
+                                          std::move(events_file));
     if (inserted) {
       cached_blocks_.pop_back();
     }
   }
   else {
     std::tie(std::ignore, inserted) =
-        event_block_contexts_.try_emplace(block_id, work_directory_, block_id);
+        event_block_contexts_.try_emplace(block_id, work_directory_, block_id,
+                                          std::move(events_file));
   }
-
-  if (!inserted) {
-    co_return EventError{EventErrorCode::kExists};
-  }
+  CHECK(inserted);
+  block_operations_.erase(block_id);
   co_return EventStatus<void>();
 }
 
@@ -1158,29 +1178,57 @@ x23::Async<void>
 EventRPCContext::finish_block_operation(
     BlockID block_id, PerThreadARC<EventBlockContext> *context, bool shutdown)
 {
-  x23::CoroGuard g;
-  co_await g(lock_);
-  if (context != nullptr) {
-    auto it = event_block_contexts_.find(block_id);
-    CHECK(it != event_block_contexts_.end());
-    CHECK(&it->second == context);
-    bool released = context->release_reference();
-    if (released || (shutdown && context->initiate_shutdown())) {
-      gc_context_internal(it);
+  x23::UniqueFd events_file;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
+    if (context != nullptr) {
+      auto it = event_block_contexts_.find(block_id);
+      CHECK(it != event_block_contexts_.end());
+      CHECK(&it->second == context);
+      bool released = context->release_reference();
+      if (released || (shutdown && context->initiate_shutdown())) {
+        events_file = gc_context_internal(it);
+      }
     }
+    block_operations_.erase(block_id);
   }
-  block_operations_.erase(block_id);
+  if (events_file) {
+    close_events_file_async(std::move(events_file));
+  }
 }
 
 x23::Async<void>
 EventRPCContext::gc_context(BlockID block_id)
 {
-  x23::CoroGuard g;
-  co_await g(lock_);
+  x23::UniqueFd events_file;
+  {
+    x23::CoroGuard g;
+    co_await g(lock_);
 
-  auto it = event_block_contexts_.find(block_id);
-  assert(it != event_block_contexts_.end());
-  gc_context_internal(it);
+    auto it = event_block_contexts_.find(block_id);
+    assert(it != event_block_contexts_.end());
+    events_file = gc_context_internal(it);
+  }
+  if (events_file) {
+    close_events_file_async(std::move(events_file));
+  }
+}
+
+x23::Detached
+EventRPCContext::close_events_file_async(x23::UniqueFd events_file)
+{
+  // The last close of an unlinked events file frees its blocks, which blocks
+  // for milliseconds on a large block.  Pool workers are reserved for work
+  // that does not block (see ThreadPool::spawn), so run it on a thread
+  // outside the pool; this coroutine resumes in the pool once it is done.
+  // The reply that triggered the teardown does not wait for it either way.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  const int fd = events_file.release();
+  co_await pool->async([fd] { x23::UniqueFd closer(fd); });
 }
 
 void
@@ -1205,7 +1253,7 @@ EventRPCContext::release_events_file(SHA256Hash const &hash)
   }
 }
 
-void
+x23::UniqueFd
 EventRPCContext::gc_context_internal(
     std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator it)
 {
@@ -1228,11 +1276,15 @@ EventRPCContext::gc_context_internal(
     cache.contexts_.erase(it->first);
   });
 
+  // Take the descriptor before the context is destroyed: ~EventBlockContext
+  // would otherwise close it here, under lock_.  See the declaration.
+  x23::UniqueFd events_file = it->second.get().take_events_fd();
   if (cached_blocks_.size() < kMaxCachedBlocks) {
     cached_blocks_.emplace_back(it->second.get().extract_data());
   }
 
   event_block_contexts_.erase(it);
+  return events_file;
 }
 
 x23::Async<PerThreadARCRef<EventBlockContext>>

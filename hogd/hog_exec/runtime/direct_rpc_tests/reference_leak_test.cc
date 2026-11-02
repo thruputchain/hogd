@@ -23,12 +23,12 @@ namespace hogd {
 // Tests for reference leak bugs in storage item delta management
 // These tests verify that when a delta reservation fails, the reference count
 // is properly released, allowing subsequent reservations of different types.
-class ReferenceLeakTest : public ::testing::TestWithParam<TestDB>,
+class ReferenceLeakTest : public ::testing::Test,
                           public NativeContractTestFramework {
 public:
   ReferenceLeakTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   constexpr static auto make_addrkey(ContractAddress contract_addr,
@@ -112,7 +112,7 @@ public:
 
 // Test RCQ reference leak: when try_reserve_consume() fails,
 // reference should be released allowing other operations to succeed
-TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
+TEST_F(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -172,7 +172,7 @@ TEST_P(ReferenceLeakTest, RCQFailedReservationReleasesReference)
 // AuthData is only allowed for AddressAuthData.
 // We check that the reference is released by committing the block
 // and making sure the item does not exist in the next block.
-TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
+TEST_F(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -210,11 +210,8 @@ TEST_P(ReferenceLeakTest, AuthDataFailedReservationReleasesReference)
 
 // Test ReplayCache reference leak: when try_reserve_insert() fails,
 // reference should be released allowing other types to be reserved
-TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
+TEST_F(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
   // Replay cache is supported in HogDb.
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -264,7 +261,7 @@ TEST_P(ReferenceLeakTest, ReplayCacheFailedReservationReleasesReference)
 
 // Test NNInt reference leak: when try_acquire_bounds_lock() fails,
 // reference should be released allowing other types to be reserved
-TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
+TEST_F(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -321,47 +318,5 @@ TEST_P(ReferenceLeakTest, NNIntFailedReservationReleasesReference)
   ASSERT_TRUE(tx2.abort_transaction()().has_value());
   ASSERT_TRUE(tx3.commit_transaction()().has_value());
 }
-
-TEST_P(ReferenceLeakTest, AuthDataMultipleSignersReleaseLocks)
-{
-  if (GetParam() == TestDB::kHogDb) {
-    GTEST_SKIP() << "Auth data concurrent ops are not supported in HogDb yet";
-    return;
-  }
-  auto contract_addr = make_contract_address(0);
-  setup_grant_storage_token(contract_addr, 1'000'000'000);
-
-  auto key = make_address_auth_data_addrkey(contract_addr);
-
-  auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(key, make_auth_data_delta({0, 1, 5}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction()();
-  ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(r1.value());
-
-  auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(key, make_auth_data_delta({2, 5, 7}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction()();
-  ASSERT_TRUE(r2.has_value());
-  ASSERT_FALSE(r2.value());
-
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(key, make_auth_data_delta({2, 7}),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction()();
-  ASSERT_TRUE(r3.has_value());
-  ASSERT_TRUE(r3.value());
-
-  ASSERT_TRUE(tx1.commit_transaction()().has_value());
-  ASSERT_TRUE(tx2.abort_transaction()().has_value());
-  ASSERT_TRUE(tx3.commit_transaction()().has_value());
-}
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ReferenceLeakTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

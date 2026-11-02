@@ -184,6 +184,13 @@ public:
     return to_return_output_;
   }
 
+  // Moves the output out, leaving it unspecified; for a finished frame whose
+  // output is being handed off.
+  InvocationFrameOutput extract_frame_output()
+  {
+    return std::move(to_return_output_);
+  }
+
   void deploy_contract(ContractAddress const &addr,
                        DeployedContractHash const &hash)
   {
@@ -399,6 +406,12 @@ public:
     return frame_stack_.back().get_events();
   }
 
+  x23::Vec<TxEmittedEvent> extract_active_frame_events()
+  {
+    assert(!frame_stack_.empty());
+    return frame_stack_.back().extract_events();
+  }
+
   HashBuffers &get_active_frame_hash_buffers()
   {
     assert(!frame_stack_.empty());
@@ -410,6 +423,13 @@ public:
   {
     assert(!frame_stack_.empty());
     return frame_stack_.back().child_return_output_;
+  }
+
+  std::optional<InvocationFrameOutput>
+  extract_active_frame_child_return_output()
+  {
+    assert(!frame_stack_.empty());
+    return std::move(frame_stack_.back().child_return_output_);
   }
 
   AuthTokenIdRange get_active_frame_child_returned_auth_tokens() const
@@ -492,6 +512,8 @@ public:
   consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  // Whether the active frame's parent has ids left for count returned tokens.
+  bool check_parent_can_take_auth_tokens(size_t count) const;
 
   size_t size() const { return frame_stack_.size(); }
 

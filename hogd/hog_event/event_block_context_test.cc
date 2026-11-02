@@ -89,7 +89,9 @@ finish_file(EventBlockContext &context)
 
 TEST_F(EventBlockContextTest, BasicTest)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
   EXPECT_TRUE(
       context.add_event(TxEventLog{.tx_hash =
@@ -118,7 +120,9 @@ TEST_F(EventBlockContextTest, BasicTest)
 
 TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
   context.executor_close_block();
   finish_file(context);
@@ -131,7 +135,9 @@ TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor)
 
 TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   finish_file(context);
   auto hash = context.get_root_hash();
   EXPECT_TRUE(std::filesystem::exists(
@@ -143,7 +149,9 @@ TEST_F(EventBlockContextTest, TestEmptyBlockNoExecutor)
 // What happens if there's a conflict on a filename
 TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
   EXPECT_TRUE(
       context.add_event(TxEventLog{.tx_hash =
@@ -164,7 +172,9 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
   EXPECT_EQ(event_logs.begin()->first,
             sha256(std::as_bytes(std::span("test"))));
 
-  EventBlockContext context2(temp_dir_, 2);
+  EventBlockContext context2(temp_dir_, 2,
+                             EventBlockContext::create_events_file(temp_dir_,
+                                                                   2));
   context2.executor_open_block();
   EXPECT_TRUE(context2.add_event(
       TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test"))),
@@ -192,7 +202,9 @@ TEST_F(EventBlockContextTest, TestDuplicateEventBlocks)
 
 TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
   EXPECT_TRUE(
       context.add_event(TxEventLog{.tx_hash =
@@ -213,7 +225,9 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
   EXPECT_EQ(event_logs.begin()->first,
             sha256(std::as_bytes(std::span("test"))));
 
-  EventBlockContext context2(temp_dir_, 2);
+  EventBlockContext context2(temp_dir_, 2,
+                             EventBlockContext::create_events_file(temp_dir_,
+                                                                   2));
   context2.executor_open_block();
   EXPECT_TRUE(context2.add_event(
       TxEventLog{.tx_hash = sha256(std::as_bytes(std::span("test"))),
@@ -242,7 +256,9 @@ TEST_F(EventBlockContextTest, DifferentBlocksHaveDifferentHashes)
 // Test that abandoning a block and then trying to write an event doesn't crash
 TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
 
   // Add an initial event to potentially trigger async buffer flushing
@@ -275,7 +291,9 @@ TEST_F(EventBlockContextTest, AbandonThenAddEvent)
 // Test multiple executors opening and closing handles
 TEST_F(EventBlockContextTest, MultipleExecutors)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
 
   // Three executors open handles
   context.executor_open_block();
@@ -322,7 +340,9 @@ TEST_F(EventBlockContextTest, MultipleExecutors)
 // Test that await_all_executors_closed waits for all executors
 TEST_F(EventBlockContextTest, AwaitWaitsForAllExecutors)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
 
   // Open 2 executors
   context.executor_open_block();
@@ -362,7 +382,9 @@ TEST_F(EventBlockContextTest, AwaitWaitsForAllExecutors)
 // Test await when already all closed
 TEST_F(EventBlockContextTest, AwaitWhenAlreadyClosed)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
 
   context.executor_open_block();
   context.executor_close_block();
@@ -380,7 +402,9 @@ TEST_F(EventBlockContextTest, AwaitWhenAlreadyClosed)
 // Test await when no executors ever opened
 TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
 
   // Await should complete immediately when counter is 0
   context.await_all_executors_closed()();
@@ -398,7 +422,9 @@ TEST_F(EventBlockContextTest, AwaitWithNoExecutors)
 // Test multiple concurrent awaits (validates futex broadcast)
 TEST_F(EventBlockContextTest, MultipleConcurrentAwaits)
 {
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
 
   std::atomic<int> completed_awaits = 0;
@@ -450,7 +476,9 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
   constexpr size_t kEventsPerThread = 20;
   constexpr size_t kPayloadSize = 512;
 
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
 
   std::atomic<size_t> events_accepted{0};
@@ -528,7 +556,9 @@ TEST_F(EventBlockContextTest, StressWriteEventDuringFinish)
 TEST_F(EventBlockContextTest, TwoFlushEpochsDoNotDeadlock)
 {
   x23::ThreadPool pool(1);
-  EventBlockContext context(temp_dir_, 1);
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.executor_open_block();
 
   [](x23::ThreadPool &pool, EventBlockContext &context) -> x23::Async<void> {

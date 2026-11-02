@@ -18,12 +18,6 @@ concurrency:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  # Published crates and pinned submodules retain the legacy registry identity.
-  CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-  CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER: cargo:token
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
 
 jobs:
@@ -45,30 +39,21 @@ jobs:
           persist-credentials: false
           submodules: false # We handle submodules manually for selective init
 
-      - name: Configure private sources
-        uses: ./.github/actions/private-sources
-        with:
-          app-id: ${{ vars.COMPONENT_READER_APP_ID }}
-          private-key: ${{ secrets.COMPONENT_READER_PRIVATE_KEY }}
-          ssh-private-key: |
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
             ~/.cache/rustup
 
       - name: Use Cached rustup Home
         uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Tidy Scope
         run: |
@@ -86,10 +71,15 @@ jobs:
           fi
 
       - name: Fetch Changed-File Base
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$TIDY_SCOPE" = "changed" ]; then
-            git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
-            git fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
+            # The checkout does not persist credentials; pass the job token to
+            # these two fetches only, while hogd itself is still private.
+            auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
           fi
 
       - name: Use Full Scope for Tidy Infrastructure Changes
@@ -216,15 +206,10 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
-      - name: Remove job-local Git credentials
-        if: always()
-        shell: bash
-        run: |
-          if [[ "${GIT_CONFIG_GLOBAL:-}" == "$RUNNER_TEMP"/private-sources.* ]]; then
-            rm -f -- "$GIT_CONFIG_GLOBAL"
-          fi

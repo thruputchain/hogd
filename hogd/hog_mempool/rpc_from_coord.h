@@ -19,10 +19,10 @@
 #include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
@@ -40,6 +40,7 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -110,6 +111,8 @@ public:
   x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
+      auth_callback_disconnecting_.store(true, std::memory_order_release);
+      auth_data_height_.broadcast(&default_threadpool());
       co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
@@ -314,8 +317,40 @@ public:
     co_return ret;
   }
 
+  // Looks up in-flight txs by their exact signed encoding, for repair: a body
+  // cached under a different signing is not found.
   x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
-  schedcoord_lookup_transactions(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transactions(
+      const SignedTransactionHashBatch &signed_tx_hashes)
+  {
+    x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
+    if (!ready()) {
+      ret.resize(signed_tx_hashes.size());
+      co_return ret;
+    }
+    ret.reserve(signed_tx_hashes.size());
+    for (const SignedTransactionHash &signed_tx_hash : signed_tx_hashes) {
+      // [find_signed_tx] hands back a reference into the scheduler's tx
+      // store, and the reply holds that reference until x23 has serialized
+      // the response, so the tx cannot be freed by another thread in between.
+      // That is what the copy through [x23::Ptr]'s value constructor used to
+      // buy, and it was paying for it with a deep copy of the whole
+      // transaction -- including its unbounded [Calldata] -- for every hash
+      // resolved.
+      //
+      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
+      // is an ownership change, not a wire change.
+      ret.push_back(x23::XdrSharedPtr<SignedTransaction>(
+          scheduler_->find_signed_tx(signed_tx_hash)));
+    }
+
+    co_return ret;
+  }
+
+  // Looks up in-flight txs by [TransactionHash], returning whichever signing
+  // of each body is cached. Serves the gateway's [schedgateway_lookup_tx].
+  x23::Async<x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>>>
+  lookup_transactions_by_body(const TransactionHashBatch &tx_hashes)
   {
     x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> ret;
     if (!ready()) {
@@ -324,15 +359,8 @@ public:
     }
     ret.reserve(tx_hashes.size());
     for (const TransactionHash &tx_hash : tx_hashes) {
-      // [find_tx] hands back a reference into the scheduler's tx store, and
-      // the reply holds that reference until x23 has serialized the response,
-      // so the tx cannot be freed by another thread in between.  That is what
-      // the copy through [x23::Ptr]'s value constructor used to buy, and it
-      // was paying for it with a deep copy of the whole transaction --
-      // including its unbounded [Calldata] -- for every hash resolved.
-      //
-      // [XdrSharedPtr] serializes to the same bytes [x23::Ptr] does, so this
-      // is an ownership change, not a wire change.
+      // As in [schedcoord_lookup_transactions()], the reply shares the
+      // scheduler's copy of each tx rather than copying it.
       ret.push_back(
           x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
@@ -340,8 +368,10 @@ public:
     co_return ret;
   }
 
+  // Takes [tx_hashes] by value: the loop below suspends on each lookup, and
+  // the RPC dispatcher frees its decoded arguments at the first suspension.
   x23::Async<SchedulerTransactionOutcomeBatch>
-  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
   {
     SchedulerTransactionOutcomeBatch ret;
     ret.reserve(tx_hashes.size());
@@ -378,7 +408,7 @@ public:
   BlockHeight auth_data_height() { return auth_data_height_.load(); }
 
   x23::Async<void> auth_data_changed(BlockHeight height,
-                                     KeyChangeBatch key_changes);
+                                     ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> wait_for_block_commit(BlockHeight expected_height)
   {
@@ -394,6 +424,13 @@ public:
     co_return;
   }
 
+  // Auth data reaching exactly [expected_height] is an invariant, so landing
+  // past it is a bug, not a satisfied wait. Nomination and validation wait for
+  // the parent of the block they build or check, and commit takes
+  // [nominated_block_cache_lock_] and closes the validation gate before the DB
+  // commits the next height, so that height's auth data cannot arrive while
+  // they wait. The genesis ceremony waits without the nomination lock; that
+  // relies on there being a single ceremony.
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
@@ -438,12 +475,21 @@ public:
     submission_auth_test_hook_ = std::move(hook);
   }
 
+  // Runs when an [auth_data_changed] callback for a height is about to wait
+  // for an earlier height.
+  void set_auth_data_wait_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    auth_data_wait_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
   }
 
 private:
+  friend class MempoolValidationExecutorResultTest;
+
   struct SubmissionAuth {
     std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
         accounts;
@@ -453,7 +499,7 @@ private:
   // Returns with [commit_guard] held, so results stay valid through admission.
   x23::Async<AuthErrorCodeBatch>
   verify_submission(const SignedTransactionBatch &txs,
-                    x23::CoroGuard &commit_guard);
+                    InstrumentedCoroGuard &commit_guard);
 
   x23::Async<SchedGatewaySubmitOutcomeBatch>
   submit_unvetted(ParallelSignedTransactionBatch batch,
@@ -470,9 +516,15 @@ private:
     // validating.
     BlockExecutionContext block_execution;
     x23::XdrVec<SignedTransaction> txs;
+    // The block's txs by [TransactionHash], which keys the mempool's runqueue
+    // and the txset trie behind [ProposalHeader::txs_hash].
     x23::XdrVec<TransactionHash> tx_hashes;
+    // The same txs by [SignedTransactionHash], aligned with [tx_hashes]: the
+    // exact encodings named in [ProposalTxs::signed_hash].
+    SignedTransactionHashBatch signed_tx_hashes;
 
     x23::XdrVec<TransactionHash> result_tx_hashes;
+    SignedTransactionHashBatch result_signed_tx_hashes;
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
     SchedulerProposalResult proposal_result;
 
@@ -498,13 +550,14 @@ private:
 
   struct PreparedValidationChunk {
     x23::Vec<ProposedTransaction> proposed_txs;
-    x23::XdrVec<TransactionHash> missing_tx_hashes;
+    SignedTransactionHashBatch missing_signed_tx_hashes;
   };
 
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
-    x23::XdrVec<TransactionHash> missing_tx_hashes;
-    bool validated = true;
+    SignedTransactionHashBatch missing_signed_tx_hashes;
+    SchedulerValidationOutcome outcome =
+        SchedulerValidationOutcome::SchedulerValidationOK;
   };
 
   x23::Async<void> finish_init()
@@ -579,7 +632,7 @@ private:
         co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
     co_await auth_rpc_->register_callback(
-        [this](BlockHeight height, KeyChangeBatch key_changes) {
+        [this](BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes) {
           return auth_data_changed(height, std::move(key_changes));
         },
         [this] { initialized_.store(true, std::memory_order_release); });
@@ -674,24 +727,32 @@ private:
   schedulercoord_commit_block_impl(BlockID block_id,
                                    ConsensusValue expected_value);
 
-  x23::Async<bool>
+  // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
+  // [SchedulerValidationExecutorFailed] when an executor could not run a tx.
+  x23::Async<SchedulerValidationOutcome>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
 
+  // Looks up each of [signed_tx_hashes] in the mempool by its exact signed
+  // encoding and, for each tx found, writes its [TransactionHash] to the same
+  // index of [tx_hashes].
   x23::Async<PreparedValidationChunk> prepare_validation_chunk(
-      x23::span<const TransactionHash> tx_hashes,
-      x23::span<const NondeterministicProposalData> tx_nominations);
+      x23::span<const SignedTransactionHash> signed_tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      x23::span<TransactionHash> tx_hashes);
 
   x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
-      BlockID block_id, x23::span<const TransactionHash> tx_hashes,
-      x23::span<const NondeterministicProposalData> tx_nominations);
+      BlockID block_id, x23::span<const SignedTransactionHash> signed_tx_hashes,
+      x23::span<const NondeterministicProposalData> tx_nominations,
+      x23::span<TransactionHash> tx_hashes);
 
-  x23::Async<bool> multiplex_large_validation_chunk_across_executors(
+  x23::Async<SchedulerValidationOutcome>
+  multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
 
-  x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<SchedulerValidationOutcome>
+  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult>
   open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
@@ -794,6 +855,7 @@ private:
   std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
                                  bool)>
       submission_auth_test_hook_;
+  std::function<void(BlockHeight)> auth_data_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -817,6 +879,9 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
+  // Set by [disconnect_auth_callback] to release [auth_data_changed] callbacks
+  // waiting on [auth_data_height_] for an earlier height.
+  std::atomic<bool> auth_callback_disconnecting_ = false;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 

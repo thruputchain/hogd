@@ -6,6 +6,7 @@
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
@@ -17,12 +18,12 @@
 
 namespace hogd {
 
-class CrossCallTests : public ::testing::TestWithParam<TestDB>,
+class CrossCallTests : public ::testing::Test,
                        public NativeContractTestFramework {
 public:
   CrossCallTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -61,7 +62,7 @@ protected:
             .tx =
                 Transaction{.invocation = fibonacci_caller_client_
                                               .make_invocation<u8"initialize">(
-                                                  UINT64_MAX,
+                                                  kDefaultMaxTxGas,
                                                   fibonacci_contract_address_),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
@@ -74,7 +75,7 @@ protected:
   }
 };
 
-TEST_P(CrossCallTests, CrossCallNoGasLimit)
+TEST_F(CrossCallTests, CrossCallNoGasLimit)
 {
 
   initialize_fibonacci_caller();
@@ -85,7 +86,8 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_
                                       .make_invocation<u8"call_fibonacci">(
-                                          UINT64_MAX, uint32_t{5}, UINT64_MAX),
+                                          kDefaultMaxTxGas, uint32_t{5},
+                                          UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke()();
@@ -101,7 +103,8 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_
                                       .make_invocation<u8"call_fibonacci">(
-                                          UINT64_MAX, uint32_t{20}, UINT64_MAX),
+                                          kDefaultMaxTxGas, uint32_t{20},
+                                          UINT64_MAX),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke()();
@@ -111,7 +114,7 @@ TEST_P(CrossCallTests, CrossCallNoGasLimit)
   }
 }
 
-TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
+TEST_F(CrossCallTests, LowGasCausesDeterministicRevert)
 {
   initialize_fibonacci_caller();
 
@@ -121,7 +124,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_
                                       .make_invocation<u8"call_fibonacci">(
-                                          UINT64_MAX, uint32_t{20},
+                                          kDefaultMaxTxGas, uint32_t{20},
                                           uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
@@ -131,7 +134,7 @@ TEST_P(CrossCallTests, LowGasCausesDeterministicRevert)
   }
 }
 
-TEST_P(CrossCallTests, LowOverallGasPropagates)
+TEST_F(CrossCallTests, LowOverallGasPropagates)
 {
   initialize_fibonacci_caller();
 
@@ -150,7 +153,7 @@ TEST_P(CrossCallTests, LowOverallGasPropagates)
   }
 }
 
-TEST_P(CrossCallTests, ExpectOutOfGas)
+TEST_F(CrossCallTests, ExpectOutOfGas)
 {
   initialize_fibonacci_caller();
 
@@ -162,7 +165,8 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_.make_invocation<
                                       u8"call_fibonacci_expect_out_of_gas">(
-                                      UINT64_MAX, uint32_t{20}, uint64_t{1000}),
+                                      kDefaultMaxTxGas, uint32_t{20},
+                                      uint64_t{1000}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke()();
@@ -179,7 +183,8 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
             .tx = Transaction{.invocation =
                                   fibonacci_caller_client_.make_invocation<
                                       u8"call_fibonacci_expect_out_of_gas">(
-                                      UINT64_MAX, uint32_t{20}, uint64_t{1010}),
+                                      kDefaultMaxTxGas, uint32_t{20},
+                                      uint64_t{1010}),
                               .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
     auto res = handler.root_invoke()();
@@ -192,10 +197,5 @@ TEST_P(CrossCallTests, ExpectOutOfGas)
 
   ASSERT_EQ(gas_consumed_1 + 10, gas_consumed_2);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, CrossCallTests,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

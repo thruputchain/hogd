@@ -14,6 +14,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -36,12 +37,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class InvokeErrorHandlingTest : public ::testing::TestWithParam<TestDB>,
+class InvokeErrorHandlingTest : public ::testing::Test,
                                 public NativeContractTestFramework {
 public:
   InvokeErrorHandlingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -50,7 +51,7 @@ protected:
 
 // Tests to make sure that InvokeError codes are properly passed back to the
 // caller.
-TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
+TEST_F(InvokeErrorHandlingTest, InvokeErrorCodes)
 {
   // Not a coroutine: a pure enum-to-status mapping with nothing to await.
   auto inner_func = [](InvokeErrorCode enum_code) -> InvokeStatus<void> {
@@ -247,7 +248,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 
   // The orchestrator is the root invoked address; committing its transaction
   // consumes a replay-cache entry charged to it. It commits one transaction
-  // (N=1), so grant the single-consume cost (0 on MockInMemory).
+  // (N=1), so grant the single-consume cost.
   setup_grant_storage_token(kOrchestratorAddress,
                             replay_cache_cost_charged(1) * 1);
 
@@ -261,7 +262,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
                         Invocation{
                             .invoked_address = kOrchestratorAddress,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata = {},
                         },
                     .uniquifier = make_new_uniquifier(),
@@ -276,7 +277,7 @@ TEST_P(InvokeErrorHandlingTest, InvokeErrorCodes)
 }
 
 // Test that invalid InvokeFlag bits are rejected
-TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
+TEST_F(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
 {
   auto native_contract_xdr = make_native_contract(0);
   auto native_contract_address = make_contract_address(0);
@@ -429,7 +430,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
                         Invocation{
                             .invoked_address = native_contract_address,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata = {},
                         },
                     .uniquifier = make_new_uniquifier(),
@@ -443,7 +444,7 @@ TEST_P(InvokeErrorHandlingTest, InvalidInvokeFlagsRejected)
   }
 }
 
-TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
+TEST_F(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
 {
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);
   constexpr ContractAddress kCallerAddress = make_contract_address(1);
@@ -502,7 +503,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
                       Invocation{
                           .invoked_address = kCallerAddress,
                           .entrypoint = entrypoint_from_method_id(0),
-                          .gas_limit = UINT64_MAX,
+                          .gas_limit = kDefaultMaxTxGas,
                           .calldata = {},
                       },
                   .uniquifier = make_new_uniquifier(),
@@ -523,7 +524,7 @@ TEST_P(InvokeErrorHandlingTest, EmptyOwnedAuthTokenSpan)
 
 // A child that manually reverts: Invoke returns None, frame_status == Abort,
 // and the abort buffer remains readable via GetReturnedBuffer.
-TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
+TEST_F(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
 {
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);
   constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
@@ -595,7 +596,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
   // The orchestrator is the root invoked address; committing its transaction
-  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  // consumes one replay-cache entry charged to it.
   setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
 
   auto handler = make_new_system_call_handler(
@@ -604,7 +605,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -615,7 +616,7 @@ TEST_P(InvokeErrorHandlingTest, ManualRevertReportsFrameStatusAbort)
 
 // A child that traps/faults: Invoke returns None, frame_status == Fault, and
 // GetReturnedBuffer reports no buffer available.
-TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
+TEST_F(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
 {
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);
   constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
@@ -677,7 +678,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
   // The orchestrator is the root invoked address; committing its transaction
-  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  // consumes one replay-cache entry charged to it.
   setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
 
   auto handler = make_new_system_call_handler(
@@ -686,7 +687,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -699,7 +700,7 @@ TEST_P(InvokeErrorHandlingTest, ChildFaultReportsFrameStatusFault)
 // child frame runs (here, an undeployed target) returns a nonzero error code
 // and is a no-op on the parent's most-recent-child return slot, so
 // GetReturnedBuffer still returns the buffer from the prior child that ran.
-TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
+TEST_F(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 {
   constexpr ContractAddress kCalleeAddress = make_contract_address(0);
   constexpr ContractAddress kOrchestratorAddress = make_contract_address(1);
@@ -787,7 +788,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
   write_deployment(kOrchestratorAddress, orchestrator_xdr);
 
   // The orchestrator is the root invoked address; committing its transaction
-  // consumes one replay-cache entry charged to it (0 on MockInMemory).
+  // consumes one replay-cache entry charged to it.
   setup_grant_storage_token(kOrchestratorAddress, replay_cache_cost_charged(1));
 
   auto handler = make_new_system_call_handler(
@@ -796,7 +797,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
                                 Invocation{
                                     .invoked_address = kOrchestratorAddress,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -824,7 +825,7 @@ TEST_P(InvokeErrorHandlingTest, RejectedInvokeIsNoOpOnPriorReturnBuffer)
 // standard library would abort here rather than at the assertion below. So
 // reserve the range PROT_NONE -- address space only, nothing committed, and
 // nothing ever read from it.
-TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
+TEST_F(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
 {
   constexpr ContractAddress kSelfAddress = make_contract_address(0);
 
@@ -881,8 +882,7 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
   write_deployment(kSelfAddress, self_xdr);
 
   // The self-invoking contract is the root invoked address; committing its
-  // transaction consumes one replay-cache entry charged to it (0 on
-  // MockInMemory).
+  // transaction consumes one replay-cache entry charged to it.
   setup_grant_storage_token(kSelfAddress, replay_cache_cost_charged(1));
 
   auto handler = make_new_system_call_handler(
@@ -891,7 +891,7 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
                                 Invocation{.invoked_address = kSelfAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -899,11 +899,6 @@ TEST_P(InvokeErrorHandlingTest, SelfInvokeRejectedBeforeCalldataCopy)
   ASSERT_TRUE(res.is_root_success());
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, InvokeErrorHandlingTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

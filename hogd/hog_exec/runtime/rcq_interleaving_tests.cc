@@ -7,7 +7,6 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -17,6 +16,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -42,8 +42,7 @@ class RCQInterleavingTest : public ::testing::Test,
 public:
   RCQInterleavingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -152,7 +151,7 @@ protected:
                               Invocation{.invoked_address = kAddr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = Calldata(calldata.begin(),
                                                               calldata.end())},
                           .uniquifier = make_new_uniquifier()}};
@@ -202,7 +201,7 @@ protected:
             co_return;
           }
           if constexpr (Proposal)
-            s.proposal = handler.get_proposal_data();
+            s.proposal = handler.extract_proposal_data();
           auto commit_res = handler.try_commit_transaction()();
           if (commit_res != ExecResult::ExecResultOK &&
               commit_res != ExecResult::ExecResultTxNonDeterministicError) {

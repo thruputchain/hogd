@@ -30,6 +30,7 @@
 #include <gtest/gtest.h>
 
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -173,7 +174,7 @@ setup(ParentContext *parent_ctx, ForeignEntryPoint child_entry_point)
                  {
                      .invoked_address = parent_addr,
                      .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {},
                  },
              .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},

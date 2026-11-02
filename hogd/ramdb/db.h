@@ -227,14 +227,23 @@ private:
   DiskWriter disk_writer_;
   ScalableMap map_;
 
-  // runs background_worker().
-  std::jthread bg_th_;
-
-  // The highest end_lsn_exclusive of any snapshot loaded during recovery or
-  // created by sync_and_snapshot(). Used to validate begin_lsn in
-  // sync_and_snapshot() — begin_lsn must be 0 or <= this value to avoid
-  // creating snapshot gaps that recovery cannot bridge.
-  uint64_t max_snapshot_end_lsn_{0};
+  // These members precede bg_th_ so they are constructed before it starts
+  // and outlive it at destruction (it joins first). metrics_registered_ is
+  // published after every handle is assigned.
+  struct DbMetrics {
+    std::atomic<size_t> snap_bytes_out_;
+    Metrics::Gauge snap_bytes_out_metric;
+    Metrics::Gauge uncovered_wal_bytes;
+    Metrics::Gauge last_snapshot_bytes;
+    Metrics::Gauge snapshot_in_progress;
+    Metrics::Histogram snapshot_duration_seconds;
+    Metrics::Gauge loglet_region_bytes;
+    Metrics::Gauge loglet_memory_items;
+    Metrics::Gauge loglet_disk_buffering;
+    Metrics::Gauge loglet_free;
+  };
+  DbMetrics metrics_{};
+  std::atomic<bool> metrics_registered_{false};
 
   // True while a snapshot is admitted or in flight: the map's mutation
   // callback is a single slot. sync_and_snapshot() claims it with an atomic
@@ -261,12 +270,14 @@ private:
   // snapshot_running_.
   std::atomic<size_t> last_snapshot_bytes_{0};
 
-  // periodically updated stats; registered in register_metrics().
-  struct DbMetrics {
-    std::atomic<size_t> snap_bytes_out_;
-    Metrics::Gauge snap_bytes_out_metric;
-  };
-  DbMetrics metrics_{};
+  // runs background_worker().
+  std::jthread bg_th_;
+
+  // The highest end_lsn_exclusive of any snapshot loaded during recovery or
+  // created by sync_and_snapshot(). Used to validate begin_lsn in
+  // sync_and_snapshot() — begin_lsn must be 0 or <= this value to avoid
+  // creating snapshot gaps that recovery cannot bridge.
+  uint64_t max_snapshot_end_lsn_{0};
 
   // called when memory is low.
   void notify_low_mem();

@@ -18,8 +18,6 @@
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/queue_util.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -196,10 +194,7 @@ TEST_F(ItemViewTest, RCQRead)
       {make_test_queue_entry(6)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 5, 0);
-  server_->impl()->setup_create_item(AddressAndKey{},
-                                     StorageItemWrapper(std::move(queue),
-                                                        &cost_model));
+  server_->impl()->setup_create_queue(AddressAndKey{}, std::move(queue));
   ExecutionModeData execution_mode_data = ProposalModeData();
 
   auto check_item = [&](std::optional<uint8_t> const &expected_entry,
@@ -616,10 +611,7 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
       {make_test_queue_entry(3), make_test_queue_entry(4)},
   });
 
-  StorageCostModel cost_model(12000, 1, 5, 5, 0);
-  server_->impl()->setup_create_item(AddressAndKey{},
-                                     StorageItemWrapper(std::move(queue),
-                                                        &cost_model));
+  server_->impl()->setup_create_queue(AddressAndKey{}, std::move(queue));
 
   ExecutionModeData mode = ProposalModeData();
 

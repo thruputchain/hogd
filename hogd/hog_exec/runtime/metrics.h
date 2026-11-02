@@ -66,10 +66,12 @@ public:
   static void mark_successful_validation_tx()
   {
     // TODO(geoff): unimpl
+    successful_validation_tx_count_metric.increment();
   }
   static void mark_failed_validation_tx()
   {
     // TODO(geoff): unimpl
+    failed_validation_tx_count_metric.increment();
   }
 
   static void mark_gas_consumed(uint64_t gas)
@@ -83,9 +85,9 @@ private:
   static HogexecMetrics &get_instance();
 
   struct MetricsSnapshot {
-    ssize_t successful_proposed_tx_count = 0;
-    ssize_t failed_proposed_tx_count = 0;
-    ssize_t gas_consumed = 0;
+    uint64_t successful_proposed_tx_count = 0;
+    uint64_t failed_proposed_tx_count = 0;
+    uint64_t gas_consumed = 0;
     int64_t time_ns = 0;
 
     MetricsSnapshot operator-(const MetricsSnapshot &other) const

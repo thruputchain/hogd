@@ -15,6 +15,7 @@
 #include <thread>
 #include <vector>
 
+#include "block_query_internal.hh"
 #include "event.hh"
 #include "event_outbox_internal.hh"
 #include "hogd/hog_indexer/status.h"
@@ -115,15 +116,22 @@ public:
   IndexerStatus<std::pair<BlockHeight, TxEventLog>>
   get_tx_events(SHA256Hash const &tx_hash) const;
 
-  // Paginated, filtered events query.  See protocol/indexer.x for
-  // full semantics.
+  // Server-side cap on scanned event candidates per page, matching or not.
+  static constexpr std::uint32_t kEventsMaxCandidates = 1000;
+
+  // Paginated, filtered events query. See protocol/indexer.x for full
+  // semantics.
   //
   // Validates the query (filters non-empty, each filter's
   // contract_addresses non-empty), decodes the cursor (if any),
-  // walks the contract_index in the requested direction, applies
-  // topic filters, hydrates matches from tx_index, and returns
-  // up to `limit` events plus a continuation cursor.
-  IndexerStatus<EventPage> get_events(EventQuery const &query) const;
+  // walks the contract_index in the requested direction, hydrates and
+  // validates each candidate before topic filtering, and returns up to
+  // `limit` events plus a continuation cursor. The internal candidate_limit
+  // is clamped to [1, kEventsMaxCandidates]. Empty pages can have a cursor;
+  // callers must continue until the cursor is empty.
+  IndexerStatus<EventPage>
+  get_events(EventQuery const &query,
+             std::uint32_t candidate_limit = kEventsMaxCandidates) const;
 
   // Paginated transactions query.  See protocol/indexer.x for full
   // semantics.  The current tx_index is keyed by hash rather than by
@@ -134,10 +142,17 @@ public:
 
   // Paginated account transaction history: refs to transactions whose ROOT
   // invocation targets `query.address`, in block order.  Reads refs directly
-  // off the address index (kind = ROOT_TX); no tx_index hydration.  Clients
-  // hydrate full bodies via get_transaction_info.
+  // off the address index (kind = ROOT_TX), validating each projection against
+  // its stored transaction. Clients fetch full bodies via get_transaction_info.
   IndexerStatus<TransactionRefPage>
   get_transactions_by_address(AddressTransactionQuery const &query) const;
+
+  // Exact-height reads over the complete strict-ingestion projection.
+  // Genesis is outside coverage: the event outbox starts at height 1.
+  IndexerStatus<std::optional<ConsensusValue>>
+  get_block_by_height(BlockHeight height) const;
+  IndexerStatus<TransactionRefPage>
+  get_transactions_by_block(const BlockTransactionQuery &query) const;
 
   // Highest block height through which the index is CONTIGUOUS:
   // every block from the first-ever ingested height up to this value
@@ -219,6 +234,14 @@ private:
                                   const IndexerCommittedBlock &block);
 
   IndexerStatus<void> initialize_progress_from_db();
+  static std::string block_query_format();
+  IndexerStatus<BlockHeight> block_query_tip() const;
+  struct VerifiedBlockQueryRecord {
+    BlockQueryRecord record;
+    ConsensusValueHash hash;
+  };
+  IndexerStatus<VerifiedBlockQueryRecord>
+  read_block_query_record(BlockHeight height) const;
 
   // True iff `h` is at or below the contiguous watermark or buffered
   // in pending_heights_.  The guard evidences ingest_mutex_ is held.
@@ -257,6 +280,7 @@ private:
   // must fail with an explicit migration-required outcome while legacy storage
   // remains restart-compatible.
   bool legacy_mode_ = false;
+  std::atomic<bool> block_queries_ready_{false};
   std::function<void()> legacy_ingest_test_hook_;
   std::function<void()> initialize_epoch_test_hook_;
   std::function<void()> apply_validation_test_hook_;

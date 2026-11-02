@@ -104,7 +104,7 @@ visit_genesis_execution_prerequisites(
   visit_auth_data(kGenesisRootContractAddress, root_auth);
 
   auto token = make_native_contract(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken);
   visit_contract(token);
   visit_deployment(kNativeTokenContractAddress,
                    make_deployed_contract_hash(token));
@@ -157,8 +157,9 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 {
   using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
   root_client_t client(kGenesisRootContractAddress);
-  constexpr static GasAmount kDistributionGas =
-      std::numeric_limits<GasAmount>::max();
+  // Ample for a distribution chunk, and within the default max_tx_gas: a
+  // chain whose cap refused its own ceremony could not reach height 1.
+  constexpr static GasAmount kDistributionGas = 1'000'000'000;
   // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
   // vector comfortably below that limit, including allocator and contract
   // stack space. A ceremony is one atomic height-1 block, but it may contain
@@ -177,10 +178,11 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 
   // The root contract mints each distribution plus enough native token to
   // create the root replay/balance rows and token supply/balance rows for every
-  // ceremony transaction. Reject the artifact before emitting transactions if
-  // all of those mints would exceed the protocol supply.
-  uint128_t remaining_supply =
-      uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+  // ceremony transaction. Total supply is a nonnegative int128, so reject the
+  // artifact before emitting transactions if all of those mints would take it
+  // past INT128_MAX.
+  auto remaining_supply =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
   const std::size_t transaction_count =
       std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
                                 1) /

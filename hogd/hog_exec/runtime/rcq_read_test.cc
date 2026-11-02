@@ -13,12 +13,11 @@
 
 namespace hogd {
 
-class RCQReadTest : public ::testing::TestWithParam<TestDB>,
-                    public NativeContractTestFramework {
+class RCQReadTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   RCQReadTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   auto make_new_per_tx_db_proxy()
@@ -92,7 +91,7 @@ public:
 };
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
+TEST_F(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -115,7 +114,7 @@ TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
   ASSERT_EQ(block_from_one.value()->entries[0], make_rcq_entry(9));
 }
 
-TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
+TEST_F(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -148,7 +147,7 @@ TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
   EXPECT_EQ(block_from_two.value()->entries[0], make_rcq_entry(2));
 }
 
-TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
+TEST_F(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -173,7 +172,7 @@ TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
   EXPECT_EQ(block_from_one.value()->entries[0], make_rcq_entry(9));
 }
 
-TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -190,7 +189,7 @@ TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -207,7 +206,7 @@ TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -225,7 +224,7 @@ TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -257,7 +256,7 @@ TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
+TEST_F(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -317,10 +316,5 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQReadTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

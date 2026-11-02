@@ -1,7 +1,6 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 
@@ -16,6 +15,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -42,12 +42,12 @@
 
 namespace hogd {
 
-class RCQDeleteTest : public ::testing::TestWithParam<TestDB>,
+class RCQDeleteTest : public ::testing::Test,
                       public NativeContractTestFramework {
 protected:
   RCQDeleteTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   std::vector<uint8_t> last_consumed_values_;
@@ -2340,7 +2340,7 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -2371,7 +2371,7 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -2395,7 +2395,7 @@ protected:
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -2410,21 +2410,7 @@ protected:
   testing::AssertionResult check_rcq_empty_for(ContractAddress const &addr)
   {
     auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
-    if (GetParam() == TestDB::kHogDb) {
-      if (queue.has_value()) {
-        return testing::AssertionFailure() << "Queue has live entries";
-      }
-      return testing::AssertionSuccess();
-    }
-
-    if (!queue.has_value()) {
-      return testing::AssertionFailure() << "No queue found";
-    }
-    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-      return testing::AssertionFailure() << "Queue has wrong type";
-    }
-    auto const &qe = queue->metadata();
-    if (qe.live_entries != 0) {
+    if (queue.has_value()) {
       return testing::AssertionFailure() << "Queue has live entries";
     }
     return testing::AssertionSuccess();
@@ -2450,22 +2436,8 @@ protected:
     }
 
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-    if (GetParam() == TestDB::kHogDb) {
-      // On HogDb, metadata is removed when live_entries drops to 0.
-      if (queue.has_value()) {
-        return testing::AssertionFailure() << "Queue has live entries";
-      }
-      return testing::AssertionSuccess();
-    }
-
-    if (!queue.has_value()) {
-      return testing::AssertionFailure() << "No queue found";
-    }
-    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-      return testing::AssertionFailure() << "Queue has wrong type";
-    }
-    auto const &qe = queue->metadata();
-    if (qe.live_entries != 0) {
+    // Metadata is removed when live_entries drops to 0.
+    if (queue.has_value()) {
       return testing::AssertionFailure() << "Queue has live entries";
     }
     return testing::AssertionSuccess();
@@ -2475,7 +2447,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_P(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
+TEST_F(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
 {
   insert(42);
   insert(99);
@@ -2487,7 +2459,7 @@ TEST_P(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
+TEST_F(RCQDeleteTest, NoDeleteUnobservedEntries)
 {
   std::thread t([&] { invoke_method(11, uint32_t{42}); });
 
@@ -2504,7 +2476,7 @@ TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
+TEST_F(RCQDeleteTest, DeleteSelfInsertedEntry)
 {
   insert(42);
 
@@ -2516,7 +2488,7 @@ TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
+TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 {
   insert(42);
   insert(99);
@@ -2533,8 +2505,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 1);
   ASSERT_EQ(qe.max_live_block_num,
-            2); // TODO(geoff): is this assertion correct?   This matches in
-                // hog_db and mockdb, so I guess so?
+            2); // TODO(geoff): is this assertion correct?
 }
 
 // Verifies that when an RCQ with entries in past blocks is deleted and
@@ -2546,12 +2517,8 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 // would be orphaned as ghost entries.
 // DeleteAndRecreateRemovesPastBlocks verifies the metadata is correct but
 // doesn't check the block records directly.
-TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
+TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert entries that become a past block
   insert(10);
   insert(20);
@@ -2613,7 +2580,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
 
 // Consume 1 of 3 concurrent entries, delete, consume remaining 2.
 // Exposes the bug where current_block_consumed lost entries across delete.
-TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
+TEST_F(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 {
   insert(42);
   insert(99);
@@ -2627,7 +2594,7 @@ TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 
 // Consume entry from past block, delete queue, insert new entry,
 // consume concurrent entry.
-TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
+TEST_F(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 {
   // Block 1: insert entries that become past block entries
   insert(42);
@@ -2647,7 +2614,7 @@ TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 
 // Insert and consume a self entry, delete, insert and consume another self.
 // Verifies self entries before delete are discarded correctly.
-TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
+TEST_F(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 {
   invoke_method(15, uint32_t{42}, uint32_t{99});
 
@@ -2658,7 +2625,7 @@ TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 
 // Insert a self entry, delete, then consume a concurrent entry.
 // Verifies self insert is gone, concurrent is consumed.
-TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
+TEST_F(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 {
   insert(42);
   invoke_method(12, uint32_t{99}, uint32_t{42});
@@ -2671,7 +2638,7 @@ TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 // Delete queue, then try to consume. Should get no entry.
 // Insert is in previous block so no concurrent entries are available.
 // The empty consume should leave the key deleted, not convert to empty RCQ.
-TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
+TEST_F(RCQDeleteTest, DeleteConsumeEmpty)
 {
   insert(42);
 
@@ -2688,7 +2655,7 @@ TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 // Consume (nothing available) -> delete -> consume (nothing available).
 // Both should return no entry. retrocausally_consumed_count_ should remain 0.
 // The key should end up deleted, not converted to empty RCQ.
-TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
+TEST_F(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 {
   invoke_method(18);
 
@@ -2700,7 +2667,7 @@ TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 
 // Delete -> peek(empty) -> co_await consume(empty). The peek must not decide
 // the final write shape; the empty consume should leave the key deleted.
-TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
+TEST_F(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 {
   invoke_method(51);
 
@@ -2714,7 +2681,7 @@ TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 // consume(b) -> delete
 // -> co_await consume(c). Verifies that preserved entries accumulate correctly
 // across multiple cycles.
-TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
+TEST_F(RCQDeleteTest, MultipleDeleteRecreate)
 {
   insert(42);
   insert(99);
@@ -2728,7 +2695,7 @@ TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
 
 // Two delete-recreate cycles without consumes in between,
 // then consume a concurrent entry at the end.
-TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
+TEST_F(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 {
   insert(42);
   invoke_method(20, uint32_t{10}, uint32_t{20}, uint32_t{42});
@@ -2743,7 +2710,7 @@ TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 // Peek at concurrent entry, delete, consume. Since peek doesn't advance
 // the cursor, retrocausally_consumed_count_ stays 0. After delete,
 // consume should return the same entry (index 0).
-TEST_P(RCQDeleteTest, PeekDeleteConsume)
+TEST_F(RCQDeleteTest, PeekDeleteConsume)
 {
   insert(42);
   invoke_method(21, uint32_t{42});
@@ -2757,7 +2724,7 @@ TEST_P(RCQDeleteTest, PeekDeleteConsume)
 // then creates a bytestring, then deletes, then creates an nnint,
 // then deletes, then inserts an item.  Verify that at the next block there's
 // only the one item inserted at the end
-TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
+TEST_F(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 {
   // Insert an item in a previous block so it becomes retrocausal
   insert(42);
@@ -2783,7 +2750,7 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 // then creates a bytestring, then deletes, then creates an nnint,
 // then deletes, then inserts an item.  Verify that at the next block there's
 // only the one item inserted at the end
-TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
+TEST_F(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 {
   // Insert an item in a previous block
   insert(42);
@@ -2810,7 +2777,7 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // delete the bytestring, then consume from the queue. A concurrent tx has
 // inserted a retrocausal item into the queue.
-TEST_P(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2833,7 +2800,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // then consume from the queue (without deleting the bytestring). A concurrent
 // tx has inserted a retrocausal item into the queue.
-TEST_P(RCQDeleteTest, DeleteCreateBytestringConsume)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringConsume)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2861,7 +2828,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringConsume)
 
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // then consume from the queue (without deleting the bytestring)
-TEST_P(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2888,7 +2855,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 {
   // Start from empty, delete (no-op), then insert a new item
   invoke_method(13, uint32_t{42});
@@ -2906,7 +2873,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 {
   set_bytestring(make_bytestring("test"));
   advance_block();
@@ -2931,7 +2898,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 // Same block as above: tx1 deletes and inserts, tx2 deletes and consumes.
 // The delete is a write, so tx2's base is the deleted key rather than the
 // committed bytestring, and tx1's concurrent entry is in reach.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestringSameBlock)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestringSameBlock)
 {
   set_bytestring(make_bytestring("test"));
   advance_block();
@@ -2951,7 +2918,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestringSameBlock)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 {
   insert(42);
   invoke_method(1, uint32_t{42});
@@ -2972,7 +2939,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 // Starts from nonempty queue, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 {
   insert(42);
 
@@ -3019,7 +2986,7 @@ TEST_P(RCQDeleteTest, ReplaceTwiceStillConsumesNonEmptyQueue)
 
 // Peek returns the next entry without advancing the cursor.
 // A subsequent consume should return the same entry.
-TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
+TEST_F(RCQDeleteTest, PeekThenConsumeSameEntry)
 {
   insert(42);
   invoke_method(24, uint32_t{42}); // peek verifies value
@@ -3032,7 +2999,7 @@ TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
 
 // Multiple peeks without intervening consume return the same entry,
 // confirming the cursor doesn't advance on peek.
-TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
+TEST_F(RCQDeleteTest, PeekTwiceReturnsSameEntry)
 {
   insert(42);
   insert(99);
@@ -3045,7 +3012,7 @@ TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
 
 // After delete+recreate, peek should see entries from the new queue.
 // Verifies peek state is reset by delete.
-TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
+TEST_F(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 {
   insert(42);
   invoke_method(28, uint32_t{42}, uint32_t{99});
@@ -3062,7 +3029,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 
 // After delete, peek can still observe a concurrent entry, but it does not
 // recreate the queue or consume the entry. The pending delete still conflicts.
-TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
+TEST_F(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 {
   insert(42);
   insert(99);
@@ -3079,7 +3046,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 
 // A delete inside a reverted try_invoke frame should leave the queue intact.
 // Entries remain consumable after the revert.
-TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
+TEST_F(RCQDeleteTest, RevertedDeletePreservesQueue)
 {
   insert(42);
   invoke_method_orchestrated(26, uint32_t{42});
@@ -3091,7 +3058,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
 
 // Same as RevertedDeletePreservesQueue but entries come from a past block.
 // Verifies reverting a delete works for committed entries.
-TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
+TEST_F(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 {
   insert(42);
 
@@ -3106,7 +3073,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 
 // Insert a self entry, then try_invoke a delete that reverts.
 // Both self-inserted and concurrent entries remain consumable.
-TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
+TEST_F(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 {
   insert(99); // concurrent
   invoke_method_orchestrated(29, uint32_t{42}, uint32_t{99});
@@ -3120,7 +3087,7 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 // made it later reverts. The child ran at a third address, so nothing here is
 // reentrant: orchestrator -> kContractAddress (reverts) -> kContractAddress3
 // (the TryInvoke'd insert).
-TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
+TEST_F(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
 {
   invoke_method_orchestrated(69, uint32_t{42});
 
@@ -3137,7 +3104,7 @@ TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
 // A successful delete inside a try_invoke frame should fail to acquire locks
 // when a concurrent transaction has inserted into the same queue.
 // The delete is reverted due to conflict, and the entry remains consumable.
-TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
+TEST_F(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
   invoke_method_orchestrated(32, uint32_t{42});
@@ -3152,7 +3119,7 @@ TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 // transaction commits it for real. A second transaction in the same block
 // consumes the entry retrocausally, proving the insert landed in the DB
 // rather than only in the child frame.
-TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
+TEST_F(RCQDeleteTest, TryInvokeInsertCommits)
 {
   invoke_method_orchestrated(70, uint32_t{0}, uint32_t{42}, uint32_t{0});
   invoke_method(1, uint32_t{42});
@@ -3165,18 +3132,9 @@ TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
 // A consume of a past-block entry inside a successful TryInvoke commits: the
 // entry is gone from the queue after the block. This is the flow that pushes
 // the item's consume delta twice -- once at the TryInvoke probe and again,
-// cumulatively, at root commit.
-//
-// Skipped on MockDB: the re-push is idempotent on HogDb, but MockDB rejects
-// this transaction's second consume push as a competing consumer (see
-// mockdb/KNOWN_ISSUES.md).
-TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
+// cumulatively, at root commit. The re-push is idempotent.
+TEST_F(RCQDeleteTest, TryInvokeConsumeCommits)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   insert(42);
 
   advance_block();
@@ -3192,13 +3150,8 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
 // in the same block, so the consume is a nondeterministic observation made
 // inside the TryInvoke'd frame and then committed through the probe's
 // mid-transaction subtransaction push.
-TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
+TEST_F(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   insert(42); // concurrent
   invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
 
@@ -3211,7 +3164,7 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
 // concurrent transaction's delete holds the queue's exclusive lock, so a
 // TryInvoke'd insert fails the probe and comes back Fault instead of
 // committing.
-TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
+TEST_F(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
 {
   insert(42);
 
@@ -3230,7 +3183,7 @@ TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
 // The consume counterpart: the child consumes a past-block entry successfully
 // in-frame (against the transaction's snapshot, where the concurrent delete
 // is not visible), and the lock probe then conflicts with that delete.
-TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
+TEST_F(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
 {
   insert(42);
 
@@ -3247,7 +3200,7 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
 
 // After delete+recreate, entries inserted in the same block should be
 // lexicographically sorted when consumed in a later block.
-TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
+TEST_F(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
 {
   // Block 1: insert entries
   insert(5);
@@ -3275,7 +3228,7 @@ TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
 }
 
 // Deleting a queue destroys ALL pending entries across multiple past blocks.
-TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
+TEST_F(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 {
   // Block 1: insert(10)
   insert(10);
@@ -3302,7 +3255,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
 // A failed inner invoke that inserts an entry should leave no trace — the
 // queue should remain empty.
-TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
+TEST_F(RCQDeleteTest, RevertedInsertDiscardsEntry)
 {
   invoke_method_orchestrated(36, uint32_t{42});
 
@@ -3316,7 +3269,7 @@ TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 
 // After a reverted inner insert, a subsequent successful insert should work
 // normally. Only the successful entry is consumable.
-TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
+TEST_F(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 {
   invoke_method_orchestrated(37, uint32_t{42}, uint32_t{99});
 
@@ -3327,7 +3280,7 @@ TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 
 // A reverted inner insert does not affect concurrent entries from other
 // transactions.
-TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
+TEST_F(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 {
   insert(99); // concurrent
   invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
@@ -3338,7 +3291,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 }
 
 // A reverted inner insert does not affect entries from past blocks.
-TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
+TEST_F(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 {
   insert(99);
 
@@ -3353,7 +3306,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 
 // A failed inner invoke that consumes an entry should leave the entry
 // available for a subsequent consume.
-TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
+TEST_F(RCQDeleteTest, RevertedConsumePreservesEntry)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(38, uint32_t{42});
@@ -3364,7 +3317,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
 }
 
 // Same as RevertedConsumePreservesEntry but the entry comes from a past block.
-TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
+TEST_F(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 {
   insert(42);
 
@@ -3378,7 +3331,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 }
 
 // After a reverted inner consume, peek should still see the entry.
-TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
+TEST_F(RCQDeleteTest, RevertedConsumeThenPeek)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(39, uint32_t{42});
@@ -3393,7 +3346,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 }
 
 // An entry survives multiple consecutive reverted inner consume attempts.
-TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
+TEST_F(RCQDeleteTest, SequentialRevertedConsumes)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(40, uint32_t{42});
@@ -3405,7 +3358,7 @@ TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 
 // A failed inner invoke that both consumes AND inserts should revert both: the
 // original entry is available, the inserted entry is gone.
-TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
+TEST_F(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(41, uint32_t{42}, uint32_t{99});
@@ -3419,7 +3372,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 // separate block. This exercises DeletionLock::write_committed_change removing
 // an RCQ trie entry — the trie type must match kRetrocausalQueue used by
 // RetrocausalQueueLock, not some other value.
-TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
+TEST_F(RCQDeleteTest, PureDeleteOfCommittedRCQ)
 {
   // Block 1: insert an entry so the RCQ is written to the DAO
   insert(42);
@@ -3443,7 +3396,7 @@ TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
 // inflated live_entries/max_live_block_num. Then deletes it and inserts into an
 // RCQ at the same key. Verifies the system doesn't inherit the bogus metadata
 // from the bytestring payload -- the RCQ should be treated as fresh.
-TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
+TEST_F(RCQDeleteTest, BogusMetadataInBytestringIgnored)
 {
   // Construct a RetrocausalQueueMetadata with non-zero fields
   RetrocausalQueueMetadata bogus_meta{};
@@ -3479,7 +3432,7 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
 
 // Same block as above: the delete in tx2 lets it consume tx1's entry without
 // ever reading the bogus bytes as queue metadata.
-TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnoredSameBlock)
+TEST_F(RCQDeleteTest, BogusMetadataInBytestringIgnoredSameBlock)
 {
   RetrocausalQueueMetadata bogus_meta{};
   bogus_meta.live_entries = 9999;
@@ -3508,12 +3461,8 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnoredSameBlock)
 // purely deleted, the underlying block records in the DAO are also removed.
 // This catches a storage leak where DeletionLock::write_committed_change only
 // removes the metadata record but leaves orphaned block records behind.
-TEST_P(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
+TEST_F(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert an entry
   insert(10);
 
@@ -3561,7 +3510,7 @@ TEST_P(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
 // Delete an RCQ with multiple past blocks, then in a later block re-insert.
 // The new queue should contain only the newly inserted entry — none of the
 // old entries should survive.
-TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
+TEST_F(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
 {
   // Block 1: insert entries that become past block entries
   insert(10);
@@ -3620,12 +3569,8 @@ TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
 // the consumed block records are actually pruned from RAMDB.  Existing tests
 // check metadata (live_entries) but not block-level RAMDB state for pure
 // consume (no delete involved).
-TEST_P(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
+TEST_F(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert 2 entries → creates block 1.
   insert(10);
   insert(20);
@@ -3670,12 +3615,8 @@ TEST_P(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
 // cleans up old RCQ block records.  After delete, old blocks are gone.
 // After recreate in a later block, the new RCQ creates its own block 1,
 // which should not be confused with the old block 1.
-TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
+TEST_F(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert entries → creates block 1.
   insert(10);
   insert(20);
@@ -3722,7 +3663,7 @@ TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
       << "No block 2 should exist (old ghost or new)";
 }
 
-TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
+TEST_F(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
 {
   auto make_tx = [this](Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3730,7 +3671,7 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
                            Invocation{.invoked_address = kContractAddress,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3743,13 +3684,13 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    insert_proposal_data = handler.get_proposal_data();
+    insert_proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    delete_recreate_proposal_data = handler.get_proposal_data();
+    delete_recreate_proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(
         delete_recreate_proposal_data.observed_queue_entry_sequence.size(), 1U);
@@ -3774,7 +3715,7 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
+TEST_F(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3782,7 +3723,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3804,7 +3745,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -3830,7 +3771,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3838,7 +3779,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3862,7 +3803,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -3886,7 +3827,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
+TEST_F(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3894,7 +3835,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3920,7 +3861,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -3944,7 +3885,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
+TEST_F(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3952,7 +3893,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3978,7 +3919,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -4002,7 +3943,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -4010,7 +3951,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4044,7 +3985,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -4068,7 +4009,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -4076,7 +4017,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4097,7 +4038,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -4121,19 +4062,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
     return Transaction{.invocation =
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4154,7 +4091,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -4191,19 +4128,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
     return Transaction{.invocation =
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4226,7 +4159,7 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
@@ -4250,7 +4183,7 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
 // conflicts with a concurrent insert and logs a false nondeterministic bit;
 // validation must consume that bit and fail the child frame the same way,
 // without probing any locks itself.
-TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
+TEST_F(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 {
   // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
@@ -4262,13 +4195,13 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    insert_pd = handler.get_proposal_data();
+    insert_pd = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    orch_pd = handler.get_proposal_data();
+    orch_pd = handler.extract_proposal_data();
     // Two bits: the TryInvoke lock probe (false, the conflict) and the
     // consume of the concurrent entry, which is also observed.
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
@@ -4295,17 +4228,11 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 // A successful TryInvoke under validation mode. The proposal's probe succeeds
 // and logs a true bit; validation consumes it, checks the child's queue
 // observations against its item views, and bumps the frame's TryInvoke depth
-// (note_try_invoke_success) instead of pushing a subtransaction.
-//
-// Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
-// proposal-phase commit re-pushes the consume delta the probe already pushed.
-TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
+// (note_try_invoke_success) instead of pushing a subtransaction. As in
+// TryInvokeConsumeCommits, the proposal-phase commit re-pushes the consume
+// delta the probe already pushed.
+TEST_F(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
   // Method 70: TryInvoke co_await consume(42), expecting the frame to commit
   // (Return).
@@ -4317,13 +4244,13 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    insert_pd = handler.get_proposal_data();
+    insert_pd = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    orch_pd = handler.get_proposal_data();
+    orch_pd = handler.extract_proposal_data();
     // Two bits: the consume of the concurrent entry and the TryInvoke lock
     // probe (true, no conflict).
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
@@ -4357,12 +4284,8 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
 // rejects as kInvalidExecutorBehavior -> kRPCUnrecoverable. A correct executor
 // must never produce it, so the transaction must not commit unrecoverably. (A
 // deterministic per-tx rejection during invoke is a safe outcome and allowed.)
-TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
+TEST_F(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "kInvalidExecutorBehavior guard is HogDb-specific";
-  }
-
   // Committed in its own tx; observable as a concurrent entry to the next tx.
   insert(77);
 
@@ -4376,7 +4299,7 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
                   .invocation =
                       Invocation{.invoked_address = kContractAddress2,
                                  .entrypoint = entrypoint_from_method_id(67),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = x23::serialize(uint32_t{77},
                                                             uint32_t{42})},
                   .uniquifier = make_new_uniquifier(),
@@ -4403,10 +4326,5 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQDeleteTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

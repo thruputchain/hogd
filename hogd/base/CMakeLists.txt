@@ -24,8 +24,10 @@ target_link_libraries(
 )
 
 add_library(base_test_objects OBJECT
+  arc_test.cc
   atomic_test.cc
   base_test.cc
+  base58_test.cc
   bits_test.cc
   block_id_test.cc
   chunk_items_test.cc
@@ -37,6 +39,7 @@ add_library(base_test_objects OBJECT
   io_test.cc
   json_test.cc
   network_config_params_test.cc
+  os_test.cc
   perthread_arc_test.cc
   perthread_test.cc
   rc_bytes_test.cc

@@ -10,7 +10,9 @@
 #include <initializer_list>
 #include <latch>
 #include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -22,6 +24,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
@@ -30,11 +33,14 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -55,6 +61,7 @@
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/shared.h"
 #include "hogd/hog_mempool/test/infra.h"
+#include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/http/http.h"
 #include "hogd/http/http_test.h"
@@ -69,6 +76,7 @@
 #include "proposal_hash.h"
 #include "rpc_types.hh"
 #include "sched_coord.hh"
+#include "sched_db.hh"
 #include "sched_event.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
@@ -149,14 +157,24 @@ commit_block(MempoolTestInfra &server, BlockID block_id, const DbTip &parent,
       block_id, consensus_value(parent, proposal))();
 }
 
+// The run of one empty chunk a block that changed no auth data arrives as.
+KeyChangeChunk
+empty_height(BlockHeight height)
+{
+  return KeyChangeChunk{.height = height,
+                        .chunk_index = 0,
+                        .chunk_count = 1,
+                        .changes = {}};
+}
+
 } // namespace
 
 TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
 {
   ProposalTxs txs{};
-  txs.hash.segment_tokens = {1, 2};
-  txs.hash.segment_bytes = {4, 8};
-  txs.hash.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3};
+  txs.signed_hash.segment_tokens = {1, 2};
+  txs.signed_hash.segment_bytes = {4, 8};
+  txs.signed_hash.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3};
   txs.nondeterministic_data.segment_tokens = {1};
   txs.nondeterministic_data.segment_bytes = {4};
   txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
@@ -174,10 +192,19 @@ TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
 {
   MempoolCoordinatorRpc coordinator(/*db_rpc=*/nullptr, /*auth_rpc=*/nullptr,
                                     NetworkHash{}, /*mempool_tx_size_limit=*/0);
+  SignedTransactionHashBatch signed_hashes;
+  signed_hashes.resize(2);
+
+  auto result = coordinator.schedcoord_lookup_transactions(signed_hashes)();
+
+  ASSERT_EQ(result.size(), signed_hashes.size());
+  EXPECT_FALSE(result[0]);
+  EXPECT_FALSE(result[1]);
+
   TransactionHashBatch hashes;
   hashes.resize(2);
 
-  auto result = coordinator.schedcoord_lookup_transactions(hashes)();
+  result = coordinator.lookup_transactions_by_body(hashes)();
 
   ASSERT_EQ(result.size(), hashes.size());
   EXPECT_FALSE(result[0]);
@@ -600,6 +627,63 @@ TEST(Mempool, ShutdownBeforeReadyIsNoop)
   coordinator.schedulercoord_shutdown()();
 }
 
+// An auth server subscribes to the db before it registers, so it needs the
+// shards and the network hash without registering; registering is what lets
+// the mempool start serving the coordinator (issue #1927).
+TEST(MempoolAuthRpc, GetAuthInfoDoesNotRegisterAuth)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+  const ShardCard shard{.protocol = version::kHogdProtocol(),
+                        .address_for_auth = "127.0.0.1:3"};
+  registration.register_shard(shard);
+  NetworkHash network_hash{};
+  network_hash[0] = 7;
+  registration.set_network_hash(network_hash);
+
+  IntroAuthResult auth_info =
+      MempoolAuthRpc::mempoolauth_get_auth_info(version::kHogdProtocol())();
+  ASSERT_EQ(auth_info.outcome(), IntroAuthOutcome::kSuccess);
+  ASSERT_EQ(auth_info.success().shards.size(), 1U);
+  EXPECT_EQ(auth_info.success().shards[0], shard);
+  EXPECT_EQ(auth_info.success().network_hash, network_hash);
+  EXPECT_FALSE(registration.auth_registered(/*card=*/nullptr));
+
+  IntroAuthResult wrong_protocol =
+      MempoolAuthRpc::mempoolauth_get_auth_info(ProtocolCommit{})();
+  EXPECT_EQ(wrong_protocol.outcome(), IntroAuthOutcome::kFailure);
+}
+
+// Only one auth server is supported. The mempool builds its auth client from
+// the first registered card and never rebuilds it, so a second registration
+// must fail rather than replace the card (issue #2816).
+TEST(MempoolAuthRpc, SecondIntroAuthFails)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  const AuthCard first{.protocol = version::kHogdProtocol(),
+                       .upid = {},
+                       .address_for_db = "127.0.0.1:1",
+                       .address_for_mempool = "127.0.0.1:2"};
+  IntroAuthResult first_intro = MempoolAuthRpc::mempoolauth_intro_auth(first)();
+  ASSERT_EQ(first_intro.outcome(), IntroAuthOutcome::kSuccess);
+
+  const AuthCard second{.protocol = version::kHogdProtocol(),
+                        .upid = {},
+                        .address_for_db = "127.0.0.1:3",
+                        .address_for_mempool = "127.0.0.1:4"};
+  IntroAuthResult second_intro =
+      MempoolAuthRpc::mempoolauth_intro_auth(second)();
+  EXPECT_EQ(second_intro.outcome(), IntroAuthOutcome::kFailure);
+
+  AuthCard registered;
+  ASSERT_TRUE(registration.auth_registered(&registered));
+  EXPECT_EQ(registered, first);
+}
+
 TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 {
   MempoolAuthRpc auth_rpc;
@@ -607,11 +691,11 @@ TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
   std::vector<BlockHeight> callback_height;
   std::latch update_finished(1);
 
-  // We run [auth_rpc.mempoolauth_auth_data_changed()] in a separate thread as
-  // it blocks until a callback is registered.
+  // We run [auth_rpc.mempoolauth_auth_data_changed_chunk()] in a separate
+  // thread as it blocks until a callback is registered.
   [](MempoolAuthRpc &auth_rpc, std::latch &update_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip));
     update_finished.count_down();
   }(auth_rpc, update_finished);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
@@ -619,14 +703,15 @@ TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
 
   auth_rpc.register_callback(
       [&callback_height](BlockHeight height,
-                         KeyChangeBatch /*key_changes*/) -> x23::Async<void> {
+                         ChunkedVector<KeyChangeBatch> /*key_changes*/)
+          -> x23::Async<void> {
         callback_height.push_back(height);
         co_return;
       },
       [] {})();
 
   update_finished.wait();
-  auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+  auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip + 1))();
   EXPECT_EQ(callback_height.size(), 2);
   EXPECT_EQ(callback_height[0], kDbTip);
   EXPECT_EQ(callback_height[1], kDbTip + 1);
@@ -640,26 +725,26 @@ TEST(MempoolAuthRpc, StartupUpdatesDoNotCoalesce)
   x23::CoroLock callback_height_lock;
   std::latch updates_finished(2);
 
-  // We run [auth_rpc.mempoolauth_auth_data_changed()] in separate threads as
-  // they block until a callback is registered.
+  // We run [auth_rpc.mempoolauth_auth_data_changed_chunk()] in separate threads
+  // as they block until a callback is registered.
   [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip, KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip));
     updates_finished.count_down();
   }(auth_rpc, updates_finished);
   [](MempoolAuthRpc &auth_rpc, std::latch &updates_finished) -> x23::Detached {
     co_await default_threadpool().bg();
-    co_await auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1,
-                                                    KeyChangeBatch{});
+    co_await auth_rpc.mempoolauth_auth_data_changed_chunk(
+        empty_height(kDbTip + 1));
     updates_finished.count_down();
   }(auth_rpc, updates_finished);
   std::this_thread::sleep_for(std::chrono::milliseconds(10));
   EXPECT_TRUE(callback_height.empty());
 
   auth_rpc.register_callback(
-      [&callback_height, &callback_height_lock](BlockHeight height,
-                                                KeyChangeBatch /*key_changes*/)
-          -> x23::Async<void> {
+      [&callback_height, &callback_height_lock](
+          BlockHeight height,
+          ChunkedVector<KeyChangeBatch> /*key_changes*/) -> x23::Async<void> {
         x23::CoroGuard cg;
         co_await cg(callback_height_lock);
 
@@ -684,7 +769,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   std::atomic<size_t> callback_count = 0;
 
   auth_rpc.register_callback(
-      [&](BlockHeight, KeyChangeBatch) -> x23::Async<void> {
+      [&](BlockHeight, ChunkedVector<KeyChangeBatch>) -> x23::Async<void> {
         callback_count.fetch_add(1, std::memory_order_relaxed);
         callback_started.count_down();
         allow_callback_finish.wait();
@@ -693,7 +778,7 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
       [] {})();
 
   std::thread callback_thread([&] {
-    auth_rpc.mempoolauth_auth_data_changed(kDbTip + 1, KeyChangeBatch{})();
+    auth_rpc.mempoolauth_auth_data_changed_chunk(empty_height(kDbTip + 1))();
   });
   callback_started.wait();
 
@@ -713,6 +798,87 @@ TEST(MempoolAuthRpc, UnregisterDrainsAdmittedCallbacks)
   EXPECT_EQ(unregistered.wait_for(std::chrono::seconds(1)),
             std::future_status::ready);
   unregister_thread.join();
+}
+
+// The auth server forwards consecutive heights concurrently, so a height can
+// reach the coordinator before the previous one has been applied. It waits
+// for that height instead of failing the mempool.
+TEST(Mempool, AuthDataCallbackWaitsForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  // The fixture commits genesis and the ceremony; wait for the height-1
+  // callback before injecting later heights.
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
+
+  std::promise<void> later_result;
+  std::future<void> later_applied = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  EXPECT_EQ(later_applied.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+  EXPECT_EQ(coord.auth_data_height(), tip);
+
+  coord.auth_data_changed(tip + 1, KeyChangeBatch{})();
+  ASSERT_EQ(later_applied.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip + 2);
+  coord.set_auth_data_wait_test_hook({});
+}
+
+// Once the auth callback is disconnected, the earlier height a waiting callback
+// needs may never be admitted, so the waiting callback gives up rather than
+// keep the coordinator from draining.
+TEST(Mempool, DisconnectReleasesAuthDataCallbackWaitingForEarlierHeight)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  coord.wait_for_block_commit(/*expected_height=*/1)();
+  const BlockHeight tip = coord.auth_data_height();
+  std::atomic<bool> later_waiting = false;
+  std::promise<void> waiting_result;
+  std::future<void> waiting = waiting_result.get_future();
+  coord.set_auth_data_wait_test_hook([&](BlockHeight height) {
+    if (height == tip + 2 && !later_waiting.exchange(true)) {
+      waiting_result.set_value();
+    }
+  });
+
+  std::promise<void> later_result;
+  std::future<void> later_returned = later_result.get_future();
+  std::thread later_thread([&] {
+    coord.auth_data_changed(tip + 2, KeyChangeBatch{})();
+    later_result.set_value();
+  });
+  // On failure, returning with [later_thread] still joinable aborts the test
+  // instead of hanging in join().
+  ASSERT_EQ(waiting.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  EXPECT_EQ(later_returned.wait_for(std::chrono::milliseconds(100)),
+            std::future_status::timeout);
+
+  coord.disconnect_auth_callback()();
+  ASSERT_EQ(later_returned.wait_for(std::chrono::seconds(10)),
+            std::future_status::ready);
+  later_thread.join();
+  EXPECT_EQ(coord.auth_data_height(), tip);
+  coord.set_auth_data_wait_test_hook({});
 }
 
 TEST(Mempool, ExecutorCleanupFanoutDrainsBeforeRethrowingFirstException)
@@ -844,9 +1010,9 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
     EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
                                     parsed_txs, kNoBatchSizeLimit)());
 
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                    kNoBatchSizeLimit)());
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                    signed_tx_hashes, kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
@@ -859,8 +1025,8 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
       EXPECT_EQ(parsed_txs.size(), 1UL);
       EXPECT_EQ(parsed_txs[0], txs[0]);
 
-      EXPECT_EQ(tx_hashes.size(), 1UL);
-      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+      EXPECT_EQ(signed_tx_hashes.size(), 1UL);
+      EXPECT_EQ(signed_tx_hashes[0], sha256(parsed_txs[0]));
 
       EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
     }
@@ -871,7 +1037,7 @@ TEST(Mempool, SubmitUnvettedDuplicateRejectedByHogDb)
       // tx with error code [ExecResultTxNonDeterministicError]. The mempool
       // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
-      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(signed_tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
@@ -991,6 +1157,71 @@ TEST(Mempool, SubmitUnvettedCapacityCountsSameRequestDuplicateOnce)
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 }
 
+// A nominated tx leaves the runqueue but stays cached until its block commits,
+// so it no longer counts toward the capacity check's [Scheduler::size()].
+// Resubmitting it once the runqueue is full must still find it pending: the
+// duplicate is admitted without being requeued or consuming a slot, while a
+// new tx is retryable.
+TEST(Mempool, SubmitUnvettedCapacityAdmitsNominatedDuplicate)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  MempoolTestInfra server(/*skip_genesis_block=*/false,
+                          /*mempool_tx_size_limit=*/1);
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+
+  // Nominate txs[0]: scheduling takes it off the runqueue but keeps it cached.
+  SchedGatewaySubmitOutcomeBatch outcomes =
+      gateway.schedgateway_submit_tx_batch(
+          t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  // Fill the runqueue slot that the nomination freed.
+  outcomes = gateway.schedgateway_submit_tx_batch(
+      t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+
+  // No slots remain. The nominated duplicate is still pending, so it is
+  // admitted without being requeued; the new tx is retryable.
+  outcomes = gateway.schedgateway_submit_tx_batch(
+      t_to_parallel_batch(SignedTransactionBatch{txs[0], txs[2]})())();
+  ASSERT_EQ(outcomes.size(), 2UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(outcomes[1],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
+  EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+
+  // Commit cleanup removes the nominated tx from the cache once and leaves
+  // txs[1] queued.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, db_tip.value.proposal_header.block_height + 1);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+}
+
 TEST(Mempool, SubmitVetted)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1060,9 +1291,9 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
     EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
                                     parsed_txs, kNoBatchSizeLimit)());
 
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                    kNoBatchSizeLimit)());
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                    signed_tx_hashes, kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
@@ -1075,8 +1306,8 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
       EXPECT_EQ(parsed_txs.size(), 1UL);
       EXPECT_EQ(parsed_txs[0], txs[0]);
 
-      EXPECT_EQ(tx_hashes.size(), 1UL);
-      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+      EXPECT_EQ(signed_tx_hashes.size(), 1UL);
+      EXPECT_EQ(signed_tx_hashes[0], sha256(parsed_txs[0]));
 
       EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
     }
@@ -1087,7 +1318,7 @@ TEST(Mempool, SubmitVettedDuplicateRejectedByHogDb)
       // tx with error code [ExecResultTxNonDeterministicError]. The mempool
       // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
-      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(signed_tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
@@ -1150,13 +1381,13 @@ TEST(Mempool, LookupBorrowsTheScheduledTransactionInsteadOfCopyingIt)
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
   ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
 
-  const TransactionHash present = sha256(txs[0].tx);
-  const TransactionHash absent = sha256(txs[1].tx);
+  const SignedTransactionHash present = sha256(txs[0]);
+  const SignedTransactionHash absent = sha256(txs[1]);
   ASSERT_NE(present, absent);
 
   // A repeated hash and a miss, so both the sharing and the absent-slot paths
   // are covered and the reply is checked to stay positional.
-  TransactionHashBatch hashes;
+  SignedTransactionHashBatch hashes;
   hashes.push_back(present);
   hashes.push_back(absent);
   hashes.push_back(present);
@@ -1175,7 +1406,7 @@ TEST(Mempool, LookupBorrowsTheScheduledTransactionInsteadOfCopyingIt)
   // copies of it.  This is the regression guard: reintroducing the deep copy
   // makes these addresses differ.
   const SignedTransaction *scheduled =
-      server.mempool_coord_rpc().scheduler()->find_tx(present).get();
+      server.mempool_coord_rpc().scheduler()->find_signed_tx(present).get();
   ASSERT_NE(scheduled, nullptr);
   EXPECT_EQ(result[0].get(), scheduled);
   EXPECT_EQ(result[2].get(), scheduled);
@@ -1206,12 +1437,12 @@ TEST(Mempool, Propose)
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
-                            tx_hashes, kNoBatchSizeLimit)());
-    EXPECT_EQ(tx_hashes.size(), 1UL);
-    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(
+        res.proposed_block().proposal.transactions.signed_hash,
+        signed_tx_hashes, kNoBatchSizeLimit)());
+    EXPECT_EQ(signed_tx_hashes.size(), 1UL);
+    EXPECT_EQ(signed_tx_hashes[0], sha256(parsed_txs[0]));
   }
 }
 
@@ -1244,18 +1475,18 @@ TEST(Mempool, NominateBatch)
     std::set<SignedTransaction> txs_set(txs.begin(), txs.end());
     EXPECT_EQ(parsed_txs_set, txs_set);
 
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(
-        parallel_batch_to_t(res.proposed_block().proposal.transactions.hash,
-                            tx_hashes, kNoBatchSizeLimit)());
-    EXPECT_EQ(tx_hashes.size(), txs.size());
-    std::set<TransactionHash> parsed_tx_hashes_set(tx_hashes.begin(),
-                                                   tx_hashes.end());
-    std::set<TransactionHash> tx_hashes_set;
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(
+        res.proposed_block().proposal.transactions.signed_hash,
+        signed_tx_hashes, kNoBatchSizeLimit)());
+    EXPECT_EQ(signed_tx_hashes.size(), txs.size());
+    std::set<SignedTransactionHash> parsed_signed_tx_hashes_set(
+        signed_tx_hashes.begin(), signed_tx_hashes.end());
+    std::set<SignedTransactionHash> signed_tx_hashes_set;
     for (const SignedTransaction &tx : txs) {
-      EXPECT_TRUE(tx_hashes_set.insert(sha256(tx.tx)).second);
+      EXPECT_TRUE(signed_tx_hashes_set.insert(sha256(tx)).second);
     }
-    EXPECT_EQ(parsed_tx_hashes_set, tx_hashes_set);
+    EXPECT_EQ(parsed_signed_tx_hashes_set, signed_tx_hashes_set);
   }
 }
 
@@ -1369,9 +1600,9 @@ TEST(Mempool, NominateTxWithError)
     EXPECT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
                                     parsed_txs, kNoBatchSizeLimit)());
 
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                    kNoBatchSizeLimit)());
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                    signed_tx_hashes, kNoBatchSizeLimit)());
 
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
@@ -1384,8 +1615,8 @@ TEST(Mempool, NominateTxWithError)
       EXPECT_EQ(parsed_txs.size(), 1UL);
       EXPECT_EQ(parsed_txs[0], txs[0]);
 
-      EXPECT_EQ(tx_hashes.size(), 1UL);
-      EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+      EXPECT_EQ(signed_tx_hashes.size(), 1UL);
+      EXPECT_EQ(signed_tx_hashes[0], sha256(parsed_txs[0]));
 
       EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
     }
@@ -1396,7 +1627,7 @@ TEST(Mempool, NominateTxWithError)
       // tx with error code [ExecResultTxNonDeterministicError]. The mempool
       // should then discard the tx and not include it in the nominated block.
       EXPECT_TRUE(parsed_txs.empty());
-      EXPECT_TRUE(tx_hashes.empty());
+      EXPECT_TRUE(signed_tx_hashes.empty());
       EXPECT_TRUE(tx_nondeterministic_data.empty());
     }
 
@@ -1412,18 +1643,15 @@ TEST(Mempool, NominateTxWithError)
             kNumBlocks + 1);
 }
 
-// This test does the following to exercise a failed CHECK that was later fixed:
+// Resubmission must not requeue a nominated tx from an excluded account:
 //   1. Submit an affordable tx (txs[0]) and one whose gas_limit exceeds the
 //      account's balance (txs[1]).
 //   2. Nominate: txs[0] is included in the block; txs[1] is over budget, so the
 //      account is removed from [ready_accounts_] while the nomination is
 //      pending.
-//   3. The client resubmits txs[0]. It is added back to the scheduler runqueue;
-//      the account is *not* added back to [ready_accounts_].
-//   4. Commit the nominated block. [remove_from_scheduler()] removes the
-//      account's txs from the runqueue. In that function, [account_is_ready()]
-//      returns false and [ready_accounts_.erase()] returns 0. Before the fix,
-//      [ready_accounts_.erase()] would trigger a CHECK.
+//   3. The client resubmits txs[0]. It remains cached for the nomination and
+//      stays off the runqueue.
+//   4. Commit the nominated block and remove txs[0] from the cache.
 TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -1450,16 +1678,24 @@ TEST(Mempool, CommitOfExcludedAccountTxSucceeds)
   auto res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 3. Submit txs[0] (the affordable tx) again.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
 
   // 4. Commit the nominated block. [remove_from_scheduler()] removes txs[0]
-  // from the runqueue and attempts to remove the account from
-  // [ready_accounts_].
+  // from the cache.
   auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -1497,11 +1733,14 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
   const Proposal proposal = res_nominate.proposed_block().proposal;
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  // The resubmit lands on the excluded account's runqueue.
+  // The resubmitted tx remains cached for the nomination, off the runqueue.
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
-  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_NE(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // Commit the validated block, not the nominated one.
   auto res_validate =
@@ -1511,9 +1750,13 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
             SchedulerValidationResult::SchedulerValidationOK);
   ASSERT_NE(res_validate.block().block_id,
             res_nominate.proposed_block().block_id);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   ASSERT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      db_tip.value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
   const SchedulerTransactionOutcome outcome =
       server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
           {sha256(txs[0].tx)})()[0];
@@ -1533,12 +1776,12 @@ TEST(Mempool, ValidatedCommitOfExcludedAccountTxSucceeds)
   res_nominate = propose_block(server, db_tip);
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
-  TransactionHashBatch nominated_hashes;
+  SignedTransactionHashBatch nominated_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.proposed_block().proposal.transactions.hash,
+      res_nominate.proposed_block().proposal.transactions.signed_hash,
       nominated_hashes, kNoBatchSizeLimit)());
   ASSERT_EQ(nominated_hashes.size(), 1UL);
-  EXPECT_EQ(nominated_hashes[0], sha256(txs[2].tx));
+  EXPECT_EQ(nominated_hashes[0], sha256(txs[2]));
 }
 
 TEST(Mempool, BlockHeightsIncrement)
@@ -1598,12 +1841,12 @@ TEST(Mempool, NominateCommit)
     EXPECT_EQ(parsed_txs.size(), 1UL);
     EXPECT_EQ(parsed_txs[0], txs[0]);
 
-    TransactionHashBatch tx_hashes;
+    SignedTransactionHashBatch signed_tx_hashes;
     EXPECT_TRUE(parallel_batch_to_t(
-        res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
-        kNoBatchSizeLimit)());
-    EXPECT_EQ(tx_hashes.size(), 1UL);
-    EXPECT_EQ(tx_hashes[0], sha256(parsed_txs[0].tx));
+        res_nominate.proposed_block().proposal.transactions.signed_hash,
+        signed_tx_hashes, kNoBatchSizeLimit)());
+    EXPECT_EQ(signed_tx_hashes.size(), 1UL);
+    EXPECT_EQ(signed_tx_hashes[0], sha256(parsed_txs[0]));
   }
 
   auto res_commit =
@@ -1699,7 +1942,182 @@ TEST(Mempool, CommitRecordsLatencyHistograms)
   EXPECT_EQ(metrics.block_period_seconds.count(), 1UL);
 }
 
-TEST(Mempool, NewlyDeployedContractHogCount)
+// Block size histograms see exactly the committed transactions, whichever
+// cache the committed block came from, and never a nomination failure.
+TEST(Mempool, CommitRecordsBlockSizeHistograms)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  // The fixture clears the metrics registry, then commits the genesis
+  // ceremony through the ordinary commit path.
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+  MempoolMetrics &metrics = MempoolMetrics::instance();
+  ASSERT_EQ(metrics.block_transactions.count(), 1UL);
+  ASSERT_EQ(metrics.block_transaction_bytes.count(), 1UL);
+
+  // Dashboards and alerts query these names and edges; 2 MiB and 4 MiB bracket
+  // the firehose record cap.
+  {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    const char *const bytes_help =
+        "# HELP mempool_block_transaction_bytes XDR size in bytes of the "
+        "signed transactions in each successfully committed block. "
+        "Transaction bytes only, not the block's firehose record";
+    for (const char *series :
+         {"mempool_block_transactions_bucket{le=\"1\"} ",
+          "mempool_block_transactions_bucket{le=\"1000000\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"1024\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"2097152\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"4194304\"} ",
+          "mempool_block_transaction_bytes_bucket{le=\"536870912\"} ",
+          bytes_help}) {
+      EXPECT_NE(dump.find(series), std::string::npos) << series;
+    }
+  }
+
+  double tx_count_sum = metrics.block_transactions.sum();
+  double tx_bytes_sum = metrics.block_transaction_bytes.sum();
+  auto expect_recorded = [&](size_t samples, size_t tx_count, size_t tx_bytes) {
+    tx_count_sum += static_cast<double>(tx_count);
+    tx_bytes_sum += static_cast<double>(tx_bytes);
+    EXPECT_EQ(metrics.block_transactions.count(), samples);
+    EXPECT_EQ(metrics.block_transaction_bytes.count(), samples);
+    EXPECT_EQ(metrics.block_transactions.sum(), tx_count_sum);
+    EXPECT_EQ(metrics.block_transaction_bytes.sum(), tx_bytes_sum);
+  };
+
+  ValidatorID validator_id{};
+  // Commit a block we validated, abandoning our own nomination of it.
+  {
+    rpc.schedulercoord_submit_vetted(validator_id,
+                                     t_to_parallel_batch(
+                                         SignedTransactionBatch{txs[0]})())();
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    const Proposal proposal = nomination.proposed_block().proposal;
+    const SchedulerValidationResult validation =
+        rpc.schedulercoord_validate_block(tip.db_tip().id, proposal)();
+    ASSERT_EQ(validation.outcome(),
+              SchedulerValidationResult::SchedulerValidationOK);
+    ASSERT_EQ(commit_block(server, validation.block().block_id, tip.db_tip(),
+                           proposal),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    expect_recorded(2, 1, x23::xdr_size(txs[0]));
+  }
+
+  // Commit blocks we nominated. Resubmitting the committed tx at the next
+  // height makes it fail nomination: it stays in the cache's [tx_hashes] but
+  // is not in the block, so that block records zero.
+  for (size_t i = 0; i < 2; ++i) {
+    const ssize_t failed_before = metrics.nomination_failed_tx_count.value();
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{txs[1]})())();
+    ASSERT_EQ(rpc.scheduler()->size(), 1UL);
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    if (i == 0) {
+      EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before);
+      expect_recorded(3, 1, x23::xdr_size(txs[1]));
+    }
+    else {
+      EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before + 1);
+      expect_recorded(4, 0, 0);
+    }
+  }
+
+  // Nomination compacts a block's txs in place, moving each success over
+  // earlier failures. An account's txs are scheduled in [TxKey] order, by
+  // tx hash at equal expiry, so pick fresh txs hashing either side of the
+  // committed txs[1]: the block is then fresh, failing, fresh.
+  std::optional<size_t> before;
+  std::optional<size_t> after;
+  for (size_t i = 2; i < txs.size() && !(before && after); ++i) {
+    std::optional<size_t> &slot =
+        sha256(txs[i].tx) < sha256(txs[1].tx) ? before : after;
+    if (!slot) {
+      slot = i;
+    }
+  }
+  // An explicit early return, not ASSERT_TRUE, so clang-tidy's
+  // unchecked-optional-access analysis sees both as engaged below.
+  if (!before || !after) {
+    FAIL() << "no fresh txs hash on both sides of txs[1]";
+  }
+  {
+    const SignedTransaction &first = txs[*before];
+    const SignedTransaction &last = txs[*after];
+
+    const ssize_t failed_before = metrics.nomination_failed_tx_count.value();
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{first, txs[1], last})())();
+    ASSERT_EQ(rpc.scheduler()->size(), 3UL);
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    SignedTransactionBatch nominated;
+    ASSERT_TRUE(parallel_batch_to_t(nomination.proposed_block().txs, nominated,
+                                    kNoBatchSizeLimit)());
+    EXPECT_EQ(nominated, (SignedTransactionBatch{first, last}));
+    ASSERT_EQ(commit_block(server, tip.db_tip(), nomination.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    EXPECT_EQ(metrics.nomination_failed_tx_count.value(), failed_before + 1);
+    expect_recorded(5, 2, x23::xdr_size(first) + x23::xdr_size(last));
+  }
+
+  // A failed commit records nothing.
+  ConsensusValue value{};
+  value.proposal_header.block_height = 100;
+  EXPECT_EQ(rpc.schedulercoord_commit_block(/*block_id=*/99,
+                                            std::move(value))(),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  expect_recorded(5, 0, 0);
+
+  // Nor does a commit of a known block with the wrong consensus value; the
+  // retry with the right one records the block once.
+  {
+    // Any fresh tx not used above; one of txs[2..4] always is.
+    size_t unused = 2;
+    while (unused == *before || unused == *after) {
+      ++unused;
+    }
+    const SignedTransaction &tx = txs[unused];
+    rpc.schedulercoord_submit_unvetted(
+        t_to_parallel_batch(SignedTransactionBatch{tx})())();
+    const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult nomination =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(nomination.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    const SchedulerProposedBlock &proposed = nomination.proposed_block();
+    ConsensusValue wrong = consensus_value(tip.db_tip(), proposed.proposal);
+    wrong.prev_hash[0] ^= 0xff;
+    EXPECT_EQ(rpc.schedulercoord_commit_block(proposed.block_id,
+                                              std::move(wrong))(),
+              SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue);
+    expect_recorded(5, 0, 0);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), proposed),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    expect_recorded(6, 1, x23::xdr_size(tx));
+  }
+}
+
+TEST(Mempool, NewlyDeployedContractNativeTokenCount)
 {
   constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
   constexpr uint128_t kTransferAmount = 100'000'000;
@@ -1749,12 +2167,12 @@ TEST(Mempool, NewlyDeployedContractHogCount)
   ASSERT_EQ(parsed_txs.size(), 1UL);
   EXPECT_EQ(parsed_txs[0], tx);
 
-  TransactionHashBatch tx_hashes;
+  SignedTransactionHashBatch signed_tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
-      kNoBatchSizeLimit)());
-  ASSERT_EQ(tx_hashes.size(), 1UL);
-  EXPECT_EQ(tx_hashes[0], sha256(tx.tx));
+      res_nominate.proposed_block().proposal.transactions.signed_hash,
+      signed_tx_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(signed_tx_hashes.size(), 1UL);
+  EXPECT_EQ(signed_tx_hashes[0], sha256(tx));
 
   auto res_commit =
       commit_block(server, get_tip.db_tip(), res_nominate.proposed_block());
@@ -1772,24 +2190,32 @@ TEST(Mempool, NewlyDeployedContractHogCount)
 
   server.mempool_coord_rpc().wait_for_transfer_data(
       res_nominate.proposed_block().proposal.header.block_height)();
-  auto [deployed_hog_age, deployed_hog_age_lock] =
-      server.mempool_coord_rpc().scheduler()->get_cached_hog_age(
+  auto [deployed_native_token_age, deployed_native_token_age_lock] =
+      server.mempool_coord_rpc().scheduler()->get_cached_native_token_age(
           deployed_address);
-  ASSERT_EQ(deployed_hog_age->address, deployed_address);
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  ASSERT_EQ(deployed_native_token_age->address, deployed_address);
+  EXPECT_EQ(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0UL);
+  EXPECT_EQ(from_xdr(
+                deployed_native_token_age
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             0UL);
   // The fibonacci contract needs to pay for storage, so the storage cost is
-  // deducted from the live hogs used for scheduling. Thus, the number of hogs
-  // in the [kHogAgeGroupReceived] scheduling group will be less than
-  // [kTransferAmount].
-  EXPECT_GT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]), 0UL);
-  EXPECT_LT(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+  // deducted from the live native tokens used for scheduling. Thus, the number
+  // of native tokens in the [kNativeTokenAgeGroupReceived] scheduling group
+  // will be less than [kTransferAmount].
+  EXPECT_GT(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            0UL);
+  EXPECT_LT(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
             kTransferAmount);
   HogDbStatus<int128_t> deployed_address_balance =
       server.read_address_balance(deployed_address);
   ASSERT_TRUE(deployed_address_balance.has_value());
-  EXPECT_EQ(from_xdr(deployed_hog_age->num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(from_xdr(deployed_native_token_age
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(*deployed_address_balance));
 }
 
@@ -1827,7 +2253,7 @@ TEST(Mempool, ConcurrentCommitRejected)
   // validation gate closed until the second commit has tried to enter.
   x23::CoroGuard guard;
   [&]() -> x23::Async<void> {
-    co_await guard(rpc.scheduler()->pending_hog_age_update_lock_);
+    co_await guard(rpc.scheduler()->pending_native_token_age_update_lock_);
   }()();
 
   x23::Async<SchedulerCommitOutcome> first =
@@ -1840,6 +2266,51 @@ TEST(Mempool, ConcurrentCommitRejected)
 
   EXPECT_EQ(second, SchedulerCommitOutcome::SchedulerConcurrentCommit);
   EXPECT_EQ(first(), SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A commit attempt that commits nothing must not record a commit interval. One
+// that read [last_commit_] before closing the validation gate was not ordered
+// after the previous commit's write of it (a data race under TSan), and it
+// overwrote [last_commit_interval_ms] with the interval of a commit that never
+// happened.
+TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &rpc = server.mempool_coord_rpc();
+
+  const SchedulerGetTipResult tip = rpc.schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  const SchedulerProposalResult nomination =
+      propose_block(server, tip.db_tip());
+  ASSERT_EQ(nomination.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &block = nomination.proposed_block();
+  const ConsensusValue value = consensus_value(tip.db_tip(), block.proposal);
+
+  // The retry runs on a thread that has not synchronized with the first
+  // commit, as an RPC handler need not have synchronized with the thread-pool
+  // worker that finalized the previous commit. The flag is relaxed on purpose:
+  // an acquire would order the retry after the first commit's write of
+  // [last_commit_] and hide the race from TSan.
+  std::atomic<bool> committed = false;
+  SchedulerCommitOutcome retry{};
+  std::thread retry_thread([&] {
+    while (!committed.load(std::memory_order_relaxed)) {
+      std::this_thread::yield();
+    }
+    retry = rpc.schedulercoord_commit_block(block.block_id, value)();
+  });
+
+  EXPECT_EQ(rpc.schedulercoord_commit_block(block.block_id, value)(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  // No real interval is negative, so any record by the retry replaces this.
+  MempoolMetrics::instance().last_commit_interval_ms.record(-1);
+  committed.store(true, std::memory_order_relaxed);
+  retry_thread.join();
+
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
 TEST(Mempool, Validate)
@@ -1906,7 +2377,7 @@ TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
 {
   MempoolTestInfra server;
 
-  TransactionHashBatch tx_hashes{TransactionHash{}};
+  SignedTransactionHashBatch signed_tx_hashes{SignedTransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
@@ -1919,14 +2390,14 @@ TEST(Mempool, ValidateMalformedProposalDecodeReturnsInvalid)
                  .network_hash = MempoolTestInfra::kNetworkHash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .signed_hash = t_to_parallel_batch(signed_tx_hashes)(),
                        .nondeterministic_data =
                            t_to_parallel_batch(tx_nondeterministic_data)()}};
 
-  ASSERT_EQ(proposal.transactions.hash.segment_tokens.size(), 1UL);
+  ASSERT_EQ(proposal.transactions.signed_hash.segment_tokens.size(), 1UL);
   ASSERT_EQ(proposal.transactions.nondeterministic_data.segment_tokens.size(),
             1UL);
-  proposal.transactions.hash.segment_tokens[0]++;
+  proposal.transactions.signed_hash.segment_tokens[0]++;
   proposal.transactions.nondeterministic_data.segment_tokens[0]++;
 
   auto res_validate =
@@ -1940,7 +2411,8 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
 {
   MempoolTestInfra server;
 
-  TransactionHashBatch tx_hashes{TransactionHash{}, TransactionHash{}};
+  SignedTransactionHashBatch signed_tx_hashes{SignedTransactionHash{},
+                                              SignedTransactionHash{}};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
 
@@ -1953,7 +2425,7 @@ TEST(Mempool, ValidateMismatchedProposalCountsReturnsInvalid)
                  .network_hash = MempoolTestInfra::kNetworkHash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .signed_hash = t_to_parallel_batch(signed_tx_hashes)(),
                        .nondeterministic_data =
                            t_to_parallel_batch(tx_nondeterministic_data)()}};
 
@@ -1998,10 +2470,11 @@ TEST(Mempool, ValidateOversizedProposalIsRejected)
 
   constexpr size_t kOverCapCount = MempoolCoordinatorRpc::kMaxBlockSize + 1;
 
-  const TransactionHashBatch one_hash{TransactionHash{}};
+  const SignedTransactionHashBatch one_signed_hash{SignedTransactionHash{}};
   const x23::XdrVec<NondeterministicProposalData> one_nomination{
       NondeterministicProposalData{}};
-  ParallelBatch hashes = repeated_parallel_batch(one_hash, kOverCapCount);
+  ParallelBatch signed_hashes =
+      repeated_parallel_batch(one_signed_hash, kOverCapCount);
   ParallelBatch nominations =
       repeated_parallel_batch(one_nomination, kOverCapCount);
 
@@ -2014,7 +2487,7 @@ TEST(Mempool, ValidateOversizedProposalIsRejected)
                  .network_hash = MempoolTestInfra::kNetworkHash,
                  .block_height = db_tip.value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = std::move(hashes),
+                       .signed_hash = std::move(signed_hashes),
                        .nondeterministic_data = std::move(nominations)}};
 
   auto res_validate =
@@ -2107,6 +2580,204 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
+namespace {
+
+// Opens and finishes blocks like an executor, but answers each validated
+// transaction with a scripted [ExecResult] instead of executing it.
+class ScriptedValidationExecutorRpc {
+public:
+  using rpc_service = ExecutorSched1;
+
+  // Every validated transaction gets [result] unless [script_tx()] names it.
+  void script(ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    default_result_ = result;
+  }
+
+  void script_tx(const TransactionHash &tx_hash, ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    tx_results_[tx_hash] = result;
+  }
+
+  size_t validated_tx_count() const { return validated_tx_count_.load(); }
+
+  static x23::Async<void> executorsched_null() { co_return; }
+
+  static x23::Async<ExecResult> executorsched_ready()
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecProposeResult>
+  executorsched_propose_transaction(BlockID /*unused*/,
+                                    SignedTransaction /*unused*/)
+  {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+
+  x23::Async<ExecResult>
+  executorsched_validate_transaction(BlockID /*unused*/,
+                                     ProposedTransaction proposed_tx)
+  {
+    validated_tx_count_.fetch_add(1);
+    co_return result_for(proposed_tx);
+  }
+
+  static x23::Async<ExecProposeBatchResult>
+  executorsched_propose_batch(BlockID /*unused*/,
+                              SignedTransactionBatch signed_txs)
+  {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+
+  x23::Async<ExecValidateBatchResult>
+  executorsched_validate_batch(BlockID /*unused*/,
+                               ProposedTransactionBatch proposed_txs)
+  {
+    validated_tx_count_.fetch_add(proposed_txs.size());
+    ExecValidateBatchResult results;
+    results.reserve(proposed_txs.size());
+    for (const ProposedTransaction &proposed_tx : proposed_txs) {
+      results.push_back(result_for(proposed_tx));
+    }
+    co_return results;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_proposal_block(BlockID /*unused*/,
+                                    BlockExecutionContext /*unused*/)
+  {
+    co_return ExecResult::ExecResultSystemError;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_validation_block(BlockID /*unused*/,
+                                      BlockExecutionContext /*unused*/)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecResult> executorsched_finish_block(BlockID /*unused*/)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<void> executorsched_shutdown() { co_return; }
+
+private:
+  ExecResult result_for(const ProposedTransaction &proposed_tx)
+  {
+    std::lock_guard lock(mutex_);
+    auto it = tx_results_.find(sha256(proposed_tx.signed_tx.tx));
+    return it == tx_results_.end() ? default_result_ : it->second;
+  }
+
+  std::mutex mutex_;
+  ExecResult default_result_ = ExecResult::ExecResultOK;
+  std::map<TransactionHash, ExecResult> tx_results_;
+  std::atomic<size_t> validated_tx_count_{0};
+};
+static_assert(is_ExecutorSched1<ScriptedValidationExecutorRpc *, x23::Async>);
+
+} // namespace
+
+// Proposes a real block, then validates it with [ScriptedValidationExecutorRpc]
+// standing in for the registered executors.
+class MempoolValidationExecutorResultTest : public testing::Test {
+protected:
+  static constexpr size_t kNumBlockTxs = 2;
+
+  void SetUp() override
+  {
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    txs_ = generate_unsigned_txs(fib_client, kNumBlockTxs);
+    server_.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{}, t_to_parallel_batch(txs_)())();
+
+    SchedulerGetTipResult get_tip =
+        server_.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    parent_ = get_tip.db_tip();
+    SchedulerProposalResult res_nominate = propose_block(server_, parent_);
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    proposal_ = res_nominate.proposed_block().proposal;
+
+    executor_.start_server(/*port=*/0);
+    x23::Vec<exec_sched_client_t> &exec_clients =
+        server_.mempool_coord_rpc().exec_clients_;
+    for (size_t i = 0; i < exec_clients.size(); ++i) {
+      swapped_clients_.push_back(
+          create_client<ExecutorSched1>(MempoolTestInfra::kAddress,
+                                        executor_.port())()
+              .value());
+    }
+    std::swap(exec_clients, swapped_clients_);
+    swapped_ = true;
+  }
+
+  void TearDown() override
+  {
+    if (swapped_) {
+      std::swap(server_.mempool_coord_rpc().exec_clients_, swapped_clients_);
+    }
+  }
+
+  ScriptedValidationExecutorRpc &executor() { return *executor_.impl(); }
+
+  SchedulerValidationOutcome validate()
+  {
+    return server_.mempool_coord_rpc()
+        .schedulercoord_validate_block(parent_.id, proposal_)()
+        .outcome();
+  }
+
+  MempoolTestInfra server_;
+  SignedTransactionBatch txs_;
+  DbTip parent_;
+  Proposal proposal_;
+
+private:
+  RpcServer<ScriptedValidationExecutorRpc> executor_;
+  // The scripted executor's clients until [SetUp()] swaps them in, then the
+  // registered executors' clients until [TearDown()] swaps them back.
+  x23::Vec<exec_sched_client_t> swapped_clients_;
+  bool swapped_ = false;
+};
+
+TEST_F(MempoolValidationExecutorResultTest, TxValidationFailureIsInvalid)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  EXPECT_EQ(validate(), SchedulerValidationOutcome::SchedulerValidationInvalid);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// A system error means this node could not run the block, which says nothing
+// about whether the block is valid.
+TEST_F(MempoolValidationExecutorResultTest, SystemErrorIsNotInvalid)
+{
+  executor().script(ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// Once one transaction hits a system error, the others' results come from a
+// run this node could not complete, so they cannot show the block is invalid.
+TEST_F(MempoolValidationExecutorResultTest,
+       SystemErrorOutranksTxValidationFailure)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  executor().script_tx(sha256(txs_[0].tx), ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -2195,9 +2866,9 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
   Proposal proposal = res_nominate.proposed_block().proposal;
   proposal.header.block_height++;
   {
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                    kNoBatchSizeLimit)());
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                    signed_tx_hashes, kNoBatchSizeLimit)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -2205,14 +2876,14 @@ TEST(Mempool, ValidateBatchRemoveTxFromProposal)
     EXPECT_EQ(db_tip.value.proposal_header.block_height, 2);
 
     // Remove a transaction from the proposal.
-    tx_hashes.pop_back();
+    signed_tx_hashes.pop_back();
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
     EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                     tx_nondeterministic_data,
                                     kNoBatchSizeLimit)());
     tx_nondeterministic_data.pop_back();
 
-    proposal.transactions.hash = t_to_parallel_batch(tx_hashes)();
+    proposal.transactions.signed_hash = t_to_parallel_batch(signed_tx_hashes)();
     proposal.transactions.nondeterministic_data =
         t_to_parallel_batch(tx_nondeterministic_data)();
   }
@@ -2252,9 +2923,9 @@ TEST(Mempool, ValidateBatchMissingTx)
   Proposal proposal = res_nominate.proposed_block().proposal;
   proposal.header.block_height++;
   {
-    TransactionHashBatch tx_hashes;
-    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                    kNoBatchSizeLimit)());
+    SignedTransactionHashBatch signed_tx_hashes;
+    EXPECT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                    signed_tx_hashes, kNoBatchSizeLimit)());
 
     get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
@@ -2317,6 +2988,20 @@ TEST(Mempool, ValidateCommit)
   auto res_commit =
       commit_block(server, res_validate.block().block_id, db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+
+  // Validation resolved the proposal's [SignedTransactionHash]es to the txs'
+  // [TransactionHash]es, by which committing the validated block evicts them
+  // and records their outcomes.
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(sha256(txs[0].tx)));
+  const SchedulerTransactionOutcome outcome =
+      server.mempool_coord_rpc().schedcoord_lookup_transaction_outcomes(
+          {sha256(txs[0].tx)})()[0];
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.height, proposal.header.block_height);
 }
 
 // Regression test for a validation-gate leak: the
@@ -2387,11 +3072,26 @@ TEST(Mempool, ProposalUsesTransactionRoot)
 
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  SignedTransactionBatch proposed_txs;
+  ASSERT_TRUE(parallel_batch_to_t(res_nominate.proposed_block().txs,
+                                  proposed_txs, kNoBatchSizeLimit)());
+  SignedTransactionHashBatch signed_tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                  signed_tx_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(signed_tx_hashes.size(), proposed_txs.size());
+  ASSERT_FALSE(proposed_txs.empty());
+
+  // [ProposalTxs] names each tx by its exact signed encoding, while the header
+  // commits to the txset over the same txs' [TransactionHash]es.
   TransactionHashBatch tx_hashes;
-  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                  kNoBatchSizeLimit)());
+  for (size_t i = 0; i < proposed_txs.size(); i++) {
+    EXPECT_EQ(signed_tx_hashes[i], sha256(proposed_txs[i]));
+    tx_hashes.push_back(sha256(proposed_txs[i].tx));
+  }
   EXPECT_EQ(proposal.header.txs_hash,
             MempoolCoordinatorRpc::get_txset_hash(tx_hashes));
+  EXPECT_NE(proposal.header.txs_hash,
+            MempoolCoordinatorRpc::get_txset_hash(signed_tx_hashes));
 }
 
 TEST(Mempool, RejectsABlockWhoseTimepointPrecedesTheTip)
@@ -2548,7 +3248,7 @@ TEST(Mempool, EmptyProposalForwardsConsensusValue)
   ASSERT_EQ(res_propose.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
   const SchedulerProposedBlock &proposed = res_propose.proposed_block();
-  EXPECT_TRUE(proposed.proposal.transactions.hash.xdr.empty());
+  EXPECT_TRUE(proposed.proposal.transactions.signed_hash.xdr.empty());
   EXPECT_TRUE(proposed.proposal.transactions.nondeterministic_data.xdr.empty());
 
   ConsensusValue value = consensus_value(parent_tip, proposed.proposal);
@@ -3129,6 +3829,9 @@ TEST(Mempool, AuthChangedEvictsInvalidTxs)
 
   // The auth_data_changed callback should re-verify and evict the tx
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 0UL);
+  // ...from the cache as well as the runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
@@ -3146,7 +3849,7 @@ TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
                                auth_data);
 
   txs[0].tx.auth_claim = make_sign_claim(0);
-  const TransactionHash tx_hash = sha256(txs[0].tx);
+  const SignedTransactionHash signed_tx_hash = sha256(txs[0]);
 
   server.mempool_coord_rpc().schedulercoord_submit_unvetted(
       t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
@@ -3157,7 +3860,7 @@ TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
         server.mempool_coord_rpc().schedcoord_get_tip()();
     EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-    TransactionHashBatch tx_hashes{tx_hash};
+    SignedTransactionHashBatch signed_tx_hashes{signed_tx_hash};
     x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
         NondeterministicProposalData{}};
     Proposal proposal{
@@ -3166,7 +3869,7 @@ TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
                    .block_height =
                        get_tip.db_tip().value.proposal_header.block_height + 1},
         .transactions = {.ext = {},
-                         .hash = t_to_parallel_batch(tx_hashes)(),
+                         .signed_hash = t_to_parallel_batch(signed_tx_hashes)(),
                          .nondeterministic_data =
                              t_to_parallel_batch(tx_nondeterministic_data)()}};
 
@@ -3177,17 +3880,16 @@ TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
     return res_validate;
   };
 
-  // A local auth failure says nothing about the signatures a proposer holds.
-  // [TransactionHash] covers [Transaction] and deliberately excludes
-  // signatures, so a transaction we could not authenticate may be correctly
-  // signed elsewhere on the network. Validation must ask the coordinator for
-  // the authoritative [SignedTransaction] instead of voting the block invalid,
-  // and must keep doing so however many blocks elapse.
+  // A local auth failure must not become a vote against a block. The failed
+  // signing was never admitted, so a proposal naming it by
+  // [SignedTransactionHash] finds it missing: validation must ask the
+  // coordinator for the authoritative [SignedTransaction] instead of voting
+  // the block invalid, and must keep doing so however many blocks elapse.
   for (size_t blocks_elapsed = 0; blocks_elapsed < 5; blocks_elapsed++) {
     SchedulerValidationResult res_missing = expect_validation_outcome(
         SchedulerValidationResult::SchedulerValidationMissingTxs);
-    ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
-    EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
+    ASSERT_EQ(res_missing.missing_signed_tx_hashes().size(), 1UL);
+    EXPECT_EQ(res_missing.missing_signed_tx_hashes()[0], signed_tx_hash);
 
     // Now commit an empty block.
     SchedulerGetTipResult get_tip =
@@ -3206,8 +3908,8 @@ TEST(Mempool, FailedAuthenticationDoesNotInvalidateBlocks)
 
   SchedulerValidationResult res_validate = expect_validation_outcome(
       SchedulerValidationResult::SchedulerValidationMissingTxs);
-  ASSERT_EQ(res_validate.missing_tx_hashes().size(), 1UL);
-  EXPECT_EQ(res_validate.missing_tx_hashes()[0], tx_hash);
+  ASSERT_EQ(res_validate.missing_signed_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_validate.missing_signed_tx_hashes()[0], signed_tx_hash);
 }
 
 // [TransactionHash] hashes [Transaction] and deliberately excludes signatures
@@ -3254,6 +3956,8 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
 
   const TransactionHash tx_hash = sha256(tx);
   ASSERT_EQ(sha256(poisoned_tx.tx), tx_hash);
+  const SignedTransactionHash good_signed_hash = sha256(good_tx);
+  ASSERT_NE(sha256(poisoned_tx), good_signed_hash);
 
   // The attacker submits the corrupted copy over the unauthenticated path. It
   // must fail authentication and must not be admitted.
@@ -3269,7 +3973,7 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-  TransactionHashBatch tx_hashes{tx_hash};
+  SignedTransactionHashBatch signed_tx_hashes{good_signed_hash};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
   Proposal poisoned_proposal{
@@ -3278,7 +3982,7 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
                  .block_height =
                      get_tip.db_tip().value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .signed_hash = t_to_parallel_batch(signed_tx_hashes)(),
                        .nondeterministic_data =
                            t_to_parallel_batch(tx_nondeterministic_data)()}};
 
@@ -3287,8 +3991,8 @@ TEST(Mempool, CorruptedSignatureSubmitCannotPoisonValidation)
           get_tip.db_tip().id, poisoned_proposal)();
   ASSERT_EQ(res_poisoned.outcome(),
             SchedulerValidationResult::SchedulerValidationMissingTxs);
-  ASSERT_EQ(res_poisoned.missing_tx_hashes().size(), 1UL);
-  EXPECT_EQ(res_poisoned.missing_tx_hashes()[0], tx_hash);
+  ASSERT_EQ(res_poisoned.missing_signed_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_poisoned.missing_signed_tx_hashes()[0], good_signed_hash);
 
   // Once the genuine transaction arrives the same hash validates normally: the
   // earlier authentication failure left no residue behind.
@@ -3493,7 +4197,7 @@ TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
   SignedTransaction good_tx = txs[0];
   good_tx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0,
                                               MempoolTestInfra::kNetworkHash));
-  const TransactionHash tx_hash = sha256(tx);
+  const SignedTransactionHash good_signed_hash = sha256(good_tx);
 
   // Submit every rejectable signing over the unauthenticated gateway path,
   // twice each so a resubmission of already-rejected bytes is covered too.
@@ -3514,7 +4218,7 @@ TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
       server.mempool_coord_rpc().schedcoord_get_tip()();
   ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
 
-  TransactionHashBatch tx_hashes{tx_hash};
+  SignedTransactionHashBatch signed_tx_hashes{good_signed_hash};
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data{
       NondeterministicProposalData{}};
   Proposal proposal{
@@ -3523,7 +4227,7 @@ TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
                  .block_height =
                      get_tip.db_tip().value.proposal_header.block_height + 1},
       .transactions = {.ext = {},
-                       .hash = t_to_parallel_batch(tx_hashes)(),
+                       .signed_hash = t_to_parallel_batch(signed_tx_hashes)(),
                        .nondeterministic_data =
                            t_to_parallel_batch(tx_nondeterministic_data)()}};
 
@@ -3532,8 +4236,8 @@ TEST(Mempool, NoSignatureManipulationCanInvalidateABlock)
           get_tip.db_tip().id, proposal)();
   ASSERT_EQ(res_missing.outcome(),
             SchedulerValidationResult::SchedulerValidationMissingTxs);
-  ASSERT_EQ(res_missing.missing_tx_hashes().size(), 1UL);
-  EXPECT_EQ(res_missing.missing_tx_hashes()[0], tx_hash);
+  ASSERT_EQ(res_missing.missing_signed_tx_hashes().size(), 1UL);
+  EXPECT_EQ(res_missing.missing_signed_tx_hashes()[0], good_signed_hash);
 
   // And the genuine signing of that same transaction is still accepted.
   ValidatorID validator_id{};
@@ -3706,14 +4410,22 @@ TEST(Mempool, RejectedTransactionAcceptedAfterCommittedAuthChange)
       propose_block(server, get_tip.db_tip());
   ASSERT_EQ(res_nominate.outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/1));
   ASSERT_EQ(commit_block(server, get_tip.db_tip(),
                          res_nominate.proposed_block()),
             SchedulerCommitOutcome::SchedulerCommitOK);
+  server.mempool_coord_rpc().wait_for_block_commit(
+      get_tip.db_tip().value.proposal_header.block_height + 1)();
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 
   // The same bytes now carry enough weight, and the earlier rejections must
   // not stand in the way.
   submit_over_gateway(underweight);
   EXPECT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*server.mempool_coord_rpc().scheduler(),
+                                     /*nominated=*/0));
 }
 
 // A rejection is never remembered: every resubmission of a turned-down
@@ -4386,13 +5098,16 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
 
   const TransactionHash tx0_hash = sha256(txs[0].tx);
   const TransactionHash tx1_hash = sha256(txs[1].tx);
+  const SignedTransactionHash tx0_signed_hash = sha256(txs[0]);
+  const SignedTransactionHash tx1_signed_hash = sha256(txs[1]);
 
-  TransactionHashBatch tx_hashes;
+  SignedTransactionHashBatch signed_tx_hashes;
   ASSERT_TRUE(parallel_batch_to_t(
-      res_nominate.proposed_block().proposal.transactions.hash, tx_hashes,
-      kNoBatchSizeLimit)());
-  ASSERT_EQ(tx_hashes.size(), 1UL);
-  ASSERT_TRUE(tx_hashes[0] == tx0_hash || tx_hashes[0] == tx1_hash);
+      res_nominate.proposed_block().proposal.transactions.signed_hash,
+      signed_tx_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(signed_tx_hashes.size(), 1UL);
+  ASSERT_TRUE(signed_tx_hashes[0] == tx0_signed_hash ||
+              signed_tx_hashes[0] == tx1_signed_hash);
 
   x23::XdrVec<NondeterministicProposalData> tx_nondeterministic_data;
   ASSERT_TRUE(parallel_batch_to_t(
@@ -4400,7 +5115,8 @@ TEST(Mempool, SubmitUnvettedDuplicateTxDropped)
       tx_nondeterministic_data, kNoBatchSizeLimit)());
   EXPECT_EQ(tx_nondeterministic_data.size(), 1UL);
 
-  const TransactionHash included_hash = tx_hashes[0];
+  const TransactionHash included_hash =
+      signed_tx_hashes[0] == tx0_signed_hash ? tx0_hash : tx1_hash;
   const TransactionHash sibling_hash =
       included_hash == tx0_hash ? tx1_hash : tx0_hash;
 
@@ -4486,11 +5202,11 @@ submit_through_gateway(MempoolTestInfra &server, const SignedTransaction &stx)
   return outcomes[0];
 }
 
-TransactionHashBatch
+SignedTransactionHashBatch
 nominated_hashes(const Proposal &proposal)
 {
-  TransactionHashBatch hashes;
-  CHECK(parallel_batch_to_t(proposal.transactions.hash, hashes,
+  SignedTransactionHashBatch hashes;
+  CHECK(parallel_batch_to_t(proposal.transactions.signed_hash, hashes,
                             kNoBatchSizeLimit)());
   return hashes;
 }
@@ -4498,6 +5214,8 @@ nominated_hashes(const Proposal &proposal)
 } // namespace
 
 // #3844: proposer and validator may hold different-sized wrappers for one hash.
+// The proposal names the proposer's wrapper by [SignedTransactionHash], so a
+// validator holding the other one fetches it before validating.
 TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
 {
   const SignatureVariants variants =
@@ -4532,9 +5250,9 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     ASSERT_EQ(proposed.outcome(),
               SchedulerProposalOutcome::SchedulerProposalOK);
     proposal = proposed.proposed_block().proposal;
-    const TransactionHashBatch nominated = nominated_hashes(proposal);
+    const SignedTransactionHashBatch nominated = nominated_hashes(proposal);
     ASSERT_EQ(nominated.size(), 1UL);
-    EXPECT_EQ(nominated[0], variants.tx_hash);
+    EXPECT_EQ(nominated[0], sha256(variants.thin));
   }
 
   {
@@ -4557,12 +5275,65 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
     const SchedulerGetTipResult tip =
         validator.mempool_coord_rpc().schedcoord_get_tip()();
     ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    // The proposal names the thin wrapper, which this node does not hold, so
+    // validation asks for it rather than executing the fat one.
+    const SchedulerValidationResult missing =
+        validator.mempool_coord_rpc().schedulercoord_validate_block(
+            tip.db_tip().id, proposal)();
+    ASSERT_EQ(missing.outcome(),
+              SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+    ASSERT_EQ(missing.missing_signed_tx_hashes().size(), 1UL);
+    EXPECT_EQ(missing.missing_signed_tx_hashes()[0], sha256(variants.thin));
+
+    // The coordinator supplies the proposer's wrapper, which replaces the one
+    // this node held.
+    validator.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{},
+        t_to_parallel_batch(SignedTransactionBatch{variants.thin})())();
+    ASSERT_EQ(scheduler->size(), 1UL);
+    const std::shared_ptr<const SignedTransaction> replaced =
+        scheduler->find_tx(variants.tx_hash);
+    ASSERT_NE(replaced, nullptr);
+    EXPECT_EQ(*replaced, variants.thin);
+
     const SchedulerValidationResult validated =
         validator.mempool_coord_rpc().schedulercoord_validate_block(
             tip.db_tip().id, proposal)();
     EXPECT_EQ(validated.outcome(),
               SchedulerValidationOutcome::SchedulerValidationOK);
   }
+}
+
+// The coordinator's lookup serves repair, so it resolves only the exact
+// encoding asked for. The gateway's lookup is by [TransactionHash] and returns
+// whichever signing of the body is cached.
+TEST(Mempool, CoordinatorLookupIsBySignedEncodingAndGatewayLookupByBody)
+{
+  const SignatureVariants variants =
+      make_signature_variants(kMaxBytesTransaction);
+  ASSERT_NE(sha256(variants.thin), sha256(variants.fat));
+
+  MempoolTestInfra server;
+  server.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                               variants.auth_data);
+  EXPECT_EQ(submit_through_gateway(server, variants.thin),
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  ASSERT_EQ(server.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+  auto by_signed_hash =
+      server.mempool_coord_rpc().schedcoord_lookup_transactions(
+          {sha256(variants.thin), sha256(variants.fat)})();
+  ASSERT_EQ(by_signed_hash.size(), 2UL);
+  ASSERT_TRUE(by_signed_hash[0]);
+  EXPECT_EQ(*by_signed_hash[0], variants.thin);
+  EXPECT_FALSE(by_signed_hash[1]);
+
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  auto by_body = gateway.schedgateway_lookup_tx({variants.tx_hash})();
+  ASSERT_EQ(by_body.size(), 1UL);
+  ASSERT_TRUE(by_body[0]);
+  EXPECT_EQ(*by_body[0], variants.thin);
 }
 
 // An authenticated wrapper whose body is over kMaxBytesTransaction is dropped
@@ -4605,7 +5376,7 @@ main(int argc, char *argv[])
 // hash and nondeterministic-data counts equal, so it reaches txset hashing.
 // Building the txset is a set insertion, and the repeat is the one input that
 // fails it -- which used to abort the validator instead of voting the block
-// down. See https://github.com/groundhogchain/hogd/issues/2661.
+// down. See https://github.com/thruputchain/hogd/issues/2661.
 TEST(Mempool, TxsetHashRejectsDuplicateHashes)
 {
   TransactionHashBatch tx_hashes{sha256(uint64_t{1}), sha256(uint64_t{1})};
@@ -4647,10 +5418,10 @@ TEST(Mempool, ValidateDuplicateProposalHashesIsRejected)
   // this node actually holds -- a nomination of unknown hashes is rejected as
   // [SchedulerValidationMissingTxs] before the txset hash is ever compared.
   Proposal proposal = res_nominate.proposed_block().proposal;
-  TransactionHashBatch tx_hashes;
-  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.hash, tx_hashes,
-                                  kNoBatchSizeLimit)());
-  ASSERT_EQ(tx_hashes.size(), 1UL);
+  SignedTransactionHashBatch signed_tx_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                  signed_tx_hashes, kNoBatchSizeLimit)());
+  ASSERT_EQ(signed_tx_hashes.size(), 1UL);
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.nondeterministic_data,
                                   tx_nominations, kNoBatchSizeLimit)());
@@ -4659,7 +5430,8 @@ TEST(Mempool, ValidateDuplicateProposalHashesIsRejected)
   // Repeating the sole transaction keeps both batches decodable and keeps
   // their element counts equal, which is every structural property validation
   // checks before it builds the txset.
-  proposal.transactions.hash = repeated_parallel_batch(tx_hashes, 2);
+  proposal.transactions.signed_hash =
+      repeated_parallel_batch(signed_tx_hashes, 2);
   proposal.transactions.nondeterministic_data =
       repeated_parallel_batch(tx_nominations, 2);
 

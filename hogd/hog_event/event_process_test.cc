@@ -4,6 +4,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <optional>
@@ -52,10 +53,10 @@ namespace {
 ProposalTxs
 empty_proposal_txs()
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   ProposalTxs proposal_txs;
-  append_to_parallel_batch(hashes, proposal_txs.hash)();
+  append_to_parallel_batch(signed_hashes, proposal_txs.signed_hash)();
   append_to_parallel_batch(nondeterministic_data,
                            proposal_txs.nondeterministic_data)();
   return proposal_txs;
@@ -68,7 +69,7 @@ make_consensus_value(BlockHeight height, SHA256Hash event_root)
   ConsensusValue value{};
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash = event_root;
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(/*tx_bodies=*/{});
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -368,6 +369,46 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
 
   EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
+}
+
+// A port that is already taken must make hog-event say so and exit, not abort
+// on the bind error (issue #1202).
+TEST(HogEventProcess, ExitsCleanlyWhenAPortIsTaken)
+{
+  TmpDir work_dir;
+  auto taken_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(taken_addr.has_value());
+  x23::UniqueFd taken = x23::stcplisten(*taken_addr);
+  const std::uint16_t taken_port = x23::get_port(x23::local_addr(taken));
+  const std::string expected =
+      std::format("cannot listen on 127.0.0.1:{}: Address already in use. Is "
+                  "another instance already running",
+                  taken_port);
+
+  // The metrics port is served by an HttpServer, the executor port by an
+  // RpcServer.
+  for (const bool metrics : {true, false}) {
+    SCOPED_TRACE(metrics ? "metrics port" : "executor port");
+    DaemonProcess event = DaemonProcess::start(
+        HOG_EVENT_BINARY,
+        event_args("127.0.0.1:1", work_dir.directory(),
+                   /*exec_port=*/metrics ? 0 : taken_port, 0, 0,
+                   /*metrics_port=*/metrics ? taken_port : 0));
+    event.wait_until_log_contains(expected);
+    EXPECT_EQ(event.wait_for_exit_code(), EXIT_FAILURE);
+  }
+}
+
+// Likewise a mempool address that does not resolve (issue #1202).
+TEST(HogEventProcess, ExitsCleanlyWhenTheMempoolAddressDoesNotResolve)
+{
+  TmpDir work_dir;
+  DaemonProcess event =
+      DaemonProcess::start(HOG_EVENT_BINARY,
+                           event_args("unresolvable.invalid:1",
+                                      work_dir.directory(), 0, 0, 0, 0));
+  event.wait_until_log_contains("cannot resolve unresolvable.invalid:1");
+  EXPECT_EQ(event.wait_for_exit_code(), EXIT_FAILURE);
 }
 
 } // namespace

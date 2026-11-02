@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstddef>
@@ -9,6 +10,7 @@
 #include <span>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -30,6 +32,7 @@
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
+#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
@@ -46,13 +49,13 @@
 namespace hogd {
 
 using ERC20Exception =
-    ContractException<itc_erc20::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 
 namespace {
 
 // Compute an event-signature topic the same way the SDK does:
 // sha256("<major_version>::<crate_name>::<type_name>"). See
-// groundhog_contract_util::event_signature in the SDK.
+// thruput_contract_util::event_signature in the SDK.
 //
 // The preimage is taken from a `u8"..."` literal so its bytes are the UTF-8
 // (== ASCII, for these names) encoding mandated by the standard, independent of
@@ -402,10 +405,11 @@ move_balance(NativeSyscallContext &ctx, ContractAddress const &owner,
     co_return ResultT::make_err(Erc20ExceptionT{erc20_error_t::TooLarge});
   }
 
-  // No credit-side overflow check: total supply (~2^59) keeps any reachable
-  // receiver balance + amount far below INT128_MAX, so the reference's
-  // checked add on the credit leg cannot fire. HogDb's commit-time
-  // add-capacity bound remains the backstop for hand-crafted states.
+  // No credit-side overflow check: the receiver balance and [amount] are both
+  // part of total supply, which never exceeds INT128_MAX, so their sum cannot
+  // overflow and the reference's checked add on the credit leg cannot fire.
+  // HogDb's commit-time add-capacity bound remains the backstop for
+  // hand-crafted states.
 
   if (auto moved = co_await native_token_unchecked_transfer(ctx, owner,
                                                             receiver, amount);
@@ -645,15 +649,17 @@ delete_allowance_impl(NativeSyscallContext &ctx, ContractAddress spender)
   co_return Result<void, ERC20Exception>::make_ok();
 }
 
-// ERC20Permit (groundhog-erc20-permit-if): approvals that arrive as auth
+// ERC20Permit (thruput-erc20-permit-if): approvals that arrive as auth
 // tokens rather than as a transaction from the owner. The RV32 reference is
 // itc_erc20_permit, which is itc_erc20 with this interface on top.
 
 using PermitErc20Exception =
-    ContractException<itc_erc20_permit::ERC20Error, 0xb19947acb2fa14ffULL>;
+    ContractException<itc_erc20_permit::ERC20Error, 0xf63c8b1f5e7e2fe0ULL>;
 using PermitException = ContractException<itc_erc20_permit::ERC20PermitError,
-                                          0xe8abb072f5171148ULL>;
-using PermitResult = Result<void, PermitErc20Exception, PermitException>;
+                                          0x1aaf2b9becb7ddc4ULL>;
+// Error order follows the generated itc_erc20_permit header, which lists a
+// method's exceptions in the spec's throws order (by selector).
+using PermitResult = Result<void, PermitException, PermitErc20Exception>;
 
 static_assert(ERC20Exception::kSelector == PermitErc20Exception::kSelector,
               "ERC20Error must reject identically through either interface");
@@ -838,6 +844,70 @@ delete_allowance_signed_impl(NativeSyscallContext &ctx, SignedToken grant_token)
   co_return PermitResult::make_ok();
 }
 
+// ERC165 (thruput-erc165-if). The RV32 reference answers from the interface
+// table its #[contract] impls leave behind; the native token has no such
+// table, so it lists the interfaces make_native_token_contract registers.
+
+using erc165_meta = ContractTraitMeta<itc_erc20_permit::ERC165>;
+using interface_ids_t =
+    std::tuple_element_t<0, erc165_meta::args_t<u8"supports_interfaces">>;
+using interface_support_t = erc165_meta::return_t<u8"supports_interfaces">;
+
+static_assert(
+    std::is_same_v<
+        std::tuple_element_t<0, erc165_meta::args_t<u8"supports_interface">>,
+        InterfaceId>,
+    "ERC165 must take the InterfaceId sdk_interface_id_derivation returns");
+
+template<is_contract_trait Trait>
+InterfaceId
+interface_id_of()
+{
+  return sdk_interface_id_derivation(Trait::kTraitName, Trait::kVersion);
+}
+
+bool
+native_token_implements(InterfaceId const &id)
+{
+  // Keep in step with the builder.add calls in make_native_token_contract.
+  static const std::array<InterfaceId, 3> kImplemented{
+      interface_id_of<itc_erc20::ERC20>(),
+      interface_id_of<itc_erc20_permit::ERC20Permit>(),
+      interface_id_of<itc_erc20_permit::ERC165>(),
+  };
+  return std::ranges::contains(kImplemented, id);
+}
+
+// Ballparks of what the RV32 reference's frame consumes, from the runtime's
+// "gas consumed" trace: supports_interface 470-533, and supports_interfaces
+// about 2450 for an empty query.
+constexpr GasAmount kSupportsInterfaceGas = 500;
+constexpr GasAmount kSupportsInterfacesGas = 2500;
+
+x23::Async<InvokeStatus<bool>>
+supports_interface_impl(NativeSyscallContext &ctx, InterfaceId interface_id)
+{
+  if (!ctx.consume_gas(kSupportsInterfaceGas)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  co_return native_token_implements(interface_id);
+}
+
+x23::Async<InvokeStatus<interface_support_t>>
+supports_interfaces_impl(NativeSyscallContext &ctx,
+                         interface_ids_t interface_ids)
+{
+  if (!ctx.consume_gas(kSupportsInterfacesGas)) {
+    co_return InvokeError{InvokeErrorCode::OutOfGas};
+  }
+  // One answer per queried id, in order; the answer shares the query's bound.
+  interface_support_t support;
+  for (auto const &id : interface_ids) {
+    support.push_back(native_token_implements(id));
+  }
+  co_return support;
+}
+
 } // namespace
 
 x23::Async<InvokeStatus<void>>
@@ -869,15 +939,15 @@ Topic const &
 native_token_transfer_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::TransferEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::TransferEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_change_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceChangeEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceChangeEvent");
   return kSignature;
 }
 
@@ -885,15 +955,15 @@ Topic const &
 native_token_mint_event_signature()
 {
   static const Topic kSignature =
-      compute_event_signature(u8"0.1::groundhog-erc20-if::MintEvent");
+      compute_event_signature(u8"0.1::thruput-erc20-if::MintEvent");
   return kSignature;
 }
 
 Topic const &
 native_token_allowance_delete_event_signature()
 {
-  static const Topic kSignature = compute_event_signature(
-      u8"0.1::groundhog-erc20-if::AllowanceDeleteEvent");
+  static const Topic kSignature =
+      compute_event_signature(u8"0.1::thruput-erc20-if::AllowanceDeleteEvent");
   return kSignature;
 }
 
@@ -1017,8 +1087,15 @@ make_native_token_contract()
   builder.add<itc_erc20_permit::ERC20Permit, u8"delete_allowance_signed">(
       delete_allowance_signed_impl);
 
+  // ERC165
+  builder.add<itc_erc20_permit::ERC165, u8"supports_interface">(
+      supports_interface_impl);
+  builder.add<itc_erc20_permit::ERC165, u8"supports_interfaces">(
+      supports_interfaces_impl);
+
   assert(builder.check_methods<itc_erc20::ERC20>());
   assert(builder.check_methods<itc_erc20_permit::ERC20Permit>());
+  assert(builder.check_methods<itc_erc20_permit::ERC165>());
 
   return builder.build();
 }

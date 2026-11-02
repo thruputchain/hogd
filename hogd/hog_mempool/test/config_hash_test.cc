@@ -27,9 +27,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0x5d, 0x37, 0x3f, 0x8d, 0x68, 0x38, 0x63, 0x6c, 0x1b, 0xbd, 0x05,
-      0xab, 0x7c, 0xfc, 0x0f, 0x3b, 0xa6, 0xbe, 0x4a, 0x13, 0xe1, 0x30,
-      0x92, 0x7c, 0xb4, 0x7f, 0x52, 0x6d, 0x9c, 0x94, 0x6d, 0xa3,
+      0x12, 0x46, 0xed, 0x11, 0xfa, 0x52, 0x9d, 0xe7, 0x3b, 0xf6, 0xa1,
+      0x2b, 0x5f, 0x72, 0x9a, 0xac, 0xd9, 0xa6, 0x8f, 0xcc, 0x4a, 0xc0,
+      0x62, 0xb5, 0x14, 0xf5, 0xa8, 0xc8, 0xfc, 0x28, 0xd4, 0xb2,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -65,7 +65,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 10> variants;
+  std::array<NetworkConfig, 11> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -98,6 +98,10 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(variants[9],
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,
                                  stock.max_rv32_memory_bytes + 1);
+  // The default is the largest GasAmount, so the variant steps down.
+  NetworkConfigParams::set_param(variants[10],
+                                 ConfigParamID::kConfigParamMaxTxGas,
+                                 stock.max_tx_gas - 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -108,7 +112,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
 
 // The default wallet selects executing code, and a node's copy of it rides in
 // database metadata the state hash does not cover, so the header has to be
-// what pins it. See groundhogchain/hogd#3926.
+// what pins it. See thruputchain/hogd#3926.
 TEST(ConfigHashTest, CommitsToDefaultWallet)
 {
   const StorageCostModel model = StorageCostModel::default_cost_model();
@@ -149,7 +153,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 13U);
+  EXPECT_EQ(config.v0().params.size(), 14U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);

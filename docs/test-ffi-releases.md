@@ -40,13 +40,13 @@ not runtime compatibility or loadability on every supported host.
 
 Before the first automatic publication:
 
-1. Create the `ffi-public-artifacts` Environment in `groundhogchain/hogd` and
+1. Create the `ffi-public-artifacts` Environment in `thruputchain/hogd` and
    restrict its deployment branches to `main`. The follow-on workflow executes
    on main even though the preceding build runs on an FFI tag. Protect main and
    release tags through the repository's normal review and release controls.
 2. Apply the reviewed `ops/tofu/envs/release-artifacts/us-west-2` change that
    adds public `test-ffi/` access and its dedicated publisher role. It trusts
-   only `repo:groundhogchain/hogd:environment:ffi-public-artifacts` and cannot
+   only `repo:thruputchain/hogd:environment:ffi-public-artifacts` and cannot
    write devnode artifacts.
 3. Configure the Environment from the ops outputs:
 
@@ -68,7 +68,7 @@ Dispatch the publisher on main with an existing numeric FFI tag. The default is
 workflow artifact without assuming the AWS role or writing to S3:
 
 ```bash
-gh workflow run publish_test_ffi.yml --repo groundhogchain/hogd --ref main \
+gh workflow run publish_test_ffi.yml --repo thruputchain/hogd --ref main \
   -f tag=test-ffi-vX.Y.Z -f dry_run=true
 ```
 
@@ -87,8 +87,8 @@ python3 -m unittest discover -s scripts -p test_publish_test_ffi.py
 
 ## SDK migration and old mirror
 
-The existing `sync_release_mirror.yml` remains independent of S3 publication,
-so the current SDK can continue downloading from `groundhog.dev`. After public
-S3 delivery and the SDK download change are verified, disable the old mirror
-workflow while retaining its existing files for older SDK versions. Keep
-`release_test_ffi.yml`: it remains the FFI build and GitHub release producer.
+The SDK downloads test_ffi from public S3. The old `sync_release_mirror.yml`,
+which copied release assets to `groundhog.dev` from a self-hosted runner, is
+removed; the files it already mirrored stay there for older SDK versions.
+`release_test_ffi.yml` remains the FFI build and GitHub release producer, with
+every platform on Namespace runners.

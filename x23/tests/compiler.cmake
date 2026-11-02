@@ -68,12 +68,38 @@ require_text("${rust}" "pub next: Option<Box<Record>>")
 require_text("${rust}" "pub payload: BytesM<LIMIT>")
 require_text("${rust}" "#[derive(ReadXDR, WriteXDR, ConstXDRSize)]")
 # Generated clients encode into a CallBuf taken from the sender and pass it
-# to send_call by value, for zero-, one- and two-argument procedures.
+# to send_call_decoded by value, for zero-, one- and two-argument procedures.
+# The xdrs writer runs inside CallBuf::append_with: thruput_rpc_api has no
+# xdrs dependency, so the serializer call is the generated code's.
 require_text("${rust}" "let mut call = self.handle.call_buf();")
-require_text("${rust}" "call.encode(&()).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
-require_text("${rust}" "call.encode(&(arg0)).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
-require_text("${rust}" "call.encode(&(arg0, arg1)).map_err(|_| ::rpc_api::RpcError::GarbageArguments)?;")
-require_text("${rust}" "let buf = self.handle.send_call(Self::prog_vers(), 2, call).await?;")
+require_text("${rust}" "call.append_with(|buf| {
+             let mut w = xdrs::txs::buf_writer::BufWriter::from(::core::mem::take(buf));
+             let r = xdrs::write_xdr(&(), &mut w);
+             *buf = w.into();
+             r
+         }).map_err(|_| ::thruput_rpc_api::RpcError::GarbageArguments)?;")
+require_text("${rust}" "let r = xdrs::write_xdr(&(arg0), &mut w);")
+require_text("${rust}" "let r = xdrs::write_xdr(&(arg0, arg1), &mut w);")
+string(FIND "${rust}" "call.encode(" encode_pos)
+if(NOT encode_pos EQUAL -1)
+  message(FATAL_ERROR "generated client still calls the removed CallBuf::encode")
+endif()
+# The reply is decoded by the sender, straight from the reader's buffer on
+# driver connections, into a slot the method returns.
+require_text("${rust}" "out = ::core::option::Option::Some(xdrs::txs::decode(reply)")
+require_text("${rust}" "unsafe { self.handle.send_call_decoded(Self::prog_vers(), 2, call, &mut decode) }.await?;")
+require_text("${rust}" "out.ok_or(::thruput_rpc_api::RpcError::SystemError)")
+string(FIND "${rust}" "::rpc_api::" old_api_pos)
+if(NOT old_api_pos EQUAL -1)
+  message(FATAL_ERROR "generated Rust still names the old rpc_api crate")
+endif()
+# The borrowed read x23c writes out for a newtype fixed-opaque typedef is a
+# plain impl: ReadXDR is a safe trait again as of xdrs 0.12.
+require_text("${rust}" "impl<'r: 'a, 'a> ReadXDR<'r> for &'a Fingerprint {")
+string(FIND "${rust}" "unsafe impl" unsafe_impl_pos)
+if(NOT unsafe_impl_pos EQUAL -1)
+  message(FATAL_ERROR "generated Rust contains an unsafe impl")
+endif()
 string(FIND "${rust}" "::serde::" serde_pos)
 if(NOT serde_pos EQUAL -1)
   message(FATAL_ERROR "--rust-no-feature serde did not disable serde")
@@ -99,6 +125,7 @@ require_text("${ts}" "export interface Record")
 require_text("${ts}" "next: proto.Record | null;")
 require_text("${ts}" "w.writeVarOpaque(val.payload, Number(proto.LIMIT));")
 require_text("${ts}" "lookup: { proc: 1, request: () => Int32Codec, response: () => _Reply }")
+require_text("${ts}" "} from \"@thruputchain/xdr\";")
 
 file(WRITE "${TEST_DIR}/warning.x" "enum Warn { VALUE = 0, };\n")
 run_compiler(0 -o warning.hh warning.x)
@@ -128,6 +155,76 @@ require_text("${leading_comment}" "/* leading */")
 require_text("${leading_comment}" "struct Lead {")
 file(WRITE "${TEST_DIR}/comment_only.x" "// nothing but a comment")
 run_compiler(0 -o comment_only.hh comment_only.x)
+
+# Comments opening a file that a blank line sets off from what follows are
+# its header, such as an upstream copyright notice, and lead every
+# generated file.  A comment touching the first definition still documents
+# that definition.
+file(WRITE "${TEST_DIR}/file_header.x"
+  "// Copyright notice\n// License line\n\n/* Second header block */\n\n"
+  "// Documents Head\nstruct Head { int value; };\n")
+run_compiler(0 -o file_header.hh file_header.x)
+file(READ "${TEST_DIR}/file_header.hh" file_header)
+require_text("${file_header}" "// -*-C++-*-
+
+// Copyright notice
+// License line
+
+/* Second header block */
+
+#pragma once")
+require_text("${file_header}" "// Documents Head\nstruct Head {")
+run_compiler(0 --rust -o file_header.rs file_header.x)
+file(READ "${TEST_DIR}/file_header.rs" file_header)
+require_text("${file_header}" "// Copyright notice
+// License line
+
+/* Second header block */
+
+#![allow(non_camel_case_types)]")
+require_text("${file_header}" "// Documents Head\n#[cfg_attr(")
+run_compiler(0 --ts -o file_header.ts file_header.x)
+file(READ "${TEST_DIR}/file_header.ts" file_header)
+require_text("${file_header}" "// Copyright notice
+// License line
+
+/* Second header block */
+
+import {")
+string(FIND "${file_header}" "Copyright notice" first_pos)
+string(FIND "${file_header}" "Copyright notice" last_pos REVERSE)
+if(NOT first_pos EQUAL last_pos)
+  message(FATAL_ERROR "file header repeated in the generated TypeScript")
+endif()
+
+# A trailing comment runs on over the comment lines below it, but a doc
+# comment there opens the next definition or field and must document it,
+# not the one whose trailing comment it follows.
+file(WRITE "${TEST_DIR}/trailing_comment.x"
+  "/// Documents First.\ntypedef opaque First[4]; // trails First\n"
+  "/// Documents Second.\ntypedef opaque Second[4];\n"
+  "typedef int Third; // trails Third\n"
+  "                   // and runs on\n"
+  "struct Fourth {\n  int a; // trails a\n  /// Documents b.\n  int b;\n};\n")
+run_compiler(0 -o trailing_comment.hh trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.hh" trailing_comment)
+require_text("${trailing_comment}" "/// Documents First.
+// trails First
+using First = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "/// Documents Second.
+using Second = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "// trails Third
+// and runs on
+using Third = std::int32_t;")
+require_text("${trailing_comment}" "  // trails a
+  std::int32_t a;
+  /// Documents b.
+  std::int32_t b;")
+run_compiler(0 --rust -o trailing_comment.rs trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.rs" trailing_comment)
+require_text("${trailing_comment}" "    pub a: i32,
+    /// Documents b.
+    pub b: i32,")
 
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)

@@ -2,7 +2,6 @@
 
 #include <array>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <unordered_map>
@@ -15,6 +14,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/compiler.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -42,8 +42,7 @@ class SyscallAuthConfigTest : public ::testing::Test,
 public:
   SyscallAuthConfigTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -83,7 +82,7 @@ TEST_F(SyscallAuthConfigTest, WriteAddressRequiredWeightSuccess)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -166,7 +165,7 @@ TEST_F(SyscallAuthConfigTest, BothAuthConfigSyscalls)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -236,7 +235,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullSchemeNull)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -293,7 +292,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMixedNullBytesNotEmpty)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -367,7 +366,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -397,7 +396,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -416,6 +415,122 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationDeletion)
     ASSERT_TRUE(item.has_value());
     auto auth_data = item->auth_data();
     ASSERT_FALSE(auth_data.public_keys[0]);
+  }
+}
+
+// An ML-DSA-65 key registers like an Ed25519 one: the stored slot keeps the
+// scheme, the full 1952-byte key and the weight. A key one byte short or long,
+// or Ed25519-sized under the ML-DSA scheme, is rejected, and the slot can be
+// cleared again.
+TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMlDsa65)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000);
+
+  MlDsa65PublicKey mldsa_key{};
+  for (size_t i = 0; i < mldsa_key.size(); ++i) {
+    mldsa_key[i] = static_cast<uint8_t>(i * 7);
+  }
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
+  fns.emplace(
+      // Method 0: reject malformed ML-DSA keys, then register a valid one
+      0,
+      [mldsa_key](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        int32_t key_scheme = std::to_underlying(CryptographicScheme::MlDsa65);
+        uint32_t key_weight = 3;
+        std::span<const std::byte> key_bytes(
+            reinterpret_cast<const std::byte *>(mldsa_key.data()),
+            mldsa_key.size());
+
+        std::array<std::byte, sizeof(MlDsa65PublicKey) + 1> long_key{};
+        for (std::span<const std::byte> bad :
+             {key_bytes.subspan(0, key_bytes.size() - 1),
+              std::span<const std::byte>(long_key),
+              key_bytes.subspan(0, sizeof(Ed25519PublicKey))}) {
+          auto status =
+              co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                  1, &key_scheme, bad, &key_weight);
+          if (!status.has_value() ||
+              status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            ADD_FAILURE() << "a " << bad.size()
+                          << "-byte ML-DSA-65 key must be kInvalidSyscallInput";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                1, &key_scheme, key_bytes, &key_weight);
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to register ML-DSA-65 key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  fns.emplace(
+      // Method 1: delete the key via all-null args
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto status =
+            co_await ctx.syscall<SyscallNo::kChangePublicKeyRegistration>(
+                1, static_cast<const int32_t *>(nullptr),
+                std::span<const std::byte>{},
+                static_cast<const uint32_t *>(nullptr));
+        if (!status.has_value() ||
+            status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "Failed to delete ML-DSA-65 key";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract = std::make_unique<NativeContract>(std::move(fns));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  write_deployment(contract_addr, contract);
+
+  auto invoke_and_commit = [&](Runtime::MethodID method) {
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = contract_addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(
+                                                     method),
+                                             .gas_limit = kDefaultMaxTxGas,
+                                             .calldata = {}},
+                              .uniquifier = make_new_uniquifier()}},
+        *context);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+    advance_block();
+  };
+
+  invoke_and_commit(0);
+  {
+    auto item = lookup_storage_item_from_db(
+        make_address_auth_data_addrkey(contract_addr));
+    ASSERT_TRUE(item.has_value());
+    auto auth_data = item->auth_data();
+    ASSERT_TRUE(auth_data.public_keys[1]);
+    const PublicKey &stored = auth_data.public_keys[1]->key;
+    ASSERT_EQ(stored.scheme(), CryptographicScheme::MlDsa65);
+    EXPECT_EQ(*stored.mldsa65(), mldsa_key);
+    EXPECT_EQ(auth_data.public_keys[1]->max_weight, Weight{3});
+  }
+
+  invoke_and_commit(1);
+  {
+    auto item = lookup_storage_item_from_db(
+        make_address_auth_data_addrkey(contract_addr));
+    ASSERT_TRUE(item.has_value());
+    EXPECT_FALSE(item->auth_data().public_keys[1]);
   }
 }
 
@@ -514,7 +629,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationRejectsMalformedArgs)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -589,7 +704,7 @@ TEST_F(SyscallAuthConfigTest, ChangePublicKeyRegistrationMaxIndexBoundary)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -657,7 +772,7 @@ TEST_F(SyscallAuthConfigTest,
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -720,7 +835,7 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchCreatesNoRow)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -800,7 +915,7 @@ TEST_F(SyscallAuthConfigTest, DeletionOnlyFirstTouchTakesAuthLock)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
   };
@@ -902,7 +1017,7 @@ TEST_F(SyscallAuthConfigTest, ExplicitZeroRequiredWeightOverridesDefault)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -975,7 +1090,7 @@ TEST_F(SyscallAuthConfigTest, DuplicateSignerIsRefusedAtCommit)
                               Invocation{.invoked_address = contract_addr,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = {}},
                           .uniquifier = make_new_uniquifier()}};
   };

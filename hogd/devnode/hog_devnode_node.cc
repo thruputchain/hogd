@@ -28,12 +28,14 @@
 #include "db_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
+#include "hogd/base/base58.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/base/os.h"
 #include "hogd/base/rpc_message_size.h"
@@ -45,11 +47,10 @@
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_tmp_dir.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
-#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
+#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -146,18 +147,18 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{4});
+    w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "hog-devnode-data");
     w.object_field("bootstrapConfig", [&](json::Writer &w) {
       w.object_field("bootstrapFaucet", [&](json::Writer &faucet) {
-        faucet.field("publicKey", hex_string(config.faucet_public_key));
+        faucet.field("publicKey", encode_base58(config.faucet_public_key));
         faucet.field("initialStorageTokens",
                      std::to_string(kLocalFaucetStorageTokens));
       });
       w.array_field("bootstrapAccounts", [&](json::Writer &accounts) {
         for (auto const &account : config.accounts) {
           accounts.object([&](json::Writer &allocation) {
-            allocation.field("publicKey", hex_string(account.public_key));
+            allocation.field("publicKey", encode_base58(account.public_key));
             allocation.field("initialStorageTokens",
                              std::to_string(account.storage_tokens));
           });
@@ -165,8 +166,17 @@ build_data_dir_metadata_json(LocalBootstrapConfig const &config)
       });
       if (!config.network_config_overrides.empty()) {
         w.object_field("networkConfigOverrides", [&](json::Writer &fields) {
+          // A uint64 parameter is a decimal string, as in genesis JSON: a
+          // JSON integer here is an int64 and need not hold one.
           for (auto const &[name, value] : config.network_config_overrides) {
-            fields.field(name, static_cast<std::int64_t>(value));
+            if (const auto id = config_param_id(name);
+                id && config_param_max_value(*id) >
+                          std::numeric_limits<std::uint32_t>::max()) {
+              fields.field(name, std::to_string(value));
+            }
+            else {
+              fields.field(name, static_cast<std::int64_t>(value));
+            }
           }
         });
       }
@@ -299,15 +309,16 @@ parse_data_dir_metadata(std::string_view bytes)
 
   const std::int64_t schema_version =
       require_integer_field(*parsed, "schemaVersion", "root");
-  if (schema_version >= 1 && schema_version <= 3) {
+  if (schema_version >= 1 && schema_version <= 4) {
     throw std::runtime_error(
-        "hog-devnode data metadata uses legacy bootstrap accounts; use the "
+        "hog-devnode data metadata uses legacy bootstrap accounts or "
+        "identifier encoding; use the "
         "original "
         "runtime for this data directory or choose a new data directory");
   }
-  if (schema_version != 4) {
+  if (schema_version != 5) {
     throw std::runtime_error(std::format(
-        "unsupported hog-devnode data metadata schemaVersion {}, expected 4",
+        "unsupported hog-devnode data metadata schemaVersion {}, expected 5",
         schema_version));
   }
   std::set<std::string_view> root_fields;
@@ -345,14 +356,21 @@ parse_data_dir_metadata(std::string_view bytes)
       throw std::runtime_error(
           "data metadata networkConfigOverrides must be an object");
     }
+    // The override parser bounds each value by its parameter's width.
     for (auto const &[name, value] : overrides->as_object()) {
-      const auto number = value.as_integer();
-      if (!number || *number < 0 || std::cmp_greater(*number, UINT32_MAX)) {
-        throw std::runtime_error(
-            "data metadata network override must be a uint32 integer");
+      std::string raw;
+      if (const auto number = value.as_integer(); number && *number >= 0) {
+        raw = std::to_string(*number);
+      }
+      else if (const auto text = value.as_string()) {
+        raw = std::string(*text);
+      }
+      else {
+        throw std::runtime_error("data metadata network override must be a "
+                                 "non-negative integer or decimal string");
       }
       add_local_network_config_override(config.network_config_overrides,
-                                        std::format("{}={}", name, *number));
+                                        std::format("{}={}", name, raw));
     }
   }
   return config;
@@ -525,8 +543,15 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     sched_exec_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
-    mempool_coord_server_.start_server(
-        make_bind_host_port(bind_host_, requested_scheduler_port));
+    // The scheduler port is the one the user picks, so it is the one that can
+    // be taken. Throw instead of letting bind_server exit, so a busy port
+    // unwinds through hog-devnode's "failed before readiness" cleanup.
+    const auto scheduler_addr =
+        make_bind_host_port(bind_host_, requested_scheduler_port);
+    auto scheduler = mempool_coord_server_.try_bind_server(scheduler_addr);
+    if (!scheduler)
+      scheduler.error().raise("listen on {}", scheduler_addr);
+    mempool_coord_server_.start_accepting(std::move(scheduler->second));
     mempool_gateway_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_auth_server_->start_server(
@@ -621,12 +646,8 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Now have all of the subsystems register themselves with the mempool.
     register_db_with_mempool();
-    AuthCard auth_card = register_auth_with_mempool();
+    register_auth_with_mempool();
     register_coordinator_with_mempool()();
-    // finish_init() installs the mempool's auth-data callback. Subscribe only
-    // after that callback exists, because a recovered DB immediately reports
-    // its current height through auth_data_changed().
-    auth_server_->subscribe_to_auth_data_changes(std::move(auth_card))();
     if (recovered_existing_chain_) {
       register_event_with_mempool();
       start_indexer_pull();
@@ -1106,15 +1127,16 @@ HogDevnodeNode::init_db_backend(
     }
     ctx_->initialize_cost_model(*cost_model);
     recovered_existing_chain_ = true;
-    // Hog ages are scheduler-visible state derived from committed balances,
-    // and nothing republishes them for blocks that committed before this
-    // process started. hog-db's own main does this at startup; a composed
-    // devnode has to as well, or every account reads zero hogs available and
-    // the scheduler discards every transaction it is handed.
-    HogDbStatus<void> reconciled = reconcile_startup_hog_ages(ctx_->get_db());
+    // Native-token ages are scheduler-visible state derived from committed
+    // balances, and nothing republishes them for blocks that committed before
+    // this process started. hog-db's own main does this at startup; a composed
+    // devnode has to as well, or every account reads zero native tokens
+    // available and the scheduler discards every transaction it is handed.
+    HogDbStatus<void> reconciled =
+        reconcile_startup_native_token_ages(ctx_->get_db());
     if (!reconciled.has_value()) {
       throw std::runtime_error(
-          std::format("failed to reconcile startup hog ages: {}",
+          std::format("failed to reconcile startup native-token ages: {}",
                       reconciled.error()));
     }
     info("recovered hog-devnode database at committed height {}",
@@ -1188,7 +1210,7 @@ HogDevnodeNode::register_event_with_mempool()
   }
 }
 
-AuthCard
+void
 HogDevnodeNode::register_auth_with_mempool()
 {
   auto client_res =
@@ -1205,9 +1227,8 @@ HogDevnodeNode::register_auth_with_mempool()
       .address_for_mempool =
           format_advertised_address(bind_host_, auth_mempool_server_.port())
               .c_str()};
-  client.mempoolauth_intro_auth(auth_card)();
   auth_server_->set_mempool_client(std::move(client));
-  return auth_card;
+  auth_server_->subscribe_and_register(std::move(auth_card))();
 }
 
 void

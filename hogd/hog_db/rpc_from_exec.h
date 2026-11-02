@@ -14,6 +14,8 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/hog_db/invoke_tx.h"
+#include "hogd/hog_db/preserialized_reply.h"
+#include "hogd/hog_db/storage_item_reply.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
@@ -139,10 +141,12 @@ public:
   RPCError pop_subtransactions(BlockID block, TransactionID tx,
                                uint32_t popcount);
 
-  ExpectedStorageItem get_snapshot_item(BlockID block,
-                                        AddressAndKey const &addrkey);
+  StorageItemReply<ExpectedStorageItem>
+  get_snapshot_item(BlockID block, AddressAndKey const &addrkey);
 
-  ExpectedContract get_contract(BlockID block, SHA256Hash const &hash);
+  // Serves the stored row as is: it already is the Contract's encoding.
+  PreserializedReply<ExpectedContract> get_contract(BlockID block,
+                                                    SHA256Hash const &hash);
   ExpectedDeployment get_deployment(BlockID block,
                                     ContractAddress const &contract_address);
   ExpectedRetrocausalQueueBlock

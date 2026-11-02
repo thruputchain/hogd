@@ -66,7 +66,6 @@ target_link_libraries(
   runtime_test_lib
   runtime
   runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
-  db_interface
   hog_db
   GTest::gtest
 )
@@ -89,6 +88,7 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc
+  erc165_probe_test.cc
   erc20_permit_parity_test.cc
   event_test.cc
   faucet_scenario_test.cc
@@ -136,6 +136,7 @@ add_library(runtime_test_objects OBJECT
   syscall_misc_tests.cc
   syscall_parse_hardening_rv32_test.cc
   syscall_parse_tests.cc
+  syscall_verify_signature_test.cc
   tracing_tests.cc
   try_invoke_test.cc
   tx_context_tests.cc
@@ -185,11 +186,12 @@ target_include_directories(
 
 target_link_libraries(
   runtime_test
+  # Test-only: makes the ML-DSA signatures syscall_verify_signature_test checks.
+  mldsa_signer
   precompiles
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -226,7 +228,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -259,12 +260,12 @@ if(BUILD_BENCHMARKS)
 
   target_link_libraries(
     rv32_syscall_entry_bench
+    mldsa_signer
     precompiles
     rv32_syscall_bridge
     runtime
     runtime_test_lib
     runtime_test_util
-    db_interface
     hog_db
     storage_cost
     model_checker
@@ -355,7 +356,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -380,7 +380,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -407,7 +406,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -438,7 +436,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker

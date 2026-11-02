@@ -17,6 +17,5 @@ target_link_libraries(
   runtime_test_util
   hogd
   hog_db
-  storage_item
 )
 

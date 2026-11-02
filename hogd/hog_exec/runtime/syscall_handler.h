@@ -33,6 +33,7 @@
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/transaction_stats.h"
 #include "invoke_flag.hh"
@@ -68,6 +69,19 @@ template<typename T> struct StorageRead {
 // We may also wish to add checks to make sure that a contract that's created
 // is actually deployed, and/or put limits on the size of an individual
 // contract. What's done here is only check well-formedness of the code.
+
+#if HOGD_RV32_STACK_USAGE_ENABLED
+// One rv32 invocation's stack record: the first value its guest wrote to sp
+// (x2), the stack top it established, and the lowest, the deepest point the
+// stack reached, so sp_initial - sp_min is the invocation's stack usage. Both
+// are rv32::kSpUnwritten if the guest never wrote sp.
+struct Rv32StackUsageRecord {
+  ContractAddress address;
+  Runtime::MethodID method_id;
+  uint32_t sp_initial;
+  uint32_t sp_min;
+};
+#endif
 
 // Data structure that manages all system calls and state associated with a
 // running transaction.
@@ -148,6 +162,11 @@ public:
 
   InvocationFrameOutput get_most_recent_frame_output() const;
   x23::Vec<TxEmittedEvent> get_most_recent_frame_events() const;
+  // As above, but move the output and events out instead of copying them (the
+  // return buffer and event payloads can be large). For a caller that is done
+  // with the handler: afterwards the getters above return unspecified values.
+  InvocationFrameOutput extract_most_recent_frame_output();
+  x23::Vec<TxEmittedEvent> extract_most_recent_frame_events();
 
   void enable_tracing();
   InvocationFrameTrace const *get_trace() const;
@@ -246,6 +265,19 @@ public:
   // ExecResultTxNonDeterministicError) before interpreting this value.
   DbConflictResult const &last_commit_conflict() const;
 
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  // Debug-only rv32 stack diagnostic (HOGD_RV32_STACK_USAGE; see
+  // rv32/stack_usage.h). Rv32Runtime appends one record as each of its
+  // invocations ends, in the order they finish, so a callee precedes its
+  // caller. The test FFI reads them through get_rv32_stack_usage(); nothing in
+  // the executor reads them back.
+  void record_rv32_stack_usage(Rv32StackUsageRecord record);
+  std::vector<Rv32StackUsageRecord> const &rv32_stack_usage() const
+  {
+    return rv32_stack_usage_;
+  }
+#endif
+
   [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction();
 
   // Adds the replay-nonce consume delta for the root invoked address to the
@@ -272,10 +304,10 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_events(ExecResult exec_result, ProposedTransaction proposed_tx);
 
-  // Get the proposal data.
+  // Proposal mode only: moves the proposal data out of the handler.
   // Can only be called after root_invoke()
-  // (as otherwise the proposal data is not available)
-  NondeterministicProposalData const &get_proposal_data() const;
+  // (as otherwise the proposal data is not available), and only once.
+  NondeterministicProposalData extract_proposal_data();
 
   // Syscalls: operations within an invocation
 
@@ -337,6 +369,7 @@ public:
   // The ids the most recent child's returned tokens took in this frame.
   AuthTokenIdRange get_returned_auth_tokens() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_parent_can_take_auth_tokens(size_t count) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
@@ -484,6 +517,9 @@ private:
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
   std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
+#if HOGD_RV32_STACK_USAGE_ENABLED
+  std::vector<Rv32StackUsageRecord> rv32_stack_usage_;
+#endif
 
   const SHA256Hash source_tx_hash_;
   const AuthClaim auth_claim_;
@@ -617,8 +653,7 @@ private:
   // On a failed 2pc push: trace-logs db_proxy_'s last_push_conflict() and
   // fire-and-forgets a best-effort TxFailureDiagnostic (first conflict +
   // executing block height) to the event server, which relays it to the
-  // indexers so clients can learn why the tx was excluded (see
-  // docs/superpowers/specs/2026-07-07-tx-failure-diagnostics-cache-design.md).
+  // indexers so clients can learn why the tx was excluded.
   // A no-op when hog_db captured no diagnostics (kDbDiagnosticNone, e.g.
   // validation/viewing blocks) -- hog_db selects the level from the block's
   // execution mode, so there is no seam to configure here. Called right

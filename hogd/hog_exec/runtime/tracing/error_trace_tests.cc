@@ -79,8 +79,7 @@ class ErrorTraceTest : public ::testing::Test,
 public:
   ErrorTraceTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -140,8 +139,9 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
 // test_invoke_no_return_syscall cost 20 more; the depth-precedence pair added
 // alongside test_invoke_misaligned_tokens_beat_depth cost 20 more again.
 // Rebuilding with SDK 0.39.0, which also dropped the three invalid write
-// flags methods, saved 48 here and in the test above. Measured rather than
-// predicted -- table order does not follow the method name.
+// flags methods, saved 48 here and in the test above; rebuilding with SDK
+// 0.58.0 saved 16 more in both. Measured rather than predicted -- table order
+// does not follow the method name.
 TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
 {
   auto addr = deploy_misc_contract();

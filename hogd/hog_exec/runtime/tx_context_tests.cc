@@ -8,11 +8,11 @@
 
 #include <algorithm>
 #include <cstddef>
-#include <cstdint>
 #include <memory>
 #include <span>
 
 #include "built_contracts/tx_context_test.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -34,8 +34,7 @@ class TxContextTests : public ::testing::Test,
 public:
   TxContextTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -78,7 +77,7 @@ protected:
 TEST_F(TxContextTests, GetSourceTxHashMatchesSubmittedTx)
 {
   Transaction tx{.invocation = client_.make_invocation<u8"get_source_tx_hash">(
-                     UINT64_MAX),
+                     kDefaultMaxTxGas),
                  .uniquifier = make_new_uniquifier()};
   SHA256Hash expected = sha256(tx);
 
@@ -102,8 +101,8 @@ TEST_F(TxContextTests, GetBlockHeightMatchesExecutingBlock)
   BlockHeight expected = get_db_tip().value.proposal_header.block_height + 1;
 
   auto handler = make_new_system_call_handler(
-      Transaction{.invocation =
-                      client_.make_invocation<u8"get_block_height">(UINT64_MAX),
+      Transaction{.invocation = client_.make_invocation<u8"get_block_height">(
+                      kDefaultMaxTxGas),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -125,7 +124,7 @@ TEST_F(TxContextTests, TxStatsGasRemainingValid)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_tx_stats_gas_remaining">(
-                          UINT64_MAX),
+                          kDefaultMaxTxGas),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
@@ -140,7 +139,7 @@ TEST_F(TxContextTests, SourceTxHashConsistentInChildFrame)
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
                       client_.make_invocation<u8"test_source_tx_hash_in_child">(
-                          UINT64_MAX, kTargetAddress),
+                          kDefaultMaxTxGas, kTargetAddress),
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   ASSERT_TRUE(handler.root_invoke()().is_root_success());

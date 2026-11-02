@@ -21,6 +21,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/mldsa_signer.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
@@ -40,10 +41,9 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -163,6 +163,28 @@ static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=
               "the bytestring payload must fit in guest memory");
 static_assert(kMaxBytestringBytes <= kBytestringCeilingLen,
               "the sweep must stay inside the wire format's ceiling");
+
+// ML-DSA-65 VerifySignature material, past the largest hashing and bytestring
+// input: its signatures and key are too large for the low block ed25519 uses.
+// One signature per swept message length, over the same message.
+constexpr uint32_t kMlDsaSignatureAddress =
+    kBytestringPayloadAddress + kMaxBytestringBytes;
+constexpr uint32_t kMlDsaSignatureStride = 3312;
+static_assert(kMlDsaSignatureStride >= sizeof(MlDsa65Signature));
+
+constexpr uint32_t
+mldsa_signature_address(size_t index)
+{
+  return kMlDsaSignatureAddress +
+         (static_cast<uint32_t>(index) * kMlDsaSignatureStride);
+}
+
+constexpr uint32_t kMlDsaPublicKeyAddress =
+    kMlDsaSignatureAddress +
+    (kVerifyMessageBytes.size() * kMlDsaSignatureStride);
+static_assert(kMlDsaPublicKeyAddress + sizeof(MlDsa65PublicKey) <=
+                  kGuestMemoryBytes,
+              "the ML-DSA material must fit in guest memory");
 
 // The cross-invoke depth the fixture admits, and so the deepest parent walk
 // the frame sweeps can measure. The stock chain caps a transaction at
@@ -438,7 +460,7 @@ public:
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_item_key(space, index);
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+                make_nnint_item(kNNIntSnapshotValue));
     }
   }
 
@@ -456,7 +478,7 @@ public:
       // be measuring something other than the copy it is meant to.
       std::ranges::fill(value, uint8_t{0xAB});
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(std::move(value), &cost_model()));
+                make_bytestring_item(std::move(value)));
     }
   }
 
@@ -495,23 +517,14 @@ public:
   }
 
 private:
-  static StorageCostModel const &cost_model()
+  void seed_item(AddressAndKey const &addrkey, WireStorageItem const &item)
   {
-    static const StorageCostModel model =
-        StorageCostModel::default_cost_model();
-    return model;
-  }
-
-  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
-  {
-    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                                       std::move(item)));
+    framework_.write_item(addrkey, item);
   }
 
   NativeContractTestFramework framework_{
       /*log=*/false,
       BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb,
       /*empty_genesis=*/true,
       /*genesis_cost_model=*/std::nullopt,
       bench_network_config(),
@@ -671,6 +684,24 @@ verify_signature_call(size_t index)
   return call;
 }
 
+// The ML-DSA-65 counterpart of verify_signature_call: the same message, its own
+// signatures and key.
+SyscallCall
+verify_signature_mldsa65_call(size_t index)
+{
+  const uint32_t message_bytes = kVerifyMessageBytes.at(index);
+  SyscallCall call =
+      make_call("VerifySignatureMlDsa65", SyscallNo::kVerifySignature,
+                {static_cast<uint32_t>(CryptographicScheme::MlDsa65),
+                 mldsa_signature_address(index),
+                 static_cast<uint32_t>(sizeof(MlDsa65Signature)),
+                 kMlDsaPublicKeyAddress,
+                 static_cast<uint32_t>(sizeof(MlDsa65PublicKey)),
+                 kMessageAddress, message_bytes});
+  call.payload_bytes = message_bytes;
+  return call;
+}
+
 // force_load distinguishes a snapshot-backed read from a frame-only read.
 // These match the SDK's get_values_force and get_values paths.
 SyscallCall
@@ -785,6 +816,22 @@ make_guest_memory()
   }
   std::ranges::copy(public_key, memory.begin() + kPublicKeyAddress);
   std::ranges::copy(message, memory.begin() + kMessageAddress);
+
+  // ML-DSA-65: deterministic signatures (all-zero rnd), so every run measures
+  // the same bytes.
+  const auto mldsa_key = MlDsa65SigningKey::from_seed(MlDsaSeed{1});
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    const auto signature =
+        mldsa_key.sign_with_rnd(std::as_bytes(std::span(message).first(
+                                    kVerifyMessageBytes[i])),
+                                {}, MlDsaRnd{});
+    if (!signature.has_value()) {
+      std::abort();
+    }
+    std::ranges::copy(*signature, memory.begin() + mldsa_signature_address(i));
+  }
+  std::ranges::copy(mldsa_key.public_key(),
+                    memory.begin() + kMlDsaPublicKeyAddress);
 
   // The NNInt block: the warm keys, and SetAdd's two operands. The sweep rows
   // overwrite the key per call; the operands stay.
@@ -1456,6 +1503,19 @@ register_benchmarks()
                                    .c_str(),
                                bm_syscall_vm,
                                verify_signature_call(kVerifyVmRow));
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    benchmark::RegisterBenchmark(("entry/VerifySignatureMlDsa65/" +
+                                  std::to_string(kVerifyMessageBytes[i]))
+                                     .c_str(),
+                                 bm_syscall_entry,
+                                 verify_signature_mldsa65_call(i));
+  }
+  benchmark::RegisterBenchmark(("vm/VerifySignatureMlDsa65/" +
+                                std::to_string(
+                                    kVerifyMessageBytes[kVerifyVmRow]))
+                                   .c_str(),
+                               bm_syscall_vm,
+                               verify_signature_mldsa65_call(kVerifyVmRow));
 
   // NNInt, warm: the key's view is already in the active frame. The Get rows
   // read a view loaded from the snapshot; SetAdd overwrites a staged write.

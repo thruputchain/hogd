@@ -2,7 +2,6 @@
 
 #include <algorithm>
 #include <concepts>
-#include <cstdint>
 #include <cstring>
 #include <memory>
 #include <optional>
@@ -19,6 +18,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -62,8 +62,7 @@ class NativeRv32TokenEventParityTest : public ::testing::Test,
 public:
   NativeRv32TokenEventParityTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   // Actor addresses, shared identically across both the rv32 and native runs so
@@ -192,7 +191,7 @@ protected:
 
     // Deploy the precompiled native token at the preset address.
     auto token_contract = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token_contract);
     write_deployment(kNativeTokenContractAddress, token_contract);
     // Cover the native token's own storage writes (e.g. the allowance row).
@@ -275,7 +274,7 @@ protected:
     native_map.emplace(kWrapperNativeId, std::move(wrapper_contract));
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     auto native_context =
         std::make_unique<NativeContext>(std::move(native_map));
@@ -325,7 +324,7 @@ protected:
                               Invocation{.invoked_address = invoked,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = target_calldata(target)},
                           .uniquifier = make_new_uniquifier()}};
     auto h = make_new_system_call_handler(h_tx.tx, *multiplexed_context_);
@@ -347,7 +346,7 @@ protected:
                               Invocation{.invoked_address = invoked,
                                          .entrypoint =
                                              entrypoint_from_method_id(method),
-                                         .gas_limit = UINT64_MAX,
+                                         .gas_limit = kDefaultMaxTxGas,
                                          .calldata = target_calldata(target)},
                           .uniquifier = make_new_uniquifier()}};
     auto h =
@@ -421,7 +420,7 @@ TEST_F(NativeRv32TokenEventParityTest,
                       "transfer_from");
 }
 
-// Mint events: a supply change is its own event on groundhog-erc20-if, not a
+// Mint events: a supply change is its own event on thruput-erc20-if, not a
 // Transfer from the zero address, so a mint emits Mint(receiver) with two
 // topics, byte-identically on the rv32 itc_erc20 and the native precompile
 // (modulo the emitting contract address). Both run from the genesis root

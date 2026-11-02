@@ -802,8 +802,7 @@ class Rv32RuntimeContextTest : public ::testing::Test,
 public:
   Rv32RuntimeContextTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

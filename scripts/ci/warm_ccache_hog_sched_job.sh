@@ -26,13 +26,6 @@ hog11) WARMUP_SPECS=("clang Debug x23-coro-trace-off" "clang Debug test-ffi-no-b
   ;;
 esac
 
-export CARGO_REGISTRIES_GROUNDHOG_INDEX="sparse+https://crates.thruput.network/api/v1/crates/"
-export CARGO_REGISTRIES_GROUNDHOG_SOURCE="sparse+https://crates.thruput.network/api/v1/crates/"
-# Published crates and pinned submodules retain the legacy registry identity.
-# The token travels from the schedule as CARGO_REGISTRIES_GROUNDHOG_LEGACY_TOKEN.
-export CARGO_REGISTRIES_GROUNDHOG_LEGACY_INDEX="sparse+https://groundhog.dev/crates/api/v1/crates/"
-export CARGO_REGISTRIES_GROUNDHOG_LEGACY_CREDENTIAL_PROVIDER="cargo:token"
-
 echo 'cloning hogd'
 git init -q .
 git remote remove origin 2>/dev/null || true
@@ -43,7 +36,9 @@ git clean -ffd -e .ssh/ -e .gitconfig
 
 git submodule update --init --recursive --depth 1 --jobs 8 --quiet
 
-source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
+# Warm developer builds with the host's default GCC as the system toolchain moves.
+HOGD_CI_GCC_CC=gcc HOGD_CI_GCC_CXX=g++ \
+  source ./scripts/ci/prepare_env.sh >prepare_env.log 2>&1 || (cat prepare_env.log && exit 1)
 
 # Both variants share this checkout and the prefetched Cargo cache. Neither
 # warm_ccache.sh nor build.sh clones again between builds.

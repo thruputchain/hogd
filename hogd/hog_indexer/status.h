@@ -15,6 +15,10 @@ enum class IndexerErrorCode {
   kDBAlreadyExists,
   kDBNotFound,
   kUnsupportedCompressionAlgorithm,
+  kQueryNotReady,
+  kMigrationRequired,
+  kInvalidCursor,
+  kHistoryUnavailable,
 };
 
 class IndexerErrorCategory : public std::error_category {

@@ -2,6 +2,7 @@
 
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <cstring>
 #include <span>
@@ -19,6 +20,7 @@
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
+#include "hogd/ramdb/constants.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -28,6 +30,12 @@
 #include "x23/x23.h"
 
 namespace hogd {
+
+// An address's auth data is one ramdb item, so a full table of the largest
+// registrable key must fit in one.
+static_assert(std::max(sizeof(Ed25519PublicKey), sizeof(MlDsa65PublicKey)) *
+                  kMaxSigners <=
+              kBigItemThreshold);
 
 MaybeAsyncSyscallInnerResult
 syscall_ChangePublicKeyRegistration_inner(
@@ -72,6 +80,21 @@ syscall_ChangePublicKeyRegistration_inner(
 
       return {x23::Ptr<PublicKeyConfig>{
           new PublicKeyConfig{.key = key,
+                              .max_weight = *optional_input_key_weight}}};
+    }
+    case CryptographicScheme::MlDsa65:
+    {
+      key.scheme(CryptographicScheme::MlDsa65);
+      MlDsa65PublicKey &mldsa65 = *key.mldsa65();
+      if (input_key_bytes.size() != mldsa65.size()) {
+        return SyscallError{
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      }
+      std::memcpy(mldsa65.data(), input_key_bytes.data(),
+                  sizeof(MlDsa65PublicKey));
+
+      return {x23::Ptr<PublicKeyConfig>{
+          new PublicKeyConfig{.key = std::move(key),
                               .max_weight = *optional_input_key_weight}}};
     }
     default:

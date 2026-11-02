@@ -27,9 +27,9 @@
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
-#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -62,8 +62,8 @@ create_sched_db_client(x23::CoroPoll &cp, const std::string &coordinator_addr)
 
   // Use the bulk message cap, matching the other bulk DB links (rpc_from_db,
   // rpc_from_coord, auth subscriptions) and the mempool server on this link.
-  // A block's balance deltas go out as HogsTransferredChunk records that stay
-  // far below it (BackgroundCommitWorker::kMaxDeltasPerChunk).
+  // A block's balance deltas go out as NativeTokensTransferredChunk records
+  // that stay far below it (BackgroundCommitWorker::kMaxDeltasPerChunk).
   auto client = make_rpc_client<SchedDb1>(host_port, cp, /*retry=*/true,
                                           kBulkRpcMaxMessageSize)();
   if (!client)
@@ -102,6 +102,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     critical("Could not create database: path '{}', {}", path, ramdb.error());
     return EXIT_FAILURE;
   }
+  (*ramdb)->register_metrics();
 
   // create the RPC context.
   HogDbDAO db_tmp(RAMDB(std::move(*ramdb)));
@@ -160,9 +161,10 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
-  HogDbStatus<void> reconcile_status = reconcile_startup_hog_ages(ctx.get_db());
+  HogDbStatus<void> reconcile_status =
+      reconcile_startup_native_token_ages(ctx.get_db());
   if (!reconcile_status.has_value()) {
-    critical("Failed to reconcile startup hog ages: {}",
+    critical("Failed to reconcile startup native-token ages: {}",
              reconcile_status.error());
     return EXIT_FAILURE;
   }

@@ -47,6 +47,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -260,6 +261,19 @@ SystemCallHandler::perform_initial_validation()
     }
   }
 
+  // The budget is the chain's to bound. Refused rather than clamped: a
+  // transaction executes under the budget it signed or not at all.
+  // root_invocation_ is nullopt only in the test harness.
+  if (root_invocation_.has_value()) {
+    if (const GasAmount permitted = config_params().max_tx_gas;
+        root_invocation_->gas_limit > permitted) {
+      warn("tx {}: budgets {} gas; chain permits {}",
+           show_byte_array(get_source_tx_hash()), root_invocation_->gas_limit,
+           permitted);
+      return {InvokeError{InvokeErrorCode::ValidationFailure}, 0};
+    }
+  }
+
   // Without this gate an oversized attachment set fails only at commit, where
   // it reports as unrecoverable (#2190). Deterministic from the tx bytes.
   if (const uint32_t permitted = config_params().max_new_contracts_per_tx;
@@ -469,6 +483,46 @@ SystemCallHandler::get_most_recent_frame_events() const
     return x23::Vec<TxEmittedEvent>();
   }
   return invocation_frame_stack_.copy_active_frame_events();
+}
+
+InvocationFrameOutput
+SystemCallHandler::extract_most_recent_frame_output()
+{
+  // Mirrors get_most_recent_frame_output().
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+    if (!last_frame_.has_value()) {
+      return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+    }
+    return last_frame_.value().extract_frame_output();
+  }
+  if (invocation_frame_stack_.empty()) {
+    return InvocationFrameOutput(InvocationFrameStatusCode::Fault);
+  }
+  auto output =
+      invocation_frame_stack_.extract_active_frame_child_return_output();
+  assert(output.has_value());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  return std::move(*output);
+}
+
+x23::Vec<TxEmittedEvent>
+SystemCallHandler::extract_most_recent_frame_events()
+{
+  // Mirrors get_most_recent_frame_events().
+  if (last_frame_finished_) {
+    assert(invocation_frame_stack_.empty());
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    if (!last_frame_.has_value() || last_frame_.value().should_revert()) {
+      return x23::Vec<TxEmittedEvent>();
+    }
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    return last_frame_.value().extract_events();
+  }
+  if (invocation_frame_stack_.empty()) {
+    return x23::Vec<TxEmittedEvent>();
+  }
+  return invocation_frame_stack_.extract_active_frame_events();
 }
 
 InvokeStatus<void>
@@ -1221,6 +1275,14 @@ SystemCallHandler::last_commit_conflict() const
   return db_proxy_.last_push_conflict();
 }
 
+#if HOGD_RV32_STACK_USAGE_ENABLED
+void
+SystemCallHandler::record_rv32_stack_usage(Rv32StackUsageRecord record)
+{
+  rv32_stack_usage_.push_back(record);
+}
+#endif
+
 void
 SystemCallHandler::report_db_conflict_diagnostic() const
 {
@@ -1305,6 +1367,12 @@ SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+bool
+SystemCallHandler::check_parent_can_take_auth_tokens(size_t count) const
+{
+  return invocation_frame_stack_.check_parent_can_take_auth_tokens(count);
 }
 
 AuthTokenIdRange
@@ -1445,18 +1513,15 @@ SystemCallHandler::get_parent_supplied_auth_token_count() const
       .get_current_frame_parent_supplied_auth_token_count();
 }
 
-NondeterministicProposalData const &
-SystemCallHandler::get_proposal_data() const
+NondeterministicProposalData
+SystemCallHandler::extract_proposal_data()
 {
   // Either succeeded on the root tx (with or without a revert)
   // or deterministic error during execution.
   // Not allowed to have i.e. validation failure here, or block abort.
   assert(root_invoke_result_.has_readable_proposal_data());
-  assert(!std::holds_alternative<ViewingModeData>(execution_mode_data_));
-  if (std::holds_alternative<ProposalModeData>(execution_mode_data_)) {
-    return std::get<ProposalModeData>(execution_mode_data_).proposal_data();
-  }
-  return std::get<ValidationModeData>(execution_mode_data_).proposal_data();
+  return std::get<ProposalModeData>(execution_mode_data_)
+      .extract_proposal_data();
 }
 
 x23::Async<SystemStatus<void>>
@@ -1467,9 +1532,11 @@ SystemCallHandler::emit_events(ExecResult exec_result,
   auto events = (root_invoke_succeeded() && last_frame_.has_value())
                     ? last_frame_.value().extract_events()
                     : x23::Vec<TxEmittedEvent>{};
+  // The handler is finished once events are emitted, so move the root output
+  // (which carries the return buffer) rather than copying it.
   auto root_output =
       last_frame_.has_value()
-          ? last_frame_.value().get_frame_output()
+          ? last_frame_.value().extract_frame_output()
           : InvocationFrameOutput(InvocationFrameStatusCode::Fault);
   // gas_consumed is in the event trie leaf, so the events root commits to it.
   co_return co_await event_server_proxy_.emit_events(
@@ -1503,6 +1570,12 @@ SystemCallHandler::log_event(Topic const *topic0, Topic const *topic1,
   if (serialized_size > kMaxEventLength) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Reject over-cap events before building the buffer below: a rejected
+  // LogEvent pays only kSyscallBaseCost, so it must not copy the
+  // contract-supplied payload first (issue #3058).
+  if (invocation_frame_stack_.event_count() >= kMaxEventsPerTransaction) {
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  }
 
   x23::Buf buf;
   uint32_t num_topics = 0;
@@ -1532,16 +1605,13 @@ SystemCallHandler::log_event(uint32_t num_topics,
 {
   assert(!invocation_frame_stack_.empty());
   CHECK(!is_read_only());
-  if (num_topics > kMaxTopics) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-
-  if (data.size() > kMaxEventLength) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
-  if (invocation_frame_stack_.event_count() >= kMaxEventsPerTransaction) {
-    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-  }
+  // The topic-pointer overload, the only caller, passes at most kMaxTopics
+  // topics and has already rejected oversized and over-cap events before
+  // building the buffer it passes in.
+  CHECK_LE(num_topics, uint32_t{kMaxTopics});
+  CHECK_LE(data.size(), size_t{kMaxEventLength});
+  CHECK_LT(invocation_frame_stack_.event_count(),
+           size_t{kMaxEventsPerTransaction});
 
   auto message = make_tx_emitted_event(get_current_address(), num_topics, data);
   invocation_frame_stack_.log_event(std::move(message));
@@ -1564,7 +1634,7 @@ is_banned_redeploy_native_contract(
     HogexecPrecompiledNativeContracts native_contract_id)
 {
   switch (native_contract_id) {
-  case HogexecPrecompiledNativeContracts::kNativeContractHogToken:
+  case HogexecPrecompiledNativeContracts::kNativeContractNativeToken:
   case HogexecPrecompiledNativeContracts::kNativeContractDefaultWallet:
     return true;
   }

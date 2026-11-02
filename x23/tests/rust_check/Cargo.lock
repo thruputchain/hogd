@@ -116,21 +116,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "rpc_api"
-version = "0.2.0"
-source = "sparse+https://crates.thruput.network/api/v1/crates/"
-checksum = "f036fb03367c01b1361848588f9872d20af205bf89b0ad2d484cf9ea194bac6d"
-dependencies = [
- "async-trait",
- "thiserror",
- "xdrs",
-]
-
-[[package]]
 name = "schemars"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "687274d293b6cdc6e73e0fee520bf2049650090d7164f87672d212a3c530cf4a"
+checksum = "ab508826f74a77ca9d5aba6ff19b522583ee3eaf28a19384ff3d0e5835fadf6e"
 dependencies = [
  "dyn-clone",
  "ref-cast",
@@ -141,9 +130,9 @@ dependencies = [
 
 [[package]]
 name = "schemars_derive"
-version = "1.2.2"
+version = "1.2.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d98c67716b46af2f0b8cf752abc930f6f9aecfbf671ecfb531db8a31dbe4e2ba"
+checksum = "e1c3a92094fa7d61aa124645844facb6b554dfc797136d0f5fd1f890e2bffc69"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -194,9 +183,9 @@ dependencies = [
 
 [[package]]
 name = "serde_json"
-version = "1.0.151"
+version = "1.0.154"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "c841b55ecdae098c80dcae9cf767f6f8a0c2cdb3416bbef72181df4d0fe73f14"
+checksum = "e7e9cc8b1b85264074fbcc02a88680c4096b1e47df8f739dceb03bf482f04bd6"
 dependencies = [
  "itoa",
  "memchr",
@@ -213,9 +202,9 @@ checksum = "7da8b5736845d9f2fcb837ea5d9e2628564b3b043a70948a3f0b778838c5fb4f"
 
 [[package]]
 name = "syn"
-version = "3.0.6"
+version = "3.0.9"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "8593e8e72159ed2257d083c7a454a85cbf854f37a0966d8d483aff8c8a3ebcee"
+checksum = "d78c8dee4c7bf0e14673097256fed6142ce9d3b85a408189d07482442145823b"
 dependencies = [
  "proc-macro2",
  "quote",
@@ -243,28 +232,20 @@ dependencies = [
 ]
 
 [[package]]
-name = "unicode-ident"
-version = "1.0.26"
+name = "thruput-rpc-api"
+version = "0.4.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "d245f478577f809a851594d02313b640fb437e0bb33866753cff937863096954"
-
-[[package]]
-name = "x23c-rust-check"
-version = "0.0.0"
+checksum = "ec1c4ba7cae0e04719b109b3b6446d3340a9a9ddc6aa8ba19bc6db17cda2f51f"
 dependencies = [
  "async-trait",
- "rpc_api",
- "schemars",
- "serde",
- "xdr-common",
- "xdrs",
+ "thiserror",
 ]
 
 [[package]]
-name = "xdr-common"
-version = "0.10.3"
-source = "sparse+https://crates.thruput.network/api/v1/crates/"
-checksum = "aa40706c1eb7e8483c8ac185fbcb52d4b70495f0a1c50bf8ee3428ad3b9aef0c"
+name = "thruput-xdr-common"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "445832dd4fb8a4a2527a4920da0c796664892aa7f1e0cdebdebf97c51c06347f"
 dependencies = [
  "escape-bytes",
  "schemars",
@@ -272,10 +253,10 @@ dependencies = [
 ]
 
 [[package]]
-name = "xdr-derive"
-version = "0.10.3"
-source = "sparse+https://crates.thruput.network/api/v1/crates/"
-checksum = "c0da7fabeb5ec487a4e0ec25f49aa39ba8358fc13a201fa9705eb354b04794a2"
+name = "thruput-xdr-derive"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "91e6807fdcde80a390103e930d53d7d8a03407788bfba8e1f135694967ae6537"
 dependencies = [
  "darling",
  "proc-macro2",
@@ -284,13 +265,31 @@ dependencies = [
 ]
 
 [[package]]
-name = "xdrs"
-version = "0.10.3"
-source = "sparse+https://crates.thruput.network/api/v1/crates/"
-checksum = "2411efb4631e1c11edac3c600cd1a15c32fc7d8c39bea364d8b3af2a25956eb6"
+name = "thruput-xdrs"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "11366c38c4a05945827d91d8b81e5be6e729b2305cab107f2476fede9ccb8e53"
 dependencies = [
- "xdr-common",
- "xdr-derive",
+ "thruput-xdr-common",
+ "thruput-xdr-derive",
+]
+
+[[package]]
+name = "unicode-ident"
+version = "1.0.27"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a2c754d6c33795a1c324727428e5a7dedb5b06195f9890bdbcba760d3e246563"
+
+[[package]]
+name = "x23c-rust-check"
+version = "0.0.0"
+dependencies = [
+ "async-trait",
+ "schemars",
+ "serde",
+ "thruput-rpc-api",
+ "thruput-xdr-common",
+ "thruput-xdrs",
 ]
 
 [[package]]

@@ -12,7 +12,7 @@ add_dependencies(
 target_link_libraries(genesis
   base
   crypto
-  storage_item
+  storage_cost
   protocol
   contract_loader
   components

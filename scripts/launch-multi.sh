@@ -70,7 +70,7 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 LOADGEN_BINARY=${HOGD_BUILD_DIR}/hogd/loadgen/loadgen_server
-CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/groundhog-go/chuckd/scripts
+CHUCKD_SCRIPT_DIR=${HOGD_PROJECT_DIR}/thruput-go/chuckd/scripts
 CHUCKD_BINARY=${HOGD_BUILD_DIR}/chuckd.dev
 CHUCKD_CONFIG=$HOGD_PROJECT_DIR/scripts/config-chuckd.json
 SCPD_BINARY=${HOGD_BUILD_DIR}/scpd.dev
@@ -279,7 +279,7 @@ echo "Start mempool..."
 remote_launch "$mempool_server" "$MEMPOOL_BINARY" \
   --bind-ip "$(hog_ip "$mempool_server")" \
   --metrics-port $MEMPOOL_HTTP_PORT \
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000000 \
+  --network-hash 11111111111111111111111111111111 \
   --num-db-shards ${#hog_db_servers[@]} --num-exec-shards ${#hog_exec_servers[@]} \
   --db-port $MEMPOOL_DB_PORT --event-port $MEMPOOL_EVENT_PORT --executor-port $MEMPOOL_EXECUTOR_PORT --auth-port $MEMPOOL_AUTH_PORT --coordinator-port $MEMPOOL_COORDINATOR_PORT
 

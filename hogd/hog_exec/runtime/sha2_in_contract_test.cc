@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 
@@ -8,6 +7,7 @@
 
 #include "built_contracts/contract_loader.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/string.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -26,8 +26,7 @@ class Sha2InContractTest : public ::testing::Test,
 public:
   Sha2InContractTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -101,7 +100,7 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
           .tx = Transaction{.invocation =
                                 Invocation{.invoked_address = contract_addr_,
                                            .entrypoint = entrypoint,
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);

@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -43,8 +44,7 @@ class RcqDoctoredProposalDataTest : public ::testing::Test,
 public:
   RcqDoctoredProposalDataTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -56,7 +56,7 @@ protected:
     // against one address (RevertedDoubleConsumePlusHonestConsumePeekIsValid
     // commits 6 against kAddrB), each priced as a single consume since blocks
     // reset the committed snapshot. Top up both grants by that worst-case
-    // amount (0 on MockInMemory; this suite always runs HogDb).
+    // amount.
     write_contract(native_contract_a_xdr_);
     write_deployment(kAddrA, native_contract_a_xdr_);
     setup_grant_storage_token(kAddrA, 1'000'000'000 +
@@ -132,7 +132,7 @@ protected:
         .invocation =
             Invocation{.invoked_address = kAddrB,
                        .entrypoint = entrypoint_from_method_id(0),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(values.begin(), values.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -143,7 +143,7 @@ protected:
                            Invocation{.invoked_address = kAddrA,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -154,7 +154,7 @@ protected:
                            Invocation{.invoked_address = kAddrB,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -175,7 +175,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto ha = make_new_system_call_handler(tx_insert, *insert_ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -238,7 +238,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto honest_proposal_b = [&] {
     auto ha = make_new_system_call_handler(tx_b, *native_ctx);
     EXPECT_TRUE(ha.root_invoke()().is_root_success());
-    auto p = ha.get_proposal_data();
+    auto p = ha.extract_proposal_data();
     EXPECT_TRUE(ha.abort_transaction()().has_value());
     return p;
   }();
@@ -297,12 +297,12 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h1 = make_new_system_call_handler(tx_insert_1, *insert_ctx);
     ASSERT_TRUE(h1.root_invoke()().is_root_success());
-    insert_p1 = h1.get_proposal_data();
+    insert_p1 = h1.extract_proposal_data();
     ASSERT_EQ(h1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h2 = make_new_system_call_handler(tx_insert_2, *insert_ctx);
     ASSERT_TRUE(h2.root_invoke()().is_root_success());
-    insert_p2 = h2.get_proposal_data();
+    insert_p2 = h2.extract_proposal_data();
     ASSERT_EQ(h2.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -340,7 +340,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto ha = make_new_system_call_handler(tx_a, *tx_a_ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    proposal_a = ha.get_proposal_data();
+    proposal_a = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     // 2 consume bits (both found entries), child errors deterministically
@@ -373,7 +373,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto hb = make_new_system_call_handler(tx_b, *tx_b_ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    proposal_b = hb.get_proposal_data();
+    proposal_b = hb.extract_proposal_data();
     ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     // 2 bits (consume found, peek found).  Both the consume and peek log
@@ -503,7 +503,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    excl_p = h.get_proposal_data();
+    excl_p = h.extract_proposal_data();
     ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -517,7 +517,7 @@ TEST_F(RcqDoctoredProposalDataTest, PermExclusiveWriteBlocksConcurrentRCQInsert)
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    obs_p = h.get_proposal_data();
+    obs_p = h.extract_proposal_data();
     ASSERT_EQ(obs_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(obs_p.nondeterministic_bits[0], uint8_t{0x00})
         << "Honest proposal: peek=false (bit 0), try_invoke=false (bit 1)";
@@ -604,7 +604,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    excl_p = h.get_proposal_data();
+    excl_p = h.extract_proposal_data();
     ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -615,7 +615,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    obs_p = h.get_proposal_data();
+    obs_p = h.extract_proposal_data();
     ASSERT_EQ(obs_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(obs_p.nondeterministic_bits[0], uint8_t{0x02})
         << "Honest: peek=false (bit 0), try_invoke=true (bit 1)";
@@ -739,7 +739,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    excl_p = h.get_proposal_data();
+    excl_p = h.extract_proposal_data();
     ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -752,7 +752,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    honest_p = h.get_proposal_data();
+    honest_p = h.extract_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 2U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0], uint8_t{0x02})
         << "Honest bits: peek=false (bit 0), try_invoke=true (bit 1)";
@@ -864,7 +864,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    excl_p = h.get_proposal_data();
+    excl_p = h.extract_proposal_data();
     ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -873,7 +873,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_obs, *obs_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    auto honest_p = h.get_proposal_data();
+    auto honest_p = h.extract_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
@@ -1222,7 +1222,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_excl, *excl_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    excl_p = h.get_proposal_data();
+    excl_p = h.extract_proposal_data();
     ASSERT_EQ(h.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -1231,7 +1231,7 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto h = make_new_system_call_handler(tx_cons, *cons_ctx);
     ASSERT_TRUE(h.root_invoke()().is_root_success());
-    auto honest_p = h.get_proposal_data();
+    auto honest_p = h.extract_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);

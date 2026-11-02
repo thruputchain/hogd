@@ -12,8 +12,12 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/key_change_chunk_view.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -74,7 +78,7 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 
   auto entry =
       std::make_shared<std::pair<BlockHeight, std::optional<AddressAuthData>>>(
-          current_height, db_auth_data.value());
+          current_height, std::move(*db_auth_data));
 
   auth_data_cache_.put(address, entry);
 
@@ -142,15 +146,35 @@ AuthServer::register_auth_data_updates(
   current_height_futex_.broadcast(&default_threadpool());
   co_await Health::instance().set_current_block_height(height);
 
-  if (mempool_client_) {
-    // The mempool's proc still takes the height as one batch.
-    KeyChangeBatch batch;
-    batch.reserve(key_changes.size());
-    for (const KeyChange &key_change : key_changes) {
-      batch.push_back(key_change);
-    }
-    co_await mempool_client_->mempoolauth_auth_data_changed(height, batch);
+  co_await forward_key_changes(height, key_changes);
+}
+
+x23::Async<void>
+AuthServer::ForwardKeyChangeChunk::operator()(ChunkPosition position,
+                                              ChunkItems<KeyChange> changes)
+{
+  // The record is serialized from [changes] in place, before the call first
+  // suspends.
+  const KeyChangeChunkView view{.height = height,
+                                .chunk_index = position.index,
+                                .chunk_count = position.count,
+                                .changes = changes};
+  co_await client.mempoolauth_auth_data_changed_chunk(view);
+}
+
+x23::Async<void>
+AuthServer::forward_key_changes(
+    BlockHeight height, const ChunkedVector<KeyChangeBatch> &key_changes)
+{
+  if (!mempool_client_) {
+    co_return;
   }
+  // The chunks are serialized from [key_changes] in place; it outlives the
+  // send.
+  ChunkRunSender sender(key_changes.chunks(), max_key_changes_per_chunk_,
+                        ForwardKeyChangeChunk{.client = *mempool_client_,
+                                              .height = height});
+  co_await sender.send();
 }
 
 x23::Async<void>
@@ -184,6 +208,19 @@ AuthServer::subscribe_to_auth_data_changes(AuthCard card)
   co_return;
 }
 
+x23::Async<IntroAuthResult>
+AuthServer::subscribe_and_register(AuthCard card)
+{
+  if (!mempool_client_) {
+    co_return IntroAuthResult(IntroAuthOutcome::kFailure);
+  }
+  // [set_mempool_client] sets the client once and nothing resets it, so the
+  // reference outlives the subscription's suspension.
+  sched_auth_client_t &mempool_client = *mempool_client_;
+  co_await subscribe_to_auth_data_changes(card);
+  co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
+}
+
 x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::populate_auth_data(BlockHeight height,
                                ContractAddress const &address)
@@ -193,12 +230,12 @@ AuthServer::populate_auth_data(BlockHeight height,
     co_return entry.error();
   }
 
-  CHECK_PTR(entry.value().get());
+  CHECK_PTR(entry->get());
 
   // A missing auth entry (nullopt) is returned as-is: whether that is
   // acceptable depends on the transaction's claim type (pubkey claims
   // require it), so the policy lives in verify_auth.
-  co_return std::move(entry.value());
+  co_return std::move(*entry);
 }
 
 namespace {
@@ -247,7 +284,7 @@ AuthServer::verify_transactions(BlockHeight height,
         results[i] = entry.error().code();
         continue;
       }
-      auth_data[tx.tx.invocation.invoked_address] = std::move(entry.value());
+      auth_data[tx.tx.invocation.invoked_address] = std::move(*entry);
     }
   }
 
@@ -264,6 +301,7 @@ AuthServer::verify_transactions(BlockHeight height,
            AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
 
+          x23::Buf signature_preimage;
           for (size_t i = chunk.start; i < chunk.end; i++) {
             const SignedTransaction &tx = txs[i];
             if (results[i] != AuthErrorCode::kAuthSuccess) {
@@ -278,7 +316,7 @@ AuthServer::verify_transactions(BlockHeight height,
 
             AuthVerifyStatus<void> verify_result =
                 verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash);
+                            network_hash, signature_preimage);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -300,6 +338,7 @@ x23::Async<AuthErrorCode>
 AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
   Ed25519SignatureVerifier signature_verifier;
+  x23::Buf signature_preimage;
   for (const auto &tx : txs) {
     if (wrapper_over_cap(tx)) {
       co_return AuthErrorCode::kAuthFailed;
@@ -309,13 +348,13 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (!source_addr.has_value()) {
       co_return source_addr.error().code();
     }
-    CHECK_PTR(source_addr.value().get());
+    CHECK_PTR(source_addr->get());
     const std::optional<AddressAuthData> &source_auth_data =
-        source_addr.value()->second;
+        (*source_addr)->second;
 
     auto verify_result =
         verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                    network_hash_);
+                    network_hash_, signature_preimage);
     if (!verify_result.has_value()) {
       co_return AuthErrorCode::kAuthFailed;
     }

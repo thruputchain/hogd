@@ -350,6 +350,15 @@ Loglet::free(ItemHeader *item)
   free_len_.fetch_add(bytes_fragmented, std::memory_order_release);
 }
 
+// Counts from LogletAllocator::usage_stats(). region_bytes is the mapping
+// size. The other fields count loglets, matching the mem-stats log line.
+struct LogletUsageStats {
+  size_t region_bytes = 0;
+  size_t memory_items = 0;
+  size_t disk_buffering = 0;
+  size_t free = 0;
+};
+
 // LogletAllocator manages the allocation of loglets.
 class LogletAllocator {
 public:
@@ -380,7 +389,10 @@ public:
   // free frees a loglet, allowing it to be reused.
   void free(Loglet *ll);
   // print_stats prints loglet memory usage statistics.
-  void print_stats();
+  void print_stats() const;
+  // usage_stats snapshots the same counts print_stats logs. The mode of a
+  // loglet can change during the scan; this is the same relaxed read.
+  LogletUsageStats usage_stats() const;
   // reclaim_idle_memory returns idle loglets to the OS. It should be called
   // periodically.
   void reclaim_idle_memory();

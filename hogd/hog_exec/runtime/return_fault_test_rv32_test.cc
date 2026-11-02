@@ -1,11 +1,11 @@
 #include <gtest/gtest.h>
 
 #include <cstddef>
-#include <cstdint>
 #include <limits>
 #include <memory>
 
 #include "built_contracts/return_fault_test.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -23,8 +23,7 @@ class ReturnFaultTestRv32Test : public ::testing::Test,
 public:
   ReturnFaultTestRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       runtime_context_(make_hog_exec_context())
   {}
 
@@ -66,7 +65,7 @@ TEST_F(ReturnFaultTestRv32Test, InvokeRunTest)
   // Invoke the run_test method
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =
-                      client_.make_invocation<u8"run_test">(UINT64_MAX,
+                      client_.make_invocation<u8"run_test">(kDefaultMaxTxGas,
                                                             kCalleeAddress),
                   .uniquifier =
                       Uniquifier{.block_expiry_height =

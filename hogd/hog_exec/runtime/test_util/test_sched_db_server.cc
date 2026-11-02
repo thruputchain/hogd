@@ -10,10 +10,12 @@
 namespace hogd {
 
 void
-TestSchedDBServer::wait_for_hog_transferred_height(BlockHeight height)
+TestSchedDBServer::wait_for_native_token_transferred_height(BlockHeight height)
 {
   std::unique_lock<std::mutex> lock(mtx_);
-  cv_.wait(lock, [this, height] { return hogs_transferred_.contains(height); });
+  cv_.wait(lock, [this, height] {
+    return native_tokens_transferred_.contains(height);
+  });
 }
 
 void
@@ -24,10 +26,10 @@ TestSchedDBServer::wait_for_changed_accounts_height(BlockHeight height)
 }
 
 std::map<ContractAddress, int128_t>
-TestSchedDBServer::get_hogs_transferred(BlockHeight height)
+TestSchedDBServer::get_native_tokens_transferred(BlockHeight height)
 {
   std::unique_lock<std::mutex> lock(mtx_);
-  return hogs_transferred_.at(height);
+  return native_tokens_transferred_.at(height);
 }
 
 ContractAddressBatch

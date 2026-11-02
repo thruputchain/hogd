@@ -26,6 +26,7 @@
 #include "built_contracts/payment_channel.hh"
 #include "built_contracts/simple_wallet.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -49,8 +50,7 @@ class PaymentChannelIntegrationTest : public ::testing::Test,
 public:
   PaymentChannelIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       rv32_runtime_context_(make_hog_exec_context())
   {}
 
@@ -244,7 +244,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_client.make_invocation<u8"do_action">(
-                UINT64_MAX, mint_sig, mint_calldata),
+                kDefaultMaxTxGas, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -283,7 +283,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_client.make_invocation<u8"do_action">(
-                UINT64_MAX, allowance_sig, allowance_calldata),
+                kDefaultMaxTxGas, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -318,7 +318,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, open_sig, open_calldata),
+                kDefaultMaxTxGas, open_sig, open_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -355,7 +355,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_b_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, join_sig, join_calldata),
+                kDefaultMaxTxGas, join_sig, join_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -389,7 +389,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = pc_client_.make_invocation<u8"close_channel">(
-                UINT64_MAX, channel_id, make_difference(balance_a),
+                kDefaultMaxTxGas, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -424,7 +424,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = pc_client_.make_invocation<u8"dispute">(
-                UINT64_MAX, channel_id, make_difference(balance_a),
+                kDefaultMaxTxGas, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -453,8 +453,9 @@ protected:
   {
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = pc_client_.make_invocation<u8"finalize">(UINT64_MAX,
-                                                                   channel_id),
+            .invocation =
+                pc_client_.make_invocation<u8"finalize">(kDefaultMaxTxGas,
+                                                         channel_id),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -490,7 +491,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                pc_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                pc_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas,
                                                            kTestDisputePeriod),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -512,7 +513,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                erc20_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                erc20_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas,
                                                               kWalletAAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -532,7 +533,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, party_a_pubkey_),
+                kDefaultMaxTxGas, party_a_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -551,7 +552,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_b_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, party_b_pubkey_),
+                kDefaultMaxTxGas, party_b_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -596,7 +597,7 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -657,7 +658,7 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -719,7 +720,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -771,7 +772,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -824,7 +825,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -880,7 +881,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -940,7 +941,7 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -993,7 +994,7 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),

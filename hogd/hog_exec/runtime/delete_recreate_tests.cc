@@ -13,6 +13,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -39,12 +40,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class DeleteRecreateTest : public ::testing::TestWithParam<TestDB>,
+class DeleteRecreateTest : public ::testing::Test,
                            public NativeContractTestFramework {
 public:
   DeleteRecreateTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -53,7 +54,7 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
+TEST_F(DeleteRecreateTest, DeleteRecreateBytestring)
 {
   // Storage contract: 0 = read-empty then write bytestring; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -206,7 +207,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -231,7 +232,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
+TEST_F(DeleteRecreateTest, DeleteRecreateNNInt)
 {
   // Storage contract: 0 = read-empty then write nnint; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -385,7 +386,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -411,7 +412,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_EQ(from_xdr(nnint_item), 42);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
+TEST_F(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 {
   // Storage contract: 0 = consume-empty then insert; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -568,7 +569,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -637,7 +638,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressStorage,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -649,11 +650,6 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DeleteRecreateTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

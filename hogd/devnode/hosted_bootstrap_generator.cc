@@ -14,6 +14,7 @@
 #include <fstream>
 #include <ios>
 #include <iterator>
+#include <limits>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -26,6 +27,7 @@
 
 #include "contract.hh"
 #include "genesis.hh"
+#include "hogd/base/base58.h"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/io.h"
 #include "hogd/base/json.h"
@@ -35,7 +37,6 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
@@ -82,6 +83,21 @@ std::string
 uint64_string(std::uint64_t value)
 {
   return std::to_string(value);
+}
+
+// JSON-XDR carries a uint64 arm as a decimal string, as storage_cost_model
+// does, since a JSON number need not hold one exactly.
+void
+write_config_param_value(json::Writer &w, ConfigParam const &param)
+{
+  const std::uint64_t value = config_param_value(param);
+  if (config_param_max_value(param.param()) >
+      std::numeric_limits<std::uint32_t>::max()) {
+    w.field(config_param_name(param.param()), uint64_string(value));
+  }
+  else {
+    w.field(config_param_name(param.param()), static_cast<std::int64_t>(value));
+  }
 }
 
 std::string
@@ -135,7 +151,7 @@ storage_cost_model_hash(StorageCostModel const &model)
 void
 write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 {
-  w.field("hash", hex_string(storage_cost_model_hash(model)));
+  w.field("hash", encode_base58(storage_cost_model_hash(model)));
   w.field("baseDataItemCost", int128_to_decimal(model.kBaseItemCost));
   w.field("bytestringCostPerByte",
           std::to_string(model.kBytestringCostPerByte));
@@ -188,9 +204,7 @@ build_genesis_json(GenesisConfiguration const &genesis)
               w.object([&](json::Writer &w) {
                 w.object_field(std::format("{}", param.param()),
                                [&](json::Writer &w) {
-                                 w.field(config_param_name(param.param()),
-                                         std::int64_t{
-                                             config_param_value(param)});
+                                 write_config_param_value(w, param);
                                });
               });
             }
@@ -226,7 +240,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{2});
+    w.field("schemaVersion", std::int64_t{3});
     w.field("kind", "hog-hosted-bootstrap");
     w.field("networkHash", format_network_hash(config.network_hash));
     w.field("protocol", protocol_text(version::kHogdProtocol()));
@@ -238,7 +252,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
               std::to_string(config.bootstrap_config.storage_tokens));
     });
     w.object_field("bootstrapAccountDerivation", [&](json::Writer &w) {
-      w.field("scheme", "groundhog-bootstrap-account-v1");
+      w.field("scheme", "thruput-bootstrap-account-v1");
       w.field("seed", config.bootstrap_config.seed);
     });
     w.array_field("bootstrapAccounts", [&](json::Writer &w) {
@@ -246,8 +260,8 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
         w.object([&](json::Writer &w) {
           w.field("index", static_cast<std::int64_t>(account.index));
           w.field("role", "hosted_dev_account");
-          w.field("publicKey", hex_string(account.public_key));
-          w.field("walletAddress", hex_string(account.address));
+          w.field("publicKey", encode_base58(account.public_key));
+          w.field("walletAddress", encode_base58(account.address));
           w.field("initialStorageTokens",
                   std::to_string(account.initial_storage_tokens));
         });
@@ -256,8 +270,9 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
     if (artifact.faucet.has_value()) {
       w.object_field("faucet", [&](json::Writer &w) {
         w.field("role", "faucet");
-        w.field("publicKey", hex_string(artifact.faucet->public_key));
-        w.field("walletAddress", hex_string(artifact.faucet->wallet_address));
+        w.field("publicKey", encode_base58(artifact.faucet->public_key));
+        w.field("walletAddress",
+                encode_base58(artifact.faucet->wallet_address));
         w.field("initialStorageTokens",
                 std::to_string(artifact.faucet->initial_storage_tokens));
       });
@@ -268,7 +283,7 @@ build_metadata_json(HostedBootstrapGeneratorConfig const &config,
           x23::Buf tx_xdr = x23::serialize(artifact.initialization_txs[i]);
           w.field("index", static_cast<std::int64_t>(i));
           w.field("hash",
-                  hex_string(sha256(artifact.initialization_txs[i].tx)));
+                  encode_base58(sha256(artifact.initialization_txs[i].tx)));
           w.field("xdr", xdr_hex(std::as_bytes(
                              std::span(tx_xdr.data(), tx_xdr.size()))));
         });

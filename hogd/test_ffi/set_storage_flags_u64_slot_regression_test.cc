@@ -9,8 +9,8 @@
 // bits as an FFI usage error, so the native path answered Unrecoverable where
 // RV32, whose slots are 32 bits, delivered the same bits and SetStorageFlags
 // returned kSyscallErrorCodeInvalidSyscallInput. StorageDeltaFlagSet is now
-// unsigned (groundhogchain/protocol#192), so the cast zero-extends and the
-// syscall's own flag check decides on both paths.
+// unsigned (thruputchain/thruput-protocol#192), so the cast zero-extends and
+// the syscall's own flag check decides on both paths.
 
 #include <array>
 #include <cstddef>

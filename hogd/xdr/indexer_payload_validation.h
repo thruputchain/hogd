@@ -37,8 +37,11 @@ compute_indexer_payload_roots(const TxEventLogBatch &event_logs,
 EventsHash
 compute_indexer_outbox_event_root(const TxEventLogBatch &event_logs,
                                   const ProposedTransactionBatch &tx_bodies);
-x23::Async<IndexerPayloadStatus<TxsHash>>
-compute_indexer_proposal_txs_root(const ProposalTxs &proposal_txs);
+// The txset root [ProposalHeader::txs_hash] commits to: a Merkle trie over
+// the [TransactionHash] of each of [tx_bodies]. [ProposalTxs] names the same
+// txs by [SignedTransactionHash], so this root is not recomputable from it.
+IndexerPayloadStatus<TxsHash>
+compute_indexer_txs_root(const ProposedTransactionBatch &tx_bodies);
 x23::Async<IndexerPayloadStatus<void>>
 validate_indexer_committed_payload(const IndexerCommittedBlockPayload &payload);
 x23::Async<IndexerPayloadStatus<IndexerCommittedBlock>>

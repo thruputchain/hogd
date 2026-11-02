@@ -19,6 +19,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -71,8 +72,7 @@ class DefaultWalletFallbackTest : public ::testing::Test,
 public:
   DefaultWalletFallbackTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -109,7 +109,7 @@ protected:
     native_map.emplace(kNativeWalletId, make_native_default_wallet_contract());
     native_map.emplace(
         std::to_underlying(
-            HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+            HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
         make_native_token_contract());
     auto native_ctx = std::make_unique<NativeContext>(std::move(native_map));
     auto rv32_ctx = std::make_unique<Rv32Context>();
@@ -139,7 +139,7 @@ protected:
     setup_grant_storage_token(kEchoAddr, 1'000'000'000);
 
     auto token = make_native_contract(std::to_underlying(
-        HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+        HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
     write_contract(token);
     write_deployment(kNativeTokenContractAddress, token);
   }
@@ -194,10 +194,9 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
-                                                                  calls),
-                              claim_override ? *claim_override
-                                             : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(
+        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
+        claim_override ? *claim_override : make_pubkey_claim(preimage_));
   }
 
   CapturedRecord run_deploy_tx(
@@ -208,7 +207,7 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
     return run_wallet_root_tx(
         client.make_invocation<u8"deploy">(
-            UINT64_MAX, nonce, hash,
+            kDefaultMaxTxGas, nonce, hash,
             std::tuple<int64_t, uint64_t>{static_cast<int64_t>(amount >> 64U),
                                           static_cast<uint64_t>(amount)},
             initializer),
@@ -398,7 +397,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentCommitsTransferAndCode)
   EXPECT_EQ(stored_balance(target),
             int128_t{kAmount} - get_default_cost_model()->get_balance_cost() -
                 get_default_cost_model()->get_deployment_cost(*deployed));
-  auto changes = get_hogs_transferred(block);
+  auto changes = get_native_tokens_transferred(block);
   EXPECT_EQ(changes.at(wallet_),
             -int128_t{kAmount} - replay_cache_cost_charged(1));
   EXPECT_EQ(changes.at(target),
@@ -435,7 +434,7 @@ TEST_F(DefaultWalletFallbackTest,
                 (replay_cache_cost_charged(2) - replay_cache_cost_charged(1)));
   EXPECT_EQ(stored_balance(target), target_before);
   EXPECT_TRUE(lookup_deployment_from_db(target));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_),
             -(replay_cache_cost_charged(2) - replay_cache_cost_charged(1)));
@@ -485,7 +484,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   auto before = stored_balance(wallet_);
   auto block = get_block_number();
   auto rec = run_deploy_tx(nonce, hash, 2'000'000'000);
-  auto expected = x23::serialize_cxs(uint64_t{0xb19947acb2fa14ffULL},
+  auto expected = x23::serialize_cxs(uint64_t{0xf63c8b1f5e7e2fe0ULL},
                                      itc_erc20::ERC20Error::TooLarge)
                       .value();
   ASSERT_EQ(rec.size(), 2U + expected.size());
@@ -496,7 +495,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentInsufficientSenderRollsBack)
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
@@ -530,7 +529,7 @@ TEST_F(DefaultWalletFallbackTest, FundedDeploymentUnknownCodeRollsBackTransfer)
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  auto deltas = get_hogs_transferred(block);
+  auto deltas = get_native_tokens_transferred(block);
   ASSERT_EQ(deltas.size(), 1U);
   EXPECT_EQ(deltas.at(wallet_), -(replay_cache_cost_charged(1)));
   auto events = get_tx_event_log(last_tx_id_)();
@@ -562,7 +561,7 @@ TEST_F(DefaultWalletFallbackTest,
   EXPECT_FALSE(lookup_deployment_from_db(target));
   EXPECT_FALSE(lookup_storage_item_from_db(
       make_free_native_token_balance_addrkey(target)));
-  EXPECT_TRUE(get_hogs_transferred(block).empty());
+  EXPECT_TRUE(get_native_tokens_transferred(block).empty());
 }
 
 TEST_F(DefaultWalletFallbackTest,
@@ -601,12 +600,12 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackEmptyCallListReverts)
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
-// Separate fixture for the absent-record test: uses kMockInMemory so that
-// the wallet contract record can be erased from the in-memory store after
-// genesis writes it. Genesis must run (cost model required). With the wallet
-// record erased, the root fallback sets local_hash unconditionally and
-// NativeContext::make_new_runtime fails Unrecoverable — the expected
-// hard-failure behavior for broken chain state.
+// Separate fixture for the absent-record test: genesis names a default
+// wallet whose contract record was never written (the native wallet hash with
+// one byte flipped). Genesis must still run (cost model required). With no
+// record behind the configured hash, the root fallback sets local_hash
+// unconditionally and NativeContext::make_new_runtime fails Unrecoverable —
+// the expected hard-failure behavior for broken chain state.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class DefaultWalletFallbackNoRecordTest : public ::testing::Test,
                                           public NativeContractTestFramework {
@@ -614,15 +613,19 @@ public:
   DefaultWalletFallbackNoRecordTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kMockInMemory)
+          /*empty_genesis=*/false)
   {
-    // Genesis wrote the wallet contract record. Erase it now, before any
-    // transaction runs (so the StorageSnapshotCache has not yet cached the
-    // entry). Subsequent resolve_contract calls will see it as absent and
-    // NativeContext::make_new_runtime will return Unrecoverable.
-    erase_contract_from_mock_db(
-        make_deployed_contract_hash(make_native_contract(kNativeWalletId))
-            .hash);
+    auto missing_wallet =
+        make_deployed_contract_hash(make_native_contract(kNativeWalletId));
+    missing_wallet.hash[0] ^= 0xFF;
+
+    GenesisConfigurationBuilder builder;
+    builder.set_default_wallet(missing_wallet);
+    run_genesis_initialization(
+        builder.build(NetworkHash{}, *get_default_cost_model(),
+                      *load_stock_genesis_root_contract(),
+                      stock_network_config()),
+        BlockExecutionMode::kBlockExecutionModeProposal);
   }
 
 protected:
@@ -702,14 +705,13 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(client.make_invocation<u8"execute">(UINT64_MAX,
-                                                                  calls),
-                              claim_override ? *claim_override
-                                             : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(
+        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
+        claim_override ? *claim_override : make_pubkey_claim(preimage_));
   }
 };
 
-// Record absent (erased from mock DB after genesis): the root fallback sets
+// Record absent (configured hash never written): the root fallback sets
 // local_hash unconditionally, then NativeContext::make_new_runtime calls
 // resolve_contract(wallet_hash) which returns nullptr (no snapshot entry,
 // no tx-attached record) → SystemError{Unrecoverable} propagates through
@@ -755,7 +757,7 @@ TEST_F(DefaultWalletFallbackTest, UnknownEntrypointFaults)
   Invocation inv{.invoked_address = wallet_,
                  .entrypoint = entrypoint_from_method_id(
                      static_cast<Runtime::MethodID>(999)),
-                 .gas_limit = UINT64_MAX,
+                 .gas_limit = kDefaultMaxTxGas,
                  .calldata = {}};
   auto rec = run_wallet_root_tx(std::move(inv), make_pubkey_claim(preimage_));
   ASSERT_EQ(rec.size(), 3U);
@@ -839,7 +841,7 @@ public:
   CustomDefaultWalletTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/false)
+          /*empty_genesis=*/false)
   {}
 };
 
@@ -873,7 +875,8 @@ TEST_F(CustomDefaultWalletTest, RootFallbackResolvesConfiguredContract)
 
   ContractTraitClient<calldata_wrapper::CalldataWrapper> client(undeployed);
   SignedTransaction stx;
-  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.invocation =
+      client.make_invocation<u8"echo">(kDefaultMaxTxGas, payload);
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);
@@ -915,7 +918,8 @@ TEST_F(CustomDefaultWalletTest, AbsentRv32RecordIsUnrecoverable)
   x23::Vec<uint8_t, 4294967295> payload;
   payload.resize(8, 0xAB);
   SignedTransaction stx;
-  stx.tx.invocation = client.make_invocation<u8"echo">(UINT64_MAX, payload);
+  stx.tx.invocation =
+      client.make_invocation<u8"echo">(kDefaultMaxTxGas, payload);
   stx.tx.uniquifier = make_new_uniquifier();
 
   auto handler = make_new_system_call_handler(stx, ctx);

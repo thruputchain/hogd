@@ -119,15 +119,15 @@ public:
   // Serializes ramdb write passes against each other and against the
   // sync()/snapshot at block commit. hog_db writes in coarse passes — the
   // per-block changeset apply plus dbtip update ending in commit(), and
-  // the per-block hog-age batch — so each pass takes this once and
+  // the per-block native-token-age batch — so each pass takes this once and
   // Database::sync()'s no-concurrent-writes precondition (which ramdb's
   // write_record() CHECKs) holds by construction instead of by the
   // RPC-transport serialization described in #3397. The genesis-load
   // writes run before any concurrent writer exists and are exempt.
   // A contending pass parks its worker, which is safe here where it is not
-  // for co_wait_for_no_commit_publishing(): at most one hog-age pass contends
-  // per block, and commit_block() never waits on the x23 ThreadPool while
-  // holding the lock.
+  // for co_wait_for_no_commit_publishing(): at most one native-token-age pass
+  // contends per block, and commit_block() never waits on the x23 ThreadPool
+  // while holding the lock.
   std::mutex &ramdb_write_pass_lock() { return ramdb_write_pass_lock_; }
 
   // Get the committed block height, when exact synchronization with DbTip is

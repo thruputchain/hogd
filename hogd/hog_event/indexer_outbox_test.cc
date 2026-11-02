@@ -82,27 +82,28 @@ make_event(const ProposedTransaction &body, uint8_t marker,
 ProposalTxs
 make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : proposal_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
 
   ProposalTxs proposal_txs;
-  const size_t split = std::min<size_t>(2, hashes.size());
+  const size_t split = std::min<size_t>(2, signed_hashes.size());
   if (split != 0) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(hashes.data(),
-                                                              split),
-                             proposal_txs.hash)();
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data(), split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
   }
-  if (split != hashes.size()) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(
-                                 hashes.data() + split, hashes.size() - split),
-                             proposal_txs.hash)();
+  if (split != signed_hashes.size()) {
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data() + split,
+                                               signed_hashes.size() - split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data() + split,
                                  nondeterministic_data.size() - split),
@@ -165,7 +166,7 @@ make_committed_with_proposal(BlockHeight height,
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(events, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_header.block_timepoint = 100 + height;
@@ -258,7 +259,7 @@ make_committed_payload_golden_fixture()
   ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs, payload.tx_bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(payload.tx_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -975,7 +976,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   ProposedTransaction body_c = make_body(3);
   ProposedTransactionBatch proposal_bodies{body_a, body_b, body_c};
   ProposalTxs proposal_txs = make_canonical_proposal_txs(proposal_bodies);
-  ASSERT_GE(proposal_txs.hash.segment_tokens.size(), 2);
+  ASSERT_GE(proposal_txs.signed_hash.segment_tokens.size(), 2);
   ASSERT_GE(proposal_txs.nondeterministic_data.segment_tokens.size(), 2);
 
   ProposedTransactionBatch arrival_bodies{body_a, body_b, body_c};
@@ -1114,13 +1115,16 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
   // the one event log, between its root output and its events. It moved again
   // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body.
+  // absent key at the end of the one transaction body. It moved again, at the
+  // same length, when ProposalTxs began naming transactions by
+  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
+  // Full-key leaves and then direct key/value commitments changed the roots.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0xee, 0x08, 0xab, 0x8e, 0xeb, 0x72, 0xa9,
-                                   0x64, 0xa9, 0xb3, 0xd2, 0x90, 0xeb, 0xaf,
-                                   0xbc, 0xa9, 0xb9, 0x07, 0x63, 0xfb, 0xf8,
-                                   0x93, 0x78, 0xff, 0xb9, 0xdd, 0xf8, 0xfc,
-                                   0x6a, 0xa4, 0x41, 0x7e};
+  const SHA256Hash kExpectedDigest{0x87, 0xb2, 0x10, 0xf3, 0x52, 0x6d, 0x92,
+                                   0x71, 0x84, 0x47, 0x60, 0xe1, 0x80, 0xb9,
+                                   0x6f, 0xbb, 0x17, 0xa3, 0x91, 0xb6, 0x01,
+                                   0x49, 0xc3, 0x88, 0x3b, 0x81, 0x7b, 0xbe,
+                                   0x2d, 0x86, 0x6d, 0xaa};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
@@ -1739,7 +1743,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   TxEventLogBatch events{event_a, event_b};
   ProposedTransactionBatch bodies{body_a, body_b};
 
-  EventBlockContext context(dir_.directory(), 100);
+  EventBlockContext context(
+      dir_.directory(), 100,
+      EventBlockContext::create_events_file(dir_.directory(), 100));
   context.executor_open_block();
   ASSERT_TRUE(context.add_event(event_a, body_a)());
   ASSERT_TRUE(context.add_event(event_b, body_b)());
@@ -1749,7 +1755,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   context.finish_file(production_root)();
   EXPECT_EQ(compute_indexer_outbox_event_root(events, bodies), production_root);
 
-  EventBlockContext empty_context(dir_.directory(), 101);
+  EventBlockContext empty_context(
+      dir_.directory(), 101,
+      EventBlockContext::create_events_file(dir_.directory(), 101));
   empty_context.finish_file_write()();
   const SHA256Hash empty_production_root = empty_context.get_root_hash();
   empty_context.finish_file(empty_production_root)();
