@@ -15,61 +15,23 @@ on:
         type: boolean
         default: false
 
+# Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   
 jobs:
   build-linux-x86_64:
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: namespace-profile-release-x86
     permissions:
       contents: read
       actions: read
 
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -85,13 +47,12 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=x86-64-v2" \
@@ -125,13 +86,13 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-linux-x86_64
           path: release_artifacts/libtest_ffi-linux-x86_64.tar.gz*
 
@@ -140,56 +101,16 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   build-linux-arm64:
-    runs-on: namespace-profile-hogd-linux-arm64
+    runs-on: namespace-profile-release-arm64
     permissions:
       contents: read
       actions: read
 
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -205,13 +126,12 @@ jobs:
           echo 'CLANG_CXX=/usr/bin/clang++-21' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=armv8.2-a" \
@@ -245,13 +165,13 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-linux-arm64
           path: release_artifacts/libtest_ffi-linux-arm64.tar.gz*
 
@@ -260,63 +180,16 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   build-macos-arm64:
-    runs-on: namespace-profile-hogd-arm64-macos
+    runs-on: namespace-profile-release-macos-arm64
     permissions:
       contents: read
       actions: read
 
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-
-      - name: Configure ccache
-        run: |
-          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
-          # the cache volume. Point it at the cached path, as the Linux jobs do.
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -336,14 +209,13 @@ jobs:
       - name: Setup Environment
         run: ./scripts/macos-setup.sh
 
-      - uses: ./.github/actions/setup-sccache
-
       - name: Configure Build
         run: |
           ./scripts/build.sh \
             -d build \
             -t Debug \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DENABLE_TEST_FFI=ON" \
             -x "-DSTATIC_LIBCXX=ON" \
             -x "-DBUILD_ARCHITECTURE=armv8.5-a" \
@@ -378,13 +250,13 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Upload Artifact
+        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
+          if-no-files-found: error
           name: libtest_ffi-macos-arm64
           path: release_artifacts/libtest_ffi-macos-arm64.tar.gz*
 
@@ -395,14 +267,16 @@ jobs:
   create-release:
     if: ${{ !inputs.dry_run }}
     needs: [build-linux-x86_64, build-linux-arm64, build-macos-arm64]
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
 
     steps:
       - name: Checkout
-        uses: actions/checkout@v6
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          persist-credentials: false
 
       - name: Parse version from header
         id: parse_version

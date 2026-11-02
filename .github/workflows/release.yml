@@ -1,16 +1,18 @@
 name: Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Hogd release dry run ({0})', github.ref_name) || format('Hogd release {0}', github.ref_name) }}
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+  workflow_dispatch:  # Dry run. Only tag pushes upload and publish.
 
+# Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
   CARGO_BUILD_JOBS: "6"
-  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
-  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  # Reuse RV32 intermediates across builds within this job.
   HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
   HOGD_DISTRIBUTION_VERSION: "0.1.31"
@@ -26,81 +28,27 @@ jobs:
       matrix:
         include:
           - architecture: x86_64
-            runner: namespace-profile-hogd-linux-2604
+            runner: namespace-profile-release-x86
             machine: x86_64
             build_architecture: x86-64-v2
             rust_build_cpu: x86-64-v2
             nproc: 18
           - architecture: arm64
-            runner: namespace-profile-hogd-linux-arm64
+            runner: namespace-profile-release-arm64
             machine: aarch64
             build_architecture: armv8.2-a
             rust_build_cpu: neoverse-n1
-            # 16 vCPU / 32 GB runner; leave memory headroom for -O3 -g TUs.
+            # Leave memory headroom for parallel -O3 -g compiles.
             nproc: 12
-    # Each architecture gets its own cache volume. On the shared profile
-    # volumes, CI jobs on main committed last and the release jobs' ccache,
-    # toolchains and cargo installs were lost, so every release built cold.
-    runs-on: ${{ matrix.runner }};overrides.cache-tag=hogd-release-${{ matrix.architecture }}
+    runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       actions: read
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
-        with:
-          cache: rust
-          # ~/.cargo keeps the thruput CLI install (fetch.sh compiled it
-          # from source every run, 3.5 min on arm64);
-          # ~/.cache/rustup keeps the pinned toolchains (see
-          # .github/actions/cached-rustup-home).
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-            ~/.cargo
-            ~/.cache/rustup
-
-      - name: Use Cached rustup Home
-        uses: ./.github/actions/cached-rustup-home
-
-      - uses: ./.github/actions/setup-sccache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -112,6 +60,7 @@ jobs:
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
           go-version-file: thruput-go/chuckd/go.mod
+          cache: false
 
       - name: Configure Environment
         run: |
@@ -123,9 +72,6 @@ jobs:
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-release-${{ matrix.architecture }}" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
-          # Zero the persisted counters so "Show ccache stats" reports this
-          # run, not totals accumulated over every run on the volume.
-          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -136,6 +82,7 @@ jobs:
             -d build/release \
             -t Release \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
@@ -148,6 +95,7 @@ jobs:
             -d build/debug \
             -t Debug \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
@@ -221,6 +169,7 @@ jobs:
         run: |
           ./scripts/build.sh \
             -d build/znver5 -t Release -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=znver5" \
@@ -232,92 +181,31 @@ jobs:
             build/znver5 artifacts release x86_64 znver5
 
       - name: Upload Linux artifacts
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
+          if-no-files-found: error
           name: hogd-linux-${{ matrix.architecture }}-release-artifacts
           path: artifacts/*.tar.gz
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()
         uses: ./.github/actions/print-log-instructions
 
   hog-devnode-macos-arm64:
-    runs-on: namespace-profile-hogd-arm64-macos
+    runs-on: namespace-profile-release-macos-arm64
     permissions:
       contents: read
       actions: read
     steps:
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
           persist-credentials: false
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/sccache
-            ~/.cache/hogcache
-            ~/.cache/cargo-install
-            ~/.cache/rustup
-
-      - name: Configure ccache
-        run: |
-          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
-          # the cache volume. Point it at the cached path, as the Linux jobs do.
-          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
-          echo "CCACHE_MAXSIZE=10G" >> "$GITHUB_ENV"
-
-          # cargo install writes to ~/.cargo/bin, which the cache volume does not
-          # cover. Install into a cached root instead; ~/.cargo/bin itself is
-          # left alone because rustup's proxies live there.
-          echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
-          echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
-          mkdir -p "$HOME/.cache/cargo-install/bin"
-
-      - name: Use Cached rustup Home
-        uses: ./.github/actions/cached-rustup-home
-
-      - uses: ./.github/actions/setup-sccache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
-          cache_repo pq-code-package/mldsa-native
-          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -341,6 +229,7 @@ jobs:
             -d build/release \
             -t Release \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             hog-devnode
 
@@ -546,16 +435,16 @@ jobs:
           grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
+          if-no-files-found: error
           name: hog-devnode-macos-arm64
           path: artifacts/hog-devnode-macos-arm64.tar.gz
 
       - name: Show ccache stats
         if: always()
-        run: |
-          ccache -s
-          sccache --show-stats
+        run: ccache -s
 
       - name: Print Log Download Instructions
         if: always()
@@ -564,7 +453,7 @@ jobs:
   publish:
     if: github.event_name == 'push'
     needs: [release, hog-devnode-macos-arm64]
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
