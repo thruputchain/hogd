@@ -88,6 +88,36 @@ decode(const DbGatewayItemsReply &reply)
 
 } // namespace
 
+TEST(HogDbGatewayRpcTest, ContractReadReturnsStoredBytes)
+{
+  HogDbDAO dao = make_dao();
+  SHA256Hash hash{};
+  hash[0] = 1;
+  const std::array<uint8_t, 12> bytes = {0, 0, 0, 3, 0, 0, 0, 3, 7, 8, 9, 0};
+  ASSERT_TRUE(dao.write_contract_code(hash, std::as_bytes(std::span(bytes))));
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  auto result = gateway.dbgateway_get_contract(hash);
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_TRUE(std::ranges::equal(result.contract_xdr(), bytes));
+  hash[0] = 2;
+  EXPECT_EQ(gateway.dbgateway_get_contract(hash).error(),
+            RPCError::kRPCNotFound);
+}
+
+TEST(HogDbGatewayRpcTest, ContractReadPreservesCorruptBytesForCallerValidation)
+{
+  HogDbDAO dao = make_dao();
+  SHA256Hash hash{};
+  const std::array<std::byte, 4> bytes{};
+  ASSERT_TRUE(dao.write_contract_code(hash, bytes));
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  auto result = gateway.dbgateway_get_contract(hash);
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.contract_xdr().size(), bytes.size());
+}
+
 TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
 {
   HogDbDAO dao = make_dao();
@@ -114,6 +144,34 @@ TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
             StorageItemType::kItemTypeNonnegativeInt);
   EXPECT_EQ(from_xdr(result.payload().items[0].item().nnint()),
             int128_t{12345});
+}
+
+TEST(HogDbGatewayRpcTest, MetadataReadPreservesDeploymentAndMissingRow)
+{
+  HogDbDAO dao = make_dao();
+  ContractAddress address{};
+  address[0] = 1;
+  DeployedContractHash deployment{};
+  deployment.hash[0] = 7;
+  deployment.contract_size = 1000;
+  deployment.contract_type = ContractType::kRv32;
+  ASSERT_TRUE(dao.write_address_metadata(address, deployment));
+  RPCContext ctx(std::move(dao), nullptr);
+  HogDbGatewayRpc gateway(ctx);
+  AddressAndKey query;
+  query.address = address;
+  query.key.key_type(StorageKeyType::Metadata);
+  AddressAndKeyBatch batch;
+  batch.push_back(query);
+  query.address[0] = 2;
+  batch.push_back(query);
+  auto result = decode(gateway.dbgateway_get_items(batch)());
+  ASSERT_EQ(result.error(), RPCError::kRPCNone);
+  ASSERT_EQ(result.payload().items.size(), 2U);
+  ASSERT_EQ(result.payload().items[0].error(), RPCError::kRPCNone);
+  EXPECT_EQ(result.payload().items[0].item().deployed_contract_hash(),
+            deployment);
+  EXPECT_EQ(result.payload().items[1].error(), RPCError::kRPCNotFound);
 }
 
 TEST(HogDbGatewayRpcTest, ConfigPreservesStatedValuesAndResolvesDefaults)
