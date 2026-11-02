@@ -65,6 +65,9 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
   const uint32_t initial_memory_start =
       load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
+  const uint32_t spec_schema_version =
+      load_u32_le(bytes, kArtifactSpecSchemaVersionOffset);
+  const uint32_t spec_size = load_u32_le(bytes, kArtifactSpecSizeOffset);
   const ArtifactDigest code_digest =
       load_artifact_digest(bytes, kArtifactCodeDigestOffset);
   const ArtifactDigest initial_memory_digest =
@@ -122,11 +125,11 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (initial_memory_size == 0 && initial_memory_start != 0) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // Canonical v5 layout: header || code || initial_memory, exactly. Section
-  // positions are derived, so the only structural degree of freedom left is
-  // total size.
-  if (bytes.size() !=
-      size_t{kArtifactHeaderBytes} + code_size + initial_memory_size) {
+  // Schema contents are opaque to execution. Absent specs have one encoding.
+  // Widen before adding so crafted u32 lengths cannot wrap on 32-bit hosts.
+  if ((spec_schema_version == 0) != (spec_size == 0) ||
+      bytes.size() != uint64_t{kArtifactHeaderBytes} + code_size +
+                          initial_memory_size + spec_size) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 

@@ -328,6 +328,33 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
                    compiled_sha256_return::kInput.size())));
 }
 
+TEST(Rv32ArtifactTest, opaqueSpecDoesNotEnterGuestMemory)
+{
+  auto artifact = valid_artifact_bytes();
+  auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  store_u32_at(artifact, kArtifactSpecSchemaVersionOffset, 99);
+  store_u32_at(artifact, kArtifactSpecSizeOffset, 3);
+  artifact.insert(artifact.end(), {1, 2, 3});
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+  EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+  EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+}
+
+TEST(Rv32ArtifactTest, rejectsMalformedSpecEnvelope)
+{
+  for (auto [version, size] :
+       {std::pair{0U, 1U}, std::pair{1U, 0U}, std::pair{1U, UINT32_MAX}}) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactSpecSchemaVersionOffset, version);
+    store_u32_at(artifact, kArtifactSpecSizeOffset, size);
+    expect_artifact_error(std::move(artifact),
+                          ArtifactError::kInvalidSectionLayout);
+  }
+}
+
 TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
 {
   {

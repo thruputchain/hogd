@@ -21,8 +21,8 @@ namespace hogd::rv32 {
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
-inline constexpr uint32_t kArtifactFormatVersion = 5;
-inline constexpr uint32_t kArtifactHeaderBytes = 128;
+inline constexpr uint32_t kArtifactFormatVersion = 6;
+inline constexpr uint32_t kArtifactHeaderBytes = 136;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
 // v2 seeded sp to the top of data memory.
@@ -51,12 +51,15 @@ inline constexpr size_t kArtifactInitialMemoryStartOffset = 60;
 inline constexpr size_t kArtifactCodeDigestOffset = 64;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
+inline constexpr size_t kArtifactSpecSchemaVersionOffset = 128;
+inline constexpr size_t kArtifactSpecSizeOffset = 132;
 inline constexpr char8_t kArtifactSectionDigestAlgorithm[] = u8"sha256";
 inline constexpr char8_t kArtifactCanonicalSectionOrder[] =
-    u8"header|code|initial_memory";
+    u8"header|code|initial_memory|spec";
 
 static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
-              kArtifactHeaderBytes);
+              kArtifactSpecSchemaVersionOffset);
+static_assert(kArtifactSpecSizeOffset + 4 == kArtifactHeaderBytes);
 
 // FNV-1a digest of instruction and host-syscall costs. Artifact admission
 // checks the declared version/digest pair against kAcceptedGasSchedules.
@@ -157,16 +160,14 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 
 // format_version is a sensitivity-test hook. A format change must also update
 // the domain string below; changing the argument alone cannot reproduce other
-// format versions. folds_fixed_bounds reproduces fingerprints from before
-// code and memory bounds became chain configuration.
+// format versions.
 constexpr uint64_t
 format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                    uint32_t gas_version = kGasTableVersion,
-                   uint64_t gas_digest = kGasScheduleDigest,
-                   bool folds_fixed_bounds = false)
+                   uint64_t gas_digest = kGasScheduleDigest)
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
+  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v6");
 
   digest = format_fingerprint_bytes(digest, u8"magic", kArtifactMagic);
   digest = format_fingerprint_u64(digest, u8"format_version", format_version);
@@ -243,19 +244,20 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                                       kArtifactInitialMemoryDigestOffset,
                                       kArtifactDigestBytes);
 
+  digest =
+      format_fingerprint_layout_field(digest,
+                                      u8"header.spec_schema_version.offset",
+                                      u8"header.spec_schema_version.size",
+                                      kArtifactSpecSchemaVersionOffset, 4);
+  digest = format_fingerprint_layout_field(digest, u8"header.spec_size.offset",
+                                           u8"header.spec_size.size",
+                                           kArtifactSpecSizeOffset, 4);
   digest = format_fingerprint_string(digest, u8"section_digest_algorithm",
                                      kArtifactSectionDigestAlgorithm);
   digest =
       format_fingerprint_u64(digest, u8"digest_bytes", kArtifactDigestBytes);
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
-  // Older lowerers folded the then-fixed bounds; they are chain configuration
-  // now, not part of the format. Reproduce those historical values rather
-  // than this build's configurable defaults.
-  if (folds_fixed_bounds) {
-    digest = format_fingerprint_u64(digest, u8"max_code_bytes", 64 * 1024);
-    digest = format_fingerprint_u64(digest, u8"max_memory_bytes", 64 * 1024);
-  }
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -266,6 +268,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                              1);
   digest = format_fingerprint_u64(digest,
                                   u8"initial_memory_start_zero_when_empty", 1);
+  digest = format_fingerprint_u64(digest, u8"spec_schema_zero_iff_empty", 1);
   digest = format_fingerprint_string(digest, u8"canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
   digest =
@@ -274,41 +277,37 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x4171b4b8dc19b9abULL);
+static_assert(kArtifactFormatFingerprint == 0x4c97dd9c06cbb72cULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
 // The fingerprints a lowerer may report: one per lowerer generation in the
 // field, pinned to what that lowerer emits. The transitional entries go with
 // kAcceptedGasSchedules' transitional entry.
-inline constexpr std::array<uint64_t, 3> kAcceptedFormatFingerprints = {
+inline constexpr std::array<uint64_t, 2> kAcceptedFormatFingerprints = {
     // This build's own.
     kArtifactFormatFingerprint,
-    // Gas table v3 with fixed bounds in the fingerprint.
+    // v6 lowerer declaring gas table v3.
     format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
-                       kTransitionalGasScheduleDigest,
-                       /*folds_fixed_bounds=*/true),
-    // Gas table v3 without fixed bounds in the fingerprint.
-    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
-                       kTransitionalGasScheduleDigest,
-                       /*folds_fixed_bounds=*/false),
+                       kTransitionalGasScheduleDigest),
 };
-static_assert(kAcceptedFormatFingerprints[1] == 0x8e5caf3e9cd23b22ULL);
-static_assert(kAcceptedFormatFingerprints[2] == 0xc5f00a7d4451045eULL);
+static_assert(kAcceptedFormatFingerprints[1] == 0x36f9478fa875ca39ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v5 header, little-endian:
+// RV32 artifact v6 header, little-endian:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
-// initial_memory_start, sha256(code), sha256(initial_memory).
-// Body: header || code || initial_memory, exactly — section file positions
-// are derived from the canonical order, not stored. Method dispatch is in the
-// guest (since v4). The stored image is placed at data-space VA
+// initial_memory_start, sha256(code), sha256(initial_memory),
+// spec_schema_version, spec_size. A zero version and size denote absence.
+// Body: header || code || initial_memory || spec, exactly — section file
+// positions are derived from the canonical order, not stored. Method dispatch
+// is in the guest (since v4). The stored image is placed at data-space VA
 // initial_memory_start (a guest VA, unrelated to file layout); the runtime
 // zero-fills [0, start) — e.g. a stack-first guest's stack region — and
-// [start + size, memory_bytes).
+// [start + size, memory_bytes). Spec bytes remain outside guest memory and
+// are authenticated by the enclosing contract hash, not the section digests.
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,

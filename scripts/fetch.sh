@@ -25,3 +25,10 @@ if [ "$("$THRUPUT_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUPUT_
   echo "Installing the thruput CLI..."
   cargo "+${TOOL_RUST}" install --locked --force "thruput@${THRUPUT_CLI_VERSION}"
 fi
+
+# Hand-written VM fixtures use the low-level, spec-less artifact writer.
+RV32_LOWER_BIN="${CARGO_HOME:-$HOME/.cargo}/bin/rv32-lower"
+if [ "$("$RV32_LOWER_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUPUT_CLI_VERSION}" ]; then
+  echo "Installing the RV32 lowerer..."
+  cargo "+${TOOL_RUST}" install --locked --force "thruput-rv32-lower@${THRUPUT_CLI_VERSION}"
+fi

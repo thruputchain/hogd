@@ -67,6 +67,27 @@ fi
 # caller's working directory. Pass remaining args through to cargo.
 cd "${SCRIPT_DIR}"
 
+# Hand-written VM fixtures have no SDK interface spec. Build these through the
+# low-level lowerer; the supported SDK build path requires an embedded spec.
+if [ "${EXPECT_SPEC}" = "0" ]; then
+    LOWERER="${RV32_LOWER_BIN:-rv32-lower}"
+    if [ "$("${LOWERER}" --version)" != "rv32-lower 0.42.0" ]; then
+        echo "error: raw fixtures require rv32-lower 0.42.0; set RV32_LOWER_BIN" >&2
+        exit 1
+    fi
+    cargo --config .cargo/contract.toml build --release --no-default-features \
+        --features entrypoints --target riscv32im-unknown-none-elf \
+        --target-dir "${INTERNAL_TARGET_DIR}" -p "${TARGET_NAME}" \
+        --bin "${TARGET_NAME}" --frozen --offline "$@"
+    "${LOWERER}" \
+        --elf "${INTERNAL_TARGET_DIR}/riscv32im-unknown-none-elf/release/${TARGET_NAME}" \
+        --out "${TARGET_DIR}/${TARGET_NAME}.rv32a" \
+        --metadata "${TARGET_DIR}/${TARGET_NAME}.rv32.json" \
+        --rustc-version "$(rustc --version)" \
+        --target-triple riscv32im-unknown-none-elf
+    exit 0
+fi
+
 # Disable errexit so a build failure reports the contract name below.
 # Redirect stderr so cargo progress output doesn't break the jq parse.
 BUILD_ERR="$(mktemp)"

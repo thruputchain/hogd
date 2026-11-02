@@ -7,8 +7,8 @@ from pathlib import Path
 
 K_MAX_MEMORY_BYTES = 64 * 1024
 ARTIFACT_MAGIC = b"GHRV32A1"
-ARTIFACT_FORMAT_VERSION = 5
-ARTIFACT_HEADER_BYTES = 128
+ARTIFACT_FORMAT_VERSION = 6
+ARTIFACT_HEADER_BYTES = 136
 ARTIFACT_VM_PROFILE_DIGEST = 0x55C53A685F0EB33D
 ARTIFACT_FLAGS_REQUIRED_VALUE = 0
 ARTIFACT_ENTRY_ABI_VERSION = 3
@@ -178,7 +178,7 @@ def parse_artifact(path):
     artifact = Path(path).read_bytes()
     if len(artifact) < ARTIFACT_HEADER_BYTES:
         raise FixtureError("artifact is shorter than the header")
-    header = struct.unpack_from("<8sIIQIIIIQIIII32s32s", artifact, 0)
+    header = struct.unpack_from("<8sIIQIIIIQIIII32s32sII", artifact, 0)
     magic = header[0]
     format_version = header[1]
     header_bytes = header[2]
@@ -194,6 +194,9 @@ def parse_artifact(path):
     initial_memory_start = header[12]
     code_digest = header[13]
     initial_memory_digest = header[14]
+    spec_schema_version, spec_size = header[15:17]
+    if (spec_schema_version == 0) != (spec_size == 0):
+        raise FixtureError("invalid spec envelope")
     if magic != ARTIFACT_MAGIC:
         raise FixtureError("artifact has wrong magic")
     if format_version != ARTIFACT_FORMAT_VERSION:
@@ -222,9 +225,9 @@ def parse_artifact(path):
         )
     if memory_bytes != K_MAX_MEMORY_BYTES:
         raise FixtureError(f"unexpected memory size {memory_bytes}")
-    # v5 derives section positions from the canonical order: the only
+    # v6 derives section positions from the canonical order: the only
     # structural degree of freedom is total size.
-    expected_size = ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes
+    expected_size = ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes + spec_size
     if len(artifact) != expected_size:
         raise FixtureError("artifact size does not match header sections")
     if initial_memory_start + initial_memory_bytes > memory_bytes:
@@ -232,7 +235,8 @@ def parse_artifact(path):
     if initial_memory_bytes == 0 and initial_memory_start != 0:
         raise FixtureError("empty initial memory must have start 0")
     code = artifact[ARTIFACT_HEADER_BYTES:ARTIFACT_HEADER_BYTES + code_bytes]
-    memory = artifact[ARTIFACT_HEADER_BYTES + code_bytes:]
+    memory = artifact[ARTIFACT_HEADER_BYTES + code_bytes:
+                      ARTIFACT_HEADER_BYTES + code_bytes + initial_memory_bytes]
     if code_digest != hashlib.sha256(code).digest():
         raise FixtureError("code section digest mismatch")
     if initial_memory_digest != hashlib.sha256(memory).digest():
