@@ -18,10 +18,11 @@
  * Allocation uses malloc and free unless you define X23_MALLOC(size) before
  * including this header; then X23_FREE(ptr) defaults to doing nothing, which
  * suits a bump allocator.  X23_MALLOC must return memory aligned for any
- * type, or NULL on failure (X23_ERR_NOMEM).  memcpy is likewise replaceable
- * with X23_MEMCPY.  With all three defined, the header includes no libc
- * headers, though GCC and Clang still emit calls to memcpy (for struct
- * copies, for example), as they do in any freestanding code.
+ * type, or NULL on failure (X23_ERR_NOMEM).  Copying and zeroing use
+ * __builtin_memcpy and __builtin_memset, so they need the memcpy and memset
+ * symbols that GCC and Clang expect from every environment (libc on a host,
+ * the contract SDK on rv32), but no libc header.  With X23_MALLOC defined, the
+ * header includes no libc header at all.
  *
  * The header compiles as C11 or later and as C++20 or later.
  *
@@ -51,8 +52,7 @@
 #define X23_FREE(ptr) ((void)(ptr))
 #endif
 #ifndef X23_MEMCPY
-#include <string.h>
-#define X23_MEMCPY(dst, src, n) memcpy(dst, src, n)
+#define X23_MEMCPY(dst, src, n) __builtin_memcpy(dst, src, n)
 #endif
 
 #ifdef __cplusplus
@@ -148,9 +148,7 @@ x23_remaining(const x23_reader *r)
 static inline void
 x23_zero(void *p, size_t n)
 {
-  unsigned char *b = (unsigned char *)p;
-  for (size_t i = 0; i < n; ++i)
-    b[i] = 0;
+  __builtin_memset(p, 0, n);
 }
 
 /* Allocates n zeroed objects of the given size. */

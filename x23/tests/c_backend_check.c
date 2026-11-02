@@ -1,5 +1,5 @@
 /* Compiles the x23c --c output for c_backend.x as freestanding C11, with
- * X23_MALLOC and X23_MEMCPY standing in for libc. */
+ * X23_MALLOC standing in for libc's malloc. */
 
 #include <stddef.h>
 #include <stdint.h>
@@ -7,7 +7,6 @@
 void *bump_alloc(size_t n);
 
 #define X23_MALLOC(n) bump_alloc(n)
-#define X23_MEMCPY(dst, src, n) __builtin_memcpy(dst, src, n)
 #include "tests/c_backend.h"
 
 static _Alignas(16) unsigned char heap[1 << 16];
