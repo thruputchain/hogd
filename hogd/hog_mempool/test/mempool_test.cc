@@ -5381,9 +5381,7 @@ TEST(Mempool, ValidatedBlockCommitsAfterLocalNominationDropsItsTx)
     ASSERT_EQ(submit_through_gateway(proposer, tx),
               SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
 
-    // A Byzantine proposer need not follow its scheduler's native token
-    // policy. Raise only the proposer's cached scheduling balance; its DB
-    // state stays the same as the validator's.
+    // Byzantine proposer: raise only its cached balance, not DB state.
     {
       auto [native_token_age, lock] =
           proposer.mempool_coord_rpc().scheduler()->get_cached_native_token_age(

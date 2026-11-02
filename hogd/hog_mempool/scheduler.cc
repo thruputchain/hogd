@@ -1597,11 +1597,8 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // just remove txs from the cache, even if the *nominated* block is
             // being committed rather than a *validated* block.
             //
-            // A *validated* block's tx may already be gone: validation does not
-            // pin it, so a local [schedule()] can drop it (e.g., for
-            // insufficient native tokens) before the block commits. Dropping
-            // removes the runqueue and cache entries together, so there is
-            // nothing left to remove.
+            // Validation does not pin txs, so a local [schedule()] may have
+            // already dropped this tx along with its cache entry.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
