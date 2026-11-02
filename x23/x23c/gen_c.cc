@@ -1,22 +1,5 @@
-// C backend for x23c (x23c --c).
-//
-// Generates a header of plain C11 types plus static inline encode and decode
-// functions, built on the runtime in x23/xdr_c.h.  Decoding copies into a
-// value the caller owns: variable-length data (opaque<N>, string<N>, T<N>)
-// and pointers (T*, #[cpp(box)] fields) are allocated with X23_MALLOC, and
-// every type has a T_free that releases them.  See x23/xdr_c.h.
-//
-// RPC program definitions are not supported and are skipped.  The output
-// is organized so that recursive types work:
-//
-//   1. forward declarations of every struct and union, and the T_vec type of
-//      every struct, union and enum
-//   2. constants and type definitions, in source order
-//   3. T_XDR_SIZE macros and prototypes of every encode/decode function
-//   4. function definitions
-//
-// A field annotated #[cpp(box)], which is how the .x files mark a type that
-// contains itself by value (and what gen_hh boxes), is stored as a T *.
+// C backend for x23c (x23c --c): C11 types plus static inline codecs over
+// x23/xdr_c.h.  RPC programs are skipped.
 
 #include <algorithm>
 #include <cctype>
@@ -894,6 +877,8 @@ GenC::gen()
 
 } // namespace
 
+// Forward declarations come first and prototypes before definitions, so
+// recursive types work.
 string
 gen_c(vector<Definition> *defs, string const &header)
 {

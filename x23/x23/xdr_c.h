@@ -1,38 +1,6 @@
-/* Runtime support for the C code that `x23c --c` generates.
- *
- * Decoding copies everything into a value the caller owns: integers, enums,
- * structs, unions and fixed-length arrays into native fields, and
- *
- *   - opaque<N>  into x23_bytes  { uint8_t *data; uint32_t len; }
- *   - string<N>  into x23_string { char *data; uint32_t len; }, with a NUL
- *     after the last character (len is authoritative; the data may contain
- *     NULs)
- *   - T<N>       into T_vec      { T *elems; uint32_t len; }
- *   - T*, and fields annotated #[cpp(box)], into a plain T *
- *
- * all allocated with X23_MALLOC.  T_free() releases what a value owns (not
- * the value itself).  T_from_xdr frees a partly decoded value on error, and a
- * failed T_decode leaves *out safe to pass to T_free.  Encoding takes the
- * same structs, so a value you build has the same shape as a decoded one.
- *
- * Allocation uses malloc and free unless you define X23_MALLOC(size) before
- * including this header; then X23_FREE(ptr) defaults to doing nothing, which
- * suits a bump allocator.  X23_MALLOC must return memory aligned for any
- * type, or NULL on failure (X23_ERR_NOMEM).  Copying and zeroing use
- * __builtin_memcpy and __builtin_memset, so they need the memcpy and memset
- * symbols that GCC and Clang expect from every environment (libc on a host,
- * the contract SDK on rv32), but no libc header.  With X23_MALLOC defined, the
- * header includes no libc header at all.
- *
- * The header compiles as C11 or later and as C++20 or later.
- *
- * Decoding accepts the encodings that the x23 C++ deserializer accepts, with
- * two differences: a bool union discriminant must be 0 or 1 (X23_ERR_BOOL),
- * as in the Rust bindings, whereas C++ takes any nonzero value as TRUE; and
- * there is no recursion limit, so nesting is bounded only by the C stack.
- * As in both, an enum holds any int32, declared or not; the generated
- * T_valid() tells whether it is one of T's constants.
- */
+/* Runtime for the C that `x23c --c` generates.  Decoded values own their
+ * memory, allocated with X23_MALLOC (malloc unless defined; X23_FREE then
+ * defaults to a no-op), and T_free() releases it. */
 
 #ifndef X23_XDR_C_H
 #define X23_XDR_C_H
@@ -339,13 +307,8 @@ x23_string_free(x23_string *v)
   v->len = 0;
 }
 
-/* Primitive types.  Each type P has
- *   P_XDR_SIZE                      encoded size, or 0 if it varies
- *   x23_status P_decode(x23_reader *, T *)
- *   x23_status P_encode(x23_writer *, const T *)
- *   void P_free(T *)
- * and the P_vec type and pointer functions below.  Generated types follow
- * the same scheme under their own names. */
+/* Primitives, with the same P_XDR_SIZE (0 if it varies), P_decode, P_encode
+ * and P_free that generated types have. */
 
 #define x23_i32_XDR_SIZE 4
 #define x23_u32_XDR_SIZE 4
@@ -401,6 +364,8 @@ x23_i64_encode(x23_writer *w, const int64_t *v)
 {
   return x23_put_u64(w, (uint64_t)*v);
 }
+/* Also decodes bool union discriminants, which C++ (unlike Rust) does not
+ * restrict to 0 or 1. */
 static inline x23_status
 x23_bool_decode(x23_reader *r, bool *out)
 {
@@ -471,18 +436,8 @@ X23_NOTHING_TO_FREE(x23_bool, bool)
 X23_NOTHING_TO_FREE(x23_f32, float)
 X23_NOTHING_TO_FREE(x23_f64, double)
 
-/* Variable-length arrays (T<N>) and pointers (T* and #[cpp(box)] fields).
- *
- * X23_VEC_TYPE(P, T) defines P_vec.  It needs only a declaration of T, so it
- * can precede T's definition, as recursive types require.  X23_PTR_PROTOS
- * declares the functions below, which X23_PTR_FUNCS defines after P_decode,
- * P_encode, P_free and P_XDR_SIZE:
- *
- *   P_vec_decode / P_vec_encode / P_vec_free   for T<N>
- *   P_ptr_decode / P_ptr_encode / P_ptr_free   for T* (NULL when absent)
- *   P_box_decode / P_box_encode                for #[cpp(box)] fields, which
- *                                              are never NULL once decoded
- */
+/* T<N> (P_vec), T* (P_ptr, NULL when absent) and #[cpp(box)] fields (P_box).
+ * X23_VEC_TYPE needs only a declaration of T, as recursive types require. */
 
 #define X23_VEC_TYPE(P, T)                                                     \
   typedef struct P##_vec {                                                     \
@@ -502,10 +457,8 @@ X23_NOTHING_TO_FREE(x23_f64, double)
   static inline x23_status P##_box_decode(x23_reader *r, T **out);             \
   static inline x23_status P##_box_encode(x23_writer *w, const T *v);
 
-/* A variable-size encoding is at least 4 bytes (it holds a length, flag or
- * discriminant), so n elements need at least 4n bytes of input: checking
- * that before allocating keeps a huge count in short input from allocating
- * much more than the input's size. */
+/* A variable-size encoding is at least 4 bytes, so a count is checked against
+ * the input before allocating for it. */
 #define X23_PTR_FUNCS(P, T)                                                    \
   static inline x23_status P##_vec_decode(x23_reader *r, P##_vec *out,         \
                                           uint32_t bound)                      \
@@ -578,15 +531,8 @@ X23_NOTHING_TO_FREE(x23_f64, double)
     }                                                                          \
   }
 
-/* X23_BUF_FUNCS(P, T) defines
- *
- *   x23_status P_from_xdr(const uint8_t *buf, uint32_t len, T *out)
- *     decodes a whole buffer, which must hold exactly one value; on error
- *     *out owns nothing
- *   x23_status P_to_xdr(const T *v, uint8_t *buf, uint32_t cap, uint32_t *len)
- *     encodes v into buf and stores the encoded length in *len; with
- *     buf == NULL it writes nothing and only computes the length
- */
+/* P_from_xdr decodes a buffer holding exactly one value (owning nothing on
+ * error); P_to_xdr with buf == NULL only computes the length. */
 #define X23_BUF_FUNCS(P, T)                                                    \
   static inline x23_status P##_from_xdr(const uint8_t *buf, uint32_t len,      \
                                         T *out)                                \

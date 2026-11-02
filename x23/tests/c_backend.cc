@@ -1,13 +1,5 @@
-// Checks x23c --c output against the C++ codec, using random values of the
-// types in c_backend.x:
-//
-//   - C decodes what C++ encodes, to the same values, and re-encodes it to
-//     the same bytes (including through the lazily decoded views).
-//   - C encodes values it builds itself (native arrays, not views) to the
-//     bytes C++ encodes.
-//   - For corrupted encodings, C accepts exactly what C++ accepts, except
-//     that C (like Rust) rejects bool union discriminants other than 0 or 1,
-//     and anything C accepts it re-encodes to the same bytes.
+// Cross-checks x23c --c output against the C++ codec on random and corrupted
+// encodings of the types in c_backend.x.
 
 #include <cmath>
 #include <cstdint>
