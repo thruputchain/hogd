@@ -17,6 +17,6 @@ jobs:
   reports:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
       - name: Test calibration gates and schedule proposals
         run: python3 -m unittest discover -s scripts -p 'test_rv32*report.py'
