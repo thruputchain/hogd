@@ -198,12 +198,9 @@ void
 check(const Node &c, const ctest::Node &x)
 {
   CHECK(c.value == x.value);
-  CHECK(Node_opt_present(&c.next) == bool(x.next));
-  if (x.next) {
-    Node next;
-    CHECK_OK(Node_opt_get(&c.next, &next));
-    check(next, *x.next);
-  }
+  CHECK(bool(c.next) == bool(x.next));
+  if (x.next)
+    check(*c.next, *x.next);
   CHECK(c_encode(c, Node_to_xdr) == to_bytes(x23::serialize(x)));
 }
 
@@ -216,18 +213,10 @@ check(const Shape &c, const ctest::Shape &x)
     check(c.center, x.center());
     break;
   case ctest::Color::GREEN:
-  {
     CHECK(c.corners.len == x.corners().size());
-    Point_vec_iter it;
-    Point_vec_iter_init(&it, &c.corners);
-    Point p;
-    for (size_t i = 0; i < x.corners().size(); ++i) {
-      CHECK(Point_vec_next(&it, &p));
-      check(p, x.corners()[i]);
-    }
-    CHECK(!Point_vec_next(&it, &p));
+    for (size_t i = 0; i < x.corners().size(); ++i)
+      check(c.corners.elems[i], x.corners()[i]);
     break;
-  }
   case ctest::Color::BLUE:
     break;
   }
@@ -238,30 +227,32 @@ void
 check(const TypeT &c, const ctest::TypeT &x)
 {
   CHECK(c.k == int32_t(x.k()));
-  TypeT inner;
   switch (x.k()) {
   case ctest::Kind::K_VOID:
     break;
   case ctest::Kind::K_OPT:
-    CHECK_OK(TypeT_box_get(&c.inner, &inner));
-    check(inner, *x.inner());
+    CHECK(c.inner);
+    check(*c.inner, *x.inner());
     break;
   case ctest::Kind::K_ARRAY:
     CHECK(c.array.len == x.array().len);
-    CHECK_OK(TypeT_box_get(&c.array.element, &inner));
-    check(inner, *x.array().element);
+    CHECK(c.array.element);
+    check(*c.array.element, *x.array().element);
     break;
   case ctest::Kind::K_TUPLE:
     CHECK(c.tuple.len == x.tuple().size());
-    // Backwards, so that each get walks from the start.
-    for (size_t i = x.tuple().size(); i-- > 0;) {
-      CHECK_OK(TypeT_vec_get(&c.tuple, uint32_t(i), &inner));
-      check(inner, x.tuple()[i]);
-    }
-    CHECK(TypeT_vec_get(&c.tuple, c.tuple.len, &inner) == X23_ERR_RANGE);
+    for (size_t i = 0; i < x.tuple().size(); ++i)
+      check(c.tuple.elems[i], x.tuple()[i]);
     break;
   }
   CHECK(c_encode(c, TypeT_to_xdr) == to_bytes(x23::serialize(x)));
+}
+
+// Decoded strings are NUL-terminated.
+bool
+same_str(x23_string c, std::string_view x)
+{
+  return same(c, x) && c.data && c.data[c.len] == 0;
 }
 
 void
@@ -276,37 +267,23 @@ check(const Everything &c, const ctest::Everything &x)
   CHECK(std::memcmp(c.odd.bytes, x.odd.data(), 5) == 0);
   CHECK(same(c.blob, x.blob));
   CHECK(same(c.any, x.any));
-  CHECK(same(c.name, x.name));
-  CHECK(same(c.label, x.label));
+  CHECK(same_str(c.name, x.name));
+  CHECK(same_str(c.label, x.label));
   for (int i = 0; i < 3; ++i)
     check(c.fixed[i], x.fixed[i]);
   CHECK(c.ints[0] == x.ints[0] && c.ints[1] == x.ints[1]);
   CHECK(c.vints.len == x.vints.size());
-  for (uint32_t i = 0; i < c.vints.len; ++i) {
-    int32_t v;
-    CHECK_OK(x23_i32_vec_get(&c.vints, i, &v));
-    CHECK(v == x.vints[i]);
-  }
-  // Fixed-size elements: indexed directly.
+  for (uint32_t i = 0; i < c.vints.len; ++i)
+    CHECK(c.vints.elems[i] == x.vints[i]);
   CHECK(c.points.len == x.points.size());
-  for (uint32_t i = 0; i < c.points.len; ++i) {
-    Point pt;
-    CHECK_OK(Point_vec_get(&c.points, i, &pt));
-    check(pt, x.points[i]);
-  }
-  // Variable-size elements: walked.
+  for (uint32_t i = 0; i < c.points.len; ++i)
+    check(c.points.elems[i], x.points[i]);
   CHECK(c.shapes.len == x.shapes.size());
-  for (uint32_t i = 0; i < c.shapes.len; ++i) {
-    Shape s;
-    CHECK_OK(Shape_vec_get(&c.shapes, i, &s));
-    check(s, x.shapes[i]);
-  }
+  for (uint32_t i = 0; i < c.shapes.len; ++i)
+    check(c.shapes.elems[i], x.shapes[i]);
   CHECK(c.labels.len == x.labels.size());
-  for (uint32_t i = 0; i < c.labels.len; ++i) {
-    Label l;
-    CHECK_OK(Label_vec_get(&c.labels, i, &l));
-    CHECK(same(l, x.labels[i]));
-  }
+  for (uint32_t i = 0; i < c.labels.len; ++i)
+    CHECK(same_str(c.labels.elems[i], x.labels[i]));
   CHECK(c.num.k == x.num.k());
   if (x.num.k() == 1)
     CHECK(c.num.big == x.num.big());
@@ -314,19 +291,13 @@ check(const Everything &c, const ctest::Everything &x)
     CHECK(c.num.small == x.num.small());
   CHECK(c.flag.on == x.flag.on());
   if (x.flag.on())
-    CHECK(same(c.flag.name, x.flag.name()));
-  CHECK(Node_opt_present(&c.list) == bool(x.list));
-  if (x.list) {
-    Node n;
-    CHECK_OK(Node_opt_get(&c.list, &n));
-    check(n, *x.list);
-  }
-  CHECK(Point_opt_present(&c.maybe) == bool(x.maybe));
-  if (x.maybe) {
-    Point pt;
-    CHECK_OK(Point_opt_get(&c.maybe, &pt));
-    check(pt, *x.maybe);
-  }
+    CHECK(same_str(c.flag.name, x.flag.name()));
+  CHECK(bool(c.list) == bool(x.list));
+  if (x.list)
+    check(*c.list, *x.list);
+  CHECK(bool(c.maybe) == bool(x.maybe));
+  if (x.maybe)
+    check(*c.maybe, *x.maybe);
   check(c.type, x.type);
   CHECK(c.anon.a == x.anon.a);
   CHECK(c.anon.inner.z == x.anon.inner.z());
@@ -334,8 +305,8 @@ check(const Everything &c, const ctest::Everything &x)
     CHECK(c.anon.inner.t == x.anon.inner.t());
 }
 
-// C values built natively from C++ values: arrays and pointers rather than
-// views of encoded bytes.  The arena keeps them alive.
+// C values built by hand from C++ values, in memory the arena owns rather
+// than X23_MALLOC, as a caller might build a value to encode.
 struct Arena {
   std::vector<std::shared_ptr<void>> keep;
   template<typename T> T *alloc(size_t n)
@@ -349,13 +320,13 @@ struct Arena {
 x23_bytes
 c_bytes(std::span<const uint8_t> x)
 {
-  return {x.data(), uint32_t(x.size())};
+  return {const_cast<uint8_t *>(x.data()), uint32_t(x.size())};
 }
 
 x23_string
 c_string(std::string_view x)
 {
-  return {x.data(), uint32_t(x.size())};
+  return {const_cast<char *>(x.data()), uint32_t(x.size())};
 }
 
 Point
@@ -364,69 +335,23 @@ to_c(const ctest::Point &x, Arena &)
   return {x.x, x.y};
 }
 
+template<typename X>
+auto *
+to_c_ptr(const X &x, Arena &a)
+{
+  using C = decltype(to_c(x, a));
+  C *p = a.alloc<C>(1);
+  *p = to_c(x, a);
+  return p;
+}
+
 Node
 to_c(const ctest::Node &x, Arena &a)
 {
   Node c{};
   c.value = x.value;
-  if (x.next) {
-    Node *n = a.alloc<Node>(1);
-    *n = to_c(*x.next, a);
-    c.next.ptr = n;
-  }
-  return c;
-}
-
-Shape
-to_c(const ctest::Shape &x, Arena &a)
-{
-  Shape c{};
-  c.kind = int32_t(x.kind());
-  if (x.kind() == ctest::Color::RED)
-    c.center = to_c(x.center(), a);
-  else if (x.kind() == ctest::Color::GREEN) {
-    Point *ps = a.alloc<Point>(x.corners().size());
-    for (size_t i = 0; i < x.corners().size(); ++i)
-      ps[i] = to_c(x.corners()[i], a);
-    c.corners.len = uint32_t(x.corners().size());
-    c.corners.elems = ps;
-  }
-  return c;
-}
-
-TypeT
-to_c(const ctest::TypeT &x, Arena &a)
-{
-  TypeT c{};
-  c.k = int32_t(x.k());
-  switch (x.k()) {
-  case ctest::Kind::K_VOID:
-    break;
-  case ctest::Kind::K_OPT:
-  {
-    TypeT *t = a.alloc<TypeT>(1);
-    *t = to_c(*x.inner(), a);
-    c.inner.ptr = t;
-    break;
-  }
-  case ctest::Kind::K_ARRAY:
-  {
-    TypeT *t = a.alloc<TypeT>(1);
-    *t = to_c(*x.array().element, a);
-    c.array.element.ptr = t;
-    c.array.len = x.array().len;
-    break;
-  }
-  case ctest::Kind::K_TUPLE:
-  {
-    TypeT *ts = a.alloc<TypeT>(x.tuple().size());
-    for (size_t i = 0; i < x.tuple().size(); ++i)
-      ts[i] = to_c(x.tuple()[i], a);
-    c.tuple.len = uint32_t(x.tuple().size());
-    c.tuple.elems = ts;
-    break;
-  }
-  }
+  if (x.next)
+    c.next = to_c_ptr(*x.next, a);
   return c;
 }
 
@@ -448,6 +373,40 @@ to_c_vec(const XV &x, Arena &a)
   v.len = uint32_t(x.size());
   v.elems = es;
   return v;
+}
+
+Shape
+to_c(const ctest::Shape &x, Arena &a)
+{
+  Shape c{};
+  c.kind = int32_t(x.kind());
+  if (x.kind() == ctest::Color::RED)
+    c.center = to_c(x.center(), a);
+  else if (x.kind() == ctest::Color::GREEN)
+    c.corners = to_c_vec<Point_vec>(x.corners(), a);
+  return c;
+}
+
+TypeT
+to_c(const ctest::TypeT &x, Arena &a)
+{
+  TypeT c{};
+  c.k = int32_t(x.k());
+  switch (x.k()) {
+  case ctest::Kind::K_VOID:
+    break;
+  case ctest::Kind::K_OPT:
+    c.inner = to_c_ptr(*x.inner(), a);
+    break;
+  case ctest::Kind::K_ARRAY:
+    c.array.element = to_c_ptr(*x.array().element, a);
+    c.array.len = x.array().len;
+    break;
+  case ctest::Kind::K_TUPLE:
+    c.tuple = to_c_vec<TypeT_vec>(x.tuple(), a);
+    break;
+  }
+  return c;
 }
 
 Everything
@@ -479,16 +438,10 @@ to_c(const ctest::Everything &x, Arena &a)
   c.flag.on = x.flag.on();
   if (x.flag.on())
     c.flag.name = c_string(x.flag.name());
-  if (x.list) {
-    Node *n = a.alloc<Node>(1);
-    *n = to_c(*x.list, a);
-    c.list.ptr = n;
-  }
-  if (x.maybe) {
-    Point *pt = a.alloc<Point>(1);
-    *pt = to_c(*x.maybe, a);
-    c.maybe.ptr = pt;
-  }
+  if (x.list)
+    c.list = to_c_ptr(*x.list, a);
+  if (x.maybe)
+    c.maybe = to_c_ptr(*x.maybe, a);
   c.type = to_c(x.type, a);
   c.anon.a = x.anon.a;
   c.anon.inner.z = x.anon.inner.z();
@@ -555,6 +508,7 @@ mutate(std::mt19937_64 &rng, const Bytes &good)
   if (st == X23_OK) {
     CHECK(cpp_ok);
     CHECK(c_encode(c, Everything_to_xdr) == b);
+    Everything_free(&c);
   }
   else if (cpp_ok) {
     // C++ accepts a bool union discriminant other than 0 or 1, which C (like
@@ -578,6 +532,8 @@ random_tests(int n)
     CHECK_OK(Everything_from_xdr(b.data(), uint32_t(b.size()), &c));
     check(c, x);
     CHECK(c_encode(c, Everything_to_xdr) == b);
+    Everything_free(&c);
+    CHECK(c.shapes.elems == nullptr && c.list == nullptr);
 
     Arena a;
     Everything native = to_c(x, a);
@@ -623,10 +579,10 @@ misc_tests()
   Everything e{};
   CHECK_OK(Everything_to_xdr(&e, nullptr, 0, &n));
   e.type.k = Kind_K_OPT; // a box holding nothing
-  CHECK(Everything_to_xdr(&e, nullptr, 0, &n) == X23_ERR_RANGE);
+  CHECK(Everything_to_xdr(&e, nullptr, 0, &n) == X23_ERR_NULL);
   e.type.k = Kind_K_VOID;
   e.name.len = 11; // over the bound of 10
-  e.name.data = "01234567890";
+  e.name.data = const_cast<char *>("01234567890");
   CHECK(Everything_to_xdr(&e, nullptr, 0, &n) == X23_ERR_LENGTH);
 
   // Specific bad encodings.
@@ -637,9 +593,20 @@ misc_tests()
   x23_bytes bv;
   x23_reader r = x23_reader_init(bad_pad, sizeof(bad_pad));
   CHECK(x23_bytes_decode(&r, &bv, 8) == X23_ERR_PADDING);
+  x23_bytes_free(&bv);
   Point pt;
   CHECK(Point_from_xdr(bad_pad, 7, &pt) == X23_ERR_ALIGN);
   CHECK(Point_from_xdr(bad_pad, 4, &pt) == X23_ERR_SHORT);
+
+  // A huge count in short input fails before allocating for it.
+  const uint8_t huge[] = {0xff, 0xff, 0xff, 0xf0, 0, 0, 0, 0};
+  r = x23_reader_init(huge, sizeof(huge));
+  CHECK(x23_bytes_decode(&r, &bv, X23_UNBOUNDED) == X23_ERR_SHORT);
+  CHECK(bv.data == nullptr);
+  Shape_vec sv;
+  r = x23_reader_init(huge, sizeof(huge));
+  CHECK(Shape_vec_decode(&r, &sv, X23_UNBOUNDED) == X23_ERR_SHORT);
+  CHECK(sv.elems == nullptr);
 }
 
 } // namespace

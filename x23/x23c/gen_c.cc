@@ -1,24 +1,22 @@
 // C backend for x23c (x23c --c).
 //
 // Generates a header of plain C11 types plus static inline encode and decode
-// functions, built on the runtime in x23/xdr_c.h.  See that header for the
-// representation: variable-length opaque and string decode to views of the
-// input buffer, variable-length arrays and optionals to views of their
-// encoded bytes that decode elements on demand, and everything else to native
-// fields.  Nothing allocates.
+// functions, built on the runtime in x23/xdr_c.h.  Decoding copies into a
+// value the caller owns: variable-length data (opaque<N>, string<N>, T<N>)
+// and pointers (T*, #[cpp(box)] fields) are allocated with X23_MALLOC, and
+// every type has a T_free that releases them.  See x23/xdr_c.h.
 //
 // RPC program definitions are not supported and are skipped.  The output
 // is organized so that recursive types work:
 //
-//   1. forward declarations of every struct and union, and of the view
-//      types (T_vec, T_opt, T_box) of every struct, union and enum
+//   1. forward declarations of every struct and union, and the T_vec type of
+//      every struct, union and enum
 //   2. constants and type definitions, in source order
 //   3. T_XDR_SIZE macros and prototypes of every encode/decode function
 //   4. function definitions
 //
 // A field annotated #[cpp(box)], which is how the .x files mark a type that
-// contains itself by value (and what gen_hh boxes), is stored as a T_box
-// view.
+// contains itself by value (and what gen_hh boxes), is stored as a T *.
 
 #include <algorithm>
 #include <cctype>
@@ -231,13 +229,15 @@ struct GenC {
                      const string &indent) const;
   string encode_stmt(const Declaration &d, const string &rv,
                      const string &indent) const;
+  string free_stmt(const Declaration &d, const string &lv,
+                   const string &indent) const;
   static string size_expr(const Declaration &d);
   static string comment_block(const string &comment, const string &indent);
 
   // A field the .x file marks #[cpp(box)], as it must when the field's type
   // contains its struct or union by value.  C cannot nest a struct in
-  // itself, so it is held as a T_box view.  Same annotation as gen_hh, so C
-  // and C++ box the same fields.
+  // itself, so it is held as a T *.  Same annotation as gen_hh, so C and C++
+  // box the same fields.
   static bool boxed(const Declaration &d)
   {
     return d.qual == kScalar && d.comment.find("#[cpp(box)]") != string::npos;
@@ -370,7 +370,7 @@ GenC::field(const Declaration &d, const string &indent) const
     return {};
   case kScalar:
     if (boxed(d))
-      out += std::format("{}{}_box {};\n", indent, c_type(t).prefix, id);
+      out += std::format("{}{} *{};\n", indent, c_type(t).ctype, id);
     else
       out += std::format("{}{} {};\n", indent, c_type(t).ctype, id);
     break;
@@ -391,7 +391,7 @@ GenC::field(const Declaration &d, const string &indent) const
     out += std::format("{}x23_string {};\n", indent, id);
     break;
   case kPtr:
-    out += std::format("{}{}_opt {};\n", indent, c_type(t).prefix, id);
+    out += std::format("{}{} *{};\n", indent, c_type(t).ctype, id);
     break;
   }
   return out;
@@ -411,12 +411,8 @@ GenC::decode_stmt(const Declaration &d, const string &lv,
                        c_type(t).prefix, boxed(d) ? "box_" : "", lv);
   case kArray:
     if (t == "opaque")
-      return std::format("{0}{{\n"
-                         "{0}  const uint8_t *p_;\n"
-                         "{0}  X23_TRY(x23_get_opaque(r, {1}, &p_));\n"
-                         "{0}  x23_copy_bytes({2}, p_, {1});\n"
-                         "{0}}}\n",
-                         in, d.bound, lv);
+      return std::format("{}X23_TRY(x23_get_opaque(r, {}, {}));\n", in, d.bound,
+                         lv);
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
                        "{0}  X23_TRY({2}_decode(r, &{3}[i_]));\n",
                        in, d.bound, c_type(t).prefix, lv);
@@ -430,7 +426,7 @@ GenC::decode_stmt(const Declaration &d, const string &lv,
     return std::format("{}X23_TRY(x23_string_decode(r, &{}, {}));\n", in, lv,
                        map_bound(d.bound));
   case kPtr:
-    return std::format("{}X23_TRY({}_opt_decode(r, &{}));\n", in,
+    return std::format("{}X23_TRY({}_ptr_decode(r, &{}));\n", in,
                        c_type(t).prefix, lv);
   }
   return {};
@@ -446,8 +442,11 @@ GenC::encode_stmt(const Declaration &d, const string &rv,
   case kVoid:
     return {};
   case kScalar:
-    return std::format("{}X23_TRY({}_{}encode(w, &{}));\n", in,
-                       c_type(t).prefix, boxed(d) ? "box_" : "", rv);
+    if (boxed(d))
+      return std::format("{}X23_TRY({}_box_encode(w, {}));\n", in,
+                         c_type(t).prefix, rv);
+    return std::format("{}X23_TRY({}_encode(w, &{}));\n", in, c_type(t).prefix,
+                       rv);
   case kArray:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_put_opaque(w, {}, {}));\n", in, rv,
@@ -465,8 +464,37 @@ GenC::encode_stmt(const Declaration &d, const string &rv,
     return std::format("{}X23_TRY(x23_string_encode(w, &{}, {}));\n", in, rv,
                        map_bound(d.bound));
   case kPtr:
-    return std::format("{}X23_TRY({}_opt_encode(w, &{}));\n", in,
+    return std::format("{}X23_TRY({}_ptr_encode(w, {}));\n", in,
                        c_type(t).prefix, rv);
+  }
+  return {};
+}
+
+// Release what the lvalue lv, declared as d, owns.
+string
+GenC::free_stmt(const Declaration &d, const string &lv, const string &in) const
+{
+  const string t = d.qual == kVoid ? string{} : type_of(d);
+  switch (d.qual) {
+  case kVoid:
+    return {};
+  case kScalar:
+    return std::format("{}{}_{}free(&{});\n", in, c_type(t).prefix,
+                       boxed(d) ? "ptr_" : "", lv);
+  case kArray:
+    if (t == "opaque")
+      return {};
+    return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
+                       "{0}  {2}_free(&{3}[i_]);\n",
+                       in, d.bound, c_type(t).prefix, lv);
+  case kVec:
+    if (t == "opaque")
+      return std::format("{}x23_bytes_free(&{});\n", in, lv);
+    return std::format("{}{}_vec_free(&{});\n", in, c_type(t).prefix, lv);
+  case kString:
+    return std::format("{}x23_string_free(&{});\n", in, lv);
+  case kPtr:
+    return std::format("{}{}_ptr_free(&{});\n", in, c_type(t).prefix, lv);
   }
   return {};
 }
@@ -522,9 +550,10 @@ GenC::gen_common(const string &name, const string &size)
       "#define {0}_XDR_SIZE {1}\n"
       "static inline x23_status {0}_decode(x23_reader *r, {0} *out);\n"
       "static inline x23_status {0}_encode(x23_writer *w, const {0} *v);\n"
-      "X23_VIEW_PROTOS({0}, {0})\n",
+      "static inline void {0}_free({0} *v);\n"
+      "X23_PTR_PROTOS({0}, {0})\n",
       name, size);
-  funcs_ += std::format("X23_VIEW_FUNCS({0}, {0})\n"
+  funcs_ += std::format("X23_PTR_FUNCS({0}, {0})\n"
                         "X23_BUF_FUNCS({0}, {0})\n\n",
                         name);
 }
@@ -560,7 +589,7 @@ GenC::gen_literal(const Literal &l)
 void
 GenC::gen_enum(const EnumDecl &e, const string &comment)
 {
-  fwd_ += std::format("typedef int32_t {0};\nX23_VIEW_TYPES({0}, {0})\n", e.id);
+  fwd_ += std::format("typedef int32_t {0};\nX23_VEC_TYPE({0}, {0})\n", e.id);
 
   types_ += comment_block(comment, "");
   types_ += "enum {\n";
@@ -597,6 +626,11 @@ static inline x23_status
 {{
   return x23_i32_encode(w, v);
 }}
+static inline void
+{0}_free({0} *v)
+{{
+  (void)v;
+}}
 )",
                         e.id, valid);
   gen_common(e.id, "4");
@@ -606,7 +640,7 @@ void
 GenC::gen_struct(const StructDecl &s, const string &comment)
 {
   fwd_ +=
-      std::format("typedef struct {0} {0};\nX23_VIEW_TYPES({0}, {0})\n", s.id);
+      std::format("typedef struct {0} {0};\nX23_VEC_TYPE({0}, {0})\n", s.id);
 
   types_ += comment_block(comment, "");
   types_ += std::format("struct {} {{\n", s.id);
@@ -619,22 +653,27 @@ GenC::gen_struct(const StructDecl &s, const string &comment)
     types_ += "  char unused_; /* C forbids empty structs */\n";
   types_ += "};\n\n";
 
-  string dec, enc;
+  string dec, enc, fr;
   vector<string> sizes;
   for (const auto &d : s.body) {
     if (d.qual == kVoid)
       continue;
     dec += decode_stmt(d, "out->" + c_id(d.id), "  ");
     enc += encode_stmt(d, "v->" + c_id(d.id), "  ");
+    fr += free_stmt(d, "v->" + c_id(d.id), "  ");
     sizes.push_back(size_expr(d));
   }
   if (dec.empty()) {
-    dec = "  (void)r;\n  (void)out;\n";
+    dec = "  (void)r;\n";
     enc = "  (void)w;\n  (void)v;\n";
   }
+  if (fr.empty())
+    fr = "  (void)v;\n";
+  // Zeroing first leaves a partly decoded value safe to free.
   funcs_ += std::format(R"(static inline x23_status
 {0}_decode(x23_reader *r, {0} *out)
 {{
+  x23_zero(out, sizeof(*out));
 {1}  return X23_OK;
 }}
 static inline x23_status
@@ -642,8 +681,12 @@ static inline x23_status
 {{
 {2}  return X23_OK;
 }}
+static inline void
+{0}_free({0} *v)
+{{
+{3}}}
 )",
-                        s.id, dec, enc);
+                        s.id, dec, enc, fr);
   // A struct with no fields encodes to nothing, which "0" (varies) still
   // handles correctly, if more slowly.
   gen_common(s.id, sum_sizes(sizes));
@@ -654,7 +697,7 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
 {
   const UnionBody &b = u.body;
   fwd_ +=
-      std::format("typedef struct {0} {0};\nX23_VIEW_TYPES({0}, {0})\n", u.id);
+      std::format("typedef struct {0} {0};\nX23_VEC_TYPE({0}, {0})\n", u.id);
   const CType disc = c_type(b.switch_type);
   const string disc_id = c_id(b.switch_id);
 
@@ -676,7 +719,7 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
     types_ += "  union {\n" + arms + "  };\n";
   types_ += "};\n\n";
 
-  string dec, enc;
+  string dec, enc, fr;
   bool has_default = false;
   vector<string> arm_sizes;
   bool any_void = false, any_value = false;
@@ -690,10 +733,13 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
     }
     dec += labels;
     enc += labels;
+    fr += labels;
     dec += decode_stmt(a.decl, "out->" + c_id(a.decl.id), "    ");
     enc += encode_stmt(a.decl, "v->" + c_id(a.decl.id), "    ");
+    fr += free_stmt(a.decl, "v->" + c_id(a.decl.id), "    ");
     dec += "    break;\n";
     enc += "    break;\n";
+    fr += "    break;\n";
     if (a.decl.qual == kVoid)
       any_void = true;
     else {
@@ -704,11 +750,13 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
   if (!has_default) {
     dec += "  default:\n    return X23_ERR_UNION;\n";
     enc += "  default:\n    return X23_ERR_UNION;\n";
+    fr += "  default:\n    break;\n";
   }
   const string sw = b.switch_type == "bool" ? "(int)" : "";
   funcs_ += std::format(R"(static inline x23_status
 {0}_decode(x23_reader *r, {0} *out)
 {{
+  x23_zero(out, sizeof(*out));
   X23_TRY({1}_decode(r, &out->{2}));
   switch ({5}out->{2}) {{
 {3}  }}
@@ -722,8 +770,14 @@ static inline x23_status
 {4}  }}
   return X23_OK;
 }}
+static inline void
+{0}_free({0} *v)
+{{
+  switch ({5}v->{2}) {{
+{6}  }}
+}}
 )",
-                        u.id, disc.prefix, disc_id, dec, enc, sw);
+                        u.id, disc.prefix, disc_id, dec, enc, sw, fr);
 
   // Fixed size only when every arm has the same fixed size.
   string size = "0";
@@ -747,7 +801,7 @@ GenC::gen_typedef(const Typedef &t, const string &comment)
   const string &n = t.id;
   const string base = type_of(t);
   types_ += comment_block(comment, "");
-  string dec, enc;
+  string dec, enc, fr;
   switch (t.qual) {
   case kVoid:
     throw std::runtime_error("void typedef " + n);
@@ -774,24 +828,27 @@ GenC::gen_typedef(const Typedef &t, const string &comment)
     types_ += std::format("typedef x23_string {};\n", n);
     break;
   case kPtr:
-    types_ += std::format("typedef {}_opt {};\n", c_type(base).prefix, n);
+    types_ += std::format("typedef {} *{};\n", c_type(base).ctype, n);
     break;
   }
-  types_ += std::format("X23_VIEW_TYPES({0}, {0})\n\n", n);
+  types_ += std::format("X23_VEC_TYPE({0}, {0})\n\n", n);
 
   if (t.qual == kArray) {
     Declaration d = t;
     d.id = base == "opaque" ? "bytes" : "elems";
-    dec = decode_stmt(d, "out->" + d.id, "  ");
+    dec = "  x23_zero(out, sizeof(*out));\n" +
+          decode_stmt(d, "out->" + d.id, "  ");
     enc = encode_stmt(d, "v->" + d.id, "  ");
+    fr = free_stmt(d, "v->" + d.id, "  ");
   }
   else {
     // The typedef is the same C type as the declaration, so decode it as a
     // field would be.
     dec = decode_stmt(t, "*out", "  ");
     enc = encode_stmt(t, "*v", "  ");
+    fr = free_stmt(t, "*v", "  ");
     // "&*out" is just out.
-    for (string *s : {&dec, &enc}) {
+    for (string *s : {&dec, &enc, &fr}) {
       for (auto [from, to] : {std::pair{"&*out", "out"}, {"&*v", "v"}})
         for (size_t p; (p = s->find(from)) != string::npos;)
           s->replace(p, std::string_view(from).size(), to);
@@ -807,8 +864,12 @@ static inline x23_status
 {{
 {2}  return X23_OK;
 }}
+static inline void
+{0}_free({0} *v)
+{{
+{3}}}
 )",
-                        n, dec, enc);
+                        n, dec, enc, fr.empty() ? "  (void)v;\n" : fr);
   gen_common(n, size_expr(t));
 }
 

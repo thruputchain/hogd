@@ -1,32 +1,29 @@
 /* Runtime support for the C code that `x23c --c` generates.
  *
- * Everything here is static inline and needs only the freestanding headers
- * <stdint.h>, <stdbool.h> and <stddef.h>: no libc, no allocator.  Define
- * X23_MEMCPY before including this header to use your own memcpy; the
- * default is a byte loop.  (GCC and Clang may still lower that loop, or any
- * struct copy, to a call to memcpy, which they expect every environment to
- * provide.)
+ * Decoding copies everything into a value the caller owns: integers, enums,
+ * structs, unions and fixed-length arrays into native fields, and
+ *
+ *   - opaque<N>  into x23_bytes  { uint8_t *data; uint32_t len; }
+ *   - string<N>  into x23_string { char *data; uint32_t len; }, with a NUL
+ *     after the last character (len is authoritative; the data may contain
+ *     NULs)
+ *   - T<N>       into T_vec      { T *elems; uint32_t len; }
+ *   - T*, and fields annotated #[cpp(box)], into a plain T *
+ *
+ * all allocated with X23_MALLOC.  T_free() releases what a value owns (not
+ * the value itself).  T_from_xdr frees a partly decoded value on error, and a
+ * failed T_decode leaves *out safe to pass to T_free.  Encoding takes the
+ * same structs, so a value you build has the same shape as a decoded one.
+ *
+ * Allocation uses malloc and free unless you define X23_MALLOC(size) before
+ * including this header; then X23_FREE(ptr) defaults to doing nothing, which
+ * suits a bump allocator.  X23_MALLOC must return memory aligned for any
+ * type, or NULL on failure (X23_ERR_NOMEM).  memcpy is likewise replaceable
+ * with X23_MEMCPY.  With all three defined, the header includes no libc
+ * headers, though GCC and Clang still emit calls to memcpy (for struct
+ * copies, for example), as they do in any freestanding code.
  *
  * The header compiles as C11 or later and as C++20 or later.
- *
- * Decoding is zero-copy where the wire format allows it:
- *
- *   - opaque<N> and string<N> decode to an x23_bytes / x23_string view that
- *     points into the input buffer.
- *   - T<N> decodes to a T_vec, and T* to a T_opt.  Both are views of the
- *     encoded bytes: decoding validates every element once and records where
- *     the encoding lies; T_vec_get / T_vec_next / T_opt_get decode elements on
- *     demand.  Indexing is O(1) when T's encoding has a fixed size and a walk
- *     from the start otherwise.
- *   - Everything else (integers, enums, structs, unions, fixed-length arrays)
- *     decodes into native fields, since XDR is big-endian and padded.
- *
- * A decoded value therefore borrows the input buffer, which must outlive it.
- *
- * To encode a value you build yourself, point a T_vec at a C array (elems,
- * len, with xdr == NULL) and a T_opt at a single value (ptr, with xdr ==
- * NULL).  A view that came from decoding (xdr != NULL) re-encodes by copying
- * its already-validated bytes.
  *
  * Decoding accepts the encodings that the x23 C++ deserializer accepts, with
  * two differences: a bool union discriminant must be 0 or 1 (X23_ERR_BOOL),
@@ -42,6 +39,21 @@
 #include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
+
+#ifndef X23_MALLOC
+#include <stdlib.h>
+#define X23_MALLOC(size) malloc(size)
+#ifndef X23_FREE
+#define X23_FREE(ptr) free(ptr)
+#endif
+#endif
+#ifndef X23_FREE
+#define X23_FREE(ptr) ((void)(ptr))
+#endif
+#ifndef X23_MEMCPY
+#include <string.h>
+#define X23_MEMCPY(dst, src, n) memcpy(dst, src, n)
+#endif
 
 #ifdef __cplusplus
 #define X23_C_LINKAGE_BEGIN extern "C" {
@@ -64,7 +76,8 @@ typedef int32_t x23_status;
 #define X23_ERR_TRAILING 6 /* bytes left over after a complete value */
 #define X23_ERR_ALIGN 7    /* input length not a multiple of 4 */
 #define X23_ERR_OVERFLOW 8 /* output buffer too small */
-#define X23_ERR_RANGE 9    /* vec index out of range, or absent optional */
+#define X23_ERR_NULL 9     /* encoding a NULL #[cpp(box)] field */
+#define X23_ERR_NOMEM 10   /* X23_MALLOC failed */
 
 #define X23_TRY(expr)                                                          \
   do {                                                                         \
@@ -89,15 +102,15 @@ typedef struct x23_writer {
   uint32_t cap;
 } x23_writer;
 
-/* opaque<N>: a view of the bytes, not including padding. */
+/* opaque<N> */
 typedef struct x23_bytes {
-  const uint8_t *data;
+  uint8_t *data;
   uint32_t len;
 } x23_bytes;
 
-/* string<N>: a view of the characters.  Not NUL-terminated. */
+/* string<N> */
 typedef struct x23_string {
-  const char *data;
+  char *data;
   uint32_t len;
 } x23_string;
 
@@ -120,17 +133,6 @@ x23_writer_init(uint8_t *buf, uint32_t cap)
   return w;
 }
 
-static inline void
-x23_copy_bytes(uint8_t *dst, const uint8_t *src, uint32_t n)
-{
-#ifdef X23_MEMCPY
-  X23_MEMCPY(dst, src, n);
-#else
-  for (uint32_t i = 0; i < n; ++i)
-    dst[i] = src[i];
-#endif
-}
-
 static inline uint32_t
 x23_padded_len(uint32_t n)
 {
@@ -141,6 +143,29 @@ static inline uint32_t
 x23_remaining(const x23_reader *r)
 {
   return (uint32_t)(r->end - r->p);
+}
+
+static inline void
+x23_zero(void *p, size_t n)
+{
+  unsigned char *b = (unsigned char *)p;
+  for (size_t i = 0; i < n; ++i)
+    b[i] = 0;
+}
+
+/* Allocates n zeroed objects of the given size. */
+static inline x23_status
+x23_alloc(void **out, uint32_t n, size_t size)
+{
+  if (size && n > SIZE_MAX / size)
+    return X23_ERR_NOMEM;
+  size_t total = (size_t)n * size;
+  void *p = X23_MALLOC(total ? total : 1);
+  if (!p)
+    return X23_ERR_NOMEM;
+  x23_zero(p, total);
+  *out = p;
+  return X23_OK;
 }
 
 /* Reading */
@@ -167,10 +192,9 @@ x23_get_u64(x23_reader *r, uint64_t *out)
   return X23_OK;
 }
 
-/* Takes n bytes of opaque data plus its padding, returning a pointer to the
- * data in the input buffer. */
+/* Copies n bytes of opaque data into dst and skips its padding. */
 static inline x23_status
-x23_get_opaque(x23_reader *r, uint32_t n, const uint8_t **out)
+x23_get_opaque(x23_reader *r, uint32_t n, uint8_t *dst)
 {
   uint32_t padded = x23_padded_len(n);
   if (padded < n || x23_remaining(r) < padded)
@@ -178,7 +202,8 @@ x23_get_opaque(x23_reader *r, uint32_t n, const uint8_t **out)
   for (uint32_t i = n; i < padded; ++i)
     if (r->p[i] != 0)
       return X23_ERR_PADDING;
-  *out = r->p;
+  if (n)
+    X23_MEMCPY(dst, r->p, n);
   r->p += padded;
   return X23_OK;
 }
@@ -218,17 +243,6 @@ x23_put_u64(x23_writer *w, uint64_t v)
   return x23_put_u32(w, (uint32_t)v);
 }
 
-/* Bytes that are already a complete XDR encoding (no padding added). */
-static inline x23_status
-x23_put_raw(x23_writer *w, const uint8_t *src, uint32_t n)
-{
-  uint8_t *p;
-  X23_TRY(x23_reserve(w, n, &p));
-  if (p && n)
-    x23_copy_bytes(p, src, n);
-  return X23_OK;
-}
-
 /* n bytes of opaque data followed by zero padding. */
 static inline x23_status
 x23_put_opaque(x23_writer *w, const uint8_t *src, uint32_t n)
@@ -240,7 +254,7 @@ x23_put_opaque(x23_writer *w, const uint8_t *src, uint32_t n)
   X23_TRY(x23_reserve(w, padded, &p));
   if (p) {
     if (n)
-      x23_copy_bytes(p, src, n);
+      X23_MEMCPY(p, src, n);
     for (uint32_t i = n; i < padded; ++i)
       p[i] = 0;
   }
@@ -249,16 +263,32 @@ x23_put_opaque(x23_writer *w, const uint8_t *src, uint32_t n)
 
 /* Variable-length opaque and string */
 
+/* Reads the length and checks the bytes are there before allocating, so a
+ * huge length in short input cannot allocate. */
+static inline x23_status
+x23_get_opaque_len(x23_reader *r, uint32_t bound, uint32_t *n)
+{
+  X23_TRY(x23_get_u32(r, n));
+  if (*n > bound)
+    return X23_ERR_LENGTH;
+  uint32_t padded = x23_padded_len(*n);
+  if (padded < *n || x23_remaining(r) < padded)
+    return X23_ERR_SHORT;
+  return X23_OK;
+}
+
 static inline x23_status
 x23_bytes_decode(x23_reader *r, x23_bytes *out, uint32_t bound)
 {
   uint32_t n;
-  X23_TRY(x23_get_u32(r, &n));
-  if (n > bound)
-    return X23_ERR_LENGTH;
-  X23_TRY(x23_get_opaque(r, n, &out->data));
+  void *p;
+  out->data = NULL;
+  out->len = 0;
+  X23_TRY(x23_get_opaque_len(r, bound, &n));
+  X23_TRY(x23_alloc(&p, n, 1));
+  out->data = (uint8_t *)p;
   out->len = n;
-  return X23_OK;
+  return x23_get_opaque(r, n, out->data);
 }
 
 static inline x23_status
@@ -270,31 +300,54 @@ x23_bytes_encode(x23_writer *w, const x23_bytes *v, uint32_t bound)
   return x23_put_opaque(w, v->data, v->len);
 }
 
+static inline void
+x23_bytes_free(x23_bytes *v)
+{
+  X23_FREE(v->data);
+  v->data = NULL;
+  v->len = 0;
+}
+
 static inline x23_status
 x23_string_decode(x23_reader *r, x23_string *out, uint32_t bound)
 {
-  x23_bytes b;
-  X23_TRY(x23_bytes_decode(r, &b, bound));
-  out->data = (const char *)b.data;
-  out->len = b.len;
-  return X23_OK;
+  uint32_t n;
+  void *p;
+  out->data = NULL;
+  out->len = 0;
+  X23_TRY(x23_get_opaque_len(r, bound, &n));
+  if (n == UINT32_MAX)
+    return X23_ERR_NOMEM;
+  X23_TRY(x23_alloc(&p, n + 1, 1)); /* zeroed, so NUL-terminated */
+  out->data = (char *)p;
+  out->len = n;
+  return x23_get_opaque(r, n, (uint8_t *)out->data);
 }
 
 static inline x23_status
 x23_string_encode(x23_writer *w, const x23_string *v, uint32_t bound)
 {
-  x23_bytes b;
-  b.data = (const uint8_t *)v->data;
-  b.len = v->len;
-  return x23_bytes_encode(w, &b, bound);
+  if (v->len > bound)
+    return X23_ERR_LENGTH;
+  X23_TRY(x23_put_u32(w, v->len));
+  return x23_put_opaque(w, (const uint8_t *)v->data, v->len);
+}
+
+static inline void
+x23_string_free(x23_string *v)
+{
+  X23_FREE(v->data);
+  v->data = NULL;
+  v->len = 0;
 }
 
 /* Primitive types.  Each type P has
  *   P_XDR_SIZE                      encoded size, or 0 if it varies
  *   x23_status P_decode(x23_reader *, T *)
  *   x23_status P_encode(x23_writer *, const T *)
- * and the P_vec and P_opt views below.  Generated types follow the same
- * scheme under their own names. */
+ *   void P_free(T *)
+ * and the P_vec type and pointer functions below.  Generated types follow
+ * the same scheme under their own names. */
 
 #define x23_i32_XDR_SIZE 4
 #define x23_u32_XDR_SIZE 4
@@ -407,83 +460,72 @@ x23_f64_encode(x23_writer *w, const double *v)
   c.f = *v;
   return x23_put_u64(w, c.u);
 }
+#define X23_NOTHING_TO_FREE(P, T)                                              \
+  static inline void P##_free(T *v)                                            \
+  {                                                                            \
+    (void)v;                                                                   \
+  }
+X23_NOTHING_TO_FREE(x23_i32, int32_t)
+X23_NOTHING_TO_FREE(x23_u32, uint32_t)
+X23_NOTHING_TO_FREE(x23_i64, int64_t)
+X23_NOTHING_TO_FREE(x23_u64, uint64_t)
+X23_NOTHING_TO_FREE(x23_bool, bool)
+X23_NOTHING_TO_FREE(x23_f32, float)
+X23_NOTHING_TO_FREE(x23_f64, double)
 
-/* Views of variable-length arrays (T<N>) and optionals (T*).
+/* Variable-length arrays (T<N>) and pointers (T* and #[cpp(box)] fields).
  *
- * X23_VIEW_TYPES(P, T) declares the struct tags P_vec, P_vec_iter and P_opt.
- * It needs only a declaration of T, so it can precede T's definition (which
- * recursive types require).  X23_VIEW_FUNCS(P, T) defines their functions
- * and must follow P_decode, P_encode and P_XDR_SIZE.  X23_VIEW_PROTOS(P, T)
- * declares the functions that encoders and decoders use.
+ * X23_VEC_TYPE(P, T) defines P_vec.  It needs only a declaration of T, so it
+ * can precede T's definition, as recursive types require.  X23_PTR_PROTOS
+ * declares the functions below, which X23_PTR_FUNCS defines after P_decode,
+ * P_encode, P_free and P_XDR_SIZE:
  *
- * P_vec: if xdr != NULL, the view holds len elements encoded in the xdr_len
- * bytes at xdr (not including the length prefix); otherwise it holds the len
- * values at elems.
- *
- * P_opt: if xdr != NULL, the value is present and encoded in the xdr_len bytes
- * at xdr; otherwise it is present iff ptr != NULL.
- *
- * P_box: a value that is always present, encoded exactly as a plain T, but
- * held like a P_opt.  The generator uses it for fields annotated
- * #[cpp(box)]: types that contain themselves by value.
+ *   P_vec_decode / P_vec_encode / P_vec_free   for T<N>
+ *   P_ptr_decode / P_ptr_encode / P_ptr_free   for T* (NULL when absent)
+ *   P_box_decode / P_box_encode                for #[cpp(box)] fields, which
+ *                                              are never NULL once decoded
  */
 
-#define X23_VIEW_TYPES(P, T)                                                   \
+#define X23_VEC_TYPE(P, T)                                                     \
   typedef struct P##_vec {                                                     \
-    const uint8_t *xdr;                                                        \
-    uint32_t xdr_len;                                                          \
+    T *elems;                                                                  \
     uint32_t len;                                                              \
-    const T *elems;                                                            \
-  } P##_vec;                                                                   \
-  typedef struct P##_vec_iter {                                                \
-    x23_reader r;                                                              \
-    const T *elems;                                                            \
-    uint32_t i;                                                                \
-    uint32_t len;                                                              \
-  } P##_vec_iter;                                                              \
-  typedef struct P##_opt {                                                     \
-    const uint8_t *xdr;                                                        \
-    uint32_t xdr_len;                                                          \
-    const T *ptr;                                                              \
-  } P##_opt;                                                                   \
-  typedef struct P##_box {                                                     \
-    const uint8_t *xdr;                                                        \
-    uint32_t xdr_len;                                                          \
-    const T *ptr;                                                              \
-  } P##_box;
+  } P##_vec;
 
-/* Prototypes of the view functions that generated encoders and decoders
- * call, so that they can precede X23_VIEW_FUNCS. */
-#define X23_VIEW_PROTOS(P, T)                                                  \
+#define X23_PTR_PROTOS(P, T)                                                   \
   static inline x23_status P##_vec_decode(x23_reader *r, P##_vec *out,         \
                                           uint32_t bound);                     \
   static inline x23_status P##_vec_encode(x23_writer *w, const P##_vec *v,     \
                                           uint32_t bound);                     \
-  static inline x23_status P##_opt_decode(x23_reader *r, P##_opt *out);        \
-  static inline x23_status P##_opt_encode(x23_writer *w, const P##_opt *o);    \
-  static inline x23_status P##_box_decode(x23_reader *r, P##_box *out);        \
-  static inline x23_status P##_box_encode(x23_writer *w, const P##_box *b);
+  static inline void P##_vec_free(P##_vec *v);                                 \
+  static inline x23_status P##_ptr_decode(x23_reader *r, T **out);             \
+  static inline x23_status P##_ptr_encode(x23_writer *w, const T *v);          \
+  static inline void P##_ptr_free(T **v);                                      \
+  static inline x23_status P##_box_decode(x23_reader *r, T **out);             \
+  static inline x23_status P##_box_encode(x23_writer *w, const T *v);
 
-#define X23_VIEW_FUNCS(P, T)                                                   \
+/* A variable-size encoding is at least 4 bytes (it holds a length, flag or
+ * discriminant), so n elements need at least 4n bytes of input: checking
+ * that before allocating keeps a huge count in short input from allocating
+ * much more than the input's size. */
+#define X23_PTR_FUNCS(P, T)                                                    \
   static inline x23_status P##_vec_decode(x23_reader *r, P##_vec *out,         \
                                           uint32_t bound)                      \
   {                                                                            \
     uint32_t n;                                                                \
+    void *p;                                                                   \
+    out->elems = NULL;                                                         \
+    out->len = 0;                                                              \
     X23_TRY(x23_get_u32(r, &n));                                               \
     if (n > bound)                                                             \
       return X23_ERR_LENGTH;                                                   \
-    if (P##_XDR_SIZE &&                                                        \
-        n > x23_remaining(r) / (P##_XDR_SIZE ? P##_XDR_SIZE : 1))              \
+    if (n > x23_remaining(r) / (P##_XDR_SIZE ? P##_XDR_SIZE : 4))              \
       return X23_ERR_SHORT;                                                    \
-    const uint8_t *start = r->p;                                               \
-    for (uint32_t i = 0; i < n; ++i) {                                         \
-      T tmp;                                                                   \
-      X23_TRY(P##_decode(r, &tmp));                                            \
-    }                                                                          \
-    out->xdr = start;                                                          \
-    out->xdr_len = (uint32_t)(r->p - start);                                   \
+    X23_TRY(x23_alloc(&p, n, sizeof(T)));                                      \
+    out->elems = (T *)p;                                                       \
     out->len = n;                                                              \
-    out->elems = NULL;                                                         \
+    for (uint32_t i = 0; i < n; ++i)                                           \
+      X23_TRY(P##_decode(r, &out->elems[i]));                                  \
     return X23_OK;                                                             \
   }                                                                            \
   static inline x23_status P##_vec_encode(x23_writer *w, const P##_vec *v,     \
@@ -492,128 +534,57 @@ x23_f64_encode(x23_writer *w, const double *v)
     if (v->len > bound)                                                        \
       return X23_ERR_LENGTH;                                                   \
     X23_TRY(x23_put_u32(w, v->len));                                           \
-    if (v->xdr)                                                                \
-      return x23_put_raw(w, v->xdr, v->xdr_len);                               \
     for (uint32_t i = 0; i < v->len; ++i)                                      \
       X23_TRY(P##_encode(w, &v->elems[i]));                                    \
     return X23_OK;                                                             \
   }                                                                            \
-  static inline x23_status P##_vec_get(const P##_vec *v, uint32_t i, T *out)   \
+  static inline void P##_vec_free(P##_vec *v)                                  \
   {                                                                            \
-    if (i >= v->len)                                                           \
-      return X23_ERR_RANGE;                                                    \
-    if (!v->xdr) {                                                             \
-      *out = v->elems[i];                                                      \
-      return X23_OK;                                                           \
-    }                                                                          \
-    x23_reader r = x23_reader_init(v->xdr, v->xdr_len);                        \
-    if (P##_XDR_SIZE)                                                          \
-      r.p += (size_t)i * P##_XDR_SIZE;                                         \
-    else                                                                       \
-      for (uint32_t j = 0; j < i; ++j) {                                       \
-        T skip;                                                                \
-        X23_TRY(P##_decode(&r, &skip));                                        \
-      }                                                                        \
-    return P##_decode(&r, out);                                                \
+    if (v->elems)                                                              \
+      for (uint32_t i = 0; i < v->len; ++i)                                    \
+        P##_free(&v->elems[i]);                                                \
+    X23_FREE(v->elems);                                                        \
+    v->elems = NULL;                                                           \
+    v->len = 0;                                                                \
   }                                                                            \
-  static inline void P##_vec_iter_init(P##_vec_iter *it, const P##_vec *v)     \
+  static inline x23_status P##_box_decode(x23_reader *r, T **out)              \
   {                                                                            \
-    it->r.p = it->r.end = v->xdr;                                              \
-    if (v->xdr)                                                                \
-      it->r.end = v->xdr + v->xdr_len;                                         \
-    it->elems = v->xdr ? NULL : v->elems;                                      \
-    it->i = 0;                                                                 \
-    it->len = v->len;                                                          \
+    void *p;                                                                   \
+    *out = NULL;                                                               \
+    X23_TRY(x23_alloc(&p, 1, sizeof(T)));                                      \
+    *out = (T *)p;                                                             \
+    return P##_decode(r, *out);                                                \
   }                                                                            \
-  /* Stores the next element in *out and returns true, or returns false at     \
-   * the end. */                                                               \
-  static inline bool P##_vec_next(P##_vec_iter *it, T *out)                    \
+  static inline x23_status P##_box_encode(x23_writer *w, const T *v)           \
   {                                                                            \
-    if (it->i >= it->len)                                                      \
-      return false;                                                            \
-    if (it->elems)                                                             \
-      *out = it->elems[it->i];                                                 \
-    else if (P##_decode(&it->r, out) != X23_OK) {                              \
-      it->i = it->len;                                                         \
-      return false;                                                            \
-    }                                                                          \
-    ++it->i;                                                                   \
-    return true;                                                               \
+    return v ? P##_encode(w, v) : X23_ERR_NULL;                                \
   }                                                                            \
-  static inline bool P##_opt_present(const P##_opt *o)                         \
-  {                                                                            \
-    return o->xdr || o->ptr;                                                   \
-  }                                                                            \
-  /* Returns X23_ERR_RANGE if the optional is absent. */                       \
-  static inline x23_status P##_opt_get(const P##_opt *o, T *out)               \
-  {                                                                            \
-    if (o->xdr) {                                                              \
-      x23_reader r = x23_reader_init(o->xdr, o->xdr_len);                      \
-      return P##_decode(&r, out);                                              \
-    }                                                                          \
-    if (!o->ptr)                                                               \
-      return X23_ERR_RANGE;                                                    \
-    *out = *o->ptr;                                                            \
-    return X23_OK;                                                             \
-  }                                                                            \
-  static inline x23_status P##_opt_decode(x23_reader *r, P##_opt *out)         \
+  static inline x23_status P##_ptr_decode(x23_reader *r, T **out)              \
   {                                                                            \
     bool present;                                                              \
+    *out = NULL;                                                               \
     X23_TRY(x23_bool_decode(r, &present));                                     \
-    out->xdr = NULL;                                                           \
-    out->xdr_len = 0;                                                          \
-    out->ptr = NULL;                                                           \
-    if (present) {                                                             \
-      const uint8_t *start = r->p;                                             \
-      T tmp;                                                                   \
-      X23_TRY(P##_decode(r, &tmp));                                            \
-      out->xdr = start;                                                        \
-      out->xdr_len = (uint32_t)(r->p - start);                                 \
+    return present ? P##_box_decode(r, out) : X23_OK;                          \
+  }                                                                            \
+  static inline x23_status P##_ptr_encode(x23_writer *w, const T *v)           \
+  {                                                                            \
+    X23_TRY(x23_put_u32(w, v ? 1u : 0u));                                      \
+    return v ? P##_encode(w, v) : X23_OK;                                      \
+  }                                                                            \
+  static inline void P##_ptr_free(T **v)                                       \
+  {                                                                            \
+    if (*v) {                                                                  \
+      P##_free(*v);                                                            \
+      X23_FREE(*v);                                                            \
+      *v = NULL;                                                               \
     }                                                                          \
-    return X23_OK;                                                             \
-  }                                                                            \
-  static inline x23_status P##_opt_encode(x23_writer *w, const P##_opt *o)     \
-  {                                                                            \
-    if (o->xdr) {                                                              \
-      X23_TRY(x23_put_u32(w, 1));                                              \
-      return x23_put_raw(w, o->xdr, o->xdr_len);                               \
-    }                                                                          \
-    X23_TRY(x23_put_u32(w, o->ptr ? 1u : 0u));                                 \
-    return o->ptr ? P##_encode(w, o->ptr) : X23_OK;                            \
-  }                                                                            \
-  static inline x23_status P##_box_get(const P##_box *b, T *out)               \
-  {                                                                            \
-    if (b->xdr) {                                                              \
-      x23_reader r = x23_reader_init(b->xdr, b->xdr_len);                      \
-      return P##_decode(&r, out);                                              \
-    }                                                                          \
-    if (!b->ptr)                                                               \
-      return X23_ERR_RANGE;                                                    \
-    *out = *b->ptr;                                                            \
-    return X23_OK;                                                             \
-  }                                                                            \
-  static inline x23_status P##_box_decode(x23_reader *r, P##_box *out)         \
-  {                                                                            \
-    const uint8_t *start = r->p;                                               \
-    T tmp;                                                                     \
-    X23_TRY(P##_decode(r, &tmp));                                              \
-    out->xdr = start;                                                          \
-    out->xdr_len = (uint32_t)(r->p - start);                                   \
-    out->ptr = NULL;                                                           \
-    return X23_OK;                                                             \
-  }                                                                            \
-  /* Returns X23_ERR_RANGE if the box holds nothing. */                        \
-  static inline x23_status P##_box_encode(x23_writer *w, const P##_box *b)     \
-  {                                                                            \
-    if (b->xdr)                                                                \
-      return x23_put_raw(w, b->xdr, b->xdr_len);                               \
-    return b->ptr ? P##_encode(w, b->ptr) : X23_ERR_RANGE;                     \
   }
 
-/* X23_BUF_FUNCS(P, T) defines, for a type whose P_decode and P_encode exist,
+/* X23_BUF_FUNCS(P, T) defines
  *
  *   x23_status P_from_xdr(const uint8_t *buf, uint32_t len, T *out)
- *     decodes a whole buffer, which must hold exactly one value
+ *     decodes a whole buffer, which must hold exactly one value; on error
+ *     *out owns nothing
  *   x23_status P_to_xdr(const T *v, uint8_t *buf, uint32_t cap, uint32_t *len)
  *     encodes v into buf and stores the encoded length in *len; with
  *     buf == NULL it writes nothing and only computes the length
@@ -622,13 +593,18 @@ x23_f64_encode(x23_writer *w, const double *v)
   static inline x23_status P##_from_xdr(const uint8_t *buf, uint32_t len,      \
                                         T *out)                                \
   {                                                                            \
+    x23_zero(out, sizeof(T));                                                  \
     if (len % 4)                                                               \
       return X23_ERR_ALIGN;                                                    \
     if (!buf)                                                                  \
       return X23_ERR_SHORT;                                                    \
     x23_reader r = x23_reader_init(buf, len);                                  \
-    X23_TRY(P##_decode(&r, out));                                              \
-    return r.p == r.end ? X23_OK : X23_ERR_TRAILING;                           \
+    x23_status st = P##_decode(&r, out);                                       \
+    if (st == X23_OK && r.p != r.end)                                          \
+      st = X23_ERR_TRAILING;                                                   \
+    if (st != X23_OK)                                                          \
+      P##_free(out);                                                           \
+    return st;                                                                 \
   }                                                                            \
   static inline x23_status P##_to_xdr(const T *v, uint8_t *buf, uint32_t cap,  \
                                       uint32_t *len)                           \
@@ -639,20 +615,20 @@ x23_f64_encode(x23_writer *w, const double *v)
     return X23_OK;                                                             \
   }
 
-X23_VIEW_TYPES(x23_i32, int32_t)
-X23_VIEW_TYPES(x23_u32, uint32_t)
-X23_VIEW_TYPES(x23_i64, int64_t)
-X23_VIEW_TYPES(x23_u64, uint64_t)
-X23_VIEW_TYPES(x23_bool, bool)
-X23_VIEW_TYPES(x23_f32, float)
-X23_VIEW_TYPES(x23_f64, double)
-X23_VIEW_FUNCS(x23_i32, int32_t)
-X23_VIEW_FUNCS(x23_u32, uint32_t)
-X23_VIEW_FUNCS(x23_i64, int64_t)
-X23_VIEW_FUNCS(x23_u64, uint64_t)
-X23_VIEW_FUNCS(x23_bool, bool)
-X23_VIEW_FUNCS(x23_f32, float)
-X23_VIEW_FUNCS(x23_f64, double)
+X23_VEC_TYPE(x23_i32, int32_t)
+X23_VEC_TYPE(x23_u32, uint32_t)
+X23_VEC_TYPE(x23_i64, int64_t)
+X23_VEC_TYPE(x23_u64, uint64_t)
+X23_VEC_TYPE(x23_bool, bool)
+X23_VEC_TYPE(x23_f32, float)
+X23_VEC_TYPE(x23_f64, double)
+X23_PTR_FUNCS(x23_i32, int32_t)
+X23_PTR_FUNCS(x23_u32, uint32_t)
+X23_PTR_FUNCS(x23_i64, int64_t)
+X23_PTR_FUNCS(x23_u64, uint64_t)
+X23_PTR_FUNCS(x23_bool, bool)
+X23_PTR_FUNCS(x23_f32, float)
+X23_PTR_FUNCS(x23_f64, double)
 
 X23_C_LINKAGE_END
 
