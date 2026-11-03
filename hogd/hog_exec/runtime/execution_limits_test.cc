@@ -75,13 +75,13 @@ make_token_tree(ContractAddress const &consumer, uint32_t depth)
 // The execution limits a chain states at genesis are what the executor
 // enforces: these run under a configuration far below the protocol defaults
 // and pin that the configured value, not the constant, is the boundary.
-class ExecutionLimitsTest : public ::testing::TestWithParam<TestDB>,
+class ExecutionLimitsTest : public ::testing::Test,
                             public NativeContractTestFramework {
 protected:
   ExecutionLimitsTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
-          true, std::nullopt, lowered_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, lowered_network_config())
   {}
 
   void SetUp() override
@@ -159,7 +159,7 @@ private:
 // One savepoint slot is reserved for the root commit, so the configured
 // depth admits exactly depth - 1 child TryInvokes; the one after fails
 // deterministically without the syscall itself erroring.
-TEST_P(ExecutionLimitsTest, TryInvokeStopsAtConfiguredSavepointDepth)
+TEST_F(ExecutionLimitsTest, TryInvokeStopsAtConfiguredSavepointDepth)
 {
   const bool ok = run_driver(
       [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
@@ -194,7 +194,7 @@ TEST_P(ExecutionLimitsTest, TryInvokeStopsAtConfiguredSavepointDepth)
 
 // A token at the configured depth mints; one level deeper is refused as
 // invalid input, though the protocol default would have admitted it.
-TEST_P(ExecutionLimitsTest, MintAuthTokenStopsAtConfiguredDepth)
+TEST_F(ExecutionLimitsTest, MintAuthTokenStopsAtConfiguredDepth)
 {
   const bool ok = run_driver([](NativeSyscallContext &ctx)
                                  -> x23::Async<InvokeStatus<void>> {
@@ -221,7 +221,7 @@ TEST_P(ExecutionLimitsTest, MintAuthTokenStopsAtConfiguredDepth)
 }
 
 // A budget at the configured bound runs.
-TEST_P(ExecutionLimitsTest, RootBudgetAtConfiguredTxGasRuns)
+TEST_F(ExecutionLimitsTest, RootBudgetAtConfiguredTxGasRuns)
 {
   auto ran = std::make_shared<bool>(false);
   EXPECT_TRUE(run_driver(
@@ -235,7 +235,7 @@ TEST_P(ExecutionLimitsTest, RootBudgetAtConfiguredTxGasRuns)
 // One gas over the bound is refused before the body runs, as a validation
 // failure rather than a clamped budget, though the protocol default would have
 // admitted it.
-TEST_P(ExecutionLimitsTest, RootBudgetOverConfiguredTxGasIsRefused)
+TEST_F(ExecutionLimitsTest, RootBudgetOverConfiguredTxGasIsRefused)
 {
   auto ran = std::make_shared<bool>(false);
   const InvokeResult over = run_driver_with_budget(
@@ -249,11 +249,6 @@ TEST_P(ExecutionLimitsTest, RootBudgetOverConfiguredTxGasIsRefused)
   EXPECT_EQ(over.gas_consumed_, 0U);
   EXPECT_FALSE(*ran);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ExecutionLimitsTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

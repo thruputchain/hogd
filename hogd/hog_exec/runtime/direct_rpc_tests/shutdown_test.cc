@@ -18,8 +18,7 @@ class ShutdownTest : public ::testing::Test,
 public:
   ShutdownTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   PerTransactionDatabaseProxy make_new_per_tx_db_proxy()

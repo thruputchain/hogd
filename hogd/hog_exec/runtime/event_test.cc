@@ -42,8 +42,7 @@ class EventTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   EventTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override {}
@@ -1511,7 +1510,7 @@ TEST(EventRpcValidationProposalData,
      OversizedConsumedProposalDataFailStopsInsteadOfCrashing)
 {
   NativeContractTestFramework fw(
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+      false, BlockExecutionMode::kBlockExecutionModeProposal);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -1635,7 +1634,7 @@ TEST(EventRpcValidationProposalData,
 TEST(EventServerProxyMapping, BadBlockIdIsAbandonAndDoubleEmitIsUnrecoverable)
 {
   NativeContractTestFramework fw(
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+      false, BlockExecutionMode::kBlockExecutionModeProposal);
 
   EventServerProxy proxy(x23::HostPort{"localhost", fw.get_event_exec_port()});
 

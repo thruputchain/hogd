@@ -3,6 +3,8 @@
 #include <cerrno>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <map>
 #include <mutex>
 #include <set>
 #include <span>
@@ -20,10 +22,11 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/db_hash.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/queue_util.h"
 #include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -132,7 +135,8 @@ public:
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr,
                                DeployedContractHash deployed_contract_hash);
-  void setup_create_item(AddressAndKey const &addrkey, StorageItemWrapper item);
+  void setup_create_item(AddressAndKey const &addrkey, WireStorageItem item);
+  void setup_create_queue(AddressAndKey const &addrkey, TestQueue queue);
   void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
                                      QueueEntry entry);
 
@@ -157,7 +161,10 @@ private:
   BlockHeight tip_block_height_;
   NetworkConfig network_config_;
 
-  x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey, WireStorageItem>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey,
+                               std::map<uint64_t, RetrocausalQueueBlock>>>
+      queue_blocks_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract, SipHash24Hasher>>
       contracts_;
   x23::MVar<std::unordered_map<ContractAddress, DeployedContractHash,

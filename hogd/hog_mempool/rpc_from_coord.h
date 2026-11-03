@@ -19,7 +19,6 @@
 #include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
@@ -125,6 +124,8 @@ public:
   x23::Async<void> disconnect_auth_callback()
   {
     if (auth_rpc_ != nullptr) {
+      auth_callback_disconnecting_.store(true, std::memory_order_release);
+      auth_data_height_.broadcast(&default_threadpool());
       co_await auth_rpc_->unregister_callback();
       auth_rpc_ = nullptr;
     }
@@ -401,8 +402,10 @@ public:
     }
   }
 
+  // Takes [tx_hashes] by value: the loop below suspends on each lookup, and
+  // the RPC dispatcher frees its decoded arguments at the first suspension.
   x23::Async<SchedulerTransactionOutcomeBatch>
-  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
   {
     SchedulerTransactionOutcomeBatch ret;
     ret.reserve(tx_hashes.size());
@@ -455,6 +458,13 @@ public:
     co_return;
   }
 
+  // Auth data reaching exactly [expected_height] is an invariant, so landing
+  // past it is a bug, not a satisfied wait. Nomination and validation wait for
+  // the parent of the block they build or check, and commit takes
+  // [nominated_block_cache_lock_] and closes the validation gate before the DB
+  // commits the next height, so that height's auth data cannot arrive while
+  // they wait. The genesis ceremony waits without the nomination lock; that
+  // relies on there being a single ceremony.
   x23::Async<void> wait_for_auth_data(BlockHeight expected_height)
   {
     int64_t current_height;
@@ -499,12 +509,21 @@ public:
     submission_auth_test_hook_ = std::move(hook);
   }
 
+  // Runs when an [auth_data_changed] callback for a height is about to wait
+  // for an earlier height.
+  void set_auth_data_wait_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    auth_data_wait_test_hook_ = std::move(hook);
+  }
+
   x23::Async<void> test_finish_all_executors(BlockID block_id)
   {
     co_await finish_all_executors(block_id);
   }
 
 private:
+  friend class MempoolValidationExecutorResultTest;
+
   struct SubmissionAuth {
     std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
         accounts;
@@ -571,7 +590,8 @@ private:
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
     SignedTransactionHashBatch missing_signed_tx_hashes;
-    bool validated = true;
+    SchedulerValidationOutcome outcome =
+        SchedulerValidationOutcome::SchedulerValidationOK;
   };
 
   x23::Async<void> finish_init()
@@ -741,7 +761,9 @@ private:
   schedulercoord_commit_block_impl(BlockID block_id,
                                    ConsensusValue expected_value);
 
-  x23::Async<bool>
+  // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
+  // [SchedulerValidationExecutorFailed] when an executor could not run a tx.
+  x23::Async<SchedulerValidationOutcome>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
@@ -759,11 +781,12 @@ private:
       x23::span<const NondeterministicProposalData> tx_nominations,
       x23::span<TransactionHash> tx_hashes);
 
-  x23::Async<bool> multiplex_large_validation_chunk_across_executors(
+  x23::Async<SchedulerValidationOutcome>
+  multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
 
-  x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<SchedulerValidationOutcome>
+  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult>
   open_validation_block(BlockID block_id, BlockExecutionContext block_execution,
@@ -866,6 +889,7 @@ private:
   std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
                                  bool)>
       submission_auth_test_hook_;
+  std::function<void(BlockHeight)> auth_data_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
@@ -889,6 +913,9 @@ private:
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
   x23::CoroFutex<int64_t> auth_data_height_{-1};
+  // Set by [disconnect_auth_callback] to release [auth_data_changed] callbacks
+  // waiting on [auth_data_height_] for an earlier height.
+  std::atomic<bool> auth_callback_disconnecting_ = false;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
 

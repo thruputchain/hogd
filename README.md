@@ -17,8 +17,6 @@ For macOS users, an automated setup script is available that installs all depend
 
 The setup script installs all required dependencies including LLVM, CMake, Python packages, Rust toolchains, and development tools.
 
-**Note:** An SSH agent must be running to fetch private submodules. Configure your SSH keys with GitHub before running the build.
-
 ## Docker
 
 For development and testing in a containerized environment, use the Docker-based CI setup:
@@ -34,7 +32,7 @@ For development and testing in a containerized environment, use the Docker-based
 ./docker/local-ci.sh shell
 ~~~~
 
-See `docker/README.md` for detailed usage, including SSH agent setup for private submodules, tidy checks, and more.
+See `docker/README.md` for detailed usage, including tidy checks and image builds.
 
 ## Manual Installation (All Platforms)
 
@@ -69,33 +67,8 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     cargo install --force cbindgen
     ~~~~
 
-1. Configure cargo to authenticate with the thruput crate registry.
-   First, ensure `~/.cargo/config.toml` includes:
-
-    ~~~~ .toml
-    [registry]
-    global-credential-providers = ["cargo:token"]
-    ~~~~
-
-   Then add your token to `~/.cargo/credentials.toml`:
-
-    ~~~~ .toml
-    [registries.thruput]
-    token = "Bearer <your-token>"
-    ~~~~
-
-   You can get an access token by logging in at
-   [crates.thruput.network](https://crates.thruput.network).
-
-   Alternatively, you can authenticate using environment variables (this
-   is how CI is configured):
-
-    ~~~~ .sh
-    export CARGO_REGISTRIES_THRUPUT_TOKEN="<your-token>"
-    export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="cargo:token"
-    ~~~~
-
-1. Fetch rust crate dependencies.
+1. Fetch rust crate dependencies. They all come from crates.io, so this needs
+   no registry credentials.
     ~~~~ .sh
     ./scripts/fetch.sh
     ~~~~
@@ -150,7 +123,7 @@ contract artifact by default; no network-config overrides are needed.
 Fresh local and hosted bootstrap accounts use the native default wallet at
 nonce zero. Genesis funds their public-key-derived addresses directly; runtime
 bundles need only `genesis_root.rv32a`. Bootstrap and runtime manifests use
-schema 3; hosted bootstrap metadata uses schema 2.
+schema 5; hosted bootstrap metadata uses schema 3.
 
 Persistent local directories from the older dev-wallet bootstrap are not migrated
 in place. Keep the original CLI/runtime to open those directories, or explicitly

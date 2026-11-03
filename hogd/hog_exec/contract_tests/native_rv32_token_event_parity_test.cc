@@ -62,8 +62,7 @@ class NativeRv32TokenEventParityTest : public ::testing::Test,
 public:
   NativeRv32TokenEventParityTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   // Actor addresses, shared identically across both the rv32 and native runs so

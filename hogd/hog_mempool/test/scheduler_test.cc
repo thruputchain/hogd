@@ -22,6 +22,7 @@
 #include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
+#include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/xdr/signed_transaction_hash.h"
 #include "integration.hh"
@@ -377,6 +378,7 @@ TEST(Scheduler, ResubmittedNominationTxIsReenqueuedAfterAbandon)
   ASSERT_EQ(scheduled.size(), 1UL);
   scheduler->add_txs(txs, hashes)();
   EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // The coordinator explicitly restores the losing nomination's transactions.
   // Suppressing duplicate admission must not suppress this reenqueue.
@@ -392,6 +394,7 @@ TEST(Scheduler, ResubmittedNominationTxIsReenqueuedAfterAbandon)
                       scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(scheduled_hashes))();
   scheduler->commit_pending_nomination(/*block_id=*/3)();
@@ -494,18 +497,21 @@ TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
   EXPECT_EQ(scheduled.front(), b);
   ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
   EXPECT_EQ(scheduled_signed_hashes.front(), sha256(b));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(scheduled_hashes))();
   scheduler->commit_pending_nomination(/*block_id=*/2)();
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 
   // The index entry went with the cache entry, so the body can be cached again
   // under either encoding.
   scheduler->add_txs({a}, {tx_hash})();
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 }
 
 TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
@@ -530,6 +536,7 @@ TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
   EXPECT_EQ(scheduled.front(), a);
   ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
   EXPECT_EQ(scheduled_signed_hashes.front(), sha256(a));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // Replacing a body the nomination holds swaps only the cache entry: the
   // nomination keeps its copy, and the body stays off the runqueue.
@@ -538,10 +545,12 @@ TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
   EXPECT_EQ(scheduler->size(), 0);
   EXPECT_EQ(scheduled.front(), a);
   EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
   scheduler->abandon_pending_nomination(/*block_id=*/2)();
   EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
   scheduled_hashes.clear();
   scheduled_signed_hashes.clear();
   scheduled.clear();
@@ -552,11 +561,13 @@ TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
   EXPECT_EQ(scheduled.front(), b);
   ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
   EXPECT_EQ(scheduled_signed_hashes.front(), sha256(b));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
   scheduler->remove_from_scheduler(
       x23::span<const TransactionHash>(scheduled_hashes))();
   scheduler->commit_pending_nomination(/*block_id=*/3)();
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 }
 
 TEST(Scheduler, LatestFailedTransactionOutcomeWins)
@@ -1044,6 +1055,8 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 1UL);
+  // txs[1] was discarded from the cache along with the runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduled_hashes.clear();
   scheduled_signed_hashes.clear();
@@ -1054,14 +1067,18 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->commit_pending_nomination(/*block_id=*/1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
                       scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  // This test never removes txs[0], so both scheduled txs stay cached.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/2));
 }
 
 TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
@@ -1099,6 +1116,7 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
@@ -1112,14 +1130,18 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
+  // This test does not reenqueue txs[0], so it stays cached off the runqueue.
   scheduler->abandon_pending_nomination(/*block_id=*/1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
                       scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/2));
 }
 
 TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
@@ -1162,12 +1184,14 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   // An ordinary follow-up submission lands on the excluded account's runqueue,
   // but [add_txs] refuses to re-insert the account into [ready_accounts_].
   scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduled_hashes.clear();
   scheduled_signed_hashes.clear();
@@ -1187,6 +1211,7 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   // We only reach this point if the fix is working.
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 }
 
 // A validated-block commit empties an excluded account's runqueue while the
@@ -1230,6 +1255,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   x23::Vec<TransactionHash> committed;
   committed.push_back(sha256(txs[0].tx));
@@ -1241,6 +1267,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 
   scheduler->add_txs({txs[3]}, hash_txs({txs[3]}))();
   scheduled_hashes.clear();
@@ -1251,6 +1278,7 @@ TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[3]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 }
 
 // Same commit sequence as above, but the unaffordable tx is the account's
@@ -1292,6 +1320,9 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
   ASSERT_NE(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+  // The unaffordable head tx was discarded from the cache along with the
+  // runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 
   x23::Vec<TransactionHash> committed;
   committed.push_back(sha256(txs[1].tx));
@@ -1301,6 +1332,7 @@ TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
 
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 
   scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   scheduled_hashes.clear();

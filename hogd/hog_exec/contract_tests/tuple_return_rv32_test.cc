@@ -47,8 +47,7 @@ class TupleReturnRv32Test : public ::testing::Test,
 public:
   TupleReturnRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   template<StringLiteral MethodName, typename Expect, typename... Args>

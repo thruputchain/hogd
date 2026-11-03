@@ -91,7 +91,7 @@ public:
   FaucetScenarioTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/false)
+          /*empty_genesis=*/false)
   {}
 
 protected:

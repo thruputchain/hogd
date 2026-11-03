@@ -31,6 +31,7 @@
 #include "hogd/base/cli.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/bootstrap_manifest.h"
 #include "hogd/devnode/hog_devnode_node.h"
@@ -39,6 +40,7 @@
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
 #include "types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
@@ -140,6 +142,18 @@ hog_devnode_init(std::string listen_host,
   ShutdownSignals shutdown_signals = block_shutdown_signal();
 
   init_hog_exec_metrics();
+
+  // So is a --listen-host that is not an address of this machine. Check it
+  // before any temp dir exists: the node's port-0 listeners exit rather than
+  // unwind when they cannot listen, which would leave those dirs behind.
+  std::expected<sockaddr_storage, x23::GaiError> listen_addr =
+      make_bind_host_port(listen_host, /*port=*/0).to_addr();
+  CHECK(listen_addr.has_value()); // make_bind_host_port checked it
+  if (auto probe = x23::try_tcplisten(*listen_addr); !probe) {
+    error("hog-devnode failed before readiness: cannot listen on {}: {}",
+          listen_host, probe.error());
+    return EXIT_FAILURE;
+  }
 
   // An unusable $TMPDIR or data dir is an operator environment problem, so it
   // is reported here rather than raised out of the node's construction.
@@ -315,7 +329,7 @@ Options:
                                  [default: stdout]
   --contract-artifacts-dir <dir> Search this directory before default contract
                                  artifact locations. May be repeated.
-  --bootstrap-manifest <path>    Required schema-4 public bootstrap intent.
+  --bootstrap-manifest <path>    Required schema-5 public bootstrap intent.
                                  Include the faucet and explicit allocations.
   --network-config <name=value>  Override a genesis execution parameter.
                                  Repeat for multiple parameters. Values are

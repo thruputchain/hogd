@@ -223,7 +223,7 @@ protected:
       std::optional<StorageCostModelXdr> const &cost_model)
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/true, cost_model)
+          /*empty_genesis=*/true, cost_model)
   {}
 
   // Actors, identical across the two legs so the only legitimate difference

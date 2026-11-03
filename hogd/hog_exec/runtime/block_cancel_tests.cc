@@ -39,8 +39,7 @@ class BlockCancelTest : public ::testing::Test,
 public:
   BlockCancelTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   constexpr static ContractAddress kContractAddress = make_contract_address(0);

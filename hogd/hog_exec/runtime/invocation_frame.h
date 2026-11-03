@@ -512,6 +512,8 @@ public:
   consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  // Whether the active frame's parent has ids left for count returned tokens.
+  bool check_parent_can_take_auth_tokens(size_t count) const;
 
   size_t size() const { return frame_stack_.size(); }
 

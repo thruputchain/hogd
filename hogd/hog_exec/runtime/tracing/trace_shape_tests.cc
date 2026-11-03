@@ -248,8 +248,7 @@ class TraceShapeTest : public ::testing::Test,
 public:
   TraceShapeTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

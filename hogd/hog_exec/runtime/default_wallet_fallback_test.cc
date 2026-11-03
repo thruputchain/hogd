@@ -72,8 +72,7 @@ class DefaultWalletFallbackTest : public ::testing::Test,
 public:
   DefaultWalletFallbackTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -601,12 +600,12 @@ TEST_F(DefaultWalletFallbackTest, RootFallbackEmptyCallListReverts)
   EXPECT_TRUE(std::equal(expected.begin(), expected.end(), rec.begin() + 2));
 }
 
-// Separate fixture for the absent-record test: uses kMockInMemory so that
-// the wallet contract record can be erased from the in-memory store after
-// genesis writes it. Genesis must run (cost model required). With the wallet
-// record erased, the root fallback sets local_hash unconditionally and
-// NativeContext::make_new_runtime fails Unrecoverable — the expected
-// hard-failure behavior for broken chain state.
+// Separate fixture for the absent-record test: genesis names a default
+// wallet whose contract record was never written (the native wallet hash with
+// one byte flipped). Genesis must still run (cost model required). With no
+// record behind the configured hash, the root fallback sets local_hash
+// unconditionally and NativeContext::make_new_runtime fails Unrecoverable —
+// the expected hard-failure behavior for broken chain state.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class DefaultWalletFallbackNoRecordTest : public ::testing::Test,
                                           public NativeContractTestFramework {
@@ -614,15 +613,19 @@ public:
   DefaultWalletFallbackNoRecordTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kMockInMemory)
+          /*empty_genesis=*/false)
   {
-    // Genesis wrote the wallet contract record. Erase it now, before any
-    // transaction runs (so the StorageSnapshotCache has not yet cached the
-    // entry). Subsequent resolve_contract calls will see it as absent and
-    // NativeContext::make_new_runtime will return Unrecoverable.
-    erase_contract_from_mock_db(
-        make_deployed_contract_hash(make_native_contract(kNativeWalletId))
-            .hash);
+    auto missing_wallet =
+        make_deployed_contract_hash(make_native_contract(kNativeWalletId));
+    missing_wallet.hash[0] ^= 0xFF;
+
+    GenesisConfigurationBuilder builder;
+    builder.set_default_wallet(missing_wallet);
+    run_genesis_initialization(
+        builder.build(NetworkHash{}, *get_default_cost_model(),
+                      *load_stock_genesis_root_contract(),
+                      stock_network_config()),
+        BlockExecutionMode::kBlockExecutionModeProposal);
   }
 
 protected:
@@ -708,7 +711,7 @@ protected:
   }
 };
 
-// Record absent (erased from mock DB after genesis): the root fallback sets
+// Record absent (configured hash never written): the root fallback sets
 // local_hash unconditionally, then NativeContext::make_new_runtime calls
 // resolve_contract(wallet_hash) which returns nullptr (no snapshot entry,
 // no tx-attached record) → SystemError{Unrecoverable} propagates through
@@ -838,7 +841,7 @@ public:
   CustomDefaultWalletTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/false)
+          /*empty_genesis=*/false)
   {}
 };
 

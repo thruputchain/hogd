@@ -26,12 +26,12 @@ namespace hogd {
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class DirectStorageOrderingTest : public ::testing::TestWithParam<TestDB>,
+class DirectStorageOrderingTest : public ::testing::Test,
                                   public NativeContractTestFramework {
 public:
   DirectStorageOrderingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override { cost_model_ = get_default_cost_model(); }
@@ -51,13 +51,8 @@ public:
   }
 };
 
-TEST_P(DirectStorageOrderingTest, TransferOrdering)
+TEST_F(DirectStorageOrderingTest, TransferOrdering)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP()
-        << "MockDB is broken when having manual transfers + storage costs";
-  }
-
   auto contract_addr0 = make_contract_address(0);
   auto contract_addr1 = make_contract_address(1);
 
@@ -111,13 +106,8 @@ TEST_P(DirectStorageOrderingTest, TransferOrdering)
   ASSERT_EQ(from_xdr(contract_bal1.value().nnint()), 0);
 }
 
-TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
+TEST_F(DirectStorageOrderingTest, TransferWithTryInvoke)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB is broken when having multiple overwriting balance "
-                    "transfers + storage costs";
-  }
-
   auto contract_addr0 = make_contract_address(0);
   auto contract_addr1 = make_contract_address(1);
 
@@ -172,13 +162,8 @@ TEST_P(DirectStorageOrderingTest, TransferWithTryInvoke)
   ASSERT_EQ(from_xdr(contract_bal1.value().nnint()), 0);
 }
 
-TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
+TEST_F(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP()
-        << "MockDB is broken when having manual transfers + storage costs";
-  }
-
   auto contract_addr0 = make_contract_address(0);
   auto contract_addr1 = make_contract_address(1);
 
@@ -235,12 +220,8 @@ TEST_P(DirectStorageOrderingTest, TransferOrderingWithNewBalanceKey)
   ASSERT_EQ(from_xdr(contract_bal1.value().nnint()), 0);
 }
 
-TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
+TEST_F(DirectStorageOrderingTest, DiagnosticOnConflict)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB does not produce conflict diagnostics";
-  }
-
   auto contract_addr0 = make_contract_address(0);
   setup_grant_storage_token(contract_addr0, 2 * cost_model_->get_nnint_cost());
 
@@ -285,11 +266,6 @@ TEST_P(DirectStorageOrderingTest, DiagnosticOnConflict)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(AllDBs, DirectStorageOrderingTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
-
 // Regression for #1975: an oversized StorageDeltaBatch used to throw
 // x23::XdrBadInput out of
 // PerTransactionDatabaseProxy::try_push_current_subtransaction(), which both
@@ -302,7 +278,7 @@ TEST(DirectStorageOversizedDeltaBatchTest, OversizedBatchYieldsUnrecoverable)
   // Shrink the exec-side client's record cap so the push exceeds it.
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*empty_genesis=*/false,
       /*genesis_cost_model=*/std::nullopt,
       /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(
@@ -333,7 +309,7 @@ TEST(DirectStorageOversizedFinalCommitBatchTest,
 {
   NativeContractTestFramework fw(
       /*log=*/false, BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb, /*empty_genesis=*/false,
+      /*empty_genesis=*/false,
       /*genesis_cost_model=*/std::nullopt,
       /*genesis_network_config=*/std::nullopt, /*db_max_message_size=*/1024);
   fw.run_genesis_initialization(

@@ -69,25 +69,26 @@ public:
     }
   }
 
+  // Registering is what lets the mempool start serving the coordinator, so an
+  // auth server calls this only once it has subscribed to the db. Only one
+  // auth server is supported, so a second registration fails.
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
-    info("got {}, expected {}", protocol_text(card.protocol),
-         protocol_text(version::kHogdProtocol()));
-    if (card.protocol != version::kHogdProtocol()) {
+    IntroAuthResult result = auth_info(card.protocol);
+    if (result.outcome() == IntroAuthOutcome::kSuccess &&
+        !Registration::registration().register_auth(card)) {
+      warn("Rejecting auth registration: an auth server is already "
+           "registered");
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
-
-    Registration::registration().register_auth(card);
-    x23::XdrVec<ShardCard> shard_cards;
-    Registration::registration().shards_registered(&shard_cards);
-    NetworkHash network_hash{};
-    Registration::registration().get_network_hash(&network_hash);
-    IntroAuthResult result(IntroAuthOutcome::kSuccess);
-    result.success() = MempoolAuthIntroSuccess{
-        .shards = shard_cards,
-        .network_hash = network_hash,
-    };
     co_return result;
+  }
+
+  // What an auth server needs to subscribe to the db before it registers.
+  static x23::Async<IntroAuthResult>
+  mempoolauth_get_auth_info(ProtocolCommit protocol)
+  {
+    co_return auth_info(protocol);
   }
 
   // Collects the run of chunks the auth server sends for a height and runs
@@ -153,6 +154,28 @@ public:
   }
 
 private:
+  // The registered db shards and the network hash, or a failure if
+  // [protocol] is not ours.
+  static IntroAuthResult auth_info(const ProtocolCommit &protocol)
+  {
+    info("got {}, expected {}", protocol_text(protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (protocol != version::kHogdProtocol()) {
+      return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+
+    x23::XdrVec<ShardCard> shard_cards;
+    Registration::registration().shards_registered(&shard_cards);
+    NetworkHash network_hash{};
+    Registration::registration().get_network_hash(&network_hash);
+    IntroAuthResult result(IntroAuthOutcome::kSuccess);
+    result.success() = MempoolAuthIntroSuccess{
+        .shards = shard_cards,
+        .network_hash = network_hash,
+    };
+    return result;
+  }
+
   using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
 
   KeyChangeRunAssembler run_assembler_;

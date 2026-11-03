@@ -37,12 +37,11 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class RCQTest : public ::testing::TestWithParam<TestDB>,
-                public NativeContractTestFramework {
+class RCQTest : public ::testing::Test, public NativeContractTestFramework {
 protected:
   RCQTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   std::vector<uint8_t> last_consumed_values_;
@@ -525,7 +524,7 @@ protected:
   }
 };
 
-TEST_P(RCQTest, InsertThenConsume)
+TEST_F(RCQTest, InsertThenConsume)
 {
   auto const initial_balance = 1'000'000'000;
   setup_grant_storage_token(contract_address_, initial_balance);
@@ -533,9 +532,7 @@ TEST_P(RCQTest, InsertThenConsume)
   // Each committed transaction consumes a uniquifier into the replay cache,
   // whose (non-refundable) cost is charged to contract_address_ as the root
   // invoked address and accumulates with the number of commits. The
-  // replay_cache_cost_charged(k) terms below subtract that running cost; they
-  // are 0 on MockInMemory and the real cost on HogDb, so the underlying
-  // expected balances are unchanged on MockInMemory.
+  // replay_cache_cost_charged(k) terms below subtract that running cost.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   ASSERT_TRUE(consume({1, 2}));
@@ -558,7 +555,7 @@ TEST_P(RCQTest, InsertThenConsume)
   ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
-TEST_P(RCQTest, InsertThenAbortOnConsume)
+TEST_F(RCQTest, InsertThenAbortOnConsume)
 {
   // Abort Case - Insert items, then attempt a consume that fails.
   // Verify that lock state is reverted as if the consume operation never
@@ -571,9 +568,7 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   // the aborted consume below is not included and consumes nothing. The
   // (non-refundable) replay-cache cost is charged to contract_address_ as the
   // root invoked address and accumulates with the number of commits. The
-  // replay_cache_cost_charged(k) terms are 0 on MockInMemory and the real cost
-  // on HogDb, so the underlying expected balances are unchanged on
-  // MockInMemory.
+  // replay_cache_cost_charged(k) terms subtract that running cost.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   // Consume 1 item, but then intentionally abort.
@@ -601,7 +596,7 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
-TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
+TEST_F(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 {
   // This test targets a race where an inserter TX could overwrite the
   // consumed_past_entries_ of a consumer TX.
@@ -667,7 +662,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 // 2) in a later block, run one tx that consumes both entries
 // 3) concurrently run one tx that inserts a new entry
 // 4) commit consume first, then insert
-TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
+TEST_F(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -709,7 +704,7 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
             ExecResult::ExecResultOK);
 }
 
-TEST_P(RCQTest, ConsumeFromPastBlock)
+TEST_F(RCQTest, ConsumeFromPastBlock)
 {
   // Creates a native contract with the following methods:
   // 0: Loads the calldata and interprets it as a sequence of uint8_t values.
@@ -760,7 +755,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
   ASSERT_TRUE(consume({1, 2, 3, 0, 100}));
 }
 
-TEST_P(RCQTest, ConsumeNoConcurrentInserts)
+TEST_F(RCQTest, ConsumeNoConcurrentInserts)
 {
   // See prior test. The only difference is that this test never tries to
   // consume entries that were inserted in the current block.
@@ -775,7 +770,7 @@ TEST_P(RCQTest, ConsumeNoConcurrentInserts)
   ASSERT_TRUE(consume({3, 4, 5, 0, 100}));
 }
 
-TEST_P(RCQTest, InvariantStrictSingleConsumerPerBlock)
+TEST_F(RCQTest, InvariantStrictSingleConsumerPerBlock)
 {
   // Invariant 1: Strict Single-Consumer Per Block
   // The RCQ enforces a "Multiple Producer, Single Consumer" (MPSC) pattern
@@ -792,7 +787,7 @@ TEST_P(RCQTest, InvariantStrictSingleConsumerPerBlock)
   ASSERT_FALSE(consume({2}));
 }
 
-TEST_P(RCQTest, InvariantInterBlockSortedOrdering)
+TEST_F(RCQTest, InvariantInterBlockSortedOrdering)
 {
   // Invariant 3: Inter-Block Sorted Ordering
   // Items that are committed (persist to storage) are reordered.
@@ -807,7 +802,7 @@ TEST_P(RCQTest, InvariantInterBlockSortedOrdering)
   ASSERT_TRUE(consume({1, 4, 5}));
 }
 
-TEST_P(RCQTest, InvariantConsumptionPersistence)
+TEST_F(RCQTest, InvariantConsumptionPersistence)
 {
   // Invariant 4: Consumption Persistence (No Zombies)
   // Items successfully consumed in the current block must be permanently
@@ -822,7 +817,7 @@ TEST_P(RCQTest, InvariantConsumptionPersistence)
   ASSERT_TRUE(consume({2, 3}));
 }
 
-TEST_P(RCQTest, InvariantBlockPruningAndCost)
+TEST_F(RCQTest, InvariantBlockPruningAndCost)
 {
   // Invariant 5: Block Pruning & Cost Accuracy
   // When all items in a committed block are fully consumed, the underlying
@@ -838,7 +833,7 @@ TEST_P(RCQTest, InvariantBlockPruningAndCost)
   ASSERT_TRUE(consume({10, 11, 12}));
 }
 
-TEST_P(RCQTest, MixedConcurrentTest)
+TEST_F(RCQTest, MixedConcurrentTest)
 {
   // Checks to ensure self dequeues are prioritized over concurrent dequeues and
   // that persistence works correctly.
@@ -849,7 +844,7 @@ TEST_P(RCQTest, MixedConcurrentTest)
   ASSERT_TRUE(consume({}));
 }
 
-TEST_P(RCQTest, ConcurrentPartialConsume)
+TEST_F(RCQTest, ConcurrentPartialConsume)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   ASSERT_TRUE(insert({10}));
@@ -859,7 +854,7 @@ TEST_P(RCQTest, ConcurrentPartialConsume)
   ASSERT_TRUE(consume({10}));
 }
 
-TEST_P(RCQTest, ConsumeReturnsStorageCost)
+TEST_F(RCQTest, ConsumeReturnsStorageCost)
 {
   const int128_t native_tokens = 1'000'000'000;
   // Two transactions commit against contract_address_ (insert, consume); each
@@ -876,25 +871,15 @@ TEST_P(RCQTest, ConsumeReturnsStorageCost)
   ASSERT_TRUE(check_balance(native_tokens));
 }
 
-TEST_P(RCQTest, OverflowBlockImmediately)
+TEST_F(RCQTest, OverflowBlockImmediately)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen + 1, 1);
   ASSERT_FALSE(insert(values));
 }
 
-TEST_P(RCQTest, OverflowBlockSequentially)
+TEST_F(RCQTest, OverflowBlockSequentially)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   // Insert up to the limit is fine.
   std::vector<uint8_t> values_chunk1(kRetrocausalQueueBlockEntriesMaxLen - 10,
@@ -907,13 +892,8 @@ TEST_P(RCQTest, OverflowBlockSequentially)
   ASSERT_FALSE(insert(values_chunk2));
 }
 
-TEST_P(RCQTest, ConcurrentOverflow)
+TEST_F(RCQTest, ConcurrentOverflow)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   // Both T1 and T2 each insert just over half the per-block cap, so either
@@ -966,7 +946,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
 // consumption.  Inserts entries across 2 blocks, partially consumes from
 // past block, and checks that the balance reflects the correct live_entries
 // count after each step.
-TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
+TEST_F(RCQTest, CostAccountingMultiBlockPartialConsume)
 {
   auto const native_tokens = 1'000'000'000;
   setup_grant_storage_token(contract_address_, native_tokens);
@@ -976,8 +956,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   // whose (non-refundable) cost is charged to contract_address_ as the root
   // invoked address and accumulates with the number of commits. The
   // replay_cache_cost_charged(k) terms below subtract that running cost after
-  // k commits; they are 0 on MockInMemory and the real cost on HogDb, so the
-  // underlying expected balances are unchanged on MockInMemory.
+  // k commits.
 
   // Block 1: insert 3 entries (1 commit).
   ASSERT_TRUE(insert({1, 2, 3}));
@@ -1020,7 +999,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
 // Tests the kQueueEntryMaxLen (256 byte) boundary.  A single entry of exactly
 // 256 bytes should succeed; 257 bytes should fail at the syscall layer
 // with kSyscallErrorCodeInvalidSyscallInput.
-TEST_P(RCQTest, MaxEntrySizeBoundary)
+TEST_F(RCQTest, MaxEntrySizeBoundary)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1046,11 +1025,8 @@ TEST_P(RCQTest, MaxEntrySizeBoundary)
 //
 // Inserts exactly kRetrocausalQueueBlockEntriesMaxLen entries
 // in a single TX.  Should succeed without overflow.
-TEST_P(RCQTest, ExactBlockEntriesLimit)
+TEST_F(RCQTest, ExactBlockEntriesLimit)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for block-level verification";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen, 1);
@@ -1070,11 +1046,8 @@ TEST_P(RCQTest, ExactBlockEntriesLimit)
 // Two TXs each insert 500 entries (total = 1000 =
 // kRetrocausalQueueBlockEntriesMaxLen). Both should commit successfully since
 // they fill exactly to the limit.
-TEST_P(RCQTest, ConcurrentFillToExactLimit)
+TEST_F(RCQTest, ConcurrentFillToExactLimit)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for block-level verification";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen / 2, 1);
@@ -1131,12 +1104,8 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
 // the cost accounting for the second transaction in the same block doesn't
 // correctly account for the type change done by TX1.
 //
-TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
+TEST_F(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for cost tracking";
-  }
-
   auto context = make_context();
   // The fuzz crash starts with 1B tokens granted once at init. After
   // many blocks of operations, the balance is partially consumed. Grant
@@ -1207,7 +1176,7 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
   advance_block();
 }
 
-TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
+TEST_F(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1219,7 +1188,7 @@ TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
   ASSERT_TRUE(invoke_contract(5, {0xAA}));
 }
 
-TEST_P(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
+TEST_F(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1235,7 +1204,7 @@ TEST_P(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
   ASSERT_TRUE(invoke_contract(6, {}));
 }
 
-TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
+TEST_F(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1261,7 +1230,7 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
 // Neither answer depends on whether the value is tx-local or committed.
 
 // (1) A committed bytestring is replaced by an insert, not rejected.
-TEST_P(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
+TEST_F(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1284,7 +1253,7 @@ TEST_P(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
 }
 
 // (1) The same conversion applies to a committed NNInt.
-TEST_P(RCQTest, InsertOnCommittedNNIntConvertsKeyToQueue)
+TEST_F(RCQTest, InsertOnCommittedNNIntConvertsKeyToQueue)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1309,7 +1278,7 @@ TEST_P(RCQTest, InsertOnCommittedNNIntConvertsKeyToQueue)
 
 // (1) and the same insert against a bytestring this transaction wrote a
 // syscall earlier: same outcome, which is the point.
-TEST_P(RCQTest, InsertOnBytestringWrittenInSameTransactionConvertsKeyToQueue)
+TEST_F(RCQTest, InsertOnBytestringWrittenInSameTransactionConvertsKeyToQueue)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1328,7 +1297,7 @@ TEST_P(RCQTest, InsertOnBytestringWrittenInSameTransactionConvertsKeyToQueue)
 
 // (2) Consume, peek and PeekLen against a committed bytestring are wrong-type
 // input, and leave it alone.
-TEST_P(RCQTest, ReadsOnCommittedBytestringAreWrongTypeInput)
+TEST_F(RCQTest, ReadsOnCommittedBytestringAreWrongTypeInput)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1350,7 +1319,7 @@ TEST_P(RCQTest, ReadsOnCommittedBytestringAreWrongTypeInput)
 
 // (2) The same three reads against a bytestring this transaction wrote report
 // the same errors, and the bytestring is what commits.
-TEST_P(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
+TEST_F(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1367,7 +1336,7 @@ TEST_P(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
 
 // (2) Two writers in one block from an absent base: tx2 inserts, then reads
 // its own entry followed by tx1's concurrent one.
-TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
+TEST_F(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1378,7 +1347,7 @@ TEST_P(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
 
 // (1)+(2) Over a committed bytestring, tx2's own insert lets it see tx1's
 // entry; tx3 writes nothing and is rejected until the next block.
-TEST_P(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
+TEST_F(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1394,21 +1363,14 @@ TEST_P(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
   advance_block();
 
   // tx2 consumed both entries, so the converted key holds an empty queue,
-  // which on HogDb means it is gone (see KNOWN_ISSUES.md for MockDB).
-  if (GetParam() == TestDB::kHogDb) {
-    EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
-  }
+  // which means it is gone.
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
 }
 
 // Emptying a queue removes the key. This is the plain case, with no type
 // change involved, and the second half of rule (1).
-TEST_P(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
+TEST_F(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB keeps a zero-entry queue item instead of removing the key; see
-    // hogd/mockdb/KNOWN_ISSUES.md.
-    GTEST_SKIP() << "Requires HogDb for empty-queue removal";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
@@ -1427,13 +1389,8 @@ TEST_P(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
 }
 
 // The #1673 scenario: insert converts, consume empties, key ends up absent.
-TEST_P(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
+TEST_F(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // As above: MockDB does not remove the key when the queue ends the block
-    // empty, so only HogDb shows the end state this test is about.
-    GTEST_SKIP() << "Requires HogDb for empty-queue removal";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
@@ -1454,11 +1411,6 @@ TEST_P(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

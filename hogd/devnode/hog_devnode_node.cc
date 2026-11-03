@@ -543,8 +543,15 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     sched_exec_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
-    mempool_coord_server_.start_server(
-        make_bind_host_port(bind_host_, requested_scheduler_port));
+    // The scheduler port is the one the user picks, so it is the one that can
+    // be taken. Throw instead of letting bind_server exit, so a busy port
+    // unwinds through hog-devnode's "failed before readiness" cleanup.
+    const auto scheduler_addr =
+        make_bind_host_port(bind_host_, requested_scheduler_port);
+    auto scheduler = mempool_coord_server_.try_bind_server(scheduler_addr);
+    if (!scheduler)
+      scheduler.error().raise("listen on {}", scheduler_addr);
+    mempool_coord_server_.start_accepting(std::move(scheduler->second));
     mempool_gateway_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_auth_server_->start_server(
@@ -639,12 +646,8 @@ HogDevnodeNode::HogDevnodeNode(
 
     // Now have all of the subsystems register themselves with the mempool.
     register_db_with_mempool();
-    AuthCard auth_card = register_auth_with_mempool();
+    register_auth_with_mempool();
     register_coordinator_with_mempool()();
-    // finish_init() installs the mempool's auth-data callback. Subscribe only
-    // after that callback exists, because a recovered DB immediately reports
-    // its current height through auth_data_changed().
-    auth_server_->subscribe_to_auth_data_changes(std::move(auth_card))();
     if (recovered_existing_chain_) {
       register_event_with_mempool();
       start_indexer_pull();
@@ -1207,7 +1210,7 @@ HogDevnodeNode::register_event_with_mempool()
   }
 }
 
-AuthCard
+void
 HogDevnodeNode::register_auth_with_mempool()
 {
   auto client_res =
@@ -1224,9 +1227,8 @@ HogDevnodeNode::register_auth_with_mempool()
       .address_for_mempool =
           format_advertised_address(bind_host_, auth_mempool_server_.port())
               .c_str()};
-  client.mempoolauth_intro_auth(auth_card)();
   auth_server_->set_mempool_client(std::move(client));
-  return auth_card;
+  auth_server_->subscribe_and_register(std::move(auth_card))();
 }
 
 void

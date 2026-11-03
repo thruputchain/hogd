@@ -14,12 +14,12 @@
 
 namespace hogd {
 
-class DirectNNIntTest : public ::testing::TestWithParam<TestDB>,
+class DirectNNIntTest : public ::testing::Test,
                         public NativeContractTestFramework {
 public:
   DirectNNIntTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
@@ -33,7 +33,7 @@ public:
   }
 };
 
-TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
+TEST_F(DirectNNIntTest, MultiPopLeavesBaseDelta)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -85,7 +85,7 @@ TEST_P(DirectNNIntTest, MultiPopLeavesBaseDelta)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest,
+TEST_F(DirectNNIntTest,
        ComplementaryReservationsAbortPositiveThenCommitNegative)
 {
   auto contract_addr = make_contract_address(0);
@@ -132,7 +132,7 @@ TEST_P(DirectNNIntTest,
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
+TEST_F(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -174,7 +174,7 @@ TEST_P(DirectNNIntTest, ConcurrentPositiveAddsThenAbortOne)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, SetAddDifferentBaseConflict)
+TEST_F(DirectNNIntTest, SetAddDifferentBaseConflict)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -203,13 +203,13 @@ TEST_P(DirectNNIntTest, SetAddDifferentBaseConflict)
     ASSERT_FALSE(r.value());
   }
 
-  // Clean up: abort both transactions so mockdb closes cleanly
+  // Clean up: abort both transactions so the db closes cleanly
   ASSERT_TRUE(tx2.abort_transaction()().has_value());
   ASSERT_TRUE(tx1.abort_transaction()().has_value());
   advance_block();
 }
 
-TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
+TEST_F(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -251,7 +251,7 @@ TEST_P(DirectNNIntTest, ConcurrentLargeAddsAbortOne)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
+TEST_F(DirectNNIntTest, NestedSavepointsMixedAdds)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -306,14 +306,12 @@ TEST_P(DirectNNIntTest, NestedSavepointsMixedAdds)
   ASSERT_EQ(from_xdr(res->nnint()), 500);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
-  if (GetParam() == TestDB::kHogDb) {
-    // simple check to make sure blockheight of > 1 is working
-    auto native_tokens_transferred = get_native_tokens_transferred(2);
-    ASSERT_EQ(native_tokens_transferred.size(), 0);
-  }
+  // simple check to make sure blockheight of > 1 is working
+  auto native_tokens_transferred = get_native_tokens_transferred(2);
+  ASSERT_EQ(native_tokens_transferred.size(), 0);
 }
 
-TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
+TEST_F(DirectNNIntTest, MultiKeyRefundOrdering)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -369,7 +367,7 @@ TEST_P(DirectNNIntTest, MultiKeyRefundOrdering)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
+TEST_F(DirectNNIntTest, TwoConcurrentAddsBothCommit)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -408,48 +406,7 @@ TEST_P(DirectNNIntTest, TwoConcurrentAddsBothCommit)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, AddAndSubOk)
-{
-  // This tests the case of receiving and immediately using a balance within the
-  // same block.
-  if (GetParam() == TestDB::kHogDb) {
-    GTEST_SKIP() << "HogDb doesn't support retrocausal nnints";
-    return;
-  }
-
-  auto contract_addr = make_contract_address(0);
-  constexpr static int128_t kInitialBalance = 1'000'000'000;
-  setup_grant_storage_token(contract_addr, kInitialBalance);
-
-  auto key = make_addrkey(contract_addr, "nn_key8");
-
-  {
-    auto tx1 = make_new_per_tx_db_proxy();
-
-    tx1.add_delta(key, make_nnint_set_add_delta(0, 100),
-                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx1.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(r.value());
-
-    auto r2 = tx1.try_push_current_subtransaction()();
-    ASSERT_TRUE(r2.has_value());
-    ASSERT_TRUE(r2.value());
-    ASSERT_TRUE(tx1.commit_transaction()().has_value());
-  }
-
-  {
-    auto tx2 = make_new_per_tx_db_proxy();
-    tx2.add_delta(key, make_nnint_set_add_delta(0, -100),
-                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx2.try_push_current_subtransaction()();
-    ASSERT_TRUE(r.has_value());
-    ASSERT_TRUE(r.value());
-    ASSERT_TRUE(tx2.commit_transaction()().has_value());
-  }
-}
-
-TEST_P(DirectNNIntTest, NNIntProperLocksHeld)
+TEST_F(DirectNNIntTest, NNIntProperLocksHeld)
 {
   auto contract_addr = make_contract_address(0);
 
@@ -496,7 +453,7 @@ TEST_P(DirectNNIntTest, NNIntProperLocksHeld)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
+TEST_F(DirectNNIntTest, TryInvokeMultipleReferences)
 {
   auto contract_addr = make_contract_address(0);
 
@@ -526,7 +483,7 @@ TEST_P(DirectNNIntTest, TryInvokeMultipleReferences)
   ASSERT_TRUE(tx2.commit_transaction()().has_value());
 }
 
-TEST_P(DirectNNIntTest, NNIntCreateCost)
+TEST_F(DirectNNIntTest, NNIntCreateCost)
 {
   auto contract_addr_main = make_contract_address(0);
   auto contract_addr_ref = make_contract_address(1);
@@ -576,7 +533,7 @@ TEST_P(DirectNNIntTest, NNIntCreateCost)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
+TEST_F(DirectNNIntTest, StorageCostOnSavepointRollback)
 {
   // This test makes sure that rolling back to a savepoint does not fail
   // because of storage cost accounting.
@@ -657,7 +614,7 @@ TEST_P(DirectNNIntTest, StorageCostOnSavepointRollback)
 
 // Working-as-intended per #2155: the NNInt invariant is value >= min(set_value,
 // 0), not value >= 0. Probes the INT128_MIN boundary re-reported in #4104.
-TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
+TEST_F(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -699,7 +656,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeNNIntViaMinSetValue)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
+TEST_F(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -718,10 +675,8 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
     advance_block();
   }
 
-  // TX1: add -50 with exclusive lock
-  // On MockInMemory, this crashes with SYSTEM_ERR ("Impossible state")
-  // because the exclusive lock path for NNIntAdd is broken in the RPC layer.
-  // On HogDb, this succeeds but leaks the bounds lock.
+  // TX1: add -50 with exclusive lock. This succeeds but leaks the bounds
+  // lock.
   auto tx1 = make_new_per_tx_db_proxy();
   tx1.add_delta(key, make_nnint_add_delta(-50),
                 std::to_underlying(StorageDeltaFlags::ExclusiveLock));
@@ -748,7 +703,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddWithExclusiveLock)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
+TEST_F(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -774,7 +729,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntSetNegOneAddZero)
   EXPECT_EQ(stored, -1);
 }
 
-TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
+TEST_F(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -796,7 +751,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntAddOnlyExclNewKey)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectNNIntTest, BugHuntNNIntNegSetTwoSubtxsSameKey)
+TEST_F(DirectNNIntTest, BugHuntNNIntNegSetTwoSubtxsSameKey)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -821,7 +776,7 @@ TEST_P(DirectNNIntTest, BugHuntNNIntNegSetTwoSubtxsSameKey)
   advance_block();
 }
 
-TEST_P(DirectNNIntTest, BugHuntPopMoreThanPushed)
+TEST_F(DirectNNIntTest, BugHuntPopMoreThanPushed)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -840,7 +795,7 @@ TEST_P(DirectNNIntTest, BugHuntPopMoreThanPushed)
   ASSERT_FALSE(pop_r.has_value());
 }
 
-TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
+TEST_F(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -853,7 +808,7 @@ TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
                std::to_underlying(StorageDeltaFlags::None));
   auto r1 = tx.try_push_current_subtransaction()();
   ASSERT_TRUE(r1.has_value());
-  // MockInMemory allows this (Bug #1). HogDb: sum = 5 >= 0, passes check.
+  // sum = 5 >= 0, passes check.
   if (!r1.value()) {
     // If it was correctly rejected, we're done
     ASSERT_TRUE(tx.abort_transaction()().has_value());
@@ -882,17 +837,10 @@ TEST_P(DirectNNIntTest, BugHuntNegativeSetValueNarrowCrash)
 
 // After a failed multi-delta subtransaction push (delta A succeeds, delta B
 // fails due to insufficient storage balance), check whether a concurrent TX
-// can reserve the same key as delta A.  In hog_db, the savepoint rollback
-// releases delta A's lock; in mockdb, pop_subtransactions does NOT revert
-// the StorageItemDeltaManager lock for the already-reserved delta.
-// Known MockDB issue: partial batch failure leaves locks unreleased.
-// See hogd/mockdb/KNOWN_ISSUES.md.
-TEST_P(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
+// can reserve the same key as delta A. The savepoint rollback releases
+// delta A's lock.
+TEST_F(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB known issue: partial batch failure leaks locks";
-  }
-
   auto contract_addr = make_contract_address(0);
   // Give just enough balance for ONE nnint item, not two.
   const auto *cost_model = get_default_cost_model();
@@ -946,8 +894,8 @@ TEST_P(DirectNNIntTest, BugHuntPartialBatchFailureLocksNotReverted)
   }
 }
 
-// Exclusive lock on balance key should be rejected by both backends.
-TEST_P(DirectNNIntTest, BugHuntBalanceNNIntAddExclusiveLockRejected)
+// Exclusive lock on balance key should be rejected by the db.
+TEST_F(DirectNNIntTest, BugHuntBalanceNNIntAddExclusiveLockRejected)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -963,10 +911,5 @@ TEST_P(DirectNNIntTest, BugHuntBalanceNNIntAddExclusiveLockRejected)
   ASSERT_TRUE(tx.abort_transaction()().has_value());
   advance_block();
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNNIntTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

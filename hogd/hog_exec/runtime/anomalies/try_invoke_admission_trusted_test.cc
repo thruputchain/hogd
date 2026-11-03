@@ -96,8 +96,7 @@ class TryInvokeAdmissionTrustedTest : public ::testing::Test,
 public:
   TryInvokeAdmissionTrustedTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

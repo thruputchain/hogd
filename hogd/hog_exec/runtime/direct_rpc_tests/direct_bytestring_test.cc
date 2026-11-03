@@ -23,12 +23,12 @@ using namespace std::string_literals;
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-class DirectBytestringTest : public ::testing::TestWithParam<TestDB>,
+class DirectBytestringTest : public ::testing::Test,
                              public NativeContractTestFramework {
 public:
   DirectBytestringTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override { cost_model_ = get_default_cost_model(); }
@@ -66,7 +66,7 @@ public:
   const StorageCostModel *cost_model_;
 };
 
-TEST_P(DirectBytestringTest, ConcurrentWrites)
+TEST_F(DirectBytestringTest, ConcurrentWrites)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -105,7 +105,7 @@ TEST_P(DirectBytestringTest, ConcurrentWrites)
   ASSERT_TRUE(r3.value());
 }
 
-TEST_P(DirectBytestringTest, BytestringStorageCosts)
+TEST_F(DirectBytestringTest, BytestringStorageCosts)
 {
   auto contract_addr1 = make_contract_address(0);
   auto contract_addr2 = make_contract_address(1);
@@ -159,7 +159,7 @@ TEST_P(DirectBytestringTest, BytestringStorageCosts)
                      cost_model_->get_bytestring_cost("value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, RevertStorageCosts)
+TEST_F(DirectBytestringTest, RevertStorageCosts)
 {
   // Create bytestring twice, but first one reverts.
   // The bytestring is still created, and so the cost should reflect
@@ -208,7 +208,7 @@ TEST_P(DirectBytestringTest, RevertStorageCosts)
                      cost_model_->get_bytestring_cost("value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, LengthIncreaseCost)
+TEST_F(DirectBytestringTest, LengthIncreaseCost)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -265,7 +265,7 @@ TEST_P(DirectBytestringTest, LengthIncreaseCost)
                                        "much_longer_value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, DecreaseLengthCost)
+TEST_F(DirectBytestringTest, DecreaseLengthCost)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -320,7 +320,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCost)
                      cost_model_->get_bytestring_cost("v"s.length()));
 }
 
-TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
+TEST_F(DirectBytestringTest, DecreaseLengthCostAllCommit)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -375,7 +375,7 @@ TEST_P(DirectBytestringTest, DecreaseLengthCostAllCommit)
                      cost_model_->get_bytestring_cost("v"s.length()));
 }
 
-TEST_P(DirectBytestringTest, DeletionCost)
+TEST_F(DirectBytestringTest, DeletionCost)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -418,7 +418,7 @@ TEST_P(DirectBytestringTest, DeletionCost)
   EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
 }
 
-TEST_P(DirectBytestringTest, TryInvokeWithDelete)
+TEST_F(DirectBytestringTest, TryInvokeWithDelete)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -474,7 +474,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithDelete)
   EXPECT_EQ(from_xdr(bal1.value().nnint()), kInitialBalance);
 }
 
-TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
+TEST_F(DirectBytestringTest, TryInvokeMultipleTimes)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -522,7 +522,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimes)
                                        "value_longer"s.length()));
 }
 
-TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
+TEST_F(DirectBytestringTest, TryInvokeMultipleTimesShorter)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -570,7 +570,7 @@ TEST_P(DirectBytestringTest, TryInvokeMultipleTimesShorter)
                                        "value_longer"s.length()));
 }
 
-TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
+TEST_F(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -630,7 +630,7 @@ TEST_P(DirectBytestringTest, TryInvokeReleaseExclusiveLock)
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
 
-TEST_P(DirectBytestringTest, TryInvokeWithRegular)
+TEST_F(DirectBytestringTest, TryInvokeWithRegular)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -680,7 +680,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular)
                                        "value_longer"s.length()));
 }
 
-TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
+TEST_F(DirectBytestringTest, TryInvokeWithRegular2)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -730,7 +730,7 @@ TEST_P(DirectBytestringTest, TryInvokeWithRegular2)
                      cost_model_->get_bytestring_cost("value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, TransferKeyCosts)
+TEST_F(DirectBytestringTest, TransferKeyCosts)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -787,93 +787,7 @@ TEST_P(DirectBytestringTest, TransferKeyCosts)
                      cost_model_->get_bytestring_cost("value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, DeletionCostNotImmediatelyAvailable)
-{
-  if (GetParam() == TestDB::kHogDb) {
-    GTEST_SKIP() << "Pending hog_db retrocausal nnint";
-    return;
-  }
-  auto contract_addr = make_contract_address(0);
-  auto reference_addr = make_contract_address(1);
-  constexpr static int128_t kInitialBalance = 1'000'000'000;
-  setup_grant_storage_token(reference_addr, kInitialBalance);
-
-  auto tx_ref_init = make_new_per_tx_db_proxy();
-  tx_ref_init.add_delta(make_addrkey(reference_addr, "test_new"),
-                        make_bytestring_delta("value"),
-                        std::to_underlying(StorageDeltaFlags::None));
-  auto r_init = tx_ref_init.try_push_current_subtransaction()();
-  ASSERT_TRUE(r_init.has_value());
-  ASSERT_TRUE(r_init.value());
-  ASSERT_TRUE(tx_ref_init.commit_transaction()().has_value());
-  advance_block();
-
-  auto ref_bal = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(reference_addr));
-  ASSERT_TRUE(ref_bal.has_value());
-  int128_t ref_bal_int = from_xdr(ref_bal.value().nnint());
-  EXPECT_LT(ref_bal_int, kInitialBalance);
-  int128_t required_balance = kInitialBalance - ref_bal_int;
-  setup_grant_storage_token(contract_addr, required_balance);
-
-  auto tx1 = make_new_per_tx_db_proxy();
-  tx1.add_delta(make_addrkey(contract_addr, "test"),
-                make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r1 = tx1.try_push_current_subtransaction()();
-  ASSERT_TRUE(r1.has_value());
-  ASSERT_TRUE(r1.value());
-
-  ASSERT_TRUE(tx1.commit_transaction()().has_value());
-  advance_block();
-  auto initial_bal = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr));
-  ASSERT_TRUE(initial_bal.has_value());
-  int128_t initial_bal_int = from_xdr(initial_bal.value().nnint());
-  EXPECT_EQ(initial_bal_int, 0);
-
-  // Now the test begins.
-
-  // tx2: just delete the key
-  auto tx2 = make_new_per_tx_db_proxy();
-  tx2.add_delta(make_addrkey(contract_addr, "test"), make_delete_delta(),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r2 = tx2.try_push_current_subtransaction()();
-  ASSERT_TRUE(r2.has_value());
-  ASSERT_TRUE(r2.value());
-
-  // tx3: create a new key
-  auto tx3 = make_new_per_tx_db_proxy();
-  tx3.add_delta(make_addrkey(contract_addr, "test_new"),
-                make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r3 = tx3.try_push_current_subtransaction()();
-  ASSERT_TRUE(r3.has_value());
-  ASSERT_FALSE(r3.value()); // storage not yet available
-
-  ASSERT_TRUE(tx2.commit_transaction()().has_value());
-
-  // now storage is available
-  // This is where hog_db doesn't allow a write, when a retrocausal nnint would
-  // allow it.
-  tx3.add_delta(make_addrkey(contract_addr, "test_new"),
-                make_bytestring_delta("value"),
-                std::to_underlying(StorageDeltaFlags::None));
-  auto r3_1 = tx3.try_push_current_subtransaction()();
-  ASSERT_TRUE(r3_1.has_value());
-  ASSERT_TRUE(r3_1.value());
-
-  ASSERT_TRUE(tx3.commit_transaction()().has_value());
-
-  advance_block();
-  auto bal = lookup_storage_item_from_db(
-      make_free_native_token_balance_addrkey(contract_addr));
-  ASSERT_TRUE(bal.has_value());
-  int128_t bal_int = from_xdr(bal.value().nnint());
-  EXPECT_EQ(bal_int, 0);
-}
-
-TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
+TEST_F(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
 {
   // This is basically the same test as DeletionCostNotImmediatelyAvailable,
   // but without the last check that the storage becomes available after the
@@ -960,7 +874,7 @@ TEST_P(DirectBytestringTest, DeletionCostsNotReleasedWhenRollbackPossible)
   EXPECT_EQ(bal_int, required_balance);
 }
 
-TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
+TEST_F(DirectBytestringTest, RollbackPartwayThroughSavepoint)
 {
 
   auto contract_addr = make_contract_address(0);
@@ -990,7 +904,7 @@ TEST_P(DirectBytestringTest, RollbackPartwayThroughSavepoint)
   ASSERT_TRUE(tx1.abort_transaction()().has_value());
 }
 
-TEST_P(DirectBytestringTest, DeleteThenSetConflict)
+TEST_F(DirectBytestringTest, DeleteThenSetConflict)
 {
   auto contract_addr = make_contract_address(0);
   auto reference_addr = make_contract_address(1);
@@ -1032,7 +946,7 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
                 std::to_underlying(StorageDeltaFlags::None));
   auto r1_set = tx1.try_push_current_subtransaction()();
   ASSERT_TRUE(r1_set.has_value());
-  ASSERT_FALSE(r1_set.value()); // cannot upgrade under shared lock in mockdb
+  ASSERT_FALSE(r1_set.value()); // cannot upgrade under shared lock
 
   ASSERT_TRUE(tx1.commit_transaction()().has_value()); // deletes the key
   ASSERT_TRUE(tx2.abort_transaction()().has_value());
@@ -1043,14 +957,14 @@ TEST_P(DirectBytestringTest, DeleteThenSetConflict)
                    std::to_underlying(StorageDeltaFlags::None));
   auto r_ref = tx_ref.try_push_current_subtransaction()();
   ASSERT_TRUE(r_ref.has_value());
-  // If key absent, delete is treated as no-op but allowed in mockdb path
+  // If key absent, delete is treated as no-op but allowed
   ASSERT_TRUE(tx_ref.commit_transaction()().has_value());
 
   advance_block();
   check_balances(contract_addr, reference_addr, kInitialBalance);
 }
 
-TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
+TEST_F(DirectBytestringTest, DeleteMissingKeyNoOp)
 {
 
   auto contract_addr = make_contract_address(0);
@@ -1074,7 +988,7 @@ TEST_P(DirectBytestringTest, DeleteMissingKeyNoOp)
   EXPECT_EQ(from_xdr(bal.value().nnint()), kInitialBalance);
 }
 
-TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
+TEST_F(DirectBytestringTest, DoubleReleaseLowerCost)
 {
 
   auto contract_addr = make_contract_address(0);
@@ -1131,7 +1045,7 @@ TEST_P(DirectBytestringTest, DoubleReleaseLowerCost)
                 cost_model_->get_bytestring_cost("value"s.length()));
 }
 
-TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
+TEST_F(DirectBytestringTest, TxLocalReleaseCosts)
 {
 
   auto contract_addr = make_contract_address(0);
@@ -1237,7 +1151,7 @@ TEST_P(DirectBytestringTest, TxLocalReleaseCosts)
   EXPECT_EQ(item2.value().bytestring(), make_bytestring("value_long"));
 }
 
-TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
+TEST_F(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
 {
   auto contract_addr = make_contract_address(0);
   const int128_t initial_cost =
@@ -1309,7 +1223,7 @@ TEST_P(DirectBytestringTest, RollbackInfallibilityGivenLocalCostRelease)
   advance_block();
 }
 
-TEST_P(DirectBytestringTest, ReuseExclusiveLock)
+TEST_F(DirectBytestringTest, ReuseExclusiveLock)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -1346,7 +1260,7 @@ TEST_P(DirectBytestringTest, ReuseExclusiveLock)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value3"));
 }
 
-TEST_P(DirectBytestringTest, ReusePermamentExclusiveLock)
+TEST_F(DirectBytestringTest, ReusePermamentExclusiveLock)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -1383,7 +1297,7 @@ TEST_P(DirectBytestringTest, ReusePermamentExclusiveLock)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value3"));
 }
 
-TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
+TEST_F(DirectBytestringTest, LockAfterPermanentExclusiveLock)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -1414,7 +1328,7 @@ TEST_P(DirectBytestringTest, LockAfterPermanentExclusiveLock)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
 
-TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
+TEST_F(DirectBytestringTest, PermamentLockAfterRegularLock)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -1446,7 +1360,7 @@ TEST_P(DirectBytestringTest, PermamentLockAfterRegularLock)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
 
-TEST_P(DirectBytestringTest, LockChangeAfterCommit)
+TEST_F(DirectBytestringTest, LockChangeAfterCommit)
 {
   auto contract_addr = make_contract_address(0);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -1484,13 +1398,8 @@ TEST_P(DirectBytestringTest, LockChangeAfterCommit)
   EXPECT_EQ(val.value().bytestring(), make_bytestring("value"));
 }
 
-TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
+TEST_F(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB doesn't implement permanent exclusive lock "
-                    "immediate cost release";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   const int128_t initial_cost =
       cost_model_->get_bytestring_cost("value"s.length());
@@ -1526,13 +1435,8 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReleaseCostsDeleteItem)
   EXPECT_EQ(from_xdr(bal.value().nnint()), 0);
 }
 
-TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
+TEST_F(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB doesn't implement permanent exclusive lock "
-                    "immediate cost release";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   const int128_t initial_cost =
       cost_model_->get_bytestring_cost("value"s.length());
@@ -1600,14 +1504,9 @@ TEST_P(DirectBytestringTest, PermanentExclusiveLockReacquireAfterTryInvoke)
   EXPECT_EQ(from_xdr(bal.value().nnint()), initial_cost);
 }
 
-TEST_P(DirectBytestringTest,
+TEST_F(DirectBytestringTest,
        PermanentExclusiveLockReacquireAfterTryInvokeChangingBytestringLength)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB doesn't implement permanent exclusive lock "
-                    "immediate cost release";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   const int128_t initial_cost =
       cost_model_->get_bytestring_cost("value"s.length()) +
@@ -1696,13 +1595,8 @@ TEST_P(DirectBytestringTest,
   advance_block();
 }
 
-TEST_P(DirectBytestringTest, MultipleDeletes)
+TEST_F(DirectBytestringTest, MultipleDeletes)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB doesn't implement permanent exclusive lock "
-                    "immediate cost release";
-    return;
-  }
   auto contract_addr = make_contract_address(0);
   const int128_t initial_cost =
       cost_model_->get_bytestring_cost("value"s.length());
@@ -1764,7 +1658,7 @@ TEST_P(DirectBytestringTest, MultipleDeletes)
 }
 
 // Ensure that behavior before and after a concurrent delta is consistent
-TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
+TEST_F(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1806,7 +1700,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKeyAfterConcurrentDelta)
   EXPECT_EQ(from_xdr(item->nnint()), 20);
 }
 
-TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
+TEST_F(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1841,7 +1735,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnBytestringKey)
   EXPECT_EQ(from_xdr(item->nnint()), 10);
 }
 
-TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
+TEST_F(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -1877,7 +1771,7 @@ TEST_P(DirectBytestringTest, BugHuntNNIntAddOnExistingBytestringNoExcl)
   EXPECT_EQ(from_xdr(item->nnint()), 100);
 }
 
-TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
+TEST_F(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
 {
   auto contract_addr = make_contract_address(0);
   // Small balance that can't cover a large bytestring.
@@ -1902,7 +1796,7 @@ TEST_P(DirectBytestringTest, BugHuntLargeBytestringExhaustsBalance)
 // a node-unrecoverable error. This is the general r/w-footprint bound; here it
 // is driven by spraying max-size bytestrings across many keys (the same check
 // covers many-keys and RCQ-observation overflow).
-TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
+TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000'000);
@@ -1946,7 +1840,7 @@ TEST_P(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
 // mirrored from database_proxy.cc, so a change to the cap, the message
 // overhead, or the per-delta bound moves this boundary and fails the test --
 // an off-by-one tightening would abort transactions other validators accept.
-TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
+TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
 {
   constexpr size_t kWord = 4;
   constexpr auto kXdrMaxOf = []<typename T>(std::type_identity<T>) {
@@ -2019,10 +1913,5 @@ TEST_P(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBytestringTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

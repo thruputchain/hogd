@@ -156,6 +156,76 @@ require_text("${leading_comment}" "struct Lead {")
 file(WRITE "${TEST_DIR}/comment_only.x" "// nothing but a comment")
 run_compiler(0 -o comment_only.hh comment_only.x)
 
+# Comments opening a file that a blank line sets off from what follows are
+# its header, such as an upstream copyright notice, and lead every
+# generated file.  A comment touching the first definition still documents
+# that definition.
+file(WRITE "${TEST_DIR}/file_header.x"
+  "// Copyright notice\n// License line\n\n/* Second header block */\n\n"
+  "// Documents Head\nstruct Head { int value; };\n")
+run_compiler(0 -o file_header.hh file_header.x)
+file(READ "${TEST_DIR}/file_header.hh" file_header)
+require_text("${file_header}" "// -*-C++-*-
+
+// Copyright notice
+// License line
+
+/* Second header block */
+
+#pragma once")
+require_text("${file_header}" "// Documents Head\nstruct Head {")
+run_compiler(0 --rust -o file_header.rs file_header.x)
+file(READ "${TEST_DIR}/file_header.rs" file_header)
+require_text("${file_header}" "// Copyright notice
+// License line
+
+/* Second header block */
+
+#![allow(non_camel_case_types)]")
+require_text("${file_header}" "// Documents Head\n#[cfg_attr(")
+run_compiler(0 --ts -o file_header.ts file_header.x)
+file(READ "${TEST_DIR}/file_header.ts" file_header)
+require_text("${file_header}" "// Copyright notice
+// License line
+
+/* Second header block */
+
+import {")
+string(FIND "${file_header}" "Copyright notice" first_pos)
+string(FIND "${file_header}" "Copyright notice" last_pos REVERSE)
+if(NOT first_pos EQUAL last_pos)
+  message(FATAL_ERROR "file header repeated in the generated TypeScript")
+endif()
+
+# A trailing comment runs on over the comment lines below it, but a doc
+# comment there opens the next definition or field and must document it,
+# not the one whose trailing comment it follows.
+file(WRITE "${TEST_DIR}/trailing_comment.x"
+  "/// Documents First.\ntypedef opaque First[4]; // trails First\n"
+  "/// Documents Second.\ntypedef opaque Second[4];\n"
+  "typedef int Third; // trails Third\n"
+  "                   // and runs on\n"
+  "struct Fourth {\n  int a; // trails a\n  /// Documents b.\n  int b;\n};\n")
+run_compiler(0 -o trailing_comment.hh trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.hh" trailing_comment)
+require_text("${trailing_comment}" "/// Documents First.
+// trails First
+using First = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "/// Documents Second.
+using Second = std::array<std::uint8_t, 4>;")
+require_text("${trailing_comment}" "// trails Third
+// and runs on
+using Third = std::int32_t;")
+require_text("${trailing_comment}" "  // trails a
+  std::int32_t a;
+  /// Documents b.
+  std::int32_t b;")
+run_compiler(0 --rust -o trailing_comment.rs trailing_comment.x)
+file(READ "${TEST_DIR}/trailing_comment.rs" trailing_comment)
+require_text("${trailing_comment}" "    pub a: i32,
+    /// Documents b.
+    pub b: i32,")
+
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)
 require_text("${error}" "syntax error")

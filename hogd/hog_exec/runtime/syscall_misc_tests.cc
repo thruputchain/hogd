@@ -44,8 +44,8 @@ public:
   explicit SyscallMiscTestsBase(
       std::optional<NetworkConfig> const &genesis_network_config)
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, genesis_network_config)
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config)
   {}
 
 protected:
@@ -952,7 +952,7 @@ public:
   SyscallMiscDefaultWalletTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/false)
+          /*empty_genesis=*/false)
   {}
 };
 

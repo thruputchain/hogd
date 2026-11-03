@@ -1798,6 +1798,36 @@ TEST(HogDevnode, UnusableTmpdirPrintsDiagnosticInsteadOfAborting)
       << stderr_output;
 }
 
+TEST(HogDevnode, UnassignedListenHostFailsBeforeCreatingTempDirs)
+{
+  // 192.0.2.1 is reserved for documentation (RFC 5737) and assigned to no
+  // host, so nothing can listen on it. hog-devnode must report that and exit
+  // without leaving temp dirs behind in $TMPDIR.
+  const std::filesystem::path tmpdir =
+      std::filesystem::temp_directory_path() /
+      std::format("hog-devnode-unassigned-listen-host-{}-{}", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::filesystem::create_directories(tmpdir);
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--listen-host", "192.0.2.1"},
+                               {{"TMPDIR", tmpdir.string() + "/"}});
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("hog-devnode failed before readiness: "
+                                     "cannot listen on 192.0.2.1"))
+      << stderr_output;
+  EXPECT_TRUE(std::filesystem::is_empty(tmpdir));
+  std::filesystem::remove_all(tmpdir);
+}
+
 TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
 {
   for (std::string_view host : {"0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0",

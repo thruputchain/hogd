@@ -1,0 +1,66 @@
+name: Benchmarks
+
+# Starts the cluster runs that follow each push to main: Combined Metrics and
+# the ccache warmup. They run in the private thruputchain/benchmarks repository,
+# on its benchmark cluster (hogd-combined-metrics.yml and hogd-ccache-warmup.yml
+# there); this job only asks for them, on a GitHub-hosted runner. Everything
+# that used to run on the self-hosted runners from this repository lives
+# there now, the nightly ones on its own schedule; see hogd/README.md in that
+# repository.
+#
+# It dispatches as a GitHub App whose only permission is Actions: read and
+# write, installed only on thruputchain/benchmarks. Its client ID and key
+# (GEOPHREY_CLIENT_ID, GEOPHREY_CLIENT_KEY) are secrets of the `benchmarks`
+# environment, whose deployment branches must be limited to main, so only
+# workflows already merged to main can use them; a workflow on any other
+# branch or a fork PR never sees them. The App's runs show as <app>[bot]: the
+# benchmarks repository accepts them only for hogd main commits. To run
+# another branch, dispatch the workflow there by hand.
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+jobs:
+  dispatch:
+    name: Dispatch cluster runs
+    # Forks have no App key and no business starting runs.
+    if: github.repository == 'thruputchain/hogd'
+    environment: benchmarks
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Mint dispatch token
+        id: app
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1 # v3.2.0
+        with:
+          client-id: ${{ secrets.GEOPHREY_CLIENT_ID }}
+          private-key: ${{ secrets.GEOPHREY_CLIENT_KEY }}
+          owner: thruputchain
+          repositories: benchmarks
+          permission-actions: write
+
+      - name: Dispatch hogd-combined-metrics.yml and hogd-ccache-warmup.yml
+        env:
+          GH_TOKEN: ${{ steps.app.outputs.token }}
+          SHA: ${{ github.sha }}
+        run: |
+          # The REST dispatch endpoint needs only Actions: write. `gh workflow
+          # run` would first look up the default branch, which needs Contents.
+          # Try both before failing, so one missing workflow doesn't cost the
+          # other its run.
+          status=0
+          for workflow in hogd-combined-metrics.yml hogd-ccache-warmup.yml; do
+            if gh api --method POST \
+              "repos/thruputchain/benchmarks/actions/workflows/$workflow/dispatches" \
+              -f ref=main -f "inputs[sha]=$SHA"; then
+              echo "Dispatched $workflow for $SHA (thruputchain/benchmarks)" >> "$GITHUB_STEP_SUMMARY"
+            else
+              echo "::error::Could not dispatch $workflow"
+              status=1
+            fi
+          done
+          exit "$status"

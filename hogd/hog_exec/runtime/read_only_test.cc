@@ -43,12 +43,12 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-class ReadOnlyTest : public ::testing::TestWithParam<TestDB>,
+class ReadOnlyTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
   ReadOnlyTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -87,7 +87,7 @@ check_result(HostFnStatus<SyscallStatus<std::optional<std::tuple<>>>> res)
 
 } // namespace
 
-TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
+TEST_F(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -173,7 +173,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
+TEST_F(ReadOnlyTest, ReadOnlyLogEvent)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -262,7 +262,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyPropagation)
+TEST_F(ReadOnlyTest, ReadOnlyPropagation)
 {
   // Root invokes the middle contract with InvokeFlag::ReadOnly. The middle
   // contract invokes the leaf with InvokeFlag::None (no ReadOnly on that
@@ -376,7 +376,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 // precompile. get_balance_of is read-only safe and should succeed;
 // transfer calls modify_native_token_balance and log_event which now
 // return errors in read-only mode, causing the transfer to fail.
-TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 {
   using amount_t = std::tuple<int64_t, uint64_t>;
   auto make_amount = [](int128_t amount) -> amount_t {
@@ -530,7 +530,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 // native token precompile with the read-only flag. get_balance_of should
 // succeed; transfer should fail because modify_native_token_balance is blocked
 // in read-only mode.
-TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 {
   using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
 
@@ -613,7 +613,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 // is rejected and the output address is not zeroed.  The contract hash handed
 // to the inner frame is a real, deployable contract, so read-only mode is the
 // only thing that can make the deploy fail.
-TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
+TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 {
   deploy_callee();
 
@@ -634,7 +634,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 
 // Checks that aliasing guards (returning kFault) are performed before the read
 // only guard
-TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
+TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
   deploy_callee();
 
@@ -652,11 +652,6 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
