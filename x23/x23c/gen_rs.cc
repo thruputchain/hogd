@@ -35,6 +35,8 @@ struct RustMarkers {
   // #[rust(no_debug)]: leave Debug out of the derive list, so hand-written
   // code can supply a more readable impl.
   bool no_debug = false;
+  // Set for types holding a float or double, which lack Eq, Hash and Ord.
+  bool has_float = false;
 };
 
 struct GenRs {
@@ -47,6 +49,9 @@ struct GenRs {
   std::size_t indent_{};
   vector<string> namespaces_;
   vector<string> scopes_;
+  // Types defined so far that hold a float or double, directly or through
+  // another such type.  Types from other files are not tracked.
+  std::set<string> float_types_;
 
   constexpr static int kIndentWidth = 4;
 
@@ -68,6 +73,7 @@ struct GenRs {
       comment = std::move(*stripped);
       markers.no_debug = true;
     }
+    markers.has_float = record_float(d);
     show_comment(comment, true);
     prtop("\n");
     visit(
@@ -84,6 +90,50 @@ struct GenRs {
         },
         d);
   }
+  bool has_float(const Declaration &d) const
+  {
+    if (d.qual == Declaration::kVoid)
+      return false;
+    if (auto *name = std::get_if<string>(&d.type))
+      return *name == "float" || *name == "double" ||
+             float_types_.contains(*name);
+    if (auto *body = std::get_if<StructBody>(&d.type))
+      return std::ranges::any_of(*body, [this](const Declaration &f) {
+        return has_float(f);
+      });
+    if (auto *body = std::get_if<UnionBody>(&d.type))
+      return std::ranges::any_of(body->arms, [this](const UnionArm &a) {
+        return has_float(a.decl);
+      });
+    return false;
+  }
+
+  // Whether d's type holds a float or double; if so, remember its name.
+  bool record_float(const Definition &d)
+  {
+    Declaration decl;
+    string id;
+    if (auto *t = std::get_if<Typedef>(&d)) {
+      decl = *t;
+      id = t->id;
+    }
+    else if (auto *t = std::get_if<StructDecl>(&d)) {
+      decl.type = t->body;
+      id = t->id;
+    }
+    else if (auto *t = std::get_if<UnionDecl>(&d)) {
+      decl.type = t->body;
+      id = t->id;
+    }
+    else {
+      return false;
+    }
+    if (!has_float(decl))
+      return false;
+    float_types_.insert(id);
+    return true;
+  }
+
   void show_def(const ConstDef &c)
   {
     string val = c.val;
@@ -368,9 +418,18 @@ struct GenRs {
   static constexpr string_view kDefaultDerivesNoDebug =
       R"(#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
-  static string_view default_derives(bool no_debug)
+  // Floats are only partially ordered, so types holding them get the partial
+  // traits alone.
+  static constexpr string_view kFloatDerives =
+      R"(#[derive(Clone, Debug, PartialEq, PartialOrd)])";
+  static constexpr string_view kFloatDerivesNoDebug =
+      R"(#[derive(Clone, PartialEq, PartialOrd)])";
+
+  static string_view default_derives(RustMarkers markers)
   {
-    return no_debug ? kDefaultDerivesNoDebug : kDefaultDerives;
+    if (markers.has_float)
+      return markers.no_debug ? kFloatDerivesNoDebug : kFloatDerives;
+    return markers.no_debug ? kDefaultDerivesNoDebug : kDefaultDerives;
   }
 
   static optional<Definition> convert_to_newtype(const Definition &d);
@@ -680,7 +739,7 @@ GenRs::show_type(const StructBody &s, string const &tname, RustMarkers markers)
     prtop("{}", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
       prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
-    prtop("{}\n", default_derives(markers.no_debug));
+    prtop("{}\n", default_derives(markers));
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
@@ -878,7 +937,7 @@ GenRs::show_type(const EnumBody &e, string const &tname, RustMarkers markers)
   prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
   prtop("{}", feature_attr("spec", "derive(XDR)"));
   prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
-  prtop("{}\n", default_derives(markers.no_debug));
+  prtop("{}\n", default_derives(markers));
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
 pub struct {}(pub i32);
@@ -1015,7 +1074,7 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
   // bytes).
   constexpr static auto kEnumBaseType = "i32";
   {
-    prtop("{}\n", default_derives(markers.no_debug));
+    prtop("{}\n", default_derives(markers));
     prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
     prtop("{}", feature_attr("spec", "derive(XDR)"));
