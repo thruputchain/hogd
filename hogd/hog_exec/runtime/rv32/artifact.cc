@@ -126,6 +126,8 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
   // Schema contents are opaque to execution. Absent specs have one encoding.
+  // spec_size is bounded by total contract size, not a separate metadata cap;
+  // downstream spec decoders must enforce their own schema/resource limits.
   // Widen before adding so crafted u32 lengths cannot wrap on 32-bit hosts.
   if ((spec_schema_version == 0) != (spec_size == 0) ||
       bytes.size() != uint64_t{kArtifactHeaderBytes} + code_size +

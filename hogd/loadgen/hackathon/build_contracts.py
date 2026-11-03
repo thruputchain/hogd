@@ -69,8 +69,9 @@ required-features = ["entrypoints"]
     version = subprocess.check_output(
         ["thruput", "--version"], text=True
     ).strip()
-    if not version.startswith("thruput 0.42.0"):
-        raise ValueError(f"expected thruput 0.42.0, got {version}")
+    expected = "thruput " + (ROOT / "scripts/thruput-tools-version").read_text().strip()
+    if version.split(" (", 1)[0] != expected:
+        raise ValueError(f"expected {expected}, got {version}")
     records = []
     for kind, count in (("app", apps), ("wallet", wallets)):
         template = (BENCHMARK_DIR / f"contracts/{kind}/src/lib.rs").read_text()

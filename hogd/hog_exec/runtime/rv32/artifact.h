@@ -21,6 +21,9 @@ namespace hogd::rv32 {
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
+// This reader has no legacy-format path. Stored v5 contracts fail translation
+// and become Unrecoverable on use. A future persistent-network format change
+// needs a legacy reader and network-config activation before changing this.
 inline constexpr uint32_t kArtifactFormatVersion = 6;
 inline constexpr uint32_t kArtifactHeaderBytes = 136;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
