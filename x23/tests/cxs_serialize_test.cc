@@ -249,6 +249,40 @@ TEST(CxsSerialize, FloatRoundTrip)
   check_roundtrip(std::numeric_limits<float>::min());
 }
 
+TEST(CxsSerialize, DoubleRoundTrip)
+{
+  check_roundtrip(double{0.0});
+  check_roundtrip(double{1.0});
+  check_roundtrip(double{-1.0});
+  check_roundtrip(std::numeric_limits<double>::max());
+  check_roundtrip(std::numeric_limits<double>::min());
+}
+
+// Floats are raw little-endian IEEE 754 bytes, not compressed like integers
+// (CXS.md, and the Rust bindings).  A round trip cannot catch the encoding
+// being wrong, as long as the decoder agrees with the encoder.
+TEST(CxsSerialize, FloatEncoding)
+{
+  check_expect(float{0.0}, {0x00, 0x00, 0x00, 0x00});
+  check_expect(float{1.0}, {0x00, 0x00, 0x80, 0x3f});
+  check_expect(float{-2.5}, {0x00, 0x00, 0x20, 0xc0});
+  check_expect(double{0.0}, {0, 0, 0, 0, 0, 0, 0, 0});
+  check_expect(double{1.0}, {0, 0, 0, 0, 0, 0, 0xf0, 0x3f});
+  check_expect(double{-0.0}, {0, 0, 0, 0, 0, 0, 0, 0x80});
+  check_expect(fix_12{.i = 1, .d = 1.0}, {0x01, 0, 0, 0, 0, 0, 0, 0xf0, 0x3f});
+
+  EXPECT_EQ(cxs_size(float{0.0}), 4U);
+  EXPECT_EQ(cxs_size(double{1.0}), 8U);
+
+  x23::Buf one{0x00, 0x00, 0x80, 0x3f};
+  float f;
+  ASSERT_TRUE(deserialize_cxs(&f, x23::BufView(one)));
+  EXPECT_EQ(f, 1.0f);
+  // A float is always 4 bytes, never a 1-byte integer.
+  x23::Buf zero{0x00};
+  EXPECT_FALSE(deserialize_cxs(&f, x23::BufView(zero)));
+}
+
 TEST(CxsSerialize, CanonicalCheck)
 {
   x23::Buf buf;
