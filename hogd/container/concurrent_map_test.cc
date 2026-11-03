@@ -321,8 +321,7 @@ TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
                      }),
                  std::runtime_error);
   }
-  // The throw left the map uncleared, so the destructor finishes on the
-  // background recycler.
+  // The throw left the map uncleared, so the destructor finishes on the pool.
   ConcurrentMap<int, DestroyCounter,
                 IntHasher>::wait_for_background_recycling();
 
@@ -471,8 +470,8 @@ TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterSlowClear)
   BucketArrayCounts counts;
 
   {
-    // Destroyed without clear(): the background recycler must both destroy
-    // every value and leave the array in a recyclable (all-null) state.
+    // Destroyed without clear(): the deferred clear on the pool must both
+    // destroy every value and leave the array in a recyclable (all-null) state.
     map_t map(kBuckets);
     for (int i = 0; i < kNumEntries; i++) {
       ASSERT_NE(map.insert_or_get(i, i), nullptr);
@@ -544,7 +543,7 @@ struct RecordsDestroyingThread {
 
 // Dropping an uncleared map must not clear its bucket array on the dropping
 // thread: that walk is what made e.g. closing a viewing snapshot cost ~16ms.
-TEST(ConcurrentMap, UnclearedMapIsClearedOnBackgroundThread)
+TEST(ConcurrentMap, UnclearedMapIsClearedOnPoolWorker)
 {
   using map_t = ConcurrentMap<int, RecordsDestroyingThread, IntHasher>;
   {

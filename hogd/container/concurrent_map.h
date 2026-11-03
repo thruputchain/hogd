@@ -18,10 +18,10 @@
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
-#include "hogd/container/background_recycler.h"
 #include "hogd/container/merkle/allocator.h"
 
 namespace hogd {
@@ -215,23 +215,20 @@ public:
       return;
     }
     // Clearing an uncleared map walks every bucket head (1M by default), which
-    // takes milliseconds. Do it serially on the low-priority recycler thread
-    // rather than on the thread dropping the map, which is often on a latency-
-    // sensitive path, and rather than in parallel, which would compete with
-    // commit for cores. The storage rejoins the pool once it is cleared.
-    BackgroundRecycler::instance().submit(
-        [storage = std::move(storage)]() mutable {
-          clear_heads(storage.buckets);
-          recycle(std::move(storage));
-        });
+    // takes milliseconds. Do it on a pool worker via bg() rather than on the
+    // thread dropping the map, which is often on a latency-sensitive path, and
+    // on one worker rather than in parallel so it does not compete with commit
+    // for cores. The storage rejoins the pool once it is cleared.
+    default_threadpool().spawn([storage = std::move(storage)]() mutable {
+      clear_heads(storage.buckets);
+      recycle(std::move(storage));
+    });
   }
 
-  // Blocks until storage handed to the background recycler by earlier
-  // destructors has been cleared and returned to the pool. For tests.
-  static void wait_for_background_recycling()
-  {
-    BackgroundRecycler::instance().drain();
-  }
+  // Blocks until storage handed to the pool by earlier destructors has been
+  // cleared and returned to the storage pool. For tests; must not be called
+  // from a pool worker.
+  static void wait_for_background_recycling() { default_threadpool().drain(); }
 
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
