@@ -301,11 +301,11 @@ using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
 // initial_memory_start, sha256(code), sha256(initial_memory),
 // spec_schema_version, spec_size. A zero version and size denote absence.
-// Body: header || code || initial_memory || spec, exactly — section file
+// Body: header || code || initial_memory || spec, exactly; section file
 // positions are derived from the canonical order, not stored. Method dispatch
 // is in the guest (since v4). The stored image is placed at data-space VA
 // initial_memory_start (a guest VA, unrelated to file layout); the runtime
-// zero-fills [0, start) — e.g. a stack-first guest's stack region — and
+// zero-fills [0, start) (e.g. a stack-first guest's stack region) and
 // [start + size, memory_bytes). Spec bytes remain outside guest memory and
 // are authenticated by the enclosing contract hash, not the section digests.
 enum class ArtifactError {
