@@ -179,21 +179,26 @@ TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
   }
 }
 
-TEST(Deserialize, BoolUnionDefaultArm)
+template<typename T> class BoolUnionDefaultArm : public ::testing::Test {};
+using BoolDefaultUnions = ::testing::Types<bool_with_default, flag_with_default>;
+TYPED_TEST_SUITE(BoolUnionDefaultArm, BoolDefaultUnions);
+
+TYPED_TEST(BoolUnionDefaultArm, TakesOnlyTheUnnamedValue)
 {
   // The default arm takes FALSE, the one value no case names.
   {
     x23::Vec<uint8_t> buf{0, 0, 0, 0, 0, 0, 0, 2, 'h', 'i', 0, 0};
-    bool_with_default v;
+    TypeParam v;
     x23::deserialize(&v, buf);
     EXPECT_FALSE(v.ok());
     EXPECT_EQ(std::string_view(v.message()), "hi");
     EXPECT_EQ(x23::serialize(v), buf);
   }
-  // It does not absorb non-canonical bools.
+  // A non-canonical bool is rejected before the arm lookup, so the default
+  // arm never absorbs it, even through a typedef.
   {
     x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
-    bool_with_default v;
+    TypeParam v;
     EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
   }
 }

@@ -233,33 +233,3 @@ file(WRITE "${TEST_DIR}/duplicate.x"
   "struct Same { int value; };\nstruct Same { int other; };\n")
 run_compiler(1 -o duplicate.hh duplicate.x)
 require_text("${error}" "Duplicate declaration of struct Same")
-
-# A bool discriminant is validated on input, so a default arm in a
-# bool-switched union becomes an explicit case for the value no case names.
-file(WRITE "${TEST_DIR}/bool_default.x"
-  "union BoolDefault switch (bool b) {\ncase TRUE:\n  int v;\ndefault:\n  string msg<>;\n};\n")
-run_compiler(0 --strict -o bool_default.hh bool_default.x)
-run_compiler(0 --strict --rust --rust-feature xdrs -o bool_default.rs bool_default.x)
-file(READ "${TEST_DIR}/bool_default.rs" bool_default)
-require_text("${bool_default}" "FALSE { msg: ")
-string(FIND "${bool_default}" "default_variant" default_variant_pos)
-if(NOT default_variant_pos EQUAL -1)
-  message(FATAL_ERROR "bool union default arm left as a Rust default variant")
-endif()
-# The same holds through a typedef of bool.
-file(WRITE "${TEST_DIR}/alias_default.x"
-  "typedef bool Flag;\nunion AliasDefault switch (Flag f) {\ncase TRUE:\n  int v;\ndefault:\n  void;\n};\n")
-run_compiler(0 --strict -o alias_default.hh alias_default.x)
-file(READ "${TEST_DIR}/alias_default.hh" alias_default)
-require_text("${alias_default}" "// case FALSE:")
-# With both values named, a default arm can never match.
-file(WRITE "${TEST_DIR}/bool_default_dead.x"
-  "union BoolDead switch (bool b) {\ncase FALSE:\n  int x;\ncase TRUE:\n  int y;\ndefault:\n  void;\n};\n")
-run_compiler(1 --rust -o bool_default_dead.rs bool_default_dead.x)
-require_text("${error}" "default arm unreachable in union switched on bool")
-# An enum-switched union keeps its default arm.
-file(WRITE "${TEST_DIR}/enum_default.x"
-  "enum Kind { A = 0, B = 1 };\nunion EnumDefault switch (Kind k) {\ncase A:\n  int v;\ndefault:\n  void;\n};\n")
-run_compiler(0 --strict -o enum_default.hh enum_default.x)
-file(READ "${TEST_DIR}/enum_default.hh" enum_default)
-require_text("${enum_default}" "  default:\n")

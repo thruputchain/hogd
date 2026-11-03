@@ -422,6 +422,17 @@ default:
   string message<>;
 };
 
+typedef bool flag_t;
+
+// The same through a typedef of bool
+union flag_with_default switch (flag_t ok)
+{
+case TRUE:
+  int value;
+default:
+  string message<>;
+};
+
 // Struct mixing fixed-opaque of various alignments
 // (exercises first_unsafe_field optimization with mixed field sizes)
 struct mixed_opaque_struct {
