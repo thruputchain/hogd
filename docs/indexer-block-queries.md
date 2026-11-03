@@ -76,7 +76,7 @@ Event/root pages fail whole on encountered iterator, key, decode, hydration or p
 
 Event pages hydrate and validate at most 1,000 new candidates, matching or not. When more remain, the cursor advances past the last validated candidate, even on an empty page. Only an empty cursor ends the walk. This budget excludes continuation membership checks and does not bound storage latency, repeated transaction-log decoding or work after cancellation.
 
-Whole-chain queries read rows and order candidates by stored height/hash, then decode and validate the returned page and resume position. These checks cannot detect every deleted row or index entry. Block-query behavior is unchanged. Broader resource and completeness work remains in [GH-428](https://linear.app/grndhg/issue/GH-428).
+Whole-chain queries read rows and order candidates by stored height/hash, then decode and validate the returned page and resume position. These checks cannot detect every deleted row or index entry. Block-query behavior is unchanged. Broader resource and completeness work is tracked separately.
 
 ## Public API boundary
 

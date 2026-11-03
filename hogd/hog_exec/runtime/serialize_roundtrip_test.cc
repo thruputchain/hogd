@@ -1,5 +1,7 @@
 #include <gtest/gtest.h>
 
+#include <bit>
+#include <concepts>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -236,6 +238,27 @@ protected:
 
           co_return InvokeStatus<void>{};
         });
+    // CXS floats are raw little-endian bytes, not compressed integers; the
+    // Rust contract would misread any other encoding.
+    fns.emplace(
+        12, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          using fl = std::numeric_limits<float>;
+          using dl = std::numeric_limits<double>;
+          for (auto [f, d] : {std::pair{0.0F, 0.0}, std::pair{-0.0F, -0.0},
+                              std::pair{1.0F, 1.0}, std::pair{-2.5F, -2.5},
+                              std::pair{fl::max(), dl::max()},
+                              std::pair{fl::lowest(), dl::lowest()},
+                              std::pair{fl::denorm_min(), dl::denorm_min()},
+                              std::pair{fl::infinity(), -dl::infinity()}}) {
+            ::cxs_test::Floats floats{.f = f, .d = d};
+            co_await roundtrip_test<u8"roundtrip_floats">(floats, ctx, success);
+            if (!success) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     std::unique_ptr<NativeContract> native_contract =
         std::make_unique<NativeContract>(std::move(fns));
 
@@ -285,6 +308,20 @@ protected:
     return res.value().value().value();
   };
 
+  // Floats compare by bits, since -0.0 == 0.0.
+  template<typename T> static void expect_same(T const &got, T const &want)
+  {
+    if constexpr (std::same_as<T, ::cxs_test::Floats>) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(got.f),
+                std::bit_cast<uint32_t>(want.f));
+      EXPECT_EQ(std::bit_cast<uint64_t>(got.d),
+                std::bit_cast<uint64_t>(want.d));
+    }
+    else {
+      EXPECT_EQ(got, want);
+    }
+  }
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   // Coroutine, so gtest's ASSERT_* (which expand to a bare `return`) cannot be
   // used here; failures report via EXPECT_* and bail out leaving `success`
@@ -310,7 +347,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     {
       // TXS
@@ -328,7 +365,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     success = true;
   }
@@ -498,6 +535,24 @@ TEST_F(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(11),
+                                    .gas_limit = kDefaultMaxTxGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *multiplexed_context_);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SerializeRoundtripTest, SerializeRoundtripFloats)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(12),
                                     .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},

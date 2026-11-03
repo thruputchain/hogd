@@ -35,6 +35,9 @@ struct RustMarkers {
   // #[rust(no_debug)]: leave Debug out of the derive list, so hand-written
   // code can supply a more readable impl.
   bool no_debug = false;
+  // #[rust(no_eq)]: derive only the partial traits, for types holding a
+  // float or double (which lack Eq, Hash and Ord), directly or not.
+  bool no_eq = false;
 };
 
 struct GenRs {
@@ -67,6 +70,10 @@ struct GenRs {
     if (optional<string> stripped = line_removed(comment, kNoDebug)) {
       comment = std::move(*stripped);
       markers.no_debug = true;
+    }
+    if (optional<string> stripped = line_removed(comment, kNoEq)) {
+      comment = std::move(*stripped);
+      markers.no_eq = true;
     }
     show_comment(comment, true);
     prtop("\n");
@@ -360,6 +367,7 @@ struct GenRs {
   static constexpr string_view kConstWriteXDR = R"(#[rust(ConstWriteXDR)])";
   static constexpr string_view kDocHidden = R"(#[doc(hidden)])";
   static constexpr string_view kNoDebug = R"(#[rust(no_debug)])";
+  static constexpr string_view kNoEq = R"(#[rust(no_eq)])";
   static constexpr string_view kDefaultDerives =
       R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
   // Debug is dropped for types marked #[rust(no_debug)], leaving the impl to
@@ -368,9 +376,17 @@ struct GenRs {
   static constexpr string_view kDefaultDerivesNoDebug =
       R"(#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
-  static string_view default_derives(bool no_debug)
+  // For #[rust(no_eq)] types.
+  static constexpr string_view kPartialDerives =
+      R"(#[derive(Clone, Debug, PartialEq, PartialOrd)])";
+  static constexpr string_view kPartialDerivesNoDebug =
+      R"(#[derive(Clone, PartialEq, PartialOrd)])";
+
+  static string_view default_derives(RustMarkers markers)
   {
-    return no_debug ? kDefaultDerivesNoDebug : kDefaultDerives;
+    if (markers.no_eq)
+      return markers.no_debug ? kPartialDerivesNoDebug : kPartialDerives;
+    return markers.no_debug ? kDefaultDerivesNoDebug : kDefaultDerives;
   }
 
   static optional<Definition> convert_to_newtype(const Definition &d);
@@ -551,9 +567,9 @@ impl {0}_{1}_Client {{
   // Scalars go by value; anything else is borrowed as any type that encodes
   // like it.  ?Sized admits slices, e.g. of Arcs where the wire type is a Vec.
   auto arg_type = [](const string &type) -> string {
-    const static std::set<string_view> scalar_types = {"hyper",
-                                                       "unsigned hyper", "bool",
-                                                       "int", "unsigned int"};
+    const static std::set<string_view> scalar_types = {
+        "hyper",        "unsigned hyper", "bool",  "int",
+        "unsigned int", "float",          "double"};
     if (scalar_types.contains(type)) {
       return map_type(type);
     }
@@ -680,7 +696,7 @@ GenRs::show_type(const StructBody &s, string const &tname, RustMarkers markers)
     prtop("{}", feature_attr("spec", "derive(XDR)"));
     if (!array_size)
       prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
-    prtop("{}\n", default_derives(markers.no_debug));
+    prtop("{}\n", default_derives(markers));
     if (!derive_traits.empty())
       prtop("#[derive({})]\n", join(derive_traits, ", "));
 
@@ -878,7 +894,7 @@ GenRs::show_type(const EnumBody &e, string const &tname, RustMarkers markers)
   prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
   prtop("{}", feature_attr("spec", "derive(XDR)"));
   prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
-  prtop("{}\n", default_derives(markers.no_debug));
+  prtop("{}\n", default_derives(markers));
   prtop(R"(#[derive(Copy)]
 #[repr(transparent)]
 pub struct {}(pub i32);
@@ -1015,7 +1031,7 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
   // bytes).
   constexpr static auto kEnumBaseType = "i32";
   {
-    prtop("{}\n", default_derives(markers.no_debug));
+    prtop("{}\n", default_derives(markers));
     prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
     prtop("{}", feature_attr("spec", "derive(XDR)"));
@@ -1184,6 +1200,7 @@ GenRs::map_type(const string &t)
   static const std::map<string, string> type_map{
       {"int", "i32"},   {"unsigned int", "u32"},
       {"hyper", "i64"}, {"unsigned hyper", "u64"},
+      {"float", "f32"}, {"double", "f64"},
       {"opaque", "u8"},
   };
   if (auto it = type_map.find(t); it != type_map.end())
