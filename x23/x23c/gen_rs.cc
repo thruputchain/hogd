@@ -938,6 +938,19 @@ pub struct {}(pub i32);
   prtop("    }}\n");
   prtop("}}\n");
 
+  // An enum can switch a union, whose default variant stores the
+  // discriminant with this type.  Enums are open, so any i32 reads back.
+  prtop("{}", cfg("xdrs", std::format(R"(impl xdrs::XDRDiscriminant for {0} {{
+    fn discriminant(&self) -> i32 {{
+        self.0
+    }}
+    fn read_discriminant<'r, R: xdrs::Reader<'r>>(r: &mut R) -> xdrs::ReadResult<Self> {{
+        r.read_i32().map(Self)
+    }}
+}}
+)",
+                                      tname)));
+
   std::string write_block =
       std::format("write!(f, \"{0}({{}})\", self.0)", tname);
 
@@ -1077,10 +1090,9 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
         if (a.has_default) {
           default_decl =
               std::format("#[xdr(default_variant)] Default {{ {}: {} }},",
-                          switch_id, kEnumBaseType);
+                          switch_id, switch_type);
           default_match =
-              std::format("{0}::Default{{ {1} }} => {2},\n", tname, switch_id,
-                          convert_i32(std::format("*{}", switch_id)));
+              std::format("{0}::Default{{ {1} }} => *{1},\n", tname, switch_id);
         }
       }
       else {
@@ -1108,11 +1120,10 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
           std::format_to(
               std::back_inserter(default_decl),
               "#[xdr(default_variant)] Default {{ {}: {}, {}: {} }},",
-              switch_id, kEnumBaseType, escape_rust_id(a.decl.id),
+              switch_id, switch_type, escape_rust_id(a.decl.id),
               type_name(a.decl, false, false));
-          default_match =
-              std::format("{0}::Default{{ {1},..}} => {2},\n", tname, switch_id,
-                          convert_i32(std::format("*{}", switch_id)));
+          default_match = std::format("{0}::Default{{ {1},..}} => *{1},\n",
+                                      tname, switch_id);
         }
       }
     }

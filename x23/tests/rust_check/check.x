@@ -54,6 +54,22 @@ struct Reading {
   } last;
 };
 
+// A default arm stores the discriminant with the switch type, which decides
+// what the reader accepts: a bool only 0 and 1, an enum any value.
+union BoolResult switch (bool ok) {
+case TRUE:
+  unsigned int value;
+default:
+  string message<32>;
+};
+
+union StatusResult switch (Status status) {
+case OK:
+  unsigned int value;
+default:
+  void;
+};
+
 program check {
   version check_v1 {
     void ping(void) = 0;

@@ -451,4 +451,20 @@ mod tests {
         }
         assert!(dropped.load(Ordering::SeqCst));
     }
+
+    // A default arm's discriminant field has the switch type, so a bool
+    // union only takes the value no case names, and an enum stays open.
+    #[test]
+    fn default_arms_read_through_the_switch_type() {
+        let decode = |b: &[u8]| xdrs::txs::decode::<BoolResult>(b);
+        let r = decode(&[0, 0, 0, 0, 0, 0, 0, 2, b'h', b'i', 0, 0]).unwrap();
+        assert!(!r.ok());
+        assert!(matches!(r, BoolResult::Default { ok: false, .. }));
+        assert!(decode(&[0, 0, 0, 1, 0, 0, 0, 7]).unwrap().ok());
+        assert!(decode(&[0, 0, 0, 2, 0, 0, 0, 0]).is_err());
+
+        let status = xdrs::txs::decode::<StatusResult>(&[0, 0, 0, 9]).unwrap();
+        assert_eq!(status.status(), Status(9));
+        assert_eq!(xdrs::txs::encode(&status).unwrap(), [0, 0, 0, 9]);
+    }
 }
