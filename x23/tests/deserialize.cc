@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -146,6 +147,61 @@ TEST(Deserialize, CxsBadDiscriminant)
   auto status = x23::deserialize_cxs(&value, input);
   ASSERT_FALSE(status);
   EXPECT_EQ(status.error(), CxsErrorCode::kBadDiscriminant);
+}
+
+TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
+{
+  // Valid discriminants still decode.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 1, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool_both_arms v;
+    x23::deserialize(&v, buf);
+    EXPECT_TRUE(v.b());
+  }
+  // RFC4506 4.4: a bool is enum { FALSE = 0, TRUE = 1 }.  Any other value
+  // must be rejected rather than collapsed to true (and re-serialized as 1).
+  for (uint8_t d : {2, 0xff}) {
+    x23::Vec<uint8_t> buf{0, 0, 0, d, 0, 0, 0, 0, 0, 0, 0, 0};
+    bool_both_arms v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput) << int(d);
+  }
+  // uptr's TRUE arm is an optional int, so a trailing 0 is a valid null
+  // pointer and rejection must come from the discriminant itself.
+  {
+    x23::Vec<uint8_t> buf{0x80, 0, 0, 1, 0, 0, 0, 0};
+    uptr v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
+    uptr v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
+}
+
+template<typename T> class BoolUnionDefaultArm : public ::testing::Test {};
+using BoolDefaultUnions =
+    ::testing::Types<bool_with_default, flag_with_default>;
+TYPED_TEST_SUITE(BoolUnionDefaultArm, BoolDefaultUnions);
+
+TYPED_TEST(BoolUnionDefaultArm, TakesOnlyTheUnnamedValue)
+{
+  // The default arm takes FALSE, the one value no case names.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 0, 0, 0, 0, 2, 'h', 'i', 0, 0};
+    TypeParam v;
+    x23::deserialize(&v, buf);
+    EXPECT_FALSE(v.ok());
+    EXPECT_EQ(std::string_view(v.message()), "hi");
+    EXPECT_EQ(x23::serialize(v), buf);
+  }
+  // A non-canonical bool is rejected before the arm lookup, so the default
+  // arm never absorbs it, even through a typedef.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
+    TypeParam v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
 }
 
 TEST(Deserialize, CxsTrailingData)
