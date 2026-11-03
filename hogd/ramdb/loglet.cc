@@ -270,8 +270,8 @@ LogletAllocator::print_stats() const
     disk_pct = stats.disk_buffering * 100 / total;
     free_pct = stats.free * 100 / total;
   }
-  info("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
-       print_iec_bytes(stats.region_bytes), memory_pct, disk_pct, free_pct);
+  debug("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
+        print_iec_bytes(stats.region_bytes), memory_pct, disk_pct, free_pct);
 }
 
 void
