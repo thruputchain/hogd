@@ -39,6 +39,21 @@ struct Receipt {
   Tx *tx;
 };
 
+// Floats lack Eq, Hash and Ord.  The marker must reach the inline types too.
+// #[rust(no_eq)]
+struct Reading {
+  float level;
+  struct {
+    double total;
+  } sum;
+  union switch (bool ok) {
+  case TRUE:
+    double value;
+  case FALSE:
+    void;
+  } last;
+};
+
 program check {
   version check_v1 {
     void ping(void) = 0;
@@ -48,5 +63,6 @@ program check {
     bool verify(Hash) = 4;
     TxBatch pending(void) = 5;
     T scale(T) = 6;
+    double ratio(float, Reading) = 7;
   } = 1;
 } = 0x20000003;
