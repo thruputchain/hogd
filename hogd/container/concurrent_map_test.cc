@@ -321,6 +321,10 @@ TEST(ConcurrentMap, DestructiveIterationDoubleDestroyOnException)
                      }),
                  std::runtime_error);
   }
+  // The throw left the map uncleared, so the destructor finishes on the
+  // background recycler.
+  ConcurrentMap<int, DestroyCounter,
+                IntHasher>::wait_for_background_recycling();
 
   EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries);
 }
@@ -453,6 +457,7 @@ TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterDestructiveIteration)
     }
     ASSERT_NE(map.insert_or_get(1, 1), nullptr);
   }
+  map_t::wait_for_background_recycling();
   EXPECT_EQ(counts.frees_since(), 0U);
 }
 
@@ -466,13 +471,14 @@ TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterSlowClear)
   BucketArrayCounts counts;
 
   {
-    // Destroyed without clear(): the destructor's slow path must both destroy
+    // Destroyed without clear(): the background recycler must both destroy
     // every value and leave the array in a recyclable (all-null) state.
     map_t map(kBuckets);
     for (int i = 0; i < kNumEntries; i++) {
       ASSERT_NE(map.insert_or_get(i, i), nullptr);
     }
   }
+  map_t::wait_for_background_recycling();
   EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries);
   EXPECT_EQ(counts.allocs_since(), 1U);
   EXPECT_EQ(counts.frees_since(), 0U);
@@ -485,6 +491,7 @@ TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterSlowClear)
     }
     ASSERT_NE(map.insert_or_get(7, 7), nullptr);
   }
+  map_t::wait_for_background_recycling();
   // Exactly one more value destroyed: nothing stale survived in the array.
   EXPECT_EQ(destroy_count.load(std::memory_order_relaxed), kNumEntries + 1);
 }
@@ -505,6 +512,7 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
     }
     EXPECT_EQ(counts.allocs_since(), kLiveMaps);
   }
+  map_t::wait_for_background_recycling();
   // The pool keeps kMaxPooledStorages; the excess is freed.
   EXPECT_EQ(counts.frees_since(), kExcess);
 
@@ -517,7 +525,37 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
     }
     EXPECT_EQ(counts.allocs_since(), kLiveMaps + kExcess);
   }
+  map_t::wait_for_background_recycling();
   EXPECT_EQ(counts.frees_since(), 2 * kExcess);
+}
+
+namespace {
+std::atomic<std::thread::id> recycled_on_thread{};
+struct RecordsDestroyingThread {
+  int v;
+  explicit RecordsDestroyingThread(int i) : v(i) {}
+  ~RecordsDestroyingThread()
+  {
+    recycled_on_thread.store(std::this_thread::get_id(),
+                             std::memory_order_relaxed);
+  }
+};
+} // namespace
+
+// Dropping an uncleared map must not clear its bucket array on the dropping
+// thread: that walk is what made e.g. closing a viewing snapshot cost ~16ms.
+TEST(ConcurrentMap, UnclearedMapIsClearedOnBackgroundThread)
+{
+  using map_t = ConcurrentMap<int, RecordsDestroyingThread, IntHasher>;
+  {
+    map_t map(16);
+    ASSERT_NE(map.insert_or_get(1, 1), nullptr);
+  }
+  map_t::wait_for_background_recycling();
+  EXPECT_NE(recycled_on_thread.load(std::memory_order_relaxed),
+            std::thread::id{});
+  EXPECT_NE(recycled_on_thread.load(std::memory_order_relaxed),
+            std::this_thread::get_id());
 }
 
 // Fills more than one 64MB allocator region, recycles the storage, and fills
@@ -549,6 +587,7 @@ TEST(ConcurrentMap, RecycledStorageReusesMultipleAllocatorRegions)
         EXPECT_EQ(value->v, i);
       }
     }
+    map_t::wait_for_background_recycling();
     EXPECT_EQ(destroy_count.load(std::memory_order_relaxed),
               kNumEntries * (round + 1));
     // One bucket array for all rounds: the storage was recycled each time.

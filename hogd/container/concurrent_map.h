@@ -21,6 +21,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
+#include "hogd/container/background_recycler.h"
 #include "hogd/container/merkle/allocator.h"
 
 namespace hogd {
@@ -198,7 +199,7 @@ public:
 
   // Upper bound on the cleared storages (bucket array + value allocator)
   // retained for reuse by maps of this type; see StoragePool below.
-  static constexpr size_t kMaxPooledStorages = 2;
+  static constexpr size_t kMaxPooledStorages = 4;
 
   ConcurrentMap(size_t n_buckets = 1'048'576, Hasher hasher = Hasher())
     : ConcurrentMap(acquire_storage(n_buckets), hasher)
@@ -208,14 +209,28 @@ public:
 
   ~ConcurrentMap()
   {
-    if (!cleared_) {
-      clear_slow();
+    Storage storage{std::move(buckets_), std::move(value_allocator_)};
+    if (cleared_) {
+      recycle(std::move(storage));
+      return;
     }
-    // All clearing paths leave every head nullptr and destroy every value, so
-    // the bucket array can be reused as-is and the allocator's regions can be
-    // handed out again from the start.
-    value_allocator_->reset_all_regions();
-    release_storage(Storage{std::move(buckets_), std::move(value_allocator_)});
+    // Clearing an uncleared map walks every bucket head (1M by default), which
+    // takes milliseconds. Do it serially on the low-priority recycler thread
+    // rather than on the thread dropping the map, which is often on a latency-
+    // sensitive path, and rather than in parallel, which would compete with
+    // commit for cores. The storage rejoins the pool once it is cleared.
+    BackgroundRecycler::instance().submit(
+        [storage = std::move(storage)]() mutable {
+          clear_heads(storage.buckets);
+          recycle(std::move(storage));
+        });
+  }
+
+  // Blocks until storage handed to the background recycler by earlier
+  // destructors has been cleared and returned to the pool. For tests.
+  static void wait_for_background_recycling()
+  {
+    BackgroundRecycler::instance().drain();
   }
 
   static_assert(
@@ -414,15 +429,23 @@ private:
     return std::max<size_t>(1, buckets_.size() / pool.worker_count());
   }
 
-  void clear_slow() noexcept
+  // Recycles storage whose heads are all nullptr and whose values have all
+  // been destroyed: the bucket array can be reused as-is and the allocator's
+  // regions can be handed out again from the start.
+  static void recycle(Storage storage) noexcept
   {
-    for (auto &bucket : buckets_) {
+    storage.value_allocator->reset_all_regions();
+    release_storage(std::move(storage));
+  }
+
+  static void clear_heads(bucket_array_t &buckets) noexcept
+  {
+    for (auto &bucket : buckets) {
       // exchange() rather than load(): the destructor recycles the array, so
       // every head must be nullptr afterwards.
       value_bucket_t::clear(
           bucket.exchange(nullptr, std::memory_order_acquire));
     }
-    cleared_ = true;
   }
 
   bucket_array_t buckets_;
