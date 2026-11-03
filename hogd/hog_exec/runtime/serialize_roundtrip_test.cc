@@ -243,8 +243,8 @@ protected:
           bool success = false;
           using fl = std::numeric_limits<float>;
           using dl = std::numeric_limits<double>;
-          for (auto [f, d] : {std::pair{0.0f, 0.0}, std::pair{-0.0f, -0.0},
-                              std::pair{1.0f, 1.0}, std::pair{-2.5f, -2.5},
+          for (auto [f, d] : {std::pair{0.0F, 0.0}, std::pair{-0.0F, -0.0},
+                              std::pair{1.0F, 1.0}, std::pair{-2.5F, -2.5},
                               std::pair{fl::max(), dl::max()},
                               std::pair{fl::lowest(), dl::lowest()},
                               std::pair{fl::denorm_min(), dl::denorm_min()},

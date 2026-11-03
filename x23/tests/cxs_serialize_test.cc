@@ -276,7 +276,7 @@ TEST(CxsSerialize, FloatEncoding)
   x23::Buf one{0x00, 0x00, 0x80, 0x3f};
   float f;
   ASSERT_TRUE(deserialize_cxs(&f, x23::BufView(one)));
-  EXPECT_EQ(f, 1.0f);
+  EXPECT_EQ(f, 1.0F);
   // A float is always 4 bytes, never a 1-byte integer.
   x23::Buf zero{0x00};
   EXPECT_FALSE(deserialize_cxs(&f, x23::BufView(zero)));
