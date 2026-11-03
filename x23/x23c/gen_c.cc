@@ -36,8 +36,9 @@ c_type(const string &xdr)
       {"float", {"float", "x23_f32"}},
       {"double", {"double", "x23_f64"}},
   };
-  if (xdr == "quadruple")
-    throw std::runtime_error("the C backend does not support quadruple");
+  // No C type is a 128-bit float everywhere, so quadruple, like a type x23c
+  // has not seen, is left for the includer to define along with its
+  // quadruple_decode, quadruple_encode and quadruple_free.
   if (auto it = prims.find(xdr); it != prims.end())
     return it->second;
   return {xdr, xdr};

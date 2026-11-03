@@ -479,6 +479,9 @@ x23_f64_encode(x23_writer *w, const double *v)
   X23_MEMCPY(&u, v, 8);
   return x23_put_fixed(w, 8, u);
 }
+/* Primitives own nothing, but generated code frees every field and element
+ * through its type's P_free, so they need one too.  (void)v keeps compilers
+ * from warning about the unused parameter. */
 #define X23_NOTHING_TO_FREE(P, T)                                              \
   static inline void P##_free(T *v)                                            \
   {                                                                            \
