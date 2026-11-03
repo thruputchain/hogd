@@ -258,9 +258,8 @@ TEST(CxsSerialize, DoubleRoundTrip)
   check_roundtrip(std::numeric_limits<double>::min());
 }
 
-// Floats are raw little-endian IEEE 754 bytes, not compressed like integers
-// (CXS.md, and the Rust bindings).  A round trip cannot catch the encoding
-// being wrong, as long as the decoder agrees with the encoder.
+// Floats are raw little-endian IEEE 754 bytes (CXS.md); a round trip alone
+// would not catch a wrong encoding.
 TEST(CxsSerialize, FloatEncoding)
 {
   check_expect(float{0.0}, {0x00, 0x00, 0x00, 0x00});
