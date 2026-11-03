@@ -251,6 +251,51 @@ TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
             IndexerEpochOutcome::IndexerEpochConflict);
 }
 
+TEST_F(StrictIndexerTest, AddressHistoryStaysInsideItsEpochCoverage)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  auto first = make_block(1, origin.first_prev_hash,
+                          {make_body(1, 0x10), make_body(2, 0x10)});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  AddressTransactionQuery query{};
+  query.address =
+      first.payload.tx_bodies[0].signed_tx.tx.invocation.invoked_address;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  query.limit = 1;
+  auto previous = db_->get_transactions_by_address(query);
+  ASSERT_TRUE(previous);
+  ASSERT_FALSE(previous->cursor.empty());
+
+  const auto next =
+      make_origin("hogp/next", 2, first.identity.consensus_hash, 1);
+  ASSERT_EQ(db_->initialize_epoch(next).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  auto second = make_block(2, next.first_prev_hash, {make_body(3, 0x10)});
+  ASSERT_EQ(db_->apply_committed_block(next, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    query.order = order;
+    query.anchor.kind(order == IterationOrder::IterationOrderAscending
+                          ? BlockAnchorKind::AnchorAtBeginning
+                          : BlockAnchorKind::AnchorAtEnd);
+    auto page = db_->get_transactions_by_address(query);
+    ASSERT_TRUE(page);
+    ASSERT_EQ(page->refs.size(), 1);
+    EXPECT_EQ(page->oldest_block, 2);
+    EXPECT_EQ(page->refs[0].height, 2);
+    EXPECT_TRUE(page->cursor.empty());
+  }
+  query.cursor = previous->cursor;
+  auto stale = db_->get_transactions_by_address(query);
+  ASSERT_FALSE(stale);
+  EXPECT_EQ(stale.error().code(), IndexerErrorCode::kInvalidCursor);
+}
+
 TEST_F(StrictIndexerTest, CommittedValidationAwaitsBeforeIngestMutex)
 {
   IndexerOutboxOrigin origin = make_origin();
@@ -449,6 +494,71 @@ TEST_F(StrictIndexerTest, OrderedApplySupportsEventlessRootAndEmptyBlock)
   EXPECT_EQ(progress.initialized().contiguous_height, 2);
   EXPECT_EQ(progress.initialized().last_consensus_hash,
             empty.identity.consensus_hash);
+}
+
+TEST_F(StrictIndexerTest, NoncanonicalInvocationEvidenceIsRejected)
+{
+  const auto body = make_body(9, 0x10);
+  auto block = make_block(1, test_genesis_hash(), {body});
+  auto &addresses = block.payload.event_logs[0].invoked_addresses;
+  const auto root = body.signed_tx.tx.invocation.invoked_address;
+  addresses = {root, root};
+  EXPECT_FALSE(compute_indexer_payload_roots(block.payload.event_logs,
+                                             block.payload.tx_bodies));
+  ContractAddress higher{};
+  std::ranges::fill(higher, 0x20);
+  addresses = {higher, root};
+  EXPECT_FALSE(compute_indexer_payload_roots(block.payload.event_logs,
+                                             block.payload.tx_bodies));
+  addresses = {root, higher};
+  auto roots = compute_indexer_payload_roots(block.payload.event_logs,
+                                             block.payload.tx_bodies);
+  ASSERT_TRUE(roots.has_value());
+  EXPECT_NE(roots->events_hash,
+            block.payload.consensus_value.proposal_header.events_hash);
+}
+
+TEST_F(StrictIndexerTest, EnteredAddressHistorySurvivesFailureAndRestart)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto body = make_body(8, 0x10);
+  auto block = make_block(1, origin.first_prev_hash, {body});
+  ContractAddress child{};
+  std::ranges::fill(child, 0x20);
+  auto &log = block.payload.event_logs[0];
+  log.invoked_addresses = {body.signed_tx.tx.invocation.invoked_address, child};
+  log.exec_result = ExecResult::ExecResultTxRootFrameReverted;
+  log.events.clear();
+  block.payload.consensus_value.proposal_header.events_hash =
+      compute_indexer_outbox_event_root(block.payload.event_logs,
+                                        block.payload.tx_bodies);
+  refresh_identity(block);
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+  AddressTransactionQuery query{};
+  query.address = child;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+  auto page = reopened->get_transactions_by_address(query);
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->refs.size(), 1);
+  EXPECT_EQ(page->refs[0].tx_hash, log.tx_hash);
+  EXPECT_FALSE(page->refs[0].is_root_target);
+  EXPECT_TRUE(page->refs[0].was_invoked);
+  EXPECT_EQ(page->oldest_block, 1);
+  EXPECT_EQ(page->latest_block, 1);
+
+  query.address = body.signed_tx.tx.invocation.invoked_address;
+  page = reopened->get_transactions_by_address(query);
+  ASSERT_TRUE(page.has_value());
+  ASSERT_EQ(page->refs.size(), 1);
+  EXPECT_TRUE(page->refs[0].is_root_target);
+  EXPECT_TRUE(page->refs[0].was_invoked);
 }
 
 TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
@@ -1386,7 +1496,7 @@ TEST_F(StrictIndexerTest, HistoryContractKeysMustBeWellFormedAndMatchRootBody)
     ContractAddress address{};
     std::ranges::fill(address, damage == 0 ? 0xB0 : 0xA0);
     for (const auto kind :
-         {IndexerKeyFormat::kEvent, IndexerKeyFormat::kRootTx}) {
+         {IndexerKeyFormat::kEvent, IndexerKeyFormat::kAddressTx}) {
       if (!malformed && damage != 3 && kind == IndexerKeyFormat::kEvent) {
         continue;
       }

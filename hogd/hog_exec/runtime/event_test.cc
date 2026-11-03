@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -7,6 +8,7 @@
 #include <string_view>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 
 #include "event.hh"
 #include "exec_result.hh"
@@ -64,6 +66,98 @@ public:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
+
+TEST_F(EventTest, InvocationHistoryLimitCountsRolledBackUniqueAddresses)
+{
+  const auto root = make_contract_address(0x51);
+  std::vector<ContractAddress> children;
+  for (uint32_t i = 0; i < kMaxInvokedAddressesPerTransaction; ++i) {
+    auto address = make_contract_address(0x50);
+    address[30] = static_cast<uint8_t>(i >> 8);
+    address[31] = static_cast<uint8_t>(i);
+    children.push_back(address);
+  }
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> root_fns;
+  root_fns.emplace(
+      0,
+      [children](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        CopyableInvokeInputs inputs{.entrypoint_id = 0,
+                                    .gas_limit = UINT64_MAX,
+                                    .flags =
+                                        std::to_underlying(InvokeFlag::None)};
+        for (size_t i = 0; i <= children.size(); ++i) {
+          // After the rejected new address, an already-entered address still
+          // runs.
+          const auto &address =
+              i == children.size() ? children.front() : children[i];
+          const bool rejected = i == children.size() - 1;
+          CopyableInvokeOutputs outputs{.return_buffer_len = UINT32_MAX,
+                                        .returned_auth_token_count = UINT32_MAX,
+                                        .frame_status =
+                                            InvocationFrameStatusCode::Fault};
+          auto result = co_await ctx.syscall<SyscallNo::kInvoke>(
+              address, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, outputs);
+          if (!result.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          EXPECT_EQ(*result,
+                    rejected ? SyscallErrorCode::
+                                   kSyscallErrorCodeInvokedAddressLimitExceeded
+                             : SyscallErrorCode::kSyscallErrorCodeNone);
+          if (rejected) {
+            EXPECT_EQ(outputs.return_buffer_len, UINT32_MAX);
+            EXPECT_EQ(outputs.returned_auth_token_count, UINT32_MAX);
+            EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Fault);
+          }
+          else {
+            EXPECT_EQ(outputs.frame_status, InvocationFrameStatusCode::Abort);
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> child_fns;
+  child_fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        ctx.handler().set_return_buffer(ReturnBuffer{}, true);
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contracts;
+  contracts.emplace(0, std::make_unique<NativeContract>(std::move(root_fns)));
+  contracts.emplace(1, std::make_unique<NativeContract>(std::move(child_fns)));
+  NativeContext context(std::move(contracts));
+  const auto root_code = make_native_contract(0);
+  const auto child_code = make_native_contract(1);
+  write_contract(root_code);
+  write_contract(child_code);
+  write_deployment(root, root_code);
+  setup_grant_storage_token(root, 1'000'000'000);
+  for (const auto &address : children) {
+    write_deployment(address, child_code);
+  }
+  SignedTransaction tx{
+      .tx =
+          Transaction{.invocation =
+                          Invocation{.invoked_address = root,
+                                     .entrypoint = entrypoint_from_method_id(0),
+                                     .gas_limit = kDefaultMaxTxGas},
+                      .uniquifier = make_new_uniquifier()}};
+  EphemeralTxIdentifier tx_id;
+  auto handler = make_new_system_call_handler(tx, context, &tx_id);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.emit_events(ExecResult::ExecResultOK,
+                                  ProposedTransaction{.signed_tx = tx})());
+  advance_block();
+  const auto log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(log.has_value());
+  ASSERT_EQ(log->invoked_addresses.size(), kMaxInvokedAddressesPerTransaction);
+  EXPECT_FALSE(std::binary_search(log->invoked_addresses.begin(),
+                                  log->invoked_addresses.end(),
+                                  children.back()));
+  EXPECT_TRUE(std::binary_search(log->invoked_addresses.begin(),
+                                 log->invoked_addresses.end(), root));
+}
 
 TEST_F(EventTest, EventSuccess)
 {
@@ -1440,6 +1534,12 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 3);
 
+  // All entered contracts remain visible, including reverted/faulted children.
+  x23::Vec<ContractAddress> entered{addr_emitter, addr_manual_revert,
+                                    addr_deterministic, addr_orchestrator};
+  std::sort(entered.begin(), entered.end());
+  EXPECT_TRUE(std::ranges::equal(tx_event_log->invoked_addresses, entered));
+
   // Verify the events are from the emitter contract
   for (const auto &event : tx_event_log.value().events) {
     ASSERT_EQ(event.contract_address, addr_emitter);
@@ -1466,6 +1566,10 @@ TEST_F(EventTest, EventWithRevertingFrames)
   ASSERT_EQ(tx_event_log_2.value().exec_result,
             ExecResult::ExecResultTxRootFrameReverted);
   ASSERT_TRUE(tx_event_log_2.value().events.empty());
+  // Root rollback discards events, but not evidence that its frame ran.
+  EXPECT_TRUE(std::ranges::equal(tx_event_log_2->invoked_addresses,
+                                 x23::Vec<ContractAddress>{addr_manual_revert,
+                                                           addr_emitter}));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

@@ -3,6 +3,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <span>
 #include <string>
 
 #include "event.hh"
@@ -13,11 +14,15 @@
 
 namespace hogd {
 
-inline constexpr uint32_t kIndexerOutboxFormatVersion = 2;
+inline constexpr uint32_t kIndexerOutboxFormatVersion = 3;
 // x23's unchunked record marker has 31 payload-length bits. Keep this limit
 // local to the indexer replay path instead of narrowing unrelated bulk RPCs.
 inline constexpr size_t kIndexerRpcMaxMessageSize = (size_t{1} << 31) - 1;
 template<typename T> using IndexerPayloadStatus = std::expected<T, std::string>;
+
+// Canonical membership is bounded and strictly increasing by raw address bytes.
+bool
+valid_invoked_addresses(std::span<const ContractAddress> addresses) noexcept;
 
 struct IndexerPayloadRoots {
   EventsHash events_hash;

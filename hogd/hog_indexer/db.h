@@ -140,11 +140,10 @@ public:
   IndexerStatus<TransactionPage>
   get_transactions(TransactionQuery const &query) const;
 
-  // Paginated account transaction history: refs to transactions whose ROOT
-  // invocation targets `query.address`, in block order.  Reads refs directly
-  // off the address index (kind = ROOT_TX), validating each projection against
+  // Paginated root-target and entered-address history in block order.
+  // Reads refs directly from the address index, validating each projection against
   // its stored transaction. Clients fetch full bodies via get_transaction_info.
-  IndexerStatus<TransactionRefPage>
+  IndexerStatus<AddressTransactionRefPage>
   get_transactions_by_address(AddressTransactionQuery const &query) const;
 
   // Exact-height reads over the complete strict-ingestion projection.

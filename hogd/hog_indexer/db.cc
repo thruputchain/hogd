@@ -229,16 +229,24 @@ create_contract_index_sst_chunk(
       sequence_number++;
     }
 
-    // One ROOT_TX row keyed by the tx's root invoked address (seq = 0).
-    // Bodies are index-aligned with events; callers that pass no bodies
-    // (event-log-only tests) simply get no ROOT_TX rows.
+    // Union of root target and entered addresses, one reference per
+    // transaction.
     if (i < bodies_chunk.size()) {
       const ContractAddress &root_addr =
           bodies_chunk[i].signed_tx.tx.invocation.invoked_address;
       IndexerKeyFormat::make_contract_key(key_buffer, root_addr,
-                                          IndexerKeyFormat::kRootTx,
+                                          IndexerKeyFormat::kAddressTx,
                                           block_height, event_log.tx_hash, 0);
       entries.emplace_back(key_buffer, empty_string);
+      for (const auto &address : event_log.invoked_addresses) {
+        if (address == root_addr) {
+          continue;
+        }
+        IndexerKeyFormat::make_contract_key(key_buffer, address,
+                                            IndexerKeyFormat::kAddressTx,
+                                            block_height, event_log.tx_hash, 0);
+        entries.emplace_back(key_buffer, empty_string);
+      }
     }
   }
 
@@ -306,6 +314,7 @@ valid_tx_record(const IndexDB::TxRecord &record, const SHA256Hash &hash,
                 bool require_body)
 {
   return record.height >= 0 && record.events.tx_hash == hash &&
+         valid_invoked_addresses(record.events.invoked_addresses) &&
          (!require_body || sha256(record.tx.signed_tx.tx) == hash);
 }
 
@@ -423,6 +432,11 @@ column_family_has_rows(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle)
   std::unique_ptr<rocksdb::Iterator> iterator(
       db->NewIterator(rocksdb::ReadOptions(), handle));
   iterator->SeekToFirst();
+  // A fresh database already has its format marker; it is not history state.
+  if (handle == db->DefaultColumnFamily() && iterator->Valid() &&
+      iterator->key() == IndexerKeyFormat::kExecutionHistoryFormatKey) {
+    iterator->Next();
+  }
   if (!iterator->status().ok()) {
     error("failed to inspect indexer column family {}: {}", handle->GetName(),
           iterator->status().ToString());
@@ -561,7 +575,17 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  return IndexDB(db_ptr, tx_cf, contract_cf);
+  IndexDB idx(db_ptr, tx_cf, contract_cf);
+  rocksdb::WriteOptions write_options;
+  write_options.sync = true;
+  status =
+      db_ptr->Put(write_options, IndexerKeyFormat::kExecutionHistoryFormatKey,
+                  IndexerKeyFormat::kExecutionHistoryFormat);
+  if (!status.ok()) {
+    error("Failed to write execution history format: {}", status.ToString());
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
+  return idx;
 }
 
 IndexerStatus<IndexDB>
@@ -640,6 +664,16 @@ IndexDB::open(const std::filesystem::path &path,
   }
 
   IndexDB idx(db_ptr, tx_cf, contract_cf);
+  std::string history_format;
+  status = db_ptr->Get(rocksdb::ReadOptions(),
+                       IndexerKeyFormat::kExecutionHistoryFormatKey,
+                       &history_format);
+  if (!status.ok() ||
+      history_format != IndexerKeyFormat::kExecutionHistoryFormat) {
+    error("Incompatible execution history format; rebuild the index from "
+          "compatible committed evidence or use a new data directory");
+    return IndexerError(IndexerErrorCode::kInternal);
+  }
   auto initialized = idx.initialize_progress_from_db();
   if (!initialized) {
     return initialized.error();
@@ -1425,8 +1459,17 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
       }
       IndexerKeyFormat::make_contract_key(
           key, body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
+          IndexerKeyFormat::kAddressTx, height, event_log.tx_hash, 0);
       batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+      for (const auto &address : event_log.invoked_addresses) {
+        if (address == body.signed_tx.tx.invocation.invoked_address) {
+          continue;
+        }
+        IndexerKeyFormat::make_contract_key(key, address,
+                                            IndexerKeyFormat::kAddressTx,
+                                            height, event_log.tx_hash, 0);
+        batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+      }
     }
 
     // The query projection is committed with rows and progress. It copies
@@ -1990,7 +2033,8 @@ private:
     }
     auto parsed = IndexerKeyFormat::parse_contract_key(key_sv);
     if (!parsed || parsed->block_height < 0 ||
-        (kind_ == IndexerKeyFormat::kRootTx && parsed->sequence_number != 0) ||
+        (kind_ == IndexerKeyFormat::kAddressTx &&
+         parsed->sequence_number != 0) ||
         !iter_->value().empty()) {
       failed_ = true;
       return;
@@ -2056,12 +2100,14 @@ valid_event_position(const IndexDB::TxRecord &record, const Position &position,
 }
 
 bool
-valid_root_position(const IndexDB::TxRecord &record, const Position &position,
-                    const ContractAddress &address)
+valid_address_position(const IndexDB::TxRecord &record,
+                       const Position &position, const ContractAddress &address)
 {
   return position.seq == 0 && record.height == position.block &&
          valid_tx_record(record, position.tx, true) &&
-         record.tx.signed_tx.tx.invocation.invoked_address == address;
+         (record.tx.signed_tx.tx.invocation.invoked_address == address ||
+          std::binary_search(record.events.invoked_addresses.begin(),
+                             record.events.invoked_addresses.end(), address));
 }
 
 // Resolves a query's anchor to the block height a scan starts from, or
@@ -2340,7 +2386,7 @@ IndexDB::get_events(EventQuery const &query,
   });
 
   if (scanned != 0 && any_more) {
-    EventCursorPayload payload;
+    EventCursorPayload payload{};
     payload.method = HistoryCursorMethod::CursorEvents;
     payload.query_hash = query_hash;
     payload.order = order;
@@ -2530,7 +2576,7 @@ IndexDB::get_transactions(TransactionQuery const &query) const
   }
 
   if (any_emitted && page.transactions.size() < rows.size()) {
-    EventCursorPayload payload;
+    EventCursorPayload payload{};
     payload.method = HistoryCursorMethod::CursorTransactions;
     payload.query_hash = {};
     payload.order = order;
@@ -2546,19 +2592,35 @@ IndexDB::get_transactions(TransactionQuery const &query) const
   return page;
 }
 
-IndexerStatus<TransactionRefPage>
+IndexerStatus<AddressTransactionRefPage>
 IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
 {
   if (!is_open()) {
     return IndexerError(IndexerErrorCode::kDBNotOpen);
   }
 
-  TransactionRefPage page;
-  BlockHeight max_serve_block = serve_watermark();
+  AddressTransactionRefPage page;
+  const auto progress = durable_progress();
+  if (progress.state() != IndexerProgressState::IndexerProgressInitialized) {
+    return IndexerError(IndexerErrorCode::kQueryNotReady);
+  }
+  const auto epoch_hash = sha256(progress.initialized().origin);
+  BlockHeight max_serve_block =
+      std::min(serve_watermark(), progress.initialized().contiguous_height);
+  if (max_serve_block < progress.initialized().origin.first_height) {
+    return IndexerError(IndexerErrorCode::kQueryNotReady);
+  }
   page.latest_block = max_serve_block;
-  page.oldest_block = oldest_block();
+  page.oldest_block =
+      std::max(oldest_block(), progress.initialized().origin.first_height);
 
   const auto query_hash = cursor::address_query_hash(query.address);
+  if (query.cursor.empty() &&
+      query.anchor.kind() == BlockAnchorKind::AnchorAtHeight &&
+      (query.anchor.height() < page.oldest_block ||
+       query.anchor.height() > page.latest_block)) {
+    return IndexerError(IndexerErrorCode::kHistoryUnavailable);
+  }
   const uint32_t limit = IndexDB::clamp_events_limit(query.limit);
 
   IterationOrder order;
@@ -2572,7 +2634,8 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
                          query.cursor.size()));
     if (!decoded ||
         decoded->method != HistoryCursorMethod::CursorAddressTransactions ||
-        decoded->query_hash != query_hash) {
+        decoded->query_hash != query_hash ||
+        decoded->epoch_hash != epoch_hash) {
       return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     if (decoded->max_block_height > max_serve_block) {
@@ -2580,6 +2643,7 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
     }
     order = decoded->order;
     max_serve_block = decoded->max_block_height;
+    page.latest_block = max_serve_block;
     cursor_pos.block = decoded->block_height;
     cursor_pos.tx = decoded->tx_hash;
     // ROOT_TX rows are always written with seq == 0, so the position we
@@ -2607,9 +2671,12 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   }
 
   if (have_cursor) {
+    if (cursor_pos.block < page.oldest_block) {
+      return IndexerError(IndexerErrorCode::kHistoryUnavailable);
+    }
     auto exists =
         contract_position_exists(db_.get(), contract_cf_handle_, query.address,
-                                 IndexerKeyFormat::kRootTx, cursor_pos);
+                                 IndexerKeyFormat::kAddressTx, cursor_pos);
     if (!exists) {
       return exists.error();
     }
@@ -2617,13 +2684,15 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
       return IndexerError(IndexerErrorCode::kInvalidCursor);
     }
     auto record = get_tx_record(cursor_pos.tx);
-    if (!record || !valid_root_position(*record, cursor_pos, query.address)) {
+    if (!record ||
+        !valid_address_position(*record, cursor_pos, query.address)) {
       return IndexerError(IndexerErrorCode::kInternal);
     }
   }
 
   ContractIter iter(db_.get(), contract_cf_handle_, query.address, order,
-                    max_serve_block, IndexerKeyFormat::kRootTx);
+                    max_serve_block, IndexerKeyFormat::kAddressTx);
+  anchor_block = std::max(anchor_block, page.oldest_block);
   iter.seek(anchor_block, order, have_cursor ? &cursor_pos : nullptr);
   if (have_cursor && iter.has_current()) {
     iter.skip_past(order, cursor_pos);
@@ -2631,18 +2700,26 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
 
   Position last_emitted{};
   bool any_emitted = false;
-  while (page.refs.size() < limit && iter.has_current()) {
+  while (page.refs.size() < limit && iter.has_current() &&
+         iter.current().block >= page.oldest_block) {
     Position const pos = iter.current();
     auto record = get_tx_record(pos.tx);
-    if (!record || !valid_root_position(*record, pos, query.address)) {
-      error("get_transactions_by_address: inconsistent root projection for {} "
-            "at block {}",
-            HexArray(pos.tx).str(), static_cast<int64_t>(pos.block));
+    if (!record || !valid_address_position(*record, pos, query.address)) {
+      error(
+          "get_transactions_by_address: inconsistent address projection for {} "
+          "at block {}",
+          HexArray(pos.tx).str(), static_cast<int64_t>(pos.block));
       return IndexerError(IndexerErrorCode::kInternal);
     }
-    TransactionRef ref;
+    AddressTransactionRef ref;
     ref.tx_hash = pos.tx;
     ref.height = pos.block;
+    ref.is_root_target =
+        record->tx.signed_tx.tx.invocation.invoked_address == query.address;
+    ref.was_invoked =
+        std::binary_search(record->events.invoked_addresses.begin(),
+                           record->events.invoked_addresses.end(),
+                           query.address);
     page.refs.push_back(ref);
     last_emitted = pos;
     any_emitted = true;
@@ -2654,9 +2731,11 @@ IndexDB::get_transactions_by_address(AddressTransactionQuery const &query) const
   }
 
   // More rows remain past the page — emit a continuation cursor.
-  if (any_emitted && iter.has_current()) {
-    EventCursorPayload payload;
+  if (any_emitted && iter.has_current() &&
+      iter.current().block >= page.oldest_block) {
+    EventCursorPayload payload{};
     payload.method = HistoryCursorMethod::CursorAddressTransactions;
+    payload.epoch_hash = epoch_hash;
     payload.query_hash = query_hash;
     payload.order = order;
     payload.block_height = last_emitted.block;

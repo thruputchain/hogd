@@ -198,7 +198,7 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
   const uint32_t seq = 9;
 
   for (IndexerKeyFormat::RecordKind kind :
-       {IndexerKeyFormat::kEvent, IndexerKeyFormat::kRootTx}) {
+       {IndexerKeyFormat::kEvent, IndexerKeyFormat::kAddressTx}) {
     std::string key;
     IndexerKeyFormat::make_contract_key(key, addr, kind, block, tx_hash, seq);
     EXPECT_EQ(key.size(), IndexerKeyFormat::kContractKeySize);
@@ -218,8 +218,9 @@ TEST(KeyFormatTest, ContractKeyRoundTripsRecordKind)
   std::string ev_key, rt_key;
   IndexerKeyFormat::make_contract_key(ev_key, addr, IndexerKeyFormat::kEvent,
                                       block, tx_hash, seq);
-  IndexerKeyFormat::make_contract_key(rt_key, addr, IndexerKeyFormat::kRootTx,
-                                      block, tx_hash, seq);
+  IndexerKeyFormat::make_contract_key(rt_key, addr,
+                                      IndexerKeyFormat::kAddressTx, block,
+                                      tx_hash, seq);
   EXPECT_LT(ev_key, rt_key);
 }
 

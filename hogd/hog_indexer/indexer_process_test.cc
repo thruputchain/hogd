@@ -97,7 +97,7 @@ query_latest_block(std::uint16_t port)
   AddressTransactionQuery query{};
   query.order = IterationOrder::IterationOrderAscending;
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
-  TransactionRefPageResult result =
+  AddressTransactionRefPageResult result =
       client->get_transactions_by_address(query)();
   if (result.outcome() != IndexerQueryOutcome::IndexerQueryOk) {
     throw std::runtime_error(

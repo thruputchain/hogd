@@ -872,6 +872,14 @@ SystemCallHandler::validate_new_invocation(
           owned_auth_tokens.ids())) {
     return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
+  // Reject before the syscall copies calldata or resolves a runtime: rejected
+  // calls pay only the syscall base cost, not length-proportional work.
+  if (invoked_addresses_.size() == kMaxInvokedAddressesPerTransaction &&
+      !std::binary_search(invoked_addresses_.begin(), invoked_addresses_.end(),
+                          address)) {
+    return SyscallError{
+        SyscallErrorCode::kSyscallErrorCodeInvokedAddressLimitExceeded};
+  }
   return {};
 }
 
@@ -937,6 +945,27 @@ SystemCallHandler::invoke(ContractAddress const &address,
         0};
   }
 
+  const auto insertion = std::lower_bound(invoked_addresses_.begin(),
+                                          invoked_addresses_.end(), address);
+  const auto insertion_index =
+      invoked_addresses_.empty() ? 0 : insertion - invoked_addresses_.begin();
+  const bool new_address =
+      insertion == invoked_addresses_.end() || *insertion != address;
+  if (new_address) {
+    if (invoked_addresses_.size() == kMaxInvokedAddressesPerTransaction) {
+      co_return invoke_result_t{
+          SyscallError{
+              SyscallErrorCode::kSyscallErrorCodeInvokedAddressLimitExceeded},
+          0};
+    }
+    try {
+      invoked_addresses_.reserve(invoked_addresses_.size() + 1);
+    } catch (std::exception const &e) {
+      report_dropped_log(e.what());
+      co_return invoke_result_t{SystemError{SystemErrorCode::Unrecoverable}, 0};
+    }
+  }
+
   Invocation invocation = {.invoked_address = address,
                            .entrypoint = entrypoint_from_method_id(method),
                            .gas_limit = gas_limit,
@@ -958,6 +987,14 @@ SystemCallHandler::invoke(ContractAddress const &address,
     co_return invoke_result_t{start_status.error(), 0};
   }
   auto stashed_parent_trace = std::move(start_status.value());
+
+  if (new_address) {
+    // Admission succeeded. Reserved capacity makes this insertion
+    // allocation-free.
+    invoked_addresses_.push_back(address);
+    std::rotate(invoked_addresses_.begin() + insertion_index,
+                invoked_addresses_.end() - 1, invoked_addresses_.end());
+  }
 
   InvokeResult cumulative_result =
       co_await runtime.value()->invoke(method, gas_limit);
@@ -1545,6 +1582,7 @@ SystemCallHandler::emit_events(ExecResult exec_result,
           .exec_result = exec_result,
           .root_output = std::move(root_output),
           .gas_consumed = root_invoke_result_.gas_consumed_,
+          .invoked_addresses = std::move(invoked_addresses_),
           .events = std::move(events),
       },
       std::move(proposed_tx));

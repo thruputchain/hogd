@@ -516,6 +516,10 @@ private:
   PerTransactionDatabaseProxy db_proxy_;
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
+  // Execution evidence belongs to the attempt, not to rollbackable frame state.
+  // Capacity is reserved before admission; membership is added only on entry.
+  x23::Vec<ContractAddress, kMaxInvokedAddressesPerTransaction>
+      invoked_addresses_;
   std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
 #if HOGD_RV32_STACK_USAGE_ENABLED
   std::vector<Rv32StackUsageRecord> rv32_stack_usage_;

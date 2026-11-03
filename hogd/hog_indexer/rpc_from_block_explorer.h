@@ -97,15 +97,15 @@ public:
     co_return ret;
   }
 
-  x23::Async<TransactionRefPageResult>
+  x23::Async<AddressTransactionRefPageResult>
   get_transactions_by_address(AddressTransactionQuery query)
   {
     auto status = db_.get_transactions_by_address(query);
     if (!status) {
-      co_return query_failure<TransactionRefPageResult>(
+      co_return query_failure<AddressTransactionRefPageResult>(
           "get_transactions_by_address", status.error());
     }
-    TransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
+    AddressTransactionRefPageResult ret(IndexerQueryOutcome::IndexerQueryOk);
     ret.page() = std::move(*status);
     co_return ret;
   }

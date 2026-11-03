@@ -114,12 +114,12 @@ IndexerKeyFormat::parse_contract_key(std::string_view key)
   offset += kAddressLen;
 
   // A wrong-size key (above) is a benign "not a contract key" miss.  But a
-  // correctly-sized key whose kind byte is neither kEvent nor kRootTx is a
+  // correctly-sized key whose kind byte is neither kEvent nor kAddressTx is a
   // corrupt row (or one written by a newer binary): the data is present and
   // wrong, so fail loud rather than silently reporting it as absent.
   const auto raw_kind = static_cast<uint8_t>(key[offset]);
   CHECK(raw_kind == static_cast<uint8_t>(kEvent) ||
-        raw_kind == static_cast<uint8_t>(kRootTx));
+        raw_kind == static_cast<uint8_t>(kAddressTx));
   out.kind = static_cast<RecordKind>(raw_kind);
   offset += kKindLen;
 

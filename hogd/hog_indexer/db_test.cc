@@ -15,12 +15,16 @@
 
 #include "event.hh"
 #include "hogd/base/test.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/status.h"
+#include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "proposal_hash.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize.h"
@@ -1241,7 +1245,38 @@ TEST_F(IndexDBTest, HistoryCursorsSeekDirectlyWithinDenseBlock)
     bodies.push_back(body);
     logs.push_back(log);
   }
-  ASSERT_TRUE(db->consume_events(10, logs, bodies));
+  IndexerOutboxOrigin origin{};
+  origin.protocol = protocol_from_text("hogp/test");
+  origin.first_height = 1;
+  origin.first_prev_hash[0] = 1;
+  ASSERT_EQ(db->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  IndexerCommittedBlock block{};
+  auto &payload = block.payload;
+  payload.format_version = kIndexerOutboxFormatVersion;
+  payload.event_logs.append_range(logs);
+  payload.tx_bodies.append_range(bodies);
+  auto &value = payload.consensus_value;
+  value.proposal_header.block_height = 1;
+  value.prev_hash = origin.first_prev_hash;
+  auto roots =
+      compute_indexer_payload_roots(payload.event_logs, payload.tx_bodies);
+  ASSERT_TRUE(roots);
+  value.proposal_header.events_hash = roots->events_hash;
+  value.proposal_header.txs_hash = roots->txs_hash;
+  ProposalTxs txs;
+  SignedTransactionHashBatch signed_hashes;
+  x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+  for (const auto &body : bodies) {
+    signed_hashes.push_back(sha256(body.signed_tx));
+    nondeterministic_data.push_back(body.nondeterministic_proposal_data);
+  }
+  txs.signed_hash = t_to_parallel_batch(signed_hashes)();
+  txs.nondeterministic_data = t_to_parallel_batch(nondeterministic_data)();
+  value.proposal_txs_hash = proposal_txs_compatibility_hash(txs);
+  block.identity.consensus_hash = sha256(value);
+  ASSERT_EQ(db->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
   std::ranges::sort(hashes);
   ScopedPerfCounting counting;
   for (const auto order : {IterationOrder::IterationOrderAscending,

@@ -1,5 +1,6 @@
 #include "hogd/xdr/indexer_payload_validation.h"
 
+#include <algorithm>
 #include <cstddef>
 #include <expected>
 #include <format>
@@ -21,6 +22,16 @@
 #include "x23/vec.h"
 
 namespace hogd {
+bool
+valid_invoked_addresses(std::span<const ContractAddress> addresses) noexcept
+{
+  return addresses.size() <= kMaxInvokedAddressesPerTransaction &&
+         std::adjacent_find(addresses.begin(), addresses.end(),
+                            [](auto const &a, auto const &b) {
+                              return !(a < b);
+                            }) == addresses.end();
+}
+
 size_t
 serialize_event_commitment_leaf(
     x23::Buf &buf, const TxEventLog &event,
@@ -45,6 +56,11 @@ compute_indexer_payload_roots(const TxEventLogBatch &event_logs,
   MerkleTriePrefix tx_trie(/*allocator_type=*/Allocator<Node>::Type::kBump);
   x23::Buf event_leaf;
   for (size_t i = 0; i < tx_bodies.size(); ++i) {
+    const auto &addresses = event_logs[i].invoked_addresses;
+    if (!valid_invoked_addresses(addresses)) {
+      return std::unexpected(
+          std::format("noncanonical invoked addresses at index {}", i));
+    }
     const TransactionHash body_hash = sha256(tx_bodies[i].signed_tx.tx);
     if (body_hash != event_logs[i].tx_hash) {
       return std::unexpected(std::format(

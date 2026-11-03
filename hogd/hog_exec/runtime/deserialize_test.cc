@@ -136,9 +136,12 @@ struct DeserializeBranch<x23::Vec<T, MS>> {
     assert(is_good == 0);
     exists_failure = true;
 
-    std::vector<uint32_t> possible_bad_sizes = {0, 100};
+    // A zero-length vector followed by garbage can become valid when the
+    // garbage is consumed by the next struct field. Use an impossible count.
+    std::vector<uint32_t> possible_bad_sizes = {
+        std::numeric_limits<uint32_t>::max()};
     if (MS != std::numeric_limits<uint32_t>::max()) {
-      possible_bad_sizes.push_back(padded_size(MS + 1));
+      possible_bad_sizes.push_back(MS + 1);
     }
 
     auto choice = set.choice(possible_bad_sizes.size());
@@ -240,7 +243,14 @@ run_deserialize_test(std::vector<uint8_t> const &choices = {})
                     }
                   }
 
-                  if (exists_failure != found_failure) {
+                  // Concatenating malformed fields can produce a different,
+                  // valid struct: extra bytes in a fixed array may become the
+                  // next field. Acceptance is sound only if it roundtrips to
+                  // exactly the same canonical bytes.
+                  const bool canonical =
+                      !found_failure && x23::serialize(value) == data;
+                  if ((!exists_failure && found_failure) ||
+                      (!found_failure && !canonical)) {
                     ADD_FAILURE() << "exists_failure != found_failure";
                     warn("bad example: deserialize {} (len = {}) found failure "
                          "{} expected failure {}",

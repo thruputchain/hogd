@@ -42,6 +42,9 @@ public:
   // Column family names for RocksDB
   static constexpr const char *kTxIndexColumnFamily = "tx_index";
   static constexpr const char *kContractIndexColumnFamily = "contract_index";
+  static constexpr const char *kExecutionHistoryFormatKey =
+      "meta:execution_history_format";
+  static constexpr const char *kExecutionHistoryFormat = "1";
 
   // Default-CF meta key holding the highest block_height ever observed
   // by consume_events, encoded as 8 bytes big-endian.  Read once on
@@ -87,8 +90,8 @@ public:
   // Record kind discriminator, stored as 1 byte immediately after the
   // address so each (address, kind) forms a contiguous key range.
   enum RecordKind : uint8_t {
-    kEvent = 0,  // one row per emitted event, keyed by emitter address
-    kRootTx = 1, // one row per tx, keyed by root invoked_address (seq = 0)
+    kEvent = 0,     // one row per emitted event, keyed by emitter address
+    kAddressTx = 1, // one row per root-target/entered-address tx (seq = 0)
   };
 
   // Contract index key format:

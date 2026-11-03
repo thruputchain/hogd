@@ -18,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/event_cursor.h"
@@ -26,8 +27,11 @@
 #include "hogd/hog_indexer/status.h"
 #include "hogd/init.h"
 #include "hogd/metrics/health.h"
+#include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
 #include "pagination.hh"
+#include "proposal_hash.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -54,6 +58,62 @@ public:
   }
 
 protected:
+  // Address history requires contiguous committed evidence, including empty
+  // blocks before the fixture's requested height.
+  x23::Async<void>
+  ingest_committed_events(BlockHeight height, const TxEventLogBatch &logs,
+                          const ProposedTransactionBatch &bodies,
+                          IndexDB *database = nullptr)
+  {
+    auto &index = database ? *database : *db_;
+    auto progress = index.durable_progress();
+    if (progress.state() ==
+        IndexerProgressState::IndexerProgressUninitialized) {
+      IndexerOutboxOrigin origin{};
+      origin.protocol = protocol_from_text("hogp/test");
+      origin.first_height = 1;
+      origin.first_prev_hash[0] = 1;
+      CHECK_EQ(index.initialize_epoch(origin).outcome(),
+               IndexerEpochOutcome::IndexerEpochInitialized);
+      progress = index.durable_progress();
+    }
+    auto current = progress.initialized();
+    for (BlockHeight next = current.contiguous_height + 1; next <= height;
+         ++next) {
+      IndexerCommittedBlock block{};
+      auto &payload = block.payload;
+      payload.format_version = kIndexerOutboxFormatVersion;
+      if (next == height) {
+        payload.event_logs = logs;
+        payload.tx_bodies = bodies;
+      }
+      auto &value = payload.consensus_value;
+      value.proposal_header.block_height = next;
+      value.prev_hash = current.last_consensus_hash;
+      auto roots =
+          compute_indexer_payload_roots(payload.event_logs, payload.tx_bodies);
+      CHECK(roots.has_value());
+      value.proposal_header.events_hash = roots->events_hash;
+      value.proposal_header.txs_hash = roots->txs_hash;
+      ProposalTxs txs;
+      SignedTransactionHashBatch signed_hashes;
+      x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+      for (const auto &body : payload.tx_bodies) {
+        signed_hashes.push_back(sha256(body.signed_tx));
+        nondeterministic_data.push_back(body.nondeterministic_proposal_data);
+      }
+      txs.signed_hash = t_to_parallel_batch(signed_hashes)();
+      txs.nondeterministic_data = t_to_parallel_batch(nondeterministic_data)();
+      value.proposal_txs_hash = proposal_txs_compatibility_hash(txs);
+      block.identity.consensus_hash = sha256(value);
+      CHECK_EQ((co_await index.apply_committed_block(current.origin, block))
+                   .outcome(),
+               IndexerBlockApplyOutcome::IndexerBlockApplied);
+      current = index.durable_progress().initialized();
+    }
+    co_return;
+  }
+
   void SetUp() override
   {
     // Create a temporary test directory for the database.
@@ -274,8 +334,8 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   event_log.tx_hash = tx_hash;
   ASSERT_TRUE(event_log.events.empty());
 
-  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
-                       ProposedTransactionBatch{body})();
+  ingest_committed_events(block_height, TxEventLogBatch{event_log},
+                          ProposedTransactionBatch{body})();
 
   AddressTransactionQuery query{};
   query.address = root_addr;
@@ -283,7 +343,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   query.limit = 0;
 
-  TransactionRefPage page =
+  AddressTransactionRefPage page =
       unwrap_page(block_explorer_->get_transactions_by_address(query)());
   ASSERT_EQ(page.refs.size(), 1);
   EXPECT_EQ(page.refs[0].tx_hash, tx_hash);
@@ -316,8 +376,8 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   ev.serialized_event.resize(4);
   event_log.events.push_back(ev);
 
-  ingest_legacy_events(block_height, TxEventLogBatch{event_log},
-                       ProposedTransactionBatch{body})();
+  ingest_committed_events(block_height, TxEventLogBatch{event_log},
+                          ProposedTransactionBatch{body})();
 
   auto query_for = [&](ContractAddress const &addr) {
     AddressTransactionQuery q{};
@@ -329,12 +389,12 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
   };
 
   // Rooted at A → in A's history.
-  TransactionRefPage a_page = query_for(root_a);
+  AddressTransactionRefPage a_page = query_for(root_a);
   ASSERT_EQ(a_page.refs.size(), 1);
   EXPECT_EQ(a_page.refs[0].tx_hash, tx_hash);
 
   // B only emitted an event → NOT in B's transaction history.
-  TransactionRefPage b_page = query_for(emitter_b);
+  AddressTransactionRefPage b_page = query_for(emitter_b);
   EXPECT_TRUE(b_page.refs.empty());
 
   // But B's event is still found via the event index.
@@ -363,9 +423,9 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     hashes.push_back(h);
     TxEventLog log{};
     log.tx_hash = h;
-    ingest_legacy_events(static_cast<BlockHeight>(300 + i),
-                         TxEventLogBatch{log},
-                         ProposedTransactionBatch{body})();
+    ingest_committed_events(static_cast<BlockHeight>(300 + i),
+                            TxEventLogBatch{log},
+                            ProposedTransactionBatch{body})();
   }
 
   AddressTransactionQuery q{};
@@ -376,7 +436,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
 
   std::vector<SHA256Hash> seen;
   for (int guard = 0; guard < 10; guard++) {
-    TransactionRefPage page =
+    AddressTransactionRefPage page =
         unwrap_page(block_explorer_->get_transactions_by_address(q)());
     for (auto const &r : page.refs) {
       seen.push_back(r.tx_hash);
@@ -407,8 +467,8 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     TxEmittedEvent event{};
     event.contract_address = addr;
     log.events.push_back(event);
-    ingest_legacy_events(height, TxEventLogBatch{log},
-                         ProposedTransactionBatch{body})();
+    ingest_committed_events(height, TxEventLogBatch{log},
+                            ProposedTransactionBatch{body})();
   };
 
   ingest(300, 0x60);
@@ -439,7 +499,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   address_query.order = IterationOrder::IterationOrderAscending;
   address_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   address_query.limit = 1;
-  TransactionRefPage address_page = unwrap_page(
+  AddressTransactionRefPage address_page = unwrap_page(
       block_explorer_->get_transactions_by_address(address_query)());
   ASSERT_EQ(address_page.refs.size(), 1UL);
   ASSERT_FALSE(address_page.cursor.empty());
@@ -466,7 +526,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
       block_explorer_->get_transactions_by_address(address_query)());
   ASSERT_EQ(address_page.refs.size(), 1UL);
   EXPECT_EQ(address_page.refs[0].height, 301);
-  EXPECT_EQ(address_page.latest_block, 302);
+  EXPECT_EQ(address_page.latest_block, 301);
   EXPECT_TRUE(address_page.cursor.empty());
 }
 
@@ -483,8 +543,8 @@ TEST_F(IndexerTest, HistoryCursorsBindMethodAndRootAddress)
     TxEmittedEvent event{};
     event.contract_address = root;
     log.events.push_back(event);
-    ingest_legacy_events(10 + i, TxEventLogBatch{log},
-                         ProposedTransactionBatch{body})();
+    ingest_committed_events(10 + i, TxEventLogBatch{log},
+                            ProposedTransactionBatch{body})();
   }
   for (const auto order : {IterationOrder::IterationOrderAscending,
                            IterationOrder::IterationOrderDescending}) {
@@ -569,7 +629,7 @@ TEST_F(IndexerTest, MalformedHistoryCursorsHaveTypedOutcomes)
 {
   const auto logs = create_event_logs();
   const auto bodies = create_tx_bodies(logs.size());
-  ingest_legacy_events(10, logs, bodies)();
+  ingest_committed_events(10, logs, bodies)();
 
   EventQuery events{};
   events.filters.push_back(
@@ -655,9 +715,9 @@ TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
     logs[i].events[0].num_topics = 0;
     bodies[i].signed_tx.tx.invocation.invoked_address = addr;
     logs[i].tx_hash = sha256(bodies[i].signed_tx.tx);
-    ingest_legacy_events(static_cast<BlockHeight>(10 + i),
-                         TxEventLogBatch{logs[i]},
-                         ProposedTransactionBatch{bodies[i]})();
+    ingest_committed_events(static_cast<BlockHeight>(10 + i),
+                            TxEventLogBatch{logs[i]},
+                            ProposedTransactionBatch{bodies[i]})();
   }
   for (const auto order : {IterationOrder::IterationOrderAscending,
                            IterationOrder::IterationOrderDescending}) {
@@ -693,9 +753,9 @@ TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
         IndexDB::make_new(std::filesystem::path(tmp_dir_.directory()) /
                           (ascending ? "ascending" : "descending"));
     ASSERT_TRUE(replacement);
-    ASSERT_TRUE(
-        replacement->consume_events(10, TxEventLogBatch{logs[0]},
-                                    ProposedTransactionBatch{bodies[0]}));
+    ingest_committed_events(10, TxEventLogBatch{logs[0]},
+                            ProposedTransactionBatch{bodies[0]},
+                            &*replacement)();
     RecentTxFailureCache failures;
     IndexerBlockExplorerRpc rpc(*replacement, failures);
     auto wrong_events = events;
@@ -729,9 +789,9 @@ TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
     EXPECT_EQ(rpc.get_transactions_by_address(address)().outcome(),
               IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
 
-    ASSERT_TRUE(
-        replacement->consume_events(11, TxEventLogBatch{logs[1]},
-                                    ProposedTransactionBatch{bodies[1]}));
+    ingest_committed_events(11, TxEventLogBatch{logs[1]},
+                            ProposedTransactionBatch{bodies[1]},
+                            &*replacement)();
     const auto resumed_events = unwrap_page(rpc.get_events(events)());
     ASSERT_EQ(resumed_events.events.size(), 1);
     EXPECT_EQ(resumed_events.events[0].block_height, ascending ? 11 : 10);
@@ -776,7 +836,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
 
   // Whole batch ingested in a single call: events.size() == 4, but the total
   // number of emitted events across the batch is 0.
-  ingest_legacy_events(block_height, logs, bodies)();
+  ingest_committed_events(block_height, logs, bodies)();
 
   for (uint8_t i = 0; i < 4; i++) {
     AddressTransactionQuery q{};
@@ -786,7 +846,7 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     q.limit = 0;
 
     // Each eventless tx must still have produced its ROOT_TX row.
-    TransactionRefPage page =
+    AddressTransactionRefPage page =
         unwrap_page(block_explorer_->get_transactions_by_address(q)());
     ASSERT_EQ(page.refs.size(), 1);
     EXPECT_EQ(page.refs[0].tx_hash, logs[i].tx_hash);
@@ -921,20 +981,16 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   ASSERT_EQ(tx_page.transactions.size(), 1);
   EXPECT_EQ(tx_page.transactions[0].height, 10);
 
-  // Scan 3 -- indexed address query (get_transactions_by_address): the pending
-  // block-12 ref is hidden even though its tx is point-lookup visible.
+  // Legacy rows cannot establish complete invocation-history coverage.
   AddressTransactionQuery addr_query{};
   addr_query.address = addr;
   addr_query.order = IterationOrder::IterationOrderAscending;
   addr_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   addr_query.limit = 0;
 
-  TransactionRefPage addr_page =
-      unwrap_page(block_explorer_->get_transactions_by_address(addr_query)());
-  EXPECT_EQ(addr_page.latest_block, 10);
-  ASSERT_EQ(addr_page.refs.size(), 1);
-  EXPECT_EQ(addr_page.refs[0].tx_hash, tx10);
-  EXPECT_EQ(addr_page.refs[0].height, 10);
+  EXPECT_EQ(
+      block_explorer_->get_transactions_by_address(addr_query)().outcome(),
+      IndexerQueryOutcome::IndexerQueryNotReady);
 }
 
 // A db-level failure must be reported as such, not as an empty page:
@@ -973,7 +1029,7 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
   addr_query.order = IterationOrder::IterationOrderAscending;
   addr_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
   addr_query.limit = 0;
-  TransactionRefPageResult refs =
+  AddressTransactionRefPageResult refs =
       block_explorer_->get_transactions_by_address(addr_query)();
   EXPECT_EQ(refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
 

@@ -31,6 +31,9 @@ struct EventCursorPayload {
   SHA256Hash tx_hash;
   unsigned int sequence_number;
   BlockHeight max_block_height;
+  // Address history binds its walk to the durable outbox origin. Other
+  // history methods leave this zero until they adopt the same epoch contract.
+  SHA256Hash epoch_hash;
 };
 
 } // namespace hogd
