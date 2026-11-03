@@ -413,6 +413,15 @@ case TRUE:
   double true_val;
 };
 
+// Bool union whose default arm stands for FALSE
+union bool_with_default switch (bool ok)
+{
+case TRUE:
+  int value;
+default:
+  string message<>;
+};
+
 // Struct mixing fixed-opaque of various alignments
 // (exercises first_unsafe_field optimization with mixed field sizes)
 struct mixed_opaque_struct {

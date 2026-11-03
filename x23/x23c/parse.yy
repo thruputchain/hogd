@@ -53,6 +53,52 @@ combine(const string s1, const string s2)
 
 int yylex(YYSTYPE *yylval_param, YYLTYPE *yylloc_param,
 	  size_t *pos, XdrCtx *xc);
+
+// Whether type is bool, directly or through typedefs defined earlier in
+// this file.
+inline bool
+is_bool_type(const XdrCtx *xc, string type)
+{
+  for (size_t depth = 0; depth <= xc->defs.size(); ++depth) {
+    if (type == "bool")
+      return true;
+    const Typedef *td = nullptr;
+    for (const auto &d : xc->defs)
+      if (auto *t = get_if<Typedef>(&d); t && t->id == type)
+        td = t;
+    if (!td || td->qual != kScalar || !holds_alternative<string>(td->type))
+      return false;
+    type = get<string>(td->type);
+  }
+  return false;
+}
+
+// A bool discriminant is validated as 0 or 1 on input, so a default arm
+// can only ever match the value no case names.  Spell that value out as a
+// case: every backend then rejects other wire values as a bad discriminant,
+// including Rust, whose default variant would otherwise accept any i32.
+inline void
+lower_bool_default(YYLTYPE *loc, XdrCtx *xc, UnionBody &body)
+{
+  for (auto &arm : body.arms) {
+    if (!arm.has_default)
+      continue;
+    vector<string> missing;
+    for (string v : {"FALSE", "TRUE"}) {
+      bool named = false;
+      for (const auto &a : body.arms)
+        for (const auto &c : a.cases)
+          named = named || c == v;
+      if (!named)
+        missing.push_back(v);
+    }
+    if (missing.empty())
+      yyerror(loc, xc, "default arm unreachable in union switched on bool",
+              false);
+    arm.has_default = false;
+    arm.cases.insert(arm.cases.end(), missing.begin(), missing.end());
+  }
+}
 }
 
 %token T_BLOCKCOMMENT T_LINECOMMENT T_LITERAL
@@ -213,14 +259,8 @@ case_specs:
 union_body: T_SWITCH '(' scalar_type[type] T_ID[id] ')' '{' case_specs '}' {
     $$ = UnionBody{ .switch_type = $type->text, .switch_id = $id->text,
        	 	    .arms = $case_specs.move().arms };
-    // A bool has only FALSE and TRUE (RFC4506 4.4), so a default arm is dead
-    // and could not round-trip an unknown value.  gen_hh also emits a
-    // static_assert for typedefs of bool, which the parser cannot resolve.
-    if ($type->text == "bool")
-      for (const auto &arm : $$->arms)
-        if (arm.has_default)
-          yyerror(&@type, xc,
-                  "default arm not allowed in union switched on bool", false);
+    if (is_bool_type(xc, $type->text))
+      lower_bool_default(&@type, xc, *$$);
   }
 ;
 

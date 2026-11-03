@@ -6,6 +6,7 @@
 #include <memory>
 #include <new>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <utility>
 
@@ -174,6 +175,25 @@ TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
   {
     x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
     uptr v;
+    EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
+  }
+}
+
+TEST(Deserialize, BoolUnionDefaultArm)
+{
+  // The default arm takes FALSE, the one value no case names.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 0, 0, 0, 0, 2, 'h', 'i', 0, 0};
+    bool_with_default v;
+    x23::deserialize(&v, buf);
+    EXPECT_FALSE(v.ok());
+    EXPECT_EQ(std::string_view(v.message()), "hi");
+    EXPECT_EQ(x23::serialize(v), buf);
+  }
+  // It does not absorb non-canonical bools.
+  {
+    x23::Vec<uint8_t> buf{0, 0, 0, 2, 0, 0, 0, 0};
+    bool_with_default v;
     EXPECT_THROW(x23::deserialize(&v, buf), XdrBadInput);
   }
 }
