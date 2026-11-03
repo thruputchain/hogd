@@ -41,7 +41,7 @@
     "0xe8ccfc8ffc9e81b9",
     "0x2f2cb89270e38729"
   ],
-  "packaging_tool_sha256": "c73424b80bca1b7cc46af079ac8cccff1c4a9d393e9d08ca843742abb43f681a",
+  "packaging_tool_sha256": "15d27035b5f69805f4c8fa444947bb2368124a16187fef7bb5f0b6c21fd979a1",
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: x86_64-unknown-linux-gnu;release: 1.95.0;LLVM version: 22.1.2;",
   "source_sha256": "bf740faa7f03f4de35d9369da9fc7565804466425542ac10fb3206625e00b660",
   "target_triple": "riscv32im-unknown-none-elf"
