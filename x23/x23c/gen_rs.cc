@@ -553,7 +553,8 @@ impl {0}_{1}_Client {{
   auto arg_type = [](const string &type) -> string {
     const static std::set<string_view> scalar_types = {"hyper",
                                                        "unsigned hyper", "bool",
-                                                       "int", "unsigned int"};
+                                                       "int", "unsigned int",
+                                                       "float", "double"};
     if (scalar_types.contains(type)) {
       return map_type(type);
     }
@@ -1184,6 +1185,7 @@ GenRs::map_type(const string &t)
   static const std::map<string, string> type_map{
       {"int", "i32"},   {"unsigned int", "u32"},
       {"hyper", "i64"}, {"unsigned hyper", "u64"},
+      {"float", "f32"}, {"double", "f64"},
       {"opaque", "u8"},
   };
   if (auto it = type_map.find(t); it != type_map.end())
