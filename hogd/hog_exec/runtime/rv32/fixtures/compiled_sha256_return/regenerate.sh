@@ -11,7 +11,8 @@ fi
 
 target="riscv32im-unknown-none-elf"
 expected_rustc_release="1.95.0"
-expected_lowerer_version="rv32-lower 0.42.0"
+repo_root="$(git rev-parse --show-toplevel)"
+expected_lowerer_version="rv32-lower $(cat "${repo_root}/scripts/thruput-tools-version")"
 profile="release"
 elf="target/${target}/${profile}/rv32-compiled-sha256-return"
 header="compiled_sha256_return_fixture.h"

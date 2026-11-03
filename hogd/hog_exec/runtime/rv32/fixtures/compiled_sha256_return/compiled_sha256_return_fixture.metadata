@@ -29,7 +29,7 @@
     "target_triple": "riscv32im-unknown-none-elf"
   },
   "lowering_tool": "rv32-lower",
-  "lowering_tool_version": "rv32-lower 0.42.0",
+  "lowering_tool_version": "rv32-lower 0.43.0",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
