@@ -15,6 +15,7 @@
 #include <vector>
 
 #include <x23/nodestroy.h>
+#include <x23/threadpool.h>
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
