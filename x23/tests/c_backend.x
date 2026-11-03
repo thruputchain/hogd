@@ -21,16 +21,11 @@ struct Point {
   unsigned int y;
 };
 
-// Sizes that are products: a fixed array of a fixed-size struct, and one of
-// a variable-size type, whose size macro is a literal 0.
-struct Grid {
-  Point cells[2];
-  int tag;
-};
-
-struct Names {
-  Label names[2];
-  int tag;
+// Apart from Everything, since C's CXS floats (raw little-endian, as in Rust
+// and CXS.md) differ from x23 C++'s (variable-length integers).
+struct Floats {
+  float f;
+  double d;
 };
 
 struct Prims {
@@ -39,8 +34,6 @@ struct Prims {
   hyper h;
   unsigned hyper uh;
   bool b;
-  float f;
-  double d;
   Color c;
   Hue hue;
   Shade shade;

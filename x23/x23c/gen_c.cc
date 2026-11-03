@@ -201,7 +201,7 @@ struct GenC {
 
   // Common to every named type: size macro, prototypes, view functions and
   // whole-buffer helpers.
-  void gen_common(const string &name, const string &size_expr);
+  void gen_common(const string &name);
 
   string field(const Declaration &d, const string &indent) const;
   string decode_stmt(const Declaration &d, const string &lv,
@@ -210,7 +210,6 @@ struct GenC {
                      const string &indent) const;
   string free_stmt(const Declaration &d, const string &lv,
                    const string &indent) const;
-  static string size_expr(const Declaration &d);
   static string comment_block(const string &comment, const string &indent);
 
   // #[cpp(box)] fields are held as T *, matching gen_hh so C and C++ box the
@@ -476,60 +475,15 @@ GenC::free_stmt(const Declaration &d, const string &lv, const string &in) const
   return {};
 }
 
-// A C constant expression for d's encoded size, or "0" if it varies.
-string
-GenC::size_expr(const Declaration &d)
-{
-  switch (d.qual) {
-  case kVoid:
-    return "0";
-  case kScalar:
-    return c_type(type_of(d)).prefix + "_XDR_SIZE";
-  case kArray:
-    if (type_of(d) == "opaque")
-      return std::format("((({}) + 3u) & ~3u)", d.bound);
-    return std::format("({}_XDR_SIZE * ({}))", c_type(type_of(d)).prefix,
-                       d.bound);
-  case kVec:
-  case kString:
-  case kPtr:
-    return "0";
-  }
-  return "0";
-}
-
-// The sum of sizes, or 0 if any of them is 0 (varies).
-string
-sum_sizes(const vector<string> &sizes)
-{
-  vector<string> parts;
-  for (const auto &s : sizes) {
-    if (s == "0")
-      return "0";
-    parts.push_back(s);
-  }
-  if (parts.empty())
-    return "0";
-  if (parts.size() == 1)
-    return parts[0];
-  string all, sum;
-  for (const auto &p : parts) {
-    all += std::format("{}({}) != 0", all.empty() ? "" : " && ", p);
-    sum += (sum.empty() ? "" : " + ") + p;
-  }
-  return std::format("(({}) ? ({}) : 0)", all, sum);
-}
-
 void
-GenC::gen_common(const string &name, const string &size)
+GenC::gen_common(const string &name)
 {
   protos_ += std::format(
-      "#define {0}_XDR_SIZE {1}\n"
       "static inline x23_status {0}_decode(x23_reader *r, {0} *out);\n"
       "static inline x23_status {0}_encode(x23_writer *w, const {0} *v);\n"
       "static inline void {0}_free({0} *v);\n"
       "X23_PTR_PROTOS({0}, {0})\n",
-      name, size);
+      name);
   funcs_ += std::format("X23_PTR_FUNCS({0}, {0})\n"
                         "X23_BUF_FUNCS({0}, {0})\n\n",
                         name);
@@ -610,7 +564,7 @@ static inline void
 }}
 )",
                         e.id, valid);
-  gen_common(e.id, "4");
+  gen_common(e.id);
 }
 
 void
@@ -631,14 +585,12 @@ GenC::gen_struct(const StructDecl &s, const string &comment)
   types_ += "};\n\n";
 
   string dec, enc, fr;
-  vector<string> sizes;
   for (const auto &d : s.body) {
     if (d.qual == kVoid)
       continue;
     dec += decode_stmt(d, "out->" + c_id(d.id), "  ");
     enc += encode_stmt(d, "v->" + c_id(d.id), "  ");
     fr += free_stmt(d, "v->" + c_id(d.id), "  ");
-    sizes.push_back(size_expr(d));
   }
   if (dec.empty()) {
     dec = "  (void)r;\n";
@@ -664,9 +616,7 @@ static inline void
 {3}}}
 )",
                         s.id, dec, enc, fr);
-  // A struct with no fields encodes to nothing, which "0" (varies) still
-  // handles correctly, if more slowly.
-  gen_common(s.id, sum_sizes(sizes));
+  gen_common(s.id);
 }
 
 void
@@ -698,8 +648,6 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
 
   string dec, enc, fr;
   bool has_default = false;
-  vector<string> arm_sizes;
-  bool any_void = false, any_value = false;
   for (const auto &a : b.arms) {
     string labels;
     for (const auto &c : a.cases)
@@ -717,12 +665,6 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
     dec += "    break;\n";
     enc += "    break;\n";
     fr += "    break;\n";
-    if (a.decl.qual == kVoid)
-      any_void = true;
-    else {
-      any_value = true;
-      arm_sizes.push_back(size_expr(a.decl));
-    }
   }
   if (!has_default) {
     dec += "  default:\n    return X23_ERR_UNION;\n";
@@ -756,20 +698,7 @@ static inline void
 )",
                         u.id, disc.prefix, disc_id, dec, enc, sw, fr);
 
-  // Fixed size only when every arm has the same fixed size.
-  string size = "0";
-  if (!any_value)
-    size = disc.prefix + "_XDR_SIZE";
-  else if (!any_void &&
-           std::ranges::none_of(arm_sizes, [](auto &s) { return s == "0"; })) {
-    string cond;
-    for (const auto &s : arm_sizes)
-      cond += std::format("{}({}) == ({})", cond.empty() ? "" : " && ", s,
-                          arm_sizes[0]);
-    size = std::format("(({}) ? {}_XDR_SIZE + ({}) : 0)", cond, disc.prefix,
-                       arm_sizes[0]);
-  }
-  gen_common(u.id, size);
+  gen_common(u.id);
 }
 
 void
@@ -847,7 +776,7 @@ static inline void
 {3}}}
 )",
                         n, dec, enc, fr.empty() ? "  (void)v;\n" : fr);
-  gen_common(n, size_expr(t));
+  gen_common(n);
 }
 
 void
@@ -900,8 +829,7 @@ gen_c(vector<Definition> *defs, string const &header)
     out += "/* Forward declarations */\n\n" + g.fwd_ + '\n';
   out += types;
   if (!g.protos_.empty())
-    out += "/* Encoded sizes (0 if variable) and prototypes */\n\n" +
-           g.protos_ + '\n';
+    out += "/* Prototypes */\n\n" + g.protos_ + '\n';
   out += g.funcs_;
   out += "X23_C_LINKAGE_END\n";
   return out;

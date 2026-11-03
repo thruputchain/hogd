@@ -14,6 +14,17 @@
 
 #include "tests/c_backend.hh"
 #include "x23/serialize.h"
+#include "x23/serialize_cxs.h"
+
+// Corrupted counts would otherwise have decoding allocate gigabytes; capped,
+// they fail with X23_ERR_NOMEM.  Valid test values need far less.
+static void *
+capped_malloc(size_t n)
+{
+  return n > (16u << 20) ? nullptr : std::malloc(n);
+}
+#define X23_MALLOC(n) capped_malloc(n)
+#define X23_FREE(p) std::free(p)
 
 // After the C++ header, whose constants the C header's macros would rename.
 #include "tests/c_backend.h"
@@ -252,8 +263,7 @@ check(const Everything &c, const ctest::Everything &x)
 {
   const auto &p = x.prims;
   CHECK(c.prims.i == p.i && c.prims.u == p.u && c.prims.h == p.h &&
-        c.prims.uh == p.uh && c.prims.b == p.b && c.prims.f == p.f &&
-        c.prims.d == p.d && c.prims.c == int32_t(p.c) &&
+        c.prims.uh == p.uh && c.prims.b == p.b && c.prims.c == int32_t(p.c) &&
         c.prims.hue == int32_t(p.hue) && c.prims.shade == int32_t(p.shade));
   CHECK(std::memcmp(c.hash.bytes, x.hash.data(), 32) == 0);
   CHECK(std::memcmp(c.odd.bytes, x.odd.data(), 5) == 0);
@@ -406,8 +416,8 @@ to_c(const ctest::Everything &x, Arena &a)
 {
   Everything c{};
   const auto &p = x.prims;
-  c.prims = {p.i, p.u, p.h,          p.uh,           p.b,
-             p.f, p.d, int32_t(p.c), int32_t(p.hue), int32_t(p.shade)};
+  c.prims = {
+      p.i, p.u, p.h, p.uh, p.b, int32_t(p.c), int32_t(p.hue), int32_t(p.shade)};
   std::memcpy(c.hash.bytes, x.hash.data(), 32);
   std::memcpy(c.odd.bytes, x.odd.data(), 5);
   c.blob = c_bytes(x.blob);
@@ -443,10 +453,23 @@ to_c(const ctest::Everything &x, Arena &a)
 }
 
 template<typename X>
+Bytes
+cpp_encode(const X &x, bool cxs)
+{
+  if (!cxs)
+    return to_bytes(x23::serialize(x));
+  auto b = x23::serialize_cxs(x);
+  CHECK(b.has_value());
+  return to_bytes(*b);
+}
+
+template<typename X>
 bool
-cpp_accepts(const Bytes &b)
+cpp_accepts(const Bytes &b, bool cxs)
 {
   X v;
+  if (cxs)
+    return x23::deserialize_cxs(&v, std::span<const uint8_t>(b)).has_value();
   try {
     x23::Buf buf(b.data(), b.data() + b.size());
     x23::deserialize(&v, x23::BufViewEnd(buf));
@@ -466,17 +489,28 @@ cpp_reencode(const Bytes &b)
   return to_bytes(x23::serialize(v));
 }
 
+using FromFn = x23_status (*)(const uint8_t *, uint32_t, Everything *);
+using ToFn = x23_status (*)(const Everything *, uint8_t *, uint32_t,
+                            uint32_t *);
+
 // Corrupts an encoding and checks that C accepts what C++ does.
 void
-mutate(std::mt19937_64 &rng, const Bytes &good)
+mutate(std::mt19937_64 &rng, const Bytes &good, bool cxs)
 {
+  FromFn from = cxs ? Everything_from_cxs : Everything_from_xdr;
+  ToFn to = cxs ? Everything_to_cxs : Everything_to_xdr;
   Bytes b = good;
   switch (rng() % 5) {
   case 0: // one byte
     b[rng() % b.size()] = uint8_t(rng());
     break;
-  case 1: // a word: huge, a bad bool or length, or zero
-    if (b.size() >= 4) {
+  case 1:
+    if (cxs) { // a CXS header byte, or one with reserved low bits
+      static constexpr uint8_t kHeaders[] = {0x3f, 0x7f, 0xbf,
+                                             0xff, 0x40, 0x3e};
+      b[rng() % b.size()] = kHeaders[rng() % std::size(kHeaders)];
+    }
+    else if (b.size() >= 4) { // a word: huge, a bad bool or length, or zero
       static constexpr uint32_t kWords[] = {0xffffffff, 2, 0, 1, 0x80000000};
       size_t w = rng() % (b.size() / 4);
       uint32_t v = kWords[rng() % std::size(kWords)];
@@ -490,22 +524,23 @@ mutate(std::mt19937_64 &rng, const Bytes &good)
   case 3: // trailing data
     b.resize(b.size() + 4 * (1 + rng() % 2));
     break;
-  case 4: // misaligned
+  case 4: // misaligned, for XDR
     b.push_back(0);
     break;
   }
-  bool cpp_ok = cpp_accepts<ctest::Everything>(b);
+  bool cpp_ok = cpp_accepts<ctest::Everything>(b, cxs);
   Everything c;
-  x23_status st = Everything_from_xdr(b.data(), uint32_t(b.size()), &c);
+  x23_status st = from(b.data(), uint32_t(b.size()), &c);
   if (st == X23_OK) {
     CHECK(cpp_ok);
-    CHECK(c_encode(c, Everything_to_xdr) == b);
+    CHECK(c_encode(c, to) == b);
     Everything_free(&c);
   }
   else if (cpp_ok) {
-    // C++ accepts a bool discriminant other than 0 or 1; C (like Rust)
-    // rejects it.
-    CHECK(st == X23_ERR_BOOL && cpp_reencode<ctest::Everything>(b) != b);
+    // C++ accepts a bool discriminant other than 0 or 1 in XDR; C (like Rust,
+    // and like C++ in CXS) rejects it.
+    CHECK(!cxs && st == X23_ERR_BOOL &&
+          cpp_reencode<ctest::Everything>(b) != b);
   }
 }
 
@@ -517,45 +552,167 @@ random_tests(int n)
     Randomizer rnd(seed);
     ctest::Everything x;
     rnd.go(x);
-    Bytes b = to_bytes(x23::serialize(x));
-
-    Everything c;
-    CHECK_OK(Everything_from_xdr(b.data(), uint32_t(b.size()), &c));
-    check(c, x);
-    CHECK(c_encode(c, Everything_to_xdr) == b);
-    Everything_free(&c);
-    CHECK(c.shapes.elems == nullptr && c.list == nullptr);
-
     Arena a;
     Everything native = to_c(x, a);
-    CHECK(c_encode(native, Everything_to_xdr) == b);
+    for (bool cxs : {false, true}) {
+      FromFn from = cxs ? Everything_from_cxs : Everything_from_xdr;
+      ToFn to = cxs ? Everything_to_cxs : Everything_to_xdr;
+      Bytes b = cpp_encode(x, cxs);
 
-    for (int j = 0; j < 20; ++j)
-      mutate(rnd.rng, b);
+      Everything c;
+      CHECK_OK(from(b.data(), uint32_t(b.size()), &c));
+      check(c, x);
+      CHECK(c_encode(c, to) == b);
+      Everything_free(&c);
+      CHECK(c.shapes.elems == nullptr && c.list == nullptr);
+
+      CHECK(c_encode(native, to) == b);
+
+      for (int j = 0; j < 20; ++j)
+        mutate(rnd.rng, b, cxs);
+    }
   }
+}
+
+// Floats are raw IEEE 754 bits: as C++ does in XDR, and little-endian in CXS
+// (as in Rust and CXS.md, where x23 C++ uses variable-length integers).
+void
+float_tests()
+{
+  for (int i = 0; i < 500; ++i) {
+    seed = 0xf10a0000 + i;
+    Randomizer rnd(seed);
+    ctest::Floats x;
+    rnd.go(x);
+    Bytes b = to_bytes(x23::serialize(x));
+    Floats c;
+    CHECK_OK(Floats_from_xdr(b.data(), uint32_t(b.size()), &c));
+    CHECK(c.f == x.f && c.d == x.d);
+    CHECK(c_encode(c, Floats_to_xdr) == b);
+
+    uint32_t fb;
+    uint64_t db;
+    std::memcpy(&fb, &x.f, 4);
+    std::memcpy(&db, &x.d, 8);
+    Bytes want(12);
+    for (int j = 0; j < 4; ++j)
+      want[j] = uint8_t(fb >> (8 * j));
+    for (int j = 0; j < 8; ++j)
+      want[4 + j] = uint8_t(db >> (8 * j));
+    CHECK(c_encode(c, Floats_to_cxs) == want);
+    CHECK_OK(Floats_from_cxs(want.data(), uint32_t(want.size()), &c));
+    CHECK(c.f == x.f && c.d == x.d);
+  }
+}
+
+// CXS integers against C++: encodings of values at every size boundary, and
+// acceptance of random short byte strings.
+template<typename T, typename Enc, typename Dec>
+void
+cxs_int_check(T v, Enc enc, Dec dec)
+{
+  uint8_t buf[16];
+  x23_writer w = x23_writer_init(buf, sizeof(buf), true);
+  CHECK_OK(enc(&w, &v));
+  Bytes got(buf, buf + w.pos);
+  CHECK(got == cpp_encode(v, true));
+  x23_reader r = x23_reader_init(buf, w.pos, true);
+  T back;
+  CHECK_OK(dec(&r, &back));
+  CHECK(back == v && r.p == r.end);
+}
+
+template<typename T, typename Dec>
+void
+cxs_bytes_check(const Bytes &b, Dec dec)
+{
+  T cv{}, xv{};
+  x23_reader r = x23_reader_init(b.data(), uint32_t(b.size()), true);
+  bool c_ok = dec(&r, &cv) == X23_OK && r.p == r.end;
+  bool x_ok =
+      x23::deserialize_cxs(&xv, std::span<const uint8_t>(b)).has_value();
+  CHECK(c_ok == x_ok);
+  if (c_ok)
+    CHECK(cv == xv);
+}
+
+void
+cxs_int_tests()
+{
+  seed = 0;
+  static constexpr int64_t kInts[] = {0,
+                                      1,
+                                      -1,
+                                      30,
+                                      31,
+                                      32,
+                                      -30,
+                                      -31,
+                                      -32,
+                                      62,
+                                      63,
+                                      127,
+                                      128,
+                                      -128,
+                                      -129,
+                                      255,
+                                      256,
+                                      32767,
+                                      32768,
+                                      -32768,
+                                      -32769,
+                                      65535,
+                                      65536,
+                                      INT32_MAX,
+                                      INT32_MIN,
+                                      0x7fffffffll + 1,
+                                      -0x80000000ll - 1,
+                                      INT64_MAX,
+                                      INT64_MIN,
+                                      0xffffffffll,
+                                      0x100000000ll};
+  for (int64_t v : kInts) {
+    cxs_int_check<int64_t>(v, x23_i64_encode, x23_i64_decode);
+    cxs_int_check<uint64_t>(uint64_t(v), x23_u64_encode, x23_u64_decode);
+    if (v >= INT32_MIN && v <= INT32_MAX)
+      cxs_int_check<int32_t>(int32_t(v), x23_i32_encode, x23_i32_decode);
+    if (v >= 0 && v <= UINT32_MAX)
+      cxs_int_check<uint32_t>(uint32_t(v), x23_u32_encode, x23_u32_decode);
+  }
+  for (bool v : {false, true})
+    cxs_int_check<bool>(v, x23_bool_encode, x23_bool_decode);
+
+  std::mt19937_64 rng(0xc0de);
+  static constexpr uint8_t kHeaders[] = {0x3f, 0x7f, 0xbf, 0xff};
+  for (int i = 0; i < 200000; ++i) {
+    Bytes b(1 + rng() % 9);
+    for (auto &x : b)
+      x = uint8_t(rng());
+    if (rng() % 2)
+      b[0] = kHeaders[rng() % 4];
+    cxs_bytes_check<int32_t>(b, x23_i32_decode);
+    cxs_bytes_check<uint32_t>(b, x23_u32_decode);
+    cxs_bytes_check<int64_t>(b, x23_i64_decode);
+    cxs_bytes_check<uint64_t>(b, x23_u64_decode);
+    cxs_bytes_check<bool>(b, x23_bool_decode);
+  }
+
+  // Not the shortest form.
+  const uint8_t five_in_two[] = {0x3f, 0x05};
+  x23_reader r = x23_reader_init(five_in_two, 2, true);
+  uint32_t u;
+  CHECK(x23_u32_decode(&r, &u) == X23_ERR_NONCANONICAL);
 }
 
 void
 misc_tests()
 {
   seed = 0;
-  // Fixed sizes: known where the encoding cannot vary.
-  static_assert(Point_XDR_SIZE == 8);
-  static_assert(Grid_XDR_SIZE == 2 * 8 + 4);
-  static_assert(Names_XDR_SIZE == 0);
-  static_assert(Hash_XDR_SIZE == 32);
-  static_assert(Odd_XDR_SIZE == 8);
-  static_assert(Color_XDR_SIZE == 4);
-  static_assert(Prims_XDR_SIZE == 4 * 3 + 8 * 3 + 4 * 4);
-  static_assert(Shape_XDR_SIZE == 0);
-  static_assert(Label_XDR_SIZE == 0);
-
   // Enum constants are prefixed, so reusing a name across enums is fine.
   static_assert(Color_RED == 0 && Shade_RED == 7 && Color_BLUE == -5);
 
   // An enum holds any int32, as in C++ and Rust; a union discriminant must
   // still select an arm.
-  static_assert(Color_XDR_SIZE == 4);
   CHECK(!Shade_valid(0) && Shade_valid(Shade_DARK));
   const uint8_t shade_99[] = {0, 0, 0, 99};
   Shade sh;
@@ -563,7 +720,7 @@ misc_tests()
   CHECK(sh == 99);
   uint32_t n;
   CHECK_OK(Shade_to_xdr(&sh, nullptr, 0, &n));
-  CHECK(cpp_accepts<ctest::Shade>(Bytes(shade_99, shade_99 + 4)));
+  CHECK(cpp_accepts<ctest::Shade>(Bytes(shade_99, shade_99 + 4), false));
   Shape s{};
   s.kind = 3;
   CHECK(Shape_to_xdr(&s, nullptr, 0, &n) == X23_ERR_UNION);
@@ -582,22 +739,18 @@ misc_tests()
   CHECK(Flag_from_xdr(bad_bool + 4, 4, &f) == X23_ERR_BOOL);
   const uint8_t bad_pad[] = {0, 0, 0, 1, 'a', 0, 0, 1};
   x23_bytes bv;
-  x23_reader r = x23_reader_init(bad_pad, sizeof(bad_pad));
+  x23_reader r = x23_reader_init(bad_pad, sizeof(bad_pad), false);
   CHECK(x23_bytes_decode(&r, &bv, 8) == X23_ERR_PADDING);
   x23_bytes_free(&bv);
   Point pt;
   CHECK(Point_from_xdr(bad_pad, 7, &pt) == X23_ERR_ALIGN);
   CHECK(Point_from_xdr(bad_pad, 4, &pt) == X23_ERR_SHORT);
 
-  // A huge count in short input fails before allocating for it.
+  // Opaque data longer than the input fails before allocating.
   const uint8_t huge[] = {0xff, 0xff, 0xff, 0xf0, 0, 0, 0, 0};
-  r = x23_reader_init(huge, sizeof(huge));
+  r = x23_reader_init(huge, sizeof(huge), false);
   CHECK(x23_bytes_decode(&r, &bv, X23_UNBOUNDED) == X23_ERR_SHORT);
   CHECK(bv.data == nullptr);
-  Shape_vec sv;
-  r = x23_reader_init(huge, sizeof(huge));
-  CHECK(Shape_vec_decode(&r, &sv, X23_UNBOUNDED) == X23_ERR_SHORT);
-  CHECK(sv.elems == nullptr);
 }
 
 } // namespace
@@ -606,6 +759,8 @@ int
 main()
 {
   misc_tests();
+  cxs_int_tests();
+  float_tests();
   random_tests(5000);
   std::printf("c_backend: ok\n");
   return 0;
