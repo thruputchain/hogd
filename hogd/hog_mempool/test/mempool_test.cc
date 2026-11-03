@@ -1855,6 +1855,93 @@ TEST(Mempool, NominateCommit)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
+namespace {
+
+// The transactions a proposal names, by hash.
+TransactionHashBatch
+proposed_tx_hashes(const SchedulerProposalResult &result)
+{
+  TransactionHashBatch tx_hashes;
+  EXPECT_TRUE(
+      parallel_batch_to_t(result.proposed_block().proposal.transactions.hash,
+                          tx_hashes, kNoBatchSizeLimit)());
+  return tx_hashes;
+}
+
+} // namespace
+
+// The coordinator proposes on the tip again before the height commits, in a
+// later slot it leads at the same height or after it restarted. The second
+// proposal succeeds and takes the pending transactions again, and the first
+// proposal's block stays committable: committing it leaves its transactions
+// out of later proposals.
+TEST(Mempool, ProposingAgainKeepsTheEarlierProposalCommittable)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+
+  const SchedulerProposalResult first = propose_block(server, db_tip);
+  ASSERT_EQ(first.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_EQ(proposed_tx_hashes(first).size(), 1UL);
+  const SchedulerProposalResult second = propose_block(server, db_tip);
+  ASSERT_EQ(second.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_NE(second.proposed_block().block_id, first.proposed_block().block_id);
+  EXPECT_EQ(proposed_tx_hashes(second), proposed_tx_hashes(first));
+
+  EXPECT_EQ(commit_block(server, db_tip, first.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, first.proposed_block().block_id);
+
+  const SchedulerProposalResult next = propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(next.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(proposed_tx_hashes(next).empty());
+}
+
+// As above, committing the later proposal.
+TEST(Mempool, ProposingAgainKeepsTheLaterProposalCommittable)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(
+      validator_id, t_to_parallel_batch(SignedTransactionBatch{txs[0]})())();
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+
+  const SchedulerProposalResult first = propose_block(server, db_tip);
+  ASSERT_EQ(first.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposalResult second = propose_block(server, db_tip);
+  ASSERT_EQ(second.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+
+  EXPECT_EQ(commit_block(server, db_tip, second.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, second.proposed_block().block_id);
+  // The first block went with the height.
+  EXPECT_EQ(commit_block(server, db_tip, first.proposed_block()),
+            SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+
+  const SchedulerProposalResult next = propose_block(server, get_tip.db_tip());
+  ASSERT_EQ(next.outcome(), SchedulerProposalOutcome::SchedulerProposalOK);
+  EXPECT_TRUE(proposed_tx_hashes(next).empty());
+}
+
 TEST(Mempool, CommitRecordsLatencyHistograms)
 {
   // The fixture clears the metrics registry, then commits the genesis
@@ -3045,6 +3132,101 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   auto res_commit = commit_block(server, res_nominate.proposed_block().block_id,
                                  db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A block above the committed tip's child has its parent above the tip, which
+// the mempool cannot execute on. The validation answers
+// [SchedulerValidationUnknownParentBlock] at once, rather than wait for the
+// parent to commit: the coordinator waits for that itself, and the waiting
+// call would hold one of its connections. Without the fix this test HANGS at
+// the validation below.
+TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal above = res_nominate.proposed_block().proposal;
+  above.header.block_height = db_tip.value.proposal_header.block_height + 2;
+
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
+      res_nominate.proposed_block().block_id, std::move(above))();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationUnknownParentBlock);
+
+  // The validation released its gate increment.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A block at a committed height is too late to validate, the genesis heights
+// included: heights 0 and 1 are established outside ordinary validation, but
+// once committed, a block at either is no more invalid than at any committed
+// height, and the coordinator drops a too-late value where it would vote
+// against an invalid one.
+TEST(Mempool, ValidationAtACommittedGenesisHeightIsTooLate)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  ASSERT_GE(db_tip.value.proposal_header.block_height, 1);
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  for (const BlockHeight height : {BlockHeight{0}, BlockHeight{1}}) {
+    Proposal committed = res_nominate.proposed_block().proposal;
+    committed.header.block_height = height;
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate_block(
+            db_tip.id, std::move(committed))();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationTooLateToValidate)
+        << "height " << height;
+  }
+}
+
+// A commit whose answer the coordinator did not see may be retried: the tip
+// committed again under the value it committed with succeeds, and changes
+// nothing. The tip's id under another value is still refused.
+TEST(Mempool, CommittingTheTipAgainSucceeds)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_nominate.proposed_block();
+  ASSERT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+
+  EXPECT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, tip.id);
+  EXPECT_EQ(get_tip.db_tip().value, tip.value);
+
+  ConsensusValue other = consensus_value(parent, proposed.proposal);
+  other.proposal_header.storage_hash[0] ^= 1;
+  EXPECT_NE(server.mempool_coord_rpc().schedulercoord_commit_block(
+                proposed.block_id, std::move(other))(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 TEST(Mempool, ProposalUsesTransactionRoot)

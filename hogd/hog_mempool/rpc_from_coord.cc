@@ -13,6 +13,7 @@
 #include <ios>
 #include <iterator>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -669,7 +670,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           // the admission RPC does not wait on the coordinator notification.
           ParallelBatch response;
           co_await t_to_parallel_batch(*txs, response);
-          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
+          co_await coord.notify_vetted(response);
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
         }(*this, txs);
@@ -691,6 +692,72 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
     graph_dot << submit_dag.dot();
   }
   co_return std::move(*outcomes);
+}
+
+x23::Async<ErrnoStatus<coord_sched_client_t>>
+MempoolCoordinatorRpc::connect_to_coordinator()
+{
+  CoordCard card;
+  CHECK(Registration::registration().coordinator_registered(&card));
+
+  co_return co_await create_client<CoordScheduler1>(
+      server_address_to_sockaddr(card.address_for_sched),
+      /*retry=*/false,
+      /*max_message_size=*/kBulkRpcMaxMessageSize);
+}
+
+x23::Async<std::shared_ptr<coord_sched_client_t>>
+MempoolCoordinatorRpc::coord_client()
+{
+  {
+    std::lock_guard guard(coord_client_mutex_);
+    if (coord_client_) {
+      co_return coord_client_;
+    }
+  }
+  x23::CoroGuard cg;
+  co_await cg(coord_connect_lock_);
+  {
+    // Another notification may have reconnected meanwhile.
+    std::lock_guard guard(coord_client_mutex_);
+    if (coord_client_) {
+      co_return coord_client_;
+    }
+  }
+  auto client = co_await connect_to_coordinator();
+  if (!client) {
+    co_return nullptr;
+  }
+  auto connected = std::make_shared<coord_sched_client_t>(std::move(*client));
+  std::lock_guard guard(coord_client_mutex_);
+  coord_client_ = connected;
+  co_return connected;
+}
+
+x23::Async<void>
+MempoolCoordinatorRpc::notify_vetted(const ParallelBatch &batch)
+{
+  // A connection that broke while the coordinator was down or restarting
+  // fails the first call made through it; the second attempt connects anew,
+  // and reaches a coordinator that is back.
+  for (int attempt = 0; attempt < 2; ++attempt) {
+    std::shared_ptr<coord_sched_client_t> client = co_await coord_client();
+    if (!client) {
+      break;
+    }
+    try {
+      co_await client->coordscheduler_notify_vetted(batch);
+      co_return;
+    } catch (const std::exception &e) {
+      warn("notify_vetted did not reach the coordinator: {}", e.what());
+    }
+    std::lock_guard guard(coord_client_mutex_);
+    if (coord_client_ == client) {
+      coord_client_.reset();
+    }
+  }
+  warn("notify_vetted: the coordinator is unreachable; dropping the "
+       "notification");
 }
 
 x23::Async<void>
@@ -1657,6 +1724,49 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   co_return result;
 }
 
+x23::Async<void>
+MempoolCoordinatorRpc::retire_nominated_block()
+{
+  PendingBlock &nominated = nominated_block_cache_;
+  CHECK_NE(nominated.block_id, 0UL);
+
+  // The block joins the validated blocks with what their commit path reads:
+  // its closed state (the tip it makes, its DB snapshot and event block, kept
+  // under its id) and its transactions, which are [nominated.txs], compacted
+  // to the ones that executed, in the order of [nominated.result_tx_hashes].
+  PendingBlock retired{};
+  retired.db_tip = nominated.db_tip;
+  retired.block_id = nominated.block_id;
+  retired.block_execution = nominated.block_execution;
+  retired.txs = nominated.txs;
+  retired.tx_hashes = nominated.result_tx_hashes;
+
+  // Every transaction the nomination took leaves the scheduler's pending
+  // nomination for its run queue, as when a nomination is rolled back, so
+  // that the next nomination may take them again. If the retired block
+  // commits, they leave the scheduler as a validated block's do.
+  scheduler_->reenqueue_txs(nominated.tx_hashes.cbegin(),
+                            nominated.tx_hashes.cend());
+  {
+    InstrumentedCoroGuard scheduler_guard(
+        MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+        MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
+    co_await scheduler_guard(scheduler_->global_lock_);
+    co_await scheduler_->abandon_pending_nomination(nominated.block_id);
+  }
+  {
+    // [nominated_block_cache_lock_] is held, and taken before this lock
+    // everywhere both are.
+    x23::CoroGuard cache_cg;
+    co_await cache_cg(validated_block_cache_lock_);
+    CHECK(!validated_block_cache_.contains(retired.block_id));
+    validated_block_cache_[retired.block_id] = std::move(retired);
+  }
+  info("retired nominated block {} to the validated blocks",
+       nominated.block_id);
+  nominated.block_id = 0;
+}
+
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
@@ -1704,12 +1814,11 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (nominated_block_cache_.block_id) {
-    // A block was nominated by this node and not yet committed or abandoned.
-    // [schedulercoord_commit_block()] needs to be called before this node can
-    // nominate another block.
-    info("schedulercoord_nominate ret");
-    co_return SchedulerProposalResult(
-        SchedulerProposalOutcome::SchedulerProposalError);
+    // A block this node nominated is not committed or abandoned yet: the
+    // coordinator proposes on the tip again, in a later slot it leads at the
+    // same height, or after it restarted. Both blocks stay committable until
+    // the height commits.
+    co_await retire_nominated_block();
   }
 
   std::atomic<BlockID> proposal_block_id{0};
@@ -2407,55 +2516,48 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                 validation_tx_count);
     });
   });
+  // The open validation gate keeps commits, and so [last_committed_block_],
+  // still from here on.
+  while (!(co_await increment_num_validations_in_progress())) {
+    co_await wait_for_validation_gate_open();
+  }
+  const BlockHeight committed_height =
+      last_committed_block_.value.proposal_header.block_height;
+  if (proposal.header.block_height <= committed_height) {
+    // This block's height is committed: it is too late to validate it.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+  }
   if (proposal.header.block_height <= 1) {
     // Heights 0 and 1 are established outside ordinary validation.
+    co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  while (true) {
-    while (!(co_await increment_num_validations_in_progress())) {
-      co_await wait_for_validation_gate_open();
-    }
-
-    if (proposal.header.block_height <
-        last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is too old to validate.
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
-      info("schedulercoord_validate ret");
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
-    }
-    else if (proposal.header.block_height >
-             last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is ahead of the current block in the mempool. Thus, we need
-      // to wait for the mempool to catch up before verifying this block.
-      co_await decrement_num_validations_in_progress();
-      // If we want to validate a block at height [x], we need to wait for the
-      // block at height [x - 1] to commit.
-      co_await wait_for_block_commit(proposal.header.block_height - 1);
-      // Rather than break out of the loop here, we instead continue to the next
-      // iteration of the loop. This prevents a race where a different block at
-      // height [x] is committed before we are able to wake up, increment the
-      // [num_validations_in_progress_] futex, and exit the loop. If that race
-      // could occur, then we would fail the CHECK below. Instead, we go to the
-      // next iteration, increment the [num_validations_in_progress_] futex, and
-      // then either break out of the loop or we return
-      // [SchedulerValidationTooLateToValidate] if a different block at height x
-      // has already been committed.
-    }
-    else {
-      break;
-    }
+  if (proposal.header.block_height > committed_height + 1) {
+    // The block's parent is above the committed tip, and a block executes
+    // on the committed tip only ([create_snapshot()]). Answer at once rather
+    // than wait for the parent to commit: the coordinator waits for that
+    // itself and validates the block again, and a call that waited would
+    // hold one of the coordinator's connections, which the commit that
+    // ends the wait may be queued behind.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
-  CHECK_EQ(proposal.header.block_height,
-           last_committed_block_.value.proposal_header.block_height + 1);
+  CHECK_EQ(proposal.header.block_height, committed_height + 1);
 
   if (last_committed_block_.id != parent_id) {
-    // Release the validation-gate increment taken at the top of this loop.
+    // Release the validation-gate increment taken above.
     // Without this, the increment leaks: [close_validation_gate()] then waits
     // forever for the count to reach zero, and every subsequent
     // [schedulercoord_commit_block()] wedges. (The bench harness maps a
@@ -3022,6 +3124,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
     }
   });
 
+  // The tip committed again under the value it committed with is a retry of a
+  // commit whose answer the coordinator did not see: it is done. The closed
+  // gate keeps any other commit from moving [last_committed_block_].
+  if (block_id == last_committed_block_.id &&
+      expected_value == last_committed_block_.value) {
+    info("schedulercoord_commit_block ret: the tip, committed again");
+    co_return SchedulerCommitOutcome::SchedulerCommitOK;
+  }
+
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};
     bool committed_nominated{false};
@@ -3073,11 +3184,16 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  auto lock_validated_node = commit_dag.async<void>(
-      "lock validated block cache", [&, validated_guard]() -> x23::Async<void> {
-        co_await (*validated_guard)(validated_block_cache_lock_);
-        co_return;
-      });
+  // After the nominated block cache's lock: a proposal holding that lock
+  // takes this one to retire its earlier nomination.
+  auto lock_validated_node =
+      commit_dag.async<void>("lock validated block cache",
+                             commit_dag.after(lock_nominated_node),
+                             [&, validated_guard]() -> x23::Async<void> {
+                               co_await (*validated_guard)(
+                                   validated_block_cache_lock_);
+                               co_return;
+                             });
 
   auto check_block_node = commit_dag.async<void>(
       "check block exists",
