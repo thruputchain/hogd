@@ -2,7 +2,6 @@
 
 #include <bit>
 #include <concepts>
-#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
