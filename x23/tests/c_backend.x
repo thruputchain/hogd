@@ -21,8 +21,6 @@ struct Point {
   unsigned int y;
 };
 
-// Apart from Everything, since C's CXS floats (raw little-endian, as in Rust
-// and CXS.md) differ from x23 C++'s (variable-length integers).
 struct Floats {
   float f;
   double d;
@@ -95,6 +93,7 @@ case K_TUPLE:
 
 struct Everything {
   Prims prims;
+  Floats floats;
   Hash hash;
   Odd odd;
   opaque blob<MAXV>;

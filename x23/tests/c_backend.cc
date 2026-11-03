@@ -265,6 +265,7 @@ check(const Everything &c, const ctest::Everything &x)
   CHECK(c.prims.i == p.i && c.prims.u == p.u && c.prims.h == p.h &&
         c.prims.uh == p.uh && c.prims.b == p.b && c.prims.c == int32_t(p.c) &&
         c.prims.hue == int32_t(p.hue) && c.prims.shade == int32_t(p.shade));
+  CHECK(c.floats.f == x.floats.f && c.floats.d == x.floats.d);
   CHECK(std::memcmp(c.hash.bytes, x.hash.data(), 32) == 0);
   CHECK(std::memcmp(c.odd.bytes, x.odd.data(), 5) == 0);
   CHECK(same(c.blob, x.blob));
@@ -418,6 +419,7 @@ to_c(const ctest::Everything &x, Arena &a)
   const auto &p = x.prims;
   c.prims = {
       p.i, p.u, p.h, p.uh, p.b, int32_t(p.c), int32_t(p.hue), int32_t(p.shade)};
+  c.floats = {x.floats.f, x.floats.d};
   std::memcpy(c.hash.bytes, x.hash.data(), 32);
   std::memcpy(c.odd.bytes, x.odd.data(), 5);
   c.blob = c_bytes(x.blob);
@@ -574,8 +576,7 @@ random_tests(int n)
   }
 }
 
-// Floats are raw IEEE 754 bits: as C++ does in XDR, and little-endian in CXS
-// (as in Rust and CXS.md, where x23 C++ uses variable-length integers).
+// Floats are raw IEEE 754 bits: big-endian in XDR, little-endian in CXS.
 void
 float_tests()
 {
@@ -600,6 +601,7 @@ float_tests()
     for (int j = 0; j < 8; ++j)
       want[4 + j] = uint8_t(db >> (8 * j));
     CHECK(c_encode(c, Floats_to_cxs) == want);
+    CHECK(cpp_encode(x, true) == want);
     CHECK_OK(Floats_from_cxs(want.data(), uint32_t(want.size()), &c));
     CHECK(c.f == x.f && c.d == x.d);
   }
