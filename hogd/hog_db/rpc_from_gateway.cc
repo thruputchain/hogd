@@ -206,7 +206,7 @@ HogDbGatewayRpc::dbgateway_get_contract(SHA256Hash const &hash)
   }
   DbGatewayContractResult result(RPCError::kRPCNone);
   result.contract_xdr().resize(encoded->size());
-  if (encoded->size() != 0) {
+  if (!encoded->empty()) {
     std::memcpy(result.contract_xdr().data(), encoded->data(), encoded->size());
   }
   return result;
