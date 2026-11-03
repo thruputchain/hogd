@@ -208,7 +208,7 @@ private:
     }
 
     // carve_artifact_fixup consumes a 12-byte control prefix. Bound its input
-    // so replacing that prefix with the 128-byte artifact header still fits
+    // so replacing that prefix with the artifact header still fits
     // libFuzzer's MaxSize.
     const size_t carve_size =
         std::min(input_.size(), max_size_ - rv32::kArtifactHeaderBytes + 12);
@@ -268,7 +268,7 @@ private:
     return true;
   }
 
-  // Serialize a canonical v5 header and body with matching section digests.
+  // Serialize a canonical v6 header and body with matching section digests.
   void rebuild(std::span<const uint8_t> code, std::span<const uint8_t> memory,
                uint32_t memory_start, uint32_t memory_bytes)
   {
@@ -294,6 +294,8 @@ private:
     rv32::test_artifact::append_digest(artifact_, rv32::artifact_digest(code));
     rv32::test_artifact::append_digest(artifact_,
                                        rv32::artifact_digest(memory));
+    rv32::test_artifact::append_u32(artifact_, 0); // spec_schema_version
+    rv32::test_artifact::append_u32(artifact_, 0); // spec_size
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
   }
