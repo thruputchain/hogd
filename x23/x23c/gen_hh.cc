@@ -596,6 +596,12 @@ struct x23::xdr_meta<struct {0}> {{
     }
   }
   bottom_ += "  };\n";
+  // The parser rejects a default arm on a literal bool switch; this also
+  // catches a typedef of bool, which only resolves in C++.
+  if (has_default)
+    bottom_ += "  static_assert(!std::is_same_v<discriminant_type, bool>,\n"
+               "                \"default arm not allowed in union switched "
+               "on bool\");\n";
   bottom_ += "};\n";
 
   if (!namespaces_.empty())

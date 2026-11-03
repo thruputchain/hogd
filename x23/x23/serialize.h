@@ -936,17 +936,12 @@ struct Deserializer
       this->recurse();
     using ops = union_ops<X>;
     typename ops::discriminant_type d;
-    if constexpr (std::is_same_v<typename ops::discriminant_type, bool>) {
-      // Don't let static_cast collapse every nonzero value to true: that
-      // would accept non-canonical encodings and re-serialize them as 1.
-      if (auto raw = get32<Safe>(); raw > 1) [[unlikely]]
-        raise("Bad discriminant {} deserializing {}", raw,
-              ops::meta::type_name);
-      else
-        d = raw;
-    }
+    // go(bool&) rejects values other than 0 and 1; a static_cast would
+    // collapse every nonzero value to true.
+    if constexpr (std::is_same_v<decltype(d), bool>)
+      go<Safe>(d);
     else
-      d = static_cast<typename ops::discriminant_type>(get32<Safe>());
+      d = static_cast<decltype(d)>(get32<Safe>());
     union_set_discriminant(x, d);
     if (ops::index(x) == -1) [[unlikely]]
       raise("Bad discriminant {} deserializing {}", get<0>(x),
