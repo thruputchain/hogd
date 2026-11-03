@@ -1,5 +1,8 @@
 #include <gtest/gtest.h>
 
+#include <bit>
+#include <concepts>
+#include <cstdint>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -306,6 +309,20 @@ protected:
     return res.value().value().value();
   };
 
+  // Floats compare by bits, since -0.0 == 0.0.
+  template<typename T> static void expect_same(T const &got, T const &want)
+  {
+    if constexpr (std::same_as<T, ::cxs_test::Floats>) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(got.f),
+                std::bit_cast<uint32_t>(want.f));
+      EXPECT_EQ(std::bit_cast<uint64_t>(got.d),
+                std::bit_cast<uint64_t>(want.d));
+    }
+    else {
+      EXPECT_EQ(got, want);
+    }
+  }
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   // Coroutine, so gtest's ASSERT_* (which expand to a bare `return`) cannot be
   // used here; failures report via EXPECT_* and bail out leaving `success`
@@ -331,7 +348,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     {
       // TXS
@@ -349,7 +366,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     success = true;
   }

@@ -58,6 +58,10 @@ impl check_check_v1 for Server {
     async fn scale(&self, t: T) -> Result<T, ProgramError> {
         Ok(t * 2)
     }
+
+    async fn ratio(&self, f: f32, r: Reading) -> Result<f64, ProgramError> {
+        Ok(f as f64 * r.sum.total)
+    }
 }
 
 // Replies can be anything that encodes like the wire type: borrowed from the
@@ -103,6 +107,10 @@ impl check_check_v1 for SharedServer {
 
     async fn scale(&self, t: T) -> Result<T, ProgramError> {
         Ok(t * 2)
+    }
+
+    async fn ratio(&self, f: f32, r: Reading) -> Result<f64, ProgramError> {
+        Ok(f as f64 * r.sum.total)
     }
 }
 
@@ -162,6 +170,14 @@ impl check_check_v1 for OpaqueServer {
     ) -> Result<impl xdrs::EncodesAs<T>, ProgramError> {
         Ok(t * 2)
     }
+
+    async fn ratio(
+        &self,
+        f: f32,
+        r: Reading,
+    ) -> Result<impl xdrs::EncodesAs<f64>, ProgramError> {
+        Ok(f as f64 * r.sum.total)
+    }
 }
 
 pub fn dispatcher() -> check_check_v1_Dispatcher<Server> {
@@ -207,7 +223,16 @@ pub async fn call_sites(
     client.verify(&Hash::default()).await?;
     client.pending().await?;
     client.scale(&3).await?;
+    client.ratio(0.5, &reading()).await?;
     Ok(())
+}
+
+pub fn reading() -> Reading {
+    Reading {
+        level: 1.5,
+        sum: Reading_sum { total: 4.0 },
+        last: Reading_last::TRUE { value: -0.0 },
+    }
 }
 
 // Generated client futures have to stay Send to be spawned.
@@ -364,6 +389,7 @@ mod tests {
             assert_eq!(client.add(1, 2).await.unwrap(), 3);
             assert!(client.verify(&Hash::default()).await.unwrap());
             assert_eq!(client.scale(&3).await.unwrap(), 6);
+            assert_eq!(client.ratio(0.5, &reading()).await.unwrap(), 2.0);
             let tx = tx();
             let receipt = client.credit(&5, &tx).await.unwrap();
             assert_eq!(receipt.tx, Some(tx));
