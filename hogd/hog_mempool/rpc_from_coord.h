@@ -152,13 +152,7 @@ public:
 
   static x23::Async<coord_sched_client_t> get_client()
   {
-    CoordCard card;
-    CHECK(Registration::registration().coordinator_registered(&card));
-
-    auto ret = co_await create_client<CoordScheduler1>(
-        server_address_to_sockaddr(card.address_for_sched),
-        /*retry=*/false,
-        /*max_message_size=*/kBulkRpcMaxMessageSize);
+    auto ret = co_await connect_to_coordinator();
     if (!ret)
       panic("rpc_from_coord get_client connect failed: {}",
             ret.error().error_code().message());
@@ -415,8 +409,8 @@ public:
     int64_t current_height;
     // [last_committed_block_] is not an [x23::CoroFutex], so we cannot [wait()]
     // on it until a certain height is reached. However, [auth_data_height_] is
-    // a safe substitute for this, plus [schedulercoord_validate()], which calls
-    // this function, needs to wait for the latest auth data to arrive anyway.
+    // a safe substitute for this, plus [verify_submission()], which calls this
+    // function, needs to wait for the latest auth data to arrive anyway.
     while ((current_height = auth_data_height_.load()) <
            static_cast<int64_t>(expected_height)) {
       co_await auth_data_height_.wait(current_height);
@@ -505,6 +499,22 @@ private:
   submit_unvetted(ParallelSignedTransactionBatch batch,
                   bool malformed_is_protocol_error);
 
+  // A connection to the [CoordScheduler1] service at the address the
+  // coordinator registered.
+  static x23::Async<ErrnoStatus<coord_sched_client_t>> connect_to_coordinator();
+
+  // Tells the coordinator that [batch] is vetted. The call fails while the
+  // coordinator is down or restarting, and the notification is then dropped
+  // (a transaction that was never disseminated still reaches the peers once
+  // it is proposed, through the repair of missing transactions); a call that
+  // fails is made once more, on a new connection, which reaches a coordinator
+  // that is back.
+  x23::Async<void> notify_vetted(const ParallelBatch &batch);
+
+  // The client to call the coordinator through, connected anew if a call
+  // through the previous one failed; null if the coordinator is unreachable.
+  x23::Async<std::shared_ptr<coord_sched_client_t>> coord_client();
+
   // clang-tidy complains that an exception may be thrown in the function
   // [operator=].
   // NOLINTNEXTLINE(bugprone-exception-escape)
@@ -562,8 +572,12 @@ private:
 
   x23::Async<void> finish_init()
   {
-    coord_client_ =
-        std::make_unique<coord_sched_client_t>(co_await get_client());
+    auto coord_client =
+        std::make_shared<coord_sched_client_t>(co_await get_client());
+    {
+      std::lock_guard guard(coord_client_mutex_);
+      coord_client_ = std::move(coord_client);
+    }
     // TODO(jhumphri): I think I just need to create a client for one of the
     // shards? Will the account information that the scheduler needs be
     // distributed across shards?
@@ -721,6 +735,11 @@ private:
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
+  // Moves the block this node nominated into [validated_block_cache_], so that
+  // another block can be nominated at the same height while the first stays
+  // committable, and returns its transactions to the scheduler's run queue.
+  // Called with [nominated_block_cache_lock_] held.
+  x23::Async<void> retire_nominated_block();
   x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
 
   x23::Async<SchedulerCommitOutcome>
@@ -846,7 +865,13 @@ private:
   const ssize_t mempool_tx_size_limit_;
   const size_t num_exec_shards_;
 
-  std::unique_ptr<coord_sched_client_t> coord_client_;
+  // The client [notify_vetted()] calls the coordinator through, null after a
+  // call through it failed. Guarded by [coord_client_mutex_]; a call holds
+  // its own reference, so that a reconnection does not free the client under
+  // it. [coord_connect_lock_] serializes reconnections.
+  std::mutex coord_client_mutex_;
+  std::shared_ptr<coord_sched_client_t> coord_client_;
+  x23::CoroLock coord_connect_lock_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;
   x23::Vec<exec_sched_client_t> exec_clients_;
   std::unique_ptr<event_sched_client_t> event_sched_client_;
