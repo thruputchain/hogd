@@ -35,8 +35,9 @@ struct RustMarkers {
   // #[rust(no_debug)]: leave Debug out of the derive list, so hand-written
   // code can supply a more readable impl.
   bool no_debug = false;
-  // Set for types holding a float or double, which lack Eq, Hash and Ord.
-  bool has_float = false;
+  // #[rust(no_eq)]: derive only the partial traits, for types holding a
+  // float or double (which lack Eq, Hash and Ord), directly or not.
+  bool no_eq = false;
 };
 
 struct GenRs {
@@ -49,9 +50,6 @@ struct GenRs {
   std::size_t indent_{};
   vector<string> namespaces_;
   vector<string> scopes_;
-  // Types defined so far that hold a float or double, directly or through
-  // another such type.  Types from other files are not tracked.
-  std::set<string> float_types_;
 
   constexpr static int kIndentWidth = 4;
 
@@ -73,7 +71,10 @@ struct GenRs {
       comment = std::move(*stripped);
       markers.no_debug = true;
     }
-    markers.has_float = record_float(d);
+    if (optional<string> stripped = line_removed(comment, kNoEq)) {
+      comment = std::move(*stripped);
+      markers.no_eq = true;
+    }
     show_comment(comment, true);
     prtop("\n");
     visit(
@@ -90,50 +91,6 @@ struct GenRs {
         },
         d);
   }
-  bool has_float(const Declaration &d) const
-  {
-    if (d.qual == Declaration::kVoid)
-      return false;
-    if (auto *name = std::get_if<string>(&d.type))
-      return *name == "float" || *name == "double" ||
-             float_types_.contains(*name);
-    if (auto *body = std::get_if<StructBody>(&d.type))
-      return std::ranges::any_of(*body, [this](const Declaration &f) {
-        return has_float(f);
-      });
-    if (auto *body = std::get_if<UnionBody>(&d.type))
-      return std::ranges::any_of(body->arms, [this](const UnionArm &a) {
-        return has_float(a.decl);
-      });
-    return false;
-  }
-
-  // Whether d's type holds a float or double; if so, remember its name.
-  bool record_float(const Definition &d)
-  {
-    Declaration decl;
-    string id;
-    if (auto *t = std::get_if<Typedef>(&d)) {
-      decl = *t;
-      id = t->id;
-    }
-    else if (auto *t = std::get_if<StructDecl>(&d)) {
-      decl.type = t->body;
-      id = t->id;
-    }
-    else if (auto *t = std::get_if<UnionDecl>(&d)) {
-      decl.type = t->body;
-      id = t->id;
-    }
-    else {
-      return false;
-    }
-    if (!has_float(decl))
-      return false;
-    float_types_.insert(id);
-    return true;
-  }
-
   void show_def(const ConstDef &c)
   {
     string val = c.val;
@@ -410,6 +367,7 @@ struct GenRs {
   static constexpr string_view kConstWriteXDR = R"(#[rust(ConstWriteXDR)])";
   static constexpr string_view kDocHidden = R"(#[doc(hidden)])";
   static constexpr string_view kNoDebug = R"(#[rust(no_debug)])";
+  static constexpr string_view kNoEq = R"(#[rust(no_eq)])";
   static constexpr string_view kDefaultDerives =
       R"(#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)])";
   // Debug is dropped for types marked #[rust(no_debug)], leaving the impl to
@@ -418,17 +376,16 @@ struct GenRs {
   static constexpr string_view kDefaultDerivesNoDebug =
       R"(#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)])";
 
-  // Floats are only partially ordered, so types holding them get the partial
-  // traits alone.
-  static constexpr string_view kFloatDerives =
+  // For #[rust(no_eq)] types.
+  static constexpr string_view kPartialDerives =
       R"(#[derive(Clone, Debug, PartialEq, PartialOrd)])";
-  static constexpr string_view kFloatDerivesNoDebug =
+  static constexpr string_view kPartialDerivesNoDebug =
       R"(#[derive(Clone, PartialEq, PartialOrd)])";
 
   static string_view default_derives(RustMarkers markers)
   {
-    if (markers.has_float)
-      return markers.no_debug ? kFloatDerivesNoDebug : kFloatDerives;
+    if (markers.no_eq)
+      return markers.no_debug ? kPartialDerivesNoDebug : kPartialDerives;
     return markers.no_debug ? kDefaultDerivesNoDebug : kDefaultDerives;
   }
 
