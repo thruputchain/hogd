@@ -551,10 +551,9 @@ impl {0}_{1}_Client {{
   // Scalars go by value; anything else is borrowed as any type that encodes
   // like it.  ?Sized admits slices, e.g. of Arcs where the wire type is a Vec.
   auto arg_type = [](const string &type) -> string {
-    const static std::set<string_view> scalar_types = {"hyper",
-                                                       "unsigned hyper", "bool",
-                                                       "int", "unsigned int",
-                                                       "float", "double"};
+    const static std::set<string_view> scalar_types = {
+        "hyper",        "unsigned hyper", "bool",  "int",
+        "unsigned int", "float",          "double"};
     if (scalar_types.contains(type)) {
       return map_type(type);
     }
