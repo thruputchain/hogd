@@ -2397,7 +2397,9 @@ TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
   committed.store(true, std::memory_order_relaxed);
   retry_thread.join();
 
-  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  // The retry commits the tip again under its value, which answers OK (see
+  // CommittingTheTipAgainSucceeds) and is no commit of its own.
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
