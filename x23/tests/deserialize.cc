@@ -180,7 +180,8 @@ TEST(Deserialize, BoolUnionDiscriminantMustBeCanonical)
 }
 
 template<typename T> class BoolUnionDefaultArm : public ::testing::Test {};
-using BoolDefaultUnions = ::testing::Types<bool_with_default, flag_with_default>;
+using BoolDefaultUnions =
+    ::testing::Types<bool_with_default, flag_with_default>;
 TYPED_TEST_SUITE(BoolUnionDefaultArm, BoolDefaultUnions);
 
 TYPED_TEST(BoolUnionDefaultArm, TakesOnlyTheUnnamedValue)
