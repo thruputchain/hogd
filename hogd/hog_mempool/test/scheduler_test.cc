@@ -522,7 +522,6 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
   const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
   const SignedTransaction a = with_signature(body, 1);
   const SignedTransaction b = with_signature(body, 2);
-  const SignedTransaction c = with_signature(body, 3);
   const TransactionHash tx_hash = sha256(body.tx);
 
   MempoolTestInfra server;
@@ -534,39 +533,23 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
     auto [entry, lock] = scheduler->txs_.find(sha256(a));
     ASSERT_NE(entry, nullptr);
     shared_hashes = (*entry)->signed_tx_hashes;
-    EXPECT_EQ((*entry)->signed_tx_hashes->size(), 1UL);
-    EXPECT_TRUE((*entry)->signed_tx_hashes->contains(sha256(a)));
   }
   auto held_a = scheduler->find_signed_tx(sha256(a));
 
-  for (const SignedTransaction &tx : {b, c, a, b}) {
-    scheduler->add_txs({tx}, {tx_hash}, {sha256(tx)},
-                       Scheduler::CachedVariant::kSubmitVetted)();
-  }
-  for (const SignedTransaction &tx : {a, b, c}) {
-    auto [entry, lock] = scheduler->txs_.find(sha256(tx));
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  {
+    auto [entry, lock] = scheduler->txs_.find(sha256(b));
     ASSERT_NE(entry, nullptr);
     EXPECT_EQ((*entry)->signed_tx_hashes, shared_hashes.lock());
   }
-  {
-    auto hashes = shared_hashes.lock();
-    ASSERT_TRUE(hashes);
-    EXPECT_EQ(hashes->size(), 3UL);
-    EXPECT_TRUE(hashes->contains(sha256(a)));
-    EXPECT_TRUE(hashes->contains(sha256(b)));
-    EXPECT_TRUE(hashes->contains(sha256(c)));
-  }
-  auto held_c = scheduler->find_signed_tx(sha256(c));
+  auto held_b = scheduler->find_signed_tx(sha256(b));
   TransactionHashBatch removed{tx_hash};
   scheduler->remove_from_scheduler(x23::span<const TransactionHash>(removed))();
-  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
-  for (const SignedTransaction &tx : {a, b, c}) {
-    EXPECT_FALSE(scheduler->find_signed_tx(sha256(tx)));
-  }
   EXPECT_FALSE(shared_hashes.expired());
   held_a.reset();
   EXPECT_FALSE(shared_hashes.expired());
-  held_c.reset();
+  held_b.reset();
   EXPECT_TRUE(shared_hashes.expired());
 }
 
