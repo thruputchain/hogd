@@ -451,4 +451,21 @@ mod tests {
         }
         assert!(dropped.load(Ordering::SeqCst));
     }
+
+    #[test]
+    fn case_values_keep_the_switch_type() {
+        let max = Unsigned::_4294967295 { v: 1 };
+        let bytes = xdrs::txs::encode(&max).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<Unsigned>(&bytes).unwrap(), max);
+        assert_eq!(max.k(), u32::MAX);
+        assert_eq!(Unsigned::_0x80000000.k(), 0x8000_0000);
+        assert_eq!(Unsigned::_MAX_BATCH.k(), MAX_BATCH);
+
+        let neg = Signed::_neg1 { v: 2 };
+        let bytes = xdrs::txs::encode(&neg).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 2]);
+        assert_eq!(xdrs::txs::decode::<Signed>(&bytes).unwrap(), neg);
+        assert_eq!(Signed::_neg2147483648.k(), i32::MIN);
+    }
 }

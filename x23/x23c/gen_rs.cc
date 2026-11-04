@@ -1012,11 +1012,23 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
       // so access the inner value with .0
       return b.switch_type + "::" + c + ".0";
     }
-    return c;
+    // Type the case value as the switch type before the `as i32` callers
+    // append: a bare literal is an i32, so an unsigned case of 2^31 or more
+    // would not compile.  A named constant is a u32 or u64, so cast it.
+    bool literal =
+        !c.empty() &&
+        (std::isdigit(static_cast<unsigned char>(c[0])) || c[0] == '-');
+    // Parenthesized so `as i32` applies even where the derive pastes this
+    // in statement position.
+    return std::format("({{ const V: {} = {}; V }})", switch_type,
+                       literal ? c : std::format("{} as {}", c, switch_type));
   };
 
   auto int_qualified_declname = [&](std::string c) {
     if (!is_enum) {
+      // A negative case such as -1 becomes _neg1; `-` is not an identifier.
+      if (c.starts_with('-'))
+        return "_neg" + c.substr(1);
       return std::string("_") + c;
     }
     return c;

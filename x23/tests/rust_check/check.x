@@ -54,6 +54,24 @@ struct Reading {
   } last;
 };
 
+// Case values have the switch type: unsigned cases of 2^31 and up, and
+// negative signed ones, must compile and keep their value.
+union Unsigned switch (unsigned int k) {
+case 4294967295:
+  int v;
+case 0x80000000:
+  void;
+case MAX_BATCH:
+  void;
+};
+
+union Signed switch (int k) {
+case -1:
+  int v;
+case -2147483648:
+  void;
+};
+
 program check {
   version check_v1 {
     void ping(void) = 0;
