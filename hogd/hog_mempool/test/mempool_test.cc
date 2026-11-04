@@ -5322,10 +5322,10 @@ TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
   ASSERT_NE(sha256(mid), sha256(variants.thin));
   ASSERT_NE(sha256(mid), sha256(variants.fat));
 
-  for (const SignedTransactionBatch &signings :
-       {SignedTransactionBatch{mid, variants.fat},
-        SignedTransactionBatch{variants.thin, mid, variants.fat}}) {
-    SCOPED_TRACE(signings.size());
+  for (const SignedTransactionBatch &missing_signings :
+       {SignedTransactionBatch{mid},
+        SignedTransactionBatch{variants.thin, mid}}) {
+    SCOPED_TRACE(missing_signings.size());
     MempoolTestInfra validator;
     validator.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
                                     variants.auth_data);
@@ -5339,10 +5339,13 @@ TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
 
     SignedTransactionHashBatch named;
     x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
-    for (const SignedTransaction &signing : signings) {
+    for (const SignedTransaction &signing : missing_signings) {
       named.push_back(sha256(signing));
       nondeterministic_data.push_back(NondeterministicProposalData{});
     }
+    const SignedTransactionHashBatch expected_missing_hashes = named;
+    named.push_back(sha256(variants.fat));
+    nondeterministic_data.push_back(NondeterministicProposalData{});
     const Proposal proposal{
         .header = {.ext = {},
                    .network_hash = MempoolTestInfra::kNetworkHash,
@@ -5359,21 +5362,11 @@ TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
             tip.db_tip().id, proposal)();
     ASSERT_EQ(missing.outcome(),
               SchedulerValidationOutcome::SchedulerValidationMissingTxs);
-    ASSERT_EQ(missing.missing_signed_tx_hashes().size(), signings.size() - 1);
+    ASSERT_EQ(missing.missing_signed_tx_hashes(), expected_missing_hashes);
 
-    // Play the coordinator: supply exactly the signings requested.
-    SignedTransactionBatch supplied;
-    for (const SignedTransactionHash &missing_hash :
-         missing.missing_signed_tx_hashes()) {
-      const auto signing =
-          std::ranges::find_if(signings, [&](const SignedTransaction &stx) {
-            return sha256(stx) == missing_hash;
-          });
-      ASSERT_NE(signing, signings.end());
-      supplied.push_back(*signing);
-    }
+    // Supply the missing signings in one batch.
     validator.mempool_coord_rpc().schedulercoord_submit_vetted(
-        ValidatorID{}, t_to_parallel_batch(supplied)())();
+        ValidatorID{}, t_to_parallel_batch(missing_signings)())();
     ASSERT_EQ(validator.mempool_coord_rpc().scheduler()->size(), 1UL);
 
     // With every signing available, validation rejects the repeated body.
