@@ -375,9 +375,6 @@ private:
     }
   };
 
-  using SignedTransactionHashSet =
-      std::unordered_set<SignedTransactionHash, SipHash24Hasher>;
-
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
@@ -388,8 +385,9 @@ private:
     // Shared by all signed versions of this body. Contains every cached
     // signed hash, including the current one in [txs_by_body_]. Access requires
     // the body's account lock; the last TxValue owner frees the set.
-    std::shared_ptr<SignedTransactionHashSet> signed_tx_hashes =
-        std::make_shared<SignedTransactionHashSet>();
+    std::shared_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
+        signed_tx_hashes = std::make_shared<
+            std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
   };
 
   struct AccountState {

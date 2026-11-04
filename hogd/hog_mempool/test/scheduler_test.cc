@@ -8,6 +8,7 @@
 #include <memory>
 #include <thread>
 #include <unordered_map>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -528,7 +529,8 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   auto scheduler = server.mempool_coord_rpc().scheduler();
   scheduler->add_txs({a}, {tx_hash})();
-  std::weak_ptr<Scheduler::SignedTransactionHashSet> shared_hashes;
+  std::weak_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
+      shared_hashes;
   {
     auto [entry, lock] = scheduler->txs_.find(sha256(a));
     ASSERT_NE(entry, nullptr);
