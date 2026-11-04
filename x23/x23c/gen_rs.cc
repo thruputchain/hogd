@@ -1003,35 +1003,63 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
     throw std::runtime_error("unexpected boolean");
   };
 
-  auto qualified_typename = [&](std::string c) {
-    if (is_enum) {
-      if (is_bool) {
-        return bool_map(c);
-      }
-      // Enum types are newtype structs with associated constants,
-      // so access the inner value with .0
-      return b.switch_type + "::" + c + ".0";
-    }
-    // Type the case value as the switch type before the `as i32` callers
-    // append: a bare literal is an i32, so an unsigned case of 2^31 or more
-    // would not compile.  A named constant is a u32 or u64, so cast it.
-    bool literal =
-        !c.empty() &&
-        (std::isdigit(static_cast<unsigned char>(c[0])) || c[0] == '-');
-    // Parenthesized so `as i32` applies even where the derive pastes this
-    // in statement position.
-    return std::format("({{ const V: {} = {}; V }})", switch_type,
-                       literal ? c : std::format("{} as {}", c, switch_type));
+  // x23c cannot resolve a typedef, which may live in another file, so a
+  // switch type it does not know is taken for an enum unless a case label
+  // says otherwise: a number cannot be an enum member, and RFC 4506 reserves
+  // TRUE and FALSE for bool.  Each case value below is an expression of the
+  // switch type itself, which rustc resolves through any typedef.
+  auto is_number = [](const std::string &c) {
+    return !c.empty() &&
+           (std::isdigit(static_cast<unsigned char>(c[0])) || c[0] == '-');
+  };
+  auto is_bool_constant = [](const std::string &c) {
+    return c == "TRUE" || c == "FALSE";
+  };
+  auto is_enum_member = [&](const std::string &c) {
+    return is_enum && !is_bool && !is_number(c) && !is_bool_constant(c);
+  };
+
+  // The case value as an expression of the switch type.  A literal or
+  // named constant goes through a typed const, so that an unsigned case of
+  // 2^31 or more is not taken for an out-of-range i32.
+  auto case_value = [&](const std::string &c) -> std::string {
+    if (is_enum_member(c))
+      return std::format("{}::{}", b.switch_type, c);
+    if (is_bool)
+      return bool_map(c); // throws for anything but TRUE and FALSE
+    std::string v = is_bool_constant(c) ? bool_map(c)
+                    : is_number(c)      ? c
+                                   : std::format("{} as {}", c, switch_type);
+    return std::format("{{ const V: {} = {}; V }}", switch_type, v);
+  };
+
+  // The case value as the i32 discriminant of the repr(i32) enum: an
+  // unsigned value keeps its bit pattern.  Parenthesized so `as i32`
+  // applies even where the derive pastes it in statement position.
+  auto case_discriminant = [&](const std::string &c) {
+    if (is_enum_member(c))
+      return std::format("{}.0 as i32", case_value(c));
+    std::string v = case_value(c);
+    if (v.starts_with('{'))
+      return std::format("({}) as i32", v);
+    return std::format("{} as i32", v);
   };
 
   auto int_qualified_declname = [&](std::string c) {
-    if (!is_enum) {
-      // A negative case such as -1 becomes _neg1; `-` is not an identifier.
-      if (c.starts_with('-'))
-        return "_neg" + c.substr(1);
-      return std::string("_") + c;
-    }
-    return c;
+    if (is_enum_member(c) || is_bool_constant(c))
+      return c;
+    // A negative case such as -1 becomes _neg1; `-` is not an identifier.
+    if (c.starts_with('-'))
+      return "_neg" + c.substr(1);
+    return std::string("_") + c;
+  };
+
+  // The accessor maps each case variant back to its value.
+  std::string case_matches;
+  auto add_case_match = [&](const std::string &c, bool unit) {
+    case_matches += std::format("{}::{}{} => {},\n            ", tname,
+                                int_qualified_declname(c),
+                                unit ? "" : " { .. }", case_value(c));
   };
 
   // We could change this base type if we need to, for e.g. boolean enums or
@@ -1083,8 +1111,8 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
       if (a.decl.qual == Declaration::kVoid) {
         prtop("//   void;\n");
         for (const auto &c : a.cases) {
-          prtop("{} = {} as i32,\n", int_qualified_declname(c),
-                qualified_typename(c));
+          prtop("{} = {},\n", int_qualified_declname(c), case_discriminant(c));
+          add_case_match(c, true);
         }
         if (a.has_default) {
           default_decl =
@@ -1103,18 +1131,11 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
 
         prtop("//   {} {};\n", type_name(a.decl, false, false), a.decl.id);
         for (const auto &c : a.cases) {
-          prtop("{} {{ {}: {} }} = {} as {},\n", int_qualified_declname(c),
+          prtop("{} {{ {}: {} }} = {},\n", int_qualified_declname(c),
                 escape_rust_id(a.decl.id),
                 name_prefix + type_name(a.decl, false, false),
-                qualified_typename(c), kEnumBaseType);
-
-          std::string match_name =
-              std::format("{1}::{0}", int_qualified_declname(c),
-                          map_type(b.switch_type));
-
-          if (b.switch_type == "int" || b.switch_type == "unsigned int") {
-            match_name = c;
-          }
+                case_discriminant(c));
+          add_case_match(c, false);
         }
         if (a.has_default) {
           std::format_to(
@@ -1133,26 +1154,20 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
     top_ += "\n";
   }
 
-  std::string unsafe_read =
-      std::format("unsafe {{ *(self as *const Self as *const {}) }}",
-                  kEnumBaseType);
-  std::string converted_read = convert_i32(unsafe_read);
-
-  // Without a default arm the match holds only the wildcard, which clippy
-  // flags; keeping one shape for both cases is simpler than special-casing.
+  // A union with a single case has a single match arm, which clippy flags;
+  // keeping one shape for every union is simpler than special-casing.
   bottom_ +=
       std::format(R"(impl {0} {{
     #[allow(clippy::match_single_binding)]
     pub fn {2}(&self) -> {3} {{
         match self {{
-            {1}
-            _ => {4},
+            {4}{1}
         }}
     }}
 }}
 
 )",
-                  tname, default_match, switch_id, switch_type, converted_read);
+                  tname, default_match, switch_id, switch_type, case_matches);
 }
 
 void

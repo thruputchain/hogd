@@ -468,4 +468,20 @@ mod tests {
         assert_eq!(xdrs::txs::decode::<Signed>(&bytes).unwrap(), neg);
         assert_eq!(Signed::_neg2147483648.k(), i32::MIN);
     }
+
+    #[test]
+    fn typedefd_switch_types_resolve() {
+        let last = ByIndex::_4294967295 { v: 3 };
+        let bytes = xdrs::txs::encode(&last).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 3]);
+        assert_eq!(xdrs::txs::decode::<ByIndex>(&bytes).unwrap(), last);
+        let i: Index = last.i();
+        assert_eq!(i, u32::MAX);
+        assert_eq!(ByIndex::_1.i(), 1);
+
+        let f: Flag = ByFlag::TRUE { v: 4 }.f();
+        assert!(f);
+        assert!(!ByFlag::FALSE.f());
+        assert!(xdrs::txs::decode::<ByFlag>(&[0, 0, 0, 2]).is_err());
+    }
 }

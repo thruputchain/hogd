@@ -72,6 +72,25 @@ case -2147483648:
   void;
 };
 
+// A typedef'd switch type, which x23c cannot resolve: rustc does, through
+// case values written as constants of the switch type.
+typedef unsigned int Index;
+typedef bool Flag;
+
+union ByIndex switch (Index i) {
+case 4294967295:
+  int v;
+case 1:
+  void;
+};
+
+union ByFlag switch (Flag f) {
+case TRUE:
+  int v;
+case FALSE:
+  void;
+};
+
 program check {
   version check_v1 {
     void ping(void) = 0;
