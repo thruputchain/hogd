@@ -5306,12 +5306,12 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
   }
 }
 
-// A proposal naming two or more signings of one body repeats that body, so it
-// can never validate. The validator caches one live encoding per body, and
-// each encoding the coordinator supplies used to displace the other, so
-// validation kept reporting one signing missing until the coordinator's retry
-// bound stopped it. Now every supplied signing stays cached, so one supply
-// round resolves them all and execution rejects the repeated body.
+// This test submits multiple signed txs that each have the same underlying
+// base tx. The test only submits one of the signed txs initially and then
+// attempts to validate a block that has several of the signed txs. The test
+// checks that first the mempool returns a missing tx error, and then after the
+// test provides the missing txs, the test checks that the block is rejected
+// altogether by the mempool.
 TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
 {
   const SignatureVariants variants =
