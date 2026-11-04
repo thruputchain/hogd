@@ -750,10 +750,8 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
                                         .signed_tx_hash = signed_tx_hash}));
   CHECK_PTR(tx_ptr);
   if (!inserted) {
-    const SignedTransactionHash cached_signed_tx_hash =
-        (*tx_ptr)->signed_tx_hash;
     if (on_variant == CachedVariant::kSubmitUnvetted ||
-        cached_signed_tx_hash == signed_tx_hash) {
+        (*tx_ptr)->signed_tx_hash == signed_tx_hash) {
       return false;
     }
     // Swap in the submitted encoding wherever the cached one is held. A
@@ -768,27 +766,22 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // the repeated body's uniquifier. Vetted submissions are authenticated,
     // so only the body's signers can mint more encodings, and all of them go
     // when the body expires or commits.
-    std::vector<SignedTransactionHash> others =
-        (*tx_ptr)->other_signed_tx_hashes;
-    others.push_back(cached_signed_tx_hash);
-    const auto submitted_it = std::ranges::find(others, signed_tx_hash);
-    if (submitted_it != others.end()) {
-      others.erase(submitted_it);
-      CHECK_EQ(txs_.remove(signed_tx_hash), 1UL);
-    }
-    std::shared_ptr<TxValue> replacement = std::make_shared<TxValue>(
+    auto replacement = std::make_shared<TxValue>(
         TxValue{.tx = tx,
                 .tx_hash = tx_hash,
                 .signed_tx_hash = signed_tx_hash,
-                .other_signed_tx_hashes = std::move(others)});
+                .signed_tx_hashes = (*tx_ptr)->signed_tx_hashes});
+    replacement->signed_tx_hashes->insert(signed_tx_hash);
+
     *tx_ptr = replacement;
-    CHECK_PTR(txs_.insert(signed_tx_hash, replacement).first);
     if (auto it = account_state->txs.find(key);
         it != account_state->txs.end()) {
-      it->second = std::move(replacement);
+      it->second = replacement;
     }
+    txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
     return false;
   }
+  (*tx_ptr)->signed_tx_hashes->insert(signed_tx_hash);
   CHECK_PTR(txs_.insert(signed_tx_hash, *tx_ptr).first);
   // [txs_by_body_.find_or_insert()] acquires a lock, so the increment to
   // [tx_cache_size_] happens after the tx is added to the cache from the
@@ -811,9 +804,8 @@ Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
     tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
     CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
   }
-  CHECK_EQ(txs_.remove(tx_value->signed_tx_hash), 1UL);
-  for (const SignedTransactionHash &other : tx_value->other_signed_tx_hashes) {
-    CHECK_EQ(txs_.remove(other), 1UL);
+  for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+    CHECK_EQ(txs_.remove(signed_hash), 1UL);
   }
 }
 

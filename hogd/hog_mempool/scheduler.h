@@ -302,6 +302,7 @@ public:
 
 private:
   friend class Scheduler_BatchCommittedOutcomesCrossChunks_Test;
+  friend class Scheduler_SignedVariantsShareHashSetLifetime_Test;
 
   // Reuse the keyed hash calculated for shard selection during map probes
   // and eviction. The cached value is internal; transaction identity remains
@@ -374,6 +375,9 @@ private:
     }
   };
 
+  using SignedTransactionHashSet =
+      std::unordered_set<SignedTransactionHash, SipHash24Hasher>;
+
   struct TxValue {
     // The tx itself.
     SignedTransaction tx;
@@ -381,12 +385,11 @@ private:
     TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
-    // Every other encoding of this body that is cached, each in [txs_] under
-    // its own signed hash but in neither [txs_by_body_] nor a runqueue. They
-    // are the encodings [CachedVariant::kSubmitVetted] submissions displaced,
-    // and they are erased with the body. Set only on the entry held in
-    // [txs_by_body_].
-    std::vector<SignedTransactionHash> other_signed_tx_hashes;
+    // Shared by all signed versions of this body. Contains every cached
+    // signed hash, including the current one in [txs_by_body_]. Access requires
+    // the body's account lock; the last TxValue owner frees the set.
+    std::shared_ptr<SignedTransactionHashSet> signed_tx_hashes =
+        std::make_shared<SignedTransactionHashSet>();
   };
 
   struct AccountState {
@@ -497,7 +500,7 @@ private:
   // Tx cache, keyed by each tx's exact signed encoding. It holds one live
   // encoding per body, which [txs_by_body_] indexes by body hash, plus the
   // encodings vetted submissions displaced (see
-  // [TxValue::other_signed_tx_hashes]).
+  // [TxValue::signed_tx_hashes]).
   // Entries are removed when transactions expire, are discarded, or appear in
   // a committed/validated block. Shared ownership keeps an entry's
   // transaction alive for in-flight lookups after it is removed from here.
