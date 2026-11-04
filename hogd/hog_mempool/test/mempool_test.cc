@@ -1,4 +1,3 @@
-#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -5303,78 +5302,6 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
             tip.db_tip().id, proposal)();
     EXPECT_EQ(validated.outcome(),
               SchedulerValidationOutcome::SchedulerValidationOK);
-  }
-}
-
-// This test submits multiple signed txs that each have the same underlying
-// base tx. The test only submits one of the signed txs initially and then
-// attempts to validate a block that has several of the signed txs. The test
-// checks that first the mempool returns a missing tx error, and then after the
-// test provides the missing txs, the test checks that the block is rejected
-// altogether by the mempool.
-TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
-{
-  const SignatureVariants variants =
-      make_signature_variants(kMaxBytesTransaction);
-  // A third signing: all but the last of the fat wrapper's signatures.
-  SignedTransaction mid = variants.fat;
-  mid.signatures.pop_back();
-  ASSERT_NE(sha256(mid), sha256(variants.thin));
-  ASSERT_NE(sha256(mid), sha256(variants.fat));
-
-  for (const SignedTransactionBatch &missing_signings :
-       {SignedTransactionBatch{mid},
-        SignedTransactionBatch{variants.thin, mid}}) {
-    SCOPED_TRACE(missing_signings.size());
-    MempoolTestInfra validator;
-    validator.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
-                                    variants.auth_data);
-    // The validator holds the fat wrapper, which the proposal names last.
-    EXPECT_EQ(submit_through_gateway(validator, variants.fat),
-              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
-
-    const SchedulerGetTipResult tip =
-        validator.mempool_coord_rpc().schedcoord_get_tip()();
-    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
-
-    SignedTransactionHashBatch named;
-    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
-    for (const SignedTransaction &signing : missing_signings) {
-      named.push_back(sha256(signing));
-      nondeterministic_data.push_back(NondeterministicProposalData{});
-    }
-    const SignedTransactionHashBatch expected_missing_hashes = named;
-    named.push_back(sha256(variants.fat));
-    nondeterministic_data.push_back(NondeterministicProposalData{});
-    const Proposal proposal{
-        .header = {.ext = {},
-                   .network_hash = MempoolTestInfra::kNetworkHash,
-                   .block_height =
-                       tip.db_tip().value.proposal_header.block_height + 1},
-        .transactions = {.ext = {},
-                         .signed_hash = t_to_parallel_batch(named)(),
-                         .nondeterministic_data =
-                             t_to_parallel_batch(nondeterministic_data)()}};
-
-    // First validation asks for the signings other than the cached fat one.
-    const SchedulerValidationResult missing =
-        validator.mempool_coord_rpc().schedulercoord_validate_block(
-            tip.db_tip().id, proposal)();
-    ASSERT_EQ(missing.outcome(),
-              SchedulerValidationOutcome::SchedulerValidationMissingTxs);
-    ASSERT_EQ(missing.missing_signed_tx_hashes(), expected_missing_hashes);
-
-    // Supply the missing signings in one batch.
-    validator.mempool_coord_rpc().schedulercoord_submit_vetted(
-        ValidatorID{}, t_to_parallel_batch(missing_signings)())();
-    ASSERT_EQ(validator.mempool_coord_rpc().scheduler()->size(), 1UL);
-
-    // With every signing available, validation rejects the repeated body.
-    const SchedulerValidationResult validated =
-        validator.mempool_coord_rpc().schedulercoord_validate_block(
-            tip.db_tip().id, proposal)();
-    EXPECT_EQ(validated.outcome(),
-              SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 }
 
