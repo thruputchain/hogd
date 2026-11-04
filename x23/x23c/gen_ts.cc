@@ -853,7 +853,7 @@ void
 GenTs::gen_struct_codec(const StructBody &body, const string &name)
 {
   codec_names_.push_back(name);
-  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = withCodecBudget<{0}>({{\n", name);
 
   // encode
   prbottom("  encode(w, val) {{\n");
@@ -881,7 +881,7 @@ GenTs::gen_struct_codec(const StructBody &body, const string &name)
   prbottom(" }};\n");
 
   prbottom("  }},\n");
-  prbottom("}};\n");
+  prbottom("}});\n");
 }
 
 void
@@ -907,7 +907,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
     }
 
   codec_names_.push_back(name);
-  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = withCodecBudget<{0}>({{\n", name);
 
   // ---- encode ----
   prbottom("  encode(w, val) {{\n");
@@ -1029,7 +1029,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
   prbottom("    }}\n");
   prbottom("  }},\n");
-  prbottom("}};\n");
+  prbottom("}});\n");
 }
 
 // ---- Field type mapping ----
@@ -1233,7 +1233,7 @@ gen_ts(vector<Definition> *defs, string const &header)
     preamble += header + '\n';
 
   {
-    string imports = "import { type XdrCodec"
+    string imports = "import { type XdrCodec, withCodecBudget"
                      ", VoidCodec, OptionCodec, VarArrayCodec, FixedArrayCodec"
                      ", type FixedBytes, type FixedArray"
                      ", type VarBytes, type VarArray, type VarString";
