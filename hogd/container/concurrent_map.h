@@ -215,13 +215,9 @@ public:
       recycle(std::move(storage));
       return;
     }
-    // Clearing an uncleared map walks every bucket head (1M by default), which
-    // takes milliseconds. When the dropping thread is a pool worker (e.g. an
-    // rpc handler closing a viewing snapshot), hand the clear to another
-    // worker via bg() instead of stalling this one; a single worker rather
-    // than a parallel sweep so it does not compete with commit for cores. Any
-    // other thread clears inline: that keeps static teardown synchronous, where
-    // the per-thread bookkeeping the clear touches may already be gone.
+    // Clearing walks every bucket head (1M by default), so a pool worker hands
+    // it to another worker via spawn() rather than stalling; any other thread
+    // clears inline, which keeps static teardown synchronous.
     if (x23::ThreadPool::get_thread_pool() == nullptr) {
       clear_heads(storage.buckets);
       recycle(std::move(storage));

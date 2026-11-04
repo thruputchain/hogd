@@ -525,9 +525,8 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
 }
 
 namespace {
-// Set by the test once the map's destructor has returned; the value
-// destructor waits for it, so an inline clear (which would run the value
-// destructor before the map destructor returns) is reported rather than hung.
+// Set after the map destructor returns; values wait on it, so an inline clear
+// is reported as a failure instead of hanging.
 std::atomic<bool> map_destructor_returned{false};
 std::atomic<int> values_destroyed_after_return{0};
 struct WaitsForMapDestructor {
@@ -554,6 +553,8 @@ TEST(ConcurrentMap, WorkerDroppingUnclearedMapDefersTheClear)
 {
   using map_t = ConcurrentMap<int, WaitsForMapDestructor, IntHasher>;
   ASSERT_EQ(x23::ThreadPool::get_thread_pool(), nullptr);
+  map_destructor_returned.store(false, std::memory_order_relaxed);
+  values_destroyed_after_return.store(0, std::memory_order_relaxed);
   default_threadpool().spawn([] {
     {
       map_t map(16);
