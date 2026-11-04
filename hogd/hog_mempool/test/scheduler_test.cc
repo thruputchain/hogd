@@ -17,6 +17,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_db/status.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
