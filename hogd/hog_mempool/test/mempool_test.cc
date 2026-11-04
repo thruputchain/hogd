@@ -2911,8 +2911,9 @@ TEST(Mempool, ValidateRejectsUnconsumedNondeterministicDataThenCommitsHonest)
 // The tests below drop a block from the event server while an executor still
 // holds it, which is what the real event server reports for a block whose
 // context is gone: the executor's emits and close come back kRPCBadBlockID, it
-// records Abandon, and its finish_block replies ExecResultSystemError. The
-// mempool CHECKs that reply instead of failing the block, so each of these
+// records Abandon, and its finish_block replies ExecResultSystemError. A
+// trusted local component losing a block's state takes the node down either
+// way, so the mempool CHECKs that reply as a fail-stop, and each of these
 // aborts the mempool. See https://github.com/thruputchain/hogd/issues/2813.
 namespace {
 
