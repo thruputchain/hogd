@@ -4,6 +4,7 @@
 #include <array>
 #include <atomic>
 #include <bit>
+#include <chrono>
 #include <cstring>
 #include <memory>
 #include <mutex>
@@ -16,6 +17,9 @@
 #include <utility>
 #include <vector>
 
+#include <x23/threadpool.h>
+
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/container/concurrent_map.h"
@@ -466,8 +470,8 @@ TEST(ConcurrentMap, RecycledBucketArrayIsEmptyAfterSlowClear)
   BucketArrayCounts counts;
 
   {
-    // Destroyed without clear(): the destructor's slow path must both destroy
-    // every value and leave the array in a recyclable (all-null) state.
+    // Destroyed without clear(): the deferred clear on the pool must both
+    // destroy every value and leave the array in a recyclable (all-null) state.
     map_t map(kBuckets);
     for (int i = 0; i < kNumEntries; i++) {
       ASSERT_NE(map.insert_or_get(i, i), nullptr);
@@ -518,6 +522,51 @@ TEST(ConcurrentMap, RecyclingPastThePoolBound)
     EXPECT_EQ(counts.allocs_since(), kLiveMaps + kExcess);
   }
   EXPECT_EQ(counts.frees_since(), 2 * kExcess);
+}
+
+namespace {
+// Set after the map destructor returns; values wait on it, so an inline clear
+// is reported as a failure instead of hanging.
+std::atomic<bool> map_destructor_returned{false};
+std::atomic<int> values_destroyed_after_return{0};
+struct WaitsForMapDestructor {
+  int v;
+  explicit WaitsForMapDestructor(int i) : v(i) {}
+  ~WaitsForMapDestructor()
+  {
+    const auto deadline =
+        std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    while (!map_destructor_returned.load(std::memory_order_acquire) &&
+           std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::yield();
+    }
+    if (map_destructor_returned.load(std::memory_order_acquire)) {
+      values_destroyed_after_return.fetch_add(1, std::memory_order_relaxed);
+    }
+  }
+};
+} // namespace
+
+// A pool worker dropping an uncleared map must not clear its bucket array
+// inline: that walk is what made e.g. closing a viewing snapshot cost ~16ms.
+TEST(ConcurrentMap, WorkerDroppingUnclearedMapDefersTheClear)
+{
+  using map_t = ConcurrentMap<int, WaitsForMapDestructor, IntHasher>;
+  ASSERT_EQ(x23::ThreadPool::get_thread_pool(), nullptr);
+  map_destructor_returned.store(false, std::memory_order_relaxed);
+  values_destroyed_after_return.store(0, std::memory_order_relaxed);
+  default_threadpool().spawn([] {
+    {
+      map_t map(16);
+      ASSERT_NE(map.insert_or_get(1, 1), nullptr);
+    }
+    map_destructor_returned.store(true, std::memory_order_release);
+  });
+  // The first drain finishes the job above, whose map destructor queues the
+  // clear; the second drain finishes that clear.
+  map_t::wait_for_background_recycling();
+  map_t::wait_for_background_recycling();
+  EXPECT_EQ(values_destroyed_after_return.load(std::memory_order_relaxed), 1);
 }
 
 // Fills more than one 64MB allocator region, recycles the storage, and fills
