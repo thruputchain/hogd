@@ -1733,11 +1733,7 @@ MempoolCoordinatorRpc::retire_nominated_block()
   PendingBlock &nominated = nominated_block_cache_;
   CHECK_NE(nominated.block_id, 0UL);
 
-  // The block joins the validated blocks with what their commit path reads:
-  // its closed state (the tip it makes, its DB snapshot and event block, kept
-  // under its id) and its transactions, which are [nominated.txs], compacted
-  // to the ones that executed, in the order of [nominated.result_tx_hashes]
-  // and, aligned with them, [nominated.result_signed_tx_hashes].
+  // Copy the closed state and the executed txs, in result order.
   PendingBlock retired{};
   retired.db_tip = nominated.db_tip;
   retired.block_id = nominated.block_id;
@@ -1746,10 +1742,8 @@ MempoolCoordinatorRpc::retire_nominated_block()
   retired.tx_hashes = nominated.result_tx_hashes;
   retired.signed_tx_hashes = nominated.result_signed_tx_hashes;
 
-  // Every transaction the nomination took leaves the scheduler's pending
-  // nomination for its run queue, as when a nomination is rolled back, so
-  // that the next nomination may take them again. If the retired block
-  // commits, they leave the scheduler as a validated block's do.
+  // Return the nominated txs to the run queue so the next nomination can
+  // take them.
   scheduler_->reenqueue_txs(nominated.tx_hashes.cbegin(),
                             nominated.tx_hashes.cend());
   {
@@ -1819,10 +1813,8 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (nominated_block_cache_.block_id) {
-    // A block this node nominated is not committed or abandoned yet: the
-    // coordinator proposes on the tip again, in a later slot it leads at the
-    // same height, or after it restarted. Both blocks stay committable until
-    // the height commits.
+    // Retire the earlier nomination; both blocks stay committable until the
+    // height commits.
     co_await retire_nominated_block();
   }
 
@@ -2546,12 +2538,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
   if (proposal.header.block_height > committed_height + 1) {
-    // The block's parent is above the committed tip, and a block executes
-    // on the committed tip only ([create_snapshot()]). Answer at once rather
-    // than wait for the parent to commit: the coordinator waits for that
-    // itself and validates the block again, and a call that waited would
-    // hold one of the coordinator's connections, which the commit that
-    // ends the wait may be queued behind.
+    // The parent is above the committed tip, so answer at once instead of
+    // waiting: a waiting call would pin a coordinator connection.
     co_await decrement_num_validations_in_progress();
     validation_outcome =
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;

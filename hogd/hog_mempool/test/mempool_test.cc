@@ -1870,11 +1870,7 @@ proposed_tx_hashes(const SchedulerProposalResult &result)
 
 } // namespace
 
-// The coordinator proposes on the tip again before the height commits, in a
-// later slot it leads at the same height or after it restarted. The second
-// proposal succeeds and takes the pending transactions again, and the first
-// proposal's block stays committable: committing it leaves its transactions
-// out of later proposals.
+// A second proposal on the tip succeeds; the first one's block still commits.
 TEST(Mempool, ProposingAgainKeepsTheEarlierProposalCommittable)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -3136,12 +3132,8 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-// A block above the committed tip's child has its parent above the tip, which
-// the mempool cannot execute on. The validation answers
-// [SchedulerValidationUnknownParentBlock] at once, rather than wait for the
-// parent to commit: the coordinator waits for that itself, and the waiting
-// call would hold one of its connections. Without the fix this test HANGS at
-// the validation below.
+// A block two heights above the tip answers UnknownParentBlock at once,
+// rather than wait for its parent.
 TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
 {
   MempoolTestInfra server;
@@ -3166,11 +3158,8 @@ TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
-// A block at a committed height is too late to validate, the genesis heights
-// included: heights 0 and 1 are established outside ordinary validation, but
-// once committed, a block at either is no more invalid than at any committed
-// height, and the coordinator drops a too-late value where it would vote
-// against an invalid one.
+// Once committed, heights 0 and 1 are too late to validate, like any other
+// committed height.
 TEST(Mempool, ValidationAtACommittedGenesisHeightIsTooLate)
 {
   MempoolTestInfra server;
