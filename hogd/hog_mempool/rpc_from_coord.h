@@ -503,12 +503,8 @@ private:
   // coordinator registered.
   static x23::Async<ErrnoStatus<coord_sched_client_t>> connect_to_coordinator();
 
-  // Tells the coordinator that [batch] is vetted. The call fails while the
-  // coordinator is down or restarting, and the notification is then dropped
-  // (a transaction that was never disseminated still reaches the peers once
-  // it is proposed, through the repair of missing transactions); a call that
-  // fails is made once more, on a new connection, which reaches a coordinator
-  // that is back.
+  // Tells the coordinator that [batch] is vetted. A failed call is retried
+  // once on a new connection; if that fails too, the notification is dropped.
   x23::Async<void> notify_vetted(const ParallelBatch &batch);
 
   // The client to call the coordinator through, connected anew if a call
@@ -735,9 +731,7 @@ private:
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
-  // Moves the block this node nominated into [validated_block_cache_], so that
-  // another block can be nominated at the same height while the first stays
-  // committable, and returns its transactions to the scheduler's run queue.
+  // Moves the nominated block to [validated_block_cache_], still committable.
   // Called with [nominated_block_cache_lock_] held.
   x23::Async<void> retire_nominated_block();
   x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
@@ -865,10 +859,8 @@ private:
   const ssize_t mempool_tx_size_limit_;
   const size_t num_exec_shards_;
 
-  // The client [notify_vetted()] calls the coordinator through, null after a
-  // call through it failed. Guarded by [coord_client_mutex_]; a call holds
-  // its own reference, so that a reconnection does not free the client under
-  // it. [coord_connect_lock_] serializes reconnections.
+  // Coordinator client, null after a failed call. Guarded by
+  // [coord_client_mutex_]; [coord_connect_lock_] serializes reconnects.
   std::mutex coord_client_mutex_;
   std::shared_ptr<coord_sched_client_t> coord_client_;
   x23::CoroLock coord_connect_lock_;
