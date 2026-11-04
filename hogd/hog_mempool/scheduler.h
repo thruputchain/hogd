@@ -382,9 +382,9 @@ private:
     TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
-    // Shared by all signed versions of this body. Contains every cached
-    // signed hash, including the current one in [txs_by_body_]. Access requires
-    // the body's account lock; the last TxValue owner frees the set.
+    // Shared by all signed versions of this body. This is an [std::shared_ptr],
+    // so it is automatically freed when the last [TxValue] for this tx body is
+    // freed.
     std::shared_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
         signed_tx_hashes = std::make_shared<
             std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
