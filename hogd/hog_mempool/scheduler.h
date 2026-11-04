@@ -38,12 +38,26 @@ public:
   // written. A NativeTokenAge is 104 bytes on the wire, so a record stays near
   // 7 MiB, under x23's 16 MiB default record cap, whichever way it travels.
   static constexpr size_t kMaxNativeTokenAgesPerRecord = size_t{1} << 16;
+  // How many blocks may pass between native-token age writes to hog_db. Each
+  // write carries only the accounts whose cached [NativeTokenAge] changed since
+  // the last write, so a longer interval also coalesces repeated updates to
+  // busy accounts. The rows are not consensus state and hog_db reconciles them
+  // against balances at startup, so a row that lags the scheduler's cache by a
+  // few blocks is acceptable (#4384).
+  static constexpr BlockHeight kDefaultNativeTokenAgeWriteIntervalBlocks = 32;
 
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<db_sched_client_t> db_sched_client)
+            std::shared_ptr<db_sched_client_t> db_sched_client,
+            BlockHeight native_token_age_write_interval_blocks =
+                kDefaultNativeTokenAgeWriteIntervalBlocks)
     : current_block_(current_block),
-      db_sched_client_(std::move(db_sched_client))
-  {}
+      db_sched_client_(std::move(db_sched_client)),
+      native_token_age_write_interval_blocks_(
+          native_token_age_write_interval_blocks),
+      last_native_token_age_write_block_(current_block)
+  {
+    CHECK_GT(native_token_age_write_interval_blocks_, 0);
+  }
 
   ~Scheduler() { wait_for_pending_detached_coroutines(); }
 
@@ -229,7 +243,26 @@ public:
   std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
   get_cached_native_token_age(const ContractAddress &address);
 
-  x23::Async<void> write_all_average_native_token_ages_to_db();
+  // Writes the native-token ages of the accounts marked dirty since the last
+  // write and clears those marks. Sends nothing when no account is dirty.
+  x23::Async<void> write_dirty_native_token_ages_to_db();
+
+  // Calls [write_dirty_native_token_ages_to_db()] if at least
+  // [native_token_age_write_interval_blocks_] blocks have passed since the last
+  // write. [block_height] is the block whose transfers were just processed.
+  x23::Async<void>
+  maybe_write_dirty_native_token_ages_to_db(BlockHeight block_height);
+
+  // Records that [account]'s cached [NativeTokenAge] in [accounts_] changed and
+  // must be written to hog_db. Callers may hold the account's [accounts_] lock;
+  // the lock order is account lock, then [dirty_native_token_ages_mutex_].
+  void mark_native_token_age_dirty(const ContractAddress &account);
+
+  size_t num_dirty_native_token_ages()
+  {
+    std::lock_guard<std::mutex> lock(dirty_native_token_ages_mutex_);
+    return dirty_native_token_ages_.size();
+  }
 
   // Bounds the native-token ages per DbSched1 record read or written;
   // production keeps the default.
@@ -539,6 +572,17 @@ private:
   size_t max_native_token_ages_per_record_ = kMaxNativeTokenAgesPerRecord;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
+
+  // Accounts whose cached [NativeTokenAge] changed since the last write.
+  // Writing only these, rather than every cached account, keeps an idle block
+  // from appending a record per account ever seen (#4384).
+  std::mutex dirty_native_token_ages_mutex_;
+  std::unordered_set<ContractAddress, SipHash24Hasher> dirty_native_token_ages_;
+
+  const BlockHeight native_token_age_write_interval_blocks_;
+  // Only touched from [MempoolDbRpc::handle_transfer()], which runs one block
+  // at a time under its scheduler lock.
+  BlockHeight last_native_token_age_write_block_;
 };
 
 } // namespace hogd
