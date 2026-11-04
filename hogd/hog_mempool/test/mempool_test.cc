@@ -3112,10 +3112,13 @@ TEST(Mempool, CommitWaitsForInFlightValidationBeforeAbandoningIt)
   validation_thread.join();
   commit_thread.join();
 
-  ASSERT_TRUE(validation.has_value());
+  // An explicit guard, which clang-tidy's optional-access check can follow
+  // where it cannot see through ASSERT_TRUE.
+  if (!validation.has_value() || !commit.has_value()) {
+    FAIL() << "a thread returned no result";
+  }
   EXPECT_EQ(validation->outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
-  ASSERT_TRUE(commit.has_value());
   EXPECT_EQ(*commit, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_TRUE(commit_returned_after_release);
 }
@@ -3169,10 +3172,13 @@ TEST(Mempool, CommitWaitsForInFlightNominationBeforeAbandoningIt)
   nomination_thread.join();
   commit_thread.join();
 
-  ASSERT_TRUE(nomination.has_value());
+  // An explicit guard, which clang-tidy's optional-access check can follow
+  // where it cannot see through ASSERT_TRUE.
+  if (!nomination.has_value() || !commit.has_value()) {
+    FAIL() << "a thread returned no result";
+  }
   EXPECT_EQ(nomination->outcome(),
             SchedulerProposalOutcome::SchedulerProposalOK);
-  ASSERT_TRUE(commit.has_value());
   EXPECT_EQ(*commit, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_TRUE(commit_returned_after_release);
 }
