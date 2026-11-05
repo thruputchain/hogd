@@ -17,4 +17,4 @@ thruput-rpc-api = "0.4.0"
 schemars = "1"
 serde = { version = "1", features = ["derive"], optional = true }
 xdr-common = { package = "thruput-xdr-common", version = "0.17.0" }
-xdrs = { package = "thruput-xdrs", version = "0.17.0", features = ["alloc", "derive", "schemars"] }
+xdrs = { package = "thruput-xdrs", version = "0.17.0", features = ["alloc", "derive", "repr", "schemars"] }

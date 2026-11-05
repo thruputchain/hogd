@@ -456,6 +456,17 @@ mod tests {
         assert!(dropped.load(Ordering::SeqCst));
     }
 
+    // An enum's schema is the XDR enum, with its members' names and values,
+    // not the newtype's one-field struct.
+    #[test]
+    fn enums_describe_themselves_as_enums() {
+        use xdrs::xdr_repr::XDR;
+        assert_eq!(
+            Status::def().to_string(),
+            "enum Status {\n\tOK = 0,\n\tREJECTED = 1,\n};\n"
+        );
+    }
+
     // Without the xdrs derives, a default arm is a plain variant.
     #[test]
     fn default_arms_without_the_xdrs_derives() {

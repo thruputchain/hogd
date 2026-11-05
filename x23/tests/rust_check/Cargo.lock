@@ -265,6 +265,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "thruput-xdr-repr"
+version = "0.17.0"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "b38994ee6ed64d2fc603e0f9b780d48b574087b41d86f10eadfc8fe2e05c842f"
+dependencies = [
+ "thruput-xdr-common",
+]
+
+[[package]]
 name = "thruput-xdrs"
 version = "0.17.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -272,6 +281,7 @@ checksum = "11366c38c4a05945827d91d8b81e5be6e729b2305cab107f2476fede9ccb8e53"
 dependencies = [
  "thruput-xdr-common",
  "thruput-xdr-derive",
+ "thruput-xdr-repr",
 ]
 
 [[package]]

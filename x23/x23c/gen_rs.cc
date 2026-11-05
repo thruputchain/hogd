@@ -904,7 +904,8 @@ GenRs::show_type(const EnumBody &e, string const &tname, RustMarkers markers)
   prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
   prtop("{}", feature_attr("serde", "serde(transparent)"));
   prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
-  prtop("{}", feature_attr("spec", "derive(XDR)"));
+  // No derive(XDR): it would describe the newtype as a struct with one int
+  // field.  The HasTypeDef impl below describes it as the XDR enum.
   prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
   prtop("{}\n", default_derives(markers));
   prtop(R"(#[derive(Copy)]
@@ -914,6 +915,7 @@ pub struct {}(pub i32);
         tname);
 
   std::string match_block;
+  std::string spec_members;
 
   prtop("\nimpl {} ", tname);
   {
@@ -934,6 +936,12 @@ pub struct {}(pub i32);
       }
       first = false;
       prtop("pub const {}: Self = Self({});\n", cd.id, cd.val);
+      std::format_to(std::back_inserter(spec_members), R"(
+                (
+                    xdrs::xdr_repr::ident("{0}"),
+                    xdrs::xdr_repr::signed(Self::{0}.0),
+                ),)",
+                     cd.id);
       match_block += std::format(R"(
             x if x == Self::{1}.0 => {{
                 write!(f, "{0}::{1}")
@@ -964,6 +972,25 @@ pub struct {}(pub i32);
 }})",
                                           tname, match_block, write_block);
   prtop("{}", cfg("std", display_block));
+
+  // The schema: the XDR enum, with its members' names and values, which
+  // derive(XDR) on a union with #[xdr(discriminant = "<this enum>")]
+  // reads as its case labels (thruputchain/xdrs#379).
+  std::string spec_block =
+      std::format(R"(impl xdrs::xdr_repr::HasTypeDef for {0} {{
+    fn type_def() -> xdrs::xdr_repr::TypeDef {{
+        xdrs::xdr_repr::enum_def(
+            "{0}",
+            [{1}
+            ]
+            .into(),
+        )
+    }}
+}})",
+                  tname, spec_members);
+  std::string spec = cfg("spec", spec_block);
+  if (!spec.empty())
+    prtop("\n{}", spec);
 }
 
 void
