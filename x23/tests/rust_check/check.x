@@ -56,12 +56,18 @@ struct Reading {
 
 // Case values have the switch type: unsigned cases of 2^31 and up, and
 // negative signed ones, must compile and keep their value.
+// A schema constant may have any name, including one x23c might pick for
+// a temporary.
+const V = 9;
+
 union Unsigned switch (unsigned int k) {
 case 4294967295:
   int v;
 case 0x80000000:
   void;
 case MAX_BATCH:
+  void;
+case V:
   void;
 };
 

@@ -1021,7 +1021,9 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
 
   // The case value as an expression of the switch type.  A literal or
   // named constant goes through a typed const, so that an unsigned case of
-  // 2^31 or more is not taken for an out-of-range i32.
+  // 2^31 or more is not taken for an out-of-range i32.  The const's name
+  // starts with "__", which is reserved in the C++ x23c also generates, so
+  // it cannot shadow a schema constant used as the case value.
   auto case_value = [&](const std::string &c) -> std::string {
     if (is_enum_member(c))
       return std::format("{}::{}", b.switch_type, c);
@@ -1030,7 +1032,8 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
     std::string v = is_bool_constant(c) ? bool_map(c)
                     : is_number(c)      ? c
                                    : std::format("{} as {}", c, switch_type);
-    return std::format("{{ const V: {} = {}; V }}", switch_type, v);
+    return std::format("{{ const __XDR_CASE: {} = {}; __XDR_CASE }}",
+                       switch_type, v);
   };
 
   // The case value as the i32 discriminant of the repr(i32) enum: an
