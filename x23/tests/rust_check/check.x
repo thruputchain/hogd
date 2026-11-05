@@ -91,9 +91,7 @@ case FALSE:
   void;
 };
 
-// The accessor's default arm, and several cases sharing an arm.  (A
-// default variant takes the last case's value plus one, so the last case
-// here leaves that value unused.)
+// The accessor's default arm, and several cases sharing an arm.
 union UnsignedDefault switch (unsigned int k) {
 case 4294967295:
 case 0x80000000:
@@ -153,6 +151,33 @@ struct Tagged {
   case 0:
     void;
   } tag;
+};
+
+// Left implicit, the default variant's tag would be the last case's plus
+// one, which here is another case's value: DOWN + 1 = IDLE, and
+// 4294967295 (-1 as an i32) + 1 = 0.  x23c has rustc pick a free tag.
+enum Signal {
+  DOWN = -1,
+  IDLE = 0,
+  UP = 1
+};
+
+union BySignal switch (Signal s) {
+case IDLE:
+  int n;
+case DOWN:
+  void;
+default:
+  void;
+};
+
+union Wrapping switch (unsigned int k) {
+case 0:
+  void;
+case 4294967295:
+  int v;
+default:
+  int other;
 };
 
 program check {

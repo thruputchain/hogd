@@ -550,4 +550,24 @@ mod tests {
         assert_eq!(xdrs::txs::decode::<Tagged>(&txs(&tagged)).unwrap(), tagged);
         assert_eq!(tagged.tag.k(), u32::MAX);
     }
+
+    #[test]
+    fn default_tags_do_not_collide_with_cases() {
+        let idle = BySignal::IDLE { n: 1 };
+        assert_eq!(txs(&idle), [0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<BySignal>(&txs(&idle)).unwrap(), idle);
+        assert_eq!(txs(&BySignal::DOWN), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(BySignal::DOWN.s(), Signal::DOWN);
+        let up = xdrs::txs::decode::<BySignal>(&[0, 0, 0, 1]).unwrap();
+        assert_eq!(up.s(), Signal::UP);
+        assert_eq!(txs(&up), [0, 0, 0, 1]);
+
+        assert_eq!(txs(&Wrapping::_0), [0, 0, 0, 0]);
+        let max = Wrapping::_4294967295 { v: 2 };
+        assert_eq!(xdrs::txs::decode::<Wrapping>(&txs(&max)).unwrap(), max);
+        let other =
+            xdrs::txs::decode::<Wrapping>(&[0, 0, 0, 5, 0, 0, 0, 9]).unwrap();
+        assert_eq!(other.k(), 5);
+        assert_eq!(txs(&other), [0, 0, 0, 5, 0, 0, 0, 9]);
+    }
 }
