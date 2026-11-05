@@ -438,13 +438,6 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, kBytestringCeilingLen);
     co_return DbSchedResult::DbSchedResultError;
   }
-  if (const uint32_t stated = config_params.max_return_buffer_len;
-      stated > kReturnBufferCeilingLen) {
-    error("genesis max_return_buffer_len {} exceeds the {} this build's "
-          "executor can forward to the event server",
-          stated, kReturnBufferCeilingLen);
-    co_return DbSchedResult::DbSchedResultError;
-  }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);
   ctx_.set_network_config(genesis_configuration.network_config);
   ctx_.initialize_cost_model(

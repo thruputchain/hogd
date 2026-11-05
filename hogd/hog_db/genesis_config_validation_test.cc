@@ -236,22 +236,6 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32LimitsByVmCeilings)
             DbSchedResult::DbSchedResultOK);
 }
 
-// A root return rides the executor->event message, so the return limit may be
-// raised only as far as that message carries (#4744).
-TEST_F(GenesisConfigValidationTest, BoundsReturnBufferLimitByEventMessage)
-{
-  auto load_with_return_limit = [&](uint32_t len) {
-    NetworkConfig config = stock_network_config();
-    NetworkConfigParams::set_param(
-        config, ConfigParamID::kConfigParamMaxReturnBufferLen, len);
-    return load(config, std::nullopt);
-  };
-  EXPECT_EQ(load_with_return_limit(kReturnBufferCeilingLen + 1),
-            DbSchedResult::DbSchedResultError);
-  EXPECT_EQ(load_with_return_limit(kReturnBufferCeilingLen),
-            DbSchedResult::DbSchedResultOK);
-}
-
 TEST_F(GenesisConfigValidationTest, AcceptsRv32CodeLimitAtVmCeiling)
 {
   NetworkConfig config = stock_network_config();
