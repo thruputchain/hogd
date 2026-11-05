@@ -4,6 +4,10 @@
 mod generated;
 pub use generated::*;
 
+// Generated from plain.x without the xdrs derives.
+#[rustfmt::skip]
+pub mod plain;
+
 use std::sync::Arc;
 use thruput_rpc_api::{ProgramError, RpcError};
 
@@ -551,5 +555,20 @@ mod tests {
         assert_eq!(txs(&tagged), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 6]);
         assert_eq!(xdrs::txs::decode::<Tagged>(&txs(&tagged)).unwrap(), tagged);
         assert_eq!(tagged.tag.k(), u32::MAX);
+    }
+
+    // Without the xdrs derives, a default arm is a plain variant.
+    #[test]
+    fn default_arms_without_the_xdrs_derives() {
+        let raw = plain::Reading::LOW { raw: 3 };
+        assert_eq!(raw.l(), plain::Level::LOW);
+        let other = plain::Count::Default { n: 7, other: 8 };
+        assert_eq!(other.n(), 7);
+        let sample = plain::Sample {
+            reading: plain::Reading::Default { l: 5 },
+            count: plain::Count::_1 { one: 1 },
+        };
+        assert_eq!(sample.reading.l(), plain::Level(5));
+        assert_eq!(sample.count.n(), 1);
     }
 }
