@@ -1019,30 +1019,28 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
     return is_enum && !is_bool && !is_number(c) && !is_bool_constant(c);
   };
 
-  // The case value as an expression of the switch type.  A literal or
-  // named constant goes through a typed const, so that an unsigned case of
-  // 2^31 or more is not taken for an out-of-range i32.
+  // The case value as an expression of the switch type.  A literal is cast
+  // to the switch type, which types the literal itself: rustc then rejects
+  // one out of the switch type's range, and an unsigned case of 2^31 or
+  // more is not taken for an out-of-range i32.  A named constant (u32 or
+  // u64) is cast the same way.
   auto case_value = [&](const std::string &c) -> std::string {
     if (is_enum_member(c))
       return std::format("{}::{}", b.switch_type, c);
     if (is_bool)
       return bool_map(c); // throws for anything but TRUE and FALSE
-    std::string v = is_bool_constant(c) ? bool_map(c)
-                    : is_number(c)      ? c
-                                   : std::format("{} as {}", c, switch_type);
-    return std::format("{{ const V: {} = {}; V }}", switch_type, v);
+    return std::format("{} as {}", is_bool_constant(c) ? bool_map(c) : c,
+                       switch_type);
   };
 
   // The case value as the i32 discriminant of the repr(i32) enum: an
-  // unsigned value keeps its bit pattern.  Parenthesized so `as i32`
-  // applies even where the derive pastes it in statement position.
+  // unsigned value keeps its bit pattern.
   auto case_discriminant = [&](const std::string &c) {
     if (is_enum_member(c))
       return std::format("{}.0 as i32", case_value(c));
-    std::string v = case_value(c);
-    if (v.starts_with('{'))
-      return std::format("({}) as i32", v);
-    return std::format("{} as i32", v);
+    if (switch_type == "i32")
+      return case_value(c);
+    return std::format("{} as i32", case_value(c));
   };
 
   auto int_qualified_declname = [&](std::string c) {

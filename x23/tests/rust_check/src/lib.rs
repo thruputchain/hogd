@@ -461,6 +461,8 @@ mod tests {
         assert_eq!(max.k(), u32::MAX);
         assert_eq!(Unsigned::_0x80000000.k(), 0x8000_0000);
         assert_eq!(Unsigned::_MAX_BATCH.k(), MAX_BATCH);
+        assert_eq!(Unsigned::_V.k(), V);
+        assert_eq!(xdrs::txs::encode(&Unsigned::_V).unwrap(), [0, 0, 0, 9]);
 
         let neg = Signed::_neg1 { v: 2 };
         let bytes = xdrs::txs::encode(&neg).unwrap();
