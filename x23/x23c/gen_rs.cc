@@ -303,6 +303,18 @@ struct GenRs {
     return std::format("#[cfg_attr(feature = \"{}\", {})]\n", feature, attr);
   }
 
+  // The marker on a union's default variant, read by the xdrs derives (and
+  // derive(XDR), which needs the xdrs feature too).  Gated like them: with
+  // the feature off, no derive declares the attribute and rustc rejects it.
+  // Returns the attribute and a space, or nothing when suppressed.
+  string default_variant_attr()
+  {
+    std::string attr = feature_attr("xdrs", "xdr(default_variant)");
+    if (!attr.empty())
+      attr.back() = ' ';
+    return attr;
+  }
+
   // The xdrs-feature derive list.  ConstXDRSize is always safe to derive, but
   // ConstWriteXDR relies on const traits (still unstable), so it is only
   // emitted for types opted in via a #[rust(ConstWriteXDR)] comment marker.
@@ -1116,7 +1128,7 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
         }
         if (a.has_default) {
           default_decl =
-              std::format("#[xdr(default_variant)] Default {{ {}: {} }},",
+              std::format("{}Default {{ {}: {} }},", default_variant_attr(),
                           switch_id, kEnumBaseType);
           default_match =
               std::format("{0}::Default{{ {1} }} => {2},\n", tname, switch_id,
@@ -1138,11 +1150,11 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
           add_case_match(c, false);
         }
         if (a.has_default) {
-          std::format_to(
-              std::back_inserter(default_decl),
-              "#[xdr(default_variant)] Default {{ {}: {}, {}: {} }},",
-              switch_id, kEnumBaseType, escape_rust_id(a.decl.id),
-              type_name(a.decl, false, false));
+          std::format_to(std::back_inserter(default_decl),
+                         "{}Default {{ {}: {}, {}: {} }},",
+                         default_variant_attr(), switch_id, kEnumBaseType,
+                         escape_rust_id(a.decl.id),
+                         type_name(a.decl, false, false));
           default_match =
               std::format("{0}::Default{{ {1},..}} => {2},\n", tname, switch_id,
                           convert_i32(std::format("*{}", switch_id)));
