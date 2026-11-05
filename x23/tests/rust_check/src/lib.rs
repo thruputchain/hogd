@@ -456,6 +456,107 @@ mod tests {
         assert!(dropped.load(Ordering::SeqCst));
     }
 
+    #[test]
+    fn case_values_keep_the_switch_type() {
+        let max = Unsigned::_4294967295 { v: 1 };
+        let bytes = xdrs::txs::encode(&max).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<Unsigned>(&bytes).unwrap(), max);
+        assert_eq!(max.k(), u32::MAX);
+        assert_eq!(Unsigned::_0x80000000.k(), 0x8000_0000);
+        assert_eq!(Unsigned::_MAX_BATCH.k(), MAX_BATCH);
+        assert_eq!(Unsigned::_V.k(), V);
+        assert_eq!(xdrs::txs::encode(&Unsigned::_V).unwrap(), [0, 0, 0, 9]);
+
+        let neg = Signed::_neg1 { v: 2 };
+        let bytes = xdrs::txs::encode(&neg).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 2]);
+        assert_eq!(xdrs::txs::decode::<Signed>(&bytes).unwrap(), neg);
+        assert_eq!(Signed::_neg2147483648.k(), i32::MIN);
+    }
+
+    #[test]
+    fn typedefd_switch_types_resolve() {
+        let last = ByIndex::_4294967295 { v: 3 };
+        let bytes = xdrs::txs::encode(&last).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 3]);
+        assert_eq!(xdrs::txs::decode::<ByIndex>(&bytes).unwrap(), last);
+        let i: Index = last.i();
+        assert_eq!(i, u32::MAX);
+        assert_eq!(ByIndex::_1.i(), 1);
+
+        let f: Flag = ByFlag::TRUE { v: 4 }.f();
+        assert!(f);
+        assert!(!ByFlag::FALSE.f());
+        assert!(xdrs::txs::decode::<ByFlag>(&[0, 0, 0, 2]).is_err());
+    }
+
+    fn txs<T: xdrs::WriteXDR>(v: &T) -> Vec<u8> {
+        xdrs::txs::encode(v).unwrap()
+    }
+
+    #[test]
+    fn default_arms_and_shared_arms() {
+        // Two cases share an arm; each keeps its own value.
+        let hi = UnsignedDefault::_0x80000000 { v: 1 };
+        assert_eq!(txs(&hi), [0x80, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(hi.k(), 0x8000_0000);
+        assert_eq!(UnsignedDefault::_4294967295 { v: 1 }.k(), u32::MAX);
+        assert_eq!(UnsignedDefault::_7.k(), 7);
+        // An unknown value lands in the default arm and keeps its value.
+        let other =
+            xdrs::txs::decode::<UnsignedDefault>(&[0xff, 0, 0, 0]).unwrap();
+        assert_eq!(other.k(), 0xff00_0000);
+        assert_eq!(txs(&other), [0xff, 0, 0, 0]);
+
+        assert_eq!(SignedDefault::_neg1.k(), -1);
+        assert_eq!(SignedDefault::_MAX_BATCH.k(), MAX_BATCH as i32);
+        let other = xdrs::txs::decode::<SignedDefault>(&[
+            0xff, 0xff, 0xff, 0xfe, 0, 0, 0, 9,
+        ])
+        .unwrap();
+        assert_eq!(other.k(), -2);
+
+        assert!(BoolDefault::TRUE { v: 1 }.ok());
+        let other = xdrs::txs::decode::<BoolDefault>(&[0, 0, 0, 0]).unwrap();
+        assert!(!other.ok());
+    }
+
+    #[test]
+    fn typedefd_enum_and_single_case_unions() {
+        let ok = ByVerdict::OK { n: 3 };
+        let v: Verdict = ok.v();
+        assert_eq!(v, Status::OK);
+        assert_eq!(txs(&ok), [0, 0, 0, 0, 0, 0, 0, 3]);
+        assert_eq!(ByVerdict::REJECTED.v(), Status::REJECTED);
+
+        let c: Code = ByCode::_0.c();
+        assert_eq!(c, 0);
+        assert!(xdrs::txs::decode::<ByCode>(&[0, 0, 0, 1]).is_err());
+    }
+
+    const CONST_MAX: ConstUnsigned = ConstUnsigned::_4294967295 { v: 5 };
+    const CONST_MAX_TXS: [u8; CONST_MAX.const_txs_size()] = {
+        let mut w =
+            xdrs::txs::ConstWriter::<{ CONST_MAX.const_txs_size() }>::new();
+        CONST_MAX.const_write_txs(&mut w);
+        w.into_bytes()
+    };
+
+    #[test]
+    fn const_writers_and_inline_unions() {
+        assert_eq!(CONST_MAX_TXS, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 5]);
+        assert_eq!(CONST_MAX_TXS.as_slice(), txs(&CONST_MAX).as_slice());
+        assert_eq!(ConstUnsigned::_0xA.i(), 10);
+
+        let tagged = Tagged {
+            tag: Tagged_tag::_4294967295 { v: 6 },
+        };
+        assert_eq!(txs(&tagged), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 6]);
+        assert_eq!(xdrs::txs::decode::<Tagged>(&txs(&tagged)).unwrap(), tagged);
+        assert_eq!(tagged.tag.k(), u32::MAX);
+    }
+
     // Without the xdrs derives, a default arm is a plain variant.
     #[test]
     fn default_arms_without_the_xdrs_derives() {
