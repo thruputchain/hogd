@@ -7,6 +7,7 @@
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "rpc_types.hh"
 #include "sched_event.hh"
@@ -27,7 +28,7 @@ public:
   // x23::default_max_message_size, which racing server threads also read).
   EventServerProxy(x23::HostPort const &host_port,
                    x23::CpuMap const &map = *x23::llc_map,
-                   size_t max_message_size = x23::default_max_message_size);
+                   size_t max_message_size = kExecToEventMessageCap);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {

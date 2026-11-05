@@ -4,6 +4,7 @@
 
 #include <cstddef>
 
+#include "event.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "integration.hh"
@@ -49,5 +50,24 @@ inline constexpr size_t kMaxSerializedContractBytes =
 // One contract at the ceiling must fit one executor->HogDb message.
 static_assert(kMaxSerializedContractBytes + 1_KiB <= kExecToDbMessageCap,
               "a contract at the ceiling must fit one executor->HogDb message");
+
+// The budget the executor holds itself to on the event link (EventServerProxy's
+// default). Raising it requires raising the event server's cap too.
+inline constexpr size_t kExecToEventMessageCap = 0x100'0000;
+
+// Ceiling on kConfigParamMaxReturnBufferLen, checked at genesis load. A root
+// frame's buffer rides in TxEventLog::root_output on the event link, next to
+// the signed transaction and the transaction's events, so all three must fit
+// one message (#4744).
+inline constexpr uint32_t kReturnBufferCeilingLen = 8 * 1024 * 1024;
+
+// Each event adds its address, topic count, and length prefix to its data.
+static_assert(kReturnBufferCeilingLen + kMaxBytesSignedTransaction +
+                      (kMaxEventsPerTransaction *
+                       (sizeof(ContractAddress) + 8 + kMaxEventLength)) +
+                      1_KiB <=
+                  kExecToEventMessageCap,
+              "a maximal root return, signed transaction and event list must "
+              "fit one executor->event message");
 
 } // namespace hogd
