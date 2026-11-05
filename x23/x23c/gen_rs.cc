@@ -1156,19 +1156,22 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
       // can collide with a case.  x23c cannot pick a free one itself, since
       // case values may be enum members or typedefs from other files, so
       // let rustc find one.  Self-contained, as generated code may be built
-      // without the xdrs crate.
+      // without the xdrs crate.  The const's name starts with "__", which is
+      // reserved in the C++ x23c also generates, so no schema constant used
+      // as a case value can be shadowed by it; `mut` bindings are never
+      // taken for constant patterns.
       std::string indent(kIndentWidth * indent_, ' ');
       std::string cases;
       for (const auto &t : case_tags)
         cases += std::format("\n{0}        {1},", indent, t);
       default_decl.pop_back(); // the trailing ','
       default_decl += std::format(R"( = {{
-{0}    const CASES: &[i32] = &[{1}
+{0}    const __XDR_CASES: &[i32] = &[{1}
 {0}    ];
 {0}    let mut tag = i32::MIN;
 {0}    let mut i = 0;
-{0}    while i < CASES.len() {{
-{0}        if CASES[i] == tag {{
+{0}    while i < __XDR_CASES.len() {{
+{0}        if __XDR_CASES[i] == tag {{
 {0}            tag += 1;
 {0}            i = 0;
 {0}        }} else {{

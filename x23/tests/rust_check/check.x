@@ -177,7 +177,12 @@ default:
   void;
 };
 
+// The tag's helper constant must not shadow a schema constant either.
+const CASES = 11;
+
 union Wrapping switch (unsigned int k) {
+case CASES:
+  void;
 case 0:
   void;
 case 4294967295:

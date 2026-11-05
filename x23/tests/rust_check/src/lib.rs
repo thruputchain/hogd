@@ -565,6 +565,8 @@ mod tests {
         assert_eq!(txs(&up), [0, 0, 0, 1]);
 
         assert_eq!(txs(&Wrapping::_0), [0, 0, 0, 0]);
+        assert_eq!(Wrapping::_CASES.k(), CASES);
+        assert_eq!(txs(&Wrapping::_CASES), [0, 0, 0, 11]);
         let max = Wrapping::_4294967295 { v: 2 };
         assert_eq!(xdrs::txs::decode::<Wrapping>(&txs(&max)).unwrap(), max);
         let other =
