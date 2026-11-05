@@ -69,7 +69,9 @@ required-features = ["entrypoints"]
     version = subprocess.check_output(
         ["thruput", "--version"], text=True
     ).strip()
-    expected = "thruput " + (ROOT / "scripts/thruput-tools-version").read_text().strip()
+    expected = "thruput " + (
+        ROOT / "scripts/thruput-tools-version"
+    ).read_text().strip()
     if version.split(" (", 1)[0] != expected:
         raise ValueError(f"expected {expected}, got {version}")
     records = []

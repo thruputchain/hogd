@@ -61,12 +61,12 @@ edition = "2024"
 
 [workspace.dependencies]
 # SDK and protocol crates, all from crates.io.
-thruput-sdk = { version = "0.58.0" }
-thruput-rv32-runtime = { version = "0.58.0" }
+thruput-sdk = { version = "0.59.0" }
+thruput-rv32-runtime = { version = "0.59.0" }
 # default features include std, which cannot build for the on-chain targets
-thruput-domain-separator = { version = "0.58.0", default-features = false }
-thruput-xdr = { version = "0.63.0", features = ["xdrs", "syscalls"] }
-thruput-syscall = { version = "0.63.0" }
+thruput-domain-separator = { version = "0.59.0", default-features = false }
+thruput-xdr = { version = "0.64.0", features = ["xdrs", "syscalls"] }
+thruput-syscall = { version = "0.64.0" }
 # Published on crates.io as thruput-xdrs; the dependency key keeps the library
 # name contracts import.
 xdrs = { package = "thruput-xdrs", version = "0.17.1", features = ["int128", "heapless"] }
@@ -76,15 +76,15 @@ hex-literal = "1.0.0"
 serde = { version = "1.0.217", default-features = false }
 
 # Standard interface crates.
-thruput-erc20-if = { version = "0.1.71" }
-thruput-erc20-permit-if = { version = "0.1.71" }
-thruput-erc165-if = { version = "0.1.71" }
+thruput-erc20-if = { version = "0.1.72" }
+thruput-erc20-permit-if = { version = "0.1.72" }
+thruput-erc165-if = { version = "0.1.72" }
 
 # Standard test crates. Only reached through optional contract features that
 # nothing here enables, but cargo resolves optional deps regardless. Published
 # as thruput-erc20-*; the keys keep the names the contracts use.
-erc20-test = { package = "thruput-erc20-test", version = "0.58.0" }
-erc20-native-test = { package = "thruput-erc20-native-test", version = "0.58.0" }
+erc20-test = { package = "thruput-erc20-test", version = "0.59.0" }
+erc20-native-test = { package = "thruput-erc20-native-test", version = "0.59.0" }
 
 [profile.release]
 trim-paths = "all" # unstable
