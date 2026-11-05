@@ -10,6 +10,7 @@
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
+#include <vector>
 
 #include "db_sched.hh"
 #include "hogd/base/log.h"
@@ -125,7 +126,8 @@ public:
   }
 
   // The cached tx with this exact signed encoding, or null if its body is not
-  // cached or is cached under a different encoding. When the tx is found and
+  // cached or is cached under a different encoding. Encodings that vetted
+  // submissions displaced are still found. When the tx is found and
   // [tx_hash] is non-null, sets [*tx_hash] to the tx's [TransactionHash].
   std::shared_ptr<const SignedTransaction>
   find_signed_tx(const SignedTransactionHash &signed_tx_hash,
@@ -300,6 +302,7 @@ public:
 
 private:
   friend class Scheduler_BatchCommittedOutcomesCrossChunks_Test;
+  friend class Scheduler_SignedVariantsShareHashSetLifetime_Test;
 
   // Reuse the keyed hash calculated for shard selection during map probes
   // and eviction. The cached value is internal; transaction identity remains
@@ -379,6 +382,12 @@ private:
     TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
+    // Shared by all signed versions of this body. This is an [std::shared_ptr],
+    // so it is automatically freed when the last [TxValue] for this tx body is
+    // freed.
+    std::shared_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
+        signed_tx_hashes = std::make_shared<
+            std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
   };
 
   struct AccountState {
@@ -429,8 +438,9 @@ private:
                       const SignedTransactionHash &signed_tx_hash,
                       CachedVariant on_variant);
   // Removes the cached tx whose body hash is [tx_hash] from [txs_by_body_] and
-  // [txs_]. The caller holds the lock of the tx's account, as every cache
-  // writer does, so the entry read here is current.
+  // [txs_], along with every other encoding of it. The caller holds the lock of
+  // the tx's account, as every cache writer does, so the entry read here is
+  // current.
   void erase_cached_tx(const TransactionHash &tx_hash);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
@@ -485,8 +495,10 @@ private:
   std::set<AccountKey> ready_accounts_;
   PendingNominationState pending_nomination_;
 
-  // Tx cache, keyed by each tx's exact signed encoding. It holds at most one
-  // encoding per body: [txs_by_body_] indexes the same entries by body hash.
+  // Tx cache, keyed by each tx's exact signed encoding. It holds one live
+  // encoding per body, which [txs_by_body_] indexes by body hash, plus the
+  // encodings vetted submissions displaced (see
+  // [TxValue::signed_tx_hashes]).
   // Entries are removed when transactions expire, are discarded, or appear in
   // a committed/validated block. Shared ownership keeps an entry's
   // transaction alive for in-flight lookups after it is removed from here.

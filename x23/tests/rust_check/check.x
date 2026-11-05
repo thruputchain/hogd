@@ -54,20 +54,141 @@ struct Reading {
   } last;
 };
 
-// A default arm stores the discriminant with the switch type, which decides
-// what the reader accepts: a bool only 0 and 1, an enum any value.
-union BoolResult switch (bool ok) {
-case TRUE:
-  unsigned int value;
-default:
-  string message<32>;
+// Case values have the switch type: unsigned cases of 2^31 and up, and
+// negative signed ones, must compile and keep their value.
+// A schema constant may have any name, including one x23c might pick for
+// a temporary.
+const V = 9;
+
+union Unsigned switch (unsigned int k) {
+case 4294967295:
+  int v;
+case 0x80000000:
+  void;
+case MAX_BATCH:
+  void;
+case V:
+  void;
 };
 
-union StatusResult switch (Status status) {
-case OK:
-  unsigned int value;
+union Signed switch (int k) {
+case -1:
+  int v;
+case -2147483648:
+  void;
+};
+
+// A typedef'd switch type, which x23c cannot resolve: rustc does, through
+// case values written as constants of the switch type.
+typedef unsigned int Index;
+typedef bool Flag;
+
+union ByIndex switch (Index i) {
+case 4294967295:
+  int v;
+case 1:
+  void;
+};
+
+union ByFlag switch (Flag f) {
+case TRUE:
+  int v;
+case FALSE:
+  void;
+};
+
+// The accessor's default arm, and several cases sharing an arm.
+union UnsignedDefault switch (unsigned int k) {
+case 4294967295:
+case 0x80000000:
+  int v;
+case 7:
+  void;
 default:
   void;
+};
+
+union SignedDefault switch (int k) {
+case -1:
+case MAX_BATCH:
+  void;
+default:
+  int other;
+};
+
+union BoolDefault switch (bool ok) {
+case TRUE:
+  int v;
+default:
+  void;
+};
+
+// A typedef of an enum keeps enum member labels; a single-case union over
+// a typedef'd int has a single accessor arm.
+typedef Status Verdict;
+typedef int Code;
+
+union ByVerdict switch (Verdict v) {
+case OK:
+  int n;
+case REJECTED:
+  void;
+};
+
+union ByCode switch (Code c) {
+case 0:
+  void;
+};
+
+// The const writers splice the typed case values too.
+// #[rust(ConstWriteXDR)]
+union ConstUnsigned switch (Index i) {
+case 4294967295:
+  int v;
+case 0xA:
+  void;
+};
+
+// An anonymous union inside a struct.
+struct Tagged {
+  union switch (unsigned int k) {
+  case 4294967295:
+    int v;
+  case 0:
+    void;
+  } tag;
+};
+
+// Left implicit, the default variant's tag would be the last case's plus
+// one, which here is another case's value: DOWN + 1 = IDLE, and
+// 4294967295 (-1 as an i32) + 1 = 0.  x23c has rustc pick a free tag.
+enum Signal {
+  DOWN = -1,
+  IDLE = 0,
+  UP = 1
+};
+
+union BySignal switch (Signal s) {
+case IDLE:
+  int n;
+case DOWN:
+  void;
+default:
+  void;
+};
+
+// The tag's helper constant must not shadow a schema constant either.
+const CASES = 11;
+
+union Wrapping switch (unsigned int k) {
+case CASES:
+  void;
+case 0:
+  void;
+case 4294967295:
+  int v;
+default:
+  int other;
 };
 
 program check {
