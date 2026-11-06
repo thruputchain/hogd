@@ -50,6 +50,14 @@ constexpr static auto kPublicKeyHashDomainSeparatorCxs =
 constexpr static auto kTransactionSignatureDomainSeparatorCxs =
     domain_separator_cxs<u8"Transaction">();
 
+// Prefix the ProposalTxsHash of a ConsensusValue and the hash of each of its
+// ParallelBatches (see hogd/xdr/proposal_hash.h).
+constexpr static auto kProposalTxsDomainSeparatorCxs =
+    domain_separator_cxs<u8"ProposalTxs">();
+
+constexpr static auto kParallelBatchDomainSeparatorCxs =
+    domain_separator_cxs<u8"ParallelBatch">();
+
 // Hashes a public key, scheme included, into the PublicKeyHash that names it
 // in a PubkeyAccountPreimage: SHA256(domain_separator || cxs(key)). Returns
 // std::nullopt if the key cannot be CXS-serialized (e.g. an unrecognized

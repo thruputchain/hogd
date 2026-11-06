@@ -180,13 +180,76 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   txs.nondeterministic_data.segment_bytes = {4};
   txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
 
+  // Shared with chuckd's TestHashProposalTxsFastCompatibilityVector and the
+  // coordinator's proposal_txs_hash_golden_vector.
   const ProposalTxsHash expected = {
-      0x3a, 0x3c, 0xe7, 0x82, 0x83, 0x94, 0x38, 0x26, 0xac, 0x43, 0x29,
-      0x1f, 0xab, 0x79, 0xbd, 0x17, 0xc4, 0xad, 0x1d, 0x1e, 0xf9, 0xe2,
-      0x2d, 0x8c, 0x72, 0x31, 0xa9, 0x7c, 0xb6, 0x68, 0xdc, 0xd9,
+      0xac, 0x7e, 0x6e, 0x65, 0xe3, 0xf3, 0x6e, 0xc7, 0x88, 0x45, 0xdd,
+      0xf3, 0xf3, 0xd9, 0x5a, 0xcf, 0x99, 0xea, 0xdb, 0xbd, 0xbc, 0xfd,
+      0x39, 0x1e, 0x44, 0x23, 0x9a, 0x7d, 0xc4, 0xb5, 0x2c, 0x03,
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+// Combined by XOR, the segment hashes kept the commitment when two segments of
+// the same shape swapped places, though the payload then decodes to the
+// opposite transaction order (hogd#4508).
+TEST(Mempool, ProposalTxsCompatibilityHashBindsTransactionOrder)
+{
+  const SignedTransactionHash first_hash = sha256(uint64_t{1});
+  const SignedTransactionHash second_hash = sha256(uint64_t{2});
+  const ParallelBatch first_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{first_hash})();
+  const ParallelBatch second_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{second_hash})();
+
+  ProposalTxs first_order{};
+  first_order.signed_hash.segment_tokens = {1, 1};
+  first_order.signed_hash.segment_bytes = {first_segment.segment_bytes[0],
+                                           second_segment.segment_bytes[0]};
+  first_order.signed_hash.xdr = first_segment.xdr;
+  first_order.signed_hash.xdr += second_segment.xdr;
+  first_order.nondeterministic_data =
+      t_to_parallel_batch(x23::XdrVec<NondeterministicProposalData>{
+          NondeterministicProposalData{}, NondeterministicProposalData{}})();
+
+  ProposalTxs swapped_order = first_order;
+  swapped_order.signed_hash.xdr = second_segment.xdr;
+  swapped_order.signed_hash.xdr += first_segment.xdr;
+
+  SignedTransactionHashBatch decoded_first_order;
+  ASSERT_TRUE(parallel_batch_to_t(first_order.signed_hash, decoded_first_order,
+                                  kNoBatchSizeLimit)());
+  SignedTransactionHashBatch decoded_swapped_order;
+  ASSERT_TRUE(parallel_batch_to_t(swapped_order.signed_hash,
+                                  decoded_swapped_order, kNoBatchSizeLimit)());
+  EXPECT_EQ(decoded_first_order,
+            (SignedTransactionHashBatch{first_hash, second_hash}));
+  EXPECT_EQ(decoded_swapped_order,
+            (SignedTransactionHashBatch{second_hash, first_hash}));
+
+  EXPECT_NE(proposal_txs_compatibility_hash(first_order),
+            proposal_txs_compatibility_hash(swapped_order));
+}
+
+// Combined by XOR, the two batch hashes kept the commitment when batches of
+// the same shape traded places.
+TEST(Mempool, ProposalTxsCompatibilityHashBindsBatchPositions)
+{
+  const ParallelBatch first =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{1})})();
+  const ParallelBatch second =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{2})})();
+
+  ProposalTxs txs{};
+  txs.signed_hash = first;
+  txs.nondeterministic_data = second;
+  ProposalTxs swapped{};
+  swapped.signed_hash = second;
+  swapped.nondeterministic_data = first;
+
+  EXPECT_NE(proposal_txs_compatibility_hash(txs),
+            proposal_txs_compatibility_hash(swapped));
 }
 
 TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
