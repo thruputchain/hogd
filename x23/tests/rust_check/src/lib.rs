@@ -4,6 +4,10 @@
 mod generated;
 pub use generated::*;
 
+// Generated from plain.x without the xdrs derives.
+#[rustfmt::skip]
+pub mod plain;
+
 use std::sync::Arc;
 use thruput_rpc_api::{ProgramError, RpcError};
 
@@ -58,6 +62,10 @@ impl check_check_v1 for Server {
     async fn scale(&self, t: T) -> Result<T, ProgramError> {
         Ok(t * 2)
     }
+
+    async fn ratio(&self, f: f32, r: Reading) -> Result<f64, ProgramError> {
+        Ok(f as f64 * r.sum.total)
+    }
 }
 
 // Replies can be anything that encodes like the wire type: borrowed from the
@@ -103,6 +111,10 @@ impl check_check_v1 for SharedServer {
 
     async fn scale(&self, t: T) -> Result<T, ProgramError> {
         Ok(t * 2)
+    }
+
+    async fn ratio(&self, f: f32, r: Reading) -> Result<f64, ProgramError> {
+        Ok(f as f64 * r.sum.total)
     }
 }
 
@@ -162,6 +174,14 @@ impl check_check_v1 for OpaqueServer {
     ) -> Result<impl xdrs::EncodesAs<T>, ProgramError> {
         Ok(t * 2)
     }
+
+    async fn ratio(
+        &self,
+        f: f32,
+        r: Reading,
+    ) -> Result<impl xdrs::EncodesAs<f64>, ProgramError> {
+        Ok(f as f64 * r.sum.total)
+    }
 }
 
 pub fn dispatcher() -> check_check_v1_Dispatcher<Server> {
@@ -207,7 +227,16 @@ pub async fn call_sites(
     client.verify(&Hash::default()).await?;
     client.pending().await?;
     client.scale(&3).await?;
+    client.ratio(0.5, &reading()).await?;
     Ok(())
+}
+
+pub fn reading() -> Reading {
+    Reading {
+        level: 1.5,
+        sum: Reading_sum { total: 4.0 },
+        last: Reading_last::TRUE { value: -0.0 },
+    }
 }
 
 // Generated client futures have to stay Send to be spawned.
@@ -364,6 +393,7 @@ mod tests {
             assert_eq!(client.add(1, 2).await.unwrap(), 3);
             assert!(client.verify(&Hash::default()).await.unwrap());
             assert_eq!(client.scale(&3).await.unwrap(), 6);
+            assert_eq!(client.ratio(0.5, &reading()).await.unwrap(), 2.0);
             let tx = tx();
             let receipt = client.credit(&5, &tx).await.unwrap();
             assert_eq!(receipt.tx, Some(tx));
@@ -424,5 +454,173 @@ mod tests {
             assert!(!dropped.load(Ordering::SeqCst));
         }
         assert!(dropped.load(Ordering::SeqCst));
+    }
+
+    #[test]
+    fn case_values_keep_the_switch_type() {
+        let max = Unsigned::_4294967295 { v: 1 };
+        let bytes = xdrs::txs::encode(&max).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<Unsigned>(&bytes).unwrap(), max);
+        assert_eq!(max.k(), u32::MAX);
+        assert_eq!(Unsigned::_0x80000000.k(), 0x8000_0000);
+        assert_eq!(Unsigned::_MAX_BATCH.k(), MAX_BATCH);
+        assert_eq!(Unsigned::_V.k(), V);
+        assert_eq!(xdrs::txs::encode(&Unsigned::_V).unwrap(), [0, 0, 0, 9]);
+
+        let neg = Signed::_neg1 { v: 2 };
+        let bytes = xdrs::txs::encode(&neg).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 2]);
+        assert_eq!(xdrs::txs::decode::<Signed>(&bytes).unwrap(), neg);
+        assert_eq!(Signed::_neg2147483648.k(), i32::MIN);
+    }
+
+    #[test]
+    fn typedefd_switch_types_resolve() {
+        let last = ByIndex::_4294967295 { v: 3 };
+        let bytes = xdrs::txs::encode(&last).unwrap();
+        assert_eq!(bytes, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 3]);
+        assert_eq!(xdrs::txs::decode::<ByIndex>(&bytes).unwrap(), last);
+        let i: Index = last.i();
+        assert_eq!(i, u32::MAX);
+        assert_eq!(ByIndex::_1.i(), 1);
+
+        let f: Flag = ByFlag::TRUE { v: 4 }.f();
+        assert!(f);
+        assert!(!ByFlag::FALSE.f());
+        assert!(xdrs::txs::decode::<ByFlag>(&[0, 0, 0, 2]).is_err());
+    }
+
+    fn txs<T: xdrs::WriteXDR>(v: &T) -> Vec<u8> {
+        xdrs::txs::encode(v).unwrap()
+    }
+
+    #[test]
+    fn default_arms_and_shared_arms() {
+        // Two cases share an arm; each keeps its own value.
+        let hi = UnsignedDefault::_0x80000000 { v: 1 };
+        assert_eq!(txs(&hi), [0x80, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(hi.k(), 0x8000_0000);
+        assert_eq!(UnsignedDefault::_4294967295 { v: 1 }.k(), u32::MAX);
+        assert_eq!(UnsignedDefault::_7.k(), 7);
+        // An unknown value lands in the default arm and keeps its value.
+        let other =
+            xdrs::txs::decode::<UnsignedDefault>(&[0xff, 0, 0, 0]).unwrap();
+        assert_eq!(other.k(), 0xff00_0000);
+        assert_eq!(txs(&other), [0xff, 0, 0, 0]);
+
+        assert_eq!(SignedDefault::_neg1.k(), -1);
+        assert_eq!(SignedDefault::_MAX_BATCH.k(), MAX_BATCH as i32);
+        let other = xdrs::txs::decode::<SignedDefault>(&[
+            0xff, 0xff, 0xff, 0xfe, 0, 0, 0, 9,
+        ])
+        .unwrap();
+        assert_eq!(other.k(), -2);
+
+        assert!(BoolDefault::TRUE { v: 1 }.ok());
+        let other = xdrs::txs::decode::<BoolDefault>(&[0, 0, 0, 0]).unwrap();
+        assert!(!other.ok());
+    }
+
+    #[test]
+    fn typedefd_enum_and_single_case_unions() {
+        let ok = ByVerdict::OK { n: 3 };
+        let v: Verdict = ok.v();
+        assert_eq!(v, Status::OK);
+        assert_eq!(txs(&ok), [0, 0, 0, 0, 0, 0, 0, 3]);
+        assert_eq!(ByVerdict::REJECTED.v(), Status::REJECTED);
+
+        let c: Code = ByCode::_0.c();
+        assert_eq!(c, 0);
+        assert!(xdrs::txs::decode::<ByCode>(&[0, 0, 0, 1]).is_err());
+    }
+
+    const CONST_MAX: ConstUnsigned = ConstUnsigned::_4294967295 { v: 5 };
+    const CONST_MAX_TXS: [u8; CONST_MAX.const_txs_size()] = {
+        let mut w =
+            xdrs::txs::ConstWriter::<{ CONST_MAX.const_txs_size() }>::new();
+        CONST_MAX.const_write_txs(&mut w);
+        w.into_bytes()
+    };
+
+    #[test]
+    fn const_writers_and_inline_unions() {
+        assert_eq!(CONST_MAX_TXS, [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 5]);
+        assert_eq!(CONST_MAX_TXS.as_slice(), txs(&CONST_MAX).as_slice());
+        assert_eq!(ConstUnsigned::_0xA.i(), 10);
+
+        let tagged = Tagged {
+            tag: Tagged_tag::_4294967295 { v: 6 },
+        };
+        assert_eq!(txs(&tagged), [0xff, 0xff, 0xff, 0xff, 0, 0, 0, 6]);
+        assert_eq!(xdrs::txs::decode::<Tagged>(&txs(&tagged)).unwrap(), tagged);
+        assert_eq!(tagged.tag.k(), u32::MAX);
+    }
+
+    #[test]
+    fn default_tags_do_not_collide_with_cases() {
+        let idle = BySignal::IDLE { n: 1 };
+        assert_eq!(txs(&idle), [0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<BySignal>(&txs(&idle)).unwrap(), idle);
+        assert_eq!(txs(&BySignal::DOWN), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(BySignal::DOWN.s(), Signal::DOWN);
+        let up = xdrs::txs::decode::<BySignal>(&[0, 0, 0, 1]).unwrap();
+        assert_eq!(up.s(), Signal::UP);
+        assert_eq!(txs(&up), [0, 0, 0, 1]);
+
+        assert_eq!(txs(&Wrapping::_0), [0, 0, 0, 0]);
+        assert_eq!(Wrapping::_CASES.k(), CASES);
+        assert_eq!(txs(&Wrapping::_CASES), [0, 0, 0, 11]);
+        let max = Wrapping::_4294967295 { v: 2 };
+        assert_eq!(xdrs::txs::decode::<Wrapping>(&txs(&max)).unwrap(), max);
+        let other =
+            xdrs::txs::decode::<Wrapping>(&[0, 0, 0, 5, 0, 0, 0, 9]).unwrap();
+        assert_eq!(other.k(), 5);
+        assert_eq!(txs(&other), [0, 0, 0, 5, 0, 0, 0, 9]);
+    }
+
+    fn cxs<T: xdrs::WriteXDR>(v: &T) -> Vec<u8> {
+        xdrs::cxs::encode(v).unwrap()
+    }
+
+    // A discriminant is encoded as its switch type, so CXS bytes match what
+    // x23's C++ writes: an unsigned int switch encodes unsigned, also through
+    // a typedef and in a default arm, and an int switch signed.
+    #[test]
+    fn discriminants_encode_by_switch_type() {
+        assert_eq!(cxs(&UnsignedDefault::Default { k: 32 }), [0x20]);
+        assert_eq!(cxs(&Unsigned::_0x80000000), [0xbf, 0, 0, 0, 0x80]);
+        let max = ByIndex::_4294967295 { v: 3 };
+        assert_eq!(cxs(&max), [0xbf, 0xff, 0xff, 0xff, 0xff, 0x03]);
+        assert_eq!(xdrs::cxs::decode::<ByIndex>(&cxs(&max)).unwrap(), max);
+        let signed = SignedDefault::Default { k: 32, other: 1 };
+        assert_eq!(cxs(&signed), [0x3f, 0x20, 0x01]);
+        assert_eq!(
+            xdrs::cxs::decode::<SignedDefault>(&cxs(&signed)).unwrap(),
+            signed
+        );
+
+        // A default arm holds its discriminant with the switch type.
+        let other = xdrs::cxs::decode::<UnsignedDefault>(&[0x20]).unwrap();
+        let k: u32 = other.k();
+        assert_eq!(k, 32);
+        // A bool discriminant is only 0 or 1, even with a default arm.
+        assert!(!xdrs::cxs::decode::<BoolDefault>(&[0x00]).unwrap().ok());
+        assert!(xdrs::cxs::decode::<BoolDefault>(&[0x02]).is_err());
+    }
+
+    // Without the xdrs derives, a default arm is a plain variant.
+    #[test]
+    fn default_arms_without_the_xdrs_derives() {
+        let raw = plain::Reading::LOW { raw: 3 };
+        assert_eq!(raw.l(), plain::Level::LOW);
+        let other = plain::Count::Default { n: 7, other: 8 };
+        assert_eq!(other.n(), 7);
+        let sample = plain::Sample {
+            reading: plain::Reading::Default { l: plain::Level(5) },
+            count: plain::Count::_1 { one: 1 },
+        };
+        assert_eq!(sample.reading.l(), plain::Level(5));
+        assert_eq!(sample.count.n(), 1);
     }
 }

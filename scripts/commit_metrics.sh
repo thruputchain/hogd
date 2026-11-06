@@ -36,7 +36,7 @@ if [ -z "$committer_name" ]; then
   committer_name="metrics-script"
 fi
 if [ -z "$committer_email" ]; then
-  committer_email="metrics-script@groundhogchain.com"
+  committer_email="metrics-script@users.noreply.github.com"
 fi
 echo "Committer name: $committer_name"
 echo "Committer email: $committer_email"

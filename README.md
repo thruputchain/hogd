@@ -1,4 +1,4 @@
-Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp.yml/badge.svg)
+Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp-namespace-optimized.yml/badge.svg)
 
 # Installation Instructions
 
