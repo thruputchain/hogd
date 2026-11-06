@@ -186,6 +186,15 @@ public:
     return root_hash_;
   }
 
+  // Cumulative serialized size of every [event log][body] pair streamed to the
+  // events file, which equals the finalized file's size. Final once all
+  // executors have closed (add_event() refuses once the last handle is gone),
+  // and identical on every node that executed this transaction set.
+  size_t total_pair_bytes() const
+  {
+    return total_pair_bytes_.load(std::memory_order_relaxed);
+  }
+
   void set_block_height(BlockHeight h)
   {
     CHECK_EQ(block_height_, -1);
@@ -292,6 +301,8 @@ private:
   // Executor handle tracking - count of executors with open handles
   std::atomic<uint32_t> open_executor_handles_ = 0;
   x23::CoroFutex<bool> all_executors_closed_ = false;
+
+  std::atomic<size_t> total_pair_bytes_ = 0;
 
   x23::UniqueFd events_file_;
   BlockHeight block_height_ = -1;
