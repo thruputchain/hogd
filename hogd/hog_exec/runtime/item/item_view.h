@@ -29,6 +29,17 @@ namespace hogd {
 
 class SnapshotStorageItem;
 class StorageSnapshotCache;
+struct StorageCostModel;
+
+// Signed bounds on the change in a conservative storage reservation: positive
+// means additional funds are needed; negative means funds can be released. A
+// missing endpoint is unknown, not zero (nor an assumed maximum item size).
+// Actual commit-time charges can be smaller than the reservation, as can DB
+// locks tightened by narrowing a history of intermediate reservations.
+struct StorageCostChangeBounds {
+  std::optional<int128_t> lower;
+  std::optional<int128_t> upper;
+};
 
 // Each of the item types has the following methods:
 // get_delta()
@@ -124,6 +135,15 @@ public:
     return locally_consumed_index_;
   }
 
+  const SnapshotStorageItem &base_item() const { return *base_item_; }
+
+  // The DB's local reservation cost, before any snapshot credit. Shared RCQs
+  // reserve standalone net current-block inserts; exclusive RCQs price the
+  // remaining snapshot entries too. No queue blocks are loaded here. nullopt
+  // means the counts cannot describe a valid exclusive result.
+  std::optional<int128_t> get_storage_cost(StorageCostModel const &cost_model,
+                                           bool exclusive) const;
+
 private:
   x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
@@ -154,8 +174,8 @@ private:
   // count of retrocausally consumed entries from other transactions
   uint16_t locally_consumed_index_ = 0;
 
-  // For (in future PR) tracking storage costs
-  uint32_t past_block_consumed_count_ = 0;
+  // Includes all snapshot entries when the queue was deleted/replaced.
+  uint64_t past_block_consumed_count_ = 0;
 
   const SnapshotStorageItem *base_item_;
 };
@@ -380,6 +400,22 @@ public:
   std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
   get_delta(std::span<QueueEntry const> observed_entries = {}) const;
 
+  // Bound the change in storage reservation between two views of the same key
+  // in the same transaction. Keep the earlier view before replacing its write.
+  // ExclusiveLock permits snapshot refunds; shared scalar writes clamp their
+  // reservation to zero. Both views' flags matter, including flag-only changes.
+  //
+  // Uses only local state. An already-loaded snapshot may be supplied;
+  // otherwise it is taken from an UnmodifiedItem/RCQ in either view when
+  // available. Both sides use cost_model. Unknown snapshot costs are bounded
+  // jointly, so their shared dependence cancels where possible.
+  // Auth/balance/replay changes are not covered yet and return unknown bounds.
+  // This does not acquire locks or authorize credits before the corresponding
+  // DB reservations succeed.
+  [[nodiscard]] StorageCostChangeBounds get_storage_cost_change_bounds(
+      ItemView const &before, StorageCostModel const &cost_model,
+      SnapshotStorageItem const *snapshot = nullptr) const;
+
   void sync_retrocausally_consumed(RetrocausalQueueItem const &item)
   {
     retrocausally_consumed_count_ = item.get_retrocausally_consumed_count();
@@ -391,6 +427,8 @@ public:
   }
 
 private:
+  SnapshotStorageItem const *get_loaded_snapshot() const;
+
   std::variant<UnmodifiedItem, DeletedItem, BytestringItem, NNIntItem,
                NativeTokenBalanceItem, RetrocausalQueueItem, ReplayCacheItem,
                AddressAuthDataItem>
