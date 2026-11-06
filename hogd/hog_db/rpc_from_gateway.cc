@@ -1,6 +1,7 @@
 #include "hogd/hog_db/rpc_from_gateway.h"
 
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <utility>
 #include <vector>
@@ -97,6 +98,17 @@ read_one_item(HogDbDAO &db, AddressAndKey const &addrkey)
     return Reply(std::move(ret));
   }
 
+  if (key.is_address_metadata()) {
+    auto deployment = db.read_address_metadata(key.get_address());
+    if (!deployment)
+      return Reply(to_rpc_error(deployment.error()));
+    WireStorageItem out(StorageItemType::kItemTypeDeployedContractHash);
+    out.deployed_contract_hash() = std::move(*deployment);
+    DbGatewayItemResult ret(RPCError::kRPCNone);
+    ret.item() = std::move(out);
+    return Reply(std::move(ret));
+  }
+
   HogDbStatus<DBItem> item = db.read_contract_data_item(key);
   if (!item)
     return Reply(to_rpc_error(item.error()));
@@ -180,6 +192,24 @@ HogDbGatewayRpc::dbgateway_get_config()
   result.config().storage_cost_model = cost_model->to_xdr();
   result.config().tip = std::move(tip);
   co_return result;
+}
+
+DbGatewayContractResult
+HogDbGatewayRpc::dbgateway_get_contract(SHA256Hash const &hash)
+{
+  auto encoded = ctx_.get_db().read_contract_code(hash);
+  if (!encoded) {
+    return DbGatewayContractResult(to_rpc_error(encoded.error()));
+  }
+  if (encoded->size() > kMaxResponseBytes) {
+    return DbGatewayContractResult(RPCError::kRPCUnrecoverable);
+  }
+  DbGatewayContractResult result(RPCError::kRPCNone);
+  result.contract_xdr().resize(encoded->size());
+  if (!encoded->empty()) {
+    std::memcpy(result.contract_xdr().data(), encoded->data(), encoded->size());
+  }
+  return result;
 }
 
 x23::Async<DbGatewayItemsReply>

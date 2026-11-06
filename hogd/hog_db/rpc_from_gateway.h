@@ -125,6 +125,8 @@ public:
 
   x23::Async<DbGatewayConfigResult> dbgateway_get_config();
 
+  DbGatewayContractResult dbgateway_get_contract(SHA256Hash const &hash);
+
   void shut_down() { shutdown_flag_ = true; }
 
   void await_shutdown_request() { shutdown_flag_.wait(false); }

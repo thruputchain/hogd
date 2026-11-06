@@ -208,7 +208,7 @@ private:
     }
 
     // carve_artifact_fixup consumes a 12-byte control prefix. Bound its input
-    // so replacing that prefix with the 128-byte artifact header still fits
+    // so replacing that prefix with the artifact header still fits
     // libFuzzer's MaxSize.
     const size_t carve_size =
         std::min(input_.size(), max_size_ - rv32::kArtifactHeaderBytes + 12);
@@ -241,8 +241,10 @@ private:
         rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset);
     const uint32_t memory_size =
         rv32::load_u32_le(input_, rv32::kArtifactInitialMemorySizeOffset);
+    // Bytes after initial memory are a v6 extension list (none in v5);
+    // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
-        memory_size != body_size - code_size ||
+        memory_size > body_size - code_size ||
         memory_size > rv32::kDefaultMaxMemoryBytes) {
       return false;
     }
@@ -268,7 +270,7 @@ private:
     return true;
   }
 
-  // Serialize a canonical v5 header and body with matching section digests.
+  // Serialize a canonical v6 header and body with matching section digests.
   void rebuild(std::span<const uint8_t> code, std::span<const uint8_t> memory,
                uint32_t memory_start, uint32_t memory_bytes)
   {
@@ -296,6 +298,7 @@ private:
                                        rv32::artifact_digest(memory));
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
+    rv32::test_artifact::append_u32(artifact_, 0); // Empty extension list.
   }
 
   std::span<uint8_t> code()
