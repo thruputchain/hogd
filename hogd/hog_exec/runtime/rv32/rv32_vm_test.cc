@@ -343,6 +343,40 @@ TEST(Rv32ArtifactTest, opaqueSpecDoesNotEnterGuestMemory)
   EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
 }
 
+TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
+{
+  auto artifact = valid_artifact_bytes();
+  auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  artifact.erase(artifact.begin() + kLegacyArtifactHeaderBytes,
+                 artifact.begin() + kArtifactHeaderBytes);
+  store_u32_at(artifact, kArtifactFormatVersionOffset,
+               kLegacyArtifactFormatVersion);
+  store_u32_at(artifact, kArtifactHeaderSizeOffset, kLegacyArtifactHeaderBytes);
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+  EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+  EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+  auto threaded = parse_threaded_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(threaded.has_value());
+  EXPECT_EQ(threaded->code.data(),
+            artifact.data() + kLegacyArtifactHeaderBytes);
+
+  auto corrupt = artifact;
+  corrupt[kLegacyArtifactHeaderBytes] ^= 1;
+  expect_artifact_error(std::move(corrupt), ArtifactError::kCodeDigestMismatch);
+  auto trailing = artifact;
+  trailing.push_back(0);
+  expect_artifact_error(std::move(trailing),
+                        ArtifactError::kInvalidSectionLayout);
+  auto wrong_header = artifact;
+  store_u32_at(wrong_header, kArtifactHeaderSizeOffset, kArtifactHeaderBytes);
+  expect_artifact_error(std::move(wrong_header), ArtifactError::kBadHeaderSize);
+  artifact.resize(kLegacyArtifactHeaderBytes - 1);
+  expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
+}
+
 TEST(Rv32ArtifactTest, rejectsMalformedSpecEnvelope)
 {
   for (auto [version, size] :

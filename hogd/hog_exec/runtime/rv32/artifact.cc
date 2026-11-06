@@ -39,7 +39,7 @@ std::expected<ArtifactParseResults, ArtifactError>
 artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
 {
 
-  if (bytes.size() < kArtifactHeaderBytes) {
+  if (bytes.size() < kLegacyArtifactHeaderBytes) {
     return std::unexpected(ArtifactError::kTooSmall);
   }
   if (!std::ranges::equal(kArtifactMagic, bytes.first(kArtifactMagic.size()))) {
@@ -49,6 +49,17 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t format_version =
       load_u32_le(bytes, kArtifactFormatVersionOffset);
   const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
+  const bool legacy = format_version == kLegacyArtifactFormatVersion;
+  if (!legacy && format_version != kArtifactFormatVersion) {
+    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
+  }
+  if (header_size !=
+      (legacy ? kLegacyArtifactHeaderBytes : kArtifactHeaderBytes)) {
+    return std::unexpected(ArtifactError::kBadHeaderSize);
+  }
+  if (bytes.size() < header_size) {
+    return std::unexpected(ArtifactError::kTooSmall);
+  }
   const uint64_t vm_profile_digest =
       load_u64_le(bytes, kArtifactVmProfileOffset);
   const uint32_t flags = load_u32_le(bytes, kArtifactFlagsOffset);
@@ -66,19 +77,14 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t initial_memory_start =
       load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
   const uint32_t spec_schema_version =
-      load_u32_le(bytes, kArtifactSpecSchemaVersionOffset);
-  const uint32_t spec_size = load_u32_le(bytes, kArtifactSpecSizeOffset);
+      legacy ? 0 : load_u32_le(bytes, kArtifactSpecSchemaVersionOffset);
+  const uint32_t spec_size =
+      legacy ? 0 : load_u32_le(bytes, kArtifactSpecSizeOffset);
   const ArtifactDigest code_digest =
       load_artifact_digest(bytes, kArtifactCodeDigestOffset);
   const ArtifactDigest initial_memory_digest =
       load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset);
 
-  if (format_version != kArtifactFormatVersion) {
-    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
-  }
-  if (header_size != kArtifactHeaderBytes) {
-    return std::unexpected(ArtifactError::kBadHeaderSize);
-  }
   if (vm_profile_digest != kArtifactVmProfileDigest) {
     return std::unexpected(ArtifactError::kUnsupportedVmProfile);
   }
@@ -130,15 +136,14 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   // downstream spec decoders must enforce their own schema/resource limits.
   // Widen before adding so crafted u32 lengths cannot wrap on 32-bit hosts.
   if ((spec_schema_version == 0) != (spec_size == 0) ||
-      bytes.size() != uint64_t{kArtifactHeaderBytes} + code_size +
-                          initial_memory_size + spec_size) {
+      bytes.size() !=
+          uint64_t{header_size} + code_size + initial_memory_size + spec_size) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 
-  const auto code = bytes.subspan(kArtifactHeaderBytes, code_size);
+  const auto code = bytes.subspan(header_size, code_size);
   const auto initial_memory =
-      bytes.subspan(size_t{kArtifactHeaderBytes} + code_size,
-                    initial_memory_size);
+      bytes.subspan(size_t{header_size} + code_size, initial_memory_size);
   if (artifact_digest(code) != code_digest) {
     return std::unexpected(ArtifactError::kCodeDigestMismatch);
   }
