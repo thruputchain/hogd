@@ -288,12 +288,17 @@ static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
 // The fingerprints a lowerer may report: one per lowerer generation in the
 // field, pinned to what that lowerer emits. The transitional entries go with
 // kAcceptedGasSchedules' transitional entry.
-inline constexpr std::array<uint64_t, 2> kAcceptedFormatFingerprints = {
+inline constexpr std::array<uint64_t, 5> kAcceptedFormatFingerprints = {
     // This build's own.
     kArtifactFormatFingerprint,
     // v6 lowerer declaring gas table v3.
     format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
                        kTransitionalGasScheduleDigest),
+    // Published v5 fingerprints, retained with the v5 reader. The v6
+    // fingerprint function uses a different domain and header layout.
+    0x4171b4b8dc19b9abULL, // Gas table v4.
+    0x8e5caf3e9cd23b22ULL, // Gas table v3, fixed bounds.
+    0xc5f00a7d4451045eULL, // Gas table v3, caller bounds (tools 0.43.0).
 };
 static_assert(kAcceptedFormatFingerprints[1] == 0x36f9478fa875ca39ULL);
 

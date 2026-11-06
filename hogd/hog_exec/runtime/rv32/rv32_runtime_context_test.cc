@@ -1630,8 +1630,8 @@ TEST_F(Rv32RuntimeContextTest,
   if (fingerprint_text.has_value()) {
     // Accept any fingerprint in the transitional window, not just this build's:
     // the lowerer that stamps the current gas schedule may not have rolled out
-    // yet, and its fingerprint folds that schedule. Narrows back to a single
-    // value when kAcceptedGasSchedules does.
+    // yet, and its fingerprint folds that schedule and artifact format. Keep
+    // v5 producers accepted while the runtime supports v5 artifacts.
     const auto accepted = accepted_format_fingerprints_hex();
     EXPECT_TRUE(std::ranges::contains(accepted, *fingerprint_text))
         << "lowered metadata reports " << *fingerprint_text
