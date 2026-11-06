@@ -7,6 +7,7 @@
 #include <expected>
 #include <sys/socket.h>
 #include <utility>
+#include <vector>
 
 #include <x23/async.h>
 #include <x23/cleanup.h>
@@ -18,6 +19,7 @@
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
+#include <x23/threadpool.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
@@ -123,7 +125,23 @@ RpcStreamImpl::reader(SLOC_ARG0)
   Buf b;
   if constexpr (kMinBuf != 0U)
     b.reserve(kMinBuf);
+  // Replies whose results are set but whose coroutines are not yet scheduled.
+  // set_result_without_resuming() hands back a handle that nothing runs until
+  // it is enqueued, so this must be drained on every exit from the loop.
+  std::vector<ThreadPool::Job> ready;
+  Defer flush_ready([this, &ready] {
+    if (!ready.empty())
+      cp_->pool_.go(std::move(ready));
+  });
   while (!ss_.stop_requested()) {
+    // Flush before a read that would suspend: replies that arrived together
+    // are enqueued together, so ThreadPool::go() takes a runqueue lock once
+    // for the group rather than once per reply, and a batch never sits
+    // unstarted while this coroutine waits for the next record.
+    if (!ready.empty() && cp_->nbuffered(fd_) < 4) {
+      cp_->pool_.go(std::move(ready));
+      ready.clear();
+    }
     if (Errno err = co_await read_record(&b)) {
       fail();
       co_return;
@@ -145,12 +163,17 @@ RpcStreamImpl::reader(SLOC_ARG0)
       auto cb = std::move(it->second);
       cs->xidmap_.erase(it);
       cs.reset();
-      // Re-enqueing this on a CPU of the LLC it came from cuts RPC
-      // throughput by about a factor of 10.  Seems to be much better
-      // to resume the client directly.
+      // Hand the client's continuation to the pool rather than running it
+      // here, on the CPU hint xidmap_ already recorded for it.
       //
-      // cp_->pool_.make_callback(cb, std::move(b));
-      cb(std::move(b));
+      // Resuming inline was the better trade when the comment this replaces
+      // was written: a continuation was "deserialize the reply and wake a
+      // blocked caller", and a scheduling hop dwarfed it. Callers now await
+      // their RPCs, so a continuation runs until its own next call -- in
+      // hogd's executor, the rest of a transaction -- and running that here
+      // holds off every other client of this connection.
+      if (CoroHandle h = cb->set_result_without_resuming(std::move(b)))
+        ready.emplace_back(h, cb.cpuhint);
       if constexpr (kMinBuf != 0U)
         b.reserve(kMinBuf);
     }
