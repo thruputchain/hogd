@@ -1,6 +1,14 @@
 Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp-namespace-optimized.yml/badge.svg)
 
-# Installation Instructions
+# hogd
+
+Thruput's core execution engine and node runtime.
+
+[Website](https://www.thruput.network/) ·
+[Developer docs](https://www.thruput.network/docs/) ·
+[Community discussions](https://github.com/thruputchain/thruput-docs/discussions) ·
+[Discord: #thruput](https://discord.com/channels/897514728459468821/1564948118162898954)
+([join server](https://discord.gg/stellardev))
 
 ## macOS Quick Start
 
