@@ -1,6 +1,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <cstdio>
 #include <cstdlib>
 #include <format>
@@ -14,12 +15,12 @@
 #include "consensus.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
-#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/indexer_latency_probe.h"
+#include "hogd/hog_exec/bench/load_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
 #include "hogd/init.h"
@@ -29,6 +30,7 @@
 #include "transaction.hh"
 #include "x23/async.h"
 #include "x23/fastclock.h"
+#include "x23/threadpool.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -67,14 +69,15 @@ x23::Detached
 connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
                 x23::CoroCB<void> &cb, int ncoro, BlockID block_number,
                 std::atomic<size_t> &n_total_coros,
-                x23::XdrVec<NondeterministicProposalData> *nominations)
+                x23::XdrVec<NondeterministicProposalData> *nominations,
+                ConnectionLoad *load, x23::ThreadPool *pool)
 {
   auto coro = [](exec_client_t &exec_client, x23::CoroCB<void> &cb,
                  BlockValidationQueue *queue, BlockID block_number,
                  std::atomic<size_t> &n_total_coros,
-                 x23::XdrVec<NondeterministicProposalData> *nominations)
-      -> x23::Detached {
-    co_await default_threadpool().bg();
+                 x23::XdrVec<NondeterministicProposalData> *nominations,
+                 ConnectionLoad *load, x23::ThreadPool *pool) -> x23::Detached {
+    co_await pool->bg();
     while (true) {
       auto batch = queue->next_batch();
       if (batch.txs.empty()) {
@@ -84,8 +87,15 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
         co_return;
       }
 
+      const auto sent = x23::fastclock::now();
       auto r = co_await exec_client.executorsched_propose_batch(block_number,
                                                                 batch.txs);
+      // x23 resumes this coroutine inline on the connection's reader.  Get
+      // off it before handling the reply and sending the next batch, or every
+      // other reply on the connection waits behind that work.
+      co_await pool->bg();
+      if (load)
+        load->record(batch.txs.size(), x23::fastclock::now() - sent);
       assert(r.size() == batch.txs.size());
       for (size_t i = 0; i < r.size(); ++i) {
         const ExecProposeResult &result = r[i];
@@ -98,10 +108,65 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
   };
 
   for (int i = 0; i < ncoro; i++) {
-    coro(exec_client, cb, queue, block_number, n_total_coros, nominations);
+    coro(exec_client, cb, queue, block_number, n_total_coros, nominations, load,
+         pool);
   }
   co_return;
 };
+
+// One work trial's load: each connection's batches, and how long the propose
+// phase took.  Filled in by run_block(); reported after the trial's timer
+// stops, so reporting costs the measurement nothing.
+struct TrialLoad {
+  explicit TrialLoad(size_t nconnections) : connections(nconnections) {}
+
+  std::vector<ConnectionLoad> connections;
+  std::chrono::nanoseconds propose_time{};
+};
+
+// Where a trial's throughput went: for each executor, its share of the block,
+// its rate over the propose phase and its mean batch round trip; and the
+// runner's own CPU use over the trial, with its busiest threads.  Connection
+// i serves executor i % num_executors() (MultiexecCluster's
+// connect_exec_clients()).  An executor whose round trip stays flat while
+// its rate falls is waiting on the runner, not the other way round.
+void
+print_load(const MultiexecCluster &cluster, const TrialLoad &load,
+           size_t block_txs, const ThreadCpuSnapshot &cpu_before,
+           const ThreadCpuSnapshot &cpu_after,
+           std::chrono::nanoseconds trial_time)
+{
+  const ThreadCpuUse cpu =
+      thread_cpu_use(cpu_before, cpu_after,
+                     std::chrono::duration<double>(trial_time).count());
+  std::string busiest;
+  for (const auto &[cores, thread] : cpu.busiest)
+    busiest += std::format(" {}={:.2f}", thread, cores);
+  std::println("load: runner_cores={:.2f} busiest:{}", cpu.cores, busiest);
+
+  const double propose_s =
+      std::chrono::duration<double>(load.propose_time).count();
+  const size_t nexec = cluster.num_executors();
+  for (size_t e = 0; e < nexec; e++) {
+    uint64_t txs = 0;
+    uint64_t batches = 0;
+    uint64_t latency_ns = 0;
+    for (size_t i = e; i < load.connections.size(); i += nexec) {
+      const ConnectionLoad &c = load.connections[i];
+      txs += c.txs.load(std::memory_order_relaxed);
+      batches += c.batches.load(std::memory_order_relaxed);
+      latency_ns += c.latency_ns.load(std::memory_order_relaxed);
+    }
+    std::println("load: executor={} host={} txs={} share={:.3f} tps={:.0f} "
+                 "mean_batch_us={:.1f}",
+                 e, cluster.exec_host(e), txs,
+                 static_cast<double>(txs) / static_cast<double>(block_txs),
+                 propose_s > 0 ? static_cast<double>(txs) / propose_s : 0.0,
+                 batches ? static_cast<double>(latency_ns) / 1e3 /
+                               static_cast<double>(batches)
+                         : 0.0);
+  }
+}
 
 void
 run_block(x23::XdrVec<SignedTransaction> const *txs,
@@ -111,7 +176,9 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number, ConsensusValue &prev_value,
-          IndexerLatencyProbe *indexer_probe)
+          IndexerLatencyProbe *indexer_probe,
+          const std::vector<x23::ThreadPool *> &pools,
+          TrialLoad *load = nullptr)
 {
   auto start_time = x23::fastclock::now();
 
@@ -129,15 +196,18 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   // make sure any destructors are run during the measured inner loop
   {
     auto [async, cb] = x23::make_async<void>();
-    for (auto &exec_client : exec_clients) {
-      connection_coro(exec_client, &block_validation_queue, cb,
+    for (size_t i = 0; i < exec_clients.size(); i++) {
+      connection_coro(exec_clients[i], &block_validation_queue, cb,
                       n_coros_per_connection, current_block_number,
-                      n_total_coros, &nominations);
+                      n_total_coros, &nominations,
+                      load ? &load->connections[i] : nullptr, pools[i]);
     }
     async();
   }
 
   auto end_coros_time = x23::fastclock::now();
+  if (load)
+    load->propose_time = end_coros_time - start_coros_time;
   double elapsed_time = (end_coros_time - start_coros_time).count();
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
   close_block(db_sched_client, event_sched_client, exec_clients,
@@ -184,13 +254,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   const size_t n_connections =
       n_connections_per_executor * cluster.num_executors();
-  std::vector<exec_client_t> coro_exec_clients =
-      cluster.connect_exec_clients(n_connections_per_executor);
+  auto [coro_exec_clients, coro_pools] =
+      cluster.connect_exec_clients_in_lanes(n_connections_per_executor);
 
   run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
-            current_block_number, prev_value, &indexer_probe);
+            current_block_number, prev_value, &indexer_probe, coro_pools);
   parent_block_number = current_block_number;
   current_block_number++;
 
@@ -198,7 +268,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, coro_pools);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -240,12 +310,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                  "batch_size={}",
                  i, num_txs_per_block, cluster.num_executors(), n_connections,
                  n_coros_per_connection, num_accounts, batch_size);
+    TrialLoad load(coro_exec_clients.size());
+    const ThreadCpuSnapshot cpu_before = thread_cpu_snapshot();
     auto ts = x23::fastclock::now();
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, coro_pools, &load);
     auto end_time = x23::fastclock::now();
+    const ThreadCpuSnapshot cpu_after = thread_cpu_snapshot();
     double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
     std::println("time taken: {} ns for txs={} nexecutors={} nconnections={} "
@@ -259,6 +332,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
          "batch_size={} tps={}",
          elapsed_time, num_txs_per_block, cluster.num_executors(),
          n_connections, n_coros_per_connection, num_accounts, batch_size, tps);
+    print_load(cluster, load, num_txs_per_block, cpu_before, cpu_after,
+               end_time - ts);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -320,9 +395,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const int account_count = num_accounts.value();
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
+  // 16 connections per executor, as the mempool opens
+  // (MempoolCoordinatorRpc::kNumClientsPerExecutor).
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 5, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 10,
                             1'000'000);
 
   std::fflush(stdout);

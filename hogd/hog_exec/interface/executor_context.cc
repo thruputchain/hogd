@@ -53,8 +53,10 @@ ExecutorContext::propose_transaction(SignedTransaction signed_tx,
   // first database read and every other request on that connection waits
   // behind it -- and a connection serves many transactions at once.  main did
   // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
+  // the result, which returned to the reader immediately.  The reader runs in
+  // its connection's LLC lane (lane_stream_placement()), so the request stays
+  // there.
+  co_await current_threadpool().bg();
   co_return co_await run_propose_transaction(std::move(signed_tx), tx_id);
 }
 
@@ -68,8 +70,10 @@ ExecutorContext::propose_transaction_batch(SignedTransactionBatch signed_txs,
   // first database read and every other request on that connection waits
   // behind it -- and a connection serves many transactions at once.  main did
   // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
+  // the result, which returned to the reader immediately.  The reader runs in
+  // its connection's LLC lane (lane_stream_placement()), so the request stays
+  // there.
+  co_await current_threadpool().bg();
   ExecProposeBatchResult batch_res;
   batch_res.reserve(signed_txs.size());
   for (size_t i = 0; i < signed_txs.size(); i++) {
@@ -90,8 +94,10 @@ ExecutorContext::view_transaction(TransactionViewQuery const &query)
   // first database read and every other request on that connection waits
   // behind it -- and a connection serves many transactions at once.  main did
   // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
+  // the result, which returned to the reader immediately.  The reader runs in
+  // its connection's LLC lane (lane_stream_placement()), so the request stays
+  // there.
+  co_await current_threadpool().bg();
   // query stays borrowed from the caller across the hop; the RPC service keeps
   // the request alive until the returned Async completes.
   co_return co_await run_view_transaction(query);
@@ -107,8 +113,10 @@ ExecutorContext::validate_transaction_batch(
   // first database read and every other request on that connection waits
   // behind it -- and a connection serves many transactions at once.  main did
   // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
+  // the result, which returned to the reader immediately.  The reader runs in
+  // its connection's LLC lane (lane_stream_placement()), so the request stays
+  // there.
+  co_await current_threadpool().bg();
   ExecValidateBatchResult batch_res;
   batch_res.reserve(proposed_txs.size());
   for (size_t i = 0; i < proposed_txs.size(); i++) {
@@ -130,8 +138,10 @@ ExecutorContext::validate_transaction(ProposedTransaction proposed_tx,
   // first database read and every other request on that connection waits
   // behind it -- and a connection serves many transactions at once.  main did
   // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
+  // the result, which returned to the reader immediately.  The reader runs in
+  // its connection's LLC lane (lane_stream_placement()), so the request stays
+  // there.
+  co_await current_threadpool().bg();
   co_return co_await run_validate_transaction(std::move(proposed_tx), tx_id);
 }
 
@@ -375,7 +385,7 @@ ExecutorContext::await_event_return()
     cpu_relax();
     wait_count++;
     if ((wait_count & 0xFF) == 0U) [[unlikely]] {
-      co_await default_threadpool().bg();
+      co_await current_threadpool().bg();
     }
   }
   co_return event_error_;
