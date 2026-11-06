@@ -443,7 +443,9 @@ public:
   void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  // Returns the first-touch load gas the insert incurred so the syscall can
+  // bill it, mirroring the bytestring and nnint reads.
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
