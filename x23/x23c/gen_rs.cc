@@ -950,6 +950,20 @@ pub struct {}(pub i32);
   prtop("    }}\n");
   prtop("}}\n");
 
+  // An enum can switch a union: its discriminant is encoded as an int, and
+  // enums are open, so any i32 is a value.
+  prtop("{}", cfg("xdrs", std::format(R"(impl xdrs::XDRDiscriminant for {0} {{
+    const ENCODING: xdrs::DiscriminantEncoding = xdrs::DiscriminantEncoding::Signed;
+    fn discriminant(&self) -> i32 {{
+        self.0
+    }}
+    fn from_discriminant(d: i32) -> Self {{
+        Self(d)
+    }}
+}}
+)",
+                                      tname)));
+
   std::string write_block =
       std::format("write!(f, \"{0}({{}})\", self.0)", tname);
 
@@ -988,22 +1002,6 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
 
   const bool is_enum = (switch_type == b.switch_type);
   const bool is_bool = (switch_type == "bool");
-
-  // Convert an i32 expression to the switch_type.  Enum newtypes have
-  // From<i32>, but primitive types like u32/bool do not.
-  auto convert_i32 = [&](std::string expr) -> std::string {
-    if (is_bool) {
-      return std::format("({}) != 0", expr);
-    }
-    if (is_enum) {
-      return std::format("({}).into()", expr);
-    }
-    if (switch_type == "i32") {
-      return expr;
-    }
-    // u32, i64, u64, etc.
-    return std::format("({}) as {}", expr, switch_type);
-  };
 
   auto bool_map = [](std::string_view b) -> std::string {
     if (b == "TRUE") {
@@ -1086,6 +1084,10 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
     prtop("{}\n", default_derives(markers));
     prtop("{}", feature_attr("serde", "derive(Serialize, Deserialize)"));
     prtop("{}", xdrs_derive_attr(markers.const_write_xdr));
+    // The switch type decides how the discriminant is encoded.  x23c only
+    // spells it; rustc resolves it, through any typedef from any file.
+    prtop("{}", feature_attr("xdrs", std::format("xdr(discriminant = \"{}\")",
+                                                 switch_type)));
     prtop("{}", feature_attr("spec", "derive(XDR)"));
     prtop("{}", feature_attr("schema", "derive(schemars::JsonSchema)"));
     // This repr(i32) suffices to fully specify the layout of the enum, making
@@ -1129,10 +1131,9 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
         if (a.has_default) {
           default_decl =
               std::format("{}Default {{ {}: {} }},", default_variant_attr(),
-                          switch_id, kEnumBaseType);
+                          switch_id, switch_type);
           default_match =
-              std::format("{0}::Default{{ {1} }} => {2},\n", tname, switch_id,
-                          convert_i32(std::format("*{}", switch_id)));
+              std::format("{0}::Default{{ {1} }} => *{1},\n", tname, switch_id);
         }
       }
       else {
@@ -1152,12 +1153,11 @@ GenRs::show_type(const UnionBody &b, string const &tname, RustMarkers markers)
         if (a.has_default) {
           std::format_to(std::back_inserter(default_decl),
                          "{}Default {{ {}: {}, {}: {} }},",
-                         default_variant_attr(), switch_id, kEnumBaseType,
+                         default_variant_attr(), switch_id, switch_type,
                          escape_rust_id(a.decl.id),
                          type_name(a.decl, false, false));
-          default_match =
-              std::format("{0}::Default{{ {1},..}} => {2},\n", tname, switch_id,
-                          convert_i32(std::format("*{}", switch_id)));
+          default_match = std::format("{0}::Default{{ {1},..}} => *{1},\n",
+                                      tname, switch_id);
         }
       }
     }

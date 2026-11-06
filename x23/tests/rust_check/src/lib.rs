@@ -579,6 +579,36 @@ mod tests {
         assert_eq!(txs(&other), [0, 0, 0, 5, 0, 0, 0, 9]);
     }
 
+    fn cxs<T: xdrs::WriteXDR>(v: &T) -> Vec<u8> {
+        xdrs::cxs::encode(v).unwrap()
+    }
+
+    // A discriminant is encoded as its switch type, so CXS bytes match what
+    // x23's C++ writes: an unsigned int switch encodes unsigned, also through
+    // a typedef and in a default arm, and an int switch signed.
+    #[test]
+    fn discriminants_encode_by_switch_type() {
+        assert_eq!(cxs(&UnsignedDefault::Default { k: 32 }), [0x20]);
+        assert_eq!(cxs(&Unsigned::_0x80000000), [0xbf, 0, 0, 0, 0x80]);
+        let max = ByIndex::_4294967295 { v: 3 };
+        assert_eq!(cxs(&max), [0xbf, 0xff, 0xff, 0xff, 0xff, 0x03]);
+        assert_eq!(xdrs::cxs::decode::<ByIndex>(&cxs(&max)).unwrap(), max);
+        let signed = SignedDefault::Default { k: 32, other: 1 };
+        assert_eq!(cxs(&signed), [0x3f, 0x20, 0x01]);
+        assert_eq!(
+            xdrs::cxs::decode::<SignedDefault>(&cxs(&signed)).unwrap(),
+            signed
+        );
+
+        // A default arm holds its discriminant with the switch type.
+        let other = xdrs::cxs::decode::<UnsignedDefault>(&[0x20]).unwrap();
+        let k: u32 = other.k();
+        assert_eq!(k, 32);
+        // A bool discriminant is only 0 or 1, even with a default arm.
+        assert!(!xdrs::cxs::decode::<BoolDefault>(&[0x00]).unwrap().ok());
+        assert!(xdrs::cxs::decode::<BoolDefault>(&[0x02]).is_err());
+    }
+
     // Without the xdrs derives, a default arm is a plain variant.
     #[test]
     fn default_arms_without_the_xdrs_derives() {
@@ -587,7 +617,7 @@ mod tests {
         let other = plain::Count::Default { n: 7, other: 8 };
         assert_eq!(other.n(), 7);
         let sample = plain::Sample {
-            reading: plain::Reading::Default { l: 5 },
+            reading: plain::Reading::Default { l: plain::Level(5) },
             count: plain::Count::_1 { one: 1 },
         };
         assert_eq!(sample.reading.l(), plain::Level(5));
