@@ -121,15 +121,15 @@ endif()
 
 # A union's default arm is marked for the xdrs derives, and the marker is
 # gated like them: rustc rejects an attribute that no derive declares.
-require_text("${rust}" "#[xdr(default_variant)] Default { status: i32 }")
+require_text("${rust}" "#[xdr(default_variant)] Default { status: Status }")
 run_compiler(0 --rust -o default_gated.rs --recursive_type Record "${INPUT}")
 file(READ "${TEST_DIR}/default_gated.rs" default_gated)
 require_text("${default_gated}"
-  "#[cfg_attr(feature = \"xdrs\", xdr(default_variant))] Default { status: i32 }")
+  "#[cfg_attr(feature = \"xdrs\", xdr(default_variant))] Default { status: Status }")
 run_compiler(0 --rust --rust-no-feature xdrs -o default_plain.rs
   --recursive_type Record "${INPUT}")
 file(READ "${TEST_DIR}/default_plain.rs" default_plain)
-require_text("${default_plain}" "    Default { status: i32 }")
+require_text("${default_plain}" "    Default { status: Status }")
 string(FIND "${default_plain}" "default_variant" default_variant_pos)
 if(NOT default_variant_pos EQUAL -1)
   message(FATAL_ERROR "--rust-no-feature xdrs left the default_variant marker")

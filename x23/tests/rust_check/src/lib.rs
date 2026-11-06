@@ -568,6 +568,58 @@ mod tests {
         assert_eq!(tagged.tag.k(), u32::MAX);
     }
 
+    #[test]
+    fn default_tags_do_not_collide_with_cases() {
+        let idle = BySignal::IDLE { n: 1 };
+        assert_eq!(txs(&idle), [0, 0, 0, 0, 0, 0, 0, 1]);
+        assert_eq!(xdrs::txs::decode::<BySignal>(&txs(&idle)).unwrap(), idle);
+        assert_eq!(txs(&BySignal::DOWN), [0xff, 0xff, 0xff, 0xff]);
+        assert_eq!(BySignal::DOWN.s(), Signal::DOWN);
+        let up = xdrs::txs::decode::<BySignal>(&[0, 0, 0, 1]).unwrap();
+        assert_eq!(up.s(), Signal::UP);
+        assert_eq!(txs(&up), [0, 0, 0, 1]);
+
+        assert_eq!(txs(&Wrapping::_0), [0, 0, 0, 0]);
+        assert_eq!(Wrapping::_CASES.k(), CASES);
+        assert_eq!(txs(&Wrapping::_CASES), [0, 0, 0, 11]);
+        let max = Wrapping::_4294967295 { v: 2 };
+        assert_eq!(xdrs::txs::decode::<Wrapping>(&txs(&max)).unwrap(), max);
+        let other =
+            xdrs::txs::decode::<Wrapping>(&[0, 0, 0, 5, 0, 0, 0, 9]).unwrap();
+        assert_eq!(other.k(), 5);
+        assert_eq!(txs(&other), [0, 0, 0, 5, 0, 0, 0, 9]);
+    }
+
+    fn cxs<T: xdrs::WriteXDR>(v: &T) -> Vec<u8> {
+        xdrs::cxs::encode(v).unwrap()
+    }
+
+    // A discriminant is encoded as its switch type, so CXS bytes match what
+    // x23's C++ writes: an unsigned int switch encodes unsigned, also through
+    // a typedef and in a default arm, and an int switch signed.
+    #[test]
+    fn discriminants_encode_by_switch_type() {
+        assert_eq!(cxs(&UnsignedDefault::Default { k: 32 }), [0x20]);
+        assert_eq!(cxs(&Unsigned::_0x80000000), [0xbf, 0, 0, 0, 0x80]);
+        let max = ByIndex::_4294967295 { v: 3 };
+        assert_eq!(cxs(&max), [0xbf, 0xff, 0xff, 0xff, 0xff, 0x03]);
+        assert_eq!(xdrs::cxs::decode::<ByIndex>(&cxs(&max)).unwrap(), max);
+        let signed = SignedDefault::Default { k: 32, other: 1 };
+        assert_eq!(cxs(&signed), [0x3f, 0x20, 0x01]);
+        assert_eq!(
+            xdrs::cxs::decode::<SignedDefault>(&cxs(&signed)).unwrap(),
+            signed
+        );
+
+        // A default arm holds its discriminant with the switch type.
+        let other = xdrs::cxs::decode::<UnsignedDefault>(&[0x20]).unwrap();
+        let k: u32 = other.k();
+        assert_eq!(k, 32);
+        // A bool discriminant is only 0 or 1, even with a default arm.
+        assert!(!xdrs::cxs::decode::<BoolDefault>(&[0x00]).unwrap().ok());
+        assert!(xdrs::cxs::decode::<BoolDefault>(&[0x02]).is_err());
+    }
+
     // Without the xdrs derives, a default arm is a plain variant.
     #[test]
     fn default_arms_without_the_xdrs_derives() {
@@ -576,7 +628,7 @@ mod tests {
         let other = plain::Count::Default { n: 7, other: 8 };
         assert_eq!(other.n(), 7);
         let sample = plain::Sample {
-            reading: plain::Reading::Default { l: 5 },
+            reading: plain::Reading::Default { l: plain::Level(5) },
             count: plain::Count::_1 { one: 1 },
         };
         assert_eq!(sample.reading.l(), plain::Level(5));
