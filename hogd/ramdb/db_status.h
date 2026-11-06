@@ -14,6 +14,14 @@ struct DBItem {
   OwningSpan<const std::byte> value;
 };
 
+// SizedDBItem adds the value size to DBItem; value is empty when
+// get_with_size() skipped materializing it.
+struct SizedDBItem {
+  uint8_t type;
+  size_t size;
+  OwningSpan<const std::byte> value;
+};
+
 // DBCode is an enum of database error codes.
 enum class DBCode : uint8_t {
   // The item was not found.
