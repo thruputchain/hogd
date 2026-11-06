@@ -712,6 +712,38 @@ TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
       "corrupt persisted state under key");
 }
 
+TEST(RecoveryTests, RecoveredNegativeReplayCacheSizeRejectedOnLoad)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  constexpr static size_t kDefaultHeapSize = 1024 * 1024 * 1024;
+
+  ASSERT_TRUE(dir.has_value());
+
+  Address address = ContractAddress{7};
+
+  {
+    DBStatus<std::unique_ptr<Database>> db =
+        Database::open(dir->get_path(), kDefaultHeapSize, 0);
+    ASSERT_TRUE(db);
+    auto dao = HogDbDAO(RAMDB(std::move(*db)));
+
+    ReplayCacheMetadata metadata{};
+    metadata.size = -1;
+    ASSERT_TRUE(
+        dao.write_address_replay_cache_meta(address, metadata).has_value());
+    ASSERT_TRUE(dao.commit().has_value());
+  }
+
+  DBStatus<std::unique_ptr<Database>> db =
+      Database::open(dir->get_path(), kDefaultHeapSize, 0);
+  ASSERT_TRUE(db);
+  auto dao = HogDbDAO(RAMDB(std::move(*db)));
+
+  auto recovered = dao.read_address_replay_cache_meta(address);
+  ASSERT_FALSE(recovered.has_value());
+  EXPECT_EQ(HogDbCode::kCorruption, recovered.error().code());
+}
+
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
 {
   ErrnoStatus<Directory> dir = Directory::open_temporary();
