@@ -1,13 +1,15 @@
 # RV32 v6 upgrade
 
 This runtime accepts RV32 v5 and v6 during the rollout. Existing v5 contracts
-remain executable. v5 uses a 128-byte header with no embedded spec; v6 uses a
-136-byte header with an optional spec section. Both formats use the same
-execution, ABI, gas, bounds, and section-hash checks.
+remain executable. Both use the same 128-byte header. v6 appends an XDR
+extension list (`Rv32ArtifactExtensions` in `contract.x`) after initial memory,
+which carries the optional contract spec; a v5 artifact reads as v6 with no
+extensions. Both formats use the same execution, ABI, gas, bounds, and
+section-hash checks.
 
 All validators must support v6 before v6 contracts are deployed. Removing v5
 support requires a separate network transition decision that accounts for
-stored contracts. Header extensibility is a separate design task.
+stored contracts. New extension kinds need no format or runtime change.
 
 ## Release order
 
@@ -24,6 +26,8 @@ stored contracts. Header extensibility is a separate design task.
    integration and explorer dependencies. Upgrade and verify devnet before
    shipping explorer. Preserve network state; any reset needs separate approval.
 
-Runtime validation treats spec contents as opaque. The spec section is bounded
-by the total contract size. Schema-aware tools must apply their own byte,
-nesting, work, and display limits before decoding or rendering metadata.
+Runtime validation checks only the extension list's framing: nonzero, strictly
+ascending kinds and zero XDR padding. It stores extension bodies, including the
+spec, without interpreting them. They are bounded by the total contract size.
+Schema-aware tools must apply their own byte, nesting, work, and display limits
+before decoding or rendering metadata.

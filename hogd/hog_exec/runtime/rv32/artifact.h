@@ -22,11 +22,11 @@ inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
 // Accept v5 during the v6 rollout so existing contracts remain executable.
-// Removing it requires a separate network transition decision.
+// Removing it requires a separate network transition decision. v5 has the
+// same header as v6 and no extension list.
 inline constexpr uint32_t kLegacyArtifactFormatVersion = 5;
-inline constexpr uint32_t kLegacyArtifactHeaderBytes = 128;
 inline constexpr uint32_t kArtifactFormatVersion = 6;
-inline constexpr uint32_t kArtifactHeaderBytes = 136;
+inline constexpr uint32_t kArtifactHeaderBytes = 128;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
 // v2 seeded sp to the top of data memory.
@@ -55,15 +55,12 @@ inline constexpr size_t kArtifactInitialMemoryStartOffset = 60;
 inline constexpr size_t kArtifactCodeDigestOffset = 64;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
-inline constexpr size_t kArtifactSpecSchemaVersionOffset = 128;
-inline constexpr size_t kArtifactSpecSizeOffset = 132;
 inline constexpr char8_t kArtifactSectionDigestAlgorithm[] = u8"sha256";
 inline constexpr char8_t kArtifactCanonicalSectionOrder[] =
-    u8"header|code|initial_memory|spec";
+    u8"header|code|initial_memory|extensions";
 
 static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
-              kArtifactSpecSchemaVersionOffset);
-static_assert(kArtifactSpecSizeOffset + 4 == kArtifactHeaderBytes);
+              kArtifactHeaderBytes);
 
 // FNV-1a digest of instruction and host-syscall costs. Artifact admission
 // checks the declared version/digest pair against kAcceptedGasSchedules.
@@ -248,14 +245,6 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                                       kArtifactInitialMemoryDigestOffset,
                                       kArtifactDigestBytes);
 
-  digest =
-      format_fingerprint_layout_field(digest,
-                                      u8"header.spec_schema_version.offset",
-                                      u8"header.spec_schema_version.size",
-                                      kArtifactSpecSchemaVersionOffset, 4);
-  digest = format_fingerprint_layout_field(digest, u8"header.spec_size.offset",
-                                           u8"header.spec_size.size",
-                                           kArtifactSpecSizeOffset, 4);
   digest = format_fingerprint_string(digest, u8"section_digest_algorithm",
                                      kArtifactSectionDigestAlgorithm);
   digest =
@@ -272,7 +261,13 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                              1);
   digest = format_fingerprint_u64(digest,
                                   u8"initial_memory_start_zero_when_empty", 1);
-  digest = format_fingerprint_u64(digest, u8"spec_schema_zero_iff_empty", 1);
+  // The extension list's framing. Kinds are not folded: adding one does not
+  // change the format.
+  digest = format_fingerprint_string(digest, u8"extensions_encoding", u8"xdr");
+  digest = format_fingerprint_u64(digest, u8"extensions_kind_nonzero", 1);
+  digest =
+      format_fingerprint_u64(digest, u8"extensions_kind_strictly_ascending", 1);
+  digest = format_fingerprint_u64(digest, u8"extensions_xdr_padding_zero", 1);
   digest = format_fingerprint_string(digest, u8"canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
   digest =
@@ -281,7 +276,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x4c97dd9c06cbb72cULL);
+static_assert(kArtifactFormatFingerprint == 0xd96927c3425ee88eULL);
 static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
               kArtifactFormatFingerprint);
 
@@ -295,12 +290,12 @@ inline constexpr std::array<uint64_t, 5> kAcceptedFormatFingerprints = {
     format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
                        kTransitionalGasScheduleDigest),
     // Published v5 fingerprints, retained with the v5 reader. The v6
-    // fingerprint function uses a different domain and header layout.
+    // fingerprint function uses a different domain and section order.
     0x4171b4b8dc19b9abULL, // Gas table v4.
     0x8e5caf3e9cd23b22ULL, // Gas table v3, fixed bounds.
     0xc5f00a7d4451045eULL, // Gas table v3, caller bounds (tools 0.43.0).
 };
-static_assert(kAcceptedFormatFingerprints[1] == 0x36f9478fa875ca39ULL);
+static_assert(kAcceptedFormatFingerprints[1] == 0x0e336ac8e46602e1ULL);
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
@@ -308,15 +303,20 @@ using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_abi_version, gas_schedule_version,
 // gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
-// initial_memory_start, sha256(code), sha256(initial_memory),
-// spec_schema_version, spec_size. A zero version and size denote absence.
-// Body: header || code || initial_memory || spec, exactly; section file
+// initial_memory_start, sha256(code), sha256(initial_memory).
+// Body: header || code || initial_memory || extensions, exactly; section file
 // positions are derived from the canonical order, not stored. Method dispatch
 // is in the guest (since v4). The stored image is placed at data-space VA
 // initial_memory_start (a guest VA, unrelated to file layout); the runtime
 // zero-fills [0, start) (e.g. a stack-first guest's stack region) and
-// [start + size, memory_bytes). Spec bytes remain outside guest memory and
-// are authenticated by the enclosing contract hash, not the section digests.
+// [start + size, memory_bytes).
+//
+// extensions is an XDR Rv32ArtifactExtensions (contract.x) running to the end
+// of the artifact: (kind, opaque body) pairs with nonzero, strictly ascending
+// kinds. The runtime checks only that framing and stores bodies (such as the
+// contract spec) without interpreting them; they stay outside guest memory
+// and are authenticated by the enclosing contract hash. A v5 body ends after
+// initial_memory and reads as having no extensions.
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,

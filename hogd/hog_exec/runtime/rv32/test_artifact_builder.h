@@ -40,11 +40,11 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
-// Assemble a spec-less v6 artifact: header || code || initial_memory, with the
-// stored image placed at data-space VA `initial_memory_start`. memory_bytes is
-// stamped as start + stored size (callers that want a larger data address
-// space rewrite the memory_bytes header field, exercising the zero-extended
-// tail path).
+// Assemble a v6 artifact with no extensions: header || code || initial_memory
+// || empty extension list, with the stored image placed at data-space VA
+// `initial_memory_start`. memory_bytes is stamped as start + stored size
+// (callers that want a larger data address space rewrite the memory_bytes
+// header field, exercising the zero-extended tail path).
 inline std::vector<uint8_t>
 build_artifact(std::span<const uint32_t> words,
                std::span<const uint8_t> initial_memory,
@@ -70,10 +70,9 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, initial_memory_start);
   append_digest(artifact, artifact_digest(code));
   append_digest(artifact, artifact_digest(initial_memory));
-  append_u32(artifact, 0); // No spec schema.
-  append_u32(artifact, 0); // No spec payload.
   append_bytes(artifact, code);
   append_bytes(artifact, initial_memory);
+  append_u32(artifact, 0); // Empty XDR extension list.
   return artifact;
 }
 

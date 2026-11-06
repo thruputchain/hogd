@@ -3782,7 +3782,8 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
     Contract large_contract(ContractType::kRv32);
     large_contract.rv32_contract().data.append_range(bytes);
     ASSERT_EQ(large_contract.rv32_contract().data.size(),
-              (320 * 1024U) + rv32::kArtifactHeaderBytes);
+              (320 * 1024U) + rv32::kArtifactHeaderBytes +
+                  4); // empty extension list
 
     auto keypair =
         derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);

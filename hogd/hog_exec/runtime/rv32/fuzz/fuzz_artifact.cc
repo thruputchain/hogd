@@ -294,10 +294,9 @@ private:
     rv32::test_artifact::append_digest(artifact_, rv32::artifact_digest(code));
     rv32::test_artifact::append_digest(artifact_,
                                        rv32::artifact_digest(memory));
-    rv32::test_artifact::append_u32(artifact_, 0); // spec_schema_version
-    rv32::test_artifact::append_u32(artifact_, 0); // spec_size
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
+    rv32::test_artifact::append_u32(artifact_, 0); // Empty extension list.
   }
 
   std::span<uint8_t> code()
