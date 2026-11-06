@@ -470,6 +470,11 @@ static_assert(kMessageOverhead < kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
 
+// Max deltas a within-cap push can hold (each costs >= kPerDeltaFraming); caps
+// how far the staging batch pre-reserves.
+constexpr size_t kMaxDeltasPerSubtransactionPush =
+    kMaxSubtransactionPushFootprint / kPerDeltaFraming;
+
 // Coherence guard: the largest possible single delta must itself fit one push,
 // so the per-key/per-tx entry caps can't be raised to a value no push could
 // ever carry (which would auto-reject every max-footprint tx). Every
@@ -621,6 +626,33 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
   }
 }
 
+void
+PerTransactionDatabaseProxy::reserve(size_t delta_count)
+{
+  // Never pre-reserve for more than one push: the batch is rejected (and
+  // staging stops) once it exceeds the cap.
+  current_subtransaction_batch_.reserve(
+      std::min(delta_count, kMaxDeltasPerSubtransactionPush));
+}
+
+void
+PerTransactionDatabaseProxy::add_delta(AddressAndKey addrkey,
+                                       StorageDelta delta,
+                                       StorageDeltaFlagSet flags)
+{
+  current_subtransaction_batch_.emplace_back(std::move(addrkey),
+                                             std::move(delta), flags);
+  current_subtransaction_footprint_ +=
+      footprint_bound(current_subtransaction_batch_.back());
+}
+
+bool
+PerTransactionDatabaseProxy::current_subtransaction_exceeds_cap() const
+{
+  return current_subtransaction_footprint_ + kMessageOverhead >
+         kExecToDbMessageCap;
+}
+
 x23::Async<SystemStatus<bool>>
 PerTransactionDatabaseProxy::try_push_current_subtransaction()
 {
@@ -645,6 +677,7 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
   auto r = co_await db_proxy_.try_push_new_subtransaction(
       block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
   current_subtransaction_batch_.clear();
+  current_subtransaction_footprint_ = 0;
   co_return r;
 }
 
