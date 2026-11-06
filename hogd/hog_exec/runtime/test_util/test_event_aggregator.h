@@ -2,9 +2,7 @@
 
 #include <atomic>
 #include <map>
-#include <mutex>
 #include <optional>
-#include <set>
 #include <utility>
 #include <vector>
 
@@ -48,22 +46,6 @@ public:
 
   // Make the next scheduler open_block call fail. The flag is consumed once.
   void fail_next_open_block() { fail_next_open_block_.store(true); }
-
-  // Forget [block_id] the way the real event server does once a block's
-  // context is gone (torn down, or lost to a restart): every later call for
-  // the block, from the executor or the scheduler, returns kRPCBadBlockID.
-  // Synchronous, so a test hook running on the coroutine pool can call it.
-  void drop_block(BlockID block_id)
-  {
-    std::scoped_lock guard(dropped_blocks_mutex_);
-    dropped_blocks_.insert(block_id);
-  }
-
-  bool is_block_dropped(BlockID block_id) const
-  {
-    std::scoped_lock guard(dropped_blocks_mutex_);
-    return dropped_blocks_.contains(block_id);
-  }
 
   // Executor handle tracking (mirrors real event server behavior).
   x23::Async<void> executor_open_block(BlockID block_id);
@@ -112,8 +94,6 @@ private:
 
   x23::CoroLock lock_;
   std::atomic_bool fail_next_open_block_{false};
-  mutable std::mutex dropped_blocks_mutex_;
-  std::set<BlockID> dropped_blocks_;
   x23::CoroFutex<bool> should_block_futex_{false};
   x23::CoroFutex<int64_t> failure_report_count_{0};
   std::vector<std::pair<TransactionHash, TxFailureDiagnostic>> failure_reports_;
@@ -147,18 +127,12 @@ struct TestEventAggregatorExecRpc {
 
   x23::Async<RPCError> eventexecutor_open_block(BlockID block_id)
   {
-    if (event_aggregator_.is_block_dropped(block_id)) {
-      co_return RPCError::kRPCBadBlockID;
-    }
     co_await event_aggregator_.executor_open_block(block_id);
     co_return RPCError::kRPCNone;
   }
 
   x23::Async<RPCError> eventexecutor_close_block(BlockID block_id)
   {
-    if (event_aggregator_.is_block_dropped(block_id)) {
-      co_return RPCError::kRPCBadBlockID;
-    }
     co_await event_aggregator_.executor_close_block(block_id);
     co_return RPCError::kRPCNone;
   }

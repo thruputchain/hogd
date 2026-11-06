@@ -39,10 +39,6 @@ TestEventAggregator::close_block(BlockID block_id, BlockHeight block_height)
   // Wait for all executor handles to close before proceeding,
   // matching the real event server's wait_for_executors_closed behavior.
   while (true) {
-    if (is_block_dropped(block_id)) {
-      error("Block {} was dropped", block_id);
-      co_return EventBlockResult(RPCError::kRPCBadBlockID);
-    }
     int32_t executor_refcount = 0;
     {
       x23::CoroGuard guard;
@@ -95,10 +91,6 @@ TestEventAggregator::get_committed_consensus_value(BlockID block_id)
 x23::Async<RPCError>
 TestEventAggregator::abandon_block(BlockID block_id)
 {
-  if (is_block_dropped(block_id)) {
-    error("Block {} was dropped", block_id);
-    co_return RPCError::kRPCBadBlockID;
-  }
   x23::CoroGuard guard;
   co_await guard(lock_);
   auto it = block_states_.find(block_id);
@@ -139,7 +131,7 @@ TestEventAggregator::do_emit_event(BlockID block_id, TransactionID tx_id,
 {
   x23::CoroGuard guard;
   co_await guard(lock_);
-  if (!is_block_open(block_id) || is_block_dropped(block_id)) {
+  if (!is_block_open(block_id)) {
     error("Block {} is not open", block_id);
     co_return RPCError::kRPCBadBlockID;
   }
