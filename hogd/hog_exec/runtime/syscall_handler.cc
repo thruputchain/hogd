@@ -2233,7 +2233,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     if (entry.has_value() && entry.value().result.has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), entry.value().load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
@@ -2266,7 +2266,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     if (entry.has_value() && entry.value().result.has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), entry.value().load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }

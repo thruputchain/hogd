@@ -397,17 +397,19 @@ RetrocausalQueueItem::past_block_cursor() const
 {
   if (queue_delta_.consume) {
     auto const &past = queue_delta_.consume->past_block_consume;
-    return {past.max_fully_consumed_block_number + 1,
-            past.partial_consumed_number};
+    return {.block_index = past.max_fully_consumed_block_number + 1,
+            .partial_consume_quantity = past.partial_consumed_number};
   }
   // If we don't have a consume delta yet, then we're starting from
   // wherever things left off according to the snapshot.
   if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
     auto const &meta = base_item_->retrocausal_queue_metadata();
-    return {meta.consume_state.max_fully_consumed_block_number + 1,
-            meta.consume_state.partial_consumed_number};
+    return {.block_index =
+                meta.consume_state.max_fully_consumed_block_number + 1,
+            .partial_consume_quantity =
+                meta.consume_state.partial_consumed_number};
   }
-  return {1, 0};
+  return {.block_index = 1, .partial_consume_quantity = 0};
 }
 
 std::optional<uint64_t>
