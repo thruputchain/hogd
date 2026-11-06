@@ -9,6 +9,7 @@
 #include <format>
 #include <functional>
 #include <memory>
+#include <pthread.h>
 #include <string>
 #include <sys/signal.h>
 #include <thread>
@@ -394,6 +395,10 @@ ThreadPool::Worker::qpop(QPtr &ptr) const
 void
 ThreadPool::Worker::work()
 {
+#ifdef __linux__
+  // Named so per-thread CPU accounting (/proc/<pid>/task) can tell it apart.
+  pthread_setname_np(pthread_self(), "x23-worker");
+#endif // __linux__
   my_thread_pool = pool_;
   my_thread_no = threadno_;
   cpu_ = cpuid();
