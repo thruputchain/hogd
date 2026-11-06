@@ -241,8 +241,10 @@ private:
         rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset);
     const uint32_t memory_size =
         rv32::load_u32_le(input_, rv32::kArtifactInitialMemorySizeOffset);
+    // Bytes after initial memory are a v6 extension list (none in v5);
+    // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
-        memory_size != body_size - code_size ||
+        memory_size > body_size - code_size ||
         memory_size > rv32::kDefaultMaxMemoryBytes) {
       return false;
     }
@@ -294,10 +296,9 @@ private:
     rv32::test_artifact::append_digest(artifact_, rv32::artifact_digest(code));
     rv32::test_artifact::append_digest(artifact_,
                                        rv32::artifact_digest(memory));
-    rv32::test_artifact::append_u32(artifact_, 0); // spec_schema_version
-    rv32::test_artifact::append_u32(artifact_, 0); // spec_size
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
+    rv32::test_artifact::append_u32(artifact_, 0); // Empty extension list.
   }
 
   std::span<uint8_t> code()

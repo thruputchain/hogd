@@ -328,14 +328,28 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
                    compiled_sha256_return::kInput.size())));
 }
 
-TEST(Rv32ArtifactTest, opaqueSpecDoesNotEnterGuestMemory)
+// Replace a v6 artifact's (empty) extension list with `words`, big-endian.
+std::vector<uint8_t>
+with_extension_words(std::vector<uint8_t> artifact,
+                     std::initializer_list<uint32_t> words)
+{
+  artifact.resize(artifact.size() - 4);
+  for (uint32_t word : words) {
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      artifact.push_back(static_cast<uint8_t>(word >> shift));
+    }
+  }
+  return artifact;
+}
+
+TEST(Rv32ArtifactTest, extensionsDoNotEnterGuestMemory)
 {
   auto artifact = valid_artifact_bytes();
   auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(baseline.has_value());
-  store_u32_at(artifact, kArtifactSpecSchemaVersionOffset, 99);
-  store_u32_at(artifact, kArtifactSpecSizeOffset, 3);
-  artifact.insert(artifact.end(), {1, 2, 3});
+  // Kinds 1 and 99, the first with a 5-byte body and three zero pad bytes.
+  artifact = with_extension_words(std::move(artifact),
+                                  {2, 1, 5, 0x01020304, 0x05000000, 99, 0});
   auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
@@ -348,11 +362,10 @@ TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
   auto artifact = valid_artifact_bytes();
   auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(baseline.has_value());
-  artifact.erase(artifact.begin() + kLegacyArtifactHeaderBytes,
-                 artifact.begin() + kArtifactHeaderBytes);
+  // v5 has the same header and ends after initial memory: no extension list.
+  artifact.resize(artifact.size() - 4);
   store_u32_at(artifact, kArtifactFormatVersionOffset,
                kLegacyArtifactFormatVersion);
-  store_u32_at(artifact, kArtifactHeaderSizeOffset, kLegacyArtifactHeaderBytes);
   auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
@@ -360,31 +373,43 @@ TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
   EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
   auto threaded = parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
-  EXPECT_EQ(threaded->code.data(),
-            artifact.data() + kLegacyArtifactHeaderBytes);
+  EXPECT_EQ(threaded->code.data(), artifact.data() + kArtifactHeaderBytes);
 
   auto corrupt = artifact;
-  corrupt[kLegacyArtifactHeaderBytes] ^= 1;
+  corrupt[kArtifactHeaderBytes] ^= 1;
   expect_artifact_error(std::move(corrupt), ArtifactError::kCodeDigestMismatch);
   auto trailing = artifact;
   trailing.push_back(0);
   expect_artifact_error(std::move(trailing),
                         ArtifactError::kInvalidSectionLayout);
+  // Even an empty extension list is trailing data in v5.
+  auto with_list = artifact;
+  with_list.insert(with_list.end(), {0, 0, 0, 0});
+  expect_artifact_error(std::move(with_list),
+                        ArtifactError::kInvalidSectionLayout);
   auto wrong_header = artifact;
-  store_u32_at(wrong_header, kArtifactHeaderSizeOffset, kArtifactHeaderBytes);
+  store_u32_at(wrong_header, kArtifactHeaderSizeOffset,
+               kArtifactHeaderBytes + 8);
   expect_artifact_error(std::move(wrong_header), ArtifactError::kBadHeaderSize);
-  artifact.resize(kLegacyArtifactHeaderBytes - 1);
+  artifact.resize(kArtifactHeaderBytes - 1);
   expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
 }
 
-TEST(Rv32ArtifactTest, rejectsMalformedSpecEnvelope)
+TEST(Rv32ArtifactTest, rejectsNonCanonicalExtensionList)
 {
-  for (auto [version, size] :
-       {std::pair{0U, 1U}, std::pair{1U, 0U}, std::pair{1U, UINT32_MAX}}) {
-    auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactSpecSchemaVersionOffset, version);
-    store_u32_at(artifact, kArtifactSpecSizeOffset, size);
-    expect_artifact_error(std::move(artifact),
+  const std::initializer_list<uint32_t> cases[] = {
+      {},                    // missing list
+      {1, 0, 0},             // kind 0
+      {2, 5, 0, 5, 0},       // duplicate kind
+      {2, 5, 0, 4, 0},       // descending kinds
+      {1, 7, 1, 0x01000001}, // nonzero padding
+      {1, 7, 0, 0},          // trailing bytes
+      {2, 7, 0},             // count past the end
+      {1, 7, 8, 0},          // body past the end
+      {1, 7, UINT32_MAX},    // padded size past the end
+  };
+  for (const auto &words : cases) {
+    expect_artifact_error(with_extension_words(valid_artifact_bytes(), words),
                           ArtifactError::kInvalidSectionLayout);
   }
 }

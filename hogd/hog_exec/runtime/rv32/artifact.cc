@@ -27,6 +27,51 @@ load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
   return digest;
 }
 
+uint32_t
+load_u32_be(std::span<const uint8_t> bytes, size_t offset)
+{
+  return (uint32_t{bytes[offset]} << 24) | (uint32_t{bytes[offset + 1]} << 16) |
+         (uint32_t{bytes[offset + 2]} << 8) | uint32_t{bytes[offset + 3]};
+}
+
+// Whether `bytes` is exactly one XDR Rv32ArtifactExtensions (contract.x) with
+// nonzero, strictly ascending kinds and zero padding. Bodies are not read.
+[[nodiscard]]
+bool
+canonical_extension_list(std::span<const uint8_t> bytes)
+{
+  if (bytes.size() < 4) {
+    return false;
+  }
+  const uint32_t count = load_u32_be(bytes, 0);
+  size_t offset = 4;
+  uint32_t previous_kind = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (bytes.size() - offset < 8) {
+      return false;
+    }
+    const uint32_t kind = load_u32_be(bytes, offset);
+    const uint32_t body_size = load_u32_be(bytes, offset + 4);
+    offset += 8;
+    if (kind <= previous_kind) {
+      return false;
+    }
+    previous_kind = kind;
+    // Widen before padding so a crafted size cannot wrap on 32-bit hosts.
+    const uint64_t padded = (uint64_t{body_size} + 3) & ~uint64_t{3};
+    if (bytes.size() - offset < padded) {
+      return false;
+    }
+    const auto padding = bytes.subspan(offset + body_size,
+                                       static_cast<size_t>(padded) - body_size);
+    if (std::ranges::any_of(padding, [](uint8_t b) { return b != 0; })) {
+      return false;
+    }
+    offset += static_cast<size_t>(padded);
+  }
+  return offset == bytes.size();
+}
+
 struct ArtifactParseResults {
   std::span<const uint8_t> code;
   std::span<const uint8_t> initial_memory;
@@ -39,7 +84,7 @@ std::expected<ArtifactParseResults, ArtifactError>
 artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
 {
 
-  if (bytes.size() < kLegacyArtifactHeaderBytes) {
+  if (bytes.size() < kArtifactHeaderBytes) {
     return std::unexpected(ArtifactError::kTooSmall);
   }
   if (!std::ranges::equal(kArtifactMagic, bytes.first(kArtifactMagic.size()))) {
@@ -53,12 +98,8 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (!legacy && format_version != kArtifactFormatVersion) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
-  if (header_size !=
-      (legacy ? kLegacyArtifactHeaderBytes : kArtifactHeaderBytes)) {
+  if (header_size != kArtifactHeaderBytes) {
     return std::unexpected(ArtifactError::kBadHeaderSize);
-  }
-  if (bytes.size() < header_size) {
-    return std::unexpected(ArtifactError::kTooSmall);
   }
   const uint64_t vm_profile_digest =
       load_u64_le(bytes, kArtifactVmProfileOffset);
@@ -76,10 +117,6 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
   const uint32_t initial_memory_start =
       load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
-  const uint32_t spec_schema_version =
-      legacy ? 0 : load_u32_le(bytes, kArtifactSpecSchemaVersionOffset);
-  const uint32_t spec_size =
-      legacy ? 0 : load_u32_le(bytes, kArtifactSpecSizeOffset);
   const ArtifactDigest code_digest =
       load_artifact_digest(bytes, kArtifactCodeDigestOffset);
   const ArtifactDigest initial_memory_digest =
@@ -131,13 +168,17 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (initial_memory_size == 0 && initial_memory_start != 0) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // Schema contents are opaque to execution. Absent specs have one encoding.
-  // spec_size is bounded by total contract size, not a separate metadata cap;
-  // downstream spec decoders must enforce their own schema/resource limits.
-  // Widen before adding so crafted u32 lengths cannot wrap on 32-bit hosts.
-  if ((spec_schema_version == 0) != (spec_size == 0) ||
-      bytes.size() !=
-          uint64_t{header_size} + code_size + initial_memory_size + spec_size) {
+  // header || code || initial_memory, then (v6 only) the extension list to
+  // the end. Extension bodies are opaque to execution and bounded only by the
+  // total contract size. Widen before adding so crafted u32 lengths cannot
+  // wrap on 32-bit hosts.
+  const uint64_t sections_end =
+      uint64_t{header_size} + code_size + initial_memory_size;
+  if (bytes.size() < sections_end) {
+    return std::unexpected(ArtifactError::kInvalidSectionLayout);
+  }
+  const auto extensions = bytes.subspan(static_cast<size_t>(sections_end));
+  if (legacy ? !extensions.empty() : !canonical_extension_list(extensions)) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 

@@ -1,6 +1,6 @@
 {
-  "artifact_bytes": 355,
-  "artifact_sha256": "16a0a037eae4b266a610e251aae29aa6f815e54464d6b1f521526c82c406f089",
+  "artifact_bytes": 351,
+  "artifact_sha256": "12b4118229b578b8e8f3bbd1a7fea9344a4ffcd593e278d75f05f6ae02e47aef",
   "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
   "code_bytes": 212,
   "code_sha256": "b36ad41e67a6dcc74033c03006b00a2f015f0d60edf9750645c4816ed72e1938",
@@ -14,9 +14,9 @@
   "initial_memory_start": 216,
   "linker_script_sha256": "0adf059534e668f60d1ed07d6bdc5186765507a952a65d76245f68b394112d11",
   "lowerer_metadata": {
-    "artifact_bytes": 355,
-    "artifact_format_fingerprint": "0x36f9478fa875ca39",
-    "artifact_sha256": "16a0a037eae4b266a610e251aae29aa6f815e54464d6b1f521526c82c406f089",
+    "artifact_bytes": 351,
+    "artifact_format_fingerprint": "0x0e336ac8e46602e1",
+    "artifact_sha256": "12b4118229b578b8e8f3bbd1a7fea9344a4ffcd593e278d75f05f6ae02e47aef",
     "build_flags": "cargo build --release --locked --offline; Cargo.toml profile.release: panic=abort, opt-level=s, codegen-units=1, lto=false; .cargo/config.toml rustflags: link-arg=-Tlinker.ld, link-arg=--build-id=none, relocation-model=static, target-feature=+m,-a,-c, force-frame-pointers=no",
     "code_bytes": 212,
     "code_sha256": "b36ad41e67a6dcc74033c03006b00a2f015f0d60edf9750645c4816ed72e1938",
@@ -29,7 +29,7 @@
     "target_triple": "riscv32im-unknown-none-elf"
   },
   "lowering_tool": "rv32-lower",
-  "lowering_tool_version": "rv32-lower 0.43.0",
+  "lowering_tool_version": "rv32-lower 0.44.0",
   "memory_bytes": 65536,
   "metadata_input_sha256": {
     ".cargo/config.toml": "1dcb6d353af2fa182ce4115a6bcfb8214746d5c267fc60e182dd4fa42deb9d8a",
@@ -41,7 +41,7 @@
     "0xe8ccfc8ffc9e81b9",
     "0x2f2cb89270e38729"
   ],
-  "packaging_tool_sha256": "15d27035b5f69805f4c8fa444947bb2368124a16187fef7bb5f0b6c21fd979a1",
+  "packaging_tool_sha256": "c89dbb80fb52e3ce525c680d0b06918337753790a570b52ec24d4d26647ed7aa",
   "rustc_version": "rustc 1.95.0 (59807616e 2026-04-14);binary: rustc;commit-hash: 59807616e1fa2540724bfbac14d7976d7e4a3860;commit-date: 2026-04-14;host: x86_64-unknown-linux-gnu;release: 1.95.0;LLVM version: 22.1.2;",
   "source_sha256": "bf740faa7f03f4de35d9369da9fc7565804466425542ac10fb3206625e00b660",
   "target_triple": "riscv32im-unknown-none-elf"
