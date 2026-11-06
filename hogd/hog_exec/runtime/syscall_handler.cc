@@ -1908,14 +1908,45 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                 .add_value_ = to_xdr(add_value)});
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+x23::Async<SystemStatus<StorageRead<void>>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
   CHECK(!is_read_only());
 
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
+  const FrameItemKey item_key =
+      invocation_frame_stack_.frame_item_key(storage_key);
+  auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{});
+
+  // Bill the per-block cleanup block close does for a deleted queue
+  // (cleanup_on_deletion). Read the committed snapshot directly, not via
+  // note_item_load, so the delete does not count as a load
+  // (RevertTest.DeleteMasksLoadUntilFrameReverts).
+  GasAmount body_gas = kStorageAccessCost;
+  auto snapshot = co_await snapshot_cache_.try_get_snapshot_item(item_key);
+  if (!snapshot.has_value()) {
+    co_return snapshot.error();
+  }
+  // Charge the per-block teardown once per key: block close cleans the rows up
+  // a single time no matter how often the key is deleted or replaced.
+  if (const SnapshotStorageItem *committed = snapshot.value();
+      committed != nullptr &&
+      committed->type() == ItemViewType::kRetrocausalQueue &&
+      rcq_teardown_charged_.insert(item_key)) {
+    auto const &meta = committed->retrocausal_queue_metadata();
+    const uint64_t live_blocks =
+        meta.max_live_block_num -
+        meta.consume_state.max_fully_consumed_block_number;
+    // One storage access per row removed; saturate (a charge at the gas limit
+    // just yields OutOfGas).
+    const uint64_t headroom = std::numeric_limits<GasAmount>::max() - body_gas;
+    body_gas += (live_blocks > headroom / kStorageAccessCost)
+                    ? headroom
+                    : kStorageAccessCost * live_blocks;
+  }
+
+  co_return StorageRead<void>{.result = item_view->set(DeletedItem{}),
+                              .load_gas = body_gas};
 }
 
 SyscallStatus<void>

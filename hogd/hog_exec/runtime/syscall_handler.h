@@ -426,7 +426,9 @@ public:
             std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  // load_gas is the body gas to charge beyond the crossing: the storage access,
+  // plus (for a committed retrocausal queue) its historical block cleanup.
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<void>>>
   delete_object(StorageKeyContractData const &storage_key);
 
   // === Storage flags syscalls ===
@@ -571,6 +573,10 @@ private:
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
   FlatKeySet<FrameItemKey> loaded_keys_;
+
+  // Keys already billed for RCQ history teardown this transaction; block close
+  // cleans the rows once, so only the first delete of a key pays.
+  FlatKeySet<FrameItemKey> rcq_teardown_charged_;
 
   inline static bool debug_force_commit_abort_{false};
 
