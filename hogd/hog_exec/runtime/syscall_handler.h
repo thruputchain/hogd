@@ -446,8 +446,11 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
+  // [load_gas] accumulates the DB-RPC cost of absent concurrent reads; callers
+  // charge it (#1443).
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
-  retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
+  retrocausal_queue_consume(StorageKeyContractData const &key, bool peek,
+                            GasAmount &load_gas);
 
   // == Native token syscalls ==
   // The load cost get_native_token_balance() would charge now, without loading.
