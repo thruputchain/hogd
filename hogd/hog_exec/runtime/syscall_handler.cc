@@ -2170,12 +2170,24 @@ SystemCallHandler::retrocausal_queue_insert(
 
 x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
-                                             bool peek)
+                                             bool peek,
+                                             GasAmount &read_body_gas)
 {
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
   assert(item_view);
+
+  // A read that reaches a committed value is billed like an nnint or bytestring
+  // read: kStorageAccessCost plus a cold-load kDBRPCCost on the first touch.
+  // The other branches keep their prior zero body gas (a deleted-key read still
+  // loads the snapshot but is priced as before).
+  read_body_gas = 0;
+  if (auto const *unmodified_item = item_view->get<UnmodifiedItem>()) {
+    read_body_gas =
+        kStorageAccessCost +
+        (unmodified_item->is_loaded() ? 0 : note_item_load(item_key));
+  }
 
   if (peek) {
     co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
