@@ -469,7 +469,7 @@ GenRs::show_vers_trait(const VersDef &vers, const std::string &prog_name)
 /// Implementations can be plain `async fn`s returning a concrete reply type
 /// under `#[allow(refining_impl_trait)]`.
 #[allow(non_camel_case_types)]
-pub trait {}_{}: Send + Sync {{)",
+pub trait {}_{}: Send + Sync + 'static {{)",
         prog_name, vers.id);
 
   for (auto const &proc : vers.procs) {
@@ -508,12 +508,16 @@ impl<__Handler: {0}_{1}> {0}_{1}_Dispatcher<__Handler> {{
   }}
 }}
 
-#[async_trait::async_trait]
 impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__Handler> {{
     fn prog_vers(&self) -> ::thruput_rpc_api::ProgVers {{
         ::thruput_rpc_api::ProgVers::new({2}, {3})
     }}
-    async fn dispatch(&self, proc: u32, data: &[u8]) -> Result<Vec<u8>, ::thruput_rpc_api::RpcError> {{
+    fn dispatch(
+        &self,
+        proc: u32,
+        data: &[u8],
+        reply: ::thruput_rpc_api::ReplyBuf,
+    ) -> Result<::thruput_rpc_api::RpcFuture<'_>, ::thruput_rpc_api::RpcError> {{
         match proc {{
 )",
         prog_name, vers.id, prog_id, vers.val);
@@ -539,11 +543,26 @@ impl<__Handler: {0}_{1}> ::thruput_rpc_api::RpcHandler for {0}_{1}_Dispatcher<__
     prtop("                    xdrs::txs::decode(data).map_err(|_| "
           "::thruput_rpc_api::RpcError::GarbageArguments)?;\n");
     auto detuple = make_arg_detuple(proc.arg_types.size());
-    prtop("                let res = self.inner.{}({}).await.map_err(|_| "
+    // Arguments are decoded from the borrowed receive buffer before the
+    // future exists, so the future owns them and never the request bytes.
+    // It encodes its result into the driver's reply buffer, after the
+    // reserved header.
+    prtop("                Ok(Box::pin(async move {{\n");
+    prtop("                    let res = self.inner.{}({}).await.map_err(|_| "
           "::thruput_rpc_api::RpcError::SystemError)?;\n",
           proc.id, detuple);
-    prtop("                xdrs::txs::encode(&res).map_err(|_| "
-          "::thruput_rpc_api::RpcError::SystemError)\n");
+    prtop("                    let mut reply = reply;\n");
+    prtop("                    reply.append_with(|buf| {{\n");
+    prtop("                        let mut w = "
+          "xdrs::txs::buf_writer::BufWriter::from("
+          "::core::mem::take(buf));\n");
+    prtop("                        let r = xdrs::write_xdr(&res, &mut w);\n");
+    prtop("                        *buf = w.into();\n");
+    prtop("                        r\n");
+    prtop("                    }}).map_err(|_| "
+          "::thruput_rpc_api::RpcError::SystemError)?;\n");
+    prtop("                    Ok(reply)\n");
+    prtop("                }}))\n");
     prtop("            }}\n");
   }
 
