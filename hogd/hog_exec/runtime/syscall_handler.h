@@ -5,6 +5,7 @@
 #include <exception>
 #include <memory>
 #include <optional>
+#include <set>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -63,6 +64,9 @@ template<typename T> struct StorageRead {
   SyscallStatus<T> result;
   GasAmount load_gas;
 };
+
+// Past RCQ block searches a transaction has made, by key and search start.
+using RcqBlockLookupSet = std::set<std::pair<FrameItemKey::Bytes, uint64_t>>;
 
 // TODO(geoff): root_invoke() validates any incoming contract code blobs.
 // We may later do that validation preemptively in the coordinator.
@@ -446,7 +450,7 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<QueueEntry>>>
   retrocausal_queue_consume(StorageKeyContractData const &key, bool peek);
 
   // == Native token syscalls ==
@@ -571,6 +575,9 @@ private:
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
   FlatKeySet<FrameItemKey> loaded_keys_;
+  // Past RCQ block searches this transaction has made, rolled-back frames
+  // included, for the same reason. See load_next_queue_entry().
+  RcqBlockLookupSet rcq_block_lookups_;
 
   inline static bool debug_force_commit_abort_{false};
 
