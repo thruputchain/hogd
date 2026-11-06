@@ -241,8 +241,10 @@ private:
         rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset);
     const uint32_t memory_size =
         rv32::load_u32_le(input_, rv32::kArtifactInitialMemorySizeOffset);
+    // Bytes after initial memory are a v6 extension list (none in v5);
+    // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
-        memory_size != body_size - code_size ||
+        memory_size > body_size - code_size ||
         memory_size > rv32::kDefaultMaxMemoryBytes) {
       return false;
     }
