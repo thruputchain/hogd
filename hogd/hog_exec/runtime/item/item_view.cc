@@ -244,29 +244,7 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
 {
   assert(base_item_);
   // Step 1: try consume from past blocks
-  // the index where we start searching from
-  uint64_t block_index = 0;
-  uint64_t partial_consume_quantity = 0;
-  if (queue_delta_.consume) {
-    block_index = queue_delta_.consume->past_block_consume
-                      .max_fully_consumed_block_number +
-                  1;
-    partial_consume_quantity =
-        queue_delta_.consume->past_block_consume.partial_consumed_number;
-  }
-  else {
-    // If we don't have a consume delta yet, then we're starting from
-    // wherever things left off according to the snapshot.
-    if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
-      auto const &meta = base_item_->retrocausal_queue_metadata();
-      block_index = meta.consume_state.max_fully_consumed_block_number + 1;
-      partial_consume_quantity = meta.consume_state.partial_consumed_number;
-    }
-    else {
-      block_index = 1;
-      partial_consume_quantity = 0;
-    }
-  }
+  auto const [block_index, partial_consume_quantity] = past_block_cursor();
 
   auto next_block_status = co_await get_next_block(block_index);
   if (!next_block_status.has_value()) {
@@ -412,6 +390,34 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
   }
   queue_delta_.insert.added_entries.push_back(entry);
   return {};
+}
+
+RetrocausalQueueItem::PastBlockCursor
+RetrocausalQueueItem::past_block_cursor() const
+{
+  if (queue_delta_.consume) {
+    auto const &past = queue_delta_.consume->past_block_consume;
+    return {past.max_fully_consumed_block_number + 1,
+            past.partial_consumed_number};
+  }
+  // If we don't have a consume delta yet, then we're starting from
+  // wherever things left off according to the snapshot.
+  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    auto const &meta = base_item_->retrocausal_queue_metadata();
+    return {meta.consume_state.max_fully_consumed_block_number + 1,
+            meta.consume_state.partial_consumed_number};
+  }
+  return {1, 0};
+}
+
+std::optional<uint64_t>
+RetrocausalQueueItem::past_block_lookup_index() const
+{
+  assert(base_item_);
+  if (base_item_->type() != ItemViewType::kRetrocausalQueue) {
+    return std::nullopt;
+  }
+  return past_block_cursor().block_index;
 }
 
 x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
