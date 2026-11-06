@@ -1266,15 +1266,23 @@ TEST_F(SyscallRcqPeekTest, PastBlockPeekPaysOneDbRpcPerTransaction)
         co_return InvokeStatus<void>{};
       });
 
-  // Peeks twice; an empty queue is not a failure.
+  // Peeks twice, expecting an entry of [expected_len] bytes, or an empty queue
+  // when [expected_len] is 0.
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-      5, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+      5,
+      [](NativeSyscallContext &ctx,
+         uint32_t expected_len) -> x23::Async<InvokeStatus<void>> {
+        const auto expected_code =
+            expected_len == 0
+                ? SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry
+                : SyscallErrorCode::kSyscallErrorCodeNone;
         for (int i = 0; i < 2; ++i) {
           RuntimeMemoryLength len = 0;
           auto peek_status =
               co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
                   SyscallRcqPeekTest::kStorageKey, len);
-          if (!peek_status.has_value()) {
+          if (!peek_status.has_value() ||
+              peek_status.value() != expected_code || len != expected_len) {
             co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
@@ -1294,11 +1302,11 @@ TEST_F(SyscallRcqPeekTest, PastBlockPeekPaysOneDbRpcPerTransaction)
     write_deployment(addr, contract);
   }
 
-  auto calldata = Serializer<
-      NativeContractBuilder::kDefaultSerializationFormat>::serialize();
-  ASSERT_TRUE(calldata.has_value());
-
-  auto invoke = [&](ContractAddress const &addr, uint32_t method) {
+  auto invoke = [&](ContractAddress const &addr, uint32_t method,
+                    auto... args) {
+    auto calldata = Serializer<
+        NativeContractBuilder::kDefaultSerializationFormat>::serialize(args...);
+    EXPECT_TRUE(calldata.has_value());
     auto handler = make_new_system_call_handler(
         SignedTransaction{
             .tx = Transaction{.invocation =
@@ -1319,8 +1327,9 @@ TEST_F(SyscallRcqPeekTest, PastBlockPeekPaysOneDbRpcPerTransaction)
   invoke(queue_addr, 4);
   advance_block();
 
-  const GasAmount queue_gas = invoke(queue_addr, 5);
-  const GasAmount empty_gas = invoke(empty_addr, 5);
+  const GasAmount queue_gas =
+      invoke(queue_addr, 5, static_cast<uint32_t>(sizeof(uint32_t)));
+  const GasAmount empty_gas = invoke(empty_addr, 5, uint32_t{0});
   EXPECT_EQ(queue_gas, empty_gas + kDBRPCCost);
 }
 
