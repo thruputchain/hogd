@@ -219,6 +219,7 @@ std::string gen_rs(vector<Definition> *defs, string const &header,
                    std::set<std::string> const &rust_features,
                    std::set<std::string> const &rust_no_features);
 std::string gen_ts(vector<Definition> *defs, string const &header);
+std::string gen_c(vector<Definition> *defs, string const &header);
 
 struct Join {
   string str_;
