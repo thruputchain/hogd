@@ -6,6 +6,7 @@
 #include <latch>
 #include <limits>
 #include <memory>
+#include <stdexcept>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -25,12 +26,14 @@
 #include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
 #include "hogd/xdr/signed_transaction_hash.h"
+#include "integration.hh"
 #include "sched_coord.hh"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -244,6 +247,45 @@ TEST(Scheduler, LocalSchedulingDropsTxWhenAllNativeTokenAgeGroupsAreEmpty)
   EXPECT_EQ(scheduler->size(), 1UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
   EXPECT_TRUE(scheduler->find_tx(tx_hash));
+}
+
+// A lookup whose reply would not fit in one RPC record fails, rather than
+// reach x23, which would send it with a wrapped length. Batches up to
+// [kMaxUncheckedLookupBatch] fit whatever they find; larger ones fail only if
+// what they find is actually too big.
+TEST(Scheduler, LookupReplyPastOneRecordFails)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  SignedTransaction &largest = txs[0];
+  Calldata &calldata = largest.tx.invocation.calldata;
+  const size_t padding = kMaxBytesSignedTransaction - x23::xdr_size(largest);
+  calldata.resize(calldata.size() + padding, 0);
+  ASSERT_EQ(x23::xdr_size(largest), size_t{kMaxBytesSignedTransaction});
+  const TransactionHash largest_hash = sha256(largest.tx);
+  const TransactionHash small_hash = sha256(txs[1].tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs(txs, hash_txs(txs))();
+  ASSERT_EQ(scheduler->size(), 2UL);
+
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  constexpr size_t kUnchecked = MempoolCoordinatorRpc::kMaxUncheckedLookupBatch;
+  const TransactionHashBatch fits(kUnchecked, largest_hash);
+  const TransactionHashBatch too_large(kUnchecked + 1, largest_hash);
+  const TransactionHashBatch many_small(kUnchecked + 1, small_hash);
+  EXPECT_EQ(gateway.schedgateway_lookup_tx(fits)().size(), kUnchecked);
+  EXPECT_THROW(gateway.schedgateway_lookup_tx(too_large)(), std::runtime_error);
+  EXPECT_EQ(gateway.schedgateway_lookup_tx(many_small)().size(),
+            kUnchecked + 1);
+
+  // The coordinator's lookup by signed encoding shares the check.
+  const SignedTransactionHashBatch too_large_signed(
+      kUnchecked + 1, hash_signed_transaction(largest).signed_tx_hash);
+  EXPECT_THROW(server.mempool_coord_rpc().schedcoord_lookup_transactions(
+                   too_large_signed)(),
+               std::runtime_error);
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
