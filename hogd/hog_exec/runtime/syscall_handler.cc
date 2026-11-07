@@ -2529,6 +2529,16 @@ SystemCallHandler::mint_auth_token(RegisteredAuthToken token)
   return invocation_frame_stack_.mint_auth_token(std::move(token));
 }
 
+bool
+SystemCallHandler::reserve_auth_token_mint()
+{
+  if (auth_token_mint_count_ >= config_params().max_auth_tokens) {
+    return false;
+  }
+  ++auth_token_mint_count_;
+  return true;
+}
+
 SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
 SystemCallHandler::consume_auth_token(uint32_t token_id,
                                       BlockHeight current_height)
