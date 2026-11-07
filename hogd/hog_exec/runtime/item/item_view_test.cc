@@ -560,16 +560,19 @@ TEST_F(ItemViewTest, CurrentBlockInsertConsumeSelfDelta)
 
   auto delta = rcq_item.get_delta();
   ASSERT_EQ(delta.type(), StorageDeltaType::kDeltaTypeRetrocausalQueue);
-  ASSERT_FALSE(delta.retrocausal_queue().consume);
+  ASSERT_NE(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
   ASSERT_EQ(delta.retrocausal_queue().insert.added_entries.size(), 3);
 
   check_read(1, true);
 
   delta = rcq_item.get_delta();
   ASSERT_EQ(delta.type(), StorageDeltaType::kDeltaTypeRetrocausalQueue);
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
-  ASSERT_EQ(delta.retrocausal_queue().consume->current_block_consumed.size(),
-            0);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
+  ASSERT_EQ(
+      delta.retrocausal_queue().consume.delta()->current_block_consumed.size(),
+      0);
   ASSERT_EQ(delta.retrocausal_queue().insert.added_entries.size(), 2);
   check_eq(delta.retrocausal_queue().insert.added_entries[0], 2);
   check_eq(delta.retrocausal_queue().insert.added_entries[1], 3);
@@ -578,9 +581,11 @@ TEST_F(ItemViewTest, CurrentBlockInsertConsumeSelfDelta)
 
   delta = rcq_item.get_delta();
   ASSERT_EQ(delta.type(), StorageDeltaType::kDeltaTypeRetrocausalQueue);
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
-  ASSERT_EQ(delta.retrocausal_queue().consume->current_block_consumed.size(),
-            0);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
+  ASSERT_EQ(
+      delta.retrocausal_queue().consume.delta()->current_block_consumed.size(),
+      0);
   ASSERT_EQ(delta.retrocausal_queue().insert.added_entries.size(), 1);
   check_eq(delta.retrocausal_queue().insert.added_entries[0], 3);
 
@@ -588,9 +593,11 @@ TEST_F(ItemViewTest, CurrentBlockInsertConsumeSelfDelta)
 
   delta = rcq_item.get_delta();
   ASSERT_EQ(delta.type(), StorageDeltaType::kDeltaTypeRetrocausalQueue);
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
-  ASSERT_EQ(delta.retrocausal_queue().consume->current_block_consumed.size(),
-            0);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
+  ASSERT_EQ(
+      delta.retrocausal_queue().consume.delta()->current_block_consumed.size(),
+      0);
   ASSERT_EQ(delta.retrocausal_queue().insert.added_entries.size(), 0);
 }
 
@@ -613,15 +620,19 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   check_eq(*res.value(), 1);
 
   auto delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.max_fully_consumed_block_number,
+                .consume.delta()
+                ->past_block_consume.max_fully_consumed_block_number,
             0);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.partial_consumed_number,
+                .consume.delta()
+                ->past_block_consume.partial_consumed_number,
             1);
-  EXPECT_TRUE(
-      delta.retrocausal_queue().consume->current_block_consumed.empty());
+  EXPECT_TRUE(delta.retrocausal_queue()
+                  .consume.delta()
+                  ->current_block_consumed.empty());
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
   res = rcq_item.get_next_item(mode, true)();
@@ -629,12 +640,15 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   check_eq(*res.value(), 2);
 
   delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.max_fully_consumed_block_number,
+                .consume.delta()
+                ->past_block_consume.max_fully_consumed_block_number,
             1);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.partial_consumed_number,
+                .consume.delta()
+                ->past_block_consume.partial_consumed_number,
             0);
 
   res = rcq_item.get_next_item(mode, true)();
@@ -642,15 +656,19 @@ TEST_F(ItemViewTest, PastBlockConsumeDeltaTracksBlockBoundaries)
   check_eq(*res.value(), 3);
 
   delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.max_fully_consumed_block_number,
+                .consume.delta()
+                ->past_block_consume.max_fully_consumed_block_number,
             1);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.partial_consumed_number,
+                .consume.delta()
+                ->past_block_consume.partial_consumed_number,
             1);
-  EXPECT_TRUE(
-      delta.retrocausal_queue().consume->current_block_consumed.empty());
+  EXPECT_TRUE(delta.retrocausal_queue()
+                  .consume.delta()
+                  ->current_block_consumed.empty());
 }
 
 TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
@@ -670,16 +688,20 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
   check_eq(*res.value(), 7);
 
   auto delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.max_fully_consumed_block_number,
+                .consume.delta()
+                ->past_block_consume.max_fully_consumed_block_number,
             0);
   EXPECT_EQ(delta.retrocausal_queue()
-                .consume->past_block_consume.partial_consumed_number,
+                .consume.delta()
+                ->past_block_consume.partial_consumed_number,
             0);
-  EXPECT_EQ(read_entries(
-                delta.retrocausal_queue().consume->current_block_consumed),
-            (std::vector<uint32_t>{7}));
+  EXPECT_EQ(
+      read_entries(
+          delta.retrocausal_queue().consume.delta()->current_block_consumed),
+      (std::vector<uint32_t>{7}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 
   res = rcq_item.get_next_item(mode, true)();
@@ -687,10 +709,12 @@ TEST_F(ItemViewTest, CurrentBlockConcurrentConsumeAppearsInDelta)
   check_eq(*res.value(), 8);
 
   delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
-  EXPECT_EQ(read_entries(
-                delta.retrocausal_queue().consume->current_block_consumed),
-            (std::vector<uint32_t>{7, 8}));
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
+  EXPECT_EQ(
+      read_entries(
+          delta.retrocausal_queue().consume.delta()->current_block_consumed),
+      (std::vector<uint32_t>{7, 8}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
 }
 
@@ -717,15 +741,17 @@ TEST_F(ItemViewTest,
   check_eq(*res.value(), 1);
 
   auto delta = rcq_item.get_delta();
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
-  EXPECT_EQ(read_entries(
-                delta.retrocausal_queue().consume->current_block_consumed),
-            (std::vector<uint32_t>{20}));
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqConsume);
+  EXPECT_EQ(
+      read_entries(
+          delta.retrocausal_queue().consume.delta()->current_block_consumed),
+      (std::vector<uint32_t>{20}));
   ASSERT_EQ(delta.retrocausal_queue().insert.added_entries.size(), 1);
   check_eq(delta.retrocausal_queue().insert.added_entries[0], 2);
 }
 
-TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
+TEST_F(ItemViewTest, ReplacementItemPreservesConcurrentConsumeDelta)
 {
   auto item = make_empty_item();
   auto rcq_item = RetrocausalQueueItem(*item);
@@ -745,16 +771,92 @@ TEST_F(ItemViewTest, MakeFullyConsumedItemPreservesConcurrentConsumeDelta)
   ASSERT_TRUE(res.has_value() && res.value() != nullptr);
   check_eq(*res.value(), 99);
 
-  auto fully_consumed = RetrocausalQueueItem::make_fully_consumed_item(
-      *item, item->get_retrocausally_consumed_entries(
-                 rcq_item.get_retrocausally_consumed_count())());
-  auto delta = fully_consumed.get_delta();
+  auto replacement = RetrocausalQueueItem::make_replacement_item(
+      item.get(), item->get_retrocausally_consumed_entries(
+                      rcq_item.get_retrocausally_consumed_count())());
+  auto delta = replacement.get_delta();
 
-  ASSERT_TRUE(delta.retrocausal_queue().consume);
+  // HogDb places the past-block consume for a replacement; only the
+  // concurrent entries consumed before it go on the wire.
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqReplaceConsume);
   EXPECT_EQ(read_entries(
-                delta.retrocausal_queue().consume->current_block_consumed),
+                delta.retrocausal_queue().consume.current_block_consumed()),
             (std::vector<uint32_t>{42, 99}));
   EXPECT_TRUE(delta.retrocausal_queue().insert.added_entries.empty());
+}
+
+// A replaced key's queue is built without its snapshot: inserting and
+// consuming its own entries reads nothing, and the consume of the committed
+// queue is left to HogDb.
+TEST_F(ItemViewTest, ReplacementItemNeedsNoSnapshotForOwnEntries)
+{
+  auto replacement = RetrocausalQueueItem::make_replacement_item(nullptr, {});
+  EXPECT_FALSE(replacement.has_base_item());
+
+  auto delta = replacement.get_delta();
+  EXPECT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqReplace);
+
+  ASSERT_TRUE(replacement.insert_entry(make_test_queue_entry(7)).has_value());
+  ASSERT_TRUE(replacement.insert_entry(make_test_queue_entry(8)).has_value());
+
+  ExecutionModeData mode = ProposalModeData();
+  auto res = replacement.get_next_item(mode, true)();
+  ASSERT_TRUE(res.has_value() && res.value() != nullptr);
+  check_eq(*res.value(), 7);
+
+  // The self consume makes this transaction the consumer.
+  delta = replacement.get_delta();
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqReplaceConsume);
+  EXPECT_TRUE(
+      delta.retrocausal_queue().consume.current_block_consumed().empty());
+  EXPECT_EQ(read_entries(delta.retrocausal_queue().insert.added_entries),
+            (std::vector<uint32_t>{8}));
+}
+
+// Past-block entries of the snapshot are never read through a replacement,
+// even once the snapshot is attached for concurrent reads.
+TEST_F(ItemViewTest, ReplacementItemSkipsSnapshotBlocks)
+{
+  auto stored = make_queue({{make_test_queue_entry(1)}});
+  server_->impl()->setup_create_queue(AddressAndKey{}, std::move(stored));
+  server_->impl()->setup_add_concurrent_rcq_item(AddressAndKey{},
+                                                 make_test_queue_entry(5));
+
+  AddressAndKey addrkey{};
+  WireStorageItem wire(StorageItemType::kItemTypeRetrocausalQueue);
+  wire.metadata().live_entries = 1;
+  wire.metadata().max_live_block_num = 1;
+  auto entry = SnapshotStorageItem::make_variant(std::move(wire), addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  auto snapshot =
+      std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
+                                            std::move(addrkey), BlockID{1},
+                                            *db_proxy_);
+
+  // Read through an ordinary queue, the snapshot's block entry comes first.
+  RetrocausalQueueItem committed(*snapshot);
+  ExecutionModeData peek_mode = ProposalModeData();
+  auto peeked = committed.get_next_item(peek_mode, false)();
+  ASSERT_TRUE(peeked.has_value() && peeked.value() != nullptr);
+  check_eq(*peeked.value(), 1);
+
+  auto replacement = RetrocausalQueueItem::make_replacement_item(nullptr, {});
+  replacement.set_base_item(*snapshot);
+
+  ExecutionModeData mode = ProposalModeData();
+  auto res = replacement.get_next_item(mode, true)();
+  ASSERT_TRUE(res.has_value() && res.value() != nullptr);
+  check_eq(*res.value(), 5);
+
+  auto delta = replacement.get_delta();
+  ASSERT_EQ(delta.retrocausal_queue().consume.status(),
+            RetrocausalQueueConsume::kRcqReplaceConsume);
+  EXPECT_EQ(read_entries(
+                delta.retrocausal_queue().consume.current_block_consumed()),
+            (std::vector<uint32_t>{5}));
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

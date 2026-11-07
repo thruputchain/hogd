@@ -1982,8 +1982,23 @@ get_retrocausally_consumed_entries(ExecutionModeData &execution_mode_data,
   co_return co_await base_item.get_retrocausally_consumed_entries(count);
 }
 
-// Fully-consumed view of the snapshot's queue for a key this transaction
-// replaced, keeping the consumed count so no entry is consumed twice.
+x23::Async<SystemStatus<void>>
+attach_queue_base(RetrocausalQueueItem &queue_item,
+                  StorageSnapshotCache &snapshot_cache,
+                  FrameItemKey const &item_key)
+{
+  UnmodifiedItem unmodified_item;
+  auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
+  if (!load_status.has_value()) {
+    co_return load_status.error();
+  }
+  queue_item.set_base_item(unmodified_item.base_item());
+  co_return SystemStatus<void>{};
+}
+
+// Empty queue for a key this transaction replaced, keeping the consumed count
+// so no entry is consumed twice. HogDb consumes the committed queue, so the
+// snapshot is loaded only to recover entries already consumed from it.
 x23::Async<SystemStatus<RetrocausalQueueItem>>
 make_replaced_key_queue_item(FrameItemKey const &item_key,
                              AddressAndKey const &addrkey,
@@ -1991,6 +2006,10 @@ make_replaced_key_queue_item(FrameItemKey const &item_key,
                              StorageSnapshotCache &snapshot_cache,
                              ExecutionModeData &execution_mode_data)
 {
+  if (retrocausally_consumed_count == 0) {
+    co_return RetrocausalQueueItem::make_replacement_item(nullptr, {});
+  }
+
   UnmodifiedItem unmodified_item;
   auto load_status = co_await unmodified_item.load(snapshot_cache, item_key);
   if (!load_status.has_value()) {
@@ -2002,8 +2021,21 @@ make_replaced_key_queue_item(FrameItemKey const &item_key,
                                                   unmodified_item.base_item(),
                                                   addrkey,
                                                   retrocausally_consumed_count);
-  co_return RetrocausalQueueItem::make_fully_consumed_item(
-      unmodified_item.base_item(), std::move(consumed));
+  co_return RetrocausalQueueItem::make_replacement_item(
+      &unmodified_item.base_item(), std::move(consumed));
+}
+
+// A replacement queue is built without its snapshot; reads need it for
+// concurrent entries.
+x23::MaybeAsync<SystemStatus<void>>
+ensure_queue_base(RetrocausalQueueItem &queue_item,
+                  StorageSnapshotCache &snapshot_cache,
+                  FrameItemKey const &item_key)
+{
+  if (queue_item.has_base_item()) {
+    return SystemStatus<void>{};
+  }
+  return attach_queue_base(queue_item, snapshot_cache, item_key);
 }
 
 x23::Async<SystemStatus<SyscallStatus<RetrocausalQueueItem *>>>
@@ -2033,7 +2065,7 @@ retrocausal_queue_item_from_view(ItemView *item_view,
 
   // The frame holds a deleted or other-typed value. An insert is a write and
   // replaces whatever the key held, as it would a committed value, so start a
-  // fresh queue over a fully-consumed view of the snapshot.
+  // fresh queue that consumes the committed one.
   auto new_item = co_await make_replaced_key_queue_item(
       item_key, addrkey, item_view->get_retrocausally_consumed_count(),
       snapshot_cache, execution_mode_data);
@@ -2102,6 +2134,11 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
                                  ExecutionModeData &execution_mode_data)
 {
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    if (auto attached =
+            co_await ensure_queue_base(*queue_item, snapshot_cache, item_key);
+        !attached.has_value()) {
+      co_return attached.error();
+    }
     co_return co_await load_next_queue_entry(*queue_item, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
@@ -2127,6 +2164,11 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
         snapshot_cache, execution_mode_data);
     if (!queue_item.has_value()) {
       co_return queue_item.error();
+    }
+    if (auto attached = co_await ensure_queue_base(queue_item.value(),
+                                                   snapshot_cache, item_key);
+        !attached.has_value()) {
+      co_return attached.error();
     }
     co_return co_await load_next_queue_entry(queue_item.value(),
                                              execution_mode_data,
@@ -2212,6 +2254,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
   }
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
+    if (auto attached =
+            co_await ensure_queue_base(*queue_item, snapshot_cache_, item_key);
+        !attached.has_value()) {
+      co_return attached.error();
+    }
     auto entry =
         co_await load_next_queue_entry(*queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);
@@ -2229,6 +2276,11 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
       co_return queue_item_res.error();
     }
     auto &queue_item = queue_item_res.value();
+    if (auto attached =
+            co_await ensure_queue_base(queue_item, snapshot_cache_, item_key);
+        !attached.has_value()) {
+      co_return attached.error();
+    }
     auto entry =
         co_await load_next_queue_entry(queue_item, execution_mode_data_,
                                        /*advance_cursor=*/true);

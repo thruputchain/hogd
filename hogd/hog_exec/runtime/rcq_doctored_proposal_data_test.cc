@@ -978,7 +978,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx_b = make_new_per_tx_db_proxy(UINT64_MAX);
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 0,
                                .partial_consumed_number = 0},
         .current_block_consumed = {entry}};
@@ -1147,7 +1149,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   auto tx_b = make_new_per_tx_db_proxy(UINT64_MAX);
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 0,
                                .partial_consumed_number = 0},
         .current_block_consumed = {entry}};
@@ -1352,7 +1356,9 @@ TEST_F(RcqDoctoredProposalDataTest,
   {
     auto tx = make_new_per_tx_db_proxy(UINT64_MAX);
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() = RetrocausalQueueConsumeDelta{
         .past_block_consume = {.max_fully_consumed_block_number = 1,
                                .partial_consumed_number = 1},
         .current_block_consumed = {}};

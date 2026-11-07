@@ -626,14 +626,12 @@ RCQBenchmark::run_sequential()
 
         InvokeTX tx(block_tx);
         RetrocausalQueueDelta delta;
-        // NOLINTNEXTLINE(modernize-make-unique)
-        delta.consume.reset(new RetrocausalQueueConsumeDelta{
-            .past_block_consume =
-                {
-                    .max_fully_consumed_block_number = next_block,
-                    .partial_consumed_number = 0,
-                },
-        });
+        delta.consume.status(RetrocausalQueueConsume::kRcqConsume)
+            .delta()
+            ->past_block_consume = {
+            .max_fully_consumed_block_number = next_block,
+            .partial_consumed_number = 0,
+        };
         if (auto ret =
                 tx.request_retrocausal_queue(queue_keys_[q], std::move(delta),
                                              std::to_underlying(
@@ -786,15 +784,16 @@ RCQBenchmark::run_concurrent()
 
             InvokeTX tx(*block_tx_ptr);
             RetrocausalQueueDelta delta;
-            auto *consume = new RetrocausalQueueConsumeDelta{};
+            auto &consume =
+                *delta.consume.status(RetrocausalQueueConsume::kRcqConsume)
+                     .delta();
 
             auto meta_r = db_.read_retrocausal_queue_metadata(queue_keys_[q]);
             if (meta_r)
-              consume->past_block_consume = meta_r->consume_state;
+              consume.past_block_consume = meta_r->consume_state;
 
             for (auto &e : collected)
-              consume->current_block_consumed.push_back(std::move(e));
-            delta.consume.reset(consume);
+              consume.current_block_consumed.push_back(std::move(e));
 
             if (auto ret = tx.request_retrocausal_queue(
                     queue_keys_[q], std::move(delta),

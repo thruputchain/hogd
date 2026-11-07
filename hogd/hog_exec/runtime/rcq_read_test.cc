@@ -46,7 +46,9 @@ public:
                          uint64_t partial_consumed_number)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() = RetrocausalQueueConsumeDelta{
         .past_block_consume =
             RetrocausalQueuePastBlockConsumeDelta{
                 .max_fully_consumed_block_number =
@@ -62,7 +64,9 @@ public:
                                 std::vector<QueueEntry> const &values)
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    delta.retrocausal_queue().consume = RetrocausalQueueConsumeDelta{
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() = RetrocausalQueueConsumeDelta{
         .past_block_consume =
             RetrocausalQueuePastBlockConsumeDelta{
                 .max_fully_consumed_block_number =

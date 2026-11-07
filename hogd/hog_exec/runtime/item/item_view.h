@@ -24,6 +24,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -99,9 +100,21 @@ public:
   RetrocausalQueueItem(RetrocausalQueueItem const &other) = default;
   RetrocausalQueueItem &operator=(RetrocausalQueueItem const &other) = default;
 
+  // A queue for a key this transaction deleted or overwrote. It starts empty
+  // and sets replace on its delta, so HogDb consumes the committed queue's
+  // past-block entries; that needs no snapshot here. [consumed_entries] are
+  // the concurrent entries consumed before the key was replaced, which a
+  // replacement must keep so they are not consumed twice. [base_item] may be
+  // null; attach it with set_base_item() before reading concurrent entries.
   static RetrocausalQueueItem
-  make_fully_consumed_item(const SnapshotStorageItem &base_item,
-                           x23::Vec<QueueEntry> consumed_entries);
+  make_replacement_item(const SnapshotStorageItem *base_item,
+                        x23::Vec<QueueEntry> consumed_entries);
+
+  bool has_base_item() const { return base_item_ != nullptr; }
+  void set_base_item(const SnapshotStorageItem &base_item)
+  {
+    base_item_ = &base_item;
+  }
 
   StorageDelta
   get_delta(std::span<QueueEntry const> observed_entries = {}) const;
@@ -125,6 +138,10 @@ public:
   }
 
 private:
+  explicit RetrocausalQueueItem(const SnapshotStorageItem *base_item)
+    : base_item_(base_item)
+  {}
+
   x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
@@ -143,7 +160,16 @@ private:
 
   void construct_consume_delta();
 
-  RetrocausalQueueDelta queue_delta_{};
+  // The delta under construction. get_delta() encodes consume and replace as
+  // the wire's RetrocausalQueueConsume.
+  struct QueueDelta {
+    x23::Ptr<RetrocausalQueueConsumeDelta> consume;
+    RetrocausalQueueInsertDelta insert;
+    // Set for a key this transaction deleted or overwrote; consume then holds
+    // only current-block entries.
+    bool replace = false;
+  };
+  QueueDelta queue_delta_{};
 
   // Can't overflow locally_consumed_index_ in a uint16
   static_assert(std::numeric_limits<uint16_t>::max() >=
@@ -157,6 +183,7 @@ private:
   // For (in future PR) tracking storage costs
   uint32_t past_block_consumed_count_ = 0;
 
+  // Null only for a replacement item that has not yet been read from.
   const SnapshotStorageItem *base_item_;
 };
 

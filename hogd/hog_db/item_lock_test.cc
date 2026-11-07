@@ -899,6 +899,73 @@ TEST(ItemLockTest, RCQNarrowAcceptsShrinkToEmpty)
   EXPECT_TRUE(result.has_value());
 }
 
+TEST(ItemLockTest, RCQNarrowAcceptsReplaceAfterPastConsume)
+{
+  // Sub1 consumed past entries; sub2 deleted and recreated the queue. The
+  // replacement subsumes the past consume and may carry no consume itself.
+  RetrocausalQueueDelta delta1;
+  delta1.consume.status(RetrocausalQueueConsume::kRcqConsume);
+  delta1.consume.delta()->past_block_consume.max_fully_consumed_block_number =
+      3;
+  delta1.consume.delta()->past_block_consume.partial_consumed_number = 1;
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.consume.status(RetrocausalQueueConsume::kRcqReplace);
+  delta2.insert.added_entries.push_back(QueueEntry{0x0A});
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowAcceptsReplaceDroppingSelfConsume)
+{
+  // A replacement that self-consumed is replaced again: the second has no
+  // consume of its own.
+  RetrocausalQueueDelta delta1;
+  delta1.consume.status(RetrocausalQueueConsume::kRcqReplaceConsume);
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.consume.status(RetrocausalQueueConsume::kRcqReplace);
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  EXPECT_TRUE(result.has_value());
+}
+
+TEST(ItemLockTest, RCQNarrowRejectsUndoingReplace)
+{
+  RetrocausalQueueDelta delta1;
+  delta1.consume.status(RetrocausalQueueConsume::kRcqReplace);
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kInvalidExecutorBehavior);
+}
+
+TEST(ItemLockTest, RCQNarrowRejectsReplaceDroppingConcurrentConsumes)
+{
+  // Concurrent entries consumed before the replacement carry into it.
+  RetrocausalQueueDelta delta1;
+  delta1.consume.status(RetrocausalQueueConsume::kRcqConsume);
+  delta1.consume.delta()->current_block_consumed.push_back(QueueEntry{0x0A});
+  auto first = ItemChange(RetrocausalQueueIt(std::move(delta1)));
+
+  RetrocausalQueueDelta delta2;
+  delta2.consume.status(RetrocausalQueueConsume::kRcqReplace);
+  auto second = ItemChange(RetrocausalQueueIt(std::move(delta2)));
+
+  auto result = second.narrow(first);
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error().code(), HogDbCode::kInvalidExecutorBehavior);
+}
+
 TEST(ItemLockTest, RCQNarrowMaxInsertCountTracksAcrossMultipleNarrows)
 {
   // Sub1: 3 inserts, Sub2: 1 insert (shrink), Sub3: 4 inserts (grow past peak).
@@ -1211,11 +1278,11 @@ TEST(ItemLockTest, FailedRCQExclusiveUpgradeIsFailureAtomic)
   // pending deletion makes the change exclusive (a type change).
   RetrocausalQueueDelta delta;
   delta.insert.added_entries.push_back(inserted_entry);
-  delta.consume =
-      x23::Ptr<RetrocausalQueueConsumeDelta>(new RetrocausalQueueConsumeDelta{
+  delta.consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+      RetrocausalQueueConsumeDelta{
           .past_block_consume = {.max_fully_consumed_block_number = 1,
                                  .partial_consumed_number = 0},
-          .current_block_consumed = {consumed_entry}});
+          .current_block_consumed = {consumed_entry}};
 
   ItemChange recreated_rcq(RetrocausalQueueIt(std::move(delta)));
   ASSERT_TRUE(recreated_rcq.narrow(deletion).has_value());
@@ -1566,8 +1633,8 @@ TEST(ItemLockTest, RCQConsumeAllocationFailureWithSiblingLeavesConsumerFree)
 #else
   auto make_consume = [] {
     RetrocausalQueueDelta delta;
-    delta.consume = x23::Ptr<RetrocausalQueueConsumeDelta>(
-        new RetrocausalQueueConsumeDelta{});
+    delta.consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+        RetrocausalQueueConsumeDelta{};
     return ItemChange(RetrocausalQueueIt(std::move(delta)));
   };
 

@@ -2019,7 +2019,7 @@ protected:
     // lands as its own subtransaction before the recreate, so HogDb sees a
     // deletion -> RCQ exclusive upgrade. The recreated RCQ reloads the consumed
     // concurrent entry into current_block_consumed (via
-    // make_fully_consumed_item) while added_entries holds only the new insert
+    // make_replacement_item) while added_entries holds only the new insert
     // -- the exact shape HogDb's RCQ ExclusiveLock rejects as
     // kInvalidExecutorBehavior. Unlike methods 62-65 (single frame, so
     // delete+recreate fold into one delta) this actually splits them across a
@@ -2220,6 +2220,35 @@ protected:
             ADD_FAILURE() << "Got bad result from RCQ: expected " << value
                           << " but got " << out;
             co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+
+    // delete -> insert(a) -> consume self(a) -> delete -> insert(b). The
+    // second replacement has no consume of its own, only the one HogDb adds.
+    builder.add<SerializationFormat::kTxs>(
+        73,
+        [](NativeSyscallContext &ctx, uint32_t insert_a,
+           uint32_t insert_b) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_delete(ctx)) {
+            ADD_FAILURE() << "Failed to delete queue (first)";
+            co_return InvokeError{InvokeErrorCode::None};
+          }
+          if (!co_await rcq_insert(ctx, insert_a)) {
+            ADD_FAILURE() << "Failed to insert(a)";
+            co_return InvokeError{InvokeErrorCode::None};
+          }
+          if (!co_await rcq_consume_expect(ctx, insert_a)) {
+            ADD_FAILURE() << "Failed to consume self(a)";
+            co_return InvokeError{InvokeErrorCode::None};
+          }
+          if (!co_await rcq_delete(ctx)) {
+            ADD_FAILURE() << "Failed to delete queue (second)";
+            co_return InvokeError{InvokeErrorCode::None};
+          }
+          if (!co_await rcq_insert(ctx, insert_b)) {
+            ADD_FAILURE() << "Failed to insert(b)";
+            co_return InvokeError{InvokeErrorCode::None};
           }
           co_return InvokeStatus<void>{};
         });
@@ -2483,9 +2512,9 @@ TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 // recreated as a new RCQ in the same transaction (Case 1: snapshot RCQ →
 // committed RCQ), the old block records are removed from RAMDB.
 //
-// This is the case where hog_exec's make_fully_consumed_item must fold a
-// consume-all into the new RCQ delta. If hog_exec ever regressed and stopped
-// doing this, the old block records would be orphaned as ghost entries.
+// This is the case where the new RCQ delta is marked replace and HogDb must
+// resolve it to a consume-all. If that ever regressed, the old block records
+// would be orphaned as ghost entries.
 // DeleteAndRecreateRemovesPastBlocks verifies the metadata is correct but
 // doesn't check the block records directly.
 TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
@@ -2518,8 +2547,8 @@ TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
   ASSERT_TRUE(block2.has_value()) << "Block 2 should exist before delete";
 
   // Block 3: delete -> insert (same tx). This is the RCQ->delete->RCQ path.
-  // hog_exec should fold a consume-all via make_fully_consumed_item so that
-  // RetrocausalQueueLock::stage_committed_changes prunes old blocks.
+  // hog_exec marks the delta replace, which HogDb resolves to a consume-all
+  // so that RetrocausalQueueLock::stage_committed_changes prunes old blocks.
   invoke_method(13, uint32_t{99});
 
   advance_block();
@@ -2578,7 +2607,7 @@ TEST_F(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 
   advance_block();
 
-  // Past block entry (42) consumed via make_fully_consumed_item,
+  // Past block entry (42) consumed by the replacement,
   // self insert (10) consumed, concurrent (99) consumed.
   ASSERT_TRUE(check_rcq_empty());
 }
@@ -2929,6 +2958,30 @@ TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
   ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 1);
+}
+
+// Replacing a nonempty queue twice in one transaction, with a self consume in
+// between, still consumes the committed queue: the transaction remains the
+// block's consumer and the committed entry is gone.
+TEST_F(RCQDeleteTest, ReplaceTwiceStillConsumesNonEmptyQueue)
+{
+  insert(42);
+
+  advance_block();
+  invoke_method(73, uint32_t{10}, uint32_t{20});
+
+  // The committed entry was consumed by the replacement.
+  invoke_method_fail_commit(1, uint32_t{42});
+
+  advance_block();
+
+  auto queue = lookup_storage_item_from_db(get_queue_addrkey());
+  ASSERT_TRUE(queue.has_value());
+  ASSERT_TRUE(queue->type() == StorageItemType::kItemTypeRetrocausalQueue);
+  ASSERT_EQ(queue->metadata().live_entries, 1);
+  invoke_method(1, uint32_t{20});
+  advance_block();
+  ASSERT_TRUE(check_rcq_empty());
 }
 
 // Peek returns the next entry without advancing the cursor.

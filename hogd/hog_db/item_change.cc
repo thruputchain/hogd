@@ -161,21 +161,41 @@ RetrocausalQueueIt::narrow(RetrocausalQueueIt const &earlier)
   // peak for reservation accounting in RetrocausalQueueLock.
   max_insert_count_ = std::max(max_insert_count_, earlier.max_insert_count_);
 
+  // Once a transaction replaces the queue it stays replaced: a later delete
+  // and recreate replaces it again.
+  if (earlier.is_replace() && !is_replace()) {
+    return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
+  }
+
+  if (is_replace()) {
+    // A replacement consumes the whole committed queue, which subsumes any
+    // earlier past-block position, and may leave that consume to HogDb
+    // (kRcqReplace), so an explicit consume may disappear. Concurrent entries
+    // already consumed are carried over and can only grow.
+    if (current_block_consumed().size() <
+        earlier.current_block_consumed().size()) {
+      return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
+    }
+    return true;
+  }
+
   // The cumulative delta's consume can only grow within a transaction:
   // each frame inherits the prior frame's ItemView state (including consume),
   // and the single-consumer constraint means only one tx per block can consume.
   // An honest executor never drops or reduces consumes.
-  if (earlier.delta_.consume && !delta_.consume) {
+  auto const *earlier_consume = earlier.consume();
+  auto const *this_consume = consume();
+  if (earlier_consume && !this_consume) {
     return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
   }
 
-  if (earlier.delta_.consume && delta_.consume) {
-    auto const &ec = earlier.delta_.consume->past_block_consume;
-    auto const &nc = delta_.consume->past_block_consume;
+  if (earlier_consume && this_consume) {
+    auto const &ec = earlier_consume->past_block_consume;
+    auto const &nc = this_consume->past_block_consume;
     bool monotonic =
         (ec < nc) ||
-        (ec == nc && earlier.delta_.consume->current_block_consumed.size() <=
-                         delta_.consume->current_block_consumed.size());
+        (ec == nc && earlier_consume->current_block_consumed.size() <=
+                         this_consume->current_block_consumed.size());
     if (!monotonic) {
       return std::unexpected(HogDbError{HogDbCode::kInvalidExecutorBehavior});
     }

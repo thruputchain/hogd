@@ -74,6 +74,22 @@ public:
   HogDbStatus<RetrocausalQueueMetadata *>
   get_meta(const LockContext *ctx) const;
 
+  // Whether [change] makes its transaction the block's consumer. A replace
+  // consumes the committed queue described by [meta], so even a kRcqReplace
+  // is one whenever that queue still has live entries.
+  static bool claims_consumer(const change_type &change,
+                              const RetrocausalQueueMetadata &meta)
+  {
+    switch (change.delta().consume.status()) {
+    case RetrocausalQueueConsume::kRcqNoConsume:
+      return false;
+    case RetrocausalQueueConsume::kRcqReplace:
+      return meta.live_entries > 0;
+    default:
+      return true;
+    }
+  }
+
   static uint64_t live_block_count(const RetrocausalQueueMetadata &meta)
   {
     return meta.max_live_block_num -

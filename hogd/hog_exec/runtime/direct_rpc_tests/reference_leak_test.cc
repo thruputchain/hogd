@@ -76,13 +76,15 @@ public:
   {
     StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
     delta.retrocausal_queue().insert = RetrocausalQueueInsertDelta{};
-    delta.retrocausal_queue().consume.emplace(
+    delta.retrocausal_queue()
+        .consume.status(RetrocausalQueueConsume::kRcqConsume)
+        .delta() =
         RetrocausalQueueConsumeDelta{.past_block_consume =
                                          RetrocausalQueuePastBlockConsumeDelta{
                                              .max_fully_consumed_block_number =
                                                  0,
                                              .partial_consumed_number = 0},
-                                     .current_block_consumed = {}});
+                                     .current_block_consumed = {}};
     return delta;
   }
 

@@ -161,8 +161,8 @@ NNIntItem::validate() const
 // RetrocausalQueueItem implementation
 
 RetrocausalQueueItem
-RetrocausalQueueItem::make_fully_consumed_item(
-    const SnapshotStorageItem &base_item, x23::Vec<QueueEntry> consumed_entries)
+RetrocausalQueueItem::make_replacement_item(
+    const SnapshotStorageItem *base_item, x23::Vec<QueueEntry> consumed_entries)
 {
   // locally_consumed_index_ is a uint16; the per-block consumed count is
   // bounded by kRetrocausalQueueBlockEntriesMaxLen (see the static_assert in
@@ -174,24 +174,16 @@ RetrocausalQueueItem::make_fully_consumed_item(
       static_cast<uint16_t>(consumed_entries.size());
 
   RetrocausalQueueItem item(base_item);
+  item.queue_delta_.replace = true;
   item.locally_consumed_index_ = retrocausally_consumed_count;
 
-  bool need_consume_delta =
-      retrocausally_consumed_count > 0 ||
-      (base_item.type() == ItemViewType::kRetrocausalQueue &&
-       base_item.retrocausal_queue_metadata().live_entries > 0);
-
-  if (need_consume_delta) {
-    RetrocausalQueuePastBlockConsumeDelta past_consume = {
-        .max_fully_consumed_block_number = 0,
-        .partial_consumed_number = 0,
-    };
-    if (base_item.type() == ItemViewType::kRetrocausalQueue) {
-      auto const &meta = base_item.retrocausal_queue_metadata();
-      past_consume.max_fully_consumed_block_number = meta.max_live_block_num;
-    }
+  // The committed queue's past-block entries are consumed by HogDb, which
+  // resolves replace against the committed metadata (and so decides whether
+  // this transaction is the block's consumer); only the concurrent entries
+  // consumed before the key was replaced are carried here.
+  if (retrocausally_consumed_count > 0) {
     item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
-        .past_block_consume = past_consume,
+        .past_block_consume = {},
         .current_block_consumed = std::move(consumed_entries),
     });
   }
@@ -202,13 +194,15 @@ RetrocausalQueueItem::make_fully_consumed_item(
 void
 RetrocausalQueueItem::construct_consume_delta()
 {
-  assert(base_item_);
   RetrocausalQueuePastBlockConsumeDelta past_consume = {
       .max_fully_consumed_block_number = 0,
       .partial_consumed_number = 0,
   };
 
-  if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+  // A replaced queue leaves the past-block position to HogDb.
+  assert(base_item_ || queue_delta_.replace);
+  if (!queue_delta_.replace &&
+      base_item_->type() == ItemViewType::kRetrocausalQueue) {
     past_consume = base_item_->retrocausal_queue_metadata().consume_state;
   }
 
@@ -242,7 +236,7 @@ x23::Async<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
                                     bool advance_cursor)
 {
-  assert(base_item_);
+  assert(base_item_ || queue_delta_.replace);
   // Step 1: try consume from past blocks
   // the index where we start searching from
   uint64_t block_index = 0;
@@ -257,7 +251,8 @@ RetrocausalQueueItem::get_next_item(ExecutionModeData &execution_mode_data,
   else {
     // If we don't have a consume delta yet, then we're starting from
     // wherever things left off according to the snapshot.
-    if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
+    if (!queue_delta_.replace &&
+        base_item_->type() == ItemViewType::kRetrocausalQueue) {
       auto const &meta = base_item_->retrocausal_queue_metadata();
       block_index = meta.consume_state.max_fully_consumed_block_number + 1;
       partial_consume_quantity = meta.consume_state.partial_consumed_number;
@@ -371,11 +366,36 @@ RetrocausalQueueItem::get_delta(
       StorageDelta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
 
   // load the retrocausally consumed entries
+  auto &consume = delta.retrocausal_queue().consume;
   if (queue_delta_.consume) {
     // TODO(geoff): In proposal mode, we could reduce some copying in the
     // ItemView by loading this list of consumed entries from the snapshot base
     // item.
-    delta.retrocausal_queue().consume = queue_delta_.consume;
+    RetrocausalQueueConsumeDelta consume_delta = *queue_delta_.consume;
+
+    // In debug builds, we shuffle the order of entries in the concurrent
+    // consumes, as these are not supposed to affect the result of the db
+    // operation.
+    if constexpr (is_debug_build()) {
+      std::shuffle(consume_delta.current_block_consumed.begin(),
+                   consume_delta.current_block_consumed.end(),
+                   std::mt19937{std::random_device{}()});
+    }
+
+    if (queue_delta_.replace) {
+      // HogDb places the consume of the replaced queue, so only the
+      // current-block entries go on the wire.
+      consume.status(RetrocausalQueueConsume::kRcqReplaceConsume)
+          .current_block_consumed() =
+          std::move(consume_delta.current_block_consumed);
+    }
+    else {
+      consume.status(RetrocausalQueueConsume::kRcqConsume).delta() =
+          std::move(consume_delta);
+    }
+  }
+  else if (queue_delta_.replace) {
+    consume.status(RetrocausalQueueConsume::kRcqReplace);
   }
   CHECK_LE(self_consumed_index_, queue_delta_.insert.added_entries.size());
   delta.retrocausal_queue().insert.added_entries.append(
@@ -387,19 +407,8 @@ RetrocausalQueueItem::get_delta(
         observed_entries.begin(), observed_entries.end()};
   }
 
-  // In debug builds, we shuffle the order of entries in the concurrent
-  // consumes, as these are not supposed to affect the result of the db
-  // operation.
-  if constexpr (is_debug_build()) {
-    if (delta.retrocausal_queue().consume) {
-      std::shuffle(
-          delta.retrocausal_queue().consume->current_block_consumed.begin(),
-          delta.retrocausal_queue().consume->current_block_consumed.end(),
-          std::mt19937{std::random_device{}()});
-    }
-    // We don't shuffle the order of this-block inserts -- some of the tests
-    // have logic conditioned on the order of concurrent inserts.
-  }
+  // We don't shuffle the order of this-block inserts -- some of the tests
+  // have logic conditioned on the order of concurrent inserts.
   return delta;
 }
 
@@ -417,6 +426,10 @@ RetrocausalQueueItem::insert_entry(QueueEntry const &entry)
 x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
 RetrocausalQueueItem::get_next_block(uint64_t search_start_index) const
 {
+  // A replaced queue has no past blocks: HogDb consumes the committed ones.
+  if (queue_delta_.replace) {
+    return SystemStatus<const RetrocausalQueueBlock *>{nullptr};
+  }
   assert(base_item_);
   if (base_item_->type() == ItemViewType::kRetrocausalQueue) {
     return base_item_->get_next_rcq_block(search_start_index);
@@ -434,7 +447,9 @@ x23::MaybeAsync<SystemStatus<const QueueEntry *>>
 RetrocausalQueueItem::get_next_concurrent_entry(
     uint32_t index, ExecutionModeData &execution_mode_data) const
 {
-  assert(base_item_);
+  // A replaced queue is built without its snapshot; the syscall handler
+  // attaches it (set_base_item) before any read can get here.
+  CHECK_PTR(base_item_);
   auto const &addrkey = base_item_->addrkey();
 
   if (auto *proposal_data =
