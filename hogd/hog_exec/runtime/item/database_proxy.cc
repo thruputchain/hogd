@@ -480,19 +480,38 @@ constexpr size_t kMaxSubtransactionPushFootprint =
 static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
               "the largest possible single delta must fit one push");
 
+// A transaction whose body is discarded pushes only its observation deltas and
+// its replay nonce (SystemCallHandler::commit_body_discarded), so that push
+// always fits and a proposer need not reserve for it.
+constexpr size_t kMaxObservationOnlyFootprint =
+    kMaxConcurrentRcqReadsPerTx *
+    (kPerDeltaFraming + kRcqDeltaOverhead + kXdrMax<QueueEntry>);
+static_assert(kMaxObservationOnlyFootprint + kXdrMax<FlaggedStorageDelta> <=
+                  kMaxSubtransactionPushFootprint,
+              "a discarded body's observations must fit one push");
+
 } // namespace
+
+size_t
+observed_entries_footprint_bound(size_t entry_count, bool own_delta)
+{
+  // As footprint_bound(FlaggedStorageDelta) charges these entries.
+  const size_t entries = entry_count * kXdrMax<QueueEntry>;
+  return own_delta ? kPerDeltaFraming + kRcqDeltaOverhead + entries : entries;
+}
 
 x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
-                                           DbConflictResult *conflict_out)
+                                           DbConflictResult *conflict_out,
+                                           size_t reserved_footprint)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
   // whose r/w footprint would not fit the RPC message cap, so an oversized push
   // can never reach serialization and turn into a node-unrecoverable error.
-  size_t footprint = 0;
+  size_t footprint = reserved_footprint;
   for (auto const &fd : delta_batch) {
     size_t bound = footprint_bound(fd);
     // footprint_bound must be a true upper bound on the serialized size.
@@ -506,11 +525,10 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     footprint += bound;
   }
   if (footprint + kMessageOverhead > kExecToDbMessageCap) {
-    debug(
-        "rejecting subtransaction push as a conflict: delta-batch footprint "
-        "{} + message overhead {} exceeds the {}-byte executor->HogDb message "
-        "cap",
-        footprint, kMessageOverhead, kExecToDbMessageCap);
+    debug("rejecting subtransaction push as a conflict: delta-batch footprint "
+          "{} ({} reserved) + message overhead {} exceeds the {}-byte "
+          "executor->HogDb message cap",
+          footprint, reserved_footprint, kMessageOverhead, kExecToDbMessageCap);
     co_return false;
   }
 
@@ -622,7 +640,8 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 }
 
 x23::Async<SystemStatus<bool>>
-PerTransactionDatabaseProxy::try_push_current_subtransaction()
+PerTransactionDatabaseProxy::try_push_current_subtransaction(
+    size_t reserved_footprint)
 {
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -643,7 +662,8 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
 
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
-      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
+      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_,
+      reserved_footprint);
   current_subtransaction_batch_.clear();
   co_return r;
 }

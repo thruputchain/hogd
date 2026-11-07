@@ -668,7 +668,13 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   add_replay_nonce_delta();
 
-  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
+  // A proposer pushes no observations but counts the ones it recorded against
+  // the push's message cap, since every validator's push carries them.
+  auto const *proposal = std::get_if<ProposalModeData>(&execution_mode_data_);
+  auto r = co_await last_frame.try_acquire_frame_locks(
+      db_proxy_,
+      proposal != nullptr ? proposal->recorded_observations() : observations,
+      /*push_observations=*/proposal == nullptr);
   if (!r.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(
                                                       r.error().code()),
