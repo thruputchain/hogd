@@ -49,7 +49,7 @@ public:
       break;
     case 2:
       mutate_u32_field(rv32::kArtifactFormatVersionOffset,
-                       rv32::kArtifactFormatVersion);
+                       rv32::kArtifactVersion6);
       break;
     case 3:
       mutate_u32_field(rv32::kArtifactHeaderSizeOffset,
@@ -277,7 +277,7 @@ private:
     artifact_.clear();
     artifact_.reserve(rv32::kArtifactHeaderBytes + code.size() + memory.size());
     rv32::test_artifact::append_bytes(artifact_, rv32::kArtifactMagic);
-    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactFormatVersion);
+    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactVersion6);
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactHeaderBytes);
     rv32::test_artifact::append_u64(artifact_, rv32::kArtifactVmProfileDigest);
     rv32::test_artifact::append_u32(artifact_,

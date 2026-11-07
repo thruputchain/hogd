@@ -24,8 +24,8 @@ inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
 // Accept v5 during the v6 rollout so existing contracts remain executable.
 // Removing it requires a separate network transition decision. v5 has the
 // same header as v6 and no extension list.
-inline constexpr uint32_t kLegacyArtifactFormatVersion = 5;
-inline constexpr uint32_t kArtifactFormatVersion = 6;
+inline constexpr uint32_t kArtifactVersion5 = 5;
+inline constexpr uint32_t kArtifactVersion6 = 6;
 inline constexpr uint32_t kArtifactHeaderBytes = 128;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
@@ -163,7 +163,7 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // the domain string below; changing the argument alone cannot reproduce other
 // format versions.
 constexpr uint64_t
-format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
+format_fingerprint(uint32_t format_version = kArtifactVersion6,
                    uint32_t gas_version = kGasTableVersion,
                    uint64_t gas_digest = kGasScheduleDigest)
 {
@@ -277,7 +277,7 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
 static_assert(kArtifactFormatFingerprint == 0xd96927c3425ee88eULL);
-static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
+static_assert(format_fingerprint(kArtifactVersion6 + 1) !=
               kArtifactFormatFingerprint);
 
 // The fingerprints a lowerer may report: one per lowerer generation in the
@@ -287,7 +287,7 @@ inline constexpr std::array<uint64_t, 5> kAcceptedFormatFingerprints = {
     // This build's own.
     kArtifactFormatFingerprint,
     // v6 lowerer declaring gas table v3.
-    format_fingerprint(kArtifactFormatVersion, kTransitionalGasTableVersion,
+    format_fingerprint(kArtifactVersion6, kTransitionalGasTableVersion,
                        kTransitionalGasScheduleDigest),
     // Published v5 fingerprints, retained with the v5 reader. The v6
     // fingerprint function uses a different domain and section order.

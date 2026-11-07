@@ -365,7 +365,7 @@ TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
   // v5 has the same header and ends after initial memory: no extension list.
   artifact.resize(artifact.size() - 4);
   store_u32_at(artifact, kArtifactFormatVersionOffset,
-               kLegacyArtifactFormatVersion);
+               kArtifactVersion5);
   auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(parsed.has_value());
   EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
@@ -424,7 +424,7 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
   {
     auto artifact = valid_artifact_bytes();
     store_u32_at(artifact, kArtifactFormatVersionOffset,
-                 kArtifactFormatVersion + 1);
+                 kArtifactVersion6 + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedFormatVersion);
   }

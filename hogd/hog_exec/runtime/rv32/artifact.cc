@@ -94,8 +94,8 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t format_version =
       load_u32_le(bytes, kArtifactFormatVersionOffset);
   const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
-  const bool legacy = format_version == kLegacyArtifactFormatVersion;
-  if (!legacy && format_version != kArtifactFormatVersion) {
+  const bool legacy = format_version == kArtifactVersion5;
+  if (!legacy && format_version != kArtifactVersion6) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
   if (header_size != kArtifactHeaderBytes) {

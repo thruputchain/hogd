@@ -55,7 +55,7 @@ build_artifact(std::span<const uint32_t> words,
   std::vector<uint8_t> artifact;
   artifact.reserve(kArtifactHeaderBytes + code.size() + initial_memory.size());
   append_bytes(artifact, kArtifactMagic);
-  append_u32(artifact, kArtifactFormatVersion);
+  append_u32(artifact, kArtifactVersion6);
   append_u32(artifact, kArtifactHeaderBytes);
   append_u64(artifact, kArtifactVmProfileDigest);
   append_u32(artifact, 0);
