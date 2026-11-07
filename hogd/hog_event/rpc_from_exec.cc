@@ -14,7 +14,7 @@ namespace hogd {
 x23::Async<RPCError>
 EventExecRpc::eventexecutor_open_block(BlockID block_id)
 {
-  info("eventexecutor_open_block: block_id={}", block_id);
+  debug("eventexecutor_open_block: block_id={}", block_id);
   auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     info("eventexecutor_open_block: block_id={} bad_block_id", block_id);
@@ -27,14 +27,14 @@ EventExecRpc::eventexecutor_open_block(BlockID block_id)
     co_await ctx_.gc_context(block_id);
   }
 
-  info("eventexecutor_open_block: block_id={} done", block_id);
+  debug("eventexecutor_open_block: block_id={} done", block_id);
   co_return RPCError::kRPCNone;
 }
 
 x23::Async<RPCError>
 EventExecRpc::eventexecutor_close_block(BlockID block_id)
 {
-  info("eventexecutor_close_block: block_id={}", block_id);
+  debug("eventexecutor_close_block: block_id={}", block_id);
   auto context = co_await ctx_.get_context(block_id);
   if (!context) {
     info("eventexecutor_close_block: block_id={} bad_block_id", block_id);
@@ -47,7 +47,7 @@ EventExecRpc::eventexecutor_close_block(BlockID block_id)
     co_await ctx_.gc_context(block_id);
   }
 
-  info("eventexecutor_close_block: block_id={} done", block_id);
+  debug("eventexecutor_close_block: block_id={} done", block_id);
   co_return RPCError::kRPCNone;
 }
 

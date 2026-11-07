@@ -7,6 +7,7 @@ extern "C" {
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -258,8 +259,17 @@ LogletAllocator::usage_stats() const
 }
 
 void
-LogletAllocator::print_stats() const
+LogletAllocator::print_stats(bool force) const
 {
+  const auto now = std::chrono::steady_clock::now();
+  auto last = last_stats_time_.load(std::memory_order_relaxed);
+  do {
+    if (!force && last != std::chrono::steady_clock::time_point{} &&
+        now - last < std::chrono::seconds(60)) {
+      return;
+    }
+  } while (!last_stats_time_.compare_exchange_weak(last, now,
+                                                   std::memory_order_relaxed));
   const LogletUsageStats stats = usage_stats();
   const size_t total = stats.memory_items + stats.disk_buffering + stats.free;
   size_t memory_pct = 0;
