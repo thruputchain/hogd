@@ -1608,11 +1608,16 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from the cache, even if the *nominated* block is
             // being committed rather than a *validated* block.
+            //
+            // Validation does not pin txs, so a local [schedule()] may have
+            // already dropped this tx along with its cache entry.
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
                   scheduler.txs_by_body_.find(tx_hash);
-              CHECK_PTR(tx_value_ptr);
+              if (!tx_value_ptr) {
+                continue;
+              }
               tx_value = *tx_value_ptr;
             }
 
