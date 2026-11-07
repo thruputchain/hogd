@@ -236,6 +236,12 @@ public:
     return get_db().read_address_balance(address);
   }
 
+  HogDbStatus<NativeTokenAge>
+  read_address_average_native_token_age(const ContractAddress &address)
+  {
+    return get_db().read_address_average_native_token_age(address);
+  }
+
   HogDbStatus<DeployedContractHash>
   read_address_metadata(const ContractAddress &address)
   {
