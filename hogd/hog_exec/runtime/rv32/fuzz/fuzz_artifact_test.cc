@@ -67,5 +67,25 @@ TEST(Rv32ArtifactMutator, TooSmallForV6UsesRawMutation)
   }
 }
 
+TEST(Rv32ArtifactMutator, EmptyMemoryOnlyGrowsWhenSpaceRemains)
+{
+  const auto input =
+      test_artifact::build_artifact({test_program::addi(0, 0, 0)}, {});
+  for (size_t extra : {0U, 1U}) {
+    // Seeds select memory mutation with and without digest repair.
+    for (unsigned int seed : {14U, 16U}) {
+      const size_t max_size = input.size() + extra;
+      std::vector<uint8_t> output(max_size + 1, 0xAA);
+      std::ranges::copy(input, output.begin());
+      const auto size =
+          LLVMFuzzerCustomMutator(output.data(), input.size(), max_size, seed);
+      EXPECT_EQ(size, max_size);
+      EXPECT_EQ(output[max_size], 0xAA);
+      EXPECT_EQ(load_u32_le(output, kArtifactInitialMemorySizeOffset), extra);
+      EXPECT_EQ(load_u32_le(output, size - 4), 0U);
+    }
+  }
+}
+
 } // namespace
 } // namespace hogd::rv32

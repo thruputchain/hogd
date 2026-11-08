@@ -404,6 +404,9 @@ private:
   void mutate_memory(bool repair)
   {
     if (memory().empty()) {
+      if (artifact_.size() == max_size_) {
+        return;
+      }
       const std::array<uint8_t, 1> byte = {
           random_byte(),
       };
