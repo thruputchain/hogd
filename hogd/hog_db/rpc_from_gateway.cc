@@ -194,22 +194,17 @@ HogDbGatewayRpc::dbgateway_get_config()
   co_return result;
 }
 
-DbGatewayContractResult
+DbGatewayContractReply
 HogDbGatewayRpc::dbgateway_get_contract(SHA256Hash const &hash)
 {
   auto encoded = ctx_.get_db().read_contract_code(hash);
   if (!encoded) {
-    return DbGatewayContractResult(to_rpc_error(encoded.error()));
+    return DbGatewayContractReply(to_rpc_error(encoded.error()));
   }
   if (encoded->size() > kMaxResponseBytes) {
-    return DbGatewayContractResult(RPCError::kRPCUnrecoverable);
+    return DbGatewayContractReply(RPCError::kRPCUnrecoverable);
   }
-  DbGatewayContractResult result(RPCError::kRPCNone);
-  result.contract_xdr().resize(encoded->size());
-  if (!encoded->empty()) {
-    std::memcpy(result.contract_xdr().data(), encoded->data(), encoded->size());
-  }
-  return result;
+  return DbGatewayContractReply(std::move(*encoded));
 }
 
 x23::Async<DbGatewayItemsReply>

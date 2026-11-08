@@ -93,17 +93,33 @@ TEST(HogDbGatewayRpcTest, ContractReadReturnsStoredBytes)
 {
   HogDbDAO dao = make_dao();
   SHA256Hash hash{};
-  hash[0] = 1;
-  const std::array<uint8_t, 12> bytes = {0, 0, 0, 3, 0, 0, 0, 3, 7, 8, 9, 0};
-  ASSERT_TRUE(dao.write_contract_code(hash, std::as_bytes(std::span(bytes))));
   RPCContext ctx(std::move(dao), nullptr);
   HogDbGatewayRpc gateway(ctx);
-  auto result = gateway.dbgateway_get_contract(hash);
-  ASSERT_EQ(result.error(), RPCError::kRPCNone);
-  EXPECT_TRUE(std::ranges::equal(result.contract_xdr(), bytes));
-  hash[0] = 2;
-  EXPECT_EQ(gateway.dbgateway_get_contract(hash).error(),
-            RPCError::kRPCNotFound);
+  for (size_t len :
+       {size_t{0}, size_t{1}, size_t{3}, size_t{12}, size_t{200'000}}) {
+    hash[0]++;
+    DbGatewayContractResult expected(RPCError::kRPCNone);
+    expected.contract_xdr().resize(len);
+    for (size_t i = 0; i < len; ++i) {
+      expected.contract_xdr()[i] = static_cast<uint8_t>(i * 31 + 7);
+    }
+    ASSERT_TRUE(ctx.get_db().write_contract_code(
+        hash, std::as_bytes(std::span(expected.contract_xdr()))));
+    auto reply = gateway.dbgateway_get_contract(hash);
+    ASSERT_EQ(reply.error(), RPCError::kRPCNone);
+    auto moved = std::move(reply);
+    auto wire = x23::serialize(moved);
+    EXPECT_EQ(xdr_size(moved), x23::xdr_size(expected));
+    EXPECT_TRUE(std::ranges::equal(wire, x23::serialize(expected)));
+    DbGatewayContractResult result;
+    x23::deserialize(&result, x23::BufViewEnd(wire));
+    EXPECT_EQ(result, expected);
+  }
+  hash[0]++;
+  auto missing = gateway.dbgateway_get_contract(hash);
+  EXPECT_TRUE(std::ranges::equal(x23::serialize(missing),
+                                 x23::serialize(DbGatewayContractResult(
+                                     RPCError::kRPCNotFound))));
 }
 
 TEST(HogDbGatewayRpcTest, ContractReadPreservesCorruptBytesForCallerValidation)
@@ -114,9 +130,15 @@ TEST(HogDbGatewayRpcTest, ContractReadPreservesCorruptBytesForCallerValidation)
   ASSERT_TRUE(dao.write_contract_code(hash, bytes));
   RPCContext ctx(std::move(dao), nullptr);
   HogDbGatewayRpc gateway(ctx);
-  auto result = gateway.dbgateway_get_contract(hash);
+  auto reply = gateway.dbgateway_get_contract(hash);
+  auto wire = x23::serialize(reply);
+  DbGatewayContractResult result;
+  x23::deserialize(&result, x23::BufViewEnd(wire));
   ASSERT_EQ(result.error(), RPCError::kRPCNone);
   EXPECT_EQ(result.contract_xdr().size(), bytes.size());
+  EXPECT_TRUE(
+      std::ranges::equal(std::as_bytes(std::span(result.contract_xdr())),
+                         bytes));
 }
 
 TEST(HogDbGatewayRpcTest, GetItemsReturnsSeededBalance)
