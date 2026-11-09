@@ -358,7 +358,7 @@ if(APPLE)
   # The pinned RocksDB logger uses free() without including stdlib.h.
   set_property(SOURCE external/rocksdb/util/stderr_logger.cc
     DIRECTORY external/rocksdb APPEND PROPERTY COMPILE_OPTIONS
-    -include stdlib.h)
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocksdb_stdlib.h")
 endif()
 # RocksDB's CMakeLists globally installs ccache as RULE_LAUNCH_* when ccache is
 # present. The wrapper already configures ccache through CMAKE_*_COMPILER_LAUNCHER,
