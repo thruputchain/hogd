@@ -439,11 +439,9 @@ GenTs::show_def(const Typedef &d)
       prtop("}}\n");
 
       codec_names_.push_back(d.id);
-      prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", d.id);
-      prbottom("  encode(w, val) {{ {0}.encode(w, val); }},\n", cref);
-      prbottom("  decode(r) {{ return {0}({1}.decode(r)); }},\n", factory,
-               cref);
-      prbottom("}};\n");
+      prbottom("\nconst _{0}: XdrCodec<{0}> = withCodecBudget(() => "
+               "{1} as XdrCodec<{0}>);\n",
+               d.id, cref);
     }
     break;
   }
@@ -853,7 +851,7 @@ void
 GenTs::gen_struct_codec(const StructBody &body, const string &name)
 {
   codec_names_.push_back(name);
-  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = withCodecBudget<{0}>({{\n", name);
 
   // encode
   prbottom("  encode(w, val) {{\n");
@@ -881,7 +879,7 @@ GenTs::gen_struct_codec(const StructBody &body, const string &name)
   prbottom(" }};\n");
 
   prbottom("  }},\n");
-  prbottom("}};\n");
+  prbottom("}});\n");
 }
 
 void
@@ -907,7 +905,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
     }
 
   codec_names_.push_back(name);
-  prbottom("\nconst _{0}: XdrCodec<{0}> = {{\n", name);
+  prbottom("\nconst _{0}: XdrCodec<{0}> = withCodecBudget<{0}>({{\n", name);
 
   // ---- encode ----
   prbottom("  encode(w, val) {{\n");
@@ -1029,7 +1027,7 @@ GenTs::gen_union_codec(const UnionBody &body, const string &name)
 
   prbottom("    }}\n");
   prbottom("  }},\n");
-  prbottom("}};\n");
+  prbottom("}});\n");
 }
 
 // ---- Field type mapping ----
@@ -1098,13 +1096,12 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
     if (base == "opaque")
       bottom_ += std::format("{}w.writeFixedOpaque({}, Number({}));\n", indent,
                              val_expr, bound);
-    else if (is_primitive_type(base))
-      bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n", indent,
-                             val_expr, map_write_method(base));
     else
       bottom_ +=
           std::format("{}FixedArrayCodec({}, Number({})).encode(w, {});\n",
-                      indent, ref(), bound, val_expr);
+                      indent,
+                      is_primitive_type(base) ? proc_codec_ref(base) : ref(),
+                      bound, val_expr);
     break;
   }
 
@@ -1113,15 +1110,12 @@ GenTs::encode_field(const Declaration &d, const string &val_expr,
       bottom_ += std::format("{}w.writeVarOpaque({}, Number({}));\n", indent,
                              val_expr, map_bound(d.bound));
     }
-    else if (is_primitive_type(base)) {
-      bottom_ += std::format("{}w.writeUint32(BigInt({}.length));\n", indent,
-                             val_expr);
-      bottom_ += std::format("{}for (const _item of {}) w.{}(_item);\n", indent,
-                             val_expr, map_write_method(base));
-    }
     else {
-      bottom_ += std::format("{}VarArrayCodec({}, Number({})).encode(w, {});\n",
-                             indent, ref(), map_bound(d.bound), val_expr);
+      bottom_ +=
+          std::format("{}VarArrayCodec({}, Number({})).encode(w, {});\n",
+                      indent,
+                      is_primitive_type(base) ? proc_codec_ref(base) : ref(),
+                      map_bound(d.bound), val_expr);
     }
     break;
 
@@ -1169,15 +1163,11 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
     if (base == "opaque")
       bottom_ += std::format("{}const {} = r.readFixedOpaque(Number({})){};\n",
                              indent, d.id, bound, cast);
-    else if (is_primitive_type(base))
-      bottom_ +=
-          std::format("{}const {} = Array.from({{ length: Number({}) }}, () => "
-                      "r.{}()){};\n",
-                      indent, d.id, bound, map_read_method(base), cast);
     else
       bottom_ += std::format(
           "{}const {} = FixedArrayCodec({}, Number({})).decode(r){};\n", indent,
-          d.id, ref(), bound, cast);
+          d.id, is_primitive_type(base) ? proc_codec_ref(base) : ref(), bound,
+          cast);
     break;
   }
 
@@ -1186,18 +1176,12 @@ GenTs::decode_field(const Declaration &d, const string &parent_name, int sp)
       bottom_ += std::format("{}const {} = r.readVarOpaque(Number({}));\n",
                              indent, d.id, map_bound(d.bound));
     }
-    else if (is_primitive_type(base)) {
-      string len_var = "_" + d.id + "_len";
-      bottom_ += std::format("{}const {} = Number(r.readUint32());\n", indent,
-                             len_var);
-      bottom_ += std::format(
-          "{}const {} = Array.from({{ length: {} }}, () => r.{}());\n", indent,
-          d.id, len_var, map_read_method(base));
-    }
     else {
       bottom_ +=
           std::format("{}const {} = VarArrayCodec({}, Number({})).decode(r);\n",
-                      indent, d.id, ref(), map_bound(d.bound));
+                      indent, d.id,
+                      is_primitive_type(base) ? proc_codec_ref(base) : ref(),
+                      map_bound(d.bound));
     }
     break;
 
@@ -1233,7 +1217,7 @@ gen_ts(vector<Definition> *defs, string const &header)
     preamble += header + '\n';
 
   {
-    string imports = "import { type XdrCodec"
+    string imports = "import { type XdrCodec, withCodecBudget"
                      ", VoidCodec, OptionCodec, VarArrayCodec, FixedArrayCodec"
                      ", type FixedBytes, type FixedArray"
                      ", type VarBytes, type VarArray, type VarString";

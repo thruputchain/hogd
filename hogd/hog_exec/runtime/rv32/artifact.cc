@@ -27,6 +27,51 @@ load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
   return digest;
 }
 
+uint32_t
+load_u32_be(std::span<const uint8_t> bytes, size_t offset)
+{
+  return (uint32_t{bytes[offset]} << 24) | (uint32_t{bytes[offset + 1]} << 16) |
+         (uint32_t{bytes[offset + 2]} << 8) | uint32_t{bytes[offset + 3]};
+}
+
+// Whether `bytes` is exactly one XDR Rv32ArtifactExtensions (contract.x) with
+// nonzero, strictly ascending kinds and zero padding. Bodies are not read.
+[[nodiscard]]
+bool
+canonical_extension_list(std::span<const uint8_t> bytes)
+{
+  if (bytes.size() < 4) {
+    return false;
+  }
+  const uint32_t count = load_u32_be(bytes, 0);
+  size_t offset = 4;
+  uint32_t previous_kind = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (bytes.size() - offset < 8) {
+      return false;
+    }
+    const uint32_t kind = load_u32_be(bytes, offset);
+    const uint32_t body_size = load_u32_be(bytes, offset + 4);
+    offset += 8;
+    if (kind <= previous_kind) {
+      return false;
+    }
+    previous_kind = kind;
+    // Widen before padding so a crafted size cannot wrap on 32-bit hosts.
+    const uint64_t padded = (uint64_t{body_size} + 3) & ~uint64_t{3};
+    if (bytes.size() - offset < padded) {
+      return false;
+    }
+    const auto padding = bytes.subspan(offset + body_size,
+                                       static_cast<size_t>(padded) - body_size);
+    if (std::ranges::any_of(padding, [](uint8_t b) { return b != 0; })) {
+      return false;
+    }
+    offset += static_cast<size_t>(padded);
+  }
+  return offset == bytes.size();
+}
+
 struct ArtifactParseResults {
   std::span<const uint8_t> code;
   std::span<const uint8_t> initial_memory;
@@ -49,6 +94,13 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t format_version =
       load_u32_le(bytes, kArtifactFormatVersionOffset);
   const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
+  const bool legacy = format_version == kArtifactVersion5;
+  if (!legacy && format_version != kArtifactVersion6) {
+    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
+  }
+  if (header_size != kArtifactHeaderBytes) {
+    return std::unexpected(ArtifactError::kBadHeaderSize);
+  }
   const uint64_t vm_profile_digest =
       load_u64_le(bytes, kArtifactVmProfileOffset);
   const uint32_t flags = load_u32_le(bytes, kArtifactFlagsOffset);
@@ -70,12 +122,6 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const ArtifactDigest initial_memory_digest =
       load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset);
 
-  if (format_version != kArtifactFormatVersion) {
-    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
-  }
-  if (header_size != kArtifactHeaderBytes) {
-    return std::unexpected(ArtifactError::kBadHeaderSize);
-  }
   if (vm_profile_digest != kArtifactVmProfileDigest) {
     return std::unexpected(ArtifactError::kUnsupportedVmProfile);
   }
@@ -122,18 +168,23 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (initial_memory_size == 0 && initial_memory_start != 0) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // Canonical v5 layout: header || code || initial_memory, exactly. Section
-  // positions are derived, so the only structural degree of freedom left is
-  // total size.
-  if (bytes.size() !=
-      size_t{kArtifactHeaderBytes} + code_size + initial_memory_size) {
+  // header || code || initial_memory, then (v6 only) the extension list to
+  // the end. Extension bodies are opaque to execution and bounded only by the
+  // total contract size. Widen before adding so crafted u32 lengths cannot
+  // wrap on 32-bit hosts.
+  const uint64_t sections_end =
+      uint64_t{header_size} + code_size + initial_memory_size;
+  if (bytes.size() < sections_end) {
+    return std::unexpected(ArtifactError::kInvalidSectionLayout);
+  }
+  const auto extensions = bytes.subspan(static_cast<size_t>(sections_end));
+  if (legacy ? !extensions.empty() : !canonical_extension_list(extensions)) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 
-  const auto code = bytes.subspan(kArtifactHeaderBytes, code_size);
+  const auto code = bytes.subspan(header_size, code_size);
   const auto initial_memory =
-      bytes.subspan(size_t{kArtifactHeaderBytes} + code_size,
-                    initial_memory_size);
+      bytes.subspan(size_t{header_size} + code_size, initial_memory_size);
   if (artifact_digest(code) != code_digest) {
     return std::unexpected(ArtifactError::kCodeDigestMismatch);
   }

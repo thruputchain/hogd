@@ -327,6 +327,7 @@ add_custom_command(
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
   DEPENDS
     ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/thruput-tools-version
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
     ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml

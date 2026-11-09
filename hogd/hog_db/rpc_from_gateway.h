@@ -19,12 +19,50 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_server.h"
+#include "hogd/base/span.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/storage_item_reply.h"
 #include "x23/serialize.h"
 
 namespace hogd {
+
+// Own the database buffer until serialization instead of copying it into
+// the generated response's opaque vector.
+class DbGatewayContractReply {
+public:
+  explicit DbGatewayContractReply(RPCError error) noexcept : error_(error)
+  {
+    CHECK(error_ != RPCError::kRPCNone);
+  }
+  explicit DbGatewayContractReply(OwningSpan<const std::byte> bytes) noexcept
+    : error_(RPCError::kRPCNone), bytes_(std::move(bytes))
+  {}
+
+  RPCError error() const noexcept { return error_; }
+  std::span<const std::byte> contract_xdr() const noexcept { return bytes_; }
+
+private:
+  RPCError error_;
+  OwningSpan<const std::byte> bytes_;
+};
+
+inline size_t
+xdr_size(const DbGatewayContractReply &reply)
+{
+  return 4 + (reply.error() == RPCError::kRPCNone
+                  ? x23::xdr_size(x23::BufView(reply.contract_xdr()))
+                  : 0);
+}
+
+inline void
+xdr_serialize(auto &serializer, const DbGatewayContractReply &reply)
+{
+  serializer.put32(static_cast<uint32_t>(reply.error()));
+  if (reply.error() == RPCError::kRPCNone) {
+    serializer(x23::BufView(reply.contract_xdr()));
+  }
+}
 
 // Reply for dbgateway_get_items, standing in for the DbGatewayResult the RPC
 // interface declares.  Its items are StorageItemReplys, so a bytestring goes
@@ -88,6 +126,10 @@ xdr_serialize(auto &serializer, const DbGatewayItemsReply &reply)
 } // namespace hogd
 
 namespace x23 {
+template<>
+struct serialize_equiv<hogd::DbGatewayContractResult,
+                       hogd::DbGatewayContractReply> : std::true_type {};
+
 // Declares DbGatewayItemsReply a stand-in for the DbGatewayResult the
 // DbGateway1 interface declares.  Must precede the is_DbGateway1 assertion
 // below, which is what checks it.
@@ -124,6 +166,8 @@ public:
   x23::Async<DbGatewayItemsReply> dbgateway_get_items(AddressAndKeyBatch batch);
 
   x23::Async<DbGatewayConfigResult> dbgateway_get_config();
+
+  DbGatewayContractReply dbgateway_get_contract(SHA256Hash const &hash);
 
   void shut_down() { shutdown_flag_ = true; }
 
