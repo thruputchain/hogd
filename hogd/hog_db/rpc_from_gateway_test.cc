@@ -101,7 +101,7 @@ TEST(HogDbGatewayRpcTest, ContractReadReturnsStoredBytes)
     DbGatewayContractResult expected(RPCError::kRPCNone);
     expected.contract_xdr().resize(len);
     for (size_t i = 0; i < len; ++i) {
-      expected.contract_xdr()[i] = static_cast<uint8_t>(i * 31 + 7);
+      expected.contract_xdr()[i] = static_cast<uint8_t>((i * 31) + 7);
     }
     ASSERT_TRUE(ctx.get_db().write_contract_code(
         hash, std::as_bytes(std::span(expected.contract_xdr()))));
