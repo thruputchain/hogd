@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
 #include "hogd/hog_exec/runtime/rv32/fuzz/fuzz_common.h"
@@ -34,7 +35,7 @@ public:
   size_t mutate(uint8_t *output)
   {
     const size_t strategy = random_inrange(kStrategyCount);
-    if (strategy == 0 || max_size_ < rv32::kArtifactHeaderBytes + 4) {
+    if (strategy == 0 || max_size_ < kEnvelopeBytes + rv32::kInstructionBytes) {
       return LLVMFuzzerMutate(output, input_.size(), max_size_);
     }
 
@@ -49,7 +50,7 @@ public:
       break;
     case 2:
       mutate_u32_field(rv32::kArtifactFormatVersionOffset,
-                       rv32::kArtifactFormatVersion);
+                       rv32::kArtifactVersion6);
       break;
     case 3:
       mutate_u32_field(rv32::kArtifactHeaderSizeOffset,
@@ -136,6 +137,8 @@ public:
 
 private:
   static constexpr size_t kStrategyCount = 26;
+  // Header plus the count of the empty v6 extension list.
+  static constexpr size_t kEnvelopeBytes = rv32::kArtifactHeaderBytes + 4;
 
   uint64_t next_random()
   {
@@ -208,10 +211,10 @@ private:
     }
 
     // carve_artifact_fixup consumes a 12-byte control prefix. Bound its input
-    // so replacing that prefix with the 128-byte artifact header still fits
+    // so replacing that prefix with the artifact envelope still fits
     // libFuzzer's MaxSize.
     const size_t carve_size =
-        std::min(input_.size(), max_size_ - rv32::kArtifactHeaderBytes + 12);
+        std::min(input_.size(), max_size_ - kEnvelopeBytes + 12);
     const auto fixup = fuzz::carve_artifact_fixup(input_.first(carve_size));
     if (fixup.has_value()) {
       artifact_ =
@@ -237,13 +240,17 @@ private:
       return false;
     }
     const size_t body_size = input_.size() - rv32::kArtifactHeaderBytes;
+    const size_t body_capacity = max_size_ - kEnvelopeBytes;
     const uint32_t code_size =
         rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset);
     const uint32_t memory_size =
         rv32::load_u32_le(input_, rv32::kArtifactInitialMemorySizeOffset);
+    // Bytes after initial memory are a v6 extension list (none in v5);
+    // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
-        memory_size != body_size - code_size ||
-        memory_size > rv32::kDefaultMaxMemoryBytes) {
+        memory_size > body_size - code_size ||
+        memory_size > rv32::kDefaultMaxMemoryBytes ||
+        code_size > body_capacity || memory_size > body_capacity - code_size) {
       return false;
     }
 
@@ -265,17 +272,17 @@ private:
       total = floor;
     }
     rebuild(code, memory, start, total);
-    return true;
+    return artifact_.size() <= max_size_;
   }
 
-  // Serialize a canonical v5 header and body with matching section digests.
+  // Serialize a canonical v6 header and body with matching section digests.
   void rebuild(std::span<const uint8_t> code, std::span<const uint8_t> memory,
                uint32_t memory_start, uint32_t memory_bytes)
   {
     artifact_.clear();
-    artifact_.reserve(rv32::kArtifactHeaderBytes + code.size() + memory.size());
+    artifact_.reserve(kEnvelopeBytes + code.size() + memory.size());
     rv32::test_artifact::append_bytes(artifact_, rv32::kArtifactMagic);
-    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactFormatVersion);
+    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactVersion6);
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactHeaderBytes);
     rv32::test_artifact::append_u64(artifact_, rv32::kArtifactVmProfileDigest);
     rv32::test_artifact::append_u32(artifact_,
@@ -296,6 +303,7 @@ private:
                                        rv32::artifact_digest(memory));
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
+    rv32::test_artifact::append_u32(artifact_, 0); // Empty extension list.
   }
 
   std::span<uint8_t> code()
@@ -396,6 +404,9 @@ private:
   void mutate_memory(bool repair)
   {
     if (memory().empty()) {
+      if (artifact_.size() == max_size_) {
+        return;
+      }
       const std::array<uint8_t, 1> byte = {
           random_byte(),
       };
@@ -511,9 +522,9 @@ private:
 
   size_t write_output(uint8_t *output) const
   {
-    const size_t size = std::min(artifact_.size(), max_size_);
-    std::ranges::copy(std::span<const uint8_t>(artifact_).first(size), output);
-    return size;
+    CHECK(artifact_.size() <= max_size_);
+    std::ranges::copy(artifact_, output);
+    return artifact_.size();
   }
 
   std::span<const uint8_t> input_;

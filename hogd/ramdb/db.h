@@ -241,6 +241,7 @@ private:
     Metrics::Gauge loglet_memory_items;
     Metrics::Gauge loglet_disk_buffering;
     Metrics::Gauge loglet_free;
+    Metrics::Gauge log_queued_bytes;
   };
   DbMetrics metrics_{};
   std::atomic<bool> metrics_registered_{false};

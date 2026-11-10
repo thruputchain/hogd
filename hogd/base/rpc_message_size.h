@@ -23,4 +23,9 @@ static_assert(kBulkRpcMaxMessageSize <= 0x7fffffffULL,
 // pre-commit candidate. Keep this cap scoped to that internal RPC surface.
 inline constexpr size_t kEventSchedulerRpcMaxMessageSize = 0x7fffffff;
 
+// EventExecutor1 carries a transaction's body, events and root output, each
+// bounded by configuration; the transport must not be the tighter bound
+// (#4744).
+inline constexpr size_t kEventExecutorRpcMaxMessageSize = 0x7fffffff;
+
 } // namespace hogd

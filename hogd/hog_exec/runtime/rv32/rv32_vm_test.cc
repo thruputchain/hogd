@@ -328,6 +328,91 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
                    compiled_sha256_return::kInput.size())));
 }
 
+// Replace a v6 artifact's (empty) extension list with `words`, big-endian.
+std::vector<uint8_t>
+with_extension_words(std::vector<uint8_t> artifact,
+                     std::initializer_list<uint32_t> words)
+{
+  artifact.resize(artifact.size() - 4);
+  for (uint32_t word : words) {
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      artifact.push_back(static_cast<uint8_t>(word >> shift));
+    }
+  }
+  return artifact;
+}
+
+TEST(Rv32ArtifactTest, extensionsDoNotEnterGuestMemory)
+{
+  auto artifact = valid_artifact_bytes();
+  auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  // Kinds 1 and 99, the first with a 5-byte body and three zero pad bytes.
+  artifact = with_extension_words(std::move(artifact),
+                                  {2, 1, 5, 0x01020304, 0x05000000, 99, 0});
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+  EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+  EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+}
+
+TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
+{
+  auto artifact = valid_artifact_bytes();
+  auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  // v5 has the same header and ends after initial memory: no extension list.
+  artifact.resize(artifact.size() - 4);
+  store_u32_at(artifact, kArtifactFormatVersionOffset, kArtifactVersion5);
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+  EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+  EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+  auto threaded = parse_threaded_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(threaded.has_value());
+  EXPECT_EQ(threaded->code.data(), artifact.data() + kArtifactHeaderBytes);
+
+  auto corrupt = artifact;
+  corrupt[kArtifactHeaderBytes] ^= 1;
+  expect_artifact_error(std::move(corrupt), ArtifactError::kCodeDigestMismatch);
+  auto trailing = artifact;
+  trailing.push_back(0);
+  expect_artifact_error(std::move(trailing),
+                        ArtifactError::kInvalidSectionLayout);
+  // Even an empty extension list is trailing data in v5.
+  auto with_list = artifact;
+  with_list.insert(with_list.end(), {0, 0, 0, 0});
+  expect_artifact_error(std::move(with_list),
+                        ArtifactError::kInvalidSectionLayout);
+  auto wrong_header = artifact;
+  store_u32_at(wrong_header, kArtifactHeaderSizeOffset,
+               kArtifactHeaderBytes + 8);
+  expect_artifact_error(std::move(wrong_header), ArtifactError::kBadHeaderSize);
+  artifact.resize(kArtifactHeaderBytes - 1);
+  expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
+}
+
+TEST(Rv32ArtifactTest, rejectsNonCanonicalExtensionList)
+{
+  const std::initializer_list<uint32_t> cases[] = {
+      {},                    // missing list
+      {1, 0, 0},             // kind 0
+      {2, 5, 0, 5, 0},       // duplicate kind
+      {2, 5, 0, 4, 0},       // descending kinds
+      {1, 7, 1, 0x01000001}, // nonzero padding
+      {1, 7, 0, 0},          // trailing bytes
+      {2, 7, 0},             // count past the end
+      {1, 7, 8, 0},          // body past the end
+      {1, 7, UINT32_MAX},    // padded size past the end
+  };
+  for (const auto &words : cases) {
+    expect_artifact_error(with_extension_words(valid_artifact_bytes(), words),
+                          ArtifactError::kInvalidSectionLayout);
+  }
+}
+
 TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
 {
   {
@@ -337,8 +422,7 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
   }
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactFormatVersionOffset,
-                 kArtifactFormatVersion + 1);
+    store_u32_at(artifact, kArtifactFormatVersionOffset, kArtifactVersion6 + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedFormatVersion);
   }
@@ -516,6 +600,55 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
   EXPECT_TRUE(parse_artifact(zero_memory, zero_memory_limit).has_value());
   EXPECT_TRUE(
       parse_threaded_artifact(zero_memory, zero_memory_limit).has_value());
+}
+
+// A format this VM reads is still refused outside the caller's range.
+TEST(Rv32ArtifactTest, honorsCallerArtifactVersionRange)
+{
+  const auto current = valid_artifact_bytes();
+  // v5 ends after initial memory: no extension list.
+  auto legacy = valid_artifact_bytes();
+  legacy.resize(legacy.size() - 4);
+  store_u32_at(legacy, kArtifactFormatVersionOffset, kArtifactVersion5);
+
+  auto admitted = [](std::vector<uint8_t> const &artifact, uint32_t min,
+                     uint32_t max) {
+    Rv32Limits limits = Rv32Limits::defaults();
+    limits.min_artifact_version = min;
+    limits.max_artifact_version = max;
+    const auto canonical = parse_artifact(artifact, limits);
+    const auto threaded = parse_threaded_artifact(artifact, limits);
+    EXPECT_EQ(canonical.has_value(), threaded.has_value());
+    if (!canonical.has_value()) {
+      EXPECT_EQ(canonical.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    if (!threaded.has_value()) {
+      EXPECT_EQ(threaded.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    return canonical.has_value();
+  };
+
+  EXPECT_TRUE(admitted(legacy, kArtifactVersion5, kArtifactVersion6));
+  EXPECT_TRUE(admitted(current, kArtifactVersion5, kArtifactVersion6));
+
+  // Raising the minimum retires the old format from attachment.
+  EXPECT_FALSE(admitted(legacy, kArtifactVersion6, kArtifactVersion6));
+  EXPECT_TRUE(admitted(current, kArtifactVersion6, kArtifactVersion6));
+
+  // Lowering the maximum holds the new one back.
+  EXPECT_TRUE(admitted(legacy, kArtifactVersion5, kArtifactVersion5));
+  EXPECT_FALSE(admitted(current, kArtifactVersion5, kArtifactVersion5));
+
+  // An inverted range admits nothing, and a wide one adds no format the VM
+  // does not read.
+  EXPECT_FALSE(admitted(legacy, kArtifactVersion6, kArtifactVersion5));
+  EXPECT_FALSE(admitted(current, kArtifactVersion6, kArtifactVersion5));
+  auto future = valid_artifact_bytes();
+  store_u32_at(future, kArtifactFormatVersionOffset, kArtifactVersion6 + 1);
+  EXPECT_FALSE(admitted(future, 0, std::numeric_limits<uint32_t>::max()));
+
+  EXPECT_TRUE(parse_artifact(legacy, Rv32Limits::ceiling()).has_value());
+  EXPECT_TRUE(parse_artifact(current, Rv32Limits::ceiling()).has_value());
 }
 
 TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)

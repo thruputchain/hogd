@@ -370,6 +370,16 @@ if(BUILD_FUZZERS)
   target_include_directories(rv32_fuzz_common_test PRIVATE ${CMAKE_SOURCE_DIR})
 
   add_executable(
+    rv32_fuzz_artifact_test
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_artifact.cc
+    fuzz/fuzz_artifact_test.cc
+    rv32_vm_test_main.cc
+  )
+  target_link_libraries(rv32_fuzz_artifact_test rv32_vm GTest::gtest)
+  target_include_directories(rv32_fuzz_artifact_test PRIVATE ${CMAKE_SOURCE_DIR})
+
+  add_executable(
     rv32_fuzz_engine_diff
     EXCLUDE_FROM_ALL
     fuzz/fuzz_engine_diff.cc

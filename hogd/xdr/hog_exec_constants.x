@@ -18,4 +18,11 @@ const kDefaultMaxRv32CodeBytes = 262144;
 /// the same reason as `kMaxSavepointDepth`.
 const kDefaultMaxRv32MemoryBytes = 65536;
 
+/// Oldest and newest RV32 artifact format versions this node reads. They
+/// bound what `kConfigParamMinRv32ArtifactVersion` and
+/// `kConfigParamMaxRv32ArtifactVersion` may state, and are the values in
+/// force for a configuration that states neither.
+const kMinRv32ArtifactVersion = 5;
+const kMaxRv32ArtifactVersion = 6;
+
 } // namespace hogd

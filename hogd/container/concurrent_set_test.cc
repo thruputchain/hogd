@@ -295,6 +295,80 @@ TEST(ConcurrentSet, FillAFewLevels)
   ASSERT_EQ(kExpectedLevels, ConcurrentSetHelper::levels(s));
 }
 
+// A dereference returns the value the iterator reached, even if the slot is
+// erased before the dereference.
+TEST(ConcurrentSet, IteratorValueSurvivesErase)
+{
+  ConcurrentSet<uint128_t> s;
+  for (uint128_t i = 1; i <= 8; ++i)
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+
+  auto it = s.begin();
+  ASSERT_NE(it, s.end());
+  const uint128_t value = *it;
+  ASSERT_TRUE(s.erase(value));
+  EXPECT_EQ(*it, value);
+}
+
+// Growth during a walk neither repeats nor drops a value present when the walk
+// began.
+TEST(ConcurrentSet, IterationToleratesGrowth)
+{
+  ConcurrentSet<uint128_t> s;
+  constexpr size_t kInitial = ConcurrentSetHelper::kInitialCapacity *
+                              ConcurrentSetHelper::kResizeLoadFactor;
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+  const size_t levels_at_begin = ConcurrentSetHelper::levels(s);
+
+  std::multiset<uint128_t> visited;
+  bool grown = false;
+  for (auto it = s.begin(); it != s.end(); ++it) {
+    visited.insert(*it);
+    if (!grown) {
+      for (uint128_t i = kInitial + 1; i <= kInitial * 4; ++i)
+        ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+      grown = true;
+    }
+  }
+  ASSERT_GT(ConcurrentSetHelper::levels(s), levels_at_begin);
+
+  for (uint128_t v : visited)
+    EXPECT_EQ(visited.count(v), 1U) << "repeated value";
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    EXPECT_EQ(visited.count(i), 1U) << "missed value present at begin()";
+}
+
+// Growth after the walk reaches end() does not revive the iterator.
+TEST(ConcurrentSet, FinishedIteratorStaysAtEndAcrossGrowth)
+{
+  ConcurrentSet<uint128_t> s;
+  constexpr size_t kInitial = ConcurrentSetHelper::kInitialCapacity *
+                              ConcurrentSetHelper::kResizeLoadFactor;
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+  const size_t levels_at_begin = ConcurrentSetHelper::levels(s);
+
+  std::multiset<uint128_t> visited;
+  bool grown = false;
+  for (auto it = s.begin(); it != s.end();) {
+    visited.insert(*it);
+    ++it;
+    // Every value has been returned, so that ++ reached the end; grow before
+    // the loop's next comparison.
+    if (visited.size() == kInitial && !grown) {
+      for (uint128_t i = kInitial + 1; i <= kInitial * 4; ++i)
+        ASSERT_EQ(InsertResult::kInserted, s.try_insert(i));
+      grown = true;
+    }
+  }
+  ASSERT_GT(ConcurrentSetHelper::levels(s), levels_at_begin);
+
+  EXPECT_EQ(visited.size(), kInitial);
+  for (uint128_t i = 1; i <= kInitial; ++i)
+    EXPECT_EQ(visited.count(i), 1U);
+}
+
 TEST(ConcurrentSet, Contains)
 {
   ConcurrentSet<uint128_t> s;

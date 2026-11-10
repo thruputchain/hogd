@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -31,6 +32,10 @@ static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
 struct Rv32Limits {
   uint32_t max_code_bytes;
   uint32_t max_memory_bytes;
+  // Inclusive range of format versions admitted, among those the parser
+  // reads. Unbounded unless a caller narrows it to its chain's configuration.
+  uint32_t min_artifact_version = 0;
+  uint32_t max_artifact_version = std::numeric_limits<uint32_t>::max();
 
   static constexpr Rv32Limits defaults()
   {

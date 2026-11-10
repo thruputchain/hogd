@@ -1,7 +1,10 @@
 #!/bin/python3
 
 import yaml
-from yaml import CLoader as Loader
+try:
+    from yaml import CLoader as Loader
+except ImportError:
+    from yaml import Loader
 
 import argparse
 import os

@@ -82,12 +82,10 @@ public:
   // written to disk.
   size_t bytes_buffered()
   {
-    size_t bytes_in;
-    {
-      std::scoped_lock guard(to_disk_lock_);
-      bytes_in = bytes_in_;
-    }
-    return bytes_in - bytes_out_.load(std::memory_order_acquire);
+    // Read both under the lock: bytes enter bytes_in_ before the writer can
+    // dequeue them, so the written total cannot pass the queued total here.
+    std::scoped_lock guard(to_disk_lock_);
+    return bytes_in_ - bytes_out_.load(std::memory_order_acquire);
   }
 
   // print_stats prints disk usage statistics.
