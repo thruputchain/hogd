@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -155,11 +157,19 @@ EventRPCContext::publish_indexer_wake()
 x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
 {
-  info("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
+  ElapsedTimer open_timer;
+  const auto lock_start = std::chrono::steady_clock::now();
+  std::int64_t lock_wait_ns;
+  debug("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
+    lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - lock_start)
+                       .count();
+    EventBlockContext::warn_slow_phase("open_lock_wait", block_id,
+                                       lock_wait_ns);
+    debug("EventRPCContext::open_block: block_id={} lock acquired", block_id);
     // Reserve the id before creating its file.  A duplicate open must not
     // reach create_events_file(): that unlinks and recreates the temp name,
     // which would pull the live block's file out from under it and fail its
@@ -203,6 +213,11 @@ EventRPCContext::open_block(BlockID block_id)
                                           std::move(events_file));
   }
   CHECK(inserted);
+  event_block_contexts_.at(block_id).get().log_stats.open_lock_wait_ns =
+      lock_wait_ns;
+  EventBlockContext::warn_slow_phase("open", block_id,
+                                     static_cast<std::int64_t>(
+                                         open_timer.elapsed() * 1e9));
   block_operations_.erase(block_id);
   co_return EventStatus<void>();
 }
@@ -246,14 +261,24 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   bool executors_closed = co_await context->get().await_all_executors_closed();
   record_stage(stage_wait_executors_closed);
+  EventBlockContext::warn_slow_phase("wait_executors_closed", block_id,
+                                     static_cast<std::int64_t>(
+                                         stage_wait_executors_closed * 1e9));
   if (!executors_closed) {
     co_await finish_block_operation(block_id, context, false);
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
+  std::int64_t close_lock_wait_ns;
   {
+    const auto lock_start = std::chrono::steady_clock::now();
     x23::CoroGuard g;
     co_await g(lock_);
+    close_lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - lock_start)
+                             .count();
+    EventBlockContext::warn_slow_phase("close_lock_wait", block_id,
+                                       close_lock_wait_ns);
     record_stage(stage_wait_lock);
 
     context->get().set_block_height(block_height);
@@ -324,31 +349,53 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     panic("failed to durably close event block {} with unknown exception",
           block_id);
   }
-  co_await finish_block_operation(block_id, context, false);
   record_stage(stage_prepare_context_and_async);
+  // Complete diagnostics before releasing the reservation/reference: commit
+  // may start and destroy the context as soon as it is released.
+  auto &stats = context->get().log_stats;
+  stats.wait_executors_closed_s = stage_wait_executors_closed;
+  stats.wait_lock_s = stage_wait_lock;
+  stats.close_lock_wait_ns = close_lock_wait_ns;
+  stats.prepare_context_and_async_s = stage_prepare_context_and_async;
+  stats.close_total_s = timer.elapsed();
+  stats.close_total_ns = static_cast<std::int64_t>(*stats.close_total_s * 1e9);
+  EventBlockContext::warn_slow_phase(
+      "prepare_context_and_async", block_id,
+      static_cast<std::int64_t>(stage_prepare_context_and_async * 1e9));
+  EventBlockContext::warn_slow_phase("close_total", block_id,
+                                     *stats.close_total_ns);
 
-  info("close_block() stages: wait_executors_closed={:.6f}, "
-       "wait_lock={:.6f}, prepare_context_and_async={:.6f}, total={:.6f}, "
-       "outcome={}, block_id={}",
-       stage_wait_executors_closed, stage_wait_lock,
-       stage_prepare_context_and_async, timer.elapsed(), "ok", block_id);
+  debug("close_block() stages: wait_executors_closed={:.6f}, "
+        "wait_lock={:.6f}, prepare_context_and_async={:.6f}, total={:.6f}, "
+        "outcome={}, block_id={}",
+        stage_wait_executors_closed, stage_wait_lock,
+        stage_prepare_context_and_async, timer.elapsed(), "ok", block_id);
+  co_await finish_block_operation(block_id, context, false);
   co_return out_hash;
 }
 
 x23::Async<EventStatus<BlockHeight>>
 EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
 {
+  ElapsedTimer commit_timer;
   if (!co_await reserve_block_operation(block_id,
                                         BlockOperation::kCommitting)) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
-  info("EventRPCContext::commit_block: block_id={} acquiring lock", block_id);
+  const auto lock_start = std::chrono::steady_clock::now();
+  std::int64_t lock_wait_ns;
+  debug("EventRPCContext::commit_block: block_id={} acquiring lock", block_id);
   PerThreadARC<EventBlockContext> *context_ptr = nullptr;
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    info("EventRPCContext::commit_block: block_id={} lock acquired", block_id);
+    lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - lock_start)
+                       .count();
+    EventBlockContext::warn_slow_phase("commit_lock_wait", block_id,
+                                       lock_wait_ns);
+    debug("EventRPCContext::commit_block: block_id={} lock acquired", block_id);
     auto it = event_block_contexts_.find(block_id);
     if (it != event_block_contexts_.end()) {
       context_ptr = &it->second;
@@ -462,6 +509,14 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
+  // A record may have been durably written by an earlier attempt that failed
+  // the tail checks above. Its first successful publication still needs a
+  // summary; a retry of an already visible height does not. A live context
+  // always means this process opened and closed the block (commit GCs it),
+  // including a re-execution after a crash between outbox and HogDB commit.
+  const bool log_commit =
+      !*committed_exists || context_ptr != nullptr ||
+      (finalized_indexer_tail_ && block_height > *finalized_indexer_tail_);
   if (finalized_indexer_tail_) {
     finalized_indexer_tail_ = block_height;
     // Bumped under the publication lock: a pull that sampled the counter under
@@ -482,8 +537,51 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     retain_events_file(consensus_value.proposal_header.events_hash);
   }
 
-  info("EventRPCContext::commit_block: block_id={} height={} done, gc",
-       block_id, static_cast<std::int64_t>(block_height));
+  EventBlockContext::warn_slow_phase("commit", block_id,
+                                     static_cast<std::int64_t>(
+                                         commit_timer.elapsed() * 1e9));
+  // Recovery without a context omits timings this process did not collect.
+  if (log_commit) {
+    std::string fields;
+    auto append = [&fields](std::string_view key, const auto &value) {
+      if (!value) {
+        return;
+      }
+      if constexpr (std::is_floating_point_v<
+                        std::remove_cvref_t<decltype(*value)>>) {
+        fields += std::format(" {}={:.6f}", key, *value);
+      }
+      else {
+        fields += std::format(" {}={}", key, *value);
+      }
+    };
+    if (context_ptr != nullptr) {
+      auto &s = context_ptr->get().log_stats;
+      s.commit_lock_wait_ns = lock_wait_ns;
+      append("open_lock_wait_ns", s.open_lock_wait_ns);
+      append("close_lock_wait_ns", s.close_lock_wait_ns);
+      append("commit_lock_wait_ns", s.commit_lock_wait_ns);
+      append("write_events_ns", s.write_events_ns);
+      append("pending_writes_ns", s.pending_writes_ns);
+      append("residual_write_ns", s.residual_write_ns);
+      append("residual_buffers", s.residual_buffers);
+      append("sync_ns", s.sync_ns);
+      append("publish_ns", s.publish_ns);
+      append("wait_executors_closed_s", s.wait_executors_closed_s);
+      append("wait_lock_s", s.wait_lock_s);
+      append("prepare_context_and_async_s", s.prepare_context_and_async_s);
+      append("close_total_s", s.close_total_s);
+      append("close_total_ns", s.close_total_ns);
+      append("residual_bytes", s.residual_bytes);
+    }
+    else {
+      fields += std::format(" commit_lock_wait_ns={}", lock_wait_ns);
+    }
+    info("block committed height={} block_id={}{} outcome=ok",
+         static_cast<std::int64_t>(block_height), block_id, fields);
+  }
+  debug("EventRPCContext::commit_block: block_id={} height={} done, gc",
+        block_id, static_cast<std::int64_t>(block_height));
   co_await finish_block_operation(block_id, context_ptr,
                                   context_ptr != nullptr);
   co_return block_height;
