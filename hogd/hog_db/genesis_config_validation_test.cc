@@ -245,6 +245,37 @@ TEST_F(GenesisConfigValidationTest, AcceptsRv32CodeLimitAtVmCeiling)
   EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 
+// The admitted artifact versions must be a range of formats this build's VM
+// reads: it may narrow to one format, not reach past either end or invert.
+TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
+{
+  auto load_with_versions = [&](uint32_t min, uint32_t max) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMinRv32ArtifactVersion, min);
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion, max);
+    return load(config, std::nullopt);
+  };
+  constexpr uint32_t kOldest = rv32::kOldestArtifactVersion;
+  constexpr uint32_t kNewest = rv32::kNewestArtifactVersion;
+  ASSERT_LT(kOldest, kNewest);
+
+  EXPECT_EQ(load_with_versions(kOldest, kNewest),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_versions(kNewest, kNewest),
+            DbSchedResult::DbSchedResultOK);
+  EXPECT_EQ(load_with_versions(kOldest, kOldest),
+            DbSchedResult::DbSchedResultOK);
+
+  EXPECT_EQ(load_with_versions(kOldest - 1, kNewest),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_versions(kOldest, kNewest + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_versions(kNewest, kOldest),
+            DbSchedResult::DbSchedResultError);
+}
+
 // The stock wallet is written among the genesis prerequisites, so a genesis
 // that does not override it loads.
 TEST_F(GenesisConfigValidationTest, AcceptsStockDefaultWallet)

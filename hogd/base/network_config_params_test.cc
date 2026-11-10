@@ -15,7 +15,7 @@
 namespace hogd {
 
 // Wire names, spelled out so a rename has to be made here too.
-constexpr std::array<std::pair<ConfigParamID, std::string_view>, 14> kNames{{
+constexpr std::array<std::pair<ConfigParamID, std::string_view>, 16> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},
     {ConfigParamID::kConfigParamMaxNewContractsPerTx,
@@ -33,6 +33,10 @@ constexpr std::array<std::pair<ConfigParamID, std::string_view>, 14> kNames{{
     {ConfigParamID::kConfigParamMaxCalldataLen, "max_calldata_len"},
     {ConfigParamID::kConfigParamMaxReturnBufferLen, "max_return_buffer_len"},
     {ConfigParamID::kConfigParamMaxTxGas, "max_tx_gas"},
+    {ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+     "min_rv32_artifact_version"},
+    {ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+     "max_rv32_artifact_version"},
 }};
 
 TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
@@ -129,6 +133,24 @@ TEST(NetworkConfigParamsTest, AListOmittingTxGasHasTheDefaultBudget)
                 1);
 
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, 1'000'000'000U);
+}
+
+// A configuration predating the parameters keeps admitting the formats it
+// already did, and no others.
+TEST(NetworkConfigParamsTest, AListOmittingArtifactVersionsAdmitsFiveAndSix)
+{
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                 kDefaultMaxTxGas);
+  ASSERT_EQ(config.v0().params.size(),
+            static_cast<std::size_t>(
+                std::to_underlying(ConfigParamID::kConfigParamMaxTxGas)) +
+                1);
+
+  const NetworkConfigParams params(config.v0());
+  EXPECT_EQ(params.min_rv32_artifact_version, 5U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 6U);
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)

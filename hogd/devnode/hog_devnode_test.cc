@@ -2097,6 +2097,8 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
                                     "max_contract_size_bytes=1048576");
   add_local_network_config_override(config.network_config_overrides,
                                     "max_bytestring_len=32768");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "min_rv32_artifact_version=6");
   auto artifact = build_local_bootstrap_account_artifact(config);
   auto const &network = artifact.genesis_configuration.network_config;
   EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));
@@ -2105,6 +2107,8 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(params.max_rv32_code_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_bytestring_len, 32768U);
+  EXPECT_EQ(params.min_rv32_artifact_version, 6U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 6U);
   EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }

@@ -66,6 +66,10 @@ struct NetworkConfigParams {
   uint32_t max_calldata_len = kDefaultMaxCalldataLen;
   uint32_t max_return_buffer_len = kDefaultMaxReturnBufferLen;
   GasAmount max_tx_gas = kDefaultMaxTxGas;
+  uint32_t min_rv32_artifact_version =
+      static_cast<uint32_t>(kDefaultMinRv32ArtifactVersion);
+  uint32_t max_rv32_artifact_version =
+      static_cast<uint32_t>(kDefaultMaxRv32ArtifactVersion);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -112,7 +116,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxTxGas;
+    ConfigParamID::kConfigParamMaxRv32ArtifactVersion;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -147,6 +151,10 @@ config_param_name(ConfigParamID id)
     return "max_return_buffer_len";
   case ConfigParamID::kConfigParamMaxTxGas:
     return "max_tx_gas";
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return "min_rv32_artifact_version";
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return "max_rv32_artifact_version";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -187,6 +195,8 @@ config_param_max_value(ConfigParamID id)
   case ConfigParamID::kConfigParamMaxAuthTokens:
   case ConfigParamID::kConfigParamMaxCalldataLen:
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return std::numeric_limits<uint32_t>::max();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
@@ -225,6 +235,10 @@ config_param_value(ConfigParam const &param)
     return param.max_return_buffer_len();
   case ConfigParamID::kConfigParamMaxTxGas:
     return param.max_tx_gas();
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return param.min_rv32_artifact_version();
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return param.max_rv32_artifact_version();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -300,6 +314,12 @@ NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
   case ConfigParamID::kConfigParamMaxTxGas:
     out.max_tx_gas() = value;
     break;
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    out.min_rv32_artifact_version() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    out.max_rv32_artifact_version() = to_u32(value);
+    break;
   }
   return out;
 }
@@ -336,6 +356,10 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_return_buffer_len;
   case ConfigParamID::kConfigParamMaxTxGas:
     return max_tx_gas;
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return min_rv32_artifact_version;
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return max_rv32_artifact_version;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -394,7 +418,13 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
         stated_param(config, ConfigParamID::kConfigParamMaxReturnBufferLen)
             .value_or(kDefaultMaxReturnBufferLen))),
     max_tx_gas(stated_param(config, ConfigParamID::kConfigParamMaxTxGas)
-                   .value_or(kDefaultMaxTxGas))
+                   .value_or(kDefaultMaxTxGas)),
+    min_rv32_artifact_version(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMinRv32ArtifactVersion)
+            .value_or(kDefaultMinRv32ArtifactVersion))),
+    max_rv32_artifact_version(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion)
+            .value_or(kDefaultMaxRv32ArtifactVersion)))
 {}
 
 inline void

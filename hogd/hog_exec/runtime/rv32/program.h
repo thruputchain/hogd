@@ -26,21 +26,41 @@ constexpr uint32_t kCodeCeilingBytes = 4 * 1024 * 1024;
 static_assert(kDefaultMaxMemoryBytes <= kMemoryCeilingBytes);
 static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
 
+// The artifact format versions this VM reads, oldest and newest (artifact.h
+// pins them to the formats it parses), and the range admitted when a chain's
+// configuration states none. Raising the newest one this VM reads must not
+// move the default: a chain admits a new format by stating it.
+constexpr uint32_t kOldestArtifactVersion = 5;
+constexpr uint32_t kNewestArtifactVersion = 6;
+constexpr uint32_t kDefaultMinArtifactVersion = 5;
+constexpr uint32_t kDefaultMaxArtifactVersion = 6;
+static_assert(kOldestArtifactVersion <= kDefaultMinArtifactVersion);
+static_assert(kDefaultMinArtifactVersion <= kDefaultMaxArtifactVersion);
+static_assert(kDefaultMaxArtifactVersion <= kNewestArtifactVersion);
+
 // The bounds an artifact is admitted under: the chain's configuration at
 // attachment, the ceilings when a deployed contract is instantiated.
 struct Rv32Limits {
   uint32_t max_code_bytes;
   uint32_t max_memory_bytes;
+  // Inclusive range of format versions admitted. Every version this VM reads
+  // unless narrowed, so a caller bounding only sizes keeps reading them all.
+  uint32_t min_artifact_version = kOldestArtifactVersion;
+  uint32_t max_artifact_version = kNewestArtifactVersion;
 
   static constexpr Rv32Limits defaults()
   {
     return Rv32Limits{.max_code_bytes = kDefaultMaxCodeBytes,
-                      .max_memory_bytes = kDefaultMaxMemoryBytes};
+                      .max_memory_bytes = kDefaultMaxMemoryBytes,
+                      .min_artifact_version = kDefaultMinArtifactVersion,
+                      .max_artifact_version = kDefaultMaxArtifactVersion};
   }
   static constexpr Rv32Limits ceiling()
   {
     return Rv32Limits{.max_code_bytes = kCodeCeilingBytes,
-                      .max_memory_bytes = kMemoryCeilingBytes};
+                      .max_memory_bytes = kMemoryCeilingBytes,
+                      .min_artifact_version = kOldestArtifactVersion,
+                      .max_artifact_version = kNewestArtifactVersion};
   }
 };
 // Gas tiers measured on hog10, normalized to baseline dispatch cost. Pricing

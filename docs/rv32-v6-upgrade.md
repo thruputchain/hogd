@@ -12,6 +12,25 @@ support requires a separate network transition decision that accounts for
 stored contracts. New optional metadata kinds need no format or runtime change.
 Execution changes still require an explicit compatibility and activation plan.
 
+## Admitted format versions
+
+Which formats a chain admits is network configuration, not a property of the
+build: `min_rv32_artifact_version` and `max_rv32_artifact_version`
+(`kConfigParamMinRv32ArtifactVersion` and `kConfigParamMaxRv32ArtifactVersion`
+in `protocol/network_config.x`) bound the format version, inclusively, of an
+artifact attached to a transaction. A configuration that states neither admits
+v5 through v6. A local chain overrides them like any other parameter, for
+example `hog-devnode --network-config min_rv32_artifact_version=6`.
+
+The range is checked only at attachment. A contract already deployed is
+instantiated under every format the build reads, so raising the minimum stops
+new v5 deployments without stranding stored v5 contracts; removing v5 from
+execution remains the separate decision described above. Genesis load rejects
+a range that inverts or reaches outside the formats the build reads, so a node
+cannot join a chain admitting a format it would refuse. A build that learns a
+newer format does not admit it until a chain states a maximum that includes
+it.
+
 ## Release order
 
 1. Merge and publish the compatible generated protocol bindings.

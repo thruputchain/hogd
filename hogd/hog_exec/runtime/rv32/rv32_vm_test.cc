@@ -602,6 +602,55 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
       parse_threaded_artifact(zero_memory, zero_memory_limit).has_value());
 }
 
+// The admitted format versions are the caller's too: a format this VM reads
+// is refused outside the range, on both parse paths, and the ceiling limits a
+// deployed contract is instantiated under read every format.
+TEST(Rv32ArtifactTest, honorsCallerArtifactVersionRange)
+{
+  const auto current = valid_artifact_bytes();
+  auto legacy = valid_artifact_bytes();
+  store_u32_at(legacy, kArtifactFormatVersionOffset, kArtifactVersion5);
+
+  auto admitted = [](std::vector<uint8_t> const &artifact, uint32_t min,
+                     uint32_t max) {
+    Rv32Limits limits = Rv32Limits::defaults();
+    limits.min_artifact_version = min;
+    limits.max_artifact_version = max;
+    const auto canonical = parse_artifact(artifact, limits);
+    const auto threaded = parse_threaded_artifact(artifact, limits);
+    EXPECT_EQ(canonical.has_value(), threaded.has_value());
+    if (!canonical.has_value()) {
+      EXPECT_EQ(canonical.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    if (!threaded.has_value()) {
+      EXPECT_EQ(threaded.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    return canonical.has_value();
+  };
+
+  EXPECT_TRUE(admitted(legacy, kArtifactVersion5, kArtifactVersion6));
+  EXPECT_TRUE(admitted(current, kArtifactVersion5, kArtifactVersion6));
+
+  // Raising the minimum retires the old format from attachment.
+  EXPECT_FALSE(admitted(legacy, kArtifactVersion6, kArtifactVersion6));
+  EXPECT_TRUE(admitted(current, kArtifactVersion6, kArtifactVersion6));
+
+  // Lowering the maximum holds the new one back.
+  EXPECT_TRUE(admitted(legacy, kArtifactVersion5, kArtifactVersion5));
+  EXPECT_FALSE(admitted(current, kArtifactVersion5, kArtifactVersion5));
+
+  // An inverted range admits nothing, and a wide one adds no format the VM
+  // does not read.
+  EXPECT_FALSE(admitted(legacy, kArtifactVersion6, kArtifactVersion5));
+  EXPECT_FALSE(admitted(current, kArtifactVersion6, kArtifactVersion5));
+  auto future = valid_artifact_bytes();
+  store_u32_at(future, kArtifactFormatVersionOffset, kArtifactVersion6 + 1);
+  EXPECT_FALSE(admitted(future, 0, std::numeric_limits<uint32_t>::max()));
+
+  EXPECT_TRUE(parse_artifact(legacy, Rv32Limits::ceiling()).has_value());
+  EXPECT_TRUE(parse_artifact(current, Rv32Limits::ceiling()).has_value());
+}
+
 TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
 {
   // The threaded parser defers alignment checks to pre-instantiation.

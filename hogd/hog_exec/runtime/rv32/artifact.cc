@@ -98,6 +98,12 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (!legacy && format_version != kArtifactVersion6) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
+  // A format this VM reads is still refused outside the caller's range, which
+  // is how a chain stops admitting an old format or holds back a new one.
+  if (format_version < limits.min_artifact_version ||
+      format_version > limits.max_artifact_version) {
+    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
+  }
   if (header_size != kArtifactHeaderBytes) {
     return std::unexpected(ArtifactError::kBadHeaderSize);
   }

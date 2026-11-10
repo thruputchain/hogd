@@ -418,6 +418,18 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, rv32::kMemoryCeilingBytes);
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Admitting a format this build cannot read would let a node on a build
+  // that can attach a contract this one refuses.
+  if (const uint32_t oldest = config_params.min_rv32_artifact_version,
+      newest = config_params.max_rv32_artifact_version;
+      oldest > newest || oldest < rv32::kOldestArtifactVersion ||
+      newest > rv32::kNewestArtifactVersion) {
+    error("genesis rv32 artifact versions [{}, {}] are not a range within "
+          "the [{}, {}] this build's VM reads",
+          oldest, newest, rv32::kOldestArtifactVersion,
+          rv32::kNewestArtifactVersion);
+    co_return DbSchedResult::DbSchedResultError;
+  }
   // Every root commit pushes a savepoint, even without child TryInvokes.
   if (config_params.max_savepoint_depth == 0) {
     error("genesis max_savepoint_depth must be at least 1 for root commits");

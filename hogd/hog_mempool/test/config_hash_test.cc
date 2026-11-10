@@ -65,7 +65,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 11> variants;
+  std::array<NetworkConfig, 13> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -102,6 +102,12 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(variants[10],
                                  ConfigParamID::kConfigParamMaxTxGas,
                                  stock.max_tx_gas - 1);
+  NetworkConfigParams::set_param(
+      variants[11], ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+      stock.min_rv32_artifact_version + 1);
+  NetworkConfigParams::set_param(
+      variants[12], ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+      stock.max_rv32_artifact_version - 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
