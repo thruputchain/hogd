@@ -608,7 +608,9 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
 TEST(Rv32ArtifactTest, honorsCallerArtifactVersionRange)
 {
   const auto current = valid_artifact_bytes();
+  // v5 ends after initial memory: no extension list.
   auto legacy = valid_artifact_bytes();
+  legacy.resize(legacy.size() - 4);
   store_u32_at(legacy, kArtifactFormatVersionOffset, kArtifactVersion5);
 
   auto admitted = [](std::vector<uint8_t> const &artifact, uint32_t min,
