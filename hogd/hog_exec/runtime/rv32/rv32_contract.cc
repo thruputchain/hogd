@@ -39,6 +39,11 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
+// The configurable version range is exactly the formats the parser reads.
+static_assert(rv32::kArtifactVersion5 ==
+              static_cast<uint32_t>(kMinRv32ArtifactVersion));
+static_assert(rv32::kArtifactVersion6 ==
+              static_cast<uint32_t>(kMaxRv32ArtifactVersion));
 
 std::expected<Rv32Contract, rv32::ArtifactError>
 Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
@@ -318,7 +323,10 @@ Rv32Context::verify_contract(Contract const &contract,
   auto translated = Rv32Contract::create(
       contract.rv32_contract(),
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
-                       .max_memory_bytes = params.max_rv32_memory_bytes});
+                       .max_memory_bytes = params.max_rv32_memory_bytes,
+                       .min_artifact_version = params.min_rv32_artifact_version,
+                       .max_artifact_version =
+                           params.max_rv32_artifact_version});
   if (!translated.has_value()) {
     rejection = to_contract_reject_code(translated.error());
     return InvokeErrorCode::Deterministic;

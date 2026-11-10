@@ -3800,6 +3800,46 @@ TEST(TestBindingsTest, SetupCreateContractHonorsLoweredRv32MemoryCap)
             kTestFFIErrorCodeContractVerificationFailed);
 }
 
+// The same holds for the artifact format versions the chain admits: a chain
+// whose minimum is past an artifact's format refuses to attach it.
+TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
+{
+  Contract legacy = rv32_contract_declaring(64 * 1024);
+  auto &data = legacy.rv32_contract().data;
+  ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion6);
+  data[rv32::kArtifactFormatVersionOffset] = rv32::kArtifactVersion5;
+  // v5 ends after initial memory: drop the empty extension list.
+  data.resize(data.size() - 4);
+  auto bytes = x23::serialize(legacy);
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  // Precondition: the default range admits the older format.
+  auto *stock_db = make_db();
+  ASSERT_NE(stock_db, nullptr);
+  x23::Defer d2([stock_db] { free_db(stock_db); });
+  ASSERT_EQ(setup_create_contract(rc, stock_db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+      rv32::kArtifactVersion6);
+  auto serialized_config = x23::serialize(config);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto created =
+      create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                genesis_root.size(), serialized_config.data(),
+                static_cast<uint32_t>(serialized_config.size()));
+  ASSERT_EQ(created.ffi_error_code, kTestFFIErrorCodeNone);
+  auto *db = created.db;
+  x23::Defer d3([db] { free_db(db); });
+  EXPECT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+}
+
 // Regression test for #3592: a native precompile (here the default wallet)
 // verifies and stores through setup_create_contract(), but deploying it at an
 // ordinary address must be rejected -- production deploy_contract() bans
