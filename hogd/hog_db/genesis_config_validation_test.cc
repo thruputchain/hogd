@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
@@ -245,9 +246,7 @@ TEST_F(GenesisConfigValidationTest, AcceptsRv32CodeLimitAtVmCeiling)
   EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 
-// The admitted artifact versions must be a range of formats this build's VM
-// reads: it may narrow to one format, not reach past either end or invert.
-// A database loads one genesis, so the refusals come before the load.
+// The admitted versions must be a range within the formats this build reads.
 TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
 {
   auto load_with_versions = [&](uint32_t min, uint32_t max) {

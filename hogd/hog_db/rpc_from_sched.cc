@@ -17,6 +17,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "hog_exec_constants.hh"
 #include "storage_item.hh"
 
 #include "hogd/base/compiler.h"

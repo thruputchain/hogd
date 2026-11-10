@@ -602,9 +602,7 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
       parse_threaded_artifact(zero_memory, zero_memory_limit).has_value());
 }
 
-// The admitted format versions are the caller's too: a format this VM reads
-// is refused outside the range, on both parse paths, and the ceiling limits a
-// deployed contract is instantiated under read every format.
+// A format this VM reads is still refused outside the caller's range.
 TEST(Rv32ArtifactTest, honorsCallerArtifactVersionRange)
 {
   const auto current = valid_artifact_bytes();
