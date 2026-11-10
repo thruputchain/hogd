@@ -13,7 +13,6 @@
 #include <ios>
 #include <iterator>
 #include <memory>
-#include <mutex>
 #include <optional>
 #include <span>
 #include <stdexcept>
@@ -35,9 +34,6 @@
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
-#include "hogd/base/rpc_message_size.h"
-#include "hogd/base/rpc_server.h"
-#include "hogd/base/status.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -673,7 +669,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
           // the admission RPC does not wait on the coordinator notification.
           ParallelBatch response;
           co_await t_to_parallel_batch(*txs, response);
-          co_await coord.notify_vetted(response);
+          co_await coord.coord_client_->coordscheduler_notify_vetted(response);
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
         }(*this, txs);
@@ -695,72 +691,6 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
     graph_dot << submit_dag.dot();
   }
   co_return std::move(*outcomes);
-}
-
-x23::Async<ErrnoStatus<coord_sched_client_t>>
-MempoolCoordinatorRpc::connect_to_coordinator()
-{
-  CoordCard card;
-  CHECK(Registration::registration().coordinator_registered(&card));
-
-  co_return co_await create_client<CoordScheduler1>(
-      server_address_to_sockaddr(card.address_for_sched),
-      /*retry=*/false,
-      /*max_message_size=*/kBulkRpcMaxMessageSize);
-}
-
-x23::Async<std::shared_ptr<coord_sched_client_t>>
-MempoolCoordinatorRpc::coord_client()
-{
-  {
-    std::lock_guard guard(coord_client_mutex_);
-    if (coord_client_) {
-      co_return coord_client_;
-    }
-  }
-  x23::CoroGuard cg;
-  co_await cg(coord_connect_lock_);
-  {
-    // Another notification may have reconnected meanwhile.
-    std::lock_guard guard(coord_client_mutex_);
-    if (coord_client_) {
-      co_return coord_client_;
-    }
-  }
-  auto client = co_await connect_to_coordinator();
-  if (!client) {
-    co_return nullptr;
-  }
-  auto connected = std::make_shared<coord_sched_client_t>(std::move(*client));
-  std::lock_guard guard(coord_client_mutex_);
-  coord_client_ = connected;
-  co_return connected;
-}
-
-x23::Async<void>
-MempoolCoordinatorRpc::notify_vetted(const ParallelBatch &batch)
-{
-  // A connection that broke while the coordinator was down or restarting
-  // fails the first call made through it; the second attempt connects anew,
-  // and reaches a coordinator that is back.
-  for (int attempt = 0; attempt < 2; ++attempt) {
-    std::shared_ptr<coord_sched_client_t> client = co_await coord_client();
-    if (!client) {
-      break;
-    }
-    try {
-      co_await client->coordscheduler_notify_vetted(batch);
-      co_return;
-    } catch (const std::exception &e) {
-      warn("notify_vetted did not reach the coordinator: {}", e.what());
-    }
-    std::lock_guard guard(coord_client_mutex_);
-    if (coord_client_ == client) {
-      coord_client_.reset();
-    }
-  }
-  warn("notify_vetted: the coordinator is unreachable; dropping the "
-       "notification");
 }
 
 x23::Async<void>
@@ -1727,45 +1657,6 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   co_return result;
 }
 
-x23::Async<void>
-MempoolCoordinatorRpc::retire_nominated_block()
-{
-  PendingBlock &nominated = nominated_block_cache_;
-  CHECK_NE(nominated.block_id, 0UL);
-
-  // Copy the closed state and the executed txs, in result order.
-  PendingBlock retired{};
-  retired.db_tip = nominated.db_tip;
-  retired.block_id = nominated.block_id;
-  retired.block_execution = nominated.block_execution;
-  retired.txs = nominated.txs;
-  retired.tx_hashes = nominated.result_tx_hashes;
-  retired.signed_tx_hashes = nominated.result_signed_tx_hashes;
-
-  // Return the nominated txs to the run queue so the next nomination can
-  // take them.
-  scheduler_->reenqueue_txs(nominated.tx_hashes.cbegin(),
-                            nominated.tx_hashes.cend());
-  {
-    InstrumentedCoroGuard scheduler_guard(
-        MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
-        MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
-    co_await scheduler_guard(scheduler_->global_lock_);
-    co_await scheduler_->abandon_pending_nomination(nominated.block_id);
-  }
-  {
-    // [nominated_block_cache_lock_] is held, and taken before this lock
-    // everywhere both are.
-    x23::CoroGuard cache_cg;
-    co_await cache_cg(validated_block_cache_lock_);
-    CHECK(!validated_block_cache_.contains(retired.block_id));
-    validated_block_cache_[retired.block_id] = std::move(retired);
-  }
-  info("retired nominated block {} to the validated blocks",
-       nominated.block_id);
-  nominated.block_id = 0;
-}
-
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
@@ -1813,9 +1704,12 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (nominated_block_cache_.block_id) {
-    // Retire the earlier nomination; both blocks stay committable until the
-    // height commits.
-    co_await retire_nominated_block();
+    // A block was nominated by this node and not yet committed or abandoned.
+    // [schedulercoord_commit_block()] needs to be called before this node can
+    // nominate another block.
+    info("schedulercoord_nominate ret");
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
   }
 
   std::atomic<BlockID> proposal_block_id{0};
@@ -3177,16 +3071,11 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         co_return;
       });
 
-  // After the nominated block cache's lock: a proposal holding that lock
-  // takes this one to retire its earlier nomination.
-  auto lock_validated_node =
-      commit_dag.async<void>("lock validated block cache",
-                             commit_dag.after(lock_nominated_node),
-                             [&, validated_guard]() -> x23::Async<void> {
-                               co_await (*validated_guard)(
-                                   validated_block_cache_lock_);
-                               co_return;
-                             });
+  auto lock_validated_node = commit_dag.async<void>(
+      "lock validated block cache", [&, validated_guard]() -> x23::Async<void> {
+        co_await (*validated_guard)(validated_block_cache_lock_);
+        co_return;
+      });
 
   auto check_block_node = commit_dag.async<void>(
       "check block exists",
