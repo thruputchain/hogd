@@ -9,6 +9,10 @@ void *bump_alloc(size_t n);
 #define X23_MALLOC(n) bump_alloc(n)
 #include "tests/c_backend.h"
 
+#ifndef C_BACKEND_EXTRA_H
+#error "x23c --c dropped c_backend.x's .h include"
+#endif
+
 static _Alignas(16) unsigned char heap[1 << 16];
 static size_t heap_used;
 

@@ -95,8 +95,11 @@ vectors or optionals.
 
 ### Literal lines
 
-C has no use for the C++ in `%` lines, so they are dropped, except
-`%#include "other.hh"`, which becomes `#include "other.h"`.
+Only includes in `%` lines carry over: `%#include "other.hh"` becomes
+`#include "other.h"`, and includes of `.h` headers stay as they are, so
+such a header has to compile as C.  The rest is C++ and is dropped,
+forward declarations included: C does not need them, since the header
+declares every struct and union before defining any.
 
 ## Functions
 

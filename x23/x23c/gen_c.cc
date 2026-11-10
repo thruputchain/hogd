@@ -499,12 +499,15 @@ GenC::gen_const(const ConstDef &c)
   types_ += std::format("#define {} {}\n\n", c.id, val);
 }
 
-// The only literal C++ that carries over is including the header generated
-// from another .x file.
+// The only literal lines that carry over are includes: of the header
+// generated from another .x file (x.hh becomes x.h), and of .h headers, as
+// they are.  The rest is C++, and C needs none of the forward declarations,
+// since every struct and union is declared up front.
 void
 GenC::gen_literal(const Literal &l)
 {
   static const std::regex inc(R"(^\s*#\s*include\s*"(.*)\.hh\"\s*$)");
+  static const std::regex inc_h(R"(^\s*#\s*include\s*([<"].*\.h[>"])\s*$)");
   size_t pos = 0;
   while (pos < l.lines.size()) {
     size_t nl = l.lines.find('\n', pos);
@@ -514,6 +517,8 @@ GenC::gen_literal(const Literal &l)
     std::smatch m;
     if (std::regex_match(line, m, inc))
       types_ += std::format("#include \"{}.h\"\n", m[1].str());
+    else if (std::regex_match(line, m, inc_h))
+      types_ += std::format("#include {}\n", m[1].str());
     pos = nl + 1;
   }
 }
