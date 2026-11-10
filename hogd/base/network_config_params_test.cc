@@ -109,6 +109,20 @@ TEST(ConfigParamValueTest, TheTxGasArmCarriesAFullGasAmount)
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, kValue);
 }
 
+// The artifact version parameters carry the formats this node reads as their
+// bounds, not the width of their arm.
+TEST(ConfigParamValueTest, TheArtifactVersionArmsAreBoundedByReadableFormats)
+{
+  for (const ConfigParamID id :
+       {ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+        ConfigParamID::kConfigParamMaxRv32ArtifactVersion}) {
+    EXPECT_EQ(config_param_min_value(id), 5U);
+    EXPECT_EQ(config_param_max_value(id), 6U);
+  }
+  EXPECT_EQ(config_param_min_value(ConfigParamID::kConfigParamMaxCalldataLen),
+            0U);
+}
+
 // Narrowing would state a value the caller never asked for.
 TEST(ConfigParamValueDeathTest, AUint32ArmRefusesAWiderValue)
 {

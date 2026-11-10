@@ -39,10 +39,11 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32CodeBytes));
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
-static_assert(rv32::kDefaultMinArtifactVersion ==
-              static_cast<uint32_t>(kDefaultMinRv32ArtifactVersion));
-static_assert(rv32::kDefaultMaxArtifactVersion ==
-              static_cast<uint32_t>(kDefaultMaxRv32ArtifactVersion));
+// The configurable version range is exactly the formats the parser reads.
+static_assert(rv32::kArtifactVersion5 ==
+              static_cast<uint32_t>(kMinRv32ArtifactVersion));
+static_assert(rv32::kArtifactVersion6 ==
+              static_cast<uint32_t>(kMaxRv32ArtifactVersion));
 
 std::expected<Rv32Contract, rv32::ArtifactError>
 Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)

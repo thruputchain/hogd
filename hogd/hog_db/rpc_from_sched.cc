@@ -422,12 +422,12 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
   // that can attach a contract this one refuses.
   if (const uint32_t oldest = config_params.min_rv32_artifact_version,
       newest = config_params.max_rv32_artifact_version;
-      oldest > newest || oldest < rv32::kOldestArtifactVersion ||
-      newest > rv32::kNewestArtifactVersion) {
+      oldest > newest || oldest < kMinRv32ArtifactVersion ||
+      newest > kMaxRv32ArtifactVersion) {
     error("genesis rv32 artifact versions [{}, {}] are not a range within "
           "the [{}, {}] this build's VM reads",
-          oldest, newest, rv32::kOldestArtifactVersion,
-          rv32::kNewestArtifactVersion);
+          oldest, newest, static_cast<uint32_t>(kMinRv32ArtifactVersion),
+          static_cast<uint32_t>(kMaxRv32ArtifactVersion));
     co_return DbSchedResult::DbSchedResultError;
   }
   // Every root commit pushes a savepoint, even without child TryInvokes.

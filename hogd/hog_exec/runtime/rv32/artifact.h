@@ -26,9 +26,6 @@ inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
 // same header as v6 and no extension list.
 inline constexpr uint32_t kArtifactVersion5 = 5;
 inline constexpr uint32_t kArtifactVersion6 = 6;
-// The range Rv32Limits bounds is exactly the formats parsed here.
-static_assert(kOldestArtifactVersion == kArtifactVersion5);
-static_assert(kNewestArtifactVersion == kArtifactVersion6);
 inline constexpr uint32_t kArtifactHeaderBytes = 128;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.

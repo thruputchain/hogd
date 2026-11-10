@@ -2126,7 +2126,8 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
   for (const auto *bad :
        {"unknown=2", "max_bytestring_len",
         "max_bytestring_len=", "max_bytestring_len=-1",
-        "max_bytestring_len=4294967296", "max_bytestring_len=1x"}) {
+        "max_bytestring_len=4294967296", "max_bytestring_len=1x",
+        "min_rv32_artifact_version=4", "max_rv32_artifact_version=7"}) {
     EXPECT_THROW(add_local_network_config_override(overrides, bad),
                  std::runtime_error);
     EXPECT_TRUE(overrides.empty());

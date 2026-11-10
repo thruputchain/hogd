@@ -258,8 +258,8 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
         config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion, max);
     return load(config, std::nullopt);
   };
-  constexpr uint32_t kOldest = rv32::kOldestArtifactVersion;
-  constexpr uint32_t kNewest = rv32::kNewestArtifactVersion;
+  constexpr uint32_t kOldest = kMinRv32ArtifactVersion;
+  constexpr uint32_t kNewest = kMaxRv32ArtifactVersion;
   ASSERT_LT(kOldest, kNewest);
 
   EXPECT_EQ(load_with_versions(kOldest - 1, kNewest),
@@ -277,7 +277,7 @@ TEST_F(GenesisConfigValidationTest, AcceptsOnlyTheOldestRv32ArtifactVersion)
   NetworkConfig config = stock_network_config();
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
-      rv32::kOldestArtifactVersion);
+      kMinRv32ArtifactVersion);
   EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 
