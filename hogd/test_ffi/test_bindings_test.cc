@@ -3808,6 +3808,8 @@ TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
   auto &data = legacy.rv32_contract().data;
   ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion6);
   data[rv32::kArtifactFormatVersionOffset] = rv32::kArtifactVersion5;
+  // v5 ends after initial memory: drop the empty extension list.
+  data.resize(data.size() - 4);
   auto bytes = x23::serialize(legacy);
 
   auto *rc = make_runtime_context();
