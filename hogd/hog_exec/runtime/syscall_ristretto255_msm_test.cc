@@ -5,9 +5,9 @@
 #include <cstddef>
 #include <cstdint>
 #include <span>
-#include <vector>
+#include <utility>
 
-#include "hogd/base/network_config_params.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
@@ -16,38 +16,44 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_flag.hh"
+#include "rpc_types.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
+#include "types.hh"
+
+#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
+#include <vector>
+
+#include "ffi_enums.hh"
+#endif
 
 namespace hogd {
 namespace {
 
 constexpr GasAmount kPlentyOfGas = 100'000'000;
 
-class Ristretto255MsmEntryTest : public ::testing::Test,
-                                 public NativeContractTestFramework {
-public:
-  Ristretto255MsmEntryTest()
-    : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, true)
-  {}
+class Ristretto255MsmEntryTest : public ::testing::Test {
+  NativeContractTestFramework framework_{
+      false, BlockExecutionMode::kBlockExecutionModeProposal, true};
 
+public:
   SyscallResult call(std::span<std::byte> memory, uint32_t input,
                      uint32_t length, uint32_t output,
                      GasAmount gas = kPlentyOfGas)
   {
     auto context = make_hog_exec_context();
-    auto handler = make_new_system_call_handler(Transaction{}, *context);
+    auto handler =
+        framework_.make_new_system_call_handler(Transaction{}, *context);
     handler.enable_tracing();
     handler.enable_transaction_stats();
-    auto frame = handler.start_frame(Invocation{.invoked_address =
-                                                    make_contract_address(0),
-                                                .entrypoint = {},
-                                                .gas_limit = kPlentyOfGas,
-                                                .calldata = {}},
-                                     std::to_underlying(InvokeFlag::None),
-                                     ValidatedAuthTokens{});
+    auto frame = handler.start_frame(
+        Invocation{.invoked_address =
+                       NativeContractTestFramework::make_contract_address(0),
+                   .entrypoint = {},
+                   .gas_limit = kPlentyOfGas,
+                   .calldata = {}},
+        std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
     EXPECT_TRUE(frame.has_value());
     auto result =
         syscall_entry(&handler,
