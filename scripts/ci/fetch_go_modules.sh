@@ -1,18 +1,24 @@
 #!/usr/bin/env bash
 
 # Run before the C++ build, while the worker's installation token is fresh.
-# Discover modules from the checked-out submodule rather than assuming its
-# workspace layout. Keep workspace/local replacements active for each module.
+# Prefetch exactly what building and testing thruput-go's workspace needs:
+# `work` is every package in the modules go.work uses, so this follows the
+# submodule's layout rather than assuming it, and keeps its replacements.
+#
+# Not `go mod download`: with no arguments it fetches the whole module graph
+# and records a checksum for every module in it in thruput-go's tracked
+# go.work.sum. That leaves the submodule modified, the build then stamps
+# "<commit>+dirty" into hogd's version, and control_server rejects peers built
+# from the same commit without this prefetch ("version mismatch"). Listing the
+# packages downloads and verifies the same modules the build will, and writes
+# nothing while thruput-go's committed sums cover them.
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-found=false
-while IFS= read -r -d '' manifest; do
-  found=true
-  (cd "$(dirname "$manifest")" && go mod download)
-done < <(find "$ROOT_DIR/thruput-go" -name .git -prune -o -name vendor -prune -o -name go.mod -print0)
 
-if [[ "$found" != true ]]; then
-  echo "No Go modules found in thruput-go; cannot prefetch chuckd/scpd dependencies" >&2
+if [[ ! -f "$ROOT_DIR/thruput-go/go.work" ]]; then
+  echo "No go.work in thruput-go; cannot prefetch chuckd dependencies" >&2
   exit 1
 fi
+
+go -C "$ROOT_DIR/thruput-go" list -deps -test work >/dev/null
