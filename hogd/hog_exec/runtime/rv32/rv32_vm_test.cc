@@ -1410,26 +1410,41 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
-  const std::array<ExpectedSyscallGasEntry, 14> expected_syscalls = {{
-      {u8"SyscallBase", hogd::kSyscallBaseCost},
-      {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
-      {u8"SHA256Stream", hogd::kSHA256StreamCost},
-      {u8"VerifySignatureBase", hogd::kVerifySignatureBaseCost},
-      {u8"VerifySignatureBlock", hogd::kVerifySignatureBlockCost},
-      {u8"StorageAccess", hogd::kStorageAccessCost},
-      {u8"DBRPC", hogd::kDBRPCCost},
-      {u8"BytestringBlockBytes", hogd::kBytestringBlockBytes},
-      {u8"BytestringWriteBlock", hogd::kBytestringWriteBlockCost},
-      {u8"BytestringReadBlock", hogd::kBytestringReadBlockCost},
-      {u8"NoSyscall", hogd::kNoSyscallCost},
-      {u8"GenericBadSyscall", hogd::kGenericBadSyscallCost},
-      {u8"VerifySignatureMlDsa65Base", hogd::kVerifySignatureMlDsa65BaseCost},
-      {u8"VerifySignatureMlDsa65Block", hogd::kVerifySignatureMlDsa65BlockCost},
-  }};
+  const std::array<ExpectedSyscallGasEntry,
+                   hogd::kSyscallGasCostSchedule.size()>
+      expected_syscalls = {{
+          {u8"SyscallBase", hogd::kSyscallBaseCost},
+          {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
+          {u8"SHA256Stream", hogd::kSHA256StreamCost},
+          {u8"VerifySignatureBase", hogd::kVerifySignatureBaseCost},
+          {u8"VerifySignatureBlock", hogd::kVerifySignatureBlockCost},
+          {u8"StorageAccess", hogd::kStorageAccessCost},
+          {u8"DBRPC", hogd::kDBRPCCost},
+          {u8"BytestringBlockBytes", hogd::kBytestringBlockBytes},
+          {u8"BytestringWriteBlock", hogd::kBytestringWriteBlockCost},
+          {u8"BytestringReadBlock", hogd::kBytestringReadBlockCost},
+          {u8"NoSyscall", hogd::kNoSyscallCost},
+          {u8"GenericBadSyscall", hogd::kGenericBadSyscallCost},
+          {u8"VerifySignatureMlDsa65Base",
+           hogd::kVerifySignatureMlDsa65BaseCost},
+          {u8"VerifySignatureMlDsa65Block",
+           hogd::kVerifySignatureMlDsa65BlockCost},
+#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
+          {u8"Ristretto255MsmBase", 30'000},
+          {u8"Ristretto255MsmTerm", 13'000},
+          {u8"Ristretto255MsmTermBytes", 64},
+          {u8"Ristretto255MsmMaxTerms", 256},
+#endif
+      }};
 
   EXPECT_EQ(kOpCount, 49U);
+#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
+  EXPECT_EQ(kGasTableVersion, 0x80000004U);
+  EXPECT_EQ(kGasScheduleDigest, 0xa4ea2c0495d55ba7ULL);
+#else
   EXPECT_EQ(kGasTableVersion, 4U);
   EXPECT_EQ(kGasScheduleDigest, 0xa958d226df658598ULL);
+#endif
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);

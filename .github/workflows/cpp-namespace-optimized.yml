@@ -309,8 +309,10 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
-      - name: Build LLVM Debug
-        run: ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror"
+      - name: Build LLVM Debug with experimental MSM
+        run: >-
+          ./scripts/build.sh -d build/llvm -t Debug -c clang -f "-Werror"
+          -x -DHOGD_EXPERIMENTAL_RISTRETTO_MSM=ON
 
       - name: Run Tests
         run: |
