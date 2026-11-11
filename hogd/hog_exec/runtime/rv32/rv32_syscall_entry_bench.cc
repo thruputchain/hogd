@@ -44,6 +44,7 @@
 #include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -1025,7 +1026,8 @@ bm_ristretto255_msm(benchmark::State &state, uint32_t count, uint8_t pattern,
     const bool point =
         invalid == MsmInvalid::FirstPoint || invalid == MsmInvalid::LastPoint;
     const size_t offset =
-        (last ? count - 1 : 0) * RISTRETTO255_MSM_TERM_BYTES + (point ? 32 : 0);
+        ((last ? count - 1 : 0) * RISTRETTO255_MSM_TERM_BYTES) +
+        (point ? 32 : 0);
     std::fill_n(terms.begin() + offset, 32, 0xff);
   }
   uint8_t expected[32];

@@ -17,6 +17,7 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
 #include "syscall.hh"
@@ -100,7 +101,7 @@ constexpr std::array<uint8_t, 32> kTwiceBasepoint = {
 std::vector<std::byte>
 memory_for_terms(size_t terms)
 {
-  std::vector<std::byte> memory(kInput + terms * RISTRETTO255_MSM_TERM_BYTES);
+  std::vector<std::byte> memory(kInput + (terms * RISTRETTO255_MSM_TERM_BYTES));
   std::fill_n(memory.begin(), 32, std::byte{0xA5});
   return memory;
 }

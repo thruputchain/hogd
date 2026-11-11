@@ -281,8 +281,9 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
     ASSERT_EQ(machine.step(), rv32::StepResult::kContinue);
   }
   ASSERT_EQ(machine.step(), rv32::StepResult::kEcall);
-  ASSERT_TRUE(machine.pending_ecall().has_value());
-  const auto result = bridge.ecall(machine.view(), *machine.pending_ecall());
+  const auto pending = machine.pending_ecall();
+  ASSERT_TRUE(pending.has_value());
+  const auto result = bridge.ecall(machine.view(), *pending);
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
   EXPECT_EQ(machine.complete_ecall(result), rv32::StepResult::kContinue);
   finish_frame(handler, std::move(stashed_trace));
@@ -294,7 +295,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
   std::ranges::copy(kPoint, memory.begin() + kOutputAddress);
   EXPECT_TRUE(std::ranges::equal(machine.view().memory(), memory));
   EXPECT_EQ(machine.gas_remaining(),
-            kPlentyOfGas - kInstructions * rv32::kBaseInstructionGas -
+            kPlentyOfGas - (kInstructions * rv32::kBaseInstructionGas) -
                 result.gas_consumed);
 }
 

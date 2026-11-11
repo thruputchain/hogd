@@ -166,7 +166,7 @@ struct GasCost {
     static_assert(RISTRETTO255_MSM_MAX_TERMS <=
                   (UINT64_MAX - kRistretto255MsmBaseCost) /
                       kRistretto255MsmTermCost);
-    return kRistretto255MsmBaseCost + terms * kRistretto255MsmTermCost;
+    return kRistretto255MsmBaseCost + (terms * kRistretto255MsmTermCost);
   }
 
   // Blocks a hash compresses, padding included. One helper per hash rather
