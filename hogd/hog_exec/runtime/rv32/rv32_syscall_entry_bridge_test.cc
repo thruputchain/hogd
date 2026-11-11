@@ -283,7 +283,8 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
   ASSERT_EQ(machine.step(), rv32::StepResult::kEcall);
   const auto pending = machine.pending_ecall();
   ASSERT_TRUE(pending.has_value());
-  const auto result = bridge.ecall(machine.view(), *pending);
+  const auto result =
+      bridge.ecall(machine.view(), pending.value_or(rv32::EcallArgs{}));
   ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
   EXPECT_EQ(machine.complete_ecall(result), rv32::StepResult::kContinue);
   finish_frame(handler, std::move(stashed_trace));
