@@ -1555,13 +1555,13 @@ TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
   expect_parity_success(calls);
 }
 
-// #4236: the wrapper decodes calldata before the method body runs, so a
-// rejection is priced at NativeContractBuilder::kDecodeErrorGas, the dearest
-// rejection the rv32 reference can reach. Every input here is one the rv32
-// wallet decodes and rejects as DecodingArgs (larger inputs fault on its 64 KiB
-// memory before decoding); the native wallet must charge the flat price and
-// never less than the reference. calls=280 is the reference's measured peak.
-TEST_F(DefaultWalletParityTest, DecodeErrorChargeCoversRv32Reference)
+// #4236: the wrapper charges NativeContractBuilder::decode_gas(len) before it
+// decodes. Every input here is one the rv32 wallet decodes in full and rejects
+// as DecodingArgs (larger inputs fault on its 64 KiB memory before decoding),
+// so its gas is its decode cost; the native wallet must charge exactly the
+// decode price and never less than the reference. calls=280 is the largest
+// input the reference can decode.
+TEST_F(DefaultWalletParityTest, DecodeChargeCoversRv32Reference)
 {
   setup_wallets_and_targets();
   make_ctx();
@@ -1606,7 +1606,7 @@ TEST_F(DefaultWalletParityTest, DecodeErrorChargeCoversRv32Reference)
     auto native = run(native_wallet_, native_preimage_, method_id, raw);
     EXPECT_EQ(rv32.abort_bytes, expected_abort);
     EXPECT_EQ(native.abort_bytes, expected_abort);
-    EXPECT_EQ(native.gas, NativeContractBuilder::kDecodeErrorGas);
+    EXPECT_EQ(native.gas, NativeContractBuilder::decode_gas(raw.size()));
     EXPECT_GE(native.gas, rv32.gas);
   };
   auto bytes_of = [](auto const &encoded) {
@@ -1652,9 +1652,9 @@ TEST_F(DefaultWalletParityTest, DecodeErrorChargeCoversRv32Reference)
   }
 }
 
-// #4236's reproduction: malformed execute calldata under a gas limit at or
-// below kDecodeErrorGas runs the frame out of gas, charging the whole limit
-// rather than zero.
+// #4236's reproduction: execute calldata under a gas limit at or below its
+// decode price runs the frame out of gas before decoding, charging the whole
+// limit rather than reporting a zero-gas abort.
 TEST_F(DefaultWalletParityTest, DecodeErrorUnderSmallGasLimitRunsOutOfGas)
 {
   setup_wallets_and_targets();
@@ -1666,8 +1666,8 @@ TEST_F(DefaultWalletParityTest, DecodeErrorUnderSmallGasLimitRunsOutOfGas)
   std::vector<uint8_t> raw(encoded.begin(), encoded.end());
   raw.pop_back();
 
-  for (GasAmount gas_limit :
-       {GasAmount{1}, NativeContractBuilder::kDecodeErrorGas}) {
+  for (GasAmount gas_limit : {GasAmount{0}, GasAmount{1},
+                              NativeContractBuilder::decode_gas(raw.size())}) {
     SCOPED_TRACE(testing::Message() << "gas_limit=" << gas_limit);
     Invocation invocation{.invoked_address = native_wallet_,
                           .entrypoint = entrypoint_from_method_id(

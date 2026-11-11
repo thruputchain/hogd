@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -26,6 +28,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -112,6 +115,67 @@ assign_auth_handles(std::tuple<Args...> &args, uint32_t handle_count)
   return true;
 }
 
+// The fewest bytes an X can encode in. Vectors, optionals, unions and byte
+// strings can all be a single byte (an empty length, an absent pointer, a
+// void arm); fixed byte arrays are their length; structs sum their fields.
+template<typename X>
+consteval size_t
+min_encoded_bytes()
+{
+  using enum x23::XdrCategory;
+  if constexpr (x23::is_boxed_leaf<X>) {
+    return min_encoded_bytes<typename X::value_type>();
+  }
+  else if constexpr (x23::is_xdr_cat<X, kOpaqueArray>) {
+    return std::tuple_size_v<X>;
+  }
+  else if constexpr (x23::is_xdr_cat<X, kArray>) {
+    return std::tuple_size_v<X> * min_encoded_bytes<typename X::value_type>();
+  }
+  else if constexpr (x23::is_xdr_cat<X, kStruct>) {
+    return []<size_t... I>(std::index_sequence<I...>) {
+      return (size_t{0} + ... +
+              min_encoded_bytes<std::tuple_element_t<I, X>>());
+    }(std::make_index_sequence<std::tuple_size_v<X>>{});
+  }
+  else {
+    return 1;
+  }
+}
+
+// Native decoding is billed per calldata byte (NativeContractBuilder::
+// decode_gas), but decode work is per element. A vector whose elements can
+// each be a byte or two packs far more elements into a byte than that rate
+// pays for, so native arguments may not contain one unless its length is
+// bounded small. Byte strings are exempt: they decode as one copy.
+inline constexpr size_t kMaxDenseVectorLen = 64;
+inline constexpr size_t kMinVectorElementBytes = 16;
+
+template<typename X, typename... Stop>
+consteval bool
+has_dense_vector()
+{
+  if constexpr (x23::is_one_of<X, Stop...> || !x23::is_xdr_type<X>) {
+    return false;
+  }
+  else {
+    bool dense = false;
+    if constexpr (x23::is_xdr_cat<X, x23::XdrCategory::kVec>) {
+      dense =
+          X::max_size() > kMaxDenseVectorLen &&
+          min_encoded_bytes<typename X::value_type>() < kMinVectorElementBytes;
+    }
+    return dense || []<typename... T>(x23::detail::type_sequence<T...>) {
+      return (has_dense_vector<T, Stop..., X>() || ...);
+    }(x23::detail::get_field_types<X>());
+  }
+}
+
+template<typename Args> constexpr bool kArgsHaveDenseVector = false;
+template<typename... Args>
+constexpr bool kArgsHaveDenseVector<std::tuple<Args...>> =
+    (has_dense_vector<Args>() || ...);
+
 template<is_contract_trait ContractTrait, StringLiteral Name, GasAmount Gas>
 struct AlwaysErrorMethod {
   using meta_t = ContractTraitMeta<ContractTrait>;
@@ -142,15 +206,27 @@ public:
   constexpr static SerializationFormat kDefaultSerializationFormat =
       SerializationFormat::kTxs;
 
-  // Charged when the wrapper rejects calldata (a parse error, trailing bytes,
-  // or a forwarded auth-handle count the method's arguments do not match). The
-  // decode has already run by then, at a cost proportional to the calldata, so
-  // this is a flat price for that work rather than an exact one. It is set at
-  // the dearest rejection the RV32 reference default wallet can reach: its
-  // decode is ~194 gas per WalletCall, ~2.3 gas per opaque byte, and peaks at
-  // 64,282 gas (a truncated 280-call vector, 11.7 KB); one call more and the
-  // 64 KiB default guest memory faults before decoding. See #4236.
-  constexpr static GasAmount kDecodeErrorGas = 65'000;
+  // What the wrapper charges, before decoding, for decoding a frame's
+  // calldata. Decoding is proportional to the calldata and runs before the
+  // method body, so the body cannot meter it (#4236).
+  //
+  // Priced against what an RV32 contract's entrypoint glue pays to decode the
+  // same argument. That is ~50-90 gas per decoded scalar plus ~3 gas per byte
+  // copied, so its per-byte rate depends on how densely the elements encode:
+  // 2.5-3.4 for byte strings, addresses and hashes; 5.5 for the default
+  // wallet's WalletCall; 6.6-7.8 for structs and vectors of 32-byte items; but
+  // 53-82 for vectors of one-byte elements (small integers, bools, absent
+  // optionals, empty vectors). The rate here covers the first three groups,
+  // with ~600 gas for the glue itself. add() rejects argument types in the
+  // last group (detail::has_dense_vector): this rate would undercharge them
+  // ~10x.
+  constexpr static GasAmount kDecodeBaseGas = 600;
+  constexpr static GasAmount kDecodeByteGas = 8;
+
+  static constexpr GasAmount decode_gas(size_t calldata_len)
+  {
+    return kDecodeBaseGas + (kDecodeByteGas * calldata_len);
+  }
 
   template<is_contract_trait ContractTrait, StringLiteral Name>
   void add(auto lambda)
@@ -207,6 +283,9 @@ public:
     using fn_t = decltype(lambda);
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
+    static_assert(!detail::kArgsHaveDenseVector<args_t>,
+                  "native arguments may not contain a long vector of small "
+                  "elements: decode_gas would undercharge decoding it");
 
     // A coroutine, so not noexcept: NativeContract::invoke() re-establishes
     // that boundary around its frame allocation.
@@ -219,12 +298,8 @@ public:
         // not match the method's SignedToken arguments aborts the frame with
         // LibraryExn::Handling(DecodingArgs), byte-identical to an RV32
         // contract's wrapper — not a plain frame fault. See
-        // default_wallet_parity_test.cc's malformed-calldata cases. A frame
-        // that cannot pay kDecodeErrorGas runs out of gas instead.
+        // default_wallet_parity_test.cc's malformed-calldata cases.
         auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {
-          if (!ctx.consume_gas(kDecodeErrorGas)) {
-            return InvokeError{InvokeErrorCode::OutOfGas};
-          }
           LibraryExn exn(LibraryExn::kLibraryExnHandling);
           exn.handling() = HandlingError(HandlingError::kHandlingDecodingArgs);
           auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);
@@ -237,7 +312,12 @@ public:
           return {};
         };
 
+        // Charge the decode before doing it, so a frame that cannot pay runs
+        // out of gas without materializing anything.
         auto const &calldata = ctx.handler().get_calldata();
+        if (!ctx.consume_gas(decode_gas(calldata.size()))) {
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
+        }
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {
