@@ -2407,55 +2407,44 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                 validation_tx_count);
     });
   });
+  // The open validation gate keeps commits, and so [last_committed_block_],
+  // still from here on.
+  while (!(co_await increment_num_validations_in_progress())) {
+    co_await wait_for_validation_gate_open();
+  }
+  const BlockHeight committed_height =
+      last_committed_block_.value.proposal_header.block_height;
+  if (proposal.header.block_height <= committed_height) {
+    // This block's height is committed: it is too late to validate it.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+  }
   if (proposal.header.block_height <= 1) {
     // Heights 0 and 1 are established outside ordinary validation.
+    co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
     info("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  while (true) {
-    while (!(co_await increment_num_validations_in_progress())) {
-      co_await wait_for_validation_gate_open();
-    }
-
-    if (proposal.header.block_height <
-        last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is too old to validate.
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
-      info("schedulercoord_validate ret");
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
-    }
-    else if (proposal.header.block_height >
-             last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is ahead of the current block in the mempool. Thus, we need
-      // to wait for the mempool to catch up before verifying this block.
-      co_await decrement_num_validations_in_progress();
-      // If we want to validate a block at height [x], we need to wait for the
-      // block at height [x - 1] to commit.
-      co_await wait_for_block_commit(proposal.header.block_height - 1);
-      // Rather than break out of the loop here, we instead continue to the next
-      // iteration of the loop. This prevents a race where a different block at
-      // height [x] is committed before we are able to wake up, increment the
-      // [num_validations_in_progress_] futex, and exit the loop. If that race
-      // could occur, then we would fail the CHECK below. Instead, we go to the
-      // next iteration, increment the [num_validations_in_progress_] futex, and
-      // then either break out of the loop or we return
-      // [SchedulerValidationTooLateToValidate] if a different block at height x
-      // has already been committed.
-    }
-    else {
-      break;
-    }
+  if (proposal.header.block_height > committed_height + 1) {
+    // The parent is above the committed tip, so answer at once instead of
+    // waiting: a waiting call would pin a coordinator connection.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
+    info("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
-  CHECK_EQ(proposal.header.block_height,
-           last_committed_block_.value.proposal_header.block_height + 1);
+  CHECK_EQ(proposal.header.block_height, committed_height + 1);
 
   if (last_committed_block_.id != parent_id) {
-    // Release the validation-gate increment taken at the top of this loop.
+    // Release the validation-gate increment taken above.
     // Without this, the increment leaks: [close_validation_gate()] then waits
     // forever for the count to reach zero, and every subsequent
     // [schedulercoord_commit_block()] wedges. (The bench harness maps a
@@ -3021,6 +3010,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       std::terminate();
     }
   });
+
+  // The tip committed again under the value it committed with is a retry of a
+  // commit whose answer the coordinator did not see: it is done. The closed
+  // gate keeps any other commit from moving [last_committed_block_].
+  if (block_id == last_committed_block_.id &&
+      expected_value == last_committed_block_.value) {
+    info("schedulercoord_commit_block ret: the tip, committed again");
+    co_return SchedulerCommitOutcome::SchedulerCommitOK;
+  }
 
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};

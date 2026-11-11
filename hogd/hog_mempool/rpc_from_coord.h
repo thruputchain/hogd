@@ -415,8 +415,8 @@ public:
     int64_t current_height;
     // [last_committed_block_] is not an [x23::CoroFutex], so we cannot [wait()]
     // on it until a certain height is reached. However, [auth_data_height_] is
-    // a safe substitute for this, plus [schedulercoord_validate()], which calls
-    // this function, needs to wait for the latest auth data to arrive anyway.
+    // a safe substitute for this, plus [verify_submission()], which calls this
+    // function, needs to wait for the latest auth data to arrive anyway.
     while ((current_height = auth_data_height_.load()) <
            static_cast<int64_t>(expected_height)) {
       co_await auth_data_height_.wait(current_height);
