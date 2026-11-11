@@ -56,7 +56,7 @@ mock_syscall_entrypoint(uint64_t syscall, uint64_t arg1, uint64_t arg2,
                         uint64_t arg6, uint64_t arg7) noexcept
 {
   MockSyscallFunc mock_syscall_func = &mock_syscall_parser<NoSyscallFuncMeta>;
-  if (syscall < kMockSyscallTable.size()) {
+  if (syscall < kMockSyscallTable.size() && syscall_is_enabled(syscall)) {
     mock_syscall_func = kMockSyscallTable[syscall];
   }
   // The parser path can allocate (e.g. appending a record when syscall tracing

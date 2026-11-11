@@ -47,6 +47,57 @@ syscall_SHA256_inner(SystemCallHandler &handler, WrappedGasAmount remaining_gas,
 };
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_Ristretto255Msm_inner(SystemCallHandler &handler,
+                              WrappedGasAmount remaining_gas,
+                              std::span<const std::byte> input_terms,
+                              Ristretto255Point &output_point)
+{
+#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
+  static_assert(kRistretto255MsmTermBytes == RISTRETTO255_MSM_TERM_BYTES);
+  static_assert(kRistretto255MsmMaxTerms == RISTRETTO255_MSM_MAX_TERMS);
+  if (input_terms.size() % kRistretto255MsmTermBytes != 0 ||
+      input_terms.size() / kRistretto255MsmTermBytes >
+          kRistretto255MsmMaxTerms) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+  const WrappedGasAmount gas{GasCost::ristretto255_msm(
+      input_terms.size() / kRistretto255MsmTermBytes)};
+  // Reserve decoding, allocation and arithmetic before entering Rust. Exact
+  // exhaustion faults too, without computing or writing an output.
+  if (remaining_gas.get() <= gas.get()) {
+    return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+  }
+  static_assert(sizeof(output_point) == 32);
+  const MessageSpan terms{
+      .message_ptr = reinterpret_cast<const uint8_t *>(input_terms.data()),
+      .message_len = input_terms.size(),
+  };
+  // The parser owns this staged output. The Rust kernel writes it only after
+  // every encoding has passed validation; no second staging buffer is needed.
+  if (!ristretto255_msm(terms, reinterpret_cast<uint8_t (*)[32]>(
+                                   output_point.data()))) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
+  }
+  if (auto *trace_data =
+          handler.get_syscall_trace_data<SyscallNo::kRistretto255Msm>()) {
+    trace_data->outputs.emplace(
+        SyscallRistretto255MsmOutputs{.point = output_point});
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
+#else
+  // Dispatch rejects the number before parsing. Keep the generated table
+  // linkable in ordinary builds without linking the experimental primitive.
+  (void)handler;
+  (void)remaining_gas;
+  (void)input_terms;
+  (void)output_point;
+  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall,
+          WrappedGasAmount{kNoSyscallCost}};
+#endif
+}
+
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256Update_inner(SystemCallHandler &handler,
                            WrappedGasAmount remaining_gas, uint32_t input_index,
                            std::span<const std::byte> input_buffer,

@@ -804,6 +804,14 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
     return syscall_result;
   }();
 
+  if constexpr (kSyscall == SyscallNo::kRistretto255Msm) {
+    // Disarm MSM output on a returned host error. Preserve other syscalls'
+    // existing writeback behavior.
+    if (!syscall_result.has_value()) {
+      disarm_outputs(args);
+    }
+  }
+
   GasAmount gas_remaining_at_end = gas_remaining > gas_consumed.get()
                                        ? gas_remaining - gas_consumed.get()
                                        : 0;

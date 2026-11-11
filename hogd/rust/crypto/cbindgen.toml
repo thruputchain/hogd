@@ -60,7 +60,7 @@ usize_is_size_t = true
 
 
 [export]
-include = ["ED25519_SECRET_KEYPAIR_SIZE", "ED25519_PUBLIC_KEY_SIZE"]
+include = ["ED25519_SECRET_KEYPAIR_SIZE", "ED25519_PUBLIC_KEY_SIZE", "RISTRETTO255_MSM_TERM_BYTES", "RISTRETTO255_MSM_MAX_TERMS"]
 exclude = []
 # prefix = "CAPI_"
 item_types = []
