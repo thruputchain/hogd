@@ -21,13 +21,6 @@ option(BUILD_FUZZERS "Build fuzz targets" OFF)
 # Enable building test ffi (default: OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
-option(HOGD_EXPERIMENTAL_RISTRETTO_MSM
-  "Enable the experimental Ristretto255 MSM host API" OFF)
-if(HOGD_EXPERIMENTAL_RISTRETTO_MSM)
-  # Dispatch, native test FFI and artifact schedule declarations must agree.
-  add_compile_definitions(HOGD_EXPERIMENTAL_RISTRETTO_MSM=1)
-  message(WARNING "Experimental Ristretto255 MSM host API enabled")
-endif()
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
 # Debug-only diagnostic: record the lowest sp each rv32 invocation's guest
 # reached, read back through the test FFI's get_rv32_stack_usage() (see

@@ -123,7 +123,6 @@ constexpr static uint64_t kBytestringReadBlockCost = 7;
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
 // Initial price from two M4 Max production-entry sweeps, with >=15% headroom
 // over sampled valid-input row medians.
 // Calibration: https://linear.app/grndhg/issue/GH-617
@@ -131,7 +130,6 @@ constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
 constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 constexpr uint64_t kRistretto255MsmTermBytes = 64;
 constexpr uint64_t kRistretto255MsmMaxTerms = 256;
-#endif
 
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
@@ -160,7 +158,6 @@ constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;
 // Costs a syscall computes from its arguments, as opposed to the flat
 // constants above.
 struct GasCost {
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
   static constexpr uint64_t ristretto255_msm(uint64_t terms)
   {
     // The caller bounds the term count before computing the price. Even the
@@ -171,7 +168,6 @@ struct GasCost {
                       kRistretto255MsmTermCost);
     return kRistretto255MsmBaseCost + terms * kRistretto255MsmTermCost;
   }
-#endif
 
   // Blocks a hash compresses, padding included. One helper per hash rather
   // than one taking the geometry as arguments: three interchangeable uint64_t
@@ -263,11 +259,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
 constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
-#else
-constexpr std::array<SyscallGasCostEntry, 14> kSyscallGasCostSchedule = {{
-#endif
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -284,12 +276,10 @@ constexpr std::array<SyscallGasCostEntry, 14> kSyscallGasCostSchedule = {{
      .cost = kVerifySignatureMlDsa65BaseCost},
     {.name = u8"VerifySignatureMlDsa65Block",
      .cost = kVerifySignatureMlDsa65BlockCost},
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
     {.name = u8"Ristretto255MsmBase", .cost = kRistretto255MsmBaseCost},
     {.name = u8"Ristretto255MsmTerm", .cost = kRistretto255MsmTermCost},
     {.name = u8"Ristretto255MsmTermBytes", .cost = kRistretto255MsmTermBytes},
     {.name = u8"Ristretto255MsmMaxTerms", .cost = kRistretto255MsmMaxTerms},
-#endif
 }};
 
 } // namespace hogd

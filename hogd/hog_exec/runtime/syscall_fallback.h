@@ -13,18 +13,6 @@
 
 namespace hogd {
 
-// Reject disabled syscalls before parsing or tracing their operands.
-constexpr bool
-syscall_is_enabled(uint64_t syscall)
-{
-#ifndef HOGD_EXPERIMENTAL_RISTRETTO_MSM
-  return syscall != static_cast<uint64_t>(SyscallNo::kRistretto255Msm);
-#else
-  (void)syscall;
-  return true;
-#endif
-}
-
 constexpr std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 no_syscall_func_inner()
 {

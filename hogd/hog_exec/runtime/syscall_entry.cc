@@ -52,8 +52,7 @@ syscall_entry_inner(SystemCallHandler *syscall_handler,
 {
   SyscallFunc syscall_fn = nullptr;
   assert(syscall_handler);
-  bool valid_syscall_no =
-      syscall_no < kSyscallTable.size() && syscall_is_enabled(syscall_no);
+  bool valid_syscall_no = syscall_no < kSyscallTable.size();
   if (!valid_syscall_no) {
     // invalid syscall
     if (auto *stats = syscall_handler->get_transaction_stats()) {

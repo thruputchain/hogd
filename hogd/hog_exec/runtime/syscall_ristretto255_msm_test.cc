@@ -6,7 +6,9 @@
 #include <cstdint>
 #include <span>
 #include <utility>
+#include <vector>
 
+#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -21,12 +23,6 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
-
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
-#include <vector>
-
-#include "ffi_enums.hh"
-#endif
 
 namespace hogd {
 namespace {
@@ -61,17 +57,10 @@ public:
                       static_cast<uint32_t>(SyscallNo::kRistretto255Msm), input,
                       length, output, 0, 0, 0, 0)();
     const auto *stats = handler.get_transaction_stats();
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
     EXPECT_EQ(stats->invalid_syscall_count, 0);
     EXPECT_EQ(
         stats->syscall_counts[static_cast<size_t>(SyscallNo::kRistretto255Msm)],
         1);
-#else
-    EXPECT_EQ(stats->invalid_syscall_count, 1);
-    EXPECT_EQ(
-        stats->syscall_counts[static_cast<size_t>(SyscallNo::kRistretto255Msm)],
-        0);
-#endif
     const auto *trace =
         handler.get_syscall_trace_data<SyscallNo::kRistretto255Msm>();
     EXPECT_NE(trace, nullptr);
@@ -94,20 +83,6 @@ public:
     return result;
   }
 };
-
-#ifndef HOGD_EXPERIMENTAL_RISTRETTO_MSM
-TEST_F(Ristretto255MsmEntryTest, DisabledNumberSkipsPointerParsing)
-{
-  std::array<std::byte, 1> memory{std::byte{0xA5}};
-  const auto before = memory;
-  const auto [result, charged] =
-      call(memory, UINT32_MAX, UINT32_MAX, UINT32_MAX);
-  ASSERT_TRUE(result.has_value());
-  EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeNoSyscall);
-  EXPECT_EQ(charged, kSyscallBaseCost + kNoSyscallCost);
-  EXPECT_EQ(memory, before);
-}
-#else
 
 constexpr uint32_t kOutput = 0;
 constexpr uint32_t kInput = 32;
@@ -238,7 +213,6 @@ TEST_F(Ristretto255MsmEntryTest, RejectsBadPointersAndOutputAliasing)
     EXPECT_EQ(memory, before);
   }
 }
-#endif
 
 } // namespace
 } // namespace hogd

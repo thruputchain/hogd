@@ -488,26 +488,27 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
 TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
 {
   // Gas version and digest are one identity; reject cross-paired schedules.
-  auto transitional = valid_artifact_bytes();
-  store_u32_at(transitional, kArtifactGasVersionOffset,
-               kTransitionalGasTableVersion);
-  store_u64_at(transitional, kArtifactGasDigestOffset,
-               kTransitionalGasScheduleDigest);
-  EXPECT_TRUE(parse_artifact(transitional, Rv32Limits::defaults()).has_value());
-  EXPECT_TRUE(parse_threaded_artifact(transitional, Rv32Limits::defaults())
-                  .has_value());
-
-  auto current_version_transitional_digest = valid_artifact_bytes();
-  store_u64_at(current_version_transitional_digest, kArtifactGasDigestOffset,
-               kTransitionalGasScheduleDigest);
-  expect_artifact_error(std::move(current_version_transitional_digest),
-                        ArtifactError::kGasScheduleDigestMismatch);
-
-  auto transitional_version_current_digest = valid_artifact_bytes();
-  store_u32_at(transitional_version_current_digest, kArtifactGasVersionOffset,
-               kTransitionalGasTableVersion);
-  expect_artifact_error(std::move(transitional_version_current_digest),
-                        ArtifactError::kGasScheduleDigestMismatch);
+  constexpr std::array<AcceptedGasSchedule, 3> kSchedules = {{
+      {.version = 5, .digest = 0x0c3a7f084fad6a08ULL},
+      {.version = 4, .digest = 0xa958d226df658598ULL},
+      {.version = 3, .digest = 0x918317c21c46bb60ULL},
+  }};
+  for (const auto &schedule : kSchedules) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactGasVersionOffset, schedule.version);
+    store_u64_at(artifact, kArtifactGasDigestOffset, schedule.digest);
+    EXPECT_TRUE(parse_artifact(artifact, Rv32Limits::defaults()).has_value());
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
+    for (const auto &other : kSchedules) {
+      if (other.version != schedule.version) {
+        auto mismatched = artifact;
+        store_u64_at(mismatched, kArtifactGasDigestOffset, other.digest);
+        expect_artifact_error(std::move(mismatched),
+                              ArtifactError::kGasScheduleDigestMismatch);
+      }
+    }
+  }
 }
 
 TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
@@ -1429,22 +1430,15 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
            hogd::kVerifySignatureMlDsa65BaseCost},
           {u8"VerifySignatureMlDsa65Block",
            hogd::kVerifySignatureMlDsa65BlockCost},
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
           {u8"Ristretto255MsmBase", 30'000},
           {u8"Ristretto255MsmTerm", 13'000},
           {u8"Ristretto255MsmTermBytes", 64},
           {u8"Ristretto255MsmMaxTerms", 256},
-#endif
       }};
 
   EXPECT_EQ(kOpCount, 49U);
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
-  EXPECT_EQ(kGasTableVersion, 0x80000004U);
-  EXPECT_EQ(kGasScheduleDigest, 0xa4ea2c0495d55ba7ULL);
-#else
-  EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0xa958d226df658598ULL);
-#endif
+  EXPECT_EQ(kGasTableVersion, 5U);
+  EXPECT_EQ(kGasScheduleDigest, 0x0c3a7f084fad6a08ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);

@@ -46,13 +46,13 @@ syscall_SHA256_inner(SystemCallHandler &handler, WrappedGasAmount remaining_gas,
   return {SyscallErrorCode::kSyscallErrorCodeNone, required_gas};
 };
 
+// Experimental API; encoding and pricing may change before stabilization.
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_Ristretto255Msm_inner(SystemCallHandler &handler,
                               WrappedGasAmount remaining_gas,
                               std::span<const std::byte> input_terms,
                               Ristretto255Point &output_point)
 {
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
   static_assert(kRistretto255MsmTermBytes == RISTRETTO255_MSM_TERM_BYTES);
   static_assert(kRistretto255MsmMaxTerms == RISTRETTO255_MSM_MAX_TERMS);
   if (input_terms.size() % kRistretto255MsmTermBytes != 0 ||
@@ -85,16 +85,6 @@ syscall_Ristretto255Msm_inner(SystemCallHandler &handler,
         SyscallRistretto255MsmOutputs{.point = output_point});
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
-#else
-  // Dispatch rejects the number before parsing. Keep the generated table
-  // linkable in ordinary builds without linking the experimental primitive.
-  (void)handler;
-  (void)remaining_gas;
-  (void)input_terms;
-  (void)output_point;
-  return {SyscallErrorCode::kSyscallErrorCodeNoSyscall,
-          WrappedGasAmount{kNoSyscallCost}};
-#endif
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

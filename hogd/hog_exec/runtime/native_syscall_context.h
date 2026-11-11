@@ -15,7 +15,6 @@
 #include "hogd/hog_exec/runtime/syscall_arg_params.h"
 #include "hogd/hog_exec/runtime/syscall_argument_parsers.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
-#include "hogd/hog_exec/runtime/syscall_fallback.h"
 #include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -39,10 +38,6 @@ public:
   [[nodiscard]] x23::Async<HostFnStatus<SyscallErrorCode>>
   syscall(Args &&...args)
   {
-    // Internal native callers choose the syscall at compile time. Do not let
-    // them bypass the experimental gate used by both external dispatch paths.
-    static_assert(syscall_is_enabled(static_cast<uint64_t>(Syscall)),
-                  "native syscall is disabled in this build");
     using Meta = SyscallMeta<Syscall>;
     using syscall_t =
         SyscallTypes<std::remove_const_t<decltype(Meta::kInnerFunc)>>;

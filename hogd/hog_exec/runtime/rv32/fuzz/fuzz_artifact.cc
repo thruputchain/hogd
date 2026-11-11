@@ -377,15 +377,12 @@ private:
   // digest to exercise pair-wise validation rather than independent fields.
   void mutate_gas_schedule(bool keep_pair)
   {
-    const bool transitional = random_flip();
-    const uint32_t version = transitional ? rv32::kTransitionalGasTableVersion
-                                          : rv32::kGasTableVersion;
-    uint64_t digest = transitional ? rv32::kTransitionalGasScheduleDigest
-                                   : rv32::kGasScheduleDigest;
+    const auto schedule = choose(rv32::kAcceptedGasSchedules);
+    uint64_t digest = schedule.digest;
     if (!keep_pair) {
       digest ^= random_bit<uint64_t>();
     }
-    set_u32(rv32::kArtifactGasVersionOffset, version);
+    set_u32(rv32::kArtifactGasVersionOffset, schedule.version);
     set_u64(rv32::kArtifactGasDigestOffset, digest);
   }
 

@@ -960,7 +960,6 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
 }
 
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
 // Fixtures and reference outputs are built outside timing. The direct FFI
 // reference checks dispatch and output wiring; kernel tests cover arithmetic.
 std::vector<uint8_t>
@@ -1078,7 +1077,6 @@ bm_ristretto255_msm(benchmark::State &state, uint32_t count, uint8_t pattern,
   state.counters["gas"] = benchmark::Counter(static_cast<double>(warm.gas));
   state.counters["terms"] = benchmark::Counter(static_cast<double>(count));
 }
-#endif
 
 // Sequences keep state valid across iterations: Update precedes Finalize,
 // which erases its stream. Optional one-time setup seeds Copy's source without
@@ -1559,7 +1557,6 @@ bm_nnint_cold(benchmark::State &state)
 void
 register_benchmarks()
 {
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
   // Include both sides of the kernel's 190-term algorithm threshold.
   for (const uint32_t count :
        {0U, 1U, 2U, 4U, 5U, 8U, 16U, 32U, 64U, 128U, 189U, 190U, 191U, 256U}) {
@@ -1585,7 +1582,6 @@ register_benchmarks()
   benchmark::RegisterBenchmark("entry/Ristretto255Msm/over_limit/257",
                                bm_ristretto255_msm, 257U, uint8_t{0},
                                MsmInvalid::OverLimit);
-#endif
   for (const SyscallCall &call : stateless_calls()) {
     benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
                                  bm_syscall_entry, call);

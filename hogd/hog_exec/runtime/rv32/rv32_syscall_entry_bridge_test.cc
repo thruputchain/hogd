@@ -252,7 +252,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
                 host_result.gas_consumed);
 }
 
-TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255FeatureGate)
+TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
 {
   const auto program = make_syscall_program({
       static_cast<int32_t>(SyscallNo::kRistretto255Msm),
@@ -287,25 +287,17 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255FeatureGate)
   EXPECT_EQ(machine.complete_ecall(result), rv32::StepResult::kContinue);
   finish_frame(handler, std::move(stashed_trace));
 
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
   EXPECT_EQ(result.continue_value(),
             static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
   EXPECT_EQ(result.gas_consumed,
             kSyscallBaseCost + GasCost::ristretto255_msm(1));
   std::ranges::copy(kPoint, memory.begin() + kOutputAddress);
-#else
-  EXPECT_EQ(result.continue_value(),
-            static_cast<uint32_t>(
-                SyscallErrorCode::kSyscallErrorCodeNoSyscall));
-  EXPECT_EQ(result.gas_consumed, kSyscallBaseCost + kNoSyscallCost);
-#endif
   EXPECT_TRUE(std::ranges::equal(machine.view().memory(), memory));
   EXPECT_EQ(machine.gas_remaining(),
             kPlentyOfGas - kInstructions * rv32::kBaseInstructionGas -
                 result.gas_consumed);
 }
 
-#ifdef HOGD_EXPERIMENTAL_RISTRETTO_MSM
 TEST_F(Rv32SyscallEntryBridgeTest, Ristretto255ExactBudgetPreservesOutput)
 {
   std::vector<uint8_t> memory(256);
@@ -324,7 +316,6 @@ TEST_F(Rv32SyscallEntryBridgeTest, Ristretto255ExactBudgetPreservesOutput)
   EXPECT_EQ(result.gas_consumed, cost);
   EXPECT_EQ(memory, before);
 }
-#endif
 
 TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 {
