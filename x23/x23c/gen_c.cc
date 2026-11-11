@@ -1,5 +1,5 @@
-// C backend for x23c (x23c --c): C11 types plus static inline codecs over
-// x23/xdr_c.h.  RPC programs are skipped.
+// C backend for x23c (x23c --c): C11 types plus codecs over x23/xdr_c.h, one
+// set per format.  RPC programs are skipped.
 
 #include <algorithm>
 #include <cctype>
@@ -37,8 +37,8 @@ c_type(const string &xdr)
       {"double", {"double", "x23_f64"}},
   };
   // No C type is a 128-bit float everywhere, so quadruple, like a type x23c
-  // has not seen, is left for the includer to define along with its
-  // quadruple_decode, quadruple_encode and quadruple_free.
+  // has not seen, is left for the includer to define along with its codecs
+  // (quadruple_decode_xdr and so on) and quadruple_free.
   if (auto it = prims.find(xdr); it != prims.end())
     return it->second;
   return {xdr, xdr};
@@ -200,9 +200,23 @@ struct GenC {
     return t;
   }
 
-  // Common to every named type: size macro, prototypes, view functions and
+  // Common to every named type: prototypes, vector and pointer codecs and
   // whole-buffer helpers.
   void gen_common(const string &name);
+
+  // Codecs exist once per format.  Their text is written with @F where the
+  // format's name goes, and emitted for each.
+  static string per_format(const string &text)
+  {
+    string out;
+    for (std::string_view fmt : {"xdr", "cxs"}) {
+      string t = text;
+      for (size_t p = 0; (p = t.find("@F", p)) != string::npos;)
+        t.replace(p, 2, fmt);
+      out += t;
+    }
+    return out;
+  }
 
   string field(const Declaration &d, const string &indent) const;
   string decode_stmt(const Declaration &d, const string &lv,
@@ -384,26 +398,26 @@ GenC::decode_stmt(const Declaration &d, const string &lv,
   case kVoid:
     return {};
   case kScalar:
-    return std::format("{}X23_TRY({}_{}decode(r, &{}));\n", in,
+    return std::format("{}X23_TRY({}_{}decode_@F(r, &{}));\n", in,
                        c_type(t).prefix, boxed(d) ? "box_" : "", lv);
   case kArray:
     if (t == "opaque")
-      return std::format("{}X23_TRY(x23_get_opaque(r, {}, {}));\n", in, d.bound,
-                         lv);
+      return std::format("{}X23_TRY(x23_get_opaque_@F(r, {}, {}));\n", in,
+                         d.bound, lv);
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
-                       "{0}  X23_TRY({2}_decode(r, &{3}[i_]));\n",
+                       "{0}  X23_TRY({2}_decode_@F(r, &{3}[i_]));\n",
                        in, d.bound, c_type(t).prefix, lv);
   case kVec:
     if (t == "opaque")
-      return std::format("{}X23_TRY(x23_bytes_decode(r, &{}, {}));\n", in, lv,
-                         map_bound(d.bound));
-    return std::format("{}X23_TRY({}_vec_decode(r, &{}, {}));\n", in,
+      return std::format("{}X23_TRY(x23_bytes_decode_@F(r, &{}, {}));\n", in,
+                         lv, map_bound(d.bound));
+    return std::format("{}X23_TRY({}_vec_decode_@F(r, &{}, {}));\n", in,
                        c_type(t).prefix, lv, map_bound(d.bound));
   case kString:
-    return std::format("{}X23_TRY(x23_string_decode(r, &{}, {}));\n", in, lv,
+    return std::format("{}X23_TRY(x23_string_decode_@F(r, &{}, {}));\n", in, lv,
                        map_bound(d.bound));
   case kPtr:
-    return std::format("{}X23_TRY({}_ptr_decode(r, &{}));\n", in,
+    return std::format("{}X23_TRY({}_ptr_decode_@F(r, &{}));\n", in,
                        c_type(t).prefix, lv);
   }
   return {};
@@ -420,28 +434,28 @@ GenC::encode_stmt(const Declaration &d, const string &rv,
     return {};
   case kScalar:
     if (boxed(d))
-      return std::format("{}X23_TRY({}_box_encode(w, {}));\n", in,
+      return std::format("{}X23_TRY({}_box_encode_@F(w, {}));\n", in,
                          c_type(t).prefix, rv);
-    return std::format("{}X23_TRY({}_encode(w, &{}));\n", in, c_type(t).prefix,
-                       rv);
+    return std::format("{}X23_TRY({}_encode_@F(w, &{}));\n", in,
+                       c_type(t).prefix, rv);
   case kArray:
     if (t == "opaque")
-      return std::format("{}X23_TRY(x23_put_opaque(w, {}, {}));\n", in, rv,
+      return std::format("{}X23_TRY(x23_put_opaque_@F(w, {}, {}));\n", in, rv,
                          d.bound);
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
-                       "{0}  X23_TRY({2}_encode(w, &{3}[i_]));\n",
+                       "{0}  X23_TRY({2}_encode_@F(w, &{3}[i_]));\n",
                        in, d.bound, c_type(t).prefix, rv);
   case kVec:
     if (t == "opaque")
-      return std::format("{}X23_TRY(x23_bytes_encode(w, &{}, {}));\n", in, rv,
-                         map_bound(d.bound));
-    return std::format("{}X23_TRY({}_vec_encode(w, &{}, {}));\n", in,
+      return std::format("{}X23_TRY(x23_bytes_encode_@F(w, &{}, {}));\n", in,
+                         rv, map_bound(d.bound));
+    return std::format("{}X23_TRY({}_vec_encode_@F(w, &{}, {}));\n", in,
                        c_type(t).prefix, rv, map_bound(d.bound));
   case kString:
-    return std::format("{}X23_TRY(x23_string_encode(w, &{}, {}));\n", in, rv,
+    return std::format("{}X23_TRY(x23_string_encode_@F(w, &{}, {}));\n", in, rv,
                        map_bound(d.bound));
   case kPtr:
-    return std::format("{}X23_TRY({}_ptr_encode(w, {}));\n", in,
+    return std::format("{}X23_TRY({}_ptr_encode_@F(w, {}));\n", in,
                        c_type(t).prefix, rv);
   }
   return {};
@@ -479,12 +493,13 @@ GenC::free_stmt(const Declaration &d, const string &lv, const string &in) const
 void
 GenC::gen_common(const string &name)
 {
-  protos_ += std::format(
-      "static inline x23_status {0}_decode(x23_reader *r, {0} *out);\n"
-      "static inline x23_status {0}_encode(x23_writer *w, const {0} *v);\n"
-      "static inline void {0}_free({0} *v);\n"
-      "X23_PTR_PROTOS({0}, {0})\n",
-      name);
+  protos_ += per_format(std::format(
+      "X23_FN x23_status {0}_decode_@F(x23_reader *r, {0} *out);\n"
+      "X23_FN x23_status {0}_encode_@F(x23_writer *w, const {0} *v);\n",
+      name));
+  protos_ += std::format("X23_FN void {0}_free({0} *v);\n"
+                         "X23_PTR_PROTOS({0}, {0})\n",
+                         name);
   funcs_ += std::format("X23_PTR_FUNCS({0}, {0})\n"
                         "X23_BUF_FUNCS({0}, {0})\n\n",
                         name);
@@ -540,31 +555,35 @@ GenC::gen_enum(const EnumDecl &e, const string &comment)
   for (const auto &c : e.body)
     valid += std::format("{}v == {}", valid.empty() ? "" : " ||\n         ",
                          enum_const(e.id, c.id));
-  protos_ += std::format("static inline bool {}_valid(int32_t v);\n", e.id);
+  protos_ += std::format("X23_FN bool {}_valid(int32_t v);\n", e.id);
   // Like the C++ and Rust bindings, decoding accepts any value; _valid is
   // for callers that care.
-  funcs_ += std::format(R"(static inline bool
+  funcs_ += std::format(R"(X23_FN bool
 {0}_valid(int32_t v)
 {{
   return {1};
 }}
-static inline x23_status
-{0}_decode(x23_reader *r, {0} *out)
+)",
+                        e.id, valid);
+  funcs_ += per_format(std::format(R"(X23_FN x23_status
+{0}_decode_@F(x23_reader *r, {0} *out)
 {{
-  return x23_i32_decode(r, out);
+  return x23_i32_decode_@F(r, out);
 }}
-static inline x23_status
-{0}_encode(x23_writer *w, const {0} *v)
+X23_FN x23_status
+{0}_encode_@F(x23_writer *w, const {0} *v)
 {{
-  return x23_i32_encode(w, v);
+  return x23_i32_encode_@F(w, v);
 }}
-static inline void
+)",
+                                   e.id));
+  funcs_ += std::format(R"(X23_FN void
 {0}_free({0} *v)
 {{
   (void)v;
 }}
 )",
-                        e.id, valid);
+                        e.id);
   gen_common(e.id);
 }
 
@@ -600,23 +619,25 @@ GenC::gen_struct(const StructDecl &s, const string &comment)
   if (fr.empty())
     fr = "  (void)v;\n";
   // Zeroing first leaves a partly decoded value safe to free.
-  funcs_ += std::format(R"(static inline x23_status
-{0}_decode(x23_reader *r, {0} *out)
+  funcs_ += per_format(std::format(R"(X23_FN x23_status
+{0}_decode_@F(x23_reader *r, {0} *out)
 {{
   x23_zero(out, sizeof(*out));
 {1}  return X23_OK;
 }}
-static inline x23_status
-{0}_encode(x23_writer *w, const {0} *v)
+X23_FN x23_status
+{0}_encode_@F(x23_writer *w, const {0} *v)
 {{
 {2}  return X23_OK;
 }}
-static inline void
+)",
+                                   s.id, dec, enc));
+  funcs_ += std::format(R"(X23_FN void
 {0}_free({0} *v)
 {{
-{3}}}
+{1}}}
 )",
-                        s.id, dec, enc, fr);
+                        s.id, fr);
   gen_common(s.id);
 }
 
@@ -673,31 +694,33 @@ GenC::gen_union(const UnionDecl &u, const string &comment)
     fr += "  default:\n    break;\n";
   }
   const string sw = b.switch_type == "bool" ? "(int)" : "";
-  funcs_ += std::format(R"(static inline x23_status
-{0}_decode(x23_reader *r, {0} *out)
+  funcs_ += per_format(std::format(R"(X23_FN x23_status
+{0}_decode_@F(x23_reader *r, {0} *out)
 {{
   x23_zero(out, sizeof(*out));
-  X23_TRY({1}_decode(r, &out->{2}));
+  X23_TRY({1}_decode_@F(r, &out->{2}));
   switch ({5}out->{2}) {{
 {3}  }}
   return X23_OK;
 }}
-static inline x23_status
-{0}_encode(x23_writer *w, const {0} *v)
+X23_FN x23_status
+{0}_encode_@F(x23_writer *w, const {0} *v)
 {{
-  X23_TRY({1}_encode(w, &v->{2}));
+  X23_TRY({1}_encode_@F(w, &v->{2}));
   switch ({5}v->{2}) {{
 {4}  }}
   return X23_OK;
 }}
-static inline void
+)",
+                                   u.id, disc.prefix, disc_id, dec, enc, sw));
+  funcs_ += std::format(R"(X23_FN void
 {0}_free({0} *v)
 {{
-  switch ({5}v->{2}) {{
-{6}  }}
+  switch ({3}v->{1}) {{
+{2}  }}
 }}
 )",
-                        u.id, disc.prefix, disc_id, dec, enc, sw, fr);
+                        u.id, disc_id, fr, sw);
 
   gen_common(u.id);
 }
@@ -761,22 +784,24 @@ GenC::gen_typedef(const Typedef &t, const string &comment)
           s->replace(p, std::string_view(from).size(), to);
     }
   }
-  funcs_ += std::format(R"(static inline x23_status
-{0}_decode(x23_reader *r, {0} *out)
+  funcs_ += per_format(std::format(R"(X23_FN x23_status
+{0}_decode_@F(x23_reader *r, {0} *out)
 {{
 {1}  return X23_OK;
 }}
-static inline x23_status
-{0}_encode(x23_writer *w, const {0} *v)
+X23_FN x23_status
+{0}_encode_@F(x23_writer *w, const {0} *v)
 {{
 {2}  return X23_OK;
 }}
-static inline void
+)",
+                                   n, dec, enc));
+  funcs_ += std::format(R"(X23_FN void
 {0}_free({0} *v)
 {{
-{3}}}
+{1}}}
 )",
-                        n, dec, enc, fr.empty() ? "  (void)v;\n" : fr);
+                        n, fr.empty() ? "  (void)v;\n" : fr);
   gen_common(n);
 }
 

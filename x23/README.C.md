@@ -11,8 +11,9 @@ The generated header includes `<x23/xdr_c.h>`, the runtime, which is
 header-only C11 and needs only `<stdint.h>`, `<stdbool.h>` and
 `<stddef.h>`, plus `malloc` and `free` unless you supply an allocator
 (see [Memory](#memory)).  It uses `__builtin_memcpy`, so it builds with
-GCC or Clang, freestanding included.  Everything is `static inline`, so
-there is nothing to link.
+GCC or Clang, freestanding included.  Every function is `static`, so
+there is nothing to link, and what you do not call is not compiled in
+(see [Code size](#code-size)).
 
 ## XDR types
 
@@ -87,7 +88,8 @@ The C field is then `TypeT *element`.  Unlike an optional, it is never
 
 No C type is a 128-bit float everywhere, so x23c leaves `quadruple` for
 you to define before including the generated header, along with
-`quadruple_decode`, `quadruple_encode` and `quadruple_free` (see
+`quadruple_decode_xdr`, `quadruple_encode_xdr`, their `_cxs`
+counterparts and `quadruple_free` (see
 [Lower-level functions](#lower-level-functions)), and
 `X23_VEC_TYPE(quadruple, quadruple)`, `X23_PTR_PROTOS(quadruple,
 quadruple)` and `X23_PTR_FUNCS(quadruple, quadruple)` if it appears in
@@ -151,17 +153,33 @@ The buffer functions above are built on functions that work on a
 position in a larger buffer:
 
 ```c
-x23_status T_decode(x23_reader *r, T *out);
-x23_status T_encode(x23_writer *w, const T *v);
+x23_status T_decode_xdr(x23_reader *r, T *out);
+x23_status T_encode_xdr(x23_writer *w, const T *v);
+x23_status T_decode_cxs(x23_reader *r, T *out);
+x23_status T_encode_cxs(x23_writer *w, const T *v);
 ```
 
-`x23_reader_init(buf, len, cxs)` and `x23_writer_init(buf, cap, cxs)`
-make readers and writers, where `cxs` picks CXS over traditional XDR.
-`T_decode` does not check for trailing bytes.  Along with them come
-`T_vec_decode` and `T_vec_encode` (taking the bound, or
-`X23_UNBOUNDED`) and `T_vec_free`, `T_ptr_decode`, `T_ptr_encode` and
-`T_ptr_free` for optionals, and `T_box_decode` and `T_box_encode` for
-boxed fields (which `T_ptr_free` frees).
+`x23_reader_init(buf, len)` and `x23_writer_init(buf, cap)` make
+readers and writers, which are the same for both formats: the format is
+in the function's name.  The decode functions do not check for trailing
+bytes.  Along with them, each again with an `_xdr` and a `_cxs` form,
+come `T_vec_decode` and `T_vec_encode` (taking the bound, or
+`X23_UNBOUNDED`), `T_ptr_decode` and `T_ptr_encode` for optionals, and
+`T_box_decode` and `T_box_encode` for boxed fields.  `T_vec_free` and
+`T_ptr_free` (which also frees boxed fields) serve both formats.
+
+## Code size
+
+Each codec exists once per format, so the format is fixed at compile
+time, and since the functions are `static`, the compiler drops the ones
+a program does not call.  A contract that only uses CXS carries no
+traditional XDR code.
+
+Functions are declared with `X23_FN`, which is `static inline` except
+on rv32, where it is plain `static`: without the hint, the compiler
+inlines only where that makes the code smaller, as the Rust `xdrs`
+crate arranges for contract builds.  Define `X23_FN` before including
+the header to choose otherwise.
 
 ## Memory
 

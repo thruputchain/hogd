@@ -614,11 +614,11 @@ void
 cxs_int_check(T v, Enc enc, Dec dec)
 {
   uint8_t buf[16];
-  x23_writer w = x23_writer_init(buf, sizeof(buf), true);
+  x23_writer w = x23_writer_init(buf, sizeof(buf));
   CHECK_OK(enc(&w, &v));
   Bytes got(buf, buf + w.pos);
   CHECK(got == cpp_encode(v, true));
-  x23_reader r = x23_reader_init(buf, w.pos, true);
+  x23_reader r = x23_reader_init(buf, w.pos);
   T back;
   CHECK_OK(dec(&r, &back));
   CHECK(back == v && r.p == r.end);
@@ -629,7 +629,7 @@ void
 cxs_bytes_check(const Bytes &b, Dec dec)
 {
   T cv{}, xv{};
-  x23_reader r = x23_reader_init(b.data(), uint32_t(b.size()), true);
+  x23_reader r = x23_reader_init(b.data(), uint32_t(b.size()));
   bool c_ok = dec(&r, &cv) == X23_OK && r.p == r.end;
   bool x_ok =
       x23::deserialize_cxs(&xv, std::span<const uint8_t>(b)).has_value();
@@ -674,15 +674,18 @@ cxs_int_tests()
                                       0xffffffffll,
                                       0x100000000ll};
   for (int64_t v : kInts) {
-    cxs_int_check<int64_t>(v, x23_i64_encode, x23_i64_decode);
-    cxs_int_check<uint64_t>(uint64_t(v), x23_u64_encode, x23_u64_decode);
+    cxs_int_check<int64_t>(v, x23_i64_encode_cxs, x23_i64_decode_cxs);
+    cxs_int_check<uint64_t>(uint64_t(v), x23_u64_encode_cxs,
+                            x23_u64_decode_cxs);
     if (v >= INT32_MIN && v <= INT32_MAX)
-      cxs_int_check<int32_t>(int32_t(v), x23_i32_encode, x23_i32_decode);
+      cxs_int_check<int32_t>(int32_t(v), x23_i32_encode_cxs,
+                             x23_i32_decode_cxs);
     if (v >= 0 && v <= UINT32_MAX)
-      cxs_int_check<uint32_t>(uint32_t(v), x23_u32_encode, x23_u32_decode);
+      cxs_int_check<uint32_t>(uint32_t(v), x23_u32_encode_cxs,
+                              x23_u32_decode_cxs);
   }
   for (bool v : {false, true})
-    cxs_int_check<bool>(v, x23_bool_encode, x23_bool_decode);
+    cxs_int_check<bool>(v, x23_bool_encode_cxs, x23_bool_decode_cxs);
 
   std::mt19937_64 rng(0xc0de);
   static constexpr uint8_t kHeaders[] = {0x3f, 0x7f, 0xbf, 0xff};
@@ -692,18 +695,18 @@ cxs_int_tests()
       x = uint8_t(rng());
     if (rng() % 2)
       b[0] = kHeaders[rng() % 4];
-    cxs_bytes_check<int32_t>(b, x23_i32_decode);
-    cxs_bytes_check<uint32_t>(b, x23_u32_decode);
-    cxs_bytes_check<int64_t>(b, x23_i64_decode);
-    cxs_bytes_check<uint64_t>(b, x23_u64_decode);
-    cxs_bytes_check<bool>(b, x23_bool_decode);
+    cxs_bytes_check<int32_t>(b, x23_i32_decode_cxs);
+    cxs_bytes_check<uint32_t>(b, x23_u32_decode_cxs);
+    cxs_bytes_check<int64_t>(b, x23_i64_decode_cxs);
+    cxs_bytes_check<uint64_t>(b, x23_u64_decode_cxs);
+    cxs_bytes_check<bool>(b, x23_bool_decode_cxs);
   }
 
   // Not the shortest form.
   const uint8_t five_in_two[] = {0x3f, 0x05};
-  x23_reader r = x23_reader_init(five_in_two, 2, true);
+  x23_reader r = x23_reader_init(five_in_two, 2);
   uint32_t u;
-  CHECK(x23_u32_decode(&r, &u) == X23_ERR_NONCANONICAL);
+  CHECK(x23_u32_decode_cxs(&r, &u) == X23_ERR_NONCANONICAL);
 }
 
 void
@@ -741,8 +744,8 @@ misc_tests()
   CHECK(Flag_from_xdr(bad_bool + 4, 4, &f) == X23_ERR_BOOL);
   const uint8_t bad_pad[] = {0, 0, 0, 1, 'a', 0, 0, 1};
   x23_bytes bv;
-  x23_reader r = x23_reader_init(bad_pad, sizeof(bad_pad), false);
-  CHECK(x23_bytes_decode(&r, &bv, 8) == X23_ERR_PADDING);
+  x23_reader r = x23_reader_init(bad_pad, sizeof(bad_pad));
+  CHECK(x23_bytes_decode_xdr(&r, &bv, 8) == X23_ERR_PADDING);
   x23_bytes_free(&bv);
   Point pt;
   CHECK(Point_from_xdr(bad_pad, 7, &pt) == X23_ERR_ALIGN);
@@ -750,8 +753,8 @@ misc_tests()
 
   // Opaque data longer than the input fails before allocating.
   const uint8_t huge[] = {0xff, 0xff, 0xff, 0xf0, 0, 0, 0, 0};
-  r = x23_reader_init(huge, sizeof(huge), false);
-  CHECK(x23_bytes_decode(&r, &bv, X23_UNBOUNDED) == X23_ERR_SHORT);
+  r = x23_reader_init(huge, sizeof(huge));
+  CHECK(x23_bytes_decode_xdr(&r, &bv, X23_UNBOUNDED) == X23_ERR_SHORT);
   CHECK(bv.data == nullptr);
 }
 
