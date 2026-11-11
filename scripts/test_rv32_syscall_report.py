@@ -153,6 +153,14 @@ def synthetic_calibration(baseline_ns=1.6):
 
 
 class StorageParsingTest(unittest.TestCase):
+    def test_experimental_msm_does_not_set_shared_crossing_price(self):
+        measured = report.rows({"benchmarks": [
+            row("entry/GetBlockHeight", 70.0),
+            row("entry/Ristretto255Msm/dense/2", 26000.0),
+            row("entry/Ristretto255Msm/over_limit/257", 42.0),
+        ]})
+        self.assertEqual(report.syscall_names(measured), ["GetBlockHeight"])
+
     def test_cold_rows_are_not_syscalls(self):
         measured = report.rows(synthetic_run())
         names = report.syscall_names(measured)
