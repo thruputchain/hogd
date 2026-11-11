@@ -1,8 +1,6 @@
 // Types for c_backend.cc, which checks x23c --c output against the C++
 // codec.  Covers every construct the C backend handles.
 
-%#include "tests/c_backend_extra.h"
-
 namespace ctest {
 
 const MAXV = 8;
