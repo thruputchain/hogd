@@ -382,14 +382,20 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
   // an observation within the same TX.  Adding both into one map and taking
   // the max across TXs lets has_unmatched_entries() reject doctored proposals
   // where a single insert is reused for both a consume and a later peek.
-  // TODO(geoff): reduce copies by using non-owning span keys.
-  std::map<QueueEntry, uint32_t> per_tx_demand;
+  //
+  // Keys point into change.delta_, which outlives this map: the map is folded
+  // into entry_tracking_ below before any part of the delta is moved out.
+  auto entry_ptr_less = [](const QueueEntry *a, const QueueEntry *b) {
+    return *a < *b;
+  };
+  std::map<const QueueEntry *, uint32_t, decltype(entry_ptr_less)>
+      per_tx_demand(entry_ptr_less);
   for (auto const &entry : change.delta_.observed_concurrent_entries) {
-    ++per_tx_demand[entry];
+    ++per_tx_demand[&entry];
   }
   if (change.delta_.consume) {
     for (auto const &entry : change.delta_.consume->current_block_consumed) {
-      ++per_tx_demand[entry];
+      ++per_tx_demand[&entry];
     }
   }
 
@@ -448,7 +454,7 @@ RetrocausalQueueLock::commit_change(bool /*did_finalize*/,
     }
   }
   for (auto const &[entry, count] : per_tx_demand) {
-    auto &t = entry_tracking_[entry];
+    auto &t = entry_tracking_[*entry];
     t.observe_count = std::max(t.observe_count, count);
   }
 
