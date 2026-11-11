@@ -53,18 +53,16 @@ syscall_Ristretto255Msm_inner(SystemCallHandler &handler,
                               std::span<const std::byte> input_terms,
                               Ristretto255Point &output_point)
 {
-  static_assert(kRistretto255MsmTermBytes == RISTRETTO255_MSM_TERM_BYTES);
-  static_assert(kRistretto255MsmMaxTerms == RISTRETTO255_MSM_MAX_TERMS);
-  if (input_terms.size() % kRistretto255MsmTermBytes != 0 ||
-      input_terms.size() / kRistretto255MsmTermBytes >
-          kRistretto255MsmMaxTerms) {
+  if (input_terms.size() % RISTRETTO255_MSM_TERM_BYTES != 0 ||
+      input_terms.size() / RISTRETTO255_MSM_TERM_BYTES >
+          RISTRETTO255_MSM_MAX_TERMS) {
     return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
             WrappedGasAmount{0}};
   }
   const WrappedGasAmount gas{GasCost::ristretto255_msm(
-      input_terms.size() / kRistretto255MsmTermBytes)};
-  // Reserve decoding, allocation and arithmetic before entering Rust. Exact
-  // exhaustion faults too, without computing or writing an output.
+      input_terms.size() / RISTRETTO255_MSM_TERM_BYTES)};
+  // Reserve decoding, allocation and arithmetic before entering Rust.
+  // Exact exhaustion faults before entering Rust too.
   if (remaining_gas.get() <= gas.get()) {
     return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
   }

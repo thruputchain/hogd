@@ -4,6 +4,8 @@
 #include <cassert>
 #include <cstdint>
 
+#include "hogd/rust/crypto/bindings.h"
+
 namespace hogd {
 
 /**
@@ -128,8 +130,6 @@ constexpr static uint64_t kGenericBadSyscallCost = 10;
 // Calibration: https://linear.app/grndhg/issue/GH-617
 constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
 constexpr uint64_t kRistretto255MsmTermCost = 13'000;
-constexpr uint64_t kRistretto255MsmTermBytes = 64;
-constexpr uint64_t kRistretto255MsmMaxTerms = 256;
 
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
@@ -162,8 +162,8 @@ struct GasCost {
   {
     // The caller bounds the term count before computing the price. Even the
     // largest accepted input fits far below the gas type's maximum.
-    assert(terms <= kRistretto255MsmMaxTerms);
-    static_assert(kRistretto255MsmMaxTerms <=
+    assert(terms <= RISTRETTO255_MSM_MAX_TERMS);
+    static_assert(RISTRETTO255_MSM_MAX_TERMS <=
                   (UINT64_MAX - kRistretto255MsmBaseCost) /
                       kRistretto255MsmTermCost);
     return kRistretto255MsmBaseCost + terms * kRistretto255MsmTermCost;
@@ -278,8 +278,8 @@ constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
      .cost = kVerifySignatureMlDsa65BlockCost},
     {.name = u8"Ristretto255MsmBase", .cost = kRistretto255MsmBaseCost},
     {.name = u8"Ristretto255MsmTerm", .cost = kRistretto255MsmTermCost},
-    {.name = u8"Ristretto255MsmTermBytes", .cost = kRistretto255MsmTermBytes},
-    {.name = u8"Ristretto255MsmMaxTerms", .cost = kRistretto255MsmMaxTerms},
+    {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
+    {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
 }};
 
 } // namespace hogd

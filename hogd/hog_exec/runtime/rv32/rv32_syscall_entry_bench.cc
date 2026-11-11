@@ -970,10 +970,10 @@ make_msm_terms(uint32_t count, uint8_t pattern)
       0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58, 0xe3, 0x0b, 0x6a, 0xa5, 0x82,
       0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
   };
-  std::vector<uint8_t> terms(count * kRistretto255MsmTermBytes);
+  std::vector<uint8_t> terms(count * RISTRETTO255_MSM_TERM_BYTES);
   for (uint32_t i = 0; i < count; ++i) {
-    auto term = std::span(terms).subspan(i * kRistretto255MsmTermBytes,
-                                         kRistretto255MsmTermBytes);
+    auto term = std::span(terms).subspan(i * RISTRETTO255_MSM_TERM_BYTES,
+                                         RISTRETTO255_MSM_TERM_BYTES);
     // Different dense scalars, independent of the point multiples below.
     const std::array<uint8_t, 4> seed = {0x6d, 0x73, static_cast<uint8_t>(i),
                                          static_cast<uint8_t>(i >> 8)};
@@ -1025,7 +1025,7 @@ bm_ristretto255_msm(benchmark::State &state, uint32_t count, uint8_t pattern,
     const bool point =
         invalid == MsmInvalid::FirstPoint || invalid == MsmInvalid::LastPoint;
     const size_t offset =
-        (last ? count - 1 : 0) * kRistretto255MsmTermBytes + (point ? 32 : 0);
+        (last ? count - 1 : 0) * RISTRETTO255_MSM_TERM_BYTES + (point ? 32 : 0);
     std::fill_n(terms.begin() + offset, 32, 0xff);
   }
   uint8_t expected[32];
