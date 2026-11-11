@@ -142,6 +142,16 @@ public:
   constexpr static SerializationFormat kDefaultSerializationFormat =
       SerializationFormat::kTxs;
 
+  // Charged when the wrapper rejects calldata (a parse error, trailing bytes,
+  // or a forwarded auth-handle count the method's arguments do not match). The
+  // decode has already run by then, at a cost proportional to the calldata, so
+  // this is a flat price for that work rather than an exact one. It is set at
+  // the dearest rejection the RV32 reference default wallet can reach: its
+  // decode is ~194 gas per WalletCall, ~2.3 gas per opaque byte, and peaks at
+  // 64,282 gas (a truncated 280-call vector, 11.7 KB); one call more and the
+  // 64 KiB default guest memory faults before decoding. See #4236.
+  constexpr static GasAmount kDecodeErrorGas = 65'000;
+
   template<is_contract_trait ContractTrait, StringLiteral Name>
   void add(auto lambda)
   {
@@ -198,9 +208,6 @@ public:
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
 
-    // TODO(geoff): figure out gas costs for native contracts like this
-    constexpr static GasAmount kErrorGas = 0;
-
     // A coroutine, so not noexcept: NativeContract::invoke() re-establishes
     // that boundary around its frame allocation.
     auto wrapped_f =
@@ -212,9 +219,12 @@ public:
         // not match the method's SignedToken arguments aborts the frame with
         // LibraryExn::Handling(DecodingArgs), byte-identical to an RV32
         // contract's wrapper — not a plain frame fault. See
-        // default_wallet_parity_test.cc's malformed-calldata cases.
+        // default_wallet_parity_test.cc's malformed-calldata cases. A frame
+        // that cannot pay kDecodeErrorGas runs out of gas instead.
         auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {
-          ctx.consume_gas(kErrorGas);
+          if (!ctx.consume_gas(kDecodeErrorGas)) {
+            return InvokeError{InvokeErrorCode::OutOfGas};
+          }
           LibraryExn exn(LibraryExn::kLibraryExnHandling);
           exn.handling() = HandlingError(HandlingError::kHandlingDecodingArgs);
           auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);

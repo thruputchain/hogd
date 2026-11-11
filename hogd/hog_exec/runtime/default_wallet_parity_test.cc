@@ -35,6 +35,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -1552,6 +1553,146 @@ TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
   wallet_calls_t calls;
   calls.push_back(call);
   expect_parity_success(calls);
+}
+
+// #4236: the wrapper decodes calldata before the method body runs, so a
+// rejection is priced at NativeContractBuilder::kDecodeErrorGas, the dearest
+// rejection the rv32 reference can reach. Every input here is one the rv32
+// wallet decodes and rejects as DecodingArgs (larger inputs fault on its 64 KiB
+// memory before decoding); the native wallet must charge the flat price and
+// never less than the reference. calls=280 is the reference's measured peak.
+TEST_F(DefaultWalletParityTest, DecodeErrorChargeCoversRv32Reference)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+  auto const exec_id = wallet_meta::method_id<u8"execute">();
+  auto const deploy_id = wallet_meta::method_id<u8"deploy">();
+  auto const expected_abort = decoding_args_abort_bytes();
+
+  struct Measured {
+    GasAmount gas = 0;
+    std::vector<uint8_t> abort_bytes;
+  };
+  auto run = [&](ContractAddress const &wallet,
+                 PubkeyAccountPreimage const &preimage,
+                 Runtime::MethodID method_id, std::vector<uint8_t> const &raw) {
+    Invocation invocation{.invoked_address = wallet,
+                          .entrypoint = entrypoint_from_method_id(method_id),
+                          .gas_limit = kDefaultMaxTxGas,
+                          .calldata = {}};
+    invocation.calldata.append(raw.begin(), raw.end());
+    SignedTransaction stx;
+    stx.tx.invocation = std::move(invocation);
+    stx.tx.auth_claim = make_pubkey_claim(preimage);
+    stx.tx.uniquifier = make_new_uniquifier();
+    auto handler = make_new_system_call_handler(stx, *ctx_, &last_tx_id_);
+    auto res = handler.root_invoke()();
+    Measured m{.gas = res.gas_consumed_, .abort_bytes = {}};
+    auto frame_output = handler.get_most_recent_frame_output();
+    if (frame_output.status_code() == InvocationFrameStatusCode::Abort) {
+      auto const &buf = frame_output.abort_buffer();
+      m.abort_bytes.assign(buf.begin(), buf.end());
+    }
+    ExecResult commit = handler.try_commit_transaction()();
+    EXPECT_EQ(commit, ExecResult::ExecResultTxRootFrameReverted);
+    EXPECT_TRUE(
+        handler.emit_events(commit, ProposedTransaction{.signed_tx = stx})());
+    advance_block();
+    return m;
+  };
+  auto check = [&](Runtime::MethodID method_id,
+                   std::vector<uint8_t> const &raw) {
+    auto rv32 = run(rv32_wallet_, rv32_preimage_, method_id, raw);
+    auto native = run(native_wallet_, native_preimage_, method_id, raw);
+    EXPECT_EQ(rv32.abort_bytes, expected_abort);
+    EXPECT_EQ(native.abort_bytes, expected_abort);
+    EXPECT_EQ(native.gas, NativeContractBuilder::kDecodeErrorGas);
+    EXPECT_GE(native.gas, rv32.gas);
+  };
+  auto bytes_of = [](auto const &encoded) {
+    return std::vector<uint8_t>(encoded.begin(), encoded.end());
+  };
+
+  {
+    SCOPED_TRACE("execute/empty");
+    check(exec_id, {});
+  }
+  for (size_t n : {1, 16, 280}) {
+    SCOPED_TRACE(testing::Message() << "execute/truncated/calls=" << n);
+    wallet_calls_t calls;
+    calls.resize(n);
+    auto raw = bytes_of(wallet_meta::make_calldata<u8"execute">(calls));
+    raw.pop_back();
+    check(exec_id, raw);
+  }
+  for (size_t p : {0, 14336}) {
+    SCOPED_TRACE(testing::Message() << "execute/trailing/payload=" << p);
+    WalletCall call{};
+    call.calldata.resize(p, 0xA5);
+    wallet_calls_t calls;
+    calls.push_back(std::move(call));
+    auto raw = bytes_of(wallet_meta::make_calldata<u8"execute">(calls));
+    raw.push_back(0);
+    check(exec_id, raw);
+  }
+  {
+    SCOPED_TRACE("deploy/empty");
+    check(deploy_id, {});
+  }
+  {
+    SCOPED_TRACE("deploy/trailing/initializer=14336");
+    default_wallet::WalletInitCall init{};
+    init.entrypoint = entrypoint_from_method_id(0);
+    init.calldata.resize(14336, 0xA5);
+    auto raw = bytes_of(wallet_meta::make_calldata<u8"deploy">(
+        SHA256Hash{}, SHA256Hash{}, std::tuple<int64_t, uint64_t>{0, 0},
+        x23::Ptr<default_wallet::WalletInitCall>{init}));
+    raw.push_back(0);
+    check(deploy_id, raw);
+  }
+}
+
+// #4236's reproduction: malformed execute calldata under a gas limit at or
+// below kDecodeErrorGas runs the frame out of gas, charging the whole limit
+// rather than zero.
+TEST_F(DefaultWalletParityTest, DecodeErrorUnderSmallGasLimitRunsOutOfGas)
+{
+  setup_wallets_and_targets();
+  make_ctx();
+
+  wallet_calls_t calls;
+  calls.resize(1);
+  auto encoded = wallet_meta::make_calldata<u8"execute">(calls);
+  std::vector<uint8_t> raw(encoded.begin(), encoded.end());
+  raw.pop_back();
+
+  for (GasAmount gas_limit :
+       {GasAmount{1}, NativeContractBuilder::kDecodeErrorGas}) {
+    SCOPED_TRACE(testing::Message() << "gas_limit=" << gas_limit);
+    Invocation invocation{.invoked_address = native_wallet_,
+                          .entrypoint = entrypoint_from_method_id(
+                              wallet_meta::method_id<u8"execute">()),
+                          .gas_limit = gas_limit,
+                          .calldata = {}};
+    invocation.calldata.append(raw.begin(), raw.end());
+    SignedTransaction stx;
+    stx.tx.invocation = std::move(invocation);
+    stx.tx.auth_claim = make_pubkey_claim(native_preimage_);
+    stx.tx.uniquifier = make_new_uniquifier();
+    auto handler = make_new_system_call_handler(stx, *ctx_, &last_tx_id_);
+    auto res = handler.root_invoke()();
+    EXPECT_EQ(res.gas_consumed_, gas_limit);
+    ASSERT_FALSE(res.result_.has_value());
+    // The root reports a frame's OutOfGas as Deterministic.
+    EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::Deterministic);
+    EXPECT_EQ(handler.get_most_recent_frame_output().status_code(),
+              InvocationFrameStatusCode::Fault);
+    ExecResult commit = handler.try_commit_transaction()();
+    EXPECT_EQ(commit, ExecResult::ExecResultTxDeterministicError);
+    EXPECT_TRUE(
+        handler.emit_events(commit, ProposedTransaction{.signed_tx = stx})());
+    advance_block();
+  }
 }
 
 // NOLINTEND(bugprone-exception-escape)
