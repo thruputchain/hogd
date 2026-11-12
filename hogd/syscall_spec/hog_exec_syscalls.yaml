@@ -18,6 +18,8 @@ syscalls:
     needs_gas: true
   VerifySignature:
     needs_gas: true
+  Ristretto255Msm:
+    needs_gas: true
   Invoke:
     needs_gas: true
     # Invoke recurses into Runtime::invoke, so it suspends wherever the child

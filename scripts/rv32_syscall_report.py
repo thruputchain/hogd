@@ -293,8 +293,11 @@ def syscall_names(measured):
     for name in measured:
         if not name.startswith("entry/"):
             continue
+        # Experimental MSM sweeps are calibrated separately. In particular,
+        # their cheap structural rejects must not set the shared crossing price.
         if (SHA256_ROW.match(name) or BYTESTRING_ROW.match(name) or
-                MLDSA_VERIFY_ROW.match(name)):
+                MLDSA_VERIFY_ROW.match(name) or
+                name.startswith("entry/Ristretto255Msm/")):
             continue
         names.append(name[len("entry/"):])
     return sorted(names)

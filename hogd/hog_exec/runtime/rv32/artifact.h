@@ -38,7 +38,8 @@ inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
 // into the header at kArtifactGasVersionOffset and validated at load.
 // v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
 // trap.
-inline constexpr uint32_t kGasTableVersion = 4;
+// v5 adds Ristretto255 MSM costs.
+inline constexpr uint32_t kGasTableVersion = 5;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -92,7 +93,7 @@ gas_schedule_digest()
 inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
 
 // Pin the current schedule digest used by artifact producers and admission.
-static_assert(kGasScheduleDigest == 0xa958d226df658598ULL);
+static_assert(kGasScheduleDigest == 0x0c3a7f084fad6a08ULL);
 
 // Accepted artifact declarations, matched as version/digest pairs. Execution
 // always uses this build's current instruction and syscall prices, including
@@ -111,10 +112,12 @@ inline constexpr uint32_t kTransitionalGasTableVersion = 3;
 inline constexpr uint64_t kTransitionalGasScheduleDigest =
     0x918317c21c46bb60ULL;
 
-inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 3> kAcceptedGasSchedules = {{
     {.version = kGasTableVersion, .digest = kGasScheduleDigest},
     {.version = kTransitionalGasTableVersion,
      .digest = kTransitionalGasScheduleDigest},
+    // Previous production schedule retained for deployed artifacts.
+    {.version = 4, .digest = 0xa958d226df658598ULL},
 }};
 
 constexpr uint64_t
@@ -276,14 +279,14 @@ format_fingerprint(uint32_t format_version = kArtifactVersion6,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xd96927c3425ee88eULL);
+static_assert(kArtifactFormatFingerprint == 0x3ab36062185b953aULL);
 static_assert(format_fingerprint(kArtifactVersion6 + 1) !=
               kArtifactFormatFingerprint);
 
 // The fingerprints a lowerer may report: one per lowerer generation in the
 // field, pinned to what that lowerer emits. The transitional entries go with
-// kAcceptedGasSchedules' transitional entry.
-inline constexpr std::array<uint64_t, 5> kAcceptedFormatFingerprints = {
+// kAcceptedGasSchedules' previous schedules.
+inline constexpr std::array<uint64_t, 6> kAcceptedFormatFingerprints = {
     // This build's own.
     kArtifactFormatFingerprint,
     // v6 lowerer declaring gas table v3.
@@ -294,6 +297,7 @@ inline constexpr std::array<uint64_t, 5> kAcceptedFormatFingerprints = {
     0x4171b4b8dc19b9abULL, // Gas table v4.
     0x8e5caf3e9cd23b22ULL, // Gas table v3, fixed bounds.
     0xc5f00a7d4451045eULL, // Gas table v3, caller bounds (tools 0.43.0).
+    0xd96927c3425ee88eULL, // Production v6 lowerer, gas table v4.
 };
 static_assert(kAcceptedFormatFingerprints[1] == 0x0e336ac8e46602e1ULL);
 

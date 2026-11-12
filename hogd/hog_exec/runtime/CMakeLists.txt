@@ -136,6 +136,7 @@ add_library(runtime_test_objects OBJECT
   syscall_misc_tests.cc
   syscall_parse_hardening_rv32_test.cc
   syscall_parse_tests.cc
+  syscall_ristretto255_msm_test.cc
   syscall_verify_signature_test.cc
   tracing_tests.cc
   try_invoke_test.cc
