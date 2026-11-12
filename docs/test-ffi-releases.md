@@ -10,6 +10,10 @@ archives and publishes a GitHub release. Its tag check requires the header
 version to match. The full hogd `Release` workflow responds to `v*` tags and is
 not involved.
 
+Before tagging, run `Release test_ffi Library (Dry Run)` on the candidate
+branch. It uploads all three platform archives for inspection without creating
+a release or publishing to S3.
+
 After that tagged build succeeds, `Publish test_ffi to public S3` starts
 automatically. It runs publisher code from the default branch, downloads the
 six authenticated GitHub release assets, and verifies all checksums, archive
