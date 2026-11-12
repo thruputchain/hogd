@@ -1,0 +1,27 @@
+version: 2
+updates:
+  # Keeps the commit SHAs that pin every `uses:` in .github/ current. Actions
+  # are pinned to SHAs so a moved tag cannot change what runs with the
+  # repository's write tokens. Dependabot rewrites the SHA and the version
+  # comment together.
+  #
+  # Cargo updates were removed in 5959abdc ("ci: dependabot doesn't work
+  # with submodules") because Dependabot cannot resolve the workspace's
+  # submodule path dependencies. That still holds, so only the actions
+  # ecosystem is enabled here.
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+      time: "09:00"
+    open-pull-requests-limit: 5
+    groups:
+      github-actions:
+        patterns:
+          - "*"
+    labels:
+      - dependencies
+      - ci
+    commit-message:
+      prefix: ci

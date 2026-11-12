@@ -17,9 +17,8 @@ env:
   # Version embedded in binaries assembled by this component release.
   HOGD_DISTRIBUTION_VERSION: "0.1.32"
 
-permissions:
-  contents: write
-  actions: read
+# No workflow-level permissions: every job declares its own, and only the
+# publish job holds contents: write.
 
 jobs:
   release:
@@ -182,7 +181,7 @@ jobs:
 
       - name: Upload Linux artifacts
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           if-no-files-found: error
           name: hogd-linux-${{ matrix.architecture }}-release-artifacts
@@ -436,7 +435,7 @@ jobs:
 
       - name: Upload Artifact
         if: github.event_name == 'push'
-        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
+        uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6.0.0
         with:
           if-no-files-found: error
           name: hog-devnode-macos-arm64
