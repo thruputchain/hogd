@@ -221,6 +221,8 @@ public:
   void launch_stats_worker();
 
 private:
+  friend class IndexDBTest;
+
   IndexDB() = default;
   IndexDB(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *tx_cf,
           rocksdb::ColumnFamilyHandle *contract_cf)

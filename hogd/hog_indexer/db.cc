@@ -21,7 +21,9 @@
 #include <utility>
 #include <vector>
 
+#include <rocksdb/cache.h>
 #include <rocksdb/compression_type.h>
+#include <rocksdb/filter_policy.h>
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <rocksdb/db.h>
 #include <rocksdb/env.h>
@@ -30,6 +32,7 @@
 #include <rocksdb/slice.h>
 #include <rocksdb/sst_file_writer.h>
 #include <rocksdb/status.h>
+#include <rocksdb/table.h>
 #include <rocksdb/write_batch.h>
 
 #include <chrono>
@@ -65,6 +68,25 @@
 namespace hogd {
 
 namespace {
+
+rocksdb::Options
+indexer_options(rocksdb::CompressionType compression_algorithm)
+{
+  rocksdb::Options options;
+  options.compression = compression_algorithm;
+
+  // Duplicate transaction checks usually miss, so keep whole-key filters
+  // at every level and share one cache across all column families.
+  rocksdb::BlockBasedTableOptions table_options;
+  table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
+  table_options.whole_key_filtering = true;
+  table_options.block_cache = rocksdb::NewLRUCache(256_MiB);
+  table_options.cache_index_and_filter_blocks = true;
+  table_options.pin_l0_filter_and_index_blocks_in_cache = true;
+  options.table_factory.reset(
+      rocksdb::NewBlockBasedTableFactory(table_options));
+  return options;
+}
 
 // What ingest checks about a pulled block before applying it. The event
 // server established both consensus roots over the block's bodies when it
@@ -509,9 +531,8 @@ IndexDB::make_new(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kInternal);
   }
 
-  rocksdb::Options options;
+  auto options = indexer_options(compression_algorithm);
   options.create_if_missing = true;
-  options.compression = compression_algorithm;
 
   // Performance optimizations for bulk loading
   // Increase write buffer size for better SST file writing performance
@@ -572,9 +593,8 @@ IndexDB::open(const std::filesystem::path &path,
     return IndexerError(IndexerErrorCode::kUnsupportedCompressionAlgorithm);
   }
 
-  rocksdb::Options options;
+  auto options = indexer_options(compression_algorithm);
   options.create_if_missing = false; // Don't create if it doesn't exist
-  options.compression = compression_algorithm;
 
   // List existing column families
   std::vector<std::string> column_family_names;
