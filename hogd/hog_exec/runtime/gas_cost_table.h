@@ -11,9 +11,9 @@ namespace hogd {
 /**
  * Table of gas costs for various operations.
  *
- * These are consensus: validators must agree on them. They are this build's
- * and are not part of an artifact, which declares only the syscall API version
- * it was built against, so a new price needs no change to any artifact or
+ * These are consensus: validators must agree on them. They belong to this
+ * build, not to an artifact, which declares only the syscall API version it
+ * was built against, so a new price needs no change to any artifact or
  * lowerer. rv32_vm_test spells every entry out, so a change here is deliberate.
  *
  * The costs are measured by the RV32 Gas Calibration workflow, which times the

@@ -1555,9 +1555,9 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         # 1 gas -- below what this benchmark resolves, and a constant in this
         # table is not free: every one is a consensus price that the schedule
         # pins, so adding one buys a consensus change for a term that is
-        # noise. What is left unpriced
-        # is bounded by what it costs to get deep in the first place: reaching
-        # depth D means D nested invokes, each dearer than the walk it adds.
+        # noise. What is left unpriced is bounded by what it costs to get deep
+        # in the first place: reaching depth D means D nested invokes, each
+        # dearer than the walk it adds.
         # The number is printed so a regression -- or a chain setting
         # max_cross_invoke_depth far higher -- is visible in the sweep.
         walk = parent_walk_ns(storage)

@@ -28,9 +28,8 @@ inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
 inline constexpr uint32_t kArtifactVersion5 = 5;
 inline constexpr uint32_t kArtifactVersion6 = 6;
 inline constexpr uint32_t kArtifactVersion7 = 7;
-// A v7 header. A v5 or v6 header carries an 8-byte gas schedule digest after
-// its gas schedule version, so it is that much longer and every later field
-// sits that much further on.
+// A v7 header. A v5 or v6 header adds the gas schedule digest, shifting the
+// fields after it.
 inline constexpr uint32_t kArtifactHeaderBytes = 120;
 inline constexpr uint32_t kArtifactGasDigestBytes = 8;
 inline constexpr uint32_t kArtifactV5V6HeaderBytes =
@@ -75,10 +74,8 @@ static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
 
 // The gas schedule declarations a v5 or v6 artifact may carry, matched as
-// version/digest pairs. They are historical identifiers and select nothing:
-// every artifact executes at this build's prices. The list is frozen. It
-// affects consensus admission, and deployed v5 and v6 artifacts carry these
-// values, so an entry leaves only with the readers for both.
+// version/digest pairs. They select nothing: every artifact executes at this
+// build's prices. Frozen, because deployed v5 and v6 artifacts carry them.
 struct AcceptedGasSchedule {
   uint32_t version;
   uint64_t digest;

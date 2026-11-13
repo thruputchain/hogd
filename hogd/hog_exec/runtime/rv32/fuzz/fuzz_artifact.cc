@@ -384,10 +384,9 @@ private:
     set_u64(offset, value);
   }
 
-  // Exercise what the header declares. Either mutate the v7 syscall API
-  // minor, or rewrite the artifact as v6 or v5, which declare a gas schedule,
-  // with a registered pair; optionally corrupt only its digest to exercise
-  // pair-wise validation rather than independent fields.
+  // Mutate the v7 syscall API minor, or rewrite as v6 or v5 with a registered
+  // gas pair; keep_pair=false corrupts only its digest, to exercise pair-wise
+  // validation.
   void mutate_gas_schedule(bool keep_pair)
   {
     if (artifact_.size() + rv32::kArtifactGasDigestBytes > max_size_ ||
