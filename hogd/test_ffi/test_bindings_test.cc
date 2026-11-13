@@ -3827,6 +3827,9 @@ TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMinRv32ArtifactVersion,
       rv32::kArtifactVersion6);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+      rv32::kArtifactVersion6);
   auto serialized_config = x23::serialize(config);
   auto genesis_root = x23::serialize(make_test_genesis_root_contract());
   auto created =

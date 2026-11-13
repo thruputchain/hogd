@@ -135,9 +135,9 @@ TEST(NetworkConfigParamsTest, AListOmittingTxGasHasTheDefaultBudget)
   EXPECT_EQ(NetworkConfigParams(config.v0()).max_tx_gas, 1'000'000'000U);
 }
 
-// A configuration predating the parameters keeps admitting the formats it
-// already did, and no others.
-TEST(NetworkConfigParamsTest, AListOmittingArtifactVersionsAdmitsFiveAndSix)
+// A configuration that does not state the parameters admits only v5: a newer
+// format waits for a chain to state a maximum that includes it.
+TEST(NetworkConfigParamsTest, AListOmittingArtifactVersionsAdmitsOnlyFive)
 {
   NetworkConfig config;
   config.v(0);
@@ -150,7 +150,7 @@ TEST(NetworkConfigParamsTest, AListOmittingArtifactVersionsAdmitsFiveAndSix)
 
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.min_rv32_artifact_version, 5U);
-  EXPECT_EQ(params.max_rv32_artifact_version, 6U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 5U);
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)

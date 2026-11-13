@@ -69,7 +69,7 @@ struct NetworkConfigParams {
   uint32_t min_rv32_artifact_version =
       static_cast<uint32_t>(kMinRv32ArtifactVersion);
   uint32_t max_rv32_artifact_version =
-      static_cast<uint32_t>(kMaxRv32ArtifactVersion);
+      static_cast<uint32_t>(kDefaultMaxRv32ArtifactVersion);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;

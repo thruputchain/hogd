@@ -2099,6 +2099,8 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
                                     "max_bytestring_len=32768");
   add_local_network_config_override(config.network_config_overrides,
                                     "min_rv32_artifact_version=6");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_rv32_artifact_version=6");
   auto artifact = build_local_bootstrap_account_artifact(config);
   auto const &network = artifact.genesis_configuration.network_config;
   EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));

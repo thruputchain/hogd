@@ -20,9 +20,15 @@ const kDefaultMaxRv32MemoryBytes = 65536;
 
 /// Oldest and newest RV32 artifact format versions this node reads. They
 /// bound what `kConfigParamMinRv32ArtifactVersion` and
-/// `kConfigParamMaxRv32ArtifactVersion` may state, and are the values in
-/// force for a configuration that states neither.
+/// `kConfigParamMaxRv32ArtifactVersion` may state. The oldest is also the
+/// minimum in force for a configuration that does not state one.
 const kMinRv32ArtifactVersion = 5;
 const kMaxRv32ArtifactVersion = 6;
+
+/// Newest RV32 artifact format version admitted when a configuration does not
+/// state `kConfigParamMaxRv32ArtifactVersion`. Below what this node reads, so a
+/// newer format is admitted only once a chain states a maximum that includes
+/// it. Consensus-critical for the same reason as `kMaxSavepointDepth`.
+const kDefaultMaxRv32ArtifactVersion = 5;
 
 } // namespace hogd

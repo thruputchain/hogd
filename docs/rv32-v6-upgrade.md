@@ -19,8 +19,9 @@ build: `min_rv32_artifact_version` and `max_rv32_artifact_version`
 (`kConfigParamMinRv32ArtifactVersion` and `kConfigParamMaxRv32ArtifactVersion`
 in `protocol/network_config.x`) bound the format version, inclusively, of an
 artifact attached to a transaction. A configuration that states neither admits
-v5 through v6. A local chain overrides them like any other parameter, for
-example `hog-devnode --network-config min_rv32_artifact_version=6`.
+only v5; a chain admits v6 once it states `max_rv32_artifact_version=6`. A
+local chain overrides them like any other parameter, for example
+`hog-devnode --network-config max_rv32_artifact_version=6`.
 
 The range is checked only at attachment. A contract already deployed is
 instantiated under every format the build reads, so raising the minimum stops

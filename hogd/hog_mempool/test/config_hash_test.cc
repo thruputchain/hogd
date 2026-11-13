@@ -107,7 +107,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       stock.min_rv32_artifact_version + 1);
   NetworkConfigParams::set_param(
       variants[12], ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
-      stock.max_rv32_artifact_version - 1);
+      stock.max_rv32_artifact_version + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
