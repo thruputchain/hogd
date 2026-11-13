@@ -76,13 +76,15 @@ indexer_options(rocksdb::CompressionType compression_algorithm)
   options.compression = compression_algorithm;
 
   // Duplicate transaction checks usually miss, so keep whole-key filters
-  // at every level and share one cache across all column families.
+  // at every level. Index and filter blocks stay resident with each open
+  // table rather than in the block cache: on a large database they would not
+  // fit, and an evicted filter turns every miss back into disk reads. The
+  // shared cache holds data blocks only.
   rocksdb::BlockBasedTableOptions table_options;
   table_options.filter_policy.reset(rocksdb::NewBloomFilterPolicy(10));
   table_options.whole_key_filtering = true;
   table_options.block_cache = rocksdb::NewLRUCache(256_MiB);
-  table_options.cache_index_and_filter_blocks = true;
-  table_options.pin_l0_filter_and_index_blocks_in_cache = true;
+  table_options.cache_index_and_filter_blocks = false;
   options.table_factory.reset(
       rocksdb::NewBlockBasedTableFactory(table_options));
   return options;
