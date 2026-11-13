@@ -25,7 +25,7 @@ build: `min_rv32_artifact_version` and `max_rv32_artifact_version`
 (`kConfigParamMinRv32ArtifactVersion` and `kConfigParamMaxRv32ArtifactVersion`
 in `protocol/network_config.x`) bound the format version, inclusively, of an
 artifact attached to a transaction. A configuration that states neither admits
-v5 through v6; a new chain's stock configuration states v5 through v7. A local chain overrides them like any other parameter, for
+every format the build reads, v5 through v7. A local chain overrides them like any other parameter, for
 example `hog-devnode --network-config min_rv32_artifact_version=6`.
 
 The range is checked only at attachment. A contract already deployed is
@@ -33,9 +33,11 @@ instantiated under every format the build reads, so raising the minimum stops
 new v5 deployments without stranding stored v5 contracts; removing v5 from
 execution remains the separate decision described above. Genesis load rejects
 a range that inverts or reaches outside the formats the build reads, so a node
-cannot join a chain admitting a format it would refuse. A build that learns a
-newer format does not admit it until a chain states a maximum that includes
-it.
+cannot join a chain admitting a format it would refuse. A chain that states
+its maximum does not admit a newer format until it raises that maximum. A
+chain that states none admits a newer format as soon as a node's build reads
+it, so every validator must run a build that reads v7 before a v7 contract is
+deployed there.
 
 ## Release order
 
