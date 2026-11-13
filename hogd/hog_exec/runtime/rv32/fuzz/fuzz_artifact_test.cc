@@ -25,14 +25,16 @@ LLVMFuzzerMutate(uint8_t *, size_t size, size_t max_size)
 namespace hogd::rv32 {
 namespace {
 
-TEST(Rv32ArtifactMutator, StructuredMutationsFitAtV5AndV6SizeLimits)
+TEST(Rv32ArtifactMutator, StructuredMutationsFitAtEveryVersionsSizeLimits)
 {
-  auto v6 = test_artifact::build_artifact({test_program::addi(0, 0, 0)},
+  auto v7 = test_artifact::build_artifact({test_program::addi(0, 0, 0)},
                                           std::array<uint8_t, 16>{});
-  auto v5 = v6;
+  auto v6 = v7;
+  test_artifact::rewrite_as_v6(v6);
+  auto v5 = v7;
   test_artifact::rewrite_as_v5(v5);
   // Seeds select code shape, memory shape, zero memory, and memory limit.
-  for (const auto &input : {v5, v6}) {
+  for (const auto &input : {v5, v6, v7}) {
     for (size_t extra : {0U, 1U, 3U, 4U}) {
       for (unsigned int seed : {1U, 4U, 13U, 8U}) {
         const size_t max_size = input.size() + extra;
@@ -54,7 +56,7 @@ TEST(Rv32ArtifactMutator, StructuredMutationsFitAtV5AndV6SizeLimits)
   }
 }
 
-TEST(Rv32ArtifactMutator, TooSmallForV6UsesRawMutation)
+TEST(Rv32ArtifactMutator, TooSmallForV7UsesRawMutation)
 {
   for (size_t max_size = kArtifactHeaderBytes;
        max_size < kArtifactHeaderBytes + 8; ++max_size) {

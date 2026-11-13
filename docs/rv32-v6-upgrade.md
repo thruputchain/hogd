@@ -1,23 +1,17 @@
 # RV32 v6 upgrade
 
 This runtime accepts RV32 v5 and v6 during the rollout. Existing v5 contracts
-remain executable. v6 appends an XDR extension list (`Rv32ArtifactExtensions`
-in `contract.x`) after initial memory, which carries the optional contract
-spec; a v5 artifact reads as v6 with no extensions. Both formats use the same
-execution, entry ABI, bounds, and section-hash checks, and both execute at the
-runtime's current gas prices.
+remain executable. Both use the same 128-byte header. v6 appends an XDR
+extension list (`Rv32ArtifactExtensions` in `contract.x`) after initial memory,
+which carries the optional contract spec; a v5 artifact reads as v6 with no
+extensions. Both formats use the same execution, ABI, gas, bounds, and
+section-hash checks.
 
-The headers differ in what they declare. A v6 header is 120 bytes and declares
-the syscall API version the guest was built against; the artifact is admitted
-when the major matches and the minor is no later than the one this runtime
-implements (`syscall_api_version` in `protocol/syscalls.yaml`). A v5 header is
-128 bytes and declares a gas schedule version and digest in its place, which
-must be one of the pairs v5 producers stamped.
-
-v6 artifacts written before v6 declared a syscall API version have the 128-byte
-header. They are still admitted while the contracts this tree builds come from
-a CLI that writes them (`kAdmitV6GasScheduleHeaders` in `artifact.h`); that
-ends before v6 ships.
+v7 replaces the gas schedule a v5 or v6 header declares with the syscall API
+version the guest was built against (`syscall_api_version` in
+`protocol/syscalls.yaml`), in a 120-byte header. A v7 artifact is admitted when
+the major matches and the minor is no later than the one this runtime
+implements. All three formats execute at the runtime's current gas prices.
 
 All validators must support v6 before v6 contracts are deployed. Removing v5
 support requires a separate network transition decision that accounts for
@@ -31,7 +25,7 @@ build: `min_rv32_artifact_version` and `max_rv32_artifact_version`
 (`kConfigParamMinRv32ArtifactVersion` and `kConfigParamMaxRv32ArtifactVersion`
 in `protocol/network_config.x`) bound the format version, inclusively, of an
 artifact attached to a transaction. A configuration that states neither admits
-v5 through v6. A local chain overrides them like any other parameter, for
+v5 through v6; a new chain's stock configuration states v5 through v7. A local chain overrides them like any other parameter, for
 example `hog-devnode --network-config min_rv32_artifact_version=6`.
 
 The range is checked only at attachment. A contract already deployed is

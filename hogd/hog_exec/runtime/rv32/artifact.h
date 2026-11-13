@@ -21,18 +21,19 @@ namespace hogd::rv32 {
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
-// Accept v5 during the v6 rollout so existing contracts remain executable.
-// Removing it requires a separate network transition decision. v5 has no
-// extension list, and declares a gas schedule where v6 declares the syscall
-// API minor version it was built against.
+// v5 and v6 stay readable so existing contracts remain executable; removing
+// either requires a separate network transition decision. v6 added the
+// extension list. v7 declares the syscall API minor version the guest was
+// built against where v5 and v6 declare a gas schedule.
 inline constexpr uint32_t kArtifactVersion5 = 5;
 inline constexpr uint32_t kArtifactVersion6 = 6;
-// A v6 header. A header that declares a gas schedule carries an 8-byte digest
-// after its gas schedule version, so it is that much longer and every later
-// field sits that much further on.
+inline constexpr uint32_t kArtifactVersion7 = 7;
+// A v7 header. A v5 or v6 header carries an 8-byte gas schedule digest after
+// its gas schedule version, so it is that much longer and every later field
+// sits that much further on.
 inline constexpr uint32_t kArtifactHeaderBytes = 120;
 inline constexpr uint32_t kArtifactGasDigestBytes = 8;
-inline constexpr uint32_t kArtifactLegacyHeaderBytes =
+inline constexpr uint32_t kArtifactV5V6HeaderBytes =
     kArtifactHeaderBytes + kArtifactGasDigestBytes;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
@@ -51,13 +52,12 @@ inline constexpr size_t kArtifactVmProfileOffset = 16;
 inline constexpr size_t kArtifactFlagsOffset = 24;
 inline constexpr size_t kArtifactEntryAbiOffset = 28;
 inline constexpr size_t kArtifactSyscallAbiOffset = 32;
-// The syscall API minor version the guest was built against. Admission
+// v7: the syscall API minor version the guest was built against. Admission
 // requires it to be one the chain implements; what a syscall costs is the
 // chain's, not the artifact's.
 inline constexpr size_t kArtifactSyscallApiMinorOffset = 36;
-// In a kArtifactLegacyHeaderBytes header: a gas schedule version where the
-// minor is, then its digest. The offsets below are kArtifactGasDigestBytes
-// higher in such a header.
+// v5 and v6: a gas schedule version where the minor is, then its digest. The
+// offsets below are for v7, and kArtifactGasDigestBytes higher in v5 and v6.
 inline constexpr size_t kArtifactGasVersionOffset = 36;
 inline constexpr size_t kArtifactGasDigestOffset = 40;
 inline constexpr size_t kArtifactMemoryBytesOffset = 40;
@@ -74,29 +74,21 @@ inline constexpr char8_t kArtifactCanonicalSectionOrder[] =
 static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
 
-// The gas schedule declarations a v5 artifact may carry, matched as
+// The gas schedule declarations a v5 or v6 artifact may carry, matched as
 // version/digest pairs. They are historical identifiers and select nothing:
 // every artifact executes at this build's prices. The list is frozen. It
-// affects consensus admission, and deployed v5 artifacts carry these values,
-// so an entry leaves only with the v5 reader.
+// affects consensus admission, and deployed v5 and v6 artifacts carry these
+// values, so an entry leaves only with the readers for both.
 struct AcceptedGasSchedule {
   uint32_t version;
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 3> kLegacyGasSchedules = {{
+inline constexpr std::array<AcceptedGasSchedule, 3> kV5V6GasSchedules = {{
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
     {.version = 4, .digest = 0xa958d226df658598ULL},
     {.version = 5, .digest = 0x0c3a7f084fad6a08ULL},
 }};
-
-// TRANSITIONAL: v6 artifacts written before v6 declared a syscall API version
-// have a kArtifactLegacyHeaderBytes header with one of the pairs above, and
-// the contracts this tree builds come from a pinned CLI that still writes
-// them. The header size an artifact states tells the two v6 layouts apart. v6
-// has not shipped: delete this, and the branch in artifact.cc that reads it,
-// once the pinned CLI writes the syscall API version.
-inline constexpr bool kAdmitV6GasScheduleHeaders = true;
 
 constexpr uint64_t
 format_fingerprint_u64(uint64_t digest, const char8_t *name, uint64_t value)
@@ -144,10 +136,10 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
 // the domain string below; changing the argument alone cannot reproduce other
 // format versions.
 constexpr uint64_t
-format_fingerprint(uint32_t format_version = kArtifactVersion6)
+format_fingerprint(uint32_t format_version = kArtifactVersion7)
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v6");
+  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v7");
 
   digest = format_fingerprint_bytes(digest, u8"magic", kArtifactMagic);
   digest = format_fingerprint_u64(digest, u8"format_version", format_version);
@@ -253,34 +245,31 @@ format_fingerprint(uint32_t format_version = kArtifactVersion6)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0x1fa548ec574db1b4ULL);
-static_assert(format_fingerprint(kArtifactVersion6 + 1) !=
+static_assert(kArtifactFormatFingerprint == 0x95cbfa8b3b2f37daULL);
+static_assert(format_fingerprint(kArtifactVersion7 + 1) !=
               kArtifactFormatFingerprint);
 
-// The fingerprints a lowerer may report: this build's, and those of lowerers
-// whose artifacts are still admitted. A fingerprint is a producer/runtime
-// compatibility check and not consensus; adding a syscall does not move it.
+// The fingerprints a lowerer may report: this build's v7 one, and those of
+// the v5 and v6 lowerers, retained with their readers. A fingerprint is a
+// producer/runtime compatibility check and not consensus; adding a syscall
+// does not move it.
 inline constexpr std::array<uint64_t, 6> kAcceptedFormatFingerprints = {
-    // This build's own.
     kArtifactFormatFingerprint,
-    // TRANSITIONAL, with kAdmitV6GasScheduleHeaders: v6 lowerers that stamp a
-    // gas schedule.
-    0x0e336ac8e46602e1ULL, // Gas table v3.
-    0xd96927c3425ee88eULL, // Gas table v4.
-    // Published v5 fingerprints, retained with the v5 reader.
-    0x4171b4b8dc19b9abULL, // Gas table v4.
-    0x8e5caf3e9cd23b22ULL, // Gas table v3, fixed bounds.
-    0xc5f00a7d4451045eULL, // Gas table v3, caller bounds (tools 0.43.0).
+    0x0e336ac8e46602e1ULL, // v6, gas table v3.
+    0xd96927c3425ee88eULL, // v6, gas table v4.
+    0x4171b4b8dc19b9abULL, // v5, gas table v4.
+    0x8e5caf3e9cd23b22ULL, // v5, gas table v3, fixed bounds.
+    0xc5f00a7d4451045eULL, // v5, gas table v3, caller bounds (tools 0.43.0).
 };
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v6 header, little-endian, 120 bytes:
+// RV32 artifact v7 header, little-endian, 120 bytes:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
 // entry_abi_version, syscall_api_major, syscall_api_minor, memory_bytes,
 // code_size, initial_memory_size, initial_memory_start, sha256(code),
 // sha256(initial_memory).
-// A v5 header is 128 bytes: gas_schedule_version in place of
+// A v5 or v6 header is 128 bytes: gas_schedule_version in place of
 // syscall_api_minor, followed by an 8-byte gas_schedule_digest.
 // Body: header || code || initial_memory || extensions, exactly; section file
 // positions are derived from the canonical order, not stored. Method dispatch
@@ -304,7 +293,7 @@ enum class ArtifactError {
   kUnsupportedFlags,
   kUnsupportedEntryAbi,
   kUnsupportedSyscallAbi,
-  // v6: the declared syscall API minor is later than the caller admits.
+  // v7: the declared syscall API minor is later than the caller admits.
   kUnsupportedSyscallApiMinor,
   kGasScheduleVersionMismatch,
   kGasScheduleDigestMismatch,

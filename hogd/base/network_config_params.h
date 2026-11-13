@@ -71,7 +71,9 @@ struct NetworkConfigParams {
   uint32_t max_rv32_artifact_version =
       static_cast<uint32_t>(kMaxRv32ArtifactVersion);
 
-  // The defaults in force: what an empty parameter list resolves to.
+  // The defaults a new chain states. An empty parameter list resolves to the
+  // same values, except that it admits RV32 artifact formats only up to
+  // kUnstatedMaxRv32ArtifactVersion.
   NetworkConfigParams() = default;
 
   bool operator==(NetworkConfigParams const &) const = default;
@@ -440,7 +442,7 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(kMinRv32ArtifactVersion))),
     max_rv32_artifact_version(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion)
-            .value_or(kMaxRv32ArtifactVersion)))
+            .value_or(kUnstatedMaxRv32ArtifactVersion)))
 {}
 
 inline void

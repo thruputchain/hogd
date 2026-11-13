@@ -50,7 +50,7 @@ public:
       break;
     case 2:
       mutate_u32_field(rv32::kArtifactFormatVersionOffset,
-                       rv32::kArtifactVersion6);
+                       rv32::kArtifactVersion7);
       break;
     case 3:
       mutate_u32_field(rv32::kArtifactHeaderSizeOffset,
@@ -137,7 +137,7 @@ public:
 
 private:
   static constexpr size_t kStrategyCount = 26;
-  // Header plus the count of the empty v6 extension list.
+  // Header plus the count of the empty extension list.
   static constexpr size_t kEnvelopeBytes = rv32::kArtifactHeaderBytes + 4;
 
   uint64_t next_random()
@@ -239,14 +239,14 @@ private:
     if (input_.size() < rv32::kArtifactHeaderBytes) {
       return false;
     }
-    // An input that states the longer header, which declares a gas schedule,
-    // has its later fields after the digest. rebuild() emits the v6 header
-    // either way.
+    // A v5 or v6 input states the longer header, which declares a gas
+    // schedule, and has its later fields after the digest. rebuild() emits
+    // the v7 header either way.
     const size_t header_bytes =
         rv32::load_u32_le(input_, rv32::kArtifactHeaderSizeOffset) ==
-                    rv32::kArtifactLegacyHeaderBytes &&
-                input_.size() >= rv32::kArtifactLegacyHeaderBytes
-            ? rv32::kArtifactLegacyHeaderBytes
+                    rv32::kArtifactV5V6HeaderBytes &&
+                input_.size() >= rv32::kArtifactV5V6HeaderBytes
+            ? rv32::kArtifactV5V6HeaderBytes
             : rv32::kArtifactHeaderBytes;
     const size_t shift = header_bytes - rv32::kArtifactHeaderBytes;
     const size_t body_size = input_.size() - header_bytes;
@@ -256,7 +256,7 @@ private:
     const uint32_t memory_size =
         rv32::load_u32_le(input_,
                           rv32::kArtifactInitialMemorySizeOffset + shift);
-    // Bytes after initial memory are a v6 extension list (none in v5);
+    // Bytes after initial memory are an extension list (none in v5);
     // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
         memory_size > body_size - code_size ||
@@ -286,14 +286,14 @@ private:
     return artifact_.size() <= max_size_;
   }
 
-  // Serialize a canonical v6 header and body with matching section digests.
+  // Serialize a canonical v7 header and body with matching section digests.
   void rebuild(std::span<const uint8_t> code, std::span<const uint8_t> memory,
                uint32_t memory_start, uint32_t memory_bytes)
   {
     artifact_.clear();
     artifact_.reserve(kEnvelopeBytes + code.size() + memory.size());
     rv32::test_artifact::append_bytes(artifact_, rv32::kArtifactMagic);
-    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactVersion6);
+    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactVersion7);
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactHeaderBytes);
     rv32::test_artifact::append_u64(artifact_, rv32::kArtifactVmProfileDigest);
     rv32::test_artifact::append_u32(artifact_,
@@ -384,11 +384,10 @@ private:
     set_u64(offset, value);
   }
 
-  // Exercise what the header declares. Either mutate the syscall API minor,
-  // or rewrite the artifact under the longer header that declares a gas
-  // schedule, as v6 or v5, with a registered pair; optionally corrupt only
-  // its digest to exercise pair-wise validation rather than independent
-  // fields.
+  // Exercise what the header declares. Either mutate the v7 syscall API
+  // minor, or rewrite the artifact as v6 or v5, which declare a gas schedule,
+  // with a registered pair; optionally corrupt only its digest to exercise
+  // pair-wise validation rather than independent fields.
   void mutate_gas_schedule(bool keep_pair)
   {
     if (artifact_.size() + rv32::kArtifactGasDigestBytes > max_size_ ||
@@ -396,15 +395,12 @@ private:
       mutate_u32_field(rv32::kArtifactSyscallApiMinorOffset, 0);
       return;
     }
-    const auto schedule = choose(rv32::kLegacyGasSchedules);
+    const auto schedule = choose(rv32::kV5V6GasSchedules);
     if (random_inrange(2) == 0) {
-      rv32::test_artifact::rewrite_with_gas_schedule_header(artifact_,
-                                                            schedule);
+      rv32::test_artifact::rewrite_as_v6(artifact_, schedule);
     }
     else {
-      rv32::test_artifact::rewrite_as_v5(artifact_);
-      set_u32(rv32::kArtifactGasVersionOffset, schedule.version);
-      set_u64(rv32::kArtifactGasDigestOffset, schedule.digest);
+      rv32::test_artifact::rewrite_as_v5(artifact_, schedule);
     }
     if (!keep_pair) {
       set_u64(rv32::kArtifactGasDigestOffset,

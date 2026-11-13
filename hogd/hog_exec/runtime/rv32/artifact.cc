@@ -94,8 +94,9 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t format_version =
       load_u32_le(bytes, kArtifactFormatVersionOffset);
   const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
-  const bool legacy = format_version == kArtifactVersion5;
-  if (!legacy && format_version != kArtifactVersion6) {
+  if (format_version != kArtifactVersion5 &&
+      format_version != kArtifactVersion6 &&
+      format_version != kArtifactVersion7) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
   // A format this VM reads is still refused outside the caller's range, which
@@ -104,16 +105,12 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       format_version > limits.max_artifact_version) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
-  // The header size states what the header declares. v6 declares a syscall
-  // API minor in kArtifactHeaderBytes. v5 declares a gas schedule, with its
-  // digest, in kArtifactLegacyHeaderBytes; see kAdmitV6GasScheduleHeaders for
-  // the v6 headers that still do.
-  const bool declares_syscall_api =
-      !legacy && header_size == kArtifactHeaderBytes;
-  const bool declares_gas_schedule =
-      header_size == kArtifactLegacyHeaderBytes &&
-      (legacy || kAdmitV6GasScheduleHeaders);
-  if (!declares_syscall_api && !declares_gas_schedule) {
+  // v5 has no extension list. v5 and v6 declare a gas schedule, in a header
+  // that is longer by its digest; v7 declares a syscall API minor.
+  const bool has_extensions = format_version != kArtifactVersion5;
+  const bool declares_gas_schedule = format_version != kArtifactVersion7;
+  if (header_size != (declares_gas_schedule ? kArtifactV5V6HeaderBytes
+                                            : kArtifactHeaderBytes)) {
     return std::unexpected(ArtifactError::kBadHeaderSize);
   }
   if (bytes.size() < header_size) {
@@ -153,7 +150,7 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  if (declares_syscall_api) {
+  if (!declares_gas_schedule) {
     // The major was checked above. A guest built against minor n may call
     // anything introduced up to n, so it is admitted only where all of that
     // exists.
@@ -163,12 +160,12 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
     }
   }
   else {
-    // Matched as a (version, digest) pair; see kLegacyGasSchedules.
+    // Matched as a (version, digest) pair; see kV5V6GasSchedules.
     const auto *accepted =
-        std::ranges::find(kLegacyGasSchedules,
+        std::ranges::find(kV5V6GasSchedules,
                           load_u32_le(bytes, kArtifactGasVersionOffset),
                           &AcceptedGasSchedule::version);
-    if (accepted == kLegacyGasSchedules.end()) {
+    if (accepted == kV5V6GasSchedules.end()) {
       return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
     }
     if (load_u64_le(bytes, kArtifactGasDigestOffset) != accepted->digest) {
@@ -198,7 +195,7 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (initial_memory_size == 0 && initial_memory_start != 0) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // header || code || initial_memory, then (v6 only) the extension list to
+  // header || code || initial_memory, then (v6 and v7) the extension list to
   // the end. Extension bodies are opaque to execution and bounded only by the
   // total contract size. Widen before adding so crafted u32 lengths cannot
   // wrap on 32-bit hosts.
@@ -208,7 +205,8 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
   const auto extensions = bytes.subspan(static_cast<size_t>(sections_end));
-  if (legacy ? !extensions.empty() : !canonical_extension_list(extensions)) {
+  if (has_extensions ? !canonical_extension_list(extensions)
+                     : !extensions.empty()) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 

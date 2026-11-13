@@ -713,7 +713,7 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   // by the lowering into <= kMaxRunGas chunks, so the contract loads and
   // verifies.
   //
-  // The 256 KiB code default also admits runs exceeding the legacy uint16
+  // The 256 KiB code default also admits runs exceeding the earlier uint16
   // bound (65535). Verify that this formerly rejected case is split too.
   constexpr size_t kOverBoundDivCount =
       (0xFFFFU / rv32::kDivInstructionGas) + 1;

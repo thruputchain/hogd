@@ -126,12 +126,12 @@ schedule out so a price change is deliberate. The
 [calibration guide](gas_calibration/README.md) describes measurement and
 schedule changes.
 
-A v6 artifact instead declares the syscall API version it was built against
+A v7 artifact instead declares the syscall API version it was built against
 (`syscall_api_version` in the protocol's `syscalls.yaml`, which states the
 versioning rules). It is admitted when its major matches and its minor is no
 later than `kSyscallApiMinor`, so adding a syscall is a minor bump in
-`syscalls.yaml` and nothing here. v5 artifacts carry a gas schedule version and
-digest in the same bytes; `kLegacyGasSchedules` is the frozen list of pairs
+`syscalls.yaml` and nothing here. v5 and v6 artifacts carry a gas schedule
+version and digest instead; `kV5V6GasSchedules` is the frozen list of pairs
 they may carry.
 
 `Machine` charges each instruction before executing it. `ThreadedMachine`

@@ -40,13 +40,12 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
-// Rewrite a v6 artifact as written before v6 declared a syscall API version:
-// the same body under a kArtifactLegacyHeaderBytes header declaring
-// `schedule`.
+// Rewrite a v7 artifact as the v6 artifact with the same image and extensions:
+// v6 declares `schedule`, in a header that is longer by its digest.
 template<typename Bytes>
 inline void
-rewrite_with_gas_schedule_header(
-    Bytes &artifact, AcceptedGasSchedule schedule = kLegacyGasSchedules.back())
+rewrite_as_v6(Bytes &artifact,
+              AcceptedGasSchedule schedule = kV5V6GasSchedules.back())
 {
   const auto store = [&artifact](size_t offset, uint64_t value, size_t width) {
     for (size_t i = 0; i < width; ++i) {
@@ -59,24 +58,26 @@ rewrite_with_gas_schedule_header(
   for (size_t i = old_size; i > kArtifactGasDigestOffset; --i) {
     artifact[i - 1 + kArtifactGasDigestBytes] = artifact[i - 1];
   }
-  store(kArtifactHeaderSizeOffset, kArtifactLegacyHeaderBytes, 4);
+  store(kArtifactFormatVersionOffset, kArtifactVersion6, 4);
+  store(kArtifactHeaderSizeOffset, kArtifactV5V6HeaderBytes, 4);
   store(kArtifactGasVersionOffset, schedule.version, 4);
   store(kArtifactGasDigestOffset, schedule.digest, 8);
 }
 
-// Rewrite a v6 artifact with an empty extension list as the v5 artifact with
-// the same image: v5 declares a gas schedule and ends after initial memory.
+// Rewrite a v7 artifact with an empty extension list as the v5 artifact with
+// the same image: the v6 header, and nothing after initial memory.
 template<typename Bytes>
 inline void
-rewrite_as_v5(Bytes &artifact)
+rewrite_as_v5(Bytes &artifact,
+              AcceptedGasSchedule schedule = kV5V6GasSchedules.back())
 {
-  rewrite_with_gas_schedule_header(artifact);
+  rewrite_as_v6(artifact, schedule);
   artifact[kArtifactFormatVersionOffset] =
       static_cast<uint8_t>(kArtifactVersion5);
   artifact.resize(artifact.size() - 4);
 }
 
-// Assemble a v6 artifact with no extensions: header || code || initial_memory
+// Assemble a v7 artifact with no extensions: header || code || initial_memory
 // || empty extension list, with the stored image placed at data-space VA
 // `initial_memory_start`. memory_bytes is stamped as start + stored size
 // (callers that want a larger data address space rewrite the memory_bytes
@@ -91,7 +92,7 @@ build_artifact(std::span<const uint32_t> words,
   std::vector<uint8_t> artifact;
   artifact.reserve(kArtifactHeaderBytes + code.size() + initial_memory.size());
   append_bytes(artifact, kArtifactMagic);
-  append_u32(artifact, kArtifactVersion6);
+  append_u32(artifact, kArtifactVersion7);
   append_u32(artifact, kArtifactHeaderBytes);
   append_u64(artifact, kArtifactVmProfileDigest);
   append_u32(artifact, 0);

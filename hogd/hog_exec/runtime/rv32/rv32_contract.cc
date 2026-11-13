@@ -46,7 +46,7 @@ static_assert(rv32::kDefaultMaxMemoryBytes ==
 static_assert(rv32::kArtifactSyscallAbiVersion == kSyscallApiMajor);
 static_assert(rv32::kArtifactVersion5 ==
               static_cast<uint32_t>(kMinRv32ArtifactVersion));
-static_assert(rv32::kArtifactVersion6 ==
+static_assert(rv32::kArtifactVersion7 ==
               static_cast<uint32_t>(kMaxRv32ArtifactVersion));
 
 std::expected<Rv32Contract, rv32::ArtifactError>
