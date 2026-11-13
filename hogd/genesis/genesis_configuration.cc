@@ -129,7 +129,15 @@ stock_network_config()
   // network_config_params.h. Every parameter is stated outright rather than
   // left to a node's default, so a change to any of them is visible in the
   // config hash.
-  return NetworkConfigParams::stated_defaults();
+  NetworkConfig config = NetworkConfigParams::stated_defaults();
+  // A new chain has no contracts in older formats to keep deployable, so it
+  // admits only the newest RV32 artifact format. The default for a
+  // configuration that does not state the range stays every format the build
+  // reads, for chains that predate it.
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+      kMaxRv32ArtifactVersion);
+  return config;
 }
 
 GenesisConfiguration
