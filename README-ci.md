@@ -96,6 +96,22 @@ code they exercise. Credential handling for the schedules lives in benchmarks,
 never in the commit being run; benchmarks' `hogd/README.md` covers the setup
 and `hogd/launch.sh` for manual launches.
 
+## Containerized cluster jobs
+
+The cluster implementation in `thruputchain/benchmarks` uses a dedicated pinned
+image and an encrypted, internal Swarm overlay per run. Job containers have no
+LAN or internet access, SSH credentials, host home directories, or Docker socket.
+Source and dependency downloads are staged by the trusted controller before
+execution; peer commands and file copies use run-scoped mTLS HTTPS. The controller
+publishes collected metrics after execution. Namespace jobs are unchanged.
+
+Cluster setup, image qualification and recovery are documented in
+[`hogd/containers/README.md`](https://github.com/thruputchain/benchmarks/blob/main/hogd/containers/README.md).
+The requested hogd revision must include the `HOGD_CI_OFFLINE` branches in the
+shared scripts. These branches use image toolchains and staged caches; ordinary
+host and Namespace calls retain their existing behavior. Run
+`python3 -m unittest discover -s scripts/ci -p test_offline_env.py` to check them.
+
 ## Runner provisioning
 - Create the hogci home directory on the machine in question. You should create it at `/home/local/hogci` and then create a symlink from `/home/hogci` to `/home/local/hogci`: `ln -s /home/hogci /home/local/hogci`.
 - Log in as the `hogci` user before completing the remaining steps in this file. You should add you SSH public key to `~hogci/.ssh/authorized_keys` and then ssh in as `hogci`.
@@ -138,9 +154,8 @@ artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with
 results and signed corpora retained even after a replay fails. A copy also stays
 under `WORK_DIR` and, when set, the worker's `HOG_DUMP_DIR`; the exact paths
 appear in the job log.
-This job does not publish to `metrics_history`. Like every cluster job it still
-forwards that repository's deploy key: the hosts read hogd's public submodules
-over SSH.
+This job does not publish to `metrics_history`. The trusted controller stages public sources and dependencies before execution;
+the workload containers receive no deploy key or SSH access.
 The gateway source and qualified hogd protocol revision are pinned together.
 The schedule fails before building if the protocol pin no longer matches hogd;
 update both pins after checking wire compatibility. The qualified pin uses
