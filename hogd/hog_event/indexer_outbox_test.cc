@@ -1119,12 +1119,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // same length, when ProposalTxs began naming transactions by
   // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
   // Full-key leaves and then direct key/value commitments changed the roots.
+  // The proposal_txs_hash moved again when its parts began combining in order
+  // instead of by XOR (hogd#4508).
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0x87, 0xb2, 0x10, 0xf3, 0x52, 0x6d, 0x92,
-                                   0x71, 0x84, 0x47, 0x60, 0xe1, 0x80, 0xb9,
-                                   0x6f, 0xbb, 0x17, 0xa3, 0x91, 0xb6, 0x01,
-                                   0x49, 0xc3, 0x88, 0x3b, 0x81, 0x7b, 0xbe,
-                                   0x2d, 0x86, 0x6d, 0xaa};
+  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
+                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
+                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
+                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
+                                   0x21, 0x07, 0xcc, 0x31};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
