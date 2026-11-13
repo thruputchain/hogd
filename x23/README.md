@@ -12,6 +12,8 @@ simplifies code and improves performance.  Until your compiler
 supports [reflection][], X23 is likely to remain the most advanced
 XDR/RPC system you can get.
 
+`x23c` can also generate C types and codecs; see [README.C.md](README.C.md).
+
 ## Installation
 
 X23 uses cmake.  To install it, you need flex, bison, and either gcc
