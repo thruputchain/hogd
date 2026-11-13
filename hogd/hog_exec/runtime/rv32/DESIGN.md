@@ -85,8 +85,8 @@ policies with an explicit encoding. A compile-time assertion pins the C++
 value; `LoweredSdkArtifactFormatFingerprintMatchesRuntime` checks generated
 lowerer metadata against `kAcceptedFormatFingerprints`. The fingerprint is a
 compatibility check, not a substitute for parsing or instruction validation.
-Format, entry ABI, syscall ABI, and gas schedule are separate versioned
-contracts; update the relevant producer, consumer, fixtures, and checks together.
+Format, entry ABI, and syscall API are separate versioned contracts; update the
+relevant producer, consumer, fixtures, and checks together.
 
 ## Execution engines
 
@@ -118,14 +118,21 @@ boundary. [CMakeLists.txt](CMakeLists.txt) defines these targets, while
 ## Gas and traps
 
 Instruction costs are in [program.h](program.h); host costs are in
-[gas_cost_table.h](../gas_cost_table.h). The artifact gas digest covers both.
-`kAcceptedGasSchedules` accepts explicit `(version, digest)` pairs, including
-transitional declarations. **Every accepted artifact executes at this build's
-current prices**, regardless of the declaration it carries. Validators must
-agree on both prices and accepted declarations. Removing an accepted entry
-requires accounting for stored artifacts as well as the producing toolchain.
-The [calibration guide](gas_calibration/README.md) describes measurement and
+[gas_cost_table.h](../gas_cost_table.h). **Every artifact executes at this
+build's current prices.** Prices are consensus, so validators must agree on
+them, but they are not part of an artifact: changing one, or adding a syscall,
+changes no artifact, lowerer, or admission rule. `rv32_vm_test` spells the
+schedule out so a price change is deliberate. The
+[calibration guide](gas_calibration/README.md) describes measurement and
 schedule changes.
+
+A v7 artifact instead declares the syscall API version it was built against
+(`syscall_api_version` in the protocol's `syscalls.yaml`, which states the
+versioning rules). It is admitted when its major matches and its minor is no
+later than `kSyscallApiMinor`, so adding a syscall is a minor bump in
+`syscalls.yaml` and nothing here. v5 and v6 artifacts carry a gas schedule
+version and digest instead; `kV5V6GasSchedules` is the frozen list of pairs
+they may carry.
 
 `Machine` charges each instruction before executing it. `ThreadedMachine`
 charges a run at entry, including its terminating control-flow or host-boundary

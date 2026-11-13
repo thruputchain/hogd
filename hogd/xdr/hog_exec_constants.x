@@ -23,6 +23,6 @@ const kDefaultMaxRv32MemoryBytes = 65536;
 /// `kConfigParamMaxRv32ArtifactVersion` may state, and are the values in
 /// force for a configuration that states neither.
 const kMinRv32ArtifactVersion = 5;
-const kMaxRv32ArtifactVersion = 6;
+const kMaxRv32ArtifactVersion = 7;
 
 } // namespace hogd

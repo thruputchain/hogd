@@ -2108,7 +2108,7 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_bytestring_len, 32768U);
   EXPECT_EQ(params.min_rv32_artifact_version, 6U);
-  EXPECT_EQ(params.max_rv32_artifact_version, 6U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 7U);
   EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
@@ -2127,7 +2127,7 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
        {"unknown=2", "max_bytestring_len",
         "max_bytestring_len=", "max_bytestring_len=-1",
         "max_bytestring_len=4294967296", "max_bytestring_len=1x",
-        "min_rv32_artifact_version=4", "max_rv32_artifact_version=7"}) {
+        "min_rv32_artifact_version=4", "max_rv32_artifact_version=8"}) {
     EXPECT_THROW(add_local_network_config_override(overrides, bad),
                  std::runtime_error);
     EXPECT_TRUE(overrides.empty());

@@ -311,9 +311,13 @@ def gen_syscall_meta(syscall: dict) -> str:
     error_codes_cpp = [f"SyscallErrorCode::{code}" for code in error_codes]
     allowed_errors = ",\n        ".join(error_codes_cpp)
 
+    experimental = "true" if syscall.get("experimental", False) else "false"
+
     return f"""template<>
 struct SyscallMeta<SyscallNo::k{name}> {{
     constexpr static bool kIsReadOnlySyscall = {read_only};
+    constexpr static uint32_t kSinceMinor = {syscall["since_minor"]};
+    constexpr static bool kIsExperimental = {experimental};
     constexpr static auto kInnerFunc = &syscall_{name}_inner;
     constexpr static SyscallNo kSyscallNo = SyscallNo::k{name};
     constexpr static bool kCanReturn = {can_return};
@@ -344,8 +348,9 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
     return f"""// -*-C++-*-
 #pragma once
 
-#include <string_view>
 #include <array>
+#include <cstdint>
+#include <string_view>
 
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
@@ -433,6 +438,12 @@ enum SyscallNo {{
 
 const kSyscallCount = {len(syscalls)};
 
+// The syscall API version protocol/syscalls.yaml defines; its rules are
+// stated there. A guest built against kSyscallApiMajor.n runs on this host
+// when n <= kSyscallApiMinor.
+const kSyscallApiMajor = {spec_full["syscall_api_version"]["major"]};
+const kSyscallApiMinor = {spec_full["syscall_api_version"]["minor"]};
+
 }} // namespace hogd
 """
 
@@ -450,6 +461,27 @@ def validate_syscall_numbers_in_order(spec_full: dict) -> None:
             "strictly increasing numerical order starting at 0 with no gaps."
             f"Expected: {expected_numbers}; Got: {numbers}; Names: {names}"
         )
+
+
+def validate_syscall_api_version(spec_full: dict) -> None:
+    """The checks generation relies on. protocol/scripts/syscallcompat.py
+    owns the versioning rules themselves and runs in the protocol repo's CI.
+    """
+    def is_count(value) -> bool:
+        return (isinstance(value, int) and not isinstance(value, bool)
+                and value >= 0)
+
+    version = spec_full.get("syscall_api_version")
+    if (not isinstance(version, dict) or not is_count(version.get("major"))
+            or not is_count(version.get("minor"))):
+        raise ValueError(
+            "syscalls.yaml must set syscall_api_version.major and .minor")
+    for syscall in spec_full["syscalls"]:
+        since = syscall.get("since_minor")
+        if not is_count(since) or since > version["minor"]:
+            raise ValueError(
+                f"Syscall {syscall['name']}: since_minor must be an integer "
+                f"in [0, {version['minor']}]")
 
 
 parser = argparse.ArgumentParser(description="syscall generator")
@@ -489,6 +521,7 @@ spec = spec_full["syscalls"]
 
 # Validate syscall numbering and order early to provide a clear error message
 validate_syscall_numbers_in_order(spec_full)
+validate_syscall_api_version(spec_full)
 
 # Load and validate hog_exec flags before any code is generated.
 hog_exec_spec = load_hog_exec_spec(args.hog_exec_yaml,

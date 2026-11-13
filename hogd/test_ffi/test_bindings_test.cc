@@ -3804,13 +3804,11 @@ TEST(TestBindingsTest, SetupCreateContractHonorsLoweredRv32MemoryCap)
 // whose minimum is past an artifact's format refuses to attach it.
 TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
 {
-  Contract legacy = rv32_contract_declaring(64 * 1024);
-  auto &data = legacy.rv32_contract().data;
-  ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion6);
-  data[rv32::kArtifactFormatVersionOffset] = rv32::kArtifactVersion5;
-  // v5 ends after initial memory: drop the empty extension list.
-  data.resize(data.size() - 4);
-  auto bytes = x23::serialize(legacy);
+  Contract v5_contract = rv32_contract_declaring(64 * 1024);
+  auto &data = v5_contract.rv32_contract().data;
+  ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion7);
+  rv32::test_artifact::rewrite_as_v5(data);
+  auto bytes = x23::serialize(v5_contract);
 
   auto *rc = make_runtime_context();
   ASSERT_NE(rc, nullptr);
