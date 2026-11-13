@@ -2,21 +2,31 @@
 # hog_exec implementation details that do not affect the wire ABI, so they live
 # here rather than in protocol/syscalls.yaml. gen_syscalls.py reads this as the
 # single source of truth for these flags; every key must name a syscall in
-# syscalls.yaml and set only known properties, or generation fails.
+# syscalls.yaml and set only known properties, to booleans, or generation fails.
 #
-# Properties (default false):
-#   needs_gas: inner body is handed the frame's remaining gas (WrappedGasAmount
-#              remaining_gas) to reserve variable, input-dependent costs.
-#   async:     inner body may suspend (reads/writes hog_db); its declaration
-#              returns MaybeAsyncSyscallInnerResult and body is a coroutine.
+# Properties:
+#   needs_context: (default true) inner body is handed the SystemCallHandler&
+#              (syscall_handler). Set false for a syscall that needs nothing
+#              of the handler's state.
+#   needs_gas: (default false) inner body is handed the frame's remaining gas
+#              (WrappedGasAmount remaining_gas) to reserve variable,
+#              input-dependent costs.
+#   async:     (default false) inner body may suspend (reads/writes hog_db);
+#              its declaration returns MaybeAsyncSyscallInnerResult and body
+#              is a coroutine.
 syscalls:
   SHA256:
     needs_gas: true
+  ConsoleLog:
+    needs_context: false
+  Exit:
+    needs_context: false
   SHA256Update:
     needs_gas: true
   GetTransactionStatistics:
     needs_gas: true
   VerifySignature:
+    needs_context: false
     needs_gas: true
   Ristretto255Msm:
     needs_gas: true
