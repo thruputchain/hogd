@@ -62,15 +62,7 @@ default:
   void;
 };
 
-// Switched on a typedef of an enum, with digit separators in a case, an
-// enum value and a bound.
-union ByHue switch (Hue hue) {
-case GREEN:
-  int g;
-default:
-  void;
-};
-
+// Digit separators in an enum value, a case and a bound.
 enum Big { BIG = 1'000 };
 
 union ByNum switch (int n) {

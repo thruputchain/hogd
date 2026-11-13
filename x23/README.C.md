@@ -47,11 +47,9 @@ there is nothing to link, and what you do not call is not compiled in
 
 * Enums are `int32_t`, and their constants are prefixed with the enum's
   name (`enum Color { RED = 0 }` gives `Color_RED`), since C would
-  otherwise reject two enums that share a name.  A `typedef Color Hue`
-  in the same file gets the constants under its own name too
-  (`Hue_RED`), which is what a union switched on `Hue` uses.  A typedef
-  of an enum from another file gets none, so a union cannot switch on
-  it.  Decoding accepts any
+  otherwise reject two enums that share a name.  A union's cases
+  take their prefix from the discriminant's type as written, so a union
+  has to switch on the enum itself, not on a typedef of it.  Decoding accepts any
   value; `E_valid(v)` says whether `v` is one of the declared ones.
 
 * A union `union Shape switch (Color kind)` becomes a `struct Shape`

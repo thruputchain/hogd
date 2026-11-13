@@ -193,22 +193,11 @@ struct GenC {
   {
     if (switch_type == "bool")
       return c == "TRUE" ? "1" : c == "FALSE" ? "0" : c;
-    // A typedef of an enum has the enum's constants under its own name
-    // (see gen_typedef), so the discriminant's type name is the prefix
-    // whichever file defines it.
+    // The prefix is the discriminant's type name as written.  A typedef is
+    // not followed to its enum, since it may come from another file.
     if (!is_number(c) && is_enum(switch_type))
       return enum_const(switch_type, c);
     return c_num(c);
-  }
-  // The enum defined in this file that t names, directly or by typedef.
-  const EnumDecl *local_enum(const string &t) const
-  {
-    auto it = local_.find(t);
-    if (it == local_.end())
-      return nullptr;
-    if (auto *td = std::get_if<Typedef>(it->second))
-      return td->qual == kScalar ? local_enum(type_of(*td)) : nullptr;
-    return std::get_if<EnumDecl>(it->second);
   }
 
   // Common to every named type: prototypes, vector and pointer codecs and
@@ -746,16 +735,6 @@ GenC::gen_typedef(const Typedef &t, const string &comment)
     throw std::runtime_error("void typedef " + n);
   case kScalar:
     types_ += std::format("typedef {} {};\n", c_type(base).ctype, n);
-    // An enum's constants again, under the typedef's name: a union switched
-    // on the typedef, perhaps in another file, names its cases that way.
-    if (const EnumDecl *e = local_enum(base); e && !e->body.empty()) {
-      types_ += "enum {\n";
-      for (size_t i = 0; i < e->body.size(); ++i)
-        types_ += std::format("  {} = {}{}\n", enum_const(n, e->body[i].id),
-                              enum_const(e->id, e->body[i].id),
-                              i + 1 < e->body.size() ? "," : "");
-      types_ += "};\n";
-    }
     break;
   case kArray:
     // Wrapped in a struct, since C arrays cannot be assigned or returned.
