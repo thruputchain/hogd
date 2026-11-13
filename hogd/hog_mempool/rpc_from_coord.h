@@ -46,6 +46,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
+#include "integration.hh"
 #include "parallel.hh"
 #include "proposal.hh"
 #include "rpc_types.hh"
@@ -57,6 +58,8 @@
 #include "x23/async.h"
 #include "x23/corosync.h"
 #include "x23/dag.h"
+#include "x23/rpc_common.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -76,6 +79,16 @@ public:
   static_assert(kMaxBlockSize % kNumSchedulerIterations == 0);
   static constexpr size_t kNumTxsPerNominationChunk =
       kMaxBlockSize / kNumSchedulerIterations;
+
+  // A lookup reply must fit in one RPC record, less room for the reply header.
+  static constexpr size_t kMaxLookupReplyBytes =
+      x23::kMaxRecordPayloadSize - 1024;
+  // The most hashes a lookup can take whose reply fits [kMaxLookupReplyBytes]
+  // even if every tx is the largest auth admits: after the 4-byte length,
+  // each entry is a 4-byte presence flag plus at most
+  // [kMaxBytesSignedTransaction] bytes.
+  static constexpr size_t kMaxUncheckedLookupBatch =
+      (kMaxLookupReplyBytes - 4) / (4 + kMaxBytesSignedTransaction);
 
   static constexpr size_t kChunkSize = 10;
   static constexpr size_t kNumClientsPerExecutor = 10;
@@ -344,6 +357,7 @@ public:
           scheduler_->find_signed_tx(signed_tx_hash)));
     }
 
+    check_lookup_reply_fits(ret);
     co_return ret;
   }
 
@@ -365,7 +379,27 @@ public:
           x23::XdrSharedPtr<SignedTransaction>(scheduler_->find_tx(tx_hash)));
     }
 
+    check_lookup_reply_fits(ret);
     co_return ret;
+  }
+
+  // Fails the RPC (SYSTEM_ERR to the caller) if [reply] is too large for one
+  // RPC record, which x23 would otherwise send with a wrapped length,
+  // desyncing the stream. Only a batch past [kMaxUncheckedLookupBatch] can get
+  // there, so only those pay for sizing the reply.
+  static void check_lookup_reply_fits(
+      const x23::XdrVec<x23::XdrSharedPtr<SignedTransaction>> &reply)
+  {
+    if (reply.size() <= kMaxUncheckedLookupBatch) [[likely]] {
+      return;
+    }
+    const size_t bytes = x23::xdr_size(reply);
+    if (bytes > kMaxLookupReplyBytes) {
+      throw std::runtime_error(
+          std::format("lookup reply of {} txs is {} bytes, past the {}-byte "
+                      "limit for one RPC record",
+                      reply.size(), bytes, kMaxLookupReplyBytes));
+    }
   }
 
   // Takes [tx_hashes] by value: the loop below suspends on each lookup, and
