@@ -47,7 +47,11 @@ there is nothing to link, and what you do not call is not compiled in
 
 * Enums are `int32_t`, and their constants are prefixed with the enum's
   name (`enum Color { RED = 0 }` gives `Color_RED`), since C would
-  otherwise reject two enums that share a name.  Decoding accepts any
+  otherwise reject two enums that share a name.  A `typedef Color Hue`
+  in the same file gets the constants under its own name too
+  (`Hue_RED`), which is what a union switched on `Hue` uses.  A typedef
+  of an enum from another file gets none, so a union cannot switch on
+  it.  Decoding accepts any
   value; `E_valid(v)` says whether `v` is one of the declared ones.
 
 * A union `union Shape switch (Color kind)` becomes a `struct Shape`
@@ -185,8 +189,12 @@ the header to choose otherwise.
 
 Decoding copies everything into memory the value owns: strings, opaque
 data, vector elements and pointed-to values.  `T_free` releases it and
-leaves the value safe to free again.  If decoding fails, whatever it
-had allocated is freed before it returns.  Encoding allocates nothing.
+leaves the value safe to free again.  If `T_from_xdr` or `T_from_cxs`
+fails, whatever it had allocated is freed before it returns.  The
+[lower-level](#lower-level-functions) decode functions do not do that:
+after one fails, call the value's `T_free` (or `T_vec_free` or
+`T_ptr_free`), which is safe on a partly decoded value.  Encoding
+allocates nothing.
 
 Memory comes from `X23_MALLOC(size)` and goes back with
 `X23_FREE(ptr)`, which default to `malloc` and `free`.  To use your own

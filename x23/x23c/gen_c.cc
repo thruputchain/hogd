@@ -116,10 +116,18 @@ c_id(const string &id)
   return kw.contains(id) ? id + "_" : id;
 }
 
+// C11 has no digit separators.
+string
+c_num(string v)
+{
+  std::erase(v, '\'');
+  return v;
+}
+
 string
 map_bound(const string &b)
 {
-  return b.empty() ? "X23_UNBOUNDED" : "(" + b + ")";
+  return b.empty() ? "X23_UNBOUNDED" : "(" + c_num(b) + ")";
 }
 
 bool
@@ -185,19 +193,22 @@ struct GenC {
   {
     if (switch_type == "bool")
       return c == "TRUE" ? "1" : c == "FALSE" ? "0" : c;
+    // A typedef of an enum has the enum's constants under its own name
+    // (see gen_typedef), so the discriminant's type name is the prefix
+    // whichever file defines it.
     if (!is_number(c) && is_enum(switch_type))
-      return enum_const(enum_name(switch_type), c);
-    return c;
+      return enum_const(switch_type, c);
+    return c_num(c);
   }
-  // The enum a (possibly typedef'd) enum type names, whose name prefixes
-  // its constants.
-  string enum_name(const string &t) const
+  // The enum defined in this file that t names, directly or by typedef.
+  const EnumDecl *local_enum(const string &t) const
   {
     auto it = local_.find(t);
-    if (it != local_.end())
-      if (auto *td = std::get_if<Typedef>(it->second))
-        return enum_name(type_of(*td));
-    return t;
+    if (it == local_.end())
+      return nullptr;
+    if (auto *td = std::get_if<Typedef>(it->second))
+      return td->qual == kScalar ? local_enum(type_of(*td)) : nullptr;
+    return std::get_if<EnumDecl>(it->second);
   }
 
   // Common to every named type: prototypes, vector and pointer codecs and
@@ -367,10 +378,10 @@ GenC::field(const Declaration &d, const string &indent) const
     break;
   case kArray:
     if (t == "opaque")
-      out += std::format("{}uint8_t {}[{}];\n", indent, id, d.bound);
+      out += std::format("{}uint8_t {}[{}];\n", indent, id, c_num(d.bound));
     else
-      out +=
-          std::format("{}{} {}[{}];\n", indent, c_type(t).ctype, id, d.bound);
+      out += std::format("{}{} {}[{}];\n", indent, c_type(t).ctype, id,
+                         c_num(d.bound));
     break;
   case kVec:
     if (t == "opaque")
@@ -403,10 +414,10 @@ GenC::decode_stmt(const Declaration &d, const string &lv,
   case kArray:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_get_opaque_@F(r, {}, {}));\n", in,
-                         d.bound, lv);
+                         c_num(d.bound), lv);
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
                        "{0}  X23_TRY({2}_decode_@F(r, &{3}[i_]));\n",
-                       in, d.bound, c_type(t).prefix, lv);
+                       in, c_num(d.bound), c_type(t).prefix, lv);
   case kVec:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_bytes_decode_@F(r, &{}, {}));\n", in,
@@ -441,10 +452,10 @@ GenC::encode_stmt(const Declaration &d, const string &rv,
   case kArray:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_put_opaque_@F(w, {}, {}));\n", in, rv,
-                         d.bound);
+                         c_num(d.bound));
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
                        "{0}  X23_TRY({2}_encode_@F(w, &{3}[i_]));\n",
-                       in, d.bound, c_type(t).prefix, rv);
+                       in, c_num(d.bound), c_type(t).prefix, rv);
   case kVec:
     if (t == "opaque")
       return std::format("{}X23_TRY(x23_bytes_encode_@F(w, &{}, {}));\n", in,
@@ -477,7 +488,7 @@ GenC::free_stmt(const Declaration &d, const string &lv, const string &in) const
       return {};
     return std::format("{0}for (uint32_t i_ = 0; i_ < ({1}); ++i_)\n"
                        "{0}  {2}_free(&{3}[i_]);\n",
-                       in, d.bound, c_type(t).prefix, lv);
+                       in, c_num(d.bound), c_type(t).prefix, lv);
   case kVec:
     if (t == "opaque")
       return std::format("{}x23_bytes_free(&{});\n", in, lv);
@@ -508,10 +519,8 @@ GenC::gen_common(const string &name)
 void
 GenC::gen_const(const ConstDef &c)
 {
-  string val = c.val;
-  std::erase(val, '\''); // C11 has no digit separators
   types_ += comment_block(c.comment, "");
-  types_ += std::format("#define {} {}\n\n", c.id, val);
+  types_ += std::format("#define {} {}\n\n", c.id, c_num(c.val));
 }
 
 // The only literal C++ that carries over is including the header generated
@@ -541,7 +550,7 @@ GenC::gen_enum(const EnumDecl &e, const string &comment)
   types_ += comment_block(comment, "");
   types_ += "enum {\n";
   for (size_t i = 0; i < e.body.size(); ++i) {
-    string val = e.body[i].val;
+    string val = c_num(e.body[i].val);
     // A value may name an earlier constant of the same enum.
     if (std::ranges::any_of(e.body, [&](auto &c) { return c.id == val; }))
       val = enum_const(e.id, val);
@@ -737,16 +746,26 @@ GenC::gen_typedef(const Typedef &t, const string &comment)
     throw std::runtime_error("void typedef " + n);
   case kScalar:
     types_ += std::format("typedef {} {};\n", c_type(base).ctype, n);
+    // An enum's constants again, under the typedef's name: a union switched
+    // on the typedef, perhaps in another file, names its cases that way.
+    if (const EnumDecl *e = local_enum(base); e && !e->body.empty()) {
+      types_ += "enum {\n";
+      for (size_t i = 0; i < e->body.size(); ++i)
+        types_ += std::format("  {} = {}{}\n", enum_const(n, e->body[i].id),
+                              enum_const(e->id, e->body[i].id),
+                              i + 1 < e->body.size() ? "," : "");
+      types_ += "};\n";
+    }
     break;
   case kArray:
     // Wrapped in a struct, since C arrays cannot be assigned or returned.
     if (base == "opaque")
       types_ +=
           std::format("typedef struct {} {{\n  uint8_t bytes[{}];\n}} {};\n", n,
-                      t.bound, n);
+                      c_num(t.bound), n);
     else
       types_ += std::format("typedef struct {} {{\n  {} elems[{}];\n}} {};\n",
-                            n, c_type(base).ctype, t.bound, n);
+                            n, c_type(base).ctype, c_num(t.bound), n);
     break;
   case kVec:
     if (base == "opaque")
