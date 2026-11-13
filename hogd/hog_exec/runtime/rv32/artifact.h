@@ -27,7 +27,13 @@ inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
 // API minor version it was built against.
 inline constexpr uint32_t kArtifactVersion5 = 5;
 inline constexpr uint32_t kArtifactVersion6 = 6;
-inline constexpr uint32_t kArtifactHeaderBytes = 128;
+// A v6 header. A header that declares a gas schedule carries an 8-byte digest
+// after its gas schedule version, so it is that much longer and every later
+// field sits that much further on.
+inline constexpr uint32_t kArtifactHeaderBytes = 120;
+inline constexpr uint32_t kArtifactGasDigestBytes = 8;
+inline constexpr uint32_t kArtifactLegacyHeaderBytes =
+    kArtifactHeaderBytes + kArtifactGasDigestBytes;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
 // v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
 // v2 seeded sp to the top of data memory.
@@ -45,20 +51,20 @@ inline constexpr size_t kArtifactVmProfileOffset = 16;
 inline constexpr size_t kArtifactFlagsOffset = 24;
 inline constexpr size_t kArtifactEntryAbiOffset = 28;
 inline constexpr size_t kArtifactSyscallAbiOffset = 32;
-// v6: the syscall API minor version the guest was built against, then eight
-// reserved zero bytes. Admission requires the minor to be one the chain
-// implements; what a syscall costs is the chain's, not the artifact's.
+// The syscall API minor version the guest was built against. Admission
+// requires it to be one the chain implements; what a syscall costs is the
+// chain's, not the artifact's.
 inline constexpr size_t kArtifactSyscallApiMinorOffset = 36;
-inline constexpr size_t kArtifactReservedOffset = 40;
-inline constexpr size_t kArtifactReservedBytes = 8;
-// v5: a gas schedule version and digest in the same bytes.
+// In a kArtifactLegacyHeaderBytes header: a gas schedule version where the
+// minor is, then its digest. The offsets below are kArtifactGasDigestBytes
+// higher in such a header.
 inline constexpr size_t kArtifactGasVersionOffset = 36;
 inline constexpr size_t kArtifactGasDigestOffset = 40;
-inline constexpr size_t kArtifactMemoryBytesOffset = 48;
-inline constexpr size_t kArtifactCodeSizeOffset = 52;
-inline constexpr size_t kArtifactInitialMemorySizeOffset = 56;
-inline constexpr size_t kArtifactInitialMemoryStartOffset = 60;
-inline constexpr size_t kArtifactCodeDigestOffset = 64;
+inline constexpr size_t kArtifactMemoryBytesOffset = 40;
+inline constexpr size_t kArtifactCodeSizeOffset = 44;
+inline constexpr size_t kArtifactInitialMemorySizeOffset = 48;
+inline constexpr size_t kArtifactInitialMemoryStartOffset = 52;
+inline constexpr size_t kArtifactCodeDigestOffset = 56;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
 inline constexpr char8_t kArtifactSectionDigestAlgorithm[] = u8"sha256";
@@ -85,11 +91,11 @@ inline constexpr std::array<AcceptedGasSchedule, 3> kLegacyGasSchedules = {{
 }};
 
 // TRANSITIONAL: v6 artifacts written before v6 declared a syscall API version
-// carry one of the pairs above instead, and the contracts this tree builds
-// come from a pinned CLI that still writes them. Their digest makes the
-// reserved bytes nonzero, so the two layouts cannot be confused. v6 has not
-// shipped: delete this, and the branch in artifact.cc that reads it, once the
-// pinned CLI writes the syscall API version.
+// have a kArtifactLegacyHeaderBytes header with one of the pairs above, and
+// the contracts this tree builds come from a pinned CLI that still writes
+// them. The header size an artifact states tells the two v6 layouts apart. v6
+// has not shipped: delete this, and the branch in artifact.cc that reads it,
+// once the pinned CLI writes the syscall API version.
 inline constexpr bool kAdmitV6GasScheduleHeaders = true;
 
 constexpr uint64_t
@@ -184,10 +190,6 @@ format_fingerprint(uint32_t format_version = kArtifactVersion6)
                                            u8"header.syscall_api_minor.offset",
                                            u8"header.syscall_api_minor.size",
                                            kArtifactSyscallApiMinorOffset, 4);
-  digest = format_fingerprint_layout_field(digest, u8"header.reserved.offset",
-                                           u8"header.reserved.size",
-                                           kArtifactReservedOffset,
-                                           kArtifactReservedBytes);
   digest =
       format_fingerprint_layout_field(digest, u8"header.memory_bytes.offset",
                                       u8"header.memory_bytes.size",
@@ -226,7 +228,6 @@ format_fingerprint(uint32_t format_version = kArtifactVersion6)
   // The minor itself is not folded: it is the guest's, and a chain admits any
   // minor up to its own.
   digest = format_fingerprint_u64(digest, u8"syscall_api_minor_le_host", 1);
-  digest = format_fingerprint_u64(digest, u8"reserved_zero", 1);
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -252,7 +253,7 @@ format_fingerprint(uint32_t format_version = kArtifactVersion6)
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xddedc325bf5506beULL);
+static_assert(kArtifactFormatFingerprint == 0x1fa548ec574db1b4ULL);
 static_assert(format_fingerprint(kArtifactVersion6 + 1) !=
               kArtifactFormatFingerprint);
 
@@ -274,13 +275,13 @@ inline constexpr std::array<uint64_t, 6> kAcceptedFormatFingerprints = {
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v6 header, little-endian:
+// RV32 artifact v6 header, little-endian, 120 bytes:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
-// entry_abi_version, syscall_api_major, syscall_api_minor, reserved[8],
-// memory_bytes, code_size, initial_memory_size, initial_memory_start,
-// sha256(code), sha256(initial_memory).
-// A v5 header has gas_schedule_version and gas_schedule_digest in place of
-// syscall_api_minor and reserved.
+// entry_abi_version, syscall_api_major, syscall_api_minor, memory_bytes,
+// code_size, initial_memory_size, initial_memory_start, sha256(code),
+// sha256(initial_memory).
+// A v5 header is 128 bytes: gas_schedule_version in place of
+// syscall_api_minor, followed by an 8-byte gas_schedule_digest.
 // Body: header || code || initial_memory || extensions, exactly; section file
 // positions are derived from the canonical order, not stored. Method dispatch
 // is in the guest (since v4). The stored image is placed at data-space VA

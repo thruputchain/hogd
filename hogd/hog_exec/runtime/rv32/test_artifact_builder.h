@@ -40,22 +40,39 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
-// Rewrite a v6 artifact with an empty extension list as the v5 artifact with
-// the same image: v5 ends after initial memory, and declares a gas schedule
-// where v6 declares a syscall API minor.
+// Rewrite a v6 artifact as written before v6 declared a syscall API version:
+// the same body under a kArtifactLegacyHeaderBytes header declaring
+// `schedule`.
 template<typename Bytes>
 inline void
-rewrite_as_v5(Bytes &artifact)
+rewrite_with_gas_schedule_header(
+    Bytes &artifact, AcceptedGasSchedule schedule = kLegacyGasSchedules.back())
 {
   const auto store = [&artifact](size_t offset, uint64_t value, size_t width) {
     for (size_t i = 0; i < width; ++i) {
       artifact[offset + i] = static_cast<uint8_t>(value >> (i * 8));
     }
   };
-  const AcceptedGasSchedule schedule = kLegacyGasSchedules.back();
-  store(kArtifactFormatVersionOffset, kArtifactVersion5, 4);
+  // Open the digest's bytes after the gas schedule version.
+  const size_t old_size = artifact.size();
+  artifact.resize(old_size + kArtifactGasDigestBytes);
+  for (size_t i = old_size; i > kArtifactGasDigestOffset; --i) {
+    artifact[i - 1 + kArtifactGasDigestBytes] = artifact[i - 1];
+  }
+  store(kArtifactHeaderSizeOffset, kArtifactLegacyHeaderBytes, 4);
   store(kArtifactGasVersionOffset, schedule.version, 4);
   store(kArtifactGasDigestOffset, schedule.digest, 8);
+}
+
+// Rewrite a v6 artifact with an empty extension list as the v5 artifact with
+// the same image: v5 declares a gas schedule and ends after initial memory.
+template<typename Bytes>
+inline void
+rewrite_as_v5(Bytes &artifact)
+{
+  rewrite_with_gas_schedule_header(artifact);
+  artifact[kArtifactFormatVersionOffset] =
+      static_cast<uint8_t>(kArtifactVersion5);
   artifact.resize(artifact.size() - 4);
 }
 
@@ -81,7 +98,6 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, kArtifactEntryAbiVersion);
   append_u32(artifact, kArtifactSyscallAbiVersion);
   append_u32(artifact, 0); // Syscall API minor: the baseline.
-  append_u64(artifact, 0); // Reserved.
   append_u32(artifact, initial_memory_start +
                            static_cast<uint32_t>(initial_memory.size()));
   append_u32(artifact, static_cast<uint32_t>(code.size()));

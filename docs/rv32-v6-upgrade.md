@@ -1,11 +1,23 @@
 # RV32 v6 upgrade
 
 This runtime accepts RV32 v5 and v6 during the rollout. Existing v5 contracts
-remain executable. Both use the same 128-byte header. v6 appends an XDR
-extension list (`Rv32ArtifactExtensions` in `contract.x`) after initial memory,
-which carries the optional contract spec; a v5 artifact reads as v6 with no
-extensions. Both formats use the same execution, ABI, gas, bounds, and
-section-hash checks.
+remain executable. v6 appends an XDR extension list (`Rv32ArtifactExtensions`
+in `contract.x`) after initial memory, which carries the optional contract
+spec; a v5 artifact reads as v6 with no extensions. Both formats use the same
+execution, entry ABI, bounds, and section-hash checks, and both execute at the
+runtime's current gas prices.
+
+The headers differ in what they declare. A v6 header is 120 bytes and declares
+the syscall API version the guest was built against; the artifact is admitted
+when the major matches and the minor is no later than the one this runtime
+implements (`syscall_api_version` in `protocol/syscalls.yaml`). A v5 header is
+128 bytes and declares a gas schedule version and digest in its place, which
+must be one of the pairs v5 producers stamped.
+
+v6 artifacts written before v6 declared a syscall API version have the 128-byte
+header. They are still admitted while the contracts this tree builds come from
+a CLI that writes them (`kAdmitV6GasScheduleHeaders` in `artifact.h`); that
+ends before v6 ships.
 
 All validators must support v6 before v6 contracts are deployed. Removing v5
 support requires a separate network transition decision that accounts for

@@ -308,11 +308,17 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   // v5: the stored image is the initialized span [start, start+size);
   // the runtime zero-fills around it.
   EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
+  // The committed fixture declares a gas schedule, so its later fields sit
+  // after the digest.
+  ASSERT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
+                        kArtifactHeaderSizeOffset),
+            kArtifactLegacyHeaderBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactMemoryBytesOffset),
+                        kArtifactMemoryBytesOffset + kArtifactGasDigestBytes),
             compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactInitialMemoryStartOffset),
+                        kArtifactInitialMemoryStartOffset +
+                            kArtifactGasDigestBytes),
             compiled_sha256_return::kInitialMemoryStart);
   EXPECT_GT(compiled_sha256_return::kInitialMemoryStart, 0U);
   ASSERT_EQ(parsed->initial_memory.size(),
@@ -370,10 +376,11 @@ TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
   EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
   auto threaded = parse_threaded_artifact(artifact, Rv32Limits::defaults());
   ASSERT_TRUE(threaded.has_value());
-  EXPECT_EQ(threaded->code.data(), artifact.data() + kArtifactHeaderBytes);
+  EXPECT_EQ(threaded->code.data(),
+            artifact.data() + kArtifactLegacyHeaderBytes);
 
   auto corrupt = artifact;
-  corrupt[kArtifactHeaderBytes] ^= 1;
+  corrupt[kArtifactLegacyHeaderBytes] ^= 1;
   expect_artifact_error(std::move(corrupt), ArtifactError::kCodeDigestMismatch);
   auto trailing = artifact;
   trailing.push_back(0);
@@ -386,8 +393,12 @@ TEST(Rv32ArtifactTest, legacyLayoutMatchesCurrentImage)
                         ArtifactError::kInvalidSectionLayout);
   auto wrong_header = artifact;
   store_u32_at(wrong_header, kArtifactHeaderSizeOffset,
-               kArtifactHeaderBytes + 8);
+               kArtifactLegacyHeaderBytes + 8);
   expect_artifact_error(std::move(wrong_header), ArtifactError::kBadHeaderSize);
+  // Shorter than the header it states, then than any header.
+  auto cut = artifact;
+  cut.resize(kArtifactLegacyHeaderBytes - 1);
+  expect_artifact_error(std::move(cut), ArtifactError::kTooSmall);
   artifact.resize(kArtifactHeaderBytes - 1);
   expect_artifact_error(std::move(artifact), ArtifactError::kTooSmall);
 }
@@ -504,19 +515,18 @@ TEST(Rv32ArtifactTest, v5AcceptsOnlyRegisteredGasSchedulePairs)
 {
   // A v5 artifact carries a gas schedule version and digest where v6 carries
   // the syscall API minor. They are one identity; reject cross-paired
-  // schedules, unknown versions, and a v5 header with the v6 fields.
+  // schedules, unknown versions, and a v5 artifact with the v6 header.
   const auto v5_artifact_bytes = [] {
     auto artifact = valid_artifact_bytes();
     test_artifact::rewrite_as_v5(artifact);
     return artifact;
   };
   {
-    // The v6 fields: a syscall API minor and zero reserved bytes.
-    auto artifact = v5_artifact_bytes();
-    store_u32_at(artifact, kArtifactGasVersionOffset, 0);
-    store_u64_at(artifact, kArtifactGasDigestOffset, 0);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kGasScheduleVersionMismatch);
+    // The v6 header, which declares a syscall API minor and no gas schedule.
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactFormatVersionOffset, kArtifactVersion5);
+    artifact.resize(artifact.size() - 4);
+    expect_artifact_error(std::move(artifact), ArtifactError::kBadHeaderSize);
   }
   {
     auto artifact = v5_artifact_bytes();
@@ -548,26 +558,38 @@ TEST(Rv32ArtifactTest, v5AcceptsOnlyRegisteredGasSchedulePairs)
   }
 }
 
-// TRANSITIONAL, with kAdmitV6GasScheduleHeaders: a v6 header from a lowerer
+// TRANSITIONAL, with kAdmitV6GasScheduleHeaders: a v6 artifact from a lowerer
 // that stamps a gas schedule is still admitted, and only as a registered pair.
-TEST(Rv32ArtifactTest, v6StillAdmitsRegisteredGasSchedulePairs)
+TEST(Rv32ArtifactTest, v6StillAdmitsGasScheduleHeaders)
 {
   ASSERT_TRUE(kAdmitV6GasScheduleHeaders);
+  auto baseline =
+      parse_artifact(valid_artifact_bytes(), Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
   for (const auto &schedule : kLegacyGasSchedules) {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactGasVersionOffset, schedule.version);
-    store_u64_at(artifact, kArtifactGasDigestOffset, schedule.digest);
-    EXPECT_TRUE(parse_artifact(artifact, Rv32Limits::defaults()).has_value());
+    test_artifact::rewrite_with_gas_schedule_header(artifact, schedule);
+    auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_TRUE(parsed.has_value());
+    // The same image, read from fields that sit after the digest.
+    EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+    EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+    EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+    EXPECT_TRUE(
+        parse_threaded_artifact(artifact, Rv32Limits::defaults()).has_value());
     auto corrupted = artifact;
     store_u64_at(corrupted, kArtifactGasDigestOffset, schedule.digest ^ 1ULL);
     expect_artifact_error(std::move(corrupted),
                           ArtifactError::kGasScheduleDigestMismatch);
   }
-  // Nonzero reserved bytes that are no registered digest.
-  auto artifact = valid_artifact_bytes();
-  store_u64_at(artifact, kArtifactReservedOffset, 1);
-  expect_artifact_error(std::move(artifact),
-                        ArtifactError::kGasScheduleVersionMismatch);
+  // The header size says which header it is; the bytes cannot disagree.
+  auto longer = valid_artifact_bytes();
+  store_u32_at(longer, kArtifactHeaderSizeOffset, kArtifactLegacyHeaderBytes);
+  EXPECT_FALSE(parse_artifact(longer, Rv32Limits::defaults()).has_value());
+  auto shorter = valid_artifact_bytes();
+  test_artifact::rewrite_with_gas_schedule_header(shorter);
+  store_u32_at(shorter, kArtifactHeaderSizeOffset, kArtifactHeaderBytes);
+  EXPECT_FALSE(parse_artifact(shorter, Rv32Limits::defaults()).has_value());
 }
 
 TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)

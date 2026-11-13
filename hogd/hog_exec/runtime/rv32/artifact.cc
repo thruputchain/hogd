@@ -104,9 +104,23 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       format_version > limits.max_artifact_version) {
     return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
   }
-  if (header_size != kArtifactHeaderBytes) {
+  // The header size states what the header declares. v6 declares a syscall
+  // API minor in kArtifactHeaderBytes. v5 declares a gas schedule, with its
+  // digest, in kArtifactLegacyHeaderBytes; see kAdmitV6GasScheduleHeaders for
+  // the v6 headers that still do.
+  const bool declares_syscall_api =
+      !legacy && header_size == kArtifactHeaderBytes;
+  const bool declares_gas_schedule =
+      header_size == kArtifactLegacyHeaderBytes &&
+      (legacy || kAdmitV6GasScheduleHeaders);
+  if (!declares_syscall_api && !declares_gas_schedule) {
     return std::unexpected(ArtifactError::kBadHeaderSize);
   }
+  if (bytes.size() < header_size) {
+    return std::unexpected(ArtifactError::kTooSmall);
+  }
+  // Fields after the gas digest sit that much further on.
+  const size_t shift = header_size - kArtifactHeaderBytes;
   const uint64_t vm_profile_digest =
       load_u64_le(bytes, kArtifactVmProfileOffset);
   const uint32_t flags = load_u32_le(bytes, kArtifactFlagsOffset);
@@ -114,22 +128,18 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       load_u32_le(bytes, kArtifactEntryAbiOffset);
   const uint32_t syscall_abi_version =
       load_u32_le(bytes, kArtifactSyscallAbiOffset);
-  // One u32 and one u64, read as the format version says: a v6 syscall API
-  // minor and reserved bytes, or a v5 gas schedule version and digest.
-  const uint32_t minor_or_gas_version =
-      load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
-  const uint64_t reserved_or_gas_digest =
-      load_u64_le(bytes, kArtifactReservedOffset);
-  const uint32_t memory_bytes = load_u32_le(bytes, kArtifactMemoryBytesOffset);
-  const uint32_t code_size = load_u32_le(bytes, kArtifactCodeSizeOffset);
+  const uint32_t memory_bytes =
+      load_u32_le(bytes, kArtifactMemoryBytesOffset + shift);
+  const uint32_t code_size =
+      load_u32_le(bytes, kArtifactCodeSizeOffset + shift);
   const uint32_t initial_memory_size =
-      load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
+      load_u32_le(bytes, kArtifactInitialMemorySizeOffset + shift);
   const uint32_t initial_memory_start =
-      load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
+      load_u32_le(bytes, kArtifactInitialMemoryStartOffset + shift);
   const ArtifactDigest code_digest =
-      load_artifact_digest(bytes, kArtifactCodeDigestOffset);
+      load_artifact_digest(bytes, kArtifactCodeDigestOffset + shift);
   const ArtifactDigest initial_memory_digest =
-      load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset);
+      load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset + shift);
 
   if (vm_profile_digest != kArtifactVmProfileDigest) {
     return std::unexpected(ArtifactError::kUnsupportedVmProfile);
@@ -143,31 +153,25 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  // No accepted gas digest is zero, so zero reserved bytes mark a v6 header
-  // that declares a syscall API minor; see kAdmitV6GasScheduleHeaders for the
-  // v6 headers that do not.
-  const bool declares_syscall_api =
-      !legacy && (reserved_or_gas_digest == 0 || !kAdmitV6GasScheduleHeaders);
   if (declares_syscall_api) {
     // The major was checked above. A guest built against minor n may call
     // anything introduced up to n, so it is admitted only where all of that
     // exists.
-    if (minor_or_gas_version > limits.max_syscall_api_minor) {
+    if (load_u32_le(bytes, kArtifactSyscallApiMinorOffset) >
+        limits.max_syscall_api_minor) {
       return std::unexpected(ArtifactError::kUnsupportedSyscallApiMinor);
-    }
-    if (reserved_or_gas_digest != 0) {
-      return std::unexpected(ArtifactError::kUnsupportedFlags);
     }
   }
   else {
     // Matched as a (version, digest) pair; see kLegacyGasSchedules.
     const auto *accepted =
-        std::ranges::find(kLegacyGasSchedules, minor_or_gas_version,
+        std::ranges::find(kLegacyGasSchedules,
+                          load_u32_le(bytes, kArtifactGasVersionOffset),
                           &AcceptedGasSchedule::version);
     if (accepted == kLegacyGasSchedules.end()) {
       return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
     }
-    if (reserved_or_gas_digest != accepted->digest) {
+    if (load_u64_le(bytes, kArtifactGasDigestOffset) != accepted->digest) {
       return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
     }
   }
