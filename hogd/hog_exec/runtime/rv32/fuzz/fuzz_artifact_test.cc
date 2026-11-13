@@ -30,8 +30,7 @@ TEST(Rv32ArtifactMutator, StructuredMutationsFitAtV5AndV6SizeLimits)
   auto v6 = test_artifact::build_artifact({test_program::addi(0, 0, 0)},
                                           std::array<uint8_t, 16>{});
   auto v5 = v6;
-  v5.resize(v5.size() - 4);
-  store_u32_le(v5, kArtifactFormatVersionOffset, kArtifactVersion5);
+  test_artifact::rewrite_as_v5(v5);
   // Seeds select code shape, memory shape, zero memory, and memory limit.
   for (const auto &input : {v5, v6}) {
     for (size_t extra : {0U, 1U, 3U, 4U}) {

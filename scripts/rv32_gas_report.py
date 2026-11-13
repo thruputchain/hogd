@@ -632,10 +632,9 @@ def print_schedule(runs, resolution=DEFAULT_RESOLUTION):
         sequence_failures.extend(print_jump_sequences(
             run, {op: entry["proposed_gas"] for op, entry in schedule.items()}, unit))
     print("This is a proposal, not a patch. Changing any cost in")
-    print("program.h's kInstructionGasSchedule is a coordinated gas-schedule")
-    print("update: it moves rv32::kGasScheduleDigest, so the pinned digest in")
-    print("artifact.h and every committed RV32 artifact must be regenerated in")
-    print("the same change.")
+    print("program.h's kInstructionGasSchedule is a consensus change, and the")
+    print("schedule rv32_vm_test pins must change with it. No artifact or")
+    print("lowerer changes: artifacts do not declare prices.")
     return 1 if sequence_failures else 0
 
 

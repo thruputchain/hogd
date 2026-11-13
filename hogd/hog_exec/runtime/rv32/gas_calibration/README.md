@@ -179,10 +179,9 @@ The local database fixture does not measure a remote database hop. Frame rows
 measure child merge/discard; they exclude the root transaction's database commit.
 
 `--schedule` prints a proposal. [`program.h`](../program.h) and [`gas_cost_table.h`](../../gas_cost_table.h) own
-the committed constants; [`artifact.h`](../artifact.h) defines accepted gas digests. A price change
-requires reviewing that compatibility policy, the pinned digest, the artifact
-fingerprint derived from it, and producer/fixture regeneration. An accepted old
-digest does not select historical execution prices.
+the committed constants. A price change is a consensus change and has to update the schedule
+`rv32_vm_test` pins, but it touches no artifact, lowerer or fixture: artifacts do not declare
+prices, and every artifact executes at the build's current ones.
 
 The main implementation files are `kernel.*` (instruction shapes),
 `lowering_audit.*` (lowered-body checks), `measure.*` (timing and fits),

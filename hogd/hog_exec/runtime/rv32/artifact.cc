@@ -114,9 +114,12 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       load_u32_le(bytes, kArtifactEntryAbiOffset);
   const uint32_t syscall_abi_version =
       load_u32_le(bytes, kArtifactSyscallAbiOffset);
-  const uint32_t gas_schedule_version =
-      load_u32_le(bytes, kArtifactGasVersionOffset);
-  const uint64_t gas_digest = load_u64_le(bytes, kArtifactGasDigestOffset);
+  // One u32 and one u64, read as the format version says: a v6 syscall API
+  // minor and reserved bytes, or a v5 gas schedule version and digest.
+  const uint32_t minor_or_gas_version =
+      load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
+  const uint64_t reserved_or_gas_digest =
+      load_u64_le(bytes, kArtifactReservedOffset);
   const uint32_t memory_bytes = load_u32_le(bytes, kArtifactMemoryBytesOffset);
   const uint32_t code_size = load_u32_le(bytes, kArtifactCodeSizeOffset);
   const uint32_t initial_memory_size =
@@ -140,16 +143,33 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
-  // list can hold more than the current schedule and when to shrink it.
-  const auto *accepted =
-      std::ranges::find(kAcceptedGasSchedules, gas_schedule_version,
-                        &AcceptedGasSchedule::version);
-  if (accepted == kAcceptedGasSchedules.end()) {
-    return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
+  // No accepted gas digest is zero, so zero reserved bytes mark a v6 header
+  // that declares a syscall API minor; see kAdmitV6GasScheduleHeaders for the
+  // v6 headers that do not.
+  const bool declares_syscall_api =
+      !legacy && (reserved_or_gas_digest == 0 || !kAdmitV6GasScheduleHeaders);
+  if (declares_syscall_api) {
+    // The major was checked above. A guest built against minor n may call
+    // anything introduced up to n, so it is admitted only where all of that
+    // exists.
+    if (minor_or_gas_version > limits.max_syscall_api_minor) {
+      return std::unexpected(ArtifactError::kUnsupportedSyscallApiMinor);
+    }
+    if (reserved_or_gas_digest != 0) {
+      return std::unexpected(ArtifactError::kUnsupportedFlags);
+    }
   }
-  if (gas_digest != accepted->digest) {
-    return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
+  else {
+    // Matched as a (version, digest) pair; see kLegacyGasSchedules.
+    const auto *accepted =
+        std::ranges::find(kLegacyGasSchedules, minor_or_gas_version,
+                          &AcceptedGasSchedule::version);
+    if (accepted == kLegacyGasSchedules.end()) {
+      return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
+    }
+    if (reserved_or_gas_digest != accepted->digest) {
+      return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
+    }
   }
   // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose
   // data accesses all fault. Only the upper bound is enforced, and it is the

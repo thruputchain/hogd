@@ -290,8 +290,9 @@ private:
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactEntryAbiVersion);
     rv32::test_artifact::append_u32(artifact_,
                                     rv32::kArtifactSyscallAbiVersion);
-    rv32::test_artifact::append_u32(artifact_, rv32::kGasTableVersion);
-    rv32::test_artifact::append_u64(artifact_, rv32::kGasScheduleDigest);
+    // Syscall API minor (the baseline), then the reserved bytes.
+    rv32::test_artifact::append_u32(artifact_, 0);
+    rv32::test_artifact::append_u64(artifact_, 0);
     rv32::test_artifact::append_u32(artifact_, memory_bytes);
     rv32::test_artifact::append_u32(artifact_,
                                     static_cast<uint32_t>(code.size()));
@@ -377,7 +378,7 @@ private:
   // digest to exercise pair-wise validation rather than independent fields.
   void mutate_gas_schedule(bool keep_pair)
   {
-    const auto schedule = choose(rv32::kAcceptedGasSchedules);
+    const auto schedule = choose(rv32::kLegacyGasSchedules);
     uint64_t digest = schedule.digest;
     if (!keep_pair) {
       digest ^= random_bit<uint64_t>();

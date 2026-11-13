@@ -1387,7 +1387,7 @@ def fit_sha256_blocks(points):
     Fitting the block is also what removes the need for a rate denominator: a
     per-byte price is a fraction no integer can express, and the divisor that
     would fix it is exactly the sort of billing-relevant constant that is easy
-    to leave out of the gas-schedule digest.
+    to leave out of the gas schedule.
     """
     if len(points) < MIN_SWEEP_POINTS:
         return None
@@ -1553,9 +1553,9 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         # The parent walk is measured and reported, never proposed. Since
         # #3771 it is a fraction of a nanosecond per frame, which rounds to
         # 1 gas -- below what this benchmark resolves, and a constant in this
-        # table is not free: every one is hashed into
-        # rv32::kGasScheduleDigest, so adding one buys a coordinated
-        # gas-schedule update for a term that is noise. What is left unpriced
+        # table is not free: every one is a consensus price that the schedule
+        # pins, so adding one buys a consensus change for a term that is
+        # noise. What is left unpriced
         # is bounded by what it costs to get deep in the first place: reaching
         # depth D means D nested invokes, each dearer than the walk it adds.
         # The number is printed so a regression -- or a chain setting
@@ -1842,10 +1842,10 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  avoids a per-byte rate, which is a fraction no integer can")
         print("  express -- and the divisor that would fix that is exactly the")
         print("  kind of billing-relevant constant that is easy to leave out")
-        print("  of the digest. gas_schedule_digest() in artifact.h hashes")
-        print("  kSyscallGasCostSchedule's names and costs, not the formula,")
-        print("  so any constant the formula reads has to be an")
-        print("  entry in kSyscallGasCostSchedule to be hashed.")
+        print("  of the schedule. rv32_vm_test pins kSyscallGasCostSchedule's")
+        print("  names and costs, not the formula, so any constant the formula")
+        print("  reads has to be an entry in kSyscallGasCostSchedule to be")
+        print("  pinned.")
     blocks = proposal.get("bytestring_blocks")
     if blocks:
         print()
@@ -1890,7 +1890,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                   "frame rounds to 1 gas,")
             print("  which is under what this benchmark resolves, and every "
                   "constant here is")
-            print("  hashed into the gas-schedule digest. At the deepest "
+            print("  a consensus price in the gas schedule. At the deepest "
                   "depth swept that")
             print(f"  leaves ~"
                   f"{proposal['storage_parent_frame_unpriced_gas']:.0f} gas "
@@ -1907,11 +1907,9 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                             width=78, initial_indent="  ",
                             subsequent_indent="  "))
     print()
-    print("Changing any of these is a coordinated gas-schedule update: each")
-    print("is an entry in kSyscallGasCostSchedule, which is folded into")
-    print("rv32::kGasScheduleDigest -- so the pinned digest in artifact.h, the")
-    print("artifact format fingerprint derived from it, and any artifact")
-    print("stamped with the current schedule all move in the same change.")
+    print("Changing any of these is a consensus change: each is an entry in")
+    print("kSyscallGasCostSchedule, which rv32_vm_test pins. No artifact or")
+    print("lowerer changes: artifacts do not declare prices.")
     return 0
 
 

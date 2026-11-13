@@ -3807,9 +3807,7 @@ TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
   Contract legacy = rv32_contract_declaring(64 * 1024);
   auto &data = legacy.rv32_contract().data;
   ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion6);
-  data[rv32::kArtifactFormatVersionOffset] = rv32::kArtifactVersion5;
-  // v5 ends after initial memory: drop the empty extension list.
-  data.resize(data.size() - 4);
+  rv32::test_artifact::rewrite_as_v5(data);
   auto bytes = x23::serialize(legacy);
 
   auto *rc = make_runtime_context();

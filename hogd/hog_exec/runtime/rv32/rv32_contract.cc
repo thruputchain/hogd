@@ -29,6 +29,7 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
+#include "syscall.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -40,6 +41,9 @@ static_assert(rv32::kDefaultMaxCodeBytes ==
 static_assert(rv32::kDefaultMaxMemoryBytes ==
               static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
 // The configurable version range is exactly the formats the parser reads.
+// The syscall API version an artifact declares is the one syscalls.yaml
+// defines.
+static_assert(rv32::kArtifactSyscallAbiVersion == kSyscallApiMajor);
 static_assert(rv32::kArtifactVersion5 ==
               static_cast<uint32_t>(kMinRv32ArtifactVersion));
 static_assert(rv32::kArtifactVersion6 ==
@@ -285,6 +289,7 @@ to_contract_reject_code(rv32::ArtifactError error)
   case kUnsupportedFlags:
   case kUnsupportedEntryAbi:
   case kUnsupportedSyscallAbi:
+  case kUnsupportedSyscallApiMinor:
     return ContractRejectCode::ContractRejectUnsupportedAbi;
   case kGasScheduleVersionMismatch:
   case kGasScheduleDigestMismatch:
@@ -325,8 +330,8 @@ Rv32Context::verify_contract(Contract const &contract,
       rv32::Rv32Limits{.max_code_bytes = params.max_rv32_code_bytes,
                        .max_memory_bytes = params.max_rv32_memory_bytes,
                        .min_artifact_version = params.min_rv32_artifact_version,
-                       .max_artifact_version =
-                           params.max_rv32_artifact_version});
+                       .max_artifact_version = params.max_rv32_artifact_version,
+                       .max_syscall_api_minor = kSyscallApiMinor});
   if (!translated.has_value()) {
     rejection = to_contract_reject_code(translated.error());
     return InvokeErrorCode::Deterministic;

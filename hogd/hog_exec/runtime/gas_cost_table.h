@@ -11,20 +11,20 @@ namespace hogd {
 /**
  * Table of gas costs for various operations.
  *
- * RV32 artifacts commit to these: kSyscallGasCostSchedule is folded into
- * rv32::kGasScheduleDigest and pinned in artifact.h. Changing any cost/name/
- * order is a coordinated gas-schedule update: update the pinned digest/version
- * deliberately and regenerate committed RV32 artifacts/lowerer constants.
+ * These are consensus: validators must agree on them. They are this build's
+ * and are not part of an artifact, which declares only the syscall API version
+ * it was built against, so a new price needs no change to any artifact or
+ * lowerer. rv32_vm_test spells every entry out, so a change here is deliberate.
  *
  * The costs are measured by the RV32 Gas Calibration workflow, which times the
  * production syscall_entry path and converts nanoseconds to gas via the opcode
  * calibration's baseline instruction. See rv32/gas_calibration/MEASUREMENTS.md.
  *
  * Every constant the cost functions read must be an entry in
- * kSyscallGasCostSchedule, since that is what the digest hashes; a number that
- * changes a contract's bill while the digest sits still is the failure the
- * digest exists to prevent. Block geometry is the exception: it is fixed by the
- * hash functions, so it is static_asserted rather than hashed.
+ * kSyscallGasCostSchedule, since that is what the test pins; a number that
+ * changes a contract's bill with no pinned entry moving is the failure the
+ * schedule exists to prevent. Block geometry is the exception: it is fixed by
+ * the hash functions, so it is static_asserted rather than listed.
  */
 
 // Every syscall pays this: the crossing itself -- ecall barrier, argument
@@ -249,8 +249,7 @@ struct GasCost {
 };
 
 struct SyscallGasCostEntry {
-  // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
-  // wire constant), so the hashed bytes must be the standard's UTF-8 code units
+  // `u8"..."` literal, so the bytes are the standard's UTF-8 code units
   // rather than implementation-defined ordinary-literal bytes that depend on
   // the execution character set (`-fexec-charset`). See hogd issue #2689.
   const char8_t *name;

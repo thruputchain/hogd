@@ -34,6 +34,7 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -786,20 +787,24 @@ TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
             ContractRejectCode::ContractRejectMalformedArtifact);
 }
 
-TEST(Rv32ContractTest, VerifyRejectsOtherGasSchedule)
+TEST(Rv32ContractTest, VerifyRejectsLaterSyscallApiMinor)
 {
-  // An artifact stamped by a toolchain on a gas schedule the node doesn't
-  // accept.
+  // An artifact built against a syscall API minor this runtime does not
+  // implement: it may call syscalls that are not here.
   std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
                                           std::vector<uint8_t>{0});
-  const uint32_t other_version = rv32::kGasTableVersion + 1;
-  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-    artifact[rv32::kArtifactGasVersionOffset + i] =
-        static_cast<uint8_t>(other_version >> (i * 8));
-  }
+  const auto stamp_minor = [&artifact](uint32_t minor) {
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+      artifact[rv32::kArtifactSyscallApiMinorOffset + i] =
+          static_cast<uint8_t>(minor >> (i * 8));
+    }
+  };
+  stamp_minor(kSyscallApiMinor);
+  EXPECT_EQ(verify_rv32_blob(artifact), std::nullopt);
+  stamp_minor(kSyscallApiMinor + 1);
   EXPECT_EQ(verify_rv32_blob(artifact),
-            ContractRejectCode::ContractRejectGasScheduleMismatch);
+            ContractRejectCode::ContractRejectUnsupportedAbi);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)

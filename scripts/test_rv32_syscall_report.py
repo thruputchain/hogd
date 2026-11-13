@@ -504,8 +504,8 @@ class StorageScheduleTest(unittest.TestCase):
                                          synthetic_calibration(1.6),
                                          resolution=1)
         # Reported as nanoseconds, with what it leaves unpriced at the deepest
-        # depth, and never as a constant: a gas-schedule entry is hashed into
-        # the digest, so one is not added for a term this small.
+        # depth, and never as a constant: a gas-schedule entry is a consensus
+        # price, so one is not added for a term this small.
         self.assertNotIn("storage_parent_frame_gas", proposal)
         self.assertAlmostEqual(proposal["storage_parent_frame_ns"], 15.0,
                                places=6)

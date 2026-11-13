@@ -40,6 +40,25 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
+// Rewrite a v6 artifact with an empty extension list as the v5 artifact with
+// the same image: v5 ends after initial memory, and declares a gas schedule
+// where v6 declares a syscall API minor.
+template<typename Bytes>
+inline void
+rewrite_as_v5(Bytes &artifact)
+{
+  const auto store = [&artifact](size_t offset, uint64_t value, size_t width) {
+    for (size_t i = 0; i < width; ++i) {
+      artifact[offset + i] = static_cast<uint8_t>(value >> (i * 8));
+    }
+  };
+  const AcceptedGasSchedule schedule = kLegacyGasSchedules.back();
+  store(kArtifactFormatVersionOffset, kArtifactVersion5, 4);
+  store(kArtifactGasVersionOffset, schedule.version, 4);
+  store(kArtifactGasDigestOffset, schedule.digest, 8);
+  artifact.resize(artifact.size() - 4);
+}
+
 // Assemble a v6 artifact with no extensions: header || code || initial_memory
 // || empty extension list, with the stored image placed at data-space VA
 // `initial_memory_start`. memory_bytes is stamped as start + stored size
@@ -61,8 +80,8 @@ build_artifact(std::span<const uint32_t> words,
   append_u32(artifact, 0);
   append_u32(artifact, kArtifactEntryAbiVersion);
   append_u32(artifact, kArtifactSyscallAbiVersion);
-  append_u32(artifact, kGasTableVersion);
-  append_u64(artifact, kGasScheduleDigest);
+  append_u32(artifact, 0); // Syscall API minor: the baseline.
+  append_u64(artifact, 0); // Reserved.
   append_u32(artifact, initial_memory_start +
                            static_cast<uint32_t>(initial_memory.size()));
   append_u32(artifact, static_cast<uint32_t>(code.size()));

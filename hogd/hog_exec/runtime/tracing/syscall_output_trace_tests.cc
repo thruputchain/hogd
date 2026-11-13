@@ -707,10 +707,10 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // Everything else here asks the schedule what a call costs, so a repricing
 // moves those fixtures and nothing objects -- right for a fixture, useless as
 // a guard. This one spells the prices out, and it guards something the
-// artifact digest cannot: gas_schedule_digest() hashes the schedule's names
-// and costs, not the cost *functions*, so GasCost::sha256_update could drop
-// its stream term, or SHA256Copy could go back to charging nothing, and every
-// digest and fingerprint in the tree would still match. Here it fails.
+// pinned schedule cannot: rv32_vm_test pins the schedule's names and costs,
+// not the cost *functions*, so GasCost::sha256_update could drop its stream
+// term, or SHA256Copy could go back to charging nothing, and that test would
+// still pass. Here it fails.
 //
 // Charges, crossing included, at kSyscallBaseCost = 50:
 //
@@ -805,13 +805,12 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// What the artifact digest cannot check.
+// What the pinned schedule cannot check.
 //
-// gas_schedule_digest() hashes kSyscallGasCostSchedule's names and costs, not
-// the cost *functions* that read them. GasCost::sha256_update could drop its
-// stream term, or SHA256Copy could be set to charge nothing, and every digest
-// and fingerprint in the tree would still match -- verified by reverting each
-// and watching rv32_vm_test stay green. So the shapes are pinned here.
+// rv32_vm_test pins kSyscallGasCostSchedule's names and costs, not the cost
+// *functions* that read them. GasCost::sha256_update could drop its stream
+// term, or SHA256Copy could be set to charge nothing, and that test would
+// stay green -- verified by reverting each. So the shapes are pinned here.
 //
 // Written against the constants rather than as literals on purpose: this test
 // says what the formulas mean and survives a repricing, while

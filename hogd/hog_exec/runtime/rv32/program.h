@@ -36,6 +36,10 @@ struct Rv32Limits {
   // reads. Unbounded unless a caller narrows it to its chain's configuration.
   uint32_t min_artifact_version = 0;
   uint32_t max_artifact_version = std::numeric_limits<uint32_t>::max();
+  // The latest syscall API minor version a v6 artifact may declare. Unbounded
+  // unless a caller narrows it: attachment narrows it to the minor this
+  // runtime implements, and a deployed contract was admitted under one.
+  uint32_t max_syscall_api_minor = std::numeric_limits<uint32_t>::max();
 
   static constexpr Rv32Limits defaults()
   {
@@ -146,8 +150,7 @@ constexpr size_t kOpCount = static_cast<size_t>(Op::kCount);
 
 struct InstructionGasEntry {
   Op op;
-  // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
-  // wire constant), so the hashed bytes must be the standard's UTF-8 code units
+  // `u8"..."` literal, so the bytes are the standard's UTF-8 code units
   // rather than implementation-defined ordinary-literal bytes that depend on
   // the execution character set (`-fexec-charset`). See hogd issue #2689.
   const char8_t *name;
