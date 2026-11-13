@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  # The trusted controller publishes collected metrics after the job exits.
+  mkdir -p metrics_history
+  printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" > metrics_history/.publish-requested
+  exit 0
+fi
+
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/git_info.sh
 source ${SCRIPT_DIR}/metrics_history_git.sh

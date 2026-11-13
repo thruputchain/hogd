@@ -26,15 +26,20 @@ hog11) WARMUP_SPECS=("clang Debug x23-coro-trace-off" "clang Debug test-ffi-no-b
   ;;
 esac
 
-echo 'cloning hogd'
-git init -q .
-git remote remove origin 2>/dev/null || true
-git remote add origin "git@github.com:${GITHUB_REPO}.git"
-git fetch --depth 1 origin "$TARGET_SHA" --no-progress --quiet
-git checkout -f -q "$TARGET_SHA"
-git clean -ffd -e .ssh/ -e .gitconfig
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || { echo 'Staged source revision mismatch' >&2; exit 1; }
+else
+  echo 'cloning hogd'
+  git init -q .
+  git remote remove origin 2>/dev/null || true
+  git remote add origin "git@github.com:${GITHUB_REPO}.git"
+  git fetch --depth 1 origin "$TARGET_SHA" --no-progress --quiet
+  git checkout -f -q "$TARGET_SHA"
+  git clean -ffd -e .ssh/ -e .gitconfig
 
-git submodule update --init --recursive --depth 1 --jobs 8 --quiet
+  git submodule update --init --recursive --depth 1 --jobs 8 --quiet
+
+fi
 
 # Warm developer builds with the host's default GCC as the system toolchain moves.
 HOGD_CI_GCC_CC=gcc HOGD_CI_GCC_CXX=g++ \

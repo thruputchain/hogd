@@ -1,5 +1,11 @@
 #!/bin/bash
 
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  # Cargo build reports missing staged dependencies without attempting a fetch.
+  command -v thruput >/dev/null && command -v cbindgen >/dev/null
+  exit $?
+fi
+
 SCRIPT_DIR="$(dirname "$(realpath "${BASH_SOURCE[0]}")")"
 ROOT_DIR="$(realpath "${SCRIPT_DIR}/..")"
 
