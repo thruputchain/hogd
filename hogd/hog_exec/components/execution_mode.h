@@ -99,6 +99,15 @@ public:
     return empty;
   }
 
+  // The concurrent queue entries this transaction observed, by queue. Every
+  // validator pushes them, so the proposer counts their bytes against its own
+  // push's message cap (see try_acquire_frame_locks()).
+  std::map<AddressAndKey, std::vector<QueueEntry>> const &
+  recorded_observations() const
+  {
+    return queue_entry_observations_;
+  }
+
   // Set once a concurrent observation would exceed kMaxConcurrentRcqReadsPerTx.
   // The RCQ read syscall then returns InvalidSyscallInput instead of
   // overflowing the bounded observed_queue_entry_sequence (#2894).
