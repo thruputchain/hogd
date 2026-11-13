@@ -78,8 +78,7 @@ protected:
       EXPECT_EQ(table->filter_policy, tx_table->filter_policy);
       EXPECT_EQ(table->block_cache, tx_table->block_cache);
       EXPECT_TRUE(table->whole_key_filtering);
-      EXPECT_TRUE(table->cache_index_and_filter_blocks);
-      EXPECT_TRUE(table->pin_l0_filter_and_index_blocks_in_cache);
+      EXPECT_FALSE(table->cache_index_and_filter_blocks);
     }
   }
 };
