@@ -156,15 +156,10 @@ typename: string
   type, or a basic type) and be present in contract code.  For types that have
   different names, the optional `rust_typename` parameter may be set.
 
-primitive_type: bool
-  required: no
-    default: no
-  description: If the trivially copyable type is a primitive type that can
-  fit within a uint64_t, then this argument will be passed by value
-  as one of the arguments to the syscall, instead of as an offset into contract
-  memory.
-
-  Only available for input arguments.
+  An input whose typename has a type_mappings entry with `primitive_type: true`
+  is passed by value in a single 32-bit argument slot, instead of as an offset
+  into contract memory. Arguments carry no primitive_type of their own; the
+  type mapping alone decides. Outputs are always passed by reference.
 
 syscall_pass_by_value: bool
   required: no
@@ -183,9 +178,8 @@ optional: bool
     default: no
 
   description: This syscall argument is optional.
-  Passed to syscall_{name}_inner as a pointer, instead of a reference.
-
-  Not available with primitive_type = yes.
+  Passed to syscall_{name}_inner as a pointer, instead of a reference,
+  even when its type is primitive.
 
 span_argument: bool
   required: no
@@ -193,7 +187,7 @@ span_argument: bool
   description: The argument is a bytestring (a span) into contract memory.
   Passed into c++ as a std::span<{const}std::byte>.
 
-  Mutually exclusive with typename or primitive_type.
+  Mutually exclusive with typename.
 """
 
 
@@ -219,11 +213,9 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
         const = "const "
         in_out = "input"
 
-    primitive_type = False
-    if (is_input and
-        (("primitive_type" in inp and inp["primitive_type"]) or
-         ("typename" in inp and inp["typename"] in primitive_types))):
-        primitive_type = True
+    # Only the type's type_mappings entry makes an argument by-value, and only
+    # for inputs: an output is always written through a reference.
+    primitive_type = is_input and inp.get("typename") in primitive_types
 
     optional = False
     if "optional" in inp and inp["optional"]:
@@ -252,7 +244,8 @@ def gen_validate_arg(inp: dict, *, is_input: bool) -> tuple[int, str]:
         # compile time by a static_assert in narrow_slot<T>
         # (syscall_arg_params.h); a wider by-value type (e.g. a 64-bit
         # BlockHeight) fails to build. Wider types must be passed by
-        # reference (omit primitive_type so they emit as `const T&`).
+        # reference (leave primitive_type off their type mapping so they emit
+        # as `const T&`).
         return 1, f"{typename} {arg_name}"
 
     if optional:
