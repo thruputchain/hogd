@@ -300,8 +300,13 @@ TEST(HogDbGatewayRpcTest, ConfigWaitsForPublishedTipAndPrices)
   EXPECT_EQ(result.config().tip, tip);
   EXPECT_EQ(result.config().storage_cost_model, costs.to_xdr());
   EXPECT_TRUE(result.config().tip.network_config.v0().params.empty());
-  EXPECT_EQ(result.config().effective_config,
-            NetworkConfigParams::stated_defaults());
+  // An empty list is in force as the stated defaults, except that it admits
+  // RV32 artifact formats only up to the newest one it predates.
+  NetworkConfig expected = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(
+      expected, ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+      kUnstatedMaxRv32ArtifactVersion);
+  EXPECT_EQ(result.config().effective_config, expected);
 }
 
 // Querying an address that was never written returns per-item
