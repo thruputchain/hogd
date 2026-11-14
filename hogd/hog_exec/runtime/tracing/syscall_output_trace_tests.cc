@@ -1024,12 +1024,15 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
   }
   {
+    // Warm queue: no cold-load gas, but every RCQ read pays the flat storage
+    // access.
     SyscallTraceBody body(SyscallNo::kRetrocausalQueuePeekLen);
     body.retrocausal_queue_peek_len().inputs.key = key;
     body.retrocausal_queue_peek_len().outputs =
         SyscallRetrocausalQueuePeekLenOutputs{
             .len = static_cast<uint32_t>(entry_bytes.size())};
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueConsume);
@@ -1037,7 +1040,8 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().inputs.peek = false;
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);
