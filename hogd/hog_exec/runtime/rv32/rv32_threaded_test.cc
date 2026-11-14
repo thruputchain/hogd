@@ -105,6 +105,19 @@ struct ThreadedMachinePreInstantiationTestPeer {
   {
     return program.exec_[i].handler;
   }
+
+  // Seeded byte count retained by the pre-instantiation (#4327).
+  static size_t retained_image_bytes(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.size();
+  }
+
+  // Bytes the retained seed buffer keeps allocated (#4327).
+  static size_t
+  retained_image_capacity(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.capacity();
+  }
 };
 
 namespace {
@@ -228,6 +241,43 @@ TEST(Rv32Threaded, decodeRejectsLikeCanonical)
                                                     /*trace=*/false)
                 .error(),
             ProgramError::kUnsupportedSystemInstruction);
+}
+
+TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
+{
+  using test_program::addi;
+  // Large declared memory, tiny seed: the cache keeps only the seed, while the
+  // machine still materializes the full image (#4327).
+  memory_slot_pool() = MemorySlotPool{};
+  constexpr uint32_t kDeclaredMemory = 1024 * 1024;
+  constexpr uint32_t kSeedStart = 8;
+  constexpr std::array<uint8_t, 4> kSeed = {0xde, 0xad, 0xbe, 0xef};
+  const auto code = words_to_bytes(std::array{addi(0, 0, 0)});
+
+  auto pre =
+      ThreadedMachinePreInstantiation::create(code, kSeed, kSeedStart,
+                                              kDeclaredMemory, /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_image_bytes(*pre),
+            kSeed.size());
+  // Capacity too, so a full-image reserve can't sneak past the size check.
+  constexpr size_t kMaxRetainedCapacity = 1024;
+  static_assert(kMaxRetainedCapacity < kDeclaredMemory);
+  EXPECT_LE(ThreadedMachinePreInstantiationTestPeer::retained_image_capacity(
+                *pre),
+            kMaxRetainedCapacity);
+
+  // The materialized machine still exposes the full declared image: zeros
+  // everywhere except the seed at its placement.
+  ThreadedMachine machine(*pre, /*gas=*/10);
+  ASSERT_EQ(machine.memory().size(), kDeclaredMemory);
+  EXPECT_TRUE(
+      std::ranges::equal(machine.memory().subspan(kSeedStart, kSeed.size()),
+                         kSeed));
+  EXPECT_EQ(machine.memory()[kSeedStart - 1], 0U);
+  EXPECT_EQ(machine.memory()[kSeedStart + kSeed.size()], 0U);
+  EXPECT_EQ(machine.memory().back(), 0U);
+  memory_slot_pool() = MemorySlotPool{};
 }
 
 TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
