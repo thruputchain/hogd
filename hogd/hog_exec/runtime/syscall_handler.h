@@ -471,6 +471,9 @@ public:
   // Auth token syscalls
   [[nodiscard]] SyscallStatus<uint32_t>
   mint_auth_token(RegisteredAuthToken token);
+  // Counts one MintAuthToken attempt against the transaction's
+  // max_auth_tokens, or returns false once that many have been made.
+  [[nodiscard]] bool reserve_auth_token_mint();
   [[nodiscard]] SyscallStatus<InvocationFrameStack::ConsumeAuthTokenResult>
   consume_auth_token(uint32_t token_id, BlockHeight current_height);
 
@@ -551,6 +554,9 @@ private:
   NewContractSet newly_created_contracts_;
 
   std::unique_ptr<TransactionStats> stats_ = nullptr;
+
+  // MintAuthToken attempts so far; see reserve_auth_token_mint().
+  uint32_t auth_token_mint_count_ = 0;
 
   // only set at the end of the transaction
   std::optional<InvocationFrame> last_frame_;
