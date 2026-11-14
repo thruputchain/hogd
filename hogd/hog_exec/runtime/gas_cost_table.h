@@ -231,6 +231,13 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // Priced on the bytes that reach the guest, in bytestring read blocks. No
+  // storage-access term: this is the entry copy alone.
+  static constexpr uint64_t retrocausal_queue_consume(uint64_t bytes_copied)
+  {
+    return kBytestringReadBlockCost * bytestring_blocks(bytes_copied);
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
