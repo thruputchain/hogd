@@ -21,7 +21,7 @@ target_include_directories(
 
 add_dependencies(
     precompiles_objects 
-    all_contract_headers
+    core_contract_headers
     generate_syscall_inner_h
     generate_syscall_meta_h
 )

@@ -61,7 +61,7 @@ target_link_libraries(
   metrics
   http
 )
-add_dependencies(hog-db all_riscv_contracts)
+add_dependencies(hog-db core_riscv_contracts)
 
 if(BUILD_BENCHMARKS)
   # Build the hog_db_bench executable

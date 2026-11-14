@@ -29,8 +29,8 @@ target_link_libraries(
 )
 add_dependencies(
   hog_devnode
-  all_riscv_contracts
-  all_contract_headers
+  core_riscv_contracts
+  core_contract_headers
 )
 target_include_directories(
   hog_devnode
@@ -83,6 +83,7 @@ target_link_libraries(
 add_dependencies(
   hog_devnode_test
   all_riscv_contracts
+  all_contract_headers
   hog-devnode
 )
 # Every test that boots a devnode holds RESOURCE_LOCK hog_devnode (#1697), so

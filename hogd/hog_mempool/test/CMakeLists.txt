@@ -29,6 +29,7 @@ target_link_libraries(mempool_test_objects
 )
 add_dependencies(mempool_test_objects
   all_riscv_contracts
+  all_contract_headers
 )
 
 add_executable(
