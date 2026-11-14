@@ -2842,6 +2842,135 @@ TEST_F(MempoolValidationExecutorResultTest,
   EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
 }
 
+namespace {
+
+// How [forge_nondeterministic_data] corrupts one transaction's
+// nondeterministic data. A peer controls this field outright, and either way
+// the executor's replay fails the transaction with
+// [ExecResultTxValidationFailure].
+enum class NondeterministicForgery {
+  // Claims more bits than it supplies, so the replay rejects the data before
+  // the transaction runs.
+  kMalformedBitCount,
+  // Supplies a bit the transaction never consumes, so the replay runs the
+  // transaction to completion and only then rejects it.
+  kUnconsumedBit,
+};
+
+// [proposal] with the nondeterministic data of its transaction at [index]
+// forged as [forgery].
+Proposal
+forge_nondeterministic_data(Proposal proposal, size_t index,
+                            NondeterministicForgery forgery)
+{
+  x23::XdrVec<NondeterministicProposalData> data;
+  CHECK(parallel_batch_to_t(proposal.transactions.nondeterministic_data, data,
+                            kNoBatchSizeLimit)());
+  CHECK_LT(index, data.size());
+  NondeterministicProposalData &forged = data[index];
+  switch (forgery) {
+  case NondeterministicForgery::kMalformedBitCount:
+    forged.nondeterministic_bit_count += 8;
+    break;
+  case NondeterministicForgery::kUnconsumedBit:
+    if (forged.nondeterministic_bit_count % 8 == 0) {
+      forged.nondeterministic_bits.push_back(0);
+    }
+    forged.nondeterministic_bit_count++;
+    break;
+  }
+  proposal.transactions.nondeterministic_data = t_to_parallel_batch(data)();
+  return proposal;
+}
+
+size_t
+proposal_tx_count(const Proposal &proposal)
+{
+  SignedTransactionHashBatch signed_tx_hashes;
+  CHECK(parallel_batch_to_t(proposal.transactions.signed_hash, signed_tx_hashes,
+                            kNoBatchSizeLimit)());
+  return signed_tx_hashes.size();
+}
+
+// Nominates [txs] on top of [db_tip] and returns the proposal, with [txs]
+// submitted again so that validating it finds every transaction, as a
+// validator sees a block that a peer nominated.
+Proposal
+nominate_for_validation(MempoolTestInfra &server, const DbTip &db_tip,
+                        const SignedTransactionBatch &txs)
+{
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  CHECK_EQ(res_nominate.outcome(),
+           SchedulerProposalOutcome::SchedulerProposalOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  return res_nominate.proposed_block().proposal;
+}
+
+DbTip
+current_tip(MempoolTestInfra &server)
+{
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  return get_tip.db_tip();
+}
+
+// A peer forges one transaction's nondeterministic data in an otherwise
+// honest block. The executor fails that transaction while the rest of the
+// block executes and emits events, so the validation is cancelled with those
+// emissions in flight. The validator must vote the block down, release the
+// executor, event and snapshot handles the attempt took, and still validate
+// and commit the honest block at the same height.
+void
+expect_forged_block_rejected_then_honest_block_commits(
+    NondeterministicForgery forgery)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  const DbTip db_tip = current_tip(server);
+  const Proposal honest = nominate_for_validation(server, db_tip, txs);
+  // The forged transaction sits mid-block, past several executor chunks.
+  ASSERT_EQ(proposal_tx_count(honest), kNumTxs);
+  const Proposal forged =
+      forge_nondeterministic_data(honest, kNumTxs / 2, forgery);
+
+  SchedulerValidationResult res_forged =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               forged)();
+  EXPECT_EQ(res_forged.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+
+  SchedulerValidationResult res_honest =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               honest)();
+  ASSERT_EQ(res_honest.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  EXPECT_EQ(commit_block(server, res_honest.block().block_id, db_tip, honest),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+} // namespace
+
+TEST(Mempool, ValidateRejectsMalformedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kMalformedBitCount);
+}
+
+TEST(Mempool, ValidateRejectsUnconsumedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kUnconsumedBit);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
