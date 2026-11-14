@@ -17,6 +17,7 @@
 #include "hogd/hog_exec/components/contract_result.h"
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -228,6 +229,14 @@ public:
         };
 
         auto const &calldata = ctx.handler().get_calldata();
+
+        // Charge calldata decode up front (#4236) so a low-gas frame cannot
+        // parse a large payload for free; priced like a bytestring read.
+        if (!ctx.consume_gas(kBytestringReadBlockCost *
+                             GasCost::bytestring_blocks(calldata.size()))) {
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
+        }
+
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {

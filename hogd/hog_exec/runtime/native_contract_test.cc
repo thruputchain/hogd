@@ -45,7 +45,9 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -55,6 +57,10 @@ constexpr BlockExecutionContext kTestBlockExecution{
     .block_height = 1,
     .block_timepoint = 1'700'000'000,
 };
+
+// Wrapper charges a bytestring-read to decode calldata (#4236); u32 = 1 block.
+constexpr GasAmount kU32ArgDecodeGas =
+    kBytestringReadBlockCost * GasCost::bytestring_blocks(sizeof(uint32_t));
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 class NativeContractTest : public ::testing::Test {
@@ -267,7 +273,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r1_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100 + kSyscallBaseCost) {
+        if (g1 != 100 + kU32ArgDecodeGas + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -292,7 +298,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r2_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200 + kSyscallBaseCost) {
+        if (g2 != 200 + kU32ArgDecodeGas + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -317,7 +323,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r3_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150 + kSyscallBaseCost) {
+        if (g3 != 150 + kU32ArgDecodeGas + kSyscallBaseCost) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -345,7 +351,9 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost)) {
+        // Only the three consumer calls have calldata to decode.
+        if (g !=
+            100 + 200 + 150 + (3 * kU32ArgDecodeGas) + (4 * kSyscallBaseCost)) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -391,14 +399,14 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost));
+  ASSERT_EQ(res.gas_consumed_,
+            100 + 200 + 150 + (3 * kU32ArgDecodeGas) + (4 * kSyscallBaseCost));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
-  // a child that consumes 255 gas, while gas_limit 255 is converted to
-  // OutOfGas/Deterministic and still charges the full child limit.
+  // Boundary gas accounting: a limit covering body + decode fits; one short
+  // becomes OutOfGas/Deterministic and still charges the full child limit.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -419,7 +427,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
-            .gas_limit = 256,
+            .gas_limit = 256 + kU32ArgDecodeGas,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         auto invoke_status = co_await ctx.syscall<SyscallNo::kInvoke>(
@@ -431,7 +439,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
-            .gas_limit = 255,
+            .gas_limit = 255 + kU32ArgDecodeGas,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         CopyableInvokeOutputs outputs2{};
@@ -486,11 +494,11 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  // 255 for each child -- the one that fits and the one that is converted to
-  // OutOfGas and still charged its full limit -- plus the crossing each of the
-  // two invoke syscalls pays. The children's own limits are unaffected: the
-  // crossing is billed to the caller, outside the budget it hands down.
-  ASSERT_EQ(res.gas_consumed_, 255 + 255 + (2 * kSyscallBaseCost));
+  // Each child is charged its 255-gas body plus kU32ArgDecodeGas to decode its
+  // arg, plus the crossing each of the two invoke syscalls bills to the caller.
+  ASSERT_EQ(res.gas_consumed_, (255 + kU32ArgDecodeGas) +
+                                   (255 + kU32ArgDecodeGas) +
+                                   (2 * kSyscallBaseCost));
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion
@@ -629,6 +637,86 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
+}
+
+// Regression for #4236: decode is charged before the body runs.
+TEST_F(NativeContractTest, WrapperChargesForCalldataDecodeBeforeRunning)
+{
+  constexpr static ContractAddress kAddress = test_contract_address(0);
+
+  NativeContractBuilder builder;
+  builder.add<SerializationFormat::kTxs>(
+      0,
+      // The builder deduces its decoded arg tuple from the lambda's parameters,
+      // so the payload must be taken by value.
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      [](NativeSyscallContext & /*ctx*/,
+         x23::Vec<uint8_t, 4294967295> /*payload*/)
+          -> x23::Async<InvokeStatus<int32_t>> {
+        // Consumes nothing: any gas the invocation reports is the wrapper's
+        // decode charge, and reaching here at all proves the decode ran.
+        co_return 0;
+      });
+
+  x23::Vec<uint8_t, 4294967295> payload;
+  payload.resize(2000, 0xAB);
+  // Take the Buf directly; Serializer's optional trips the tidy unwrap check.
+  Calldata calldata = x23::serialize(payload);
+  const GasAmount decode_gas =
+      kBytestringReadBlockCost * GasCost::bytestring_blocks(calldata.size());
+  // Multi-block, so the charge is unmistakably length-proportional, not a flat
+  // fee, and the boundary below is not off-by-one against a 1-gas floor.
+  ASSERT_GT(decode_gas, 1U);
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
+
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      kAddress,
+      DeployedContractHash{.hash = sha256(contract),
+                           .contract_size = 0,
+                           .contract_type = contract.contract_type()});
+
+  auto invoke = [&](uint64_t gas_limit) {
+    return make_handler(
+               Transaction{
+                   .invocation =
+                       {
+                           .invoked_address = kAddress,
+                           .entrypoint = entrypoint_from_method_id(0),
+                           .gas_limit = gas_limit,
+                           .calldata = calldata,
+                       },
+               },
+               snapshot, 0, 0, *runtime_context)
+        .root_invoke()();
+  };
+
+  // Ample gas: the decode succeeds and its cost is charged even though the body
+  // consumes nothing.
+  {
+    auto res = invoke(UINT64_MAX);
+    EXPECT_TRUE(res.result_);
+    EXPECT_EQ(res.gas_consumed_, decode_gas);
+  }
+
+  // One gas short: faults before decoding, charged its whole limit; a root gas
+  // fault reads as Deterministic.
+  {
+    auto res = invoke(decode_gas - 1);
+    ASSERT_FALSE(res.result_);
+    EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::Deterministic);
+    EXPECT_EQ(res.gas_consumed_, decode_gas - 1);
+  }
 }
 
 namespace {
