@@ -105,6 +105,18 @@ struct ThreadedMachinePreInstantiationTestPeer {
   {
     return program.exec_[i].handler;
   }
+
+  // Seeded byte count the pre-instantiation retains (#4433).
+  static size_t retained_seed_bytes(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.size();
+  }
+
+  // Bytes the retained seed buffer keeps allocated (#4433).
+  static size_t retained_seed_capacity(const ThreadedMachinePreInstantiation &p)
+  {
+    return p.initial_memory_seed_.capacity();
+  }
 };
 
 namespace {
@@ -261,6 +273,42 @@ TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
   expect_both_reject(std::vector<uint32_t>{0x00000000U, 0xffffffffU,
                                            0x00200073U},
                      ProgramError::kUnsupportedCompressedInstruction);
+}
+
+TEST(Rv32Threaded, preInstantiationStoresSeedSparselyNotFullDeclaredImage)
+{
+  using test_program::addi;
+  // Large declared memory, tiny seed: the pre-instantiation keeps only the
+  // seed, while each machine still materializes the full declared image
+  // (#4433).
+  constexpr uint32_t kDeclaredMemory = 1024 * 1024;
+  constexpr uint32_t kSeedStart = 8;
+  constexpr std::array<uint8_t, 4> kSeed = {0xde, 0xad, 0xbe, 0xef};
+  const std::vector<uint8_t> code = words_to_bytes(std::array{addi(0, 0, 0)});
+
+  auto pre =
+      ThreadedMachinePreInstantiation::create(code, kSeed, kSeedStart,
+                                              kDeclaredMemory, /*trace=*/false);
+  ASSERT_TRUE(pre.has_value());
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::retained_seed_bytes(*pre),
+            kSeed.size());
+  // Capacity too, so a full-image reserve can't sneak past the size check.
+  constexpr size_t kMaxRetainedCapacity = 1024;
+  static_assert(kMaxRetainedCapacity < kDeclaredMemory);
+  EXPECT_LE(ThreadedMachinePreInstantiationTestPeer::retained_seed_capacity(
+                *pre),
+            kMaxRetainedCapacity);
+
+  // The materialized machine still exposes the full declared image: the seed
+  // at its placement, zeros everywhere else.
+  ThreadedMachine machine(*pre, /*gas=*/10);
+  ASSERT_EQ(machine.memory().size(), kDeclaredMemory);
+  EXPECT_TRUE(
+      std::ranges::equal(machine.memory().subspan(kSeedStart, kSeed.size()),
+                         kSeed));
+  EXPECT_EQ(machine.memory()[kSeedStart - 1], 0U);
+  EXPECT_EQ(machine.memory()[kSeedStart + kSeed.size()], 0U);
+  EXPECT_EQ(machine.memory().back(), 0U);
 }
 
 TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
