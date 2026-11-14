@@ -138,7 +138,7 @@ format_fingerprint_hex(uint64_t fingerprint)
 }
 
 // Every fingerprint a lowerer may report, current one first. More than one only
-// while kAcceptedGasSchedules carries a transitional entry.
+// while kAcceptedGasSchedules retains previous schedules.
 std::vector<std::string>
 accepted_format_fingerprints_hex()
 {

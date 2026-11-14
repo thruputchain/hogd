@@ -2310,7 +2310,9 @@ TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
   committed.store(true, std::memory_order_relaxed);
   retry_thread.join();
 
-  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  // The retry commits the tip again under its value, which answers OK (see
+  // CommittingTheTipAgainSucceeds) and is no commit of its own.
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
@@ -3045,6 +3047,94 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   auto res_commit = commit_block(server, res_nominate.proposed_block().block_id,
                                  db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A block two heights above the tip answers UnknownParentBlock at once,
+// rather than wait for its parent.
+TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal above = res_nominate.proposed_block().proposal;
+  above.header.block_height = db_tip.value.proposal_header.block_height + 2;
+
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
+      res_nominate.proposed_block().block_id, std::move(above))();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationUnknownParentBlock);
+
+  // The validation released its gate increment.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// Once committed, heights 0 and 1 are too late to validate, like any other
+// committed height.
+TEST(Mempool, ValidationAtACommittedGenesisHeightIsTooLate)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  ASSERT_GE(db_tip.value.proposal_header.block_height, 1);
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  for (const BlockHeight height : {BlockHeight{0}, BlockHeight{1}}) {
+    Proposal committed = res_nominate.proposed_block().proposal;
+    committed.header.block_height = height;
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate_block(
+            db_tip.id, std::move(committed))();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationTooLateToValidate)
+        << "height " << height;
+  }
+}
+
+// A commit whose answer the coordinator did not see may be retried: the tip
+// committed again under the value it committed with succeeds, and changes
+// nothing. The tip's id under another value is still refused.
+TEST(Mempool, CommittingTheTipAgainSucceeds)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_nominate.proposed_block();
+  ASSERT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+
+  EXPECT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, tip.id);
+  EXPECT_EQ(get_tip.db_tip().value, tip.value);
+
+  ConsensusValue other = consensus_value(parent, proposed.proposal);
+  other.proposal_header.storage_hash[0] ^= 1;
+  EXPECT_NE(server.mempool_coord_rpc().schedulercoord_commit_block(
+                proposed.block_id, std::move(other))(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 TEST(Mempool, ProposalUsesTransactionRoot)
@@ -5046,11 +5136,16 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
     Proposal proposal{};
     proposal.header.network_hash = MempoolTestInfra::kNetworkHash;
     proposal.header.block_height = height;
-    EXPECT_EQ(server.mempool_coord_rpc()
-                  .schedulercoord_validate_block(parent.db_tip().id,
-                                                 std::move(proposal))()
-                  .outcome(),
-              SchedulerValidationOutcome::SchedulerValidationInvalid);
+    // Height 0 is committed, so a block at it is too late to validate, as at
+    // any committed height; height 1 is the ceremony's.
+    EXPECT_EQ(
+        server.mempool_coord_rpc()
+            .schedulercoord_validate_block(parent.db_tip().id,
+                                           std::move(proposal))()
+            .outcome(),
+        height == 0
+            ? SchedulerValidationOutcome::SchedulerValidationTooLateToValidate
+            : SchedulerValidationOutcome::SchedulerValidationInvalid);
 
     ConsensusValue value{};
     value.proposal_header.block_height = height;

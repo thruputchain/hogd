@@ -7,9 +7,14 @@ rust-version = "1.81"
 [dependencies]
 ed25519-zebra = { workspace = true }
 rand = "0.8"
+# Shared curve arithmetic with ed25519-zebra; MSM uses Ristretto decoding.
+curve25519-dalek = { version = "=4.1.3", default-features = false, features = ["alloc"] }
 siphasher = { workspace = true }
 
 [lib]
 crate-type = ["rlib"]
 
 # Optimization profiles are inherited from workspace
+
+[dev-dependencies]
+sha2 = "0.10"

@@ -89,7 +89,6 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
@@ -168,7 +167,6 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error
@@ -253,7 +251,6 @@ jobs:
         run: ccache -s
 
       - name: Upload Artifact
-        if: ${{ !inputs.dry_run }}
         uses: actions/upload-artifact@v6
         with:
           if-no-files-found: error

@@ -252,6 +252,70 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
                 host_result.gas_consumed);
 }
 
+TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
+{
+  const auto program = make_syscall_program({
+      static_cast<int32_t>(SyscallNo::kRistretto255Msm),
+      static_cast<int32_t>(kInputAddress),
+      64,
+      static_cast<int32_t>(kOutputAddress),
+  });
+  ASSERT_NE(program, nullptr);
+  constexpr uint64_t kInstructions = 5;
+  constexpr std::array<uint8_t, 32> kPoint = {
+      0xe2, 0xf2, 0xae, 0x0a, 0x6a, 0xbc, 0x4e, 0x71, 0xa8, 0x84, 0xa9,
+      0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58, 0xe3, 0x0b, 0x6a, 0xa5, 0x82,
+      0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
+  };
+  rv32::Machine machine(program, 256, kPlentyOfGas);
+  std::vector<uint8_t> memory(256);
+  memory[kInputAddress] = 1;
+  std::ranges::copy(kPoint, memory.begin() + kInputAddress + 32);
+  std::fill_n(memory.begin() + kOutputAddress, 32, 0xA5);
+  ASSERT_TRUE(machine.view().write_memory(0, memory));
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
+  for (uint64_t i = 0; i + 1 < kInstructions; ++i) {
+    ASSERT_EQ(machine.step(), rv32::StepResult::kContinue);
+  }
+  ASSERT_EQ(machine.step(), rv32::StepResult::kEcall);
+  const auto pending = machine.pending_ecall();
+  ASSERT_TRUE(pending.has_value());
+  const auto result =
+      bridge.ecall(machine.view(), pending.value_or(rv32::EcallArgs{}));
+  ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(machine.complete_ecall(result), rv32::StepResult::kContinue);
+  finish_frame(handler, std::move(stashed_trace));
+
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(result.gas_consumed,
+            kSyscallBaseCost + GasCost::ristretto255_msm(1));
+  std::ranges::copy(kPoint, memory.begin() + kOutputAddress);
+  EXPECT_TRUE(std::ranges::equal(machine.view().memory(), memory));
+  EXPECT_EQ(machine.gas_remaining(),
+            kPlentyOfGas - (kInstructions * rv32::kBaseInstructionGas) -
+                result.gas_consumed);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, Ristretto255ExactBudgetFaults)
+{
+  std::vector<uint8_t> memory(256);
+  const GasAmount cost = kSyscallBaseCost + GasCost::ristretto255_msm(1);
+  const std::array<uint32_t, 4> words = {static_cast<uint32_t>(
+                                             SyscallNo::kRistretto255Msm),
+                                         kInputAddress, 64, kOutputAddress};
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  const auto result =
+      call_bridge(memory, handler, cost, make_ecall_args(words));
+  finish_frame(handler, std::move(stashed_trace));
+  EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
+  EXPECT_EQ(result.gas_consumed, cost);
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(256, 0xAA);
