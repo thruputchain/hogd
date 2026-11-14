@@ -76,9 +76,9 @@ See `docker/README.md` for detailed usage, including tidy checks and image build
     ~~~~
 
 1. Fetch rust crate dependencies and install the pinned contract tools. They
-   all come from crates.io, except `xdrc`, which is built from the public
-   [thruputchain/xdrs](https://github.com/thruputchain/xdrs) repository, so
-   this needs no registry credentials.
+   all come from crates.io, except `thruput-xdr-codegen`, which is built from
+   the public [thruputchain/xdrs](https://github.com/thruputchain/xdrs)
+   repository, so this needs no registry credentials.
     ~~~~ .sh
     ./scripts/fetch.sh
     ~~~~
