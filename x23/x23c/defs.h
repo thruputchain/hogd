@@ -5,7 +5,6 @@
 #include <concepts>
 #include <format>
 #include <memory>
-#include <set>
 #include <string>
 #include <utility>
 #include <variant>
@@ -36,9 +35,7 @@ struct ConstDef {
 
 struct EnumBody : vector<ConstDef> {};
 
-struct StructBody : vector<Declaration> {
-  bool transparent = false;
-};
+struct StructBody : vector<Declaration> {};
 
 struct UnionArm;
 struct UnionBody {
@@ -61,7 +58,6 @@ struct Declaration {
   Qual qual = kScalar;
   string bound;
   string comment;
-  bool is_private = false;
 };
 
 struct UnionArm {
@@ -214,10 +210,6 @@ void yyerror(YYLTYPE *loc, XdrCtx *, string, bool warn_only = false);
                  yyscan_t yyscanner, XdrCtx *xc)
 
 std::string gen_hh(vector<Definition> *defs, string const &header);
-std::string gen_rs(vector<Definition> *defs, string const &header,
-                   std::set<std::string> const &recursive_types,
-                   std::set<std::string> const &rust_features,
-                   std::set<std::string> const &rust_no_features);
 std::string gen_ts(vector<Definition> *defs, string const &header);
 
 struct Join {

@@ -32,6 +32,28 @@ set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
   "${CMAKE_CURRENT_BINARY_DIR}/cargo-target"
 )
 
+# Generate .rs files from .x files with xdrc (see gen_xdr_rs.sh), into
+# output_folder. x23c generates only C++ and TypeScript.
+function(add_xdr_rs target_name output_folder)
+  set(xdr_outputs)
+  foreach(xdr_file IN LISTS ARGN)
+    set(xdr_file_ "${CMAKE_CURRENT_SOURCE_DIR}/${xdr_file}")
+    get_filename_component(base_name ${xdr_file_} NAME_WLE)
+    set(output_file "${output_folder}/${base_name}.rs")
+    add_custom_command(
+      OUTPUT ${output_file}
+      COMMAND ${CMAKE_CURRENT_SOURCE_DIR}/gen_xdr_rs.sh ${output_file} ${xdr_file_}
+      DEPENDS ${xdr_file_}
+              ${CMAKE_CURRENT_SOURCE_DIR}/gen_xdr_rs.sh
+              ${CMAKE_SOURCE_DIR}/scripts/xdrc-rev
+      COMMENT "Generating ${output_file} from ${xdr_file_}"
+    )
+    list(APPEND xdr_outputs ${output_file})
+  endforeach()
+
+  add_custom_target(build_${target_name} ALL DEPENDS ${xdr_outputs})
+endfunction()
+
 set(generated_rs_files)
 
 add_xdr_rs(

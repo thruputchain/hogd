@@ -5,10 +5,6 @@ enum Status { BAD = -1, OK = 0, BUSY = 1 };
 typedef opaque Digest[16];
 typedef string Name<LIMIT>;
 
-// A newtype whose Debug is hand-written downstream.  Both markers share one
-// trailing comment line here, as they do in the protocol definitions.
-typedef opaque Fingerprint[16]; // #[rust(newtype)] #[rust(no_debug)]
-
 struct Record {
   int id;
   unsigned int count;

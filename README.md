@@ -75,8 +75,10 @@ See `docker/README.md` for detailed usage, including tidy checks and image build
     cargo install --force cbindgen
     ~~~~
 
-1. Fetch rust crate dependencies. They all come from crates.io, so this needs
-   no registry credentials.
+1. Fetch rust crate dependencies and install the pinned contract tools. They
+   all come from crates.io, except `xdrc`, which is built from the public
+   [thruputchain/xdrs](https://github.com/thruputchain/xdrs) repository, so
+   this needs no registry credentials.
     ~~~~ .sh
     ./scripts/fetch.sh
     ~~~~
