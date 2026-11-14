@@ -315,3 +315,35 @@ TEST(ThreadPoolOnQuiesce, RepeatedWakeups)
        count != kCoroutines; count = done.load(std::memory_order_acquire))
     done.wait(count, std::memory_order_relaxed);
 }
+
+#if HAVE_SCHED_SETAFFINITY
+TEST(ThreadPool, PinnedWorkersRunOnlyOnTheirCpus)
+{
+  // One allowed CPU, so that a worker off it would be caught at once.
+  CpuSet cpus;
+  for (unsigned cpu = 0; cpu < CpuSet::num_cpus(); cpu++)
+    if (allowed_cpus->isset(cpu)) {
+      cpus.set(cpu);
+      break;
+    }
+  ASSERT_EQ(cpus.count(), 1);
+
+  constexpr int kJobs = 1000;
+  std::atomic_int done{0};
+  std::atomic_int off_cpu{0};
+  {
+    ThreadPool pool(4, cpus);
+    for (int i = 0; i < kJobs; i++)
+      pool.spawn([&] {
+        if (!cpus.isset(cpuid()))
+          off_cpu++;
+        done++;
+      });
+    for (auto deadline = steady_clock::now() + 30s;
+         done < kJobs && steady_clock::now() < deadline;)
+      std::this_thread::sleep_for(1ms);
+  }
+  EXPECT_EQ(done, kJobs);
+  EXPECT_EQ(off_cpu, 0);
+}
+#endif // HAVE_SCHED_SETAFFINITY

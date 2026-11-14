@@ -71,8 +71,10 @@ public:
   // posts a semaphore, but here the waiter is the rest of a transaction: it
   // would run to its next database read on the reader, and that reader cannot
   // parse another reply while it does.  So every body below hops with
-  // default_threadpool().bg() before touching the result, leaving the reader
-  // one frame deep for as long as a re-enqueue takes.  Without the hop the
+  // current_threadpool().bg() before touching the result, leaving the reader
+  // one frame deep for as long as a re-enqueue takes.  The reader runs in its
+  // connection's LLC lane, which is its callers' (llc_coropoll()), so the hop
+  // keeps the transaction there.  Without the hop the
   // damage scales with how much work sits between two database reads, which
   // is why it showed up first as multiexec_interface throughput falling off
   // as batch_size rose.

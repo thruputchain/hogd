@@ -78,7 +78,12 @@ public:
       kMaxBlockSize / kNumSchedulerIterations;
 
   static constexpr size_t kChunkSize = 10;
-  static constexpr size_t kNumClientsPerExecutor = 10;
+  // A hog-exec gives each connection to one of its LLC lanes, round robin
+  // (lane_stream_placement()), so a multiple of the lane count keeps them
+  // equally loaded: 16 divides over 1, 2, 4, 8 or 16 LLCs.  At 10 on an
+  // 8-LLC host two lanes carry double load, which cost 7% on multiexec at
+  // batch size 5 and 22% at batch size 1.
+  static constexpr size_t kNumClientsPerExecutor = 16;
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
