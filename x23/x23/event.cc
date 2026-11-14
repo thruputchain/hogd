@@ -194,6 +194,14 @@ CoroPoll::awrite(BorrowedFd fd, Buf data)
   return w->write(*this, fd, std::move(data));
 }
 
+size_t
+CoroPoll::nbuffered(BorrowedFd fd)
+{
+  if (RefPtr<detail::ReadBuffer> r = get_reader(fd))
+    return r->nbuffered();
+  return 0;
+}
+
 Errno
 CoroPoll::dwrite(BorrowedFd fd, Buf data)
 {

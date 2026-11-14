@@ -520,6 +520,11 @@ public:
   // call this function simultaneously.
   Errno dwrite(BorrowedFd fd, Buf data);
 
+  // Bytes already read from fd and sitting in its buffer.  A reader loop can
+  // use this to tell whether its next read would suspend, and so decide
+  // whether to keep accumulating work or hand what it has to the pool.
+  size_t nbuffered(BorrowedFd fd);
+
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
   template<typename Addr = std::nullptr_t>
