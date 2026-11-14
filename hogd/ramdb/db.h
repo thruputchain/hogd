@@ -86,6 +86,11 @@ public:
   // Read-only: safe to call concurrently with put()/remove() and with sync().
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
+  // get_with_size returns an item's type and value size; see
+  // ScalableMap::get_with_size.
+  DBStatus<SizedDBItem> get_with_size(std::span<const std::byte> key,
+                                      uint8_t metadata_only_type);
+
   // get_if_type finds an item of a specific type for a given key. If the type
   // does not match, it will return DBCode::kTypeMismatch.
   DBStatus<OwningSpan<const std::byte>>
@@ -332,6 +337,14 @@ Database::get(std::span<const std::byte> key)
 {
   assert(active_);
   return map_.get(key);
+}
+
+inline DBStatus<SizedDBItem>
+Database::get_with_size(std::span<const std::byte> key,
+                        uint8_t metadata_only_type)
+{
+  assert(active_);
+  return map_.get_with_size(key, metadata_only_type);
 }
 
 inline DBStatus<OwningSpan<const std::byte>>
