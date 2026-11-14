@@ -156,17 +156,17 @@ public:
   PerTransactionDatabaseProxy &
   operator=(const PerTransactionDatabaseProxy &) = delete;
 
-  void reserve(size_t delta_count)
-  {
-    current_subtransaction_batch_.reserve(delta_count);
-  }
+  // Pre-reserves the staging batch, clamped to at most one push worth of
+  // deltas (see the .cc).
+  void reserve(size_t delta_count);
 
+  // Stages a delta and folds its footprint bound into the running total.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
-                 StorageDeltaFlagSet flags)
-  {
-    current_subtransaction_batch_.emplace_back(std::move(addrkey),
-                                               std::move(delta), flags);
-  }
+                 StorageDeltaFlagSet flags);
+
+  // True once the staged batch's footprint would exceed the cap that
+  // try_push_new_subtransaction gates on.
+  bool current_subtransaction_exceeds_cap() const;
 
   // Conflict diagnostics from the most recent failed push, at the level
   // the database selected from the block mode; the None arm if the last
@@ -231,6 +231,9 @@ private:
   // acquire and release both touch only the running thread's pool, so that
   // stays correct under interleaving.
   StorageDeltaBatch current_subtransaction_batch_;
+  // Running footprint bound of current_subtransaction_batch_, kept in step with
+  // it: add_delta adds, try_push_current_subtransaction resets it on clear.
+  size_t current_subtransaction_footprint_ = 0;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;

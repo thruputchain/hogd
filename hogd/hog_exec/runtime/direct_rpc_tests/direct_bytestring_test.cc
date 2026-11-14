@@ -1833,6 +1833,42 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
   }
 }
 
+// Staged footprint is tracked incrementally, so an over-cap batch is reported
+// before the whole aggregate is materialized, matching the push-time gate.
+TEST_P(DirectBytestringTest, SubtransactionFootprintTrackedIncrementally)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+
+  const std::string max_value(kDefaultMaxBytestringLen, 'x');
+  auto tx = make_new_per_tx_db_proxy();
+  EXPECT_FALSE(tx.current_subtransaction_exceeds_cap())
+      << "an empty batch is within the message cap";
+
+  // Each delta is ~1 KiB; adding max-size bytestrings across distinct keys
+  // crosses the 16 MiB cap well before this many would be staged.
+  constexpr int kMaxAttempts = 16000;
+  bool crossed = false;
+  int added = 0;
+  for (int i = 0; i < kMaxAttempts && !crossed; ++i) {
+    tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
+                 make_bytestring_delta(max_value),
+                 std::to_underlying(StorageDeltaFlags::None));
+    ++added;
+    crossed = tx.current_subtransaction_exceeds_cap();
+  }
+  EXPECT_TRUE(crossed) << "the staged footprint must report the cap crossing";
+  EXPECT_LT(added, kMaxAttempts)
+      << "the crossing must be reported before the whole aggregate is staged";
+
+  auto r = tx.try_push_current_subtransaction()();
+  ASSERT_TRUE(r.has_value());
+  EXPECT_FALSE(r.value())
+      << "a batch over the message cap is still rejected as a conflict";
+  EXPECT_FALSE(tx.current_subtransaction_exceeds_cap())
+      << "pushing clears the staged batch and resets the footprint";
+}
+
 // The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
 // (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
 // type-derived footprint lands exactly on the budget is pushed; one XDR word
