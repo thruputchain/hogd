@@ -1694,6 +1694,27 @@ TEST_F(IndexerOutboxTest,
                    .has_value());
 }
 
+TEST_F(IndexerOutboxTest, EventsFileReplayAdmissionIsStrictBoundary)
+{
+  // close_block() admits a block by its finalized events-file size using the
+  // maximum ConsensusValue encoding as a conservative bound, so a block it
+  // admits can never fail the exact per-record check at committed-reference
+  // publication. The two replay batch-count words are the only reassembly
+  // bytes not already in the file.
+  const size_t max_consensus =
+      x23::detail::xdr_size_bounds<ConsensusValue>().max_;
+  const size_t empty_file_record =
+      *indexer_event_pull_rpc_record_size_for_parts(max_consensus, 8, 0);
+  const size_t max_file_size =
+      kMaxIndexerEventPullRpcRecordBytes - empty_file_record;
+
+  EXPECT_TRUE(events_file_fits_indexer_replay_record(max_file_size));
+  EXPECT_TRUE(events_file_fits_indexer_replay_record(max_file_size - 1));
+  EXPECT_FALSE(events_file_fits_indexer_replay_record(max_file_size + 1));
+  EXPECT_FALSE(events_file_fits_indexer_replay_record(
+      kMaxIndexerEventPullRpcRecordBytes));
+}
+
 TEST_F(IndexerOutboxTest, FinalSymlinkIsRejected)
 {
   IndexerOutboxStore store = open_store(dir_);

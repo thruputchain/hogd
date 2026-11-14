@@ -1591,6 +1591,16 @@ MempoolCoordinatorRpc::add_finish_nominating_block_nodes(
         }
         {
           EventBlockResult result = close_event.get();
+          if (result.error() == RPCError::kRPCTransactionFailed) {
+            // The block's events exceed what the indexer pull RPC can replay
+            // (see EventRPCContext::close_block). Abandon this nomination
+            // rather than propose a block that could never be committed; the
+            // DAG cleanups abandon the event block and snapshot.
+            error("nomination: event block over indexer replay limit; "
+                  "abandoning proposal");
+            dag.fail(x23::DagFailureKind::Cancelled, "close event block");
+            co_return;
+          }
           CHECK_EQ(result.error(), RPCError::kRPCNone);
           cache.db_tip.value.proposal_header.events_hash = result.root_hash();
         }
@@ -1865,6 +1875,16 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
+    info("schedulercoord_nominate ret");
+    co_return SchedulerProposalResult(
+        SchedulerProposalOutcome::SchedulerProposalError);
+  }
+
+  // A node may have cancelled the graph after block initialization -- the
+  // event block closed over the indexer replay limit (see build_header). The
+  // proposal header was never built, so there is no block to nominate; the
+  // DAG cleanups already abandoned the event block and snapshot.
+  if (!nomination_dag.ok()) {
     info("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
@@ -2828,6 +2848,16 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
       [&]() -> x23::Async<void> {
         {
           EventBlockResult event_result = close_event_node.get();
+          // The proposed block's events exceed the indexer pull RPC replay
+          // limit (see EventRPCContext::close_block), so it could never be
+          // committed. Reject it like any other invalid nominated block; the
+          // snapshot and event cleanups abandon both closed contexts.
+          if (event_result.error() == RPCError::kRPCTransactionFailed) {
+            co_await cancel_with_result(
+                SchedulerValidationOutcome::SchedulerValidationInvalid,
+                "check closed validation block");
+            co_return;
+          }
           CHECK_EQ(event_result.error(), RPCError::kRPCNone);
           cache.db_tip.value.proposal_header.events_hash =
               event_result.root_hash();
