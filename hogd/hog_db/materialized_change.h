@@ -13,7 +13,8 @@ namespace hogd {
 // A single materialized DAO mutation. Byte data (keys, values) stored as
 // spans pointing into a ByteArena. Zero per-record heap allocations.
 //
-// For kPut, item stores contiguous [key + type_byte + value].
+// For kPut, item stores contiguous [key + value]. The ramdb type is carried
+// separately in the `type` field, so it is not duplicated in the arena bytes.
 // For kRemove, item stores just the key bytes.
 // key() and value() are accessor methods that derive spans using key_len.
 struct MaterializedChange {
@@ -29,7 +30,7 @@ struct MaterializedChange {
   std::span<const std::byte> value() const
   {
     CHECK(op == Op::kPut);
-    return item.subspan(key_len + 1);
+    return item.subspan(key_len);
   }
 };
 
