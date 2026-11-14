@@ -2048,11 +2048,25 @@ retrocausal_queue_item_from_view(ItemView *item_view,
   co_return item_view->get<RetrocausalQueueItem>();
 }
 
-x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+x23::Async<SystemStatus<StorageRead<QueueEntry>>>
 load_next_queue_entry(RetrocausalQueueItem &queue_item,
+                      FrameItemKey const &item_key,
+                      RcqBlockLookupSet &block_lookups,
                       ExecutionModeData &execution_mode_data,
                       bool advance_cursor)
 {
+  using Read = StorageRead<QueueEntry>;
+
+  // get_next_item() starts with a past-block search, a database read separate
+  // from the item load (#4755). Price it as note_item_load() prices a load:
+  // kDBRPCCost the first time this transaction searches this key from this
+  // block, whether or not the block cache happens to hold the answer.
+  GasAmount lookup_gas = 0;
+  if (auto index = queue_item.past_block_lookup_index();
+      index && block_lookups.emplace(item_key.bytes(), *index).second) {
+    lookup_gas = kDBRPCCost;
+  }
+
   auto entry =
       co_await queue_item.get_next_item(execution_mode_data, advance_cursor);
   if (!entry.has_value()) {
@@ -2067,7 +2081,7 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
   // rather than dropping it behind a read-limit error (#3611). The pointer
   // aliases into owned storage and is copied here into the syscall result.
   if (const QueueEntry *value = entry.value()) {
-    co_return *value;
+    co_return Read{*value, lookup_gas};
   }
 
   // No entry resolved. If that is because a concurrent read hit the per-tx
@@ -2076,12 +2090,15 @@ load_next_queue_entry(RetrocausalQueueItem &queue_item,
   // (#2894). This is a dedicated resource-limit code contracts can handle as a
   // stop condition, not a malformed-input error.
   if (observation_cap_exceeded(execution_mode_data)) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeRetrocausalQueueReadLimitReached};
+    co_return Read{SyscallError{
+                       SyscallErrorCode::
+                           kSyscallErrorCodeRetrocausalQueueReadLimitReached},
+                   lookup_gas};
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry};
+  co_return Read{
+      SyscallError{SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry},
+      lookup_gas};
 }
 
 // A read never converts a key, so a non-queue base is wrong-type input
@@ -2094,15 +2111,19 @@ committed_value_is_not_a_queue(UnmodifiedItem const &unmodified_item)
   return type.has_value() && *type != ItemViewType::kRetrocausalQueue;
 }
 
-x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+x23::Async<SystemStatus<StorageRead<QueueEntry>>>
 retrocausal_queue_peek_from_view(ItemView *item_view,
                                  FrameItemKey const &item_key,
                                  AddressAndKey const &addrkey,
                                  StorageSnapshotCache &snapshot_cache,
+                                 RcqBlockLookupSet &block_lookups,
                                  ExecutionModeData &execution_mode_data)
 {
+  using Read = StorageRead<QueueEntry>;
+
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
-    co_return co_await load_next_queue_entry(*queue_item, execution_mode_data,
+    co_return co_await load_next_queue_entry(*queue_item, item_key,
+                                             block_lookups, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
@@ -2113,11 +2134,13 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
       co_return loaded.error();
     }
     if (committed_value_is_not_a_queue(*unmodified_item)) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          0};
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
-    co_return co_await load_next_queue_entry(queue_item, execution_mode_data,
+    co_return co_await load_next_queue_entry(queue_item, item_key,
+                                             block_lookups, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
@@ -2128,13 +2151,14 @@ retrocausal_queue_peek_from_view(ItemView *item_view,
     if (!queue_item.has_value()) {
       co_return queue_item.error();
     }
-    co_return co_await load_next_queue_entry(queue_item.value(),
-                                             execution_mode_data,
+    co_return co_await load_next_queue_entry(queue_item.value(), item_key,
+                                             block_lookups, execution_mode_data,
                                              /*advance_cursor=*/false);
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 } // namespace
 
@@ -2168,10 +2192,12 @@ SystemCallHandler::retrocausal_queue_insert(
       queue_entry_from_span(queue_entry));
 }
 
-x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>
+x23::Async<SystemStatus<StorageRead<QueueEntry>>>
 SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
                                              bool peek)
 {
+  using Read = StorageRead<QueueEntry>;
+
   const FrameItemKey item_key = invocation_frame_stack_.frame_item_key(key);
   auto addrkey = invocation_frame_stack_.get_addrkey(key);
   auto *item_view = invocation_frame_stack_.get_item_view(item_key);
@@ -2181,6 +2207,7 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     co_return co_await retrocausal_queue_peek_from_view(item_view, item_key,
                                                         addrkey,
                                                         snapshot_cache_,
+                                                        rcq_block_lookups_,
                                                         execution_mode_data_);
   }
 
@@ -2194,17 +2221,19 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
       co_return loaded.error();
     }
     if (committed_value_is_not_a_queue(*unmodified_item)) {
-      co_return SyscallError{
-          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+      co_return Read{
+          SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          0};
     }
     RetrocausalQueueItem queue_item(unmodified_item->base_item());
     auto entry =
-        co_await load_next_queue_entry(queue_item, execution_mode_data_,
+        co_await load_next_queue_entry(queue_item, item_key, rcq_block_lookups_,
+                                       execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (entry.has_value() && entry.value().has_value()) {
+    if (entry.has_value() && entry.value().result.has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), entry.value().load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
@@ -2213,7 +2242,8 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
 
   if (auto *queue_item = item_view->get<RetrocausalQueueItem>()) {
     auto entry =
-        co_await load_next_queue_entry(*queue_item, execution_mode_data_,
+        co_await load_next_queue_entry(*queue_item, item_key,
+                                       rcq_block_lookups_, execution_mode_data_,
                                        /*advance_cursor=*/true);
     item_view->sync_retrocausally_consumed(*queue_item);
     co_return entry;
@@ -2230,20 +2260,22 @@ SystemCallHandler::retrocausal_queue_consume(StorageKeyContractData const &key,
     }
     auto &queue_item = queue_item_res.value();
     auto entry =
-        co_await load_next_queue_entry(queue_item, execution_mode_data_,
+        co_await load_next_queue_entry(queue_item, item_key, rcq_block_lookups_,
+                                       execution_mode_data_,
                                        /*advance_cursor=*/true);
-    if (entry.has_value() && entry.value().has_value()) {
+    if (entry.has_value() && entry.value().result.has_value()) {
       auto set_status = item_view->set(queue_item);
       if (!set_status.has_value()) {
-        co_return set_status.error();
+        co_return Read{set_status.error(), entry.value().load_gas};
       }
       item_view->sync_retrocausally_consumed(queue_item);
     }
     co_return entry;
   }
 
-  co_return SyscallError{
-      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+  co_return Read{SyscallError{
+                     SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+                 0};
 }
 
 // == Native token syscalls ==

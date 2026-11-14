@@ -14,6 +14,7 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -1241,6 +1242,95 @@ TEST_F(SyscallRcqPeekTest, MaterializedSelfConsumeCommitsWhenBelowCap)
   ASSERT_TRUE(run(30));
   EXPECT_TRUE(run(31))
       << "a below-cap consume must actually commit the consume";
+}
+
+// #4755: a peek that searches a key's past blocks pays kDBRPCCost for that
+// database read, once per transaction however often it repeats. Two peeks of
+// a committed queue cost exactly one kDBRPCCost more than two peeks of a key
+// with no committed queue, which has no past blocks to search.
+TEST_F(SyscallRcqPeekTest, PastBlockPeekPaysOneDbRpcPerTransaction)
+{
+  NativeContractBuilder builder;
+
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint32_t payload = 0xC0FFEEU;
+        auto insert_status =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                SyscallRcqPeekTest::kStorageKey,
+                std::as_bytes(std::span(&payload, 1)));
+        if (!insert_status.has_value() ||
+            insert_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  // Peeks twice, expecting an entry of [expected_len] bytes, or an empty queue
+  // when [expected_len] is 0.
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      5,
+      [](NativeSyscallContext &ctx,
+         uint32_t expected_len) -> x23::Async<InvokeStatus<void>> {
+        const auto expected_code =
+            expected_len == 0
+                ? SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry
+                : SyscallErrorCode::kSyscallErrorCodeNone;
+        for (int i = 0; i < 2; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto peek_status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  SyscallRcqPeekTest::kStorageKey, len);
+          if (!peek_status.has_value() ||
+              peek_status.value() != expected_code || len != expected_len) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, builder.build());
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract = make_native_contract(0);
+  write_contract(contract);
+  const auto queue_addr = make_contract_address(0);
+  const auto empty_addr = make_contract_address(1);
+  for (auto const &addr : {queue_addr, empty_addr}) {
+    setup_grant_storage_token(addr, 1'000'000'000);
+    write_deployment(addr, contract);
+  }
+
+  auto invoke = [&](ContractAddress const &addr, uint32_t method,
+                    auto... args) {
+    auto calldata = Serializer<
+        NativeContractBuilder::kDefaultSerializationFormat>::serialize(args...);
+    EXPECT_TRUE(calldata.has_value());
+    auto handler = make_new_system_call_handler(
+        SignedTransaction{
+            .tx = Transaction{.invocation =
+                                  Invocation{.invoked_address = addr,
+                                             .entrypoint =
+                                                 entrypoint_from_method_id(
+                                                     method),
+                                             .gas_limit = kDefaultMaxTxGas,
+                                             .calldata = calldata.value()},
+                              .uniquifier = make_new_uniquifier()}},
+        *context);
+    auto res = handler.root_invoke()();
+    EXPECT_TRUE(res.is_root_success());
+    EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+    return res.gas_consumed_;
+  };
+
+  invoke(queue_addr, 4);
+  advance_block();
+
+  const GasAmount queue_gas =
+      invoke(queue_addr, 5, static_cast<uint32_t>(sizeof(uint32_t)));
+  const GasAmount empty_gas = invoke(empty_addr, 5, uint32_t{0});
+  EXPECT_EQ(queue_gas, empty_gas + kDBRPCCost);
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
