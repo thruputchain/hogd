@@ -114,8 +114,11 @@ public:
   // snapshot block, this item's self-insert delta, or the proposal/validation
   // observation buffer) and is valid until the next RCQ mutation -- callers
   // copy it into the syscall result before returning to the contract.
+  // [load_gas] accumulates the database-RPC cost of any concurrent-entry
+  // lookups this read performs; see get_next_concurrent_entry.
   [[nodiscard]] x23::Async<SystemStatus<const QueueEntry *>>
-  get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
+  get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor,
+                GasAmount &load_gas);
 
   [[nodiscard]] SyscallStatus<void> insert_entry(QueueEntry const &entry);
 
@@ -128,16 +131,20 @@ private:
   x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
+  // Each absent concurrent read charges [load_gas] kDBRPCCost, identically in
+  // proposal and validation (#1443).
   [[nodiscard]] x23::MaybeAsync<SystemStatus<const QueueEntry *>>
   get_next_concurrent_entry(uint32_t index,
-                            ExecutionModeData &execution_mode_data) const;
+                            ExecutionModeData &execution_mode_data,
+                            GasAmount &load_gas) const;
 
   // Proposal-mode miss path for the above: the only arm that reads the
   // database.  [proposal_data] aliases the caller's ExecutionModeData and must
   // outlive the call.
   [[nodiscard]] x23::Async<SystemStatus<const QueueEntry *>>
   get_next_concurrent_entry_proposing(uint32_t index,
-                                      ProposalModeData &proposal_data) const;
+                                      ProposalModeData &proposal_data,
+                                      GasAmount &load_gas) const;
 
   const QueueEntry *get_next_self_entry(uint32_t index) const;
 
