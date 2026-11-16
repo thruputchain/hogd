@@ -517,8 +517,13 @@ public:
 
   size_t size() const { return frame_stack_.size(); }
 
+  // Item views this transaction has created, in any frame. A merged child
+  // moves views it created, so this bounds every frame map's size.
+  uint64_t item_views_created() const { return item_views_created_; }
+
 private:
   std::vector<InvocationFrame> frame_stack_;
+  uint64_t item_views_created_ = 0;
   std::function<void(InvocationFrame &&)> last_frame_action_;
   PerTransactionDatabaseProxy &db_proxy_;
   NetworkConfigParams const &config_params_;

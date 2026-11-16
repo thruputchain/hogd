@@ -1908,6 +1908,15 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                 .add_value_ = to_xdr(add_value)});
 }
 
+uint64_t
+SystemCallHandler::take_item_view_gas()
+{
+  const uint64_t created = invocation_frame_stack_.item_views_created();
+  const uint64_t gas = GasCost::item_views(billed_item_views_, created);
+  billed_item_views_ = created;
+  return gas;
+}
+
 x23::Async<SystemStatus<SyscallStatus<void>>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {

@@ -144,8 +144,13 @@ not cover the measured first-touch tail at large frame occupancies:
 | 262144 | 1017 | 386 |
 
 The relevant limit is keys touched, including reads that create item views.
-Whether a transaction can reach the expensive tail depends on its gas budget;
-these measurements do not establish that the tail is unreachable.
+A transaction can reach the tail: 262144 first-touch writes bill about 52M
+host gas, well under the default 1B cap (issue #4794). So each item view a
+transaction creates past the first 65536 also pays `kLargeFrameItemViewCost`
+(200), doubling the host charge for a first touch past that point. The count
+covers views created in every frame, including ones later merged into a
+parent, so it bounds the size of every frame map. Occupancies past 262144 are
+unmeasured.
 
 The local database miss measured about 55.2 microseconds with a recorded spread
 of 5.4 microseconds. The 37300-gas database charge includes that margin and brings

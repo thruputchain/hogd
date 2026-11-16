@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <array>
 #include <cassert>
 #include <cstdint>
@@ -82,9 +83,19 @@ constexpr static uint64_t kVerifySignatureMlDsa65BlockCost = 160;
 // Repeat accesses pay the same component, about 1.6-2x their measured cost at
 // 1-4096 keys. Total billing still depends on transaction-local database loads.
 // First-touch cost rose to ~234 gas at 65536 keys and ~529 at 262144, beyond
-// this allowance. See rv32/gas_calibration/MEASUREMENTS.md for measurement
-// limits; reachability of these occupancies is not established.
+// this allowance; kLargeFrameItemViewCost below covers that tail. See
+// rv32/gas_calibration/MEASUREMENTS.md for measurement limits.
 constexpr static uint64_t kStorageAccessCost = 150;
+
+// The flat access charge covers first touches up to this many item views in a
+// transaction (no-load first touch measured 271 ns at 65536 keys, inside the
+// 200 host gas billed). Past it, first touches grow with frame-map occupancy
+// (386-427 ns at 262144), so each further view the transaction creates also
+// pays kLargeFrameItemViewCost. That doubles a first touch's host charge to
+// ~650 ns, ~1.5x the largest measured occupancy; the millions of views a
+// 1B-gas transaction can reach are unmeasured. See issue #4794.
+constexpr static uint64_t kLargeFrameItemViews = 65536;
+constexpr static uint64_t kLargeFrameItemViewCost = 200;
 
 // One read from hog_db, charged wherever an item view loads.
 //
@@ -231,6 +242,15 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // The surcharge for the item views a transaction created after the first
+  // `billed` of its `created`, counting only those past kLargeFrameItemViews.
+  static constexpr uint64_t item_views(uint64_t billed, uint64_t created)
+  {
+    assert(billed <= created);
+    const uint64_t from = std::max(billed, kLargeFrameItemViews);
+    return created > from ? (created - from) * kLargeFrameItemViewCost : 0;
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
@@ -258,7 +278,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -279,6 +299,8 @@ constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmTerm", .cost = kRistretto255MsmTermCost},
     {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
+    {.name = u8"LargeFrameItemViews", .cost = kLargeFrameItemViews},
+    {.name = u8"LargeFrameItemView", .cost = kLargeFrameItemViewCost},
 }};
 
 } // namespace hogd

@@ -1504,6 +1504,8 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
           {u8"Ristretto255MsmTerm", 13'000},
           {u8"Ristretto255MsmTermBytes", 64},
           {u8"Ristretto255MsmMaxTerms", 256},
+          {u8"LargeFrameItemViews", 65'536},
+          {u8"LargeFrameItemView", 200},
       }};
 
   EXPECT_EQ(kOpCount, 49U);
@@ -1525,6 +1527,17 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
                  reinterpret_cast<const char *>(expected_syscalls[i].name));
     EXPECT_EQ(hogd::kSyscallGasCostSchedule[i].cost, expected_syscalls[i].cost);
   }
+}
+
+TEST(Rv32GasTest, item_view_surcharge_starts_past_flat_occupancy)
+{
+  using hogd::GasCost;
+  constexpr uint64_t kFlat = hogd::kLargeFrameItemViews;
+  constexpr uint64_t kCost = hogd::kLargeFrameItemViewCost;
+  EXPECT_EQ(GasCost::item_views(0, kFlat), 0U);
+  EXPECT_EQ(GasCost::item_views(kFlat, kFlat), 0U);
+  EXPECT_EQ(GasCost::item_views(kFlat - 1, kFlat + 1), kCost);
+  EXPECT_EQ(GasCost::item_views(kFlat + 5, kFlat + 8), 3 * kCost);
 }
 
 TEST(Rv32ExecutionTest, keeps_x0_hardwired_and_seeds_sp_zero)

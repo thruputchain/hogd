@@ -179,6 +179,11 @@ public:
   bool last_frame_finished() const noexcept { return last_frame_finished_; }
   bool is_running() const noexcept { return !invocation_frame_stack_.empty(); }
 
+  // Gas owed for the item views created since the last call, per
+  // GasCost::item_views. Whoever meters the work that created them takes it;
+  // a child invocation's syscalls take their own before the Invoke returns.
+  uint64_t take_item_view_gas();
+
   // Admission checks a new invocation frame must pass, in the order their
   // error codes take precedence, grouped by the question each answers:
   //
@@ -516,6 +521,7 @@ private:
   PerTransactionDatabaseProxy db_proxy_;
   PerTransactionEventServerProxy event_server_proxy_;
   InvocationFrameStack invocation_frame_stack_;
+  uint64_t billed_item_views_ = 0;
   std::unique_ptr<InvocationFrameTrace> invocation_frame_trace_;
 #if HOGD_RV32_STACK_USAGE_ENABLED
   std::vector<Rv32StackUsageRecord> rv32_stack_usage_;

@@ -36,7 +36,8 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   // Match ordinary storage reads and the sibling write helper: the flat access
   // cost on top of load_gas, which is zero once the view is loaded.
   // Affordable: the refusal above checked the charge before the read.
-  std::ignore = consume_gas(kStorageAccessCost + status->load_gas);
+  std::ignore = consume_gas(kStorageAccessCost + status->load_gas +
+                            handler_.take_item_view_gas());
   co_return std::move(status->result);
 }
 
@@ -55,7 +56,9 @@ NativeSyscallContext::modify_native_token_balance(
   }
   // Affordable: checked just above.
   std::ignore = consume_gas(kStorageAccessCost);
-  co_return co_await handler_.modify_native_token_balance(address, amount);
+  auto status = co_await handler_.modify_native_token_balance(address, amount);
+  std::ignore = consume_gas(handler_.take_item_view_gas());
+  co_return status;
 }
 
 } // namespace hogd

@@ -544,6 +544,7 @@ InvocationFrameStack::get_item_view(FrameItemKey const &key)
 
   // otherwise create view in active frame, by either copying from
   // a parent call frame or from storage
+  ++item_views_created_;
   for (int32_t i = stack_depth - 2; i >= 0; --i) {
     auto &frame = frame_stack_[i];
 
