@@ -721,7 +721,7 @@ public:
   }
 };
 
-TimePoint
+static TimePoint
 wall_clock_timepoint()
 {
   return static_cast<TimePoint>(
