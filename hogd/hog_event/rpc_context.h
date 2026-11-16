@@ -127,6 +127,12 @@ public:
   {
     open_reserved_test_hook_ = std::move(hook);
   }
+  // Runs on the background sync's thread before it fsyncs the committed
+  // record at the given height. Set it before the first commit.
+  void set_outbox_sync_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    outbox_sync_test_hook_ = std::move(hook);
+  }
   static constexpr size_t kMaxTxFailureNotices = 256;
 
 private:
@@ -248,6 +254,7 @@ private:
   IndexerOutboxStore indexer_outbox_store_;
   std::function<void(BlockID)> close_reserved_test_hook_;
   std::function<void(BlockID)> open_reserved_test_hook_;
+  std::function<void(BlockHeight)> outbox_sync_test_hook_;
 };
 
 } // namespace hogd

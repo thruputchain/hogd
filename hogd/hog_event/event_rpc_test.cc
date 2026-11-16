@@ -6,6 +6,7 @@
 #include <fcntl.h>
 #include <filesystem>
 #include <fstream>
+#include <future>
 #include <ios>
 #include <latch>
 #include <limits>
@@ -665,9 +666,6 @@ TEST_F(EventRpcTest, CommitWaitsForThePreviousCommitsSync)
     value.prev_hash = sha256(previous);
     ASSERT_EQ(rpc.eventsched_commit_block(block_id, value)(),
               RPCError::kRPCNone);
-    // A retry of the newest commit waits for that commit's own sync.
-    ASSERT_EQ(rpc.eventsched_commit_block(block_id, value)(),
-              RPCError::kRPCNone);
     previous = value;
     blocks.push_back(std::move(value));
   }
@@ -683,6 +681,94 @@ TEST_F(EventRpcTest, CommitWaitsForThePreviousCommitsSync)
   }
   EXPECT_EQ(ctx.pull_indexer_next(pull_request(progress))().outcome(),
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+}
+
+TEST_F(EventRpcTest, RetryOfTheNewestCommitWaitsForItsOwnSync)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  EventMempoolRpc rpc(ctx);
+  ASSERT_EQ(rpc.eventsched_open_block(930)(), RPCError::kRPCNone);
+  EventBlockResult closed = rpc.eventsched_close_block(930, 1)();
+  ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+  ConsensusValue value =
+      make_consensus_value(1, closed.root_hash(), /*proposal_bodies=*/{});
+  value.prev_hash = sha256(genesis);
+  ASSERT_EQ(rpc.eventsched_commit_block(930, value)(), RPCError::kRPCNone);
+  // No flush: the retry itself has to collect the first attempt's sync, and
+  // by the time it replies the record is pullable.
+  ASSERT_EQ(rpc.eventsched_commit_block(930, value)(), RPCError::kRPCNone);
+  EventIndexerPullResult pulled = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, value);
+}
+
+// Holds height 1's background sync open and checks the three things the
+// deferred sync promises while it is outstanding.
+TEST_F(EventRpcTest, OutstandingSyncBlocksPullsAndTheNextCommit)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  std::promise<void> sync_entered;
+  std::promise<void> release_sync;
+  std::shared_future<void> released = release_sync.get_future().share();
+  ctx.set_outbox_sync_test_hook([&](BlockHeight height) {
+    if (height == 1) {
+      sync_entered.set_value();
+      released.wait();
+    }
+  });
+
+  EventMempoolRpc rpc(ctx);
+  ASSERT_EQ(rpc.eventsched_open_block(940)(), RPCError::kRPCNone);
+  EventBlockResult closed_one = rpc.eventsched_close_block(940, 1)();
+  ASSERT_EQ(closed_one.error(), RPCError::kRPCNone);
+  ConsensusValue block_one =
+      make_consensus_value(1, closed_one.root_hash(), /*proposal_bodies=*/{});
+  block_one.prev_hash = sha256(genesis);
+  ASSERT_EQ(rpc.eventsched_open_block(941)(), RPCError::kRPCNone);
+  EventBlockResult closed_two = rpc.eventsched_close_block(941, 2)();
+  ASSERT_EQ(closed_two.error(), RPCError::kRPCNone);
+  ConsensusValue block_two =
+      make_consensus_value(2, closed_two.root_hash(), /*proposal_bodies=*/{});
+  block_two.prev_hash = sha256(block_one);
+
+  // Commit 1 replies while its sync is still blocked.
+  ASSERT_EQ(rpc.eventsched_commit_block(940, block_one)(), RPCError::kRPCNone);
+  sync_entered.get_future().wait();
+
+  // Its record is written but not pullable.
+  EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(1).value_or(false));
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+  // Commit 2 cannot publish until that sync completes.
+  std::future<RPCError> commit_two = std::async(std::launch::async, [&] {
+    return rpc.eventsched_commit_block(941, block_two)();
+  });
+  EXPECT_EQ(commit_two.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::timeout);
+  EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(2).value_or(true));
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request())().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+  release_sync.set_value();
+  ASSERT_EQ(commit_two.get(), RPCError::kRPCNone);
+  // Commit 2 collected sync 1 before publishing, so height 1 is pullable now.
+  EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(first.pulled_block().block.payload.consensus_value, block_one);
+  ctx.flush_outbox_sync()();
+  EventIndexerPullResult second =
+      ctx.pull_indexer_next(pull_request(progress_at(first.pulled_block())))();
+  ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
 }
 
 // A commit links its record before the bytes are durable, so a crash can

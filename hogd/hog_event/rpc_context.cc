@@ -169,6 +169,9 @@ EventRPCContext::sync_committed_record(BlockHeight block_height)
     pool = &default_threadpool();
   }
   auto synced = co_await pool->async([this, block_height] {
+    if (outbox_sync_test_hook_) {
+      outbox_sync_test_hook_(block_height);
+    }
     return indexer_outbox_store_.sync_committed(block_height);
   });
   if (!synced) {
