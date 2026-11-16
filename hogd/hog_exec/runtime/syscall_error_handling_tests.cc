@@ -74,8 +74,7 @@ class SyscallErrorHandlingTest : public ::testing::Test,
 public:
   SyscallErrorHandlingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   constexpr static Invocation kPlaceholderInvocation = {

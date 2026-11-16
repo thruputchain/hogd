@@ -173,7 +173,7 @@ GetLen was flat over this range. Set and Get became more expensive per byte at
 larger lengths; the largest adjacent band measured approximately 0.0388 and
 0.0196 ns/byte respectively. Prices use the most expensive measured band:
 13 gas per 512-byte write block and 7 per read block, on top of storage access.
-The block size is a pricing constant included in the gas digest.
+The block size is a pricing constant listed in the gas schedule.
 
 Reads charge bytes copied rather than the offered buffer capacity. This avoids
 billing the SDK's reusable scratch capacity when it reads a small item. The

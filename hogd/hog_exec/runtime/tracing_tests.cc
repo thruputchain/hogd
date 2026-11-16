@@ -51,8 +51,7 @@ class TracingTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   TracingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

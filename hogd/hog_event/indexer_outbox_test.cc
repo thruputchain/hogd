@@ -1118,13 +1118,15 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // absent key at the end of the one transaction body. It moved again, at the
   // same length, when ProposalTxs began naming transactions by
   // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
-  // Full-key Merkle leaves changed the transaction and event roots again.
+  // Full-key leaves and then direct key/value commitments changed the roots.
+  // The proposal_txs_hash moved again when its parts began combining in order
+  // instead of by XOR (hogd#4508).
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0x0b, 0x7f, 0x71, 0x25, 0xe7, 0x15, 0xa9,
-                                   0x13, 0x83, 0x9e, 0x4c, 0xb3, 0x4e, 0xdc,
-                                   0x79, 0x3c, 0x90, 0x83, 0x82, 0x4f, 0xc3,
-                                   0xee, 0xca, 0x8a, 0x6e, 0xd0, 0xc1, 0x9b,
-                                   0x1c, 0xd8, 0xef, 0xaa};
+  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
+                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
+                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
+                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
+                                   0x21, 0x07, 0xcc, 0x31};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);

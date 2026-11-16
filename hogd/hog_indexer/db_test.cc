@@ -6,8 +6,14 @@
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
+#include <rocksdb/advanced_cache.h> // NOLINT(misc-include-cleaner)
+// NOLINTNEXTLINE(misc-header-include-cycle)
+#include <rocksdb/db.h>
+#include <rocksdb/filter_policy.h>
+#include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/perf_level.h>
+#include <rocksdb/table.h>
 #include <span>
 #include <string_view>
 #include <utility>
@@ -52,7 +58,46 @@ protected:
   }
 
   TmpDir tmp_dir_;
+
+  static void check_table_options(const IndexDB &db)
+  {
+    const auto tx_options = db.db_->GetOptions(db.tx_cf_handle_);
+    const auto *tx_table =
+        tx_options.table_factory->GetOptions<rocksdb::BlockBasedTableOptions>();
+    ASSERT_NE(tx_table, nullptr);
+    ASSERT_NE(tx_table->filter_policy, nullptr);
+    EXPECT_STREQ(tx_table->filter_policy->Name(), "bloomfilter");
+    ASSERT_NE(tx_table->block_cache, nullptr);
+    EXPECT_EQ(tx_table->block_cache->GetCapacity(), 256U * 1024 * 1024);
+    for (auto *cf : {db.db_->DefaultColumnFamily(), db.tx_cf_handle_,
+                     db.contract_cf_handle_}) {
+      const auto options = db.db_->GetOptions(cf);
+      const auto *table =
+          options.table_factory->GetOptions<rocksdb::BlockBasedTableOptions>();
+      ASSERT_NE(table, nullptr);
+      EXPECT_EQ(table->filter_policy, tx_table->filter_policy);
+      EXPECT_EQ(table->block_cache, tx_table->block_cache);
+      EXPECT_TRUE(table->whole_key_filtering);
+      EXPECT_FALSE(table->cache_index_and_filter_blocks);
+    }
+  }
 };
+
+TEST_F(IndexDBTest, TableOptionsOnCreateAndOpen)
+{
+  {
+    auto db = IndexDB::make_new(tmp_dir_.directory());
+    if (!db.has_value()) {
+      FAIL() << "Failed to create database";
+    }
+    check_table_options(*db);
+  }
+  auto db = IndexDB::open(tmp_dir_.directory());
+  if (!db.has_value()) {
+    FAIL() << "Failed to open database";
+  }
+  check_table_options(*db);
+}
 
 // Test creating a new database
 TEST_F(IndexDBTest, CreateNew)

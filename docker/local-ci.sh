@@ -77,34 +77,8 @@ build_image() {
 # Initialize submodules
 init_submodules() {
     cd "${REPO_ROOT}"
-
-    # Check if SSH agent is available for private repos
-    if [[ -n "${SSH_AUTH_SOCK:-}" ]] && ssh-add -l &>/dev/null; then
-        log_info "SSH agent detected - initializing ALL submodules..."
-        git submodule update --init --recursive
-    else
-        log_info "No SSH agent - initializing public submodules only..."
-        # Public submodules that don't require SSH keys
-        local public_submodules=(
-            "external/rocksdb"
-            "external/model-checker"
-            "external/googletest"
-            "external/benchmark"
-            "external/crc32c"
-            "external/blake3"
-            "external/corrosion"
-            "external/mldsa-native"
-            "external/wycheproof"
-        )
-
-        for submodule in "${public_submodules[@]}"; do
-            if [[ ! -d "${REPO_ROOT}/${submodule}/.git" ]] && [[ ! -f "${REPO_ROOT}/${submodule}/.git" ]]; then
-                log_info "Initializing ${submodule}..."
-                git submodule update --init --recursive "${submodule}" 2>/dev/null || \
-                    log_warn "Failed to init ${submodule} (may require SSH or be empty)"
-            fi
-        done
-    fi
+    log_info "Initializing submodules..."
+    git submodule update --init --recursive
 }
 
 # Run container with proper mounts

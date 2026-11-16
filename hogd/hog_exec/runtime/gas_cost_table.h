@@ -4,25 +4,27 @@
 #include <cassert>
 #include <cstdint>
 
+#include "hogd/rust/crypto/bindings.h"
+
 namespace hogd {
 
 /**
  * Table of gas costs for various operations.
  *
- * RV32 artifacts commit to these: kSyscallGasCostSchedule is folded into
- * rv32::kGasScheduleDigest and pinned in artifact.h. Changing any cost/name/
- * order is a coordinated gas-schedule update: update the pinned digest/version
- * deliberately and regenerate committed RV32 artifacts/lowerer constants.
+ * These are consensus: validators must agree on them. They belong to this
+ * build, not to an artifact, which declares only the syscall API version it
+ * was built against, so a new price needs no change to any artifact or
+ * lowerer. rv32_vm_test spells every entry out, so a change here is deliberate.
  *
  * The costs are measured by the RV32 Gas Calibration workflow, which times the
  * production syscall_entry path and converts nanoseconds to gas via the opcode
  * calibration's baseline instruction. See rv32/gas_calibration/MEASUREMENTS.md.
  *
  * Every constant the cost functions read must be an entry in
- * kSyscallGasCostSchedule, since that is what the digest hashes; a number that
- * changes a contract's bill while the digest sits still is the failure the
- * digest exists to prevent. Block geometry is the exception: it is fixed by the
- * hash functions, so it is static_asserted rather than hashed.
+ * kSyscallGasCostSchedule, since that is what the test pins; a number that
+ * changes a contract's bill with no pinned entry moving is the failure the
+ * schedule exists to prevent. Block geometry is the exception: it is fixed by
+ * the hash functions, so it is static_asserted rather than listed.
  */
 
 // Every syscall pays this: the crossing itself -- ecall barrier, argument
@@ -123,6 +125,12 @@ constexpr static uint64_t kBytestringReadBlockCost = 7;
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
+// Initial price from two M4 Max production-entry sweeps, with >=15% headroom
+// over sampled valid-input row medians.
+// Calibration: https://linear.app/grndhg/issue/GH-617
+constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
+constexpr uint64_t kRistretto255MsmTermCost = 13'000;
+
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
 // plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
@@ -150,6 +158,17 @@ constexpr static uint64_t kMaxCostBytes = uint64_t{1} << 32;
 // Costs a syscall computes from its arguments, as opposed to the flat
 // constants above.
 struct GasCost {
+  static constexpr uint64_t ristretto255_msm(uint64_t terms)
+  {
+    // The caller bounds the term count before computing the price. Even the
+    // largest accepted input fits far below the gas type's maximum.
+    assert(terms <= RISTRETTO255_MSM_MAX_TERMS);
+    static_assert(RISTRETTO255_MSM_MAX_TERMS <=
+                  (UINT64_MAX - kRistretto255MsmBaseCost) /
+                      kRistretto255MsmTermCost);
+    return kRistretto255MsmBaseCost + (terms * kRistretto255MsmTermCost);
+  }
+
   // Blocks a hash compresses, padding included. One helper per hash rather
   // than one taking the geometry as arguments: three interchangeable uint64_t
   // parameters is a call that transposes silently.
@@ -230,8 +249,7 @@ struct GasCost {
 };
 
 struct SyscallGasCostEntry {
-  // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
-  // wire constant), so the hashed bytes must be the standard's UTF-8 code units
+  // `u8"..."` literal, so the bytes are the standard's UTF-8 code units
   // rather than implementation-defined ordinary-literal bytes that depend on
   // the execution character set (`-fexec-charset`). See hogd issue #2689.
   const char8_t *name;
@@ -240,7 +258,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 14> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -257,6 +275,10 @@ constexpr std::array<SyscallGasCostEntry, 14> kSyscallGasCostSchedule = {{
      .cost = kVerifySignatureMlDsa65BaseCost},
     {.name = u8"VerifySignatureMlDsa65Block",
      .cost = kVerifySignatureMlDsa65BlockCost},
+    {.name = u8"Ristretto255MsmBase", .cost = kRistretto255MsmBaseCost},
+    {.name = u8"Ristretto255MsmTerm", .cost = kRistretto255MsmTermCost},
+    {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
+    {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
 }};
 
 } // namespace hogd

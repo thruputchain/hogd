@@ -10,6 +10,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/status.h"
@@ -242,6 +243,40 @@ TEST_F(GenesisConfigValidationTest, AcceptsRv32CodeLimitAtVmCeiling)
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32CodeBytes,
                                  rv32::kCodeCeilingBytes);
+  EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
+}
+
+// The admitted versions must be a range within the formats this build reads.
+TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
+{
+  auto load_with_versions = [&](uint32_t min, uint32_t max) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMinRv32ArtifactVersion, min);
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion, max);
+    return load(config, std::nullopt);
+  };
+  constexpr uint32_t kOldest = kMinRv32ArtifactVersion;
+  constexpr uint32_t kNewest = kMaxRv32ArtifactVersion;
+  ASSERT_LT(kOldest, kNewest);
+
+  EXPECT_EQ(load_with_versions(kOldest - 1, kNewest),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_versions(kOldest, kNewest + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_versions(kNewest, kOldest),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_versions(kNewest, kNewest),
+            DbSchedResult::DbSchedResultOK);
+}
+
+TEST_F(GenesisConfigValidationTest, AcceptsOnlyTheOldestRv32ArtifactVersion)
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+      kMinRv32ArtifactVersion);
   EXPECT_EQ(load(config, std::nullopt), DbSchedResult::DbSchedResultOK);
 }
 

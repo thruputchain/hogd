@@ -15,9 +15,11 @@
 #include <vector>
 
 #include <x23/nodestroy.h>
+#include <x23/threadpool.h>
 
 #include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
@@ -198,7 +200,7 @@ public:
 
   // Upper bound on the cleared storages (bucket array + value allocator)
   // retained for reuse by maps of this type; see StoragePool below.
-  static constexpr size_t kMaxPooledStorages = 2;
+  static constexpr size_t kMaxPooledStorages = 4;
 
   ConcurrentMap(size_t n_buckets = 1'048'576, Hasher hasher = Hasher())
     : ConcurrentMap(acquire_storage(n_buckets), hasher)
@@ -208,15 +210,29 @@ public:
 
   ~ConcurrentMap()
   {
-    if (!cleared_) {
-      clear_slow();
+    Storage storage{std::move(buckets_), std::move(value_allocator_)};
+    if (cleared_) {
+      recycle(std::move(storage));
+      return;
     }
-    // All clearing paths leave every head nullptr and destroy every value, so
-    // the bucket array can be reused as-is and the allocator's regions can be
-    // handed out again from the start.
-    value_allocator_->reset_all_regions();
-    release_storage(Storage{std::move(buckets_), std::move(value_allocator_)});
+    // Clearing walks every bucket head (1M by default), so a pool worker hands
+    // it to another worker via spawn() rather than stalling; any other thread
+    // clears inline, which keeps static teardown synchronous.
+    if (x23::ThreadPool::get_thread_pool() == nullptr) {
+      clear_heads(storage.buckets);
+      recycle(std::move(storage));
+      return;
+    }
+    default_threadpool().spawn([storage = std::move(storage)]() mutable {
+      clear_heads(storage.buckets);
+      recycle(std::move(storage));
+    });
   }
+
+  // Blocks until storage handed to the pool by earlier destructors has been
+  // cleared and returned to the storage pool. For tests; must not be called
+  // from a pool worker.
+  static void wait_for_background_recycling() { default_threadpool().drain(); }
 
   static_assert(
       std::unsigned_integral<decltype(Hasher()(std::declval<KeyType>()))>);
@@ -414,15 +430,23 @@ private:
     return std::max<size_t>(1, buckets_.size() / pool.worker_count());
   }
 
-  void clear_slow() noexcept
+  // Recycles storage whose heads are all nullptr and whose values have all
+  // been destroyed: the bucket array can be reused as-is and the allocator's
+  // regions can be handed out again from the start.
+  static void recycle(Storage storage) noexcept
   {
-    for (auto &bucket : buckets_) {
+    storage.value_allocator->reset_all_regions();
+    release_storage(std::move(storage));
+  }
+
+  static void clear_heads(bucket_array_t &buckets) noexcept
+  {
+    for (auto &bucket : buckets) {
       // exchange() rather than load(): the destructor recycles the array, so
       // every head must be nullptr afterwards.
       value_bucket_t::clear(
           bucket.exchange(nullptr, std::memory_order_acquire));
     }
-    cleared_ = true;
   }
 
   bucket_array_t buckets_;

@@ -1798,6 +1798,36 @@ TEST(HogDevnode, UnusableTmpdirPrintsDiagnosticInsteadOfAborting)
       << stderr_output;
 }
 
+TEST(HogDevnode, UnassignedListenHostFailsBeforeCreatingTempDirs)
+{
+  // 192.0.2.1 is reserved for documentation (RFC 5737) and assigned to no
+  // host, so nothing can listen on it. hog-devnode must report that and exit
+  // without leaving temp dirs behind in $TMPDIR.
+  const std::filesystem::path tmpdir =
+      std::filesystem::temp_directory_path() /
+      std::format("hog-devnode-unassigned-listen-host-{}-{}", getpid(),
+                  std::chrono::steady_clock::now().time_since_epoch().count());
+  std::filesystem::create_directories(tmpdir);
+  HogDevnodeProcess process =
+      HogDevnodeProcess::start({"--listen-host", "192.0.2.1"},
+                               {{"TMPDIR", tmpdir.string() + "/"}});
+
+  std::optional<int> status = process.wait_for_exit_for_test(startup_timeout());
+  if (!status.has_value()) {
+    FAIL() << "hog-devnode did not exit";
+    return;
+  }
+  const int exit_status = *status;
+  std::string stderr_output = process.read_remaining_stderr();
+  ASSERT_TRUE(WIFEXITED(exit_status)) << stderr_output;
+  EXPECT_EQ(WEXITSTATUS(exit_status), EXIT_FAILURE) << stderr_output;
+  EXPECT_TRUE(stderr_output.contains("hog-devnode failed before readiness: "
+                                     "cannot listen on 192.0.2.1"))
+      << stderr_output;
+  EXPECT_TRUE(std::filesystem::is_empty(tmpdir));
+  std::filesystem::remove_all(tmpdir);
+}
+
 TEST(HogDevnode, RejectsWildcardListenHostBeforeInitialization)
 {
   for (std::string_view host : {"0.0.0.0", "::", "[::]", "0:0:0:0:0:0:0:0",
@@ -2067,6 +2097,8 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
                                     "max_contract_size_bytes=1048576");
   add_local_network_config_override(config.network_config_overrides,
                                     "max_bytestring_len=32768");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "min_rv32_artifact_version=6");
   auto artifact = build_local_bootstrap_account_artifact(config);
   auto const &network = artifact.genesis_configuration.network_config;
   EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));
@@ -2075,6 +2107,8 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(params.max_rv32_code_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_bytestring_len, 32768U);
+  EXPECT_EQ(params.min_rv32_artifact_version, 6U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 7U);
   EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
@@ -2092,7 +2126,8 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
   for (const auto *bad :
        {"unknown=2", "max_bytestring_len",
         "max_bytestring_len=", "max_bytestring_len=-1",
-        "max_bytestring_len=4294967296", "max_bytestring_len=1x"}) {
+        "max_bytestring_len=4294967296", "max_bytestring_len=1x",
+        "min_rv32_artifact_version=4", "max_rv32_artifact_version=8"}) {
     EXPECT_THROW(add_local_network_config_override(overrides, bad),
                  std::runtime_error);
     EXPECT_TRUE(overrides.empty());
@@ -3752,7 +3787,8 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
     Contract large_contract(ContractType::kRv32);
     large_contract.rv32_contract().data.append_range(bytes);
     ASSERT_EQ(large_contract.rv32_contract().data.size(),
-              (320 * 1024U) + rv32::kArtifactHeaderBytes);
+              (320 * 1024U) + rv32::kArtifactHeaderBytes +
+                  4); // empty extension list
 
     auto keypair =
         derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);

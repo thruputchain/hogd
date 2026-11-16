@@ -44,8 +44,7 @@ class ReplayCacheHeightBudgetLeakTest : public ::testing::Test,
 public:
   ReplayCacheHeightBudgetLeakTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   auto make_new_per_tx_db_proxy()

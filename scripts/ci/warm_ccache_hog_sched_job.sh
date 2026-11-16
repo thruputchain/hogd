@@ -26,9 +26,6 @@ hog11) WARMUP_SPECS=("clang Debug x23-coro-trace-off" "clang Debug test-ffi-no-b
   ;;
 esac
 
-export CARGO_REGISTRIES_THRUPUT_INDEX="sparse+https://crates.thruput.network/api/v1/crates/"
-export CARGO_REGISTRIES_THRUPUT_SOURCE="sparse+https://crates.thruput.network/api/v1/crates/"
-
 echo 'cloning hogd'
 git init -q .
 git remote remove origin 2>/dev/null || true

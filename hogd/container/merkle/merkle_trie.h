@@ -56,9 +56,9 @@ public:
   // Type definitions.
   using Key = HexArray;
 
-  // Mutating operations do not update node hashes. Call [generate_all_hashes()]
-  // after finishing mutations before reading the root hash or generating
-  // proofs.
+  // Mutating operations keep leaf hashes current. Branch and extension hashes
+  // are deferred: call [generate_all_hashes()] after finishing mutations before
+  // reading the root hash or generating proofs.
   explicit MerkleTrie(
       Allocator<Node>::Type allocator_type = Allocator<Node>::Type::kDefault)
     : allocator_(allocator_type)
@@ -124,11 +124,10 @@ public:
                     const std::vector<std::byte> &encodings, const Key &k,
                     const std::span<const std::byte> &value);
 
-  // Finds the value hash for key [k]. If key [k] does not exist in the trie,
-  // returns a nullptr. If true is returned, you *must* call [find_end(cookie)]
-  // when you are done accessing the value hash!
-  //
-  // We guarantee pointer stability for the value hash.
+  // Finds the key/value commitment for [k], as computed by
+  // [Node::compute_value_commitment]. Returns false if the key is absent.
+  // On success, call [find_end(cookie)] when done accessing [value_hash].
+  // We guarantee pointer stability for the stored commitment.
   bool find_begin(const Key &k, SHA256Hash *&value_hash, void *&cookie);
 
   // You must call this when you are done accessing a value returned by
@@ -167,7 +166,7 @@ public:
     size_ = 0;
   }
 
-  // Executes [func] on each element.
+  // Calls [func] with each complete key and its stored key/value commitment.
   template<typename F> void for_each(F func)
   {
     auto f = [&func](const HexArray &path, Node &node, Node * /*parent*/) {
@@ -189,8 +188,9 @@ public:
     walk<Node>(&root_, root_prefix_, f);
   }
 
-  // Generates a hash for every node in the trie. If the trie is modified while
-  // this function runs, the behavior is undefined.
+  // Refreshes branch and extension hashes; leaf hashes are prepared on insert.
+  // If the trie is modified while this function runs, the behavior is
+  // undefined.
   void generate_all_hashes(size_t num_threads = available_parallelism());
 
 private:
@@ -216,14 +216,13 @@ private:
   // extension node below the lowest branch for that pair, we need to handle the
   // extension node and its subtree.
   Node *insert_handle_extension(Node *current_extension, const Key &k,
-                                size_t idx,
-                                const std::span<const std::byte> &obj);
+                                size_t idx, Node *new_leaf);
 
   // Helper function for [insert()]. When we add a KV pair and there is a leaf
   // node below the lowest branch for that pair, we need to handle the leaf
   // node.
   Node *insert_handle_leaf(Node *current_leaf, const Key &k, size_t idx,
-                           const std::span<const std::byte> &obj);
+                           Node *new_leaf);
 
   // Returns true if we will need to remove [branch] after removing a KV pair
   // that is "under" it.

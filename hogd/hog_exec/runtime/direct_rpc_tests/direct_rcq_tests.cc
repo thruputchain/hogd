@@ -26,8 +26,7 @@ class DirectRCQTests : public ::testing::Test,
 public:
   DirectRCQTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override { cost_model_ = get_default_cost_model(); }

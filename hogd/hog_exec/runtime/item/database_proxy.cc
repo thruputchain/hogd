@@ -482,10 +482,10 @@ constexpr size_t kMaxSubtransactionPushFootprint =
 static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
               "the largest possible single delta must fit one push");
 
-// The merges themselves, one word each. Charged as sent rather than at the
-// type's maximum: only proposal mode sends any, about one per open frame, so a
-// fixed maximum would turn away batches that fit. Validation sends none at the
-// root commit, so it never refuses a push the proposer's larger message fit.
+// The merges themselves, one word each, charged as sent: the list has no
+// maximum, and only proposal mode sends any, about one per open frame.
+// Validation sends none at the root commit, so it never refuses a push the
+// proposer's larger message fit.
 size_t
 merges_bound(SubtransactionMerges const &merges)
 {

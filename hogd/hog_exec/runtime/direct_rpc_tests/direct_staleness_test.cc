@@ -47,8 +47,7 @@ class DirectStalenessTest : public ::testing::Test,
 public:
   DirectStalenessTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   struct SiblingBlocks {

@@ -32,8 +32,8 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_mempool/config_hash.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "integration.hh"
 #include "rpc_types.hh"
@@ -184,11 +184,8 @@ protected:
     auto stalled_addrkey = NativeContractTestFramework::
         make_contract_data_addrkey_matching_static_key_sdk_macro(
             contract_address, "nnint_get_key_not_exist");
-    snapshot_server->impl()->setup_create_item(
-        stalled_addrkey,
-        StorageItemWrapper(
-            int128_t{7},
-            NativeContractTestFramework::get_default_cost_model()));
+    snapshot_server->impl()->setup_create_item(stalled_addrkey,
+                                               make_nnint_item(int128_t{7}));
     snapshot_server->impl()->setup_stall_item(stalled_addrkey);
 
     return StalledSyscallMiscSnapshotSetup{

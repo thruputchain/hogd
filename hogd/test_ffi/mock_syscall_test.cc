@@ -487,6 +487,38 @@ TEST(MockSyscallTest, NoSyscallTest)
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
 }
 
+TEST(MockSyscallTest, Ristretto255EmptySum)
+{
+  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
+                       NetworkHash{}, make_test_genesis_root_contract(),
+                       stock_network_config());
+  auto runtime_context =
+      std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
+  SyscallHandlerContext context(runtime_context, SignedTransaction{},
+                                db_context);
+  ASSERT_TRUE(context.push_context());
+  EmptyRuntime runtime(Invocation{.gas_limit = 1'000'000});
+  context.push_mock_runtime(&runtime);
+
+  std::array<uint8_t, 32> output;
+  output.fill(0xA5);
+  // Empty input accepts a null pointer and returns the canonical identity.
+  auto res =
+      mock_syscall_entrypoint(std::to_underlying(SyscallNo::kRistretto255Msm),
+                              0, 0, reinterpret_cast<uint64_t>(output.data()),
+                              0, 0, 0, 0);
+  EXPECT_EQ(res.result_code,
+            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(output, (std::array<uint8_t, 32>{}));
+  EXPECT_EQ(runtime.gas_consumed(),
+            kSyscallBaseCost + GasCost::ristretto255_msm(0));
+  EXPECT_EQ(res.panic, 0);
+  context.pop_mock_runtime();
+  context.pop_context();
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
+  context.mark_committed_or_aborted();
+}
+
 TEST(MockSyscallTest, ErrorSyscallTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),

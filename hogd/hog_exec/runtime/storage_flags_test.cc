@@ -413,8 +413,7 @@ class StorageFlagsTest : public ::testing::Test,
 public:
   StorageFlagsTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

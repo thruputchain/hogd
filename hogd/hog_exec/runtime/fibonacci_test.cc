@@ -30,12 +30,12 @@
 
 namespace hogd {
 
-class FibonacciTest : public ::testing::TestWithParam<TestDB>,
+class FibonacciTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
   FibonacciTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -57,7 +57,7 @@ protected:
 };
 
 // Simple test for sdk, to verify that calls actually happen.
-TEST_P(FibonacciTest, FibonacciCalls)
+TEST_F(FibonacciTest, FibonacciCalls)
 {
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
@@ -82,7 +82,7 @@ TEST_P(FibonacciTest, FibonacciCalls)
   }
 }
 
-TEST_P(FibonacciTest, FibonacciGasLimit)
+TEST_F(FibonacciTest, FibonacciGasLimit)
 {
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
@@ -108,7 +108,7 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
 }
 
 // Test whether the output of the fibonacci contract is correct.
-TEST_P(FibonacciTest, FibonacciCorrectness)
+TEST_F(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
@@ -221,10 +221,5 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, FibonacciTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

@@ -1,3 +1,4 @@
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
@@ -10,7 +11,9 @@
 #include <initializer_list>
 #include <latch>
 #include <limits>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <optional>
 #include <set>
 #include <stdexcept>
@@ -22,6 +25,7 @@
 #include <vector>
 
 #include "address_auth.hh"
+#include "auth_card.hh"
 #include "auth_claim.hh"
 #include "auth_rpc.hh"
 #include "built_contracts/contract_loader.h"
@@ -30,12 +34,14 @@
 #include "consensus.hh"
 #include "contract.hh"
 #include "db_sched.hh"
+#include "exec_result.hh"
 #include "exec_sched.hh"
 #include "genesis.hh"
 #include "header.hh"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
@@ -174,13 +180,74 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   txs.nondeterministic_data.segment_bytes = {4};
   txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
 
+  // Shared with chuckd's TestHashProposalTxsFastCompatibilityVector and the
+  // coordinator's proposal_txs_hash_golden_vector.
   const ProposalTxsHash expected = {
-      0x3a, 0x3c, 0xe7, 0x82, 0x83, 0x94, 0x38, 0x26, 0xac, 0x43, 0x29,
-      0x1f, 0xab, 0x79, 0xbd, 0x17, 0xc4, 0xad, 0x1d, 0x1e, 0xf9, 0xe2,
-      0x2d, 0x8c, 0x72, 0x31, 0xa9, 0x7c, 0xb6, 0x68, 0xdc, 0xd9,
+      0xac, 0x7e, 0x6e, 0x65, 0xe3, 0xf3, 0x6e, 0xc7, 0x88, 0x45, 0xdd,
+      0xf3, 0xf3, 0xd9, 0x5a, 0xcf, 0x99, 0xea, 0xdb, 0xbd, 0xbc, 0xfd,
+      0x39, 0x1e, 0x44, 0x23, 0x9a, 0x7d, 0xc4, 0xb5, 0x2c, 0x03,
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+// Swapping two segments reverses the transaction order and changes the hash.
+TEST(Mempool, ProposalTxsCompatibilityHashBindsTransactionOrder)
+{
+  const SignedTransactionHash first_hash = sha256(uint64_t{1});
+  const SignedTransactionHash second_hash = sha256(uint64_t{2});
+  const ParallelBatch first_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{first_hash})();
+  const ParallelBatch second_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{second_hash})();
+
+  ProposalTxs first_order{};
+  first_order.signed_hash.segment_tokens = {1, 1};
+  first_order.signed_hash.segment_bytes = {first_segment.segment_bytes[0],
+                                           second_segment.segment_bytes[0]};
+  first_order.signed_hash.xdr = first_segment.xdr;
+  first_order.signed_hash.xdr += second_segment.xdr;
+  first_order.nondeterministic_data =
+      t_to_parallel_batch(x23::XdrVec<NondeterministicProposalData>{
+          NondeterministicProposalData{}, NondeterministicProposalData{}})();
+
+  ProposalTxs swapped_order = first_order;
+  swapped_order.signed_hash.xdr = second_segment.xdr;
+  swapped_order.signed_hash.xdr += first_segment.xdr;
+
+  SignedTransactionHashBatch decoded_first_order;
+  ASSERT_TRUE(parallel_batch_to_t(first_order.signed_hash, decoded_first_order,
+                                  kNoBatchSizeLimit)());
+  SignedTransactionHashBatch decoded_swapped_order;
+  ASSERT_TRUE(parallel_batch_to_t(swapped_order.signed_hash,
+                                  decoded_swapped_order, kNoBatchSizeLimit)());
+  EXPECT_EQ(decoded_first_order,
+            (SignedTransactionHashBatch{first_hash, second_hash}));
+  EXPECT_EQ(decoded_swapped_order,
+            (SignedTransactionHashBatch{second_hash, first_hash}));
+
+  EXPECT_NE(proposal_txs_compatibility_hash(first_order),
+            proposal_txs_compatibility_hash(swapped_order));
+}
+
+// Combined by XOR, the two batch hashes kept the commitment when batches of
+// the same shape traded places.
+TEST(Mempool, ProposalTxsCompatibilityHashBindsBatchPositions)
+{
+  const ParallelBatch first =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{1})})();
+  const ParallelBatch second =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{2})})();
+
+  ProposalTxs txs{};
+  txs.signed_hash = first;
+  txs.nondeterministic_data = second;
+  ProposalTxs swapped{};
+  swapped.signed_hash = second;
+  swapped.nondeterministic_data = first;
+
+  EXPECT_NE(proposal_txs_compatibility_hash(txs),
+            proposal_txs_compatibility_hash(swapped));
 }
 
 TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
@@ -648,6 +715,35 @@ TEST(MempoolAuthRpc, GetAuthInfoDoesNotRegisterAuth)
   IntroAuthResult wrong_protocol =
       MempoolAuthRpc::mempoolauth_get_auth_info(ProtocolCommit{})();
   EXPECT_EQ(wrong_protocol.outcome(), IntroAuthOutcome::kFailure);
+}
+
+// Only one auth server is supported. The mempool builds its auth client from
+// the first registered card and never rebuilds it, so a second registration
+// must fail rather than replace the card (issue #2816).
+TEST(MempoolAuthRpc, SecondIntroAuthFails)
+{
+  Registration &registration = Registration::registration();
+  registration.clear();
+  x23::Defer cleanup([&registration] { registration.clear(); });
+
+  const AuthCard first{.protocol = version::kHogdProtocol(),
+                       .upid = {},
+                       .address_for_db = "127.0.0.1:1",
+                       .address_for_mempool = "127.0.0.1:2"};
+  IntroAuthResult first_intro = MempoolAuthRpc::mempoolauth_intro_auth(first)();
+  ASSERT_EQ(first_intro.outcome(), IntroAuthOutcome::kSuccess);
+
+  const AuthCard second{.protocol = version::kHogdProtocol(),
+                        .upid = {},
+                        .address_for_db = "127.0.0.1:3",
+                        .address_for_mempool = "127.0.0.1:4"};
+  IntroAuthResult second_intro =
+      MempoolAuthRpc::mempoolauth_intro_auth(second)();
+  EXPECT_EQ(second_intro.outcome(), IntroAuthOutcome::kFailure);
+
+  AuthCard registered;
+  ASSERT_TRUE(registration.auth_registered(&registered));
+  EXPECT_EQ(registered, first);
 }
 
 TEST(MempoolAuthRpc, AuthCallbackBlocksUntilRegistration)
@@ -2275,7 +2371,9 @@ TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
   committed.store(true, std::memory_order_relaxed);
   retry_thread.join();
 
-  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  // The retry commits the tip again under its value, which answers OK (see
+  // CommittingTheTipAgainSucceeds) and is no commit of its own.
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
@@ -2546,6 +2644,204 @@ TEST(Mempool, ValidateRejectsBlockWithFailedTx)
             SchedulerValidationResult::SchedulerValidationInvalid);
 }
 
+namespace {
+
+// Opens and finishes blocks like an executor, but answers each validated
+// transaction with a scripted [ExecResult] instead of executing it.
+class ScriptedValidationExecutorRpc {
+public:
+  using rpc_service = ExecutorSched1;
+
+  // Every validated transaction gets [result] unless [script_tx()] names it.
+  void script(ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    default_result_ = result;
+  }
+
+  void script_tx(const TransactionHash &tx_hash, ExecResult result)
+  {
+    std::lock_guard lock(mutex_);
+    tx_results_[tx_hash] = result;
+  }
+
+  size_t validated_tx_count() const { return validated_tx_count_.load(); }
+
+  static x23::Async<void> executorsched_null() { co_return; }
+
+  static x23::Async<ExecResult> executorsched_ready()
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecProposeResult>
+  executorsched_propose_transaction(BlockID /*unused*/,
+                                    SignedTransaction /*unused*/)
+  {
+    co_return ExecProposeResult(ExecResult::ExecResultSystemError);
+  }
+
+  x23::Async<ExecResult>
+  executorsched_validate_transaction(BlockID /*unused*/,
+                                     ProposedTransaction proposed_tx)
+  {
+    validated_tx_count_.fetch_add(1);
+    co_return result_for(proposed_tx);
+  }
+
+  static x23::Async<ExecProposeBatchResult>
+  executorsched_propose_batch(BlockID /*unused*/,
+                              SignedTransactionBatch signed_txs)
+  {
+    co_return ExecProposeBatchResult(signed_txs.size(),
+                                     ExecProposeResult(
+                                         ExecResult::ExecResultSystemError));
+  }
+
+  x23::Async<ExecValidateBatchResult>
+  executorsched_validate_batch(BlockID /*unused*/,
+                               ProposedTransactionBatch proposed_txs)
+  {
+    validated_tx_count_.fetch_add(proposed_txs.size());
+    ExecValidateBatchResult results;
+    results.reserve(proposed_txs.size());
+    for (const ProposedTransaction &proposed_tx : proposed_txs) {
+      results.push_back(result_for(proposed_tx));
+    }
+    co_return results;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_proposal_block(BlockID /*unused*/,
+                                    BlockExecutionContext /*unused*/)
+  {
+    co_return ExecResult::ExecResultSystemError;
+  }
+
+  static x23::Async<ExecResult>
+  executorsched_open_validation_block(BlockID /*unused*/,
+                                      BlockExecutionContext /*unused*/)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<ExecResult> executorsched_finish_block(BlockID /*unused*/)
+  {
+    co_return ExecResult::ExecResultOK;
+  }
+
+  static x23::Async<void> executorsched_shutdown() { co_return; }
+
+private:
+  ExecResult result_for(const ProposedTransaction &proposed_tx)
+  {
+    std::lock_guard lock(mutex_);
+    auto it = tx_results_.find(sha256(proposed_tx.signed_tx.tx));
+    return it == tx_results_.end() ? default_result_ : it->second;
+  }
+
+  std::mutex mutex_;
+  ExecResult default_result_ = ExecResult::ExecResultOK;
+  std::map<TransactionHash, ExecResult> tx_results_;
+  std::atomic<size_t> validated_tx_count_{0};
+};
+static_assert(is_ExecutorSched1<ScriptedValidationExecutorRpc *, x23::Async>);
+
+} // namespace
+
+// Proposes a real block, then validates it with [ScriptedValidationExecutorRpc]
+// standing in for the registered executors.
+class MempoolValidationExecutorResultTest : public testing::Test {
+protected:
+  static constexpr size_t kNumBlockTxs = 2;
+
+  void SetUp() override
+  {
+    fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+    txs_ = generate_unsigned_txs(fib_client, kNumBlockTxs);
+    server_.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{}, t_to_parallel_batch(txs_)())();
+
+    SchedulerGetTipResult get_tip =
+        server_.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    parent_ = get_tip.db_tip();
+    SchedulerProposalResult res_nominate = propose_block(server_, parent_);
+    ASSERT_EQ(res_nominate.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    proposal_ = res_nominate.proposed_block().proposal;
+
+    executor_.start_server(/*port=*/0);
+    x23::Vec<exec_sched_client_t> &exec_clients =
+        server_.mempool_coord_rpc().exec_clients_;
+    for (size_t i = 0; i < exec_clients.size(); ++i) {
+      swapped_clients_.push_back(
+          create_client<ExecutorSched1>(MempoolTestInfra::kAddress,
+                                        executor_.port())()
+              .value());
+    }
+    std::swap(exec_clients, swapped_clients_);
+    swapped_ = true;
+  }
+
+  void TearDown() override
+  {
+    if (swapped_) {
+      std::swap(server_.mempool_coord_rpc().exec_clients_, swapped_clients_);
+    }
+  }
+
+  ScriptedValidationExecutorRpc &executor() { return *executor_.impl(); }
+
+  SchedulerValidationOutcome validate()
+  {
+    return server_.mempool_coord_rpc()
+        .schedulercoord_validate_block(parent_.id, proposal_)()
+        .outcome();
+  }
+
+  MempoolTestInfra server_;
+  SignedTransactionBatch txs_;
+  DbTip parent_;
+  Proposal proposal_;
+
+private:
+  RpcServer<ScriptedValidationExecutorRpc> executor_;
+  // The scripted executor's clients until [SetUp()] swaps them in, then the
+  // registered executors' clients until [TearDown()] swaps them back.
+  x23::Vec<exec_sched_client_t> swapped_clients_;
+  bool swapped_ = false;
+};
+
+TEST_F(MempoolValidationExecutorResultTest, TxValidationFailureIsInvalid)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  EXPECT_EQ(validate(), SchedulerValidationOutcome::SchedulerValidationInvalid);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// A system error means this node could not run the block, which says nothing
+// about whether the block is valid.
+TEST_F(MempoolValidationExecutorResultTest, SystemErrorIsNotInvalid)
+{
+  executor().script(ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+// Once one transaction hits a system error, the others' results come from a
+// run this node could not complete, so they cannot show the block is invalid.
+TEST_F(MempoolValidationExecutorResultTest,
+       SystemErrorOutranksTxValidationFailure)
+{
+  executor().script(ExecResult::ExecResultTxValidationFailure);
+  executor().script_tx(sha256(txs_[0].tx), ExecResult::ExecResultSystemError);
+  EXPECT_EQ(validate(),
+            SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
+  EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -2812,6 +3108,94 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   auto res_commit = commit_block(server, res_nominate.proposed_block().block_id,
                                  db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A block two heights above the tip answers UnknownParentBlock at once,
+// rather than wait for its parent.
+TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal above = res_nominate.proposed_block().proposal;
+  above.header.block_height = db_tip.value.proposal_header.block_height + 2;
+
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
+      res_nominate.proposed_block().block_id, std::move(above))();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationUnknownParentBlock);
+
+  // The validation released its gate increment.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// Once committed, heights 0 and 1 are too late to validate, like any other
+// committed height.
+TEST(Mempool, ValidationAtACommittedGenesisHeightIsTooLate)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  ASSERT_GE(db_tip.value.proposal_header.block_height, 1);
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  for (const BlockHeight height : {BlockHeight{0}, BlockHeight{1}}) {
+    Proposal committed = res_nominate.proposed_block().proposal;
+    committed.header.block_height = height;
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate_block(
+            db_tip.id, std::move(committed))();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationTooLateToValidate)
+        << "height " << height;
+  }
+}
+
+// A commit whose answer the coordinator did not see may be retried: the tip
+// committed again under the value it committed with succeeds, and changes
+// nothing. The tip's id under another value is still refused.
+TEST(Mempool, CommittingTheTipAgainSucceeds)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_nominate.proposed_block();
+  ASSERT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+
+  EXPECT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, tip.id);
+  EXPECT_EQ(get_tip.db_tip().value, tip.value);
+
+  ConsensusValue other = consensus_value(parent, proposed.proposal);
+  other.proposal_header.storage_hash[0] ^= 1;
+  EXPECT_NE(server.mempool_coord_rpc().schedulercoord_commit_block(
+                proposed.block_id, std::move(other))(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 TEST(Mempool, ProposalUsesTransactionRoot)
@@ -4813,11 +5197,16 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
     Proposal proposal{};
     proposal.header.network_hash = MempoolTestInfra::kNetworkHash;
     proposal.header.block_height = height;
-    EXPECT_EQ(server.mempool_coord_rpc()
-                  .schedulercoord_validate_block(parent.db_tip().id,
-                                                 std::move(proposal))()
-                  .outcome(),
-              SchedulerValidationOutcome::SchedulerValidationInvalid);
+    // Height 0 is committed, so a block at it is too late to validate, as at
+    // any committed height; height 1 is the ceremony's.
+    EXPECT_EQ(
+        server.mempool_coord_rpc()
+            .schedulercoord_validate_block(parent.db_tip().id,
+                                           std::move(proposal))()
+            .outcome(),
+        height == 0
+            ? SchedulerValidationOutcome::SchedulerValidationTooLateToValidate
+            : SchedulerValidationOutcome::SchedulerValidationInvalid);
 
     ConsensusValue value{};
     value.proposal_header.block_height = height;
@@ -5070,6 +5459,78 @@ TEST(Mempool, SignatureVariantsOfOneHashValidateIdentically)
             tip.db_tip().id, proposal)();
     EXPECT_EQ(validated.outcome(),
               SchedulerValidationOutcome::SchedulerValidationOK);
+  }
+}
+
+// This test submits multiple signed txs that each have the same underlying
+// base tx. The test only submits one of the signed txs initially and then
+// attempts to validate a block that has several of the signed txs. The test
+// checks that first the mempool returns a missing tx error, and then after the
+// test provides the missing txs, the test checks that the block is rejected
+// altogether by the mempool.
+TEST(Mempool, ProposalNamingSigningsOfOneBodyResolvesToInvalid)
+{
+  const SignatureVariants variants =
+      make_signature_variants(kMaxBytesTransaction);
+  // A third signing: all but the last of the fat wrapper's signatures.
+  SignedTransaction mid = variants.fat;
+  mid.signatures.pop_back();
+  ASSERT_NE(sha256(mid), sha256(variants.thin));
+  ASSERT_NE(sha256(mid), sha256(variants.fat));
+
+  for (const SignedTransactionBatch &missing_signings :
+       {SignedTransactionBatch{mid},
+        SignedTransactionBatch{variants.thin, mid}}) {
+    SCOPED_TRACE(missing_signings.size());
+    MempoolTestInfra validator;
+    validator.set_address_auth_data(MempoolTestInfra::kAccountAddresses[0],
+                                    variants.auth_data);
+    // The validator holds the fat wrapper, which the proposal names last.
+    EXPECT_EQ(submit_through_gateway(validator, variants.fat),
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
+    const SchedulerGetTipResult tip =
+        validator.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+    SignedTransactionHashBatch named;
+    x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
+    for (const SignedTransaction &signing : missing_signings) {
+      named.push_back(sha256(signing));
+      nondeterministic_data.push_back(NondeterministicProposalData{});
+    }
+    const SignedTransactionHashBatch expected_missing_hashes = named;
+    named.push_back(sha256(variants.fat));
+    nondeterministic_data.push_back(NondeterministicProposalData{});
+    const Proposal proposal{
+        .header = {.ext = {},
+                   .network_hash = MempoolTestInfra::kNetworkHash,
+                   .block_height =
+                       tip.db_tip().value.proposal_header.block_height + 1},
+        .transactions = {.ext = {},
+                         .signed_hash = t_to_parallel_batch(named)(),
+                         .nondeterministic_data =
+                             t_to_parallel_batch(nondeterministic_data)()}};
+
+    // First validation asks for the signings other than the cached fat one.
+    const SchedulerValidationResult missing =
+        validator.mempool_coord_rpc().schedulercoord_validate_block(
+            tip.db_tip().id, proposal)();
+    ASSERT_EQ(missing.outcome(),
+              SchedulerValidationOutcome::SchedulerValidationMissingTxs);
+    ASSERT_EQ(missing.missing_signed_tx_hashes(), expected_missing_hashes);
+
+    // Supply the missing signings in one batch.
+    validator.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{}, t_to_parallel_batch(missing_signings)())();
+    ASSERT_EQ(validator.mempool_coord_rpc().scheduler()->size(), 1UL);
+
+    // With every signing available, validation rejects the repeated body.
+    const SchedulerValidationResult validated =
+        validator.mempool_coord_rpc().schedulercoord_validate_block(
+            tip.db_tip().id, proposal)();
+    EXPECT_EQ(validated.outcome(),
+              SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
 }
 

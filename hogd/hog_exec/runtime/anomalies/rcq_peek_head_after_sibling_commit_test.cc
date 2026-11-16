@@ -80,8 +80,7 @@ class RcqPeekHeadAfterSiblingCommitTest : public ::testing::Test,
 public:
   RcqPeekHeadAfterSiblingCommitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override

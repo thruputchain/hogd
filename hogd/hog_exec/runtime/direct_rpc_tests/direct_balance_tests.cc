@@ -13,12 +13,12 @@
 
 namespace hogd {
 
-class DirectBalanceTest : public ::testing::TestWithParam<TestDB>,
+class DirectBalanceTest : public ::testing::Test,
                           public NativeContractTestFramework {
 public:
   DirectBalanceTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   static auto make_addrkey(ContractAddress contract_addr, std::string_view key)
@@ -38,13 +38,8 @@ public:
 // the parent depth entry.  Previously it zeroed the field, which lost storage
 // costs locked at an earlier depth whenever a balance transfer occurred at a
 // deeper depth in the same transaction.
-TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
+TEST_F(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB does not combine balance deltas across "
-                    "subtransaction depths (see KNOWN_ISSUES.md)";
-  }
-
   auto contract_addr = make_contract_address(0);
   auto recipient_addr = make_contract_address(1);
   constexpr static int128_t kInitialBalance = 1'000'000'000;
@@ -121,13 +116,8 @@ TEST_P(DirectBalanceTest, BalanceTransferAtNewDepthPreservesLockedStorage)
 // Storage at depth 1, transfer at depth 2, more storage at depth 3.
 // Exercises the full chain: lock_storage -> request_balance_change ->
 // lock_storage each needing to carry forward from the previous depth.
-TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
+TEST_F(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB does not combine balance deltas across "
-                    "subtransaction depths (see KNOWN_ISSUES.md)";
-  }
-
   auto addr_A = make_contract_address(150);
   auto addr_B = make_contract_address(151);
   constexpr static int128_t kInitialBalance = 1'000'000;
@@ -212,13 +202,8 @@ TEST_P(DirectBalanceTest, ThreeDepthsStorageTransferStorage)
 // storage at d3, transfer at d4, then pop back to d2 and push a new
 // transfer at d3.  Tests that rollback + re-push correctly preserves
 // the storage lock from d1.
-TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
+TEST_F(DirectBalanceTest, FiveDepthsPartialRollback)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB does not combine balance deltas across "
-                    "subtransaction depths (see KNOWN_ISSUES.md)";
-  }
-
   auto addr_A = make_contract_address(30);
   auto addr_B = make_contract_address(31);
   constexpr static int128_t kInitialBalance = 1'000'000;
@@ -336,13 +321,8 @@ TEST_P(DirectBalanceTest, FiveDepthsPartialRollback)
 // Two independent transactions in the same block, each doing
 // storage-at-depth-1 + transfer-at-depth-2.  Ensures there's no
 // cross-contamination between transactions sharing the same block.
-TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
+TEST_F(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB does not combine balance deltas across "
-                    "subtransaction depths (see KNOWN_ISSUES.md)";
-  }
-
   auto addr_A = make_contract_address(10);
   auto addr_B = make_contract_address(11);
   auto addr_C = make_contract_address(12);
@@ -425,10 +405,5 @@ TEST_P(DirectBalanceTest, TwoIndependentTransactionsInSameBlock)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DirectBalanceTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

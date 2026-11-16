@@ -162,8 +162,9 @@ this is a coarse regression alarm. Ratios are host-class specific. Regenerate
 references only after reviewing the change and deciding whether prices need to
 follow it.
 
-The RV32 Gas Calibration workflow and `scripts/schedules/rv32_gas_calibration.toml`
-run the checks on a selected bench host. `mode=reference` skips comparison with
+The RV32 Gas Calibration workflow and schedule (`hogd-rv32-gas-calibration.yml`
+and `hogd/rv32-gas-calibration.toml` in `thruputchain/benchmarks`) run the
+checks on a selected bench host. `mode=reference` skips comparison with
 committed references; workload execution, coverage, and bound checks still
 apply. JSON is stored in `metrics_history` under `metrics/rv32-gas-calibration/`;
 repeated runs of one commit replace that commit's sample.
@@ -178,10 +179,10 @@ The local database fixture does not measure a remote database hop. Frame rows
 measure child merge/discard; they exclude the root transaction's database commit.
 
 `--schedule` prints a proposal. [`program.h`](../program.h) and [`gas_cost_table.h`](../../gas_cost_table.h) own
-the committed constants; [`artifact.h`](../artifact.h) defines accepted gas digests. A price change
-requires reviewing that compatibility policy, the pinned digest, the artifact
-fingerprint derived from it, and producer/fixture regeneration. An accepted old
-digest does not select historical execution prices.
+the committed constants. A price change is a consensus change and has to
+update the schedule `rv32_vm_test` pins, but it touches no artifact, lowerer
+or fixture: artifacts do not declare prices, and every artifact executes at
+the build's current ones.
 
 The main implementation files are `kernel.*` (instruction shapes),
 `lowering_audit.*` (lowered-body checks), `measure.*` (timing and fits),

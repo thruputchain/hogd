@@ -31,8 +31,7 @@ class AuthWeightTests : public ::testing::Test,
 public:
   AuthWeightTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

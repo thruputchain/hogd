@@ -44,8 +44,7 @@ class RcqDoctoredProposalDataTest : public ::testing::Test,
 public:
   RcqDoctoredProposalDataTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -57,7 +56,7 @@ protected:
     // against one address (RevertedDoubleConsumePlusHonestConsumePeekIsValid
     // commits 6 against kAddrB), each priced as a single consume since blocks
     // reset the committed snapshot. Top up both grants by that worst-case
-    // amount (0 on MockInMemory; this suite always runs HogDb).
+    // amount.
     write_contract(native_contract_a_xdr_);
     write_deployment(kAddrA, native_contract_a_xdr_);
     setup_grant_storage_token(kAddrA, 1'000'000'000 +

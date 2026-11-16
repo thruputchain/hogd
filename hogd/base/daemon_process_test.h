@@ -170,6 +170,25 @@ public:
     return WTERMSIG(*status);
   }
 
+  // Waits for the process to exit on its own and returns its exit code.
+  // Throws if it was killed by a signal instead (an abort, say).
+  int
+  wait_for_exit_code(std::chrono::milliseconds timeout = kDefaultStartupTimeout)
+  {
+    if (pid_ <= 0) {
+      throw std::runtime_error("process already reaped");
+    }
+    std::optional<int> status = wait_for_exit(timeout);
+    if (!status.has_value()) {
+      throw std::runtime_error("process did not exit");
+    }
+    if (!WIFEXITED(*status)) {
+      throw std::runtime_error(
+          std::format("process did not exit normally (status={})", *status));
+    }
+    return WEXITSTATUS(*status);
+  }
+
 private:
   static constexpr std::size_t kMaxLogBytes = 256 * 1024;
 

@@ -1,6 +1,14 @@
-Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp.yml/badge.svg)
+Build Status : ![build status](https://github.com/thruputchain/hogd/actions/workflows/cpp-namespace-optimized.yml/badge.svg)
 
-# Installation Instructions
+# hogd
+
+Thruput's core execution engine and node runtime.
+
+[Website](https://www.thruput.network/) ·
+[Developer docs](https://www.thruput.network/docs/) ·
+[Community discussions](https://github.com/thruputchain/thruput-docs/discussions) ·
+[Discord: #thruput](https://discord.com/channels/897514728459468821/1564948118162898954)
+([join server](https://discord.gg/stellardev))
 
 ## macOS Quick Start
 
@@ -17,8 +25,6 @@ For macOS users, an automated setup script is available that installs all depend
 
 The setup script installs all required dependencies including LLVM, CMake, Python packages, Rust toolchains, and development tools.
 
-**Note:** An SSH agent must be running to fetch private submodules. Configure your SSH keys with GitHub before running the build.
-
 ## Docker
 
 For development and testing in a containerized environment, use the Docker-based CI setup:
@@ -34,7 +40,7 @@ For development and testing in a containerized environment, use the Docker-based
 ./docker/local-ci.sh shell
 ~~~~
 
-See `docker/README.md` for detailed usage, including SSH agent setup for private submodules, tidy checks, and more.
+See `docker/README.md` for detailed usage, including tidy checks and image builds.
 
 ## Manual Installation (All Platforms)
 
@@ -69,33 +75,8 @@ See `docker/README.md` for detailed usage, including SSH agent setup for private
     cargo install --force cbindgen
     ~~~~
 
-1. Configure cargo to authenticate with the thruput crate registry.
-   First, ensure `~/.cargo/config.toml` includes:
-
-    ~~~~ .toml
-    [registry]
-    global-credential-providers = ["cargo:token"]
-    ~~~~
-
-   Then add your token to `~/.cargo/credentials.toml`:
-
-    ~~~~ .toml
-    [registries.thruput]
-    token = "Bearer <your-token>"
-    ~~~~
-
-   You can get an access token by logging in at
-   [crates.thruput.network](https://crates.thruput.network).
-
-   Alternatively, you can authenticate using environment variables (this
-   is how CI is configured):
-
-    ~~~~ .sh
-    export CARGO_REGISTRIES_THRUPUT_TOKEN="<your-token>"
-    export CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS="cargo:token"
-    ~~~~
-
-1. Fetch rust crate dependencies.
+1. Fetch rust crate dependencies. They all come from crates.io, so this needs
+   no registry credentials.
     ~~~~ .sh
     ./scripts/fetch.sh
     ~~~~

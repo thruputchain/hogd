@@ -56,8 +56,8 @@ class PayloadLimitTest : public ::testing::Test,
 public:
   PayloadLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, genesis_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config())
   {}
 
 protected:

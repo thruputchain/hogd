@@ -263,8 +263,8 @@ DiskWriter::print_stats()
                                           static_cast<double>(ns.count()))
                     : 0;
 
-  info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
-       print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
+  debug("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
+        print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
 
   prev_bytes_out_ = out;
   prev_stats_time_ = now;

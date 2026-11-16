@@ -66,7 +66,6 @@ target_link_libraries(
   runtime_test_lib
   runtime
   runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
-  db_interface
   hog_db
   GTest::gtest
 )
@@ -137,6 +136,7 @@ add_library(runtime_test_objects OBJECT
   syscall_misc_tests.cc
   syscall_parse_hardening_rv32_test.cc
   syscall_parse_tests.cc
+  syscall_ristretto255_msm_test.cc
   syscall_verify_signature_test.cc
   tracing_tests.cc
   try_invoke_test.cc
@@ -193,7 +193,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -230,7 +229,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -269,7 +267,6 @@ if(BUILD_BENCHMARKS)
     runtime
     runtime_test_lib
     runtime_test_util
-    db_interface
     hog_db
     storage_cost
     model_checker
@@ -331,6 +328,7 @@ add_custom_command(
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
   DEPENDS
     ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/thruput-tools-version
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
     ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml
@@ -360,7 +358,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -385,7 +382,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -412,7 +408,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -443,7 +438,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker

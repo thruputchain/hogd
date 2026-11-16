@@ -137,8 +137,7 @@ format_fingerprint_hex(uint64_t fingerprint)
   return out.str();
 }
 
-// Every fingerprint a lowerer may report, current one first. More than one only
-// while kAcceptedGasSchedules carries a transitional entry.
+// Every fingerprint a lowerer may report, current one first.
 std::vector<std::string>
 accepted_format_fingerprints_hex()
 {
@@ -802,8 +801,7 @@ class Rv32RuntimeContextTest : public ::testing::Test,
 public:
   Rv32RuntimeContextTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -1629,10 +1627,9 @@ TEST_F(Rv32RuntimeContextTest,
   // bugprone-unchecked-optional-access models `if (opt.has_value())` but not
   // gtest's ASSERT_TRUE, and it flags value() and operator* alike.
   if (fingerprint_text.has_value()) {
-    // Accept any fingerprint in the transitional window, not just this build's:
-    // the lowerer that stamps the current gas schedule may not have rolled out
-    // yet, and its fingerprint folds that schedule. Narrows back to a single
-    // value when kAcceptedGasSchedules does.
+    // Accept any fingerprint in kAcceptedFormatFingerprints, not just this
+    // build's: the pinned lowerer may predate a format change. Keep v5
+    // producers accepted while the runtime supports v5 artifacts.
     const auto accepted = accepted_format_fingerprints_hex();
     EXPECT_TRUE(std::ranges::contains(accepted, *fingerprint_text))
         << "lowered metadata reports " << *fingerprint_text

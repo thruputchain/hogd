@@ -42,8 +42,7 @@ class SyscallAuthConfigTest : public ::testing::Test,
 public:
   SyscallAuthConfigTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 

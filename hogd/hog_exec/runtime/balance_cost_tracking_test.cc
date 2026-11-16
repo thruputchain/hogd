@@ -47,8 +47,7 @@ class BalanceCostTrackingTest : public ::testing::Test,
 public:
   BalanceCostTrackingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

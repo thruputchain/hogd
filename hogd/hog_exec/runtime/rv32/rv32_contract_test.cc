@@ -34,6 +34,7 @@
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
@@ -45,12 +46,12 @@ namespace hogd {
 // Rv32Context, and invoke it through Rv32Runtime. Mirrors the fibonacci
 // tests (fibonacci_test.cc), but drives the runtime directly.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class Rv32FibonacciTest : public ::testing::TestWithParam<TestDB>,
+class Rv32FibonacciTest : public ::testing::Test,
                           public NativeContractTestFramework {
 public:
   Rv32FibonacciTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -80,7 +81,7 @@ protected:
 
 // Smoke: the RV32 fibonacci contract loads, dispatches, runs, and returns
 // success through Rv32Context/Rv32Runtime.
-TEST_P(Rv32FibonacciTest, FibonacciCalls)
+TEST_F(Rv32FibonacciTest, FibonacciCalls)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -99,7 +100,7 @@ TEST_P(Rv32FibonacciTest, FibonacciCalls)
 
 // The deployment back-pointer exposes the eagerly-built rv32 translation,
 // so the engine reaches a ready-to-instantiate image with no extra lookup.
-TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
+TEST_F(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
 
@@ -118,7 +119,7 @@ TEST_P(Rv32FibonacciTest, DeploymentBackPointerCarriesEagerTranslation)
 
 // Verifies the actual returned value: fibonacci(10) == 55, decoded from the
 // root frame's return buffer (CXS-serialized u32).
-TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
+TEST_F(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -142,7 +143,7 @@ TEST_P(Rv32FibonacciTest, FibonacciReturnsCorrectValue)
 
 // slow_fibonacci is exponential recursion; with a small gas limit it traps
 // out-of-gas, so the root invocation fails and the whole limit is consumed.
-TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
+TEST_F(Rv32FibonacciTest, SlowFibonacciOutOfGas)
 {
   auto contract_addr = deploy_rv32("fibonacci.rv32a", 0);
   fib_client_t client(contract_addr);
@@ -163,7 +164,7 @@ TEST_P(Rv32FibonacciTest, SlowFibonacciOutOfGas)
 // Cross-call where the inner fibonacci call is given too little gas. The caller
 // uses the non-try client, so the inner out-of-gas propagates as a fault and
 // the whole transaction fails.
-TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
+TEST_F(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -197,7 +198,7 @@ TEST_P(Rv32FibonacciTest, CrossCallLowInnerGasReverts)
 
 // Cross-call where the caller *expects* the inner call to run out of gas and
 // handles it (try client), so the outer transaction still succeeds.
-TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
+TEST_F(Rv32FibonacciTest, CrossCallExpectOutOfGas)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -235,7 +236,7 @@ TEST_P(Rv32FibonacciTest, CrossCallExpectOutOfGas)
 // Cross-call: an RV32 "caller" contract invokes a separate RV32 fibonacci
 // contract. This re-enters Rv32Context::make_new_runtime for the inner call,
 // exercising nested RV32 invocations through the syscall/ecall bridge.
-TEST_P(Rv32FibonacciTest, CrossCallFibonacci)
+TEST_F(Rv32FibonacciTest, CrossCallFibonacci)
 {
   auto fibonacci_addr = deploy_rv32("fibonacci.rv32a", 0);
   auto caller_addr = deploy_rv32("fibonacci_call.rv32a", 1);
@@ -281,8 +282,7 @@ class Rv32ProductionMappingTest : public ::testing::Test,
 public:
   Rv32ProductionMappingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -713,7 +713,7 @@ TEST(Rv32ContractTest, VerifyAcceptsRunExceedingMaxRunGas)
   // by the lowering into <= kMaxRunGas chunks, so the contract loads and
   // verifies.
   //
-  // The 256 KiB code default also admits runs exceeding the legacy uint16
+  // The 256 KiB code default also admits runs exceeding the earlier uint16
   // bound (65535). Verify that this formerly rejected case is split too.
   constexpr size_t kOverBoundDivCount =
       (0xFFFFU / rv32::kDivInstructionGas) + 1;
@@ -787,20 +787,24 @@ TEST(Rv32ContractTest, VerifyRejectsTruncatedArtifact)
             ContractRejectCode::ContractRejectMalformedArtifact);
 }
 
-TEST(Rv32ContractTest, VerifyRejectsOtherGasSchedule)
+TEST(Rv32ContractTest, VerifyRejectsLaterSyscallApiMinor)
 {
-  // An artifact stamped by a toolchain on a gas schedule the node doesn't
-  // accept.
+  // An artifact built against a syscall API minor this runtime does not
+  // implement: it may call syscalls that are not here.
   std::vector<uint8_t> artifact =
       rv32::test_artifact::build_artifact({rv32::test_program::addi(1, 0, 1)},
                                           std::vector<uint8_t>{0});
-  const uint32_t other_version = rv32::kGasTableVersion + 1;
-  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
-    artifact[rv32::kArtifactGasVersionOffset + i] =
-        static_cast<uint8_t>(other_version >> (i * 8));
-  }
+  const auto stamp_minor = [&artifact](uint32_t minor) {
+    for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+      artifact[rv32::kArtifactSyscallApiMinorOffset + i] =
+          static_cast<uint8_t>(minor >> (i * 8));
+    }
+  };
+  stamp_minor(kSyscallApiMinor);
+  EXPECT_EQ(verify_rv32_blob(artifact), std::nullopt);
+  stamp_minor(kSyscallApiMinor + 1);
   EXPECT_EQ(verify_rv32_blob(artifact),
-            ContractRejectCode::ContractRejectGasScheduleMismatch);
+            ContractRejectCode::ContractRejectUnsupportedAbi);
 }
 
 TEST(Rv32ContractTest, VerifyRejectsUnsupportedInstruction)
@@ -826,10 +830,5 @@ TEST(Rv32ContractTest, VerifyRejectsNonRv32ContractType)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, Rv32FibonacciTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

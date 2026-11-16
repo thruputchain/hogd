@@ -45,8 +45,7 @@ class Sha256IncrementalTest : public ::testing::Test,
 public:
   Sha256IncrementalTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true)
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true)
   {}
 };
 
@@ -266,8 +265,8 @@ class Sha256SingleBufferTest : public ::testing::Test,
 public:
   Sha256SingleBufferTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, single_buffer_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, single_buffer_config())
   {}
 
 private:
@@ -524,8 +523,8 @@ public:
 
   Sha256ConfiguredBufferLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, genesis_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config())
   {}
 
 private:

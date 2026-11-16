@@ -116,8 +116,7 @@ class ContractResultPresetHandlingTest : public ::testing::Test,
 public:
   ContractResultPresetHandlingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kMockInMemory)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

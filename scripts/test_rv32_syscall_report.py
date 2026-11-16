@@ -153,6 +153,14 @@ def synthetic_calibration(baseline_ns=1.6):
 
 
 class StorageParsingTest(unittest.TestCase):
+    def test_experimental_msm_does_not_set_shared_crossing_price(self):
+        measured = report.rows({"benchmarks": [
+            row("entry/GetBlockHeight", 70.0),
+            row("entry/Ristretto255Msm/dense/2", 26000.0),
+            row("entry/Ristretto255Msm/over_limit/257", 42.0),
+        ]})
+        self.assertEqual(report.syscall_names(measured), ["GetBlockHeight"])
+
     def test_cold_rows_are_not_syscalls(self):
         measured = report.rows(synthetic_run())
         names = report.syscall_names(measured)
@@ -496,8 +504,8 @@ class StorageScheduleTest(unittest.TestCase):
                                          synthetic_calibration(1.6),
                                          resolution=1)
         # Reported as nanoseconds, with what it leaves unpriced at the deepest
-        # depth, and never as a constant: a gas-schedule entry is hashed into
-        # the digest, so one is not added for a term this small.
+        # depth, and never as a constant: a gas-schedule entry is a consensus
+        # price, so one is not added for a term this small.
         self.assertNotIn("storage_parent_frame_gas", proposal)
         self.assertAlmostEqual(proposal["storage_parent_frame_ns"], 15.0,
                                places=6)

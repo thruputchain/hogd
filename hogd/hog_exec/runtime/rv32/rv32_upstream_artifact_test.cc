@@ -208,8 +208,7 @@ class Rv32UpstreamArtifactTest
 public:
   Rv32UpstreamArtifactTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

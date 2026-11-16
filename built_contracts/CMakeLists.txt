@@ -74,6 +74,8 @@ function(add_riscv_builds)
   cmake_parse_arguments(ARG "" "" "SPEC_CONTRACTS;RAW_CONTRACTS" ${ARGN})
 
   set(common_depends
+    ${CMAKE_CURRENT_SOURCE_DIR}/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/thruput-tools-version
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
     ${roundtrip_rs_stamp})

@@ -26,8 +26,7 @@ class SyscallParseHardeningRv32Test : public ::testing::Test,
 public:
   SyscallParseHardeningRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

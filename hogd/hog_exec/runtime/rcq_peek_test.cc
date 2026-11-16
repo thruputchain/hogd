@@ -36,8 +36,7 @@ class SyscallRcqPeekTest : public ::testing::Test,
 public:
   SyscallRcqPeekTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   static constexpr StorageKeyContractData kStorageKey =

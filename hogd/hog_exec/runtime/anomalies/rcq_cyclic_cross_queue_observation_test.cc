@@ -62,8 +62,7 @@ class RCQCyclicCrossQueueTest : public ::testing::Test,
 public:
   RCQCyclicCrossQueueTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override

@@ -107,7 +107,7 @@ init_leaf_hash_bench_node(Node &leaf)
   std::string value = "hello";
   std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
                                   value.size()};
-  leaf.value_hash() = sha256(value_span);
+  leaf.value_hash() = Node::compute_value_commitment(leaf.path(), value_span);
 }
 
 void
@@ -138,7 +138,7 @@ init_branch_hash_bench_node(Node &branch,
   }
 }
 
-// Inserts 2 million KV pairs into a trie without computing node hashes.
+// Inserts 2 million KV pairs, preparing leaf hashes but deferring ancestors.
 void
 insert_two_million(benchmark::State &state)
 {
@@ -157,7 +157,7 @@ insert_two_million(benchmark::State &state)
 BENCHMARK(insert_two_million)->Iterations(1)->Unit(benchmark::kSecond);
 
 // Inserts 2 million KV pairs into a trie. Node hashes are computed once after
-// all 2 million KV pairs are inserted.
+// all 2 million KV pairs are inserted (leaf hashes are prepared on insert).
 void
 generate_all_hashes_two_million(benchmark::State &state)
 {
@@ -583,10 +583,11 @@ BENCHMARK(prove)->Unit(benchmark::kMicrosecond);
 void
 hash_leaf_node(benchmark::State &state)
 {
-  Node leaf;
-  init_leaf_hash_bench_node(leaf);
+  const HexArray key("123456789abcdef");
+  const std::string value = "hello";
   for (auto _ : state) {
-    benchmark::DoNotOptimize(leaf.compute_node_hash());
+    benchmark::DoNotOptimize(
+        Node::compute_value_commitment(key, std::as_bytes(std::span(value))));
   }
 }
 BENCHMARK(hash_leaf_node)->Unit(benchmark::kNanosecond);
@@ -624,7 +625,7 @@ decode_leaf_node(benchmark::State &state)
   std::string value = "hello";
   std::span<std::byte> value_span{reinterpret_cast<std::byte *>(value.data()),
                                   value.size()};
-  leaf.value_hash() = sha256(value_span);
+  leaf.value_hash() = Node::compute_value_commitment(leaf.path(), value_span);
 
   const std::vector<std::byte> encoding = leaf.get_node_encoding();
   for (auto _ : state) {

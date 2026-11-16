@@ -162,6 +162,9 @@ Database::register_metrics()
                      "Loglets buffering writes to disk.");
   metrics_.loglet_free = registry.gauge(kComponent, "ramdb_loglet_free",
                                         "Loglets on the free list.");
+  metrics_.log_queued_bytes =
+      registry.gauge(kComponent, "ramdb_log_queued_bytes",
+                     "Bytes handed to the log writer and not yet written.");
   disk_writer_.register_metrics();
   register_resident_bytes(kComponent);
   registry.mark_done_with_init(kComponent);
@@ -197,6 +200,8 @@ Database::record_metrics()
   metrics_.loglet_disk_buffering.record(
       saturating_gauge_value(loglets.disk_buffering));
   metrics_.loglet_free.record(saturating_gauge_value(loglets.free));
+  metrics_.log_queued_bytes.record(
+      saturating_gauge_value(disk_writer_.bytes_buffered()));
 }
 
 void
@@ -263,10 +268,13 @@ Database::background_worker(const std::stop_token &stoken)
     // return idle memory to the OS.
     loglet_allocator_->reclaim_idle_memory();
 
-    // print statistics about memory use.
-    if (!compact && !expand) {
-      loglet_allocator_->print_stats();
-      disk_writer_.print_stats();
+    // print_stats() repeats the metrics as debug log lines; release builds
+    // compile them out, so skip the work of gathering them.
+    if constexpr (should_log(LogLevel::kDebug)) {
+      if (!compact && !expand) {
+        loglet_allocator_->print_stats();
+        disk_writer_.print_stats();
+      }
     }
 
     if (disk_cleanup) {

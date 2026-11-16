@@ -34,8 +34,7 @@ class TxContextTests : public ::testing::Test,
 public:
   TxContextTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

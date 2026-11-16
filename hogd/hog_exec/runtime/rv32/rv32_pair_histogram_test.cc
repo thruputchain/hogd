@@ -445,8 +445,7 @@ class Rv32PairHistogramTest : public ::testing::Test,
 public:
   Rv32PairHistogramTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kMockInMemory)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

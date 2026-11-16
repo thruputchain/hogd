@@ -40,12 +40,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class DeleteRecreateTest : public ::testing::TestWithParam<TestDB>,
+class DeleteRecreateTest : public ::testing::Test,
                            public NativeContractTestFramework {
 public:
   DeleteRecreateTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -54,7 +54,7 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
+TEST_F(DeleteRecreateTest, DeleteRecreateBytestring)
 {
   // Storage contract: 0 = read-empty then write bytestring; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -232,7 +232,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
+TEST_F(DeleteRecreateTest, DeleteRecreateNNInt)
 {
   // Storage contract: 0 = read-empty then write nnint; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -412,7 +412,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_EQ(from_xdr(nnint_item), 42);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
+TEST_F(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 {
   // Storage contract: 0 = consume-empty then insert; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -650,11 +650,6 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DeleteRecreateTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

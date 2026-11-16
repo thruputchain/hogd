@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <format>
+#include <limits>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -172,7 +173,7 @@ TEST_F(MetricsTest, CounterFactoryReturnsHandle)
   tx_count.increment();
   tx_count.increment(3);
 
-  EXPECT_EQ(tx_count.value(), 4);
+  EXPECT_EQ(tx_count.value(), 4U);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(dump,
@@ -205,7 +206,7 @@ TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
     std::this_thread::yield();
   }
 
-  EXPECT_EQ(tx_count.value(), 7);
+  EXPECT_EQ(tx_count.value(), 7U);
 
   const std::string dump = metrics.dump_to_prometheus_string();
   expect_dump_contains(
@@ -215,6 +216,50 @@ TEST_F(MetricsTest, PerThreadCounterFactoryReturnsAggregatingHandle)
 
   done.store(true, std::memory_order_release);
   worker.join();
+}
+
+// Regression for #2829: cumulative counters (e.g. executor gas) can exceed
+// the signed range when summed across live per-thread shards.
+TEST_F(MetricsTest, PerThreadCounterAggregatesBeyondSignedRange)
+{
+  Metrics &metrics = Metrics::instance();
+
+  Metrics::Counter gas_consumed =
+      metrics.per_thread_counter(Metrics::ComponentName::kExecutor,
+                                 "metrics_test_per_thread_gas_consumed",
+                                 "Executor gas consumed.");
+  metrics.mark_done_with_init(Metrics::ComponentName::kExecutor);
+
+  constexpr uint64_t kShardGas =
+      static_cast<uint64_t>(std::numeric_limits<int64_t>::max() / 2) + 1;
+
+  std::atomic<size_t> recorded = 0;
+  std::atomic<bool> done = false;
+  auto record_shard = [&] {
+    gas_consumed.increment(kShardGas);
+    recorded.fetch_add(1, std::memory_order_release);
+    while (!done.load(std::memory_order_acquire)) {
+      std::this_thread::yield();
+    }
+  };
+
+  std::thread worker_1(record_shard);
+  std::thread worker_2(record_shard);
+  while (recorded.load(std::memory_order_acquire) != 2) {
+    std::this_thread::yield();
+  }
+
+  EXPECT_EQ(gas_consumed.value(), 2 * kShardGas);
+  expect_dump_contains(
+      metrics.dump_to_prometheus_string(),
+      std::format("executor_metrics_test_per_thread_gas_consumed {}",
+                  2 * kShardGas));
+
+  done.store(true, std::memory_order_release);
+  worker_1.join();
+  worker_2.join();
+
+  EXPECT_EQ(gas_consumed.value(), 2 * kShardGas);
 }
 
 TEST_F(MetricsTest, HistogramFactoryReturnsHandle)

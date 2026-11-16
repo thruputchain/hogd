@@ -30,8 +30,7 @@ class SyscallBlockDataTest : public ::testing::Test,
 public:
   SyscallBlockDataTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 

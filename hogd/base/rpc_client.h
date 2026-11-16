@@ -9,6 +9,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "x23/async.h"
@@ -70,7 +71,7 @@ make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_client<RpcService>(*ss, cp, retry, max_message_size);
 }
@@ -82,7 +83,7 @@ make_rpc_client(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_client<RpcService>(*ss, default_coropoll(), retry,
                                      max_message_size);
@@ -121,7 +122,7 @@ make_srpc_client(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_srpc_client<RpcService>(*ss, retry, max_message_size);
 }
@@ -157,7 +158,7 @@ make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_srpc_multiclient<RpcService>(*ss, retry, map);
 }
@@ -194,7 +195,7 @@ make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
                                           max_message_size);

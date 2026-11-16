@@ -40,7 +40,7 @@
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
@@ -183,7 +183,7 @@ public:
   Erc20ParityTest()
     : NativeContractTestFramework(
           false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, /*empty_genesis=*/true,
+          /*empty_genesis=*/true,
           /*genesis_cost_model=*/zero_cost_model_xdr())
   {}
 
@@ -914,8 +914,7 @@ protected:
       // Native: write directly to the native-token balance slot, bypassing the
       // supply-cap assert in setup_grant_storage_token.
       write_item(make_free_native_token_balance_addrkey(native_receiver),
-                 std::make_shared<const StorageItemWrapper>(
-                     recipient_start_balance, get_default_cost_model()));
+                 make_nnint_item(recipient_start_balance));
 
       // RV32: write directly to the itc_erc20 NonnegativeInt balance key,
       // bypassing the mint path (which would overflow the total-supply key).
@@ -924,8 +923,7 @@ protected:
           itc_erc20_balance_key(rv32_receiver);
       write_item(AddressAndKey{.address = kRv32TokenAddr,
                                .key = std::move(rv32_balance_skey)},
-                 std::make_shared<const StorageItemWrapper>(
-                     recipient_start_balance, get_default_cost_model()));
+                 make_nnint_item(recipient_start_balance));
     }
 
     run_tx(kRv32AdminAddr, 0, ctx);
@@ -1339,10 +1337,9 @@ protected:
   {
     StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = kNativeTokenTotalSupplyKey;
-    write_item(
-        AddressAndKey{.address = kNativeTokenAddr, .key = std::move(key)},
-        std::make_shared<const StorageItemWrapper>(value,
-                                                   get_default_cost_model()));
+    write_item(AddressAndKey{.address = kNativeTokenAddr,
+                             .key = std::move(key)},
+               make_nnint_item(value));
   }
 
   void write_rv32_total_supply(int128_t value)
@@ -1350,15 +1347,13 @@ protected:
     StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = itc_erc20_total_supply_key();
     write_item(AddressAndKey{.address = kRv32TokenAddr, .key = std::move(key)},
-               std::make_shared<const StorageItemWrapper>(
-                   value, get_default_cost_model()));
+               make_nnint_item(value));
   }
 
   void write_native_balance(ContractAddress const &addr, int128_t value)
   {
     write_item(make_free_native_token_balance_addrkey(addr),
-               std::make_shared<const StorageItemWrapper>(
-                   value, get_default_cost_model()));
+               make_nnint_item(value));
   }
 
   void write_rv32_balance(ContractAddress const &addr, int128_t value)
@@ -1366,8 +1361,7 @@ protected:
     StorageKey key(StorageKeyType::ContractData);
     key.contract_data_key() = itc_erc20_balance_key(addr);
     write_item(AddressAndKey{.address = kRv32TokenAddr, .key = std::move(key)},
-               std::make_shared<const StorageItemWrapper>(
-                   value, get_default_cost_model()));
+               make_nnint_item(value));
   }
 
   // Committed token state read straight from each backend's storage rows; a

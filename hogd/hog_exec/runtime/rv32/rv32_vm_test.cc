@@ -27,7 +27,7 @@
 #include "hogd/hog_exec/runtime/rv32/test_support.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
-// Some legacy VM tests keep descriptive snake_case names and compact aggregate
+// Some older VM tests keep descriptive snake_case names and compact aggregate
 // tables; the checks still run through clang-tidy for the production code
 // paths.
 // NOLINTBEGIN(google-readability-avoid-underscore-in-googletest-name,modernize-use-designated-initializers,readability-suspicious-call-argument,bugprone-random-generator-seed,bugprone-unchecked-optional-access)
@@ -308,11 +308,17 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
   // v5: the stored image is the initialized span [start, start+size);
   // the runtime zero-fills around it.
   EXPECT_EQ(parsed->memory_bytes, compiled_sha256_return::kMemoryBytes);
+  // The committed fixture is v6: it declares a gas schedule, so its later
+  // fields sit after the digest.
+  ASSERT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
+                        kArtifactFormatVersionOffset),
+            kArtifactVersion6);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactMemoryBytesOffset),
+                        kArtifactMemoryBytesOffset + kArtifactGasDigestBytes),
             compiled_sha256_return::kMemoryBytes);
   EXPECT_EQ(load_u32_le(compiled_sha256_return::kArtifact,
-                        kArtifactInitialMemoryStartOffset),
+                        kArtifactInitialMemoryStartOffset +
+                            kArtifactGasDigestBytes),
             compiled_sha256_return::kInitialMemoryStart);
   EXPECT_GT(compiled_sha256_return::kInitialMemoryStart, 0U);
   ASSERT_EQ(parsed->initial_memory.size(),
@@ -328,6 +334,114 @@ TEST(Rv32ArtifactTest, parsesCompiledFixtureArtifact)
                    compiled_sha256_return::kInput.size())));
 }
 
+// Replace a v7 artifact's (empty) extension list with `words`, big-endian.
+std::vector<uint8_t>
+with_extension_words(std::vector<uint8_t> artifact,
+                     std::initializer_list<uint32_t> words)
+{
+  artifact.resize(artifact.size() - 4);
+  for (uint32_t word : words) {
+    for (int shift = 24; shift >= 0; shift -= 8) {
+      artifact.push_back(static_cast<uint8_t>(word >> shift));
+    }
+  }
+  return artifact;
+}
+
+TEST(Rv32ArtifactTest, extensionsDoNotEnterGuestMemory)
+{
+  auto artifact = valid_artifact_bytes();
+  auto baseline = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  // Kinds 1 and 99, the first with a 5-byte body and three zero pad bytes.
+  artifact = with_extension_words(std::move(artifact),
+                                  {2, 1, 5, 0x01020304, 0x05000000, 99, 0});
+  auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+  ASSERT_TRUE(parsed.has_value());
+  EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+  EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+  EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+}
+
+TEST(Rv32ArtifactTest, v5AndV6LayoutsMatchTheV7Image)
+{
+  const auto current = valid_artifact_bytes();
+  auto baseline = parse_artifact(current, Rv32Limits::defaults());
+  ASSERT_TRUE(baseline.has_value());
+  auto v6 = current;
+  test_artifact::rewrite_as_v6(v6);
+  auto v5 = current;
+  test_artifact::rewrite_as_v5(v5);
+  for (const auto &artifact : {v6, v5}) {
+    auto parsed = parse_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_TRUE(parsed.has_value());
+    EXPECT_EQ(parsed->initial_memory, baseline->initial_memory);
+    EXPECT_EQ(parsed->memory_bytes, baseline->memory_bytes);
+    EXPECT_EQ(parsed->program->byte_size(), baseline->program->byte_size());
+    auto threaded = parse_threaded_artifact(artifact, Rv32Limits::defaults());
+    ASSERT_TRUE(threaded.has_value());
+    EXPECT_EQ(threaded->code.data(),
+              artifact.data() + kArtifactV5V6HeaderBytes);
+
+    auto corrupt = artifact;
+    corrupt[kArtifactV5V6HeaderBytes] ^= 1;
+    expect_artifact_error(std::move(corrupt),
+                          ArtifactError::kCodeDigestMismatch);
+    auto trailing = artifact;
+    trailing.push_back(0);
+    expect_artifact_error(std::move(trailing),
+                          ArtifactError::kInvalidSectionLayout);
+    // The header size belongs to the version: neither takes the v7 header,
+    // nor a longer one.
+    for (const uint32_t size :
+         {kArtifactHeaderBytes, kArtifactV5V6HeaderBytes + 8}) {
+      auto wrong_header = artifact;
+      store_u32_at(wrong_header, kArtifactHeaderSizeOffset, size);
+      expect_artifact_error(std::move(wrong_header),
+                            ArtifactError::kBadHeaderSize);
+    }
+    // Shorter than the header it states, then than any header.
+    auto cut = artifact;
+    cut.resize(kArtifactV5V6HeaderBytes - 1);
+    expect_artifact_error(std::move(cut), ArtifactError::kTooSmall);
+    cut = artifact;
+    cut.resize(kArtifactHeaderBytes - 1);
+    expect_artifact_error(std::move(cut), ArtifactError::kTooSmall);
+  }
+  // Even an empty extension list is trailing data in v5, and v6 needs one.
+  auto with_list = v5;
+  with_list.insert(with_list.end(), {0, 0, 0, 0});
+  expect_artifact_error(std::move(with_list),
+                        ArtifactError::kInvalidSectionLayout);
+  auto without_list = v6;
+  without_list.resize(without_list.size() - 4);
+  expect_artifact_error(std::move(without_list),
+                        ArtifactError::kInvalidSectionLayout);
+  // v7 does not take the header that declares a gas schedule.
+  auto v7 = current;
+  store_u32_at(v7, kArtifactHeaderSizeOffset, kArtifactV5V6HeaderBytes);
+  expect_artifact_error(std::move(v7), ArtifactError::kBadHeaderSize);
+}
+
+TEST(Rv32ArtifactTest, rejectsNonCanonicalExtensionList)
+{
+  const std::initializer_list<uint32_t> cases[] = {
+      {},                    // missing list
+      {1, 0, 0},             // kind 0
+      {2, 5, 0, 5, 0},       // duplicate kind
+      {2, 5, 0, 4, 0},       // descending kinds
+      {1, 7, 1, 0x01000001}, // nonzero padding
+      {1, 7, 0, 0},          // trailing bytes
+      {2, 7, 0},             // count past the end
+      {1, 7, 8, 0},          // body past the end
+      {1, 7, UINT32_MAX},    // padded size past the end
+  };
+  for (const auto &words : cases) {
+    expect_artifact_error(with_extension_words(valid_artifact_bytes(), words),
+                          ArtifactError::kInvalidSectionLayout);
+  }
+}
+
 TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
 {
   {
@@ -337,8 +451,7 @@ TEST(Rv32ArtifactTest, rejectsHeaderVersionAndProfileMismatches)
   }
   {
     auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactFormatVersionOffset,
-                 kArtifactFormatVersion + 1);
+    store_u32_at(artifact, kArtifactFormatVersionOffset, kArtifactVersion7 + 1);
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedFormatVersion);
   }
@@ -387,43 +500,78 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
     expect_artifact_error(std::move(artifact),
                           ArtifactError::kUnsupportedSyscallAbi);
   }
-  {
-    auto artifact = valid_artifact_bytes();
-    store_u32_at(artifact, kArtifactGasVersionOffset, kGasTableVersion + 1);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kGasScheduleVersionMismatch);
-  }
-  {
-    auto artifact = valid_artifact_bytes();
-    store_u64_at(artifact, kArtifactGasDigestOffset, kGasScheduleDigest ^ 1ULL);
-    expect_artifact_error(std::move(artifact),
-                          ArtifactError::kGasScheduleDigestMismatch);
-  }
 }
 
-TEST(Rv32ArtifactTest, acceptsOnlyRegisteredGasSchedulePairs)
+TEST(Rv32ArtifactTest, admitsSyscallApiMinorsUpToTheCallersBound)
 {
-  // Gas version and digest are one identity; reject cross-paired schedules.
-  auto transitional = valid_artifact_bytes();
-  store_u32_at(transitional, kArtifactGasVersionOffset,
-               kTransitionalGasTableVersion);
-  store_u64_at(transitional, kArtifactGasDigestOffset,
-               kTransitionalGasScheduleDigest);
-  EXPECT_TRUE(parse_artifact(transitional, Rv32Limits::defaults()).has_value());
-  EXPECT_TRUE(parse_threaded_artifact(transitional, Rv32Limits::defaults())
-                  .has_value());
+  // A v7 artifact declares the syscall API minor it was built against, and
+  // is admitted wherever at least that minor is implemented.
+  Rv32Limits limits = Rv32Limits::defaults();
+  limits.max_syscall_api_minor = 3;
+  for (const uint32_t minor : {0U, 1U, 3U}) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactSyscallApiMinorOffset, minor);
+    EXPECT_TRUE(parse_artifact(artifact, limits).has_value()) << minor;
+    EXPECT_TRUE(parse_threaded_artifact(artifact, limits).has_value()) << minor;
+  }
+  for (const uint32_t minor : {4U, std::numeric_limits<uint32_t>::max()}) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactSyscallApiMinorOffset, minor);
+    auto parsed = parse_artifact(artifact, limits);
+    ASSERT_FALSE(parsed.has_value()) << minor;
+    EXPECT_EQ(parsed.error(), ArtifactError::kUnsupportedSyscallApiMinor);
+    auto threaded = parse_threaded_artifact(artifact, limits);
+    ASSERT_FALSE(threaded.has_value()) << minor;
+    EXPECT_EQ(threaded.error(), ArtifactError::kUnsupportedSyscallApiMinor);
+  }
+  // Unbounded unless the caller narrows it, as for a deployed contract.
+  auto artifact = valid_artifact_bytes();
+  store_u32_at(artifact, kArtifactSyscallApiMinorOffset,
+               std::numeric_limits<uint32_t>::max());
+  EXPECT_TRUE(parse_artifact(artifact, Rv32Limits::ceiling()).has_value());
+}
 
-  auto current_version_transitional_digest = valid_artifact_bytes();
-  store_u64_at(current_version_transitional_digest, kArtifactGasDigestOffset,
-               kTransitionalGasScheduleDigest);
-  expect_artifact_error(std::move(current_version_transitional_digest),
-                        ArtifactError::kGasScheduleDigestMismatch);
-
-  auto transitional_version_current_digest = valid_artifact_bytes();
-  store_u32_at(transitional_version_current_digest, kArtifactGasVersionOffset,
-               kTransitionalGasTableVersion);
-  expect_artifact_error(std::move(transitional_version_current_digest),
-                        ArtifactError::kGasScheduleDigestMismatch);
+TEST(Rv32ArtifactTest, v5AndV6AcceptOnlyRegisteredGasSchedulePairs)
+{
+  // v5 and v6 artifacts carry a gas schedule version and digest where v7
+  // carries the syscall API minor. They are one identity; reject cross-paired
+  // schedules and unknown versions.
+  constexpr std::array<AcceptedGasSchedule, 3> kSchedules = {{
+      {.version = 5, .digest = 0x0c3a7f084fad6a08ULL},
+      {.version = 4, .digest = 0xa958d226df658598ULL},
+      {.version = 3, .digest = 0x918317c21c46bb60ULL},
+  }};
+  for (const bool as_v5 : {true, false}) {
+    const auto with_schedule = [as_v5](AcceptedGasSchedule schedule) {
+      auto artifact = valid_artifact_bytes();
+      if (as_v5) {
+        test_artifact::rewrite_as_v5(artifact, schedule);
+      }
+      else {
+        test_artifact::rewrite_as_v6(artifact, schedule);
+      }
+      return artifact;
+    };
+    expect_artifact_error(with_schedule(
+                              {.version = 6, .digest = 0x0c3a7f084fad6a08ULL}),
+                          ArtifactError::kGasScheduleVersionMismatch);
+    expect_artifact_error(with_schedule({.version = 0, .digest = 0}),
+                          ArtifactError::kGasScheduleVersionMismatch);
+    for (const auto &schedule : kSchedules) {
+      const auto artifact = with_schedule(schedule);
+      EXPECT_TRUE(parse_artifact(artifact, Rv32Limits::defaults()).has_value());
+      EXPECT_TRUE(parse_threaded_artifact(artifact, Rv32Limits::defaults())
+                      .has_value());
+      for (const auto &other : kSchedules) {
+        if (other.version != schedule.version) {
+          auto mismatched = artifact;
+          store_u64_at(mismatched, kArtifactGasDigestOffset, other.digest);
+          expect_artifact_error(std::move(mismatched),
+                                ArtifactError::kGasScheduleDigestMismatch);
+        }
+      }
+    }
+  }
 }
 
 TEST(Rv32ArtifactTest, rejectsExtremeHeaderIntegersWithoutWrapping)
@@ -516,6 +664,61 @@ TEST(Rv32ArtifactTest, honorsZeroAndExactCallerLimits)
   EXPECT_TRUE(parse_artifact(zero_memory, zero_memory_limit).has_value());
   EXPECT_TRUE(
       parse_threaded_artifact(zero_memory, zero_memory_limit).has_value());
+}
+
+// A format this VM reads is still refused outside the caller's range.
+TEST(Rv32ArtifactTest, honorsCallerArtifactVersionRange)
+{
+  const auto v7 = valid_artifact_bytes();
+  auto v6 = valid_artifact_bytes();
+  test_artifact::rewrite_as_v6(v6);
+  auto v5 = valid_artifact_bytes();
+  test_artifact::rewrite_as_v5(v5);
+
+  auto admitted = [](std::vector<uint8_t> const &artifact, uint32_t min,
+                     uint32_t max) {
+    Rv32Limits limits = Rv32Limits::defaults();
+    limits.min_artifact_version = min;
+    limits.max_artifact_version = max;
+    const auto canonical = parse_artifact(artifact, limits);
+    const auto threaded = parse_threaded_artifact(artifact, limits);
+    EXPECT_EQ(canonical.has_value(), threaded.has_value());
+    if (!canonical.has_value()) {
+      EXPECT_EQ(canonical.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    if (!threaded.has_value()) {
+      EXPECT_EQ(threaded.error(), ArtifactError::kUnsupportedFormatVersion);
+    }
+    return canonical.has_value();
+  };
+
+  EXPECT_TRUE(admitted(v5, kArtifactVersion5, kArtifactVersion7));
+  EXPECT_TRUE(admitted(v6, kArtifactVersion5, kArtifactVersion7));
+  EXPECT_TRUE(admitted(v7, kArtifactVersion5, kArtifactVersion7));
+
+  // Raising the minimum retires the older formats from attachment.
+  EXPECT_FALSE(admitted(v5, kArtifactVersion6, kArtifactVersion7));
+  EXPECT_TRUE(admitted(v6, kArtifactVersion6, kArtifactVersion7));
+  EXPECT_FALSE(admitted(v6, kArtifactVersion7, kArtifactVersion7));
+  EXPECT_TRUE(admitted(v7, kArtifactVersion7, kArtifactVersion7));
+
+  // Lowering the maximum holds the newer ones back.
+  EXPECT_TRUE(admitted(v5, kArtifactVersion5, kArtifactVersion5));
+  EXPECT_FALSE(admitted(v6, kArtifactVersion5, kArtifactVersion5));
+  EXPECT_TRUE(admitted(v6, kArtifactVersion5, kArtifactVersion6));
+  EXPECT_FALSE(admitted(v7, kArtifactVersion5, kArtifactVersion6));
+
+  // An inverted range admits nothing, and a wide one adds no format the VM
+  // does not read.
+  EXPECT_FALSE(admitted(v5, kArtifactVersion6, kArtifactVersion5));
+  EXPECT_FALSE(admitted(v7, kArtifactVersion7, kArtifactVersion5));
+  auto future = valid_artifact_bytes();
+  store_u32_at(future, kArtifactFormatVersionOffset, kArtifactVersion7 + 1);
+  EXPECT_FALSE(admitted(future, 0, std::numeric_limits<uint32_t>::max()));
+
+  EXPECT_TRUE(parse_artifact(v5, Rv32Limits::ceiling()).has_value());
+  EXPECT_TRUE(parse_artifact(v6, Rv32Limits::ceiling()).has_value());
+  EXPECT_TRUE(parse_artifact(v7, Rv32Limits::ceiling()).has_value());
 }
 
 TEST(Rv32ArtifactTest, defersMisalignedCodeOnlyOnThreadedParsePath)
@@ -1277,26 +1480,33 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
       {Op::kEcall, u8"ECALL", 1}, {Op::kEbreak, u8"EBREAK", 1},
       {Op::kUnimp, u8"UNIMP", 1},
   }};
-  const std::array<ExpectedSyscallGasEntry, 14> expected_syscalls = {{
-      {u8"SyscallBase", hogd::kSyscallBaseCost},
-      {u8"SHA256HashBlock", hogd::kSHA256HashBlockCost},
-      {u8"SHA256Stream", hogd::kSHA256StreamCost},
-      {u8"VerifySignatureBase", hogd::kVerifySignatureBaseCost},
-      {u8"VerifySignatureBlock", hogd::kVerifySignatureBlockCost},
-      {u8"StorageAccess", hogd::kStorageAccessCost},
-      {u8"DBRPC", hogd::kDBRPCCost},
-      {u8"BytestringBlockBytes", hogd::kBytestringBlockBytes},
-      {u8"BytestringWriteBlock", hogd::kBytestringWriteBlockCost},
-      {u8"BytestringReadBlock", hogd::kBytestringReadBlockCost},
-      {u8"NoSyscall", hogd::kNoSyscallCost},
-      {u8"GenericBadSyscall", hogd::kGenericBadSyscallCost},
-      {u8"VerifySignatureMlDsa65Base", hogd::kVerifySignatureMlDsa65BaseCost},
-      {u8"VerifySignatureMlDsa65Block", hogd::kVerifySignatureMlDsa65BlockCost},
-  }};
+  const std::array<ExpectedSyscallGasEntry,
+                   hogd::kSyscallGasCostSchedule.size()>
+      expected_syscalls = {{
+          // Literals, not the constants the schedule is built from: this is
+          // the independent statement of each price, so a changed constant
+          // fails here until it is restated.
+          {u8"SyscallBase", 50},
+          {u8"SHA256HashBlock", 22},
+          {u8"SHA256Stream", 26},
+          {u8"VerifySignatureBase", 17'750},
+          {u8"VerifySignatureBlock", 131},
+          {u8"StorageAccess", 150},
+          {u8"DBRPC", 37'300},
+          {u8"BytestringBlockBytes", 512},
+          {u8"BytestringWriteBlock", 13},
+          {u8"BytestringReadBlock", 7},
+          {u8"NoSyscall", 10},
+          {u8"GenericBadSyscall", 10},
+          {u8"VerifySignatureMlDsa65Base", 46'592},
+          {u8"VerifySignatureMlDsa65Block", 160},
+          {u8"Ristretto255MsmBase", 30'000},
+          {u8"Ristretto255MsmTerm", 13'000},
+          {u8"Ristretto255MsmTermBytes", 64},
+          {u8"Ristretto255MsmMaxTerms", 256},
+      }};
 
   EXPECT_EQ(kOpCount, 49U);
-  EXPECT_EQ(kGasTableVersion, 4U);
-  EXPECT_EQ(kGasScheduleDigest, 0xa958d226df658598ULL);
   ASSERT_EQ(kInstructionGasSchedule.size(), expected.size());
   for (size_t i = 0; i < expected.size(); ++i) {
     EXPECT_EQ(kInstructionGasSchedule[i].op, expected[i].op);
