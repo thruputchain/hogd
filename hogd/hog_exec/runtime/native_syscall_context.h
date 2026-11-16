@@ -55,7 +55,10 @@ public:
                                         gas_remaining(), Meta::kSyscallNo,
                                         std::move(parsed));
 
-    consume_gas(gas_consumed);
+    // The syscall ran within gas_remaining(), so its result already reports
+    // anything it could not pay for; a frame left exactly empty is upgraded to
+    // OutOfGas when it finishes (NativeContract::invoke_impl).
+    std::ignore = consume_gas(gas_consumed);
     co_return res;
   }
 
@@ -90,7 +93,9 @@ public:
     return initial_gas_amount_ - gas_remaining();
   }
 
-  bool consume_gas(GasAmount amount)
+  // Debits [amount], saturating at the limit. False once nothing is left: a
+  // caller that goes on to do more work must stop there.
+  [[nodiscard]] bool consume_gas(GasAmount amount)
   {
     auto [sum, of] = overflowing_add(amount, gas_consumed_);
 

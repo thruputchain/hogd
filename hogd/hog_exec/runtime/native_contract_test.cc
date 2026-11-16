@@ -11,6 +11,7 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -46,6 +47,8 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -555,28 +558,28 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         // Exhaust the limit exactly, then report success.
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return 0;
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       1,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::Abandon};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       2,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::ValidationFailure};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       3,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::Unrecoverable};
       });
 

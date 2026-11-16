@@ -188,7 +188,8 @@ struct AlwaysErrorMethod {
       return [](NativeSyscallContext &ctx,
                 std::tuple_element_t<Is, args_t>... /*unused*/)
                  -> x23::Async<InvokeStatus<return_t>> {
-        ctx.consume_gas(Gas);
+        // Fails either way; an unaffordable charge just exhausts the frame.
+        std::ignore = ctx.consume_gas(Gas);
         co_return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
