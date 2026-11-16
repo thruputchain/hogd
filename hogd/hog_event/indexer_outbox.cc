@@ -1956,7 +1956,7 @@ IndexerOutboxStore::discard_torn_committed_tail()
   for (const std::string &name : *names) {
     auto height = parse_filename_identity<BlockHeight>(name, kCommittedPrefix);
     if (height && (!tail || *height > *tail)) {
-      tail = *height;
+      tail = height;
       tail_name = name;
     }
   }
