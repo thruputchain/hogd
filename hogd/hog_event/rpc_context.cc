@@ -145,12 +145,13 @@ EventRPCContext::flush_outbox_sync()
 {
   x23::CoroGuard guard;
   co_await guard(outbox_sync_lock_);
-  co_await drain_outbox_sync_locked();
+  co_await drain_outbox_sync(guard);
 }
 
 x23::Async<void>
-EventRPCContext::drain_outbox_sync_locked()
+EventRPCContext::drain_outbox_sync(const x23::CoroGuard &sync_guard)
 {
+  CHECK(sync_guard.lkp_ == &outbox_sync_lock_);
   if (pending_outbox_sync_) {
     co_await *pending_outbox_sync_;
     pending_outbox_sync_.reset();
@@ -434,7 +435,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   // pullable, which the tail checks below rely on.
   x23::CoroGuard sync_guard;
   co_await sync_guard(outbox_sync_lock_);
-  co_await drain_outbox_sync_locked();
+  co_await drain_outbox_sync(sync_guard);
   bool sync_deferred = false;
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);

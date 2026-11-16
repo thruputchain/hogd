@@ -163,8 +163,9 @@ private:
   // the mailbox after sampling.
   void publish_indexer_wake();
 
-  // Awaits and clears pending_outbox_sync_. Caller holds outbox_sync_lock_.
-  x23::Async<void> drain_outbox_sync_locked();
+  // Awaits and clears pending_outbox_sync_. [sync_guard] is the caller's hold
+  // on outbox_sync_lock_, checked on entry.
+  x23::Async<void> drain_outbox_sync(const x23::CoroGuard &sync_guard);
   // The background half of a deferred commit: fsyncs the committed record at
   // [block_height] off the pool, then advances the pullable tail to it under
   // outbox_commit_lock_. Panics if the record cannot be made durable.
