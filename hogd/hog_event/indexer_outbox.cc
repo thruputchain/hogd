@@ -615,7 +615,8 @@ IndexerOutboxStore::publish_candidate(
     co_return std::unexpected(bytes.error());
   }
   co_return publish_bytes(candidate_filename(payload.block_id),
-                          std::as_bytes(std::span(*bytes)));
+                          std::as_bytes(std::span(*bytes)),
+                          Durability::kSynced);
 }
 
 IndexerOutboxStatus<void>
@@ -709,7 +710,8 @@ IndexerOutboxStore::publish_candidate_encoded(
   file_pieces.insert(file_pieces.end(), payload_pieces.begin(),
                      payload_pieces.end());
 
-  return publish_bytes(candidate_filename(block_id), file_pieces);
+  return publish_bytes(candidate_filename(block_id), file_pieces,
+                       Durability::kSynced);
 }
 
 x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
@@ -826,26 +828,23 @@ IndexerOutboxStore::publish_committed(
       .format_version = payload.format_version,
       .consensus_value = payload.consensus_value,
   };
-  co_return co_await publish_committed_stored(stored, &payload,
-                                              IndexerOutboxDurability::kSynced);
+  co_return co_await publish_committed_stored(stored, &payload);
 }
 
 x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::publish_committed_reference(
-    const IndexerOutboxCommittedStoredPayload &stored,
-    IndexerOutboxDurability durability) const
+    const IndexerOutboxCommittedStoredPayload &stored) const
 {
   if (stored.consensus_value.proposal_header.block_height < 0) {
     co_return std::unexpected("committed outbox height is negative");
   }
-  co_return co_await publish_committed_stored(stored, nullptr, durability);
+  co_return co_await publish_committed_stored(stored, nullptr);
 }
 
 x23::Async<IndexerOutboxStatus<void>>
 IndexerOutboxStore::publish_committed_stored(
     const IndexerOutboxCommittedStoredPayload &stored,
-    const IndexerOutboxCommittedPayload *payload_for_ensure,
-    IndexerOutboxDurability durability) const
+    const IndexerOutboxCommittedPayload *payload_for_ensure) const
 {
   const BlockHeight height =
       stored.consensus_value.proposal_header.block_height;
@@ -919,8 +918,9 @@ IndexerOutboxStore::publish_committed_stored(
     // publish_bytes accepts only a byte-identical existing file. This check
     // intentionally precedes latest-height validation so an exact retry of an
     // older committed height remains idempotent.
-    auto published = publish_bytes(committed_filename(height),
-                                   std::as_bytes(std::span(*bytes)));
+    auto published =
+        publish_bytes(committed_filename(height),
+                      std::as_bytes(std::span(*bytes)), Durability::kSynced);
     if (!published) {
       co_return co_await fail_committed_publication_unlocked(
           std::move(published.error()));
@@ -997,10 +997,14 @@ IndexerOutboxStore::publish_committed_stored(
     }
   }
 
-  // The one publication that may be deferred: a new record at the append tip.
-  // The idempotent-retry publication above stays synced.
-  auto published = publish_bytes(committed_filename(height),
-                                 std::as_bytes(std::span(*bytes)), durability);
+  // The one publication that is deferred: a new record at the append tip from
+  // the live commit path, whose caller owes the sync. The idempotent-retry
+  // publication above stays synced.
+  auto published =
+      publish_bytes(committed_filename(height),
+                    std::as_bytes(std::span(*bytes)),
+                    payload_for_ensure != nullptr ? Durability::kSynced
+                                                  : Durability::kDeferred);
   if (!published) {
     co_return co_await fail_committed_publication_unlocked(
         std::move(published.error()));
@@ -1267,8 +1271,9 @@ IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
-  auto published = publish_bytes(current_epoch_origin_filename(),
-                                 std::as_bytes(std::span(*bytes)));
+  auto published =
+      publish_bytes(current_epoch_origin_filename(),
+                    std::as_bytes(std::span(*bytes)), Durability::kSynced);
   if (!published) {
     committed_append_cache_.reset();
   }
@@ -1740,7 +1745,7 @@ IndexerOutboxStore::list_names() const
 IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(std::string_view filename,
                                   std::span<const std::byte> bytes,
-                                  IndexerOutboxDurability durability) const
+                                  Durability durability) const
 {
   const std::array<std::span<const std::byte>, 1> pieces{bytes};
   return publish_bytes(filename, pieces, durability);
@@ -1754,9 +1759,9 @@ IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(
     std::string_view filename,
     std::span<const std::span<const std::byte>> pieces,
-    IndexerOutboxDurability durability) const
+    Durability durability) const
 {
-  const bool synced = durability == IndexerOutboxDurability::kSynced;
+  const bool synced = durability == Durability::kSynced;
   size_t total_bytes = 0;
   for (const auto &piece : pieces) {
     total_bytes += piece.size();

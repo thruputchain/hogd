@@ -481,8 +481,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
         .consensus_value = consensus_value,
     };
     if (auto published =
-            co_await indexer_outbox_store_.publish_committed_reference(
-                stored, IndexerOutboxDurability::kDeferred);
+            co_await indexer_outbox_store_.publish_committed_reference(stored);
         !published) {
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",

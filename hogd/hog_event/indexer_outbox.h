@@ -105,17 +105,6 @@ enum class IndexerOutboxFaultPoint {
   kSyncDeferredCommitted,
 };
 
-// Whether a publication is durable when it returns.
-//
-// kSynced is the crash-safe sequence: the bytes are fsynced before the final
-// name is linked, and the directory is fsynced after. kDeferred links the name
-// with neither fsync and leaves both to a later sync_committed() call, so a
-// crash in between can lose the record or leave its name on an empty or
-// partial file. Only the newest committed record may be in that state: open()
-// discards such a tail, and startup reconciliation rebuilds it from the
-// events file.
-enum class IndexerOutboxDurability { kSynced, kDeferred };
-
 // Process-global, one-shot syscall fault injection for durability tests.
 void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
 
@@ -188,16 +177,17 @@ public:
   // if it does not -- and its size is checked against the pull RPC replay
   // bound so an unservable record is rejected at commit, not at first pull.
   //
-  // With kDeferred the record is readable when this returns but not yet
-  // durable; the caller owes a sync_committed() for its height and must not
-  // publish the next height until that has succeeded.
-  x23::Async<IndexerOutboxStatus<void>>
-  publish_committed_reference(const IndexerOutboxCommittedStoredPayload &stored,
-                              IndexerOutboxDurability durability =
-                                  IndexerOutboxDurability::kSynced) const;
-  // Makes a kDeferred committed record durable: fsyncs the record, then the
-  // directory. Blocking, and safe to call off the publication lock from any
-  // thread -- it touches only the record's own file and the directory fd.
+  // The record is readable when this returns but not yet durable: it is
+  // linked with neither the file fsync nor the directory fsync. The caller
+  // owes a sync_committed() for its height and must not publish the next
+  // height until that has succeeded. A crash in between can lose the record
+  // or leave its name on an incomplete file, which open() settles.
+  x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
+      const IndexerOutboxCommittedStoredPayload &stored) const;
+  // Makes a publish_committed_reference() record durable: fsyncs the record,
+  // then the directory. Blocking, and safe to call off the publication lock
+  // from any thread -- it touches only the record's own file and the directory
+  // fd.
   IndexerOutboxStatus<void> sync_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
@@ -265,7 +255,7 @@ private:
   finish_opening(UniqueFd directory_fd);
   IndexerOutboxStatus<void> cleanup_stale_temp_files();
   // Leaves the newest committed record either durable or gone, since a
-  // kDeferred publication may have crashed before its sync_committed(). A
+  // reference publication may have crashed before its sync_committed(). A
   // record that reads back complete is synced; one that does not is removed.
   // Older records are left for validation to reject.
   IndexerOutboxStatus<void> settle_committed_tail();
@@ -286,15 +276,17 @@ private:
   validate_committed_history_unlocked(
       std::optional<BlockHeight> max_height = std::nullopt) const;
   IndexerOutboxStatus<std::vector<std::string>> list_names() const;
-  IndexerOutboxStatus<void>
-  publish_bytes(std::string_view filename, std::span<const std::byte> bytes,
-                IndexerOutboxDurability durability =
-                    IndexerOutboxDurability::kSynced) const;
+  // kSynced is the crash-safe sequence: the bytes are fsynced before the final
+  // name is linked, and the directory is fsynced after. kDeferred links the
+  // name with neither fsync.
+  enum class Durability { kSynced, kDeferred };
+  IndexerOutboxStatus<void> publish_bytes(std::string_view filename,
+                                          std::span<const std::byte> bytes,
+                                          Durability durability) const;
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
                 std::span<const std::span<const std::byte>> pieces,
-                IndexerOutboxDurability durability =
-                    IndexerOutboxDurability::kSynced) const;
+                Durability durability) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
@@ -333,13 +325,13 @@ private:
   IndexerOutboxStatus<void> validate_committed_record_reference(
       const IndexerOutboxCommittedRecordInfo &record) const;
   // Common tail of committed publication. [payload_for_ensure] non-null means
-  // the caller holds the full payload and a missing events file is written
-  // from it (publish_committed); null means the file must already exist
+  // the caller holds the full payload, a missing events file is written from
+  // it, and the record is published synced (publish_committed); null means
+  // the file must already exist and the record's sync is deferred
   // (publish_committed_reference).
   x23::Async<IndexerOutboxStatus<void>> publish_committed_stored(
       const IndexerOutboxCommittedStoredPayload &stored,
-      const IndexerOutboxCommittedPayload *payload_for_ensure,
-      IndexerOutboxDurability durability) const;
+      const IndexerOutboxCommittedPayload *payload_for_ensure) const;
 
   UniqueFd directory_fd_;
   // The parent directory, where <event_root>.events files live. A committed

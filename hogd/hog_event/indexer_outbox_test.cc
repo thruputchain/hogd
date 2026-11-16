@@ -907,11 +907,7 @@ TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
   };
 
   // Readable as soon as it is published, before any fsync.
-  ASSERT_TRUE(
-      store
-          .publish_committed_reference(stored,
-                                       IndexerOutboxDurability::kDeferred)()
-          .has_value());
+  ASSERT_TRUE(store.publish_committed_reference(stored)().has_value());
   ASSERT_TRUE(store.has_committed(2).value());
   auto loaded = store.load_committed(2)();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
