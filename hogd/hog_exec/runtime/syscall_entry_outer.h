@@ -705,10 +705,8 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   }
 
   auto [syscall_result, gas_consumed] = std::move(body_result);
-  // Account for the reserved crossing on every path, including rejected calls
-  // and bodies that suspended or threw, and for any item views the body
-  // created past the flat access charge's occupancy. Saturate to avoid
-  // wrapping the charge.
+  // Account for the reserved crossing on every path, plus any item views the
+  // body created past the flat access charge. Saturate to avoid wrapping.
   gas_consumed = WrappedGasAmount{
       detail::saturating_add(detail::saturating_add(gas_consumed.get(),
                                                     kSyscallBaseCost),

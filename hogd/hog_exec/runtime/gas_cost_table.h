@@ -88,12 +88,8 @@ constexpr static uint64_t kVerifySignatureMlDsa65BlockCost = 160;
 constexpr static uint64_t kStorageAccessCost = 150;
 
 // The flat access charge covers first touches up to this many item views in a
-// transaction (no-load first touch measured 271 ns at 65536 keys, inside the
-// 200 host gas billed). Past it, first touches grow with frame-map occupancy
-// (386-427 ns at 262144), so each further view the transaction creates also
-// pays kLargeFrameItemViewCost. That doubles a first touch's host charge to
-// ~650 ns, ~1.5x the largest measured occupancy; the millions of views a
-// 1B-gas transaction can reach are unmeasured. See issue #4794.
+// transaction; past it each further view also pays kLargeFrameItemViewCost.
+// See rv32/gas_calibration/MEASUREMENTS.md and issue #4794.
 constexpr static uint64_t kLargeFrameItemViews = 65536;
 constexpr static uint64_t kLargeFrameItemViewCost = 200;
 
