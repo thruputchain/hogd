@@ -2075,12 +2075,7 @@ TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
 
 TEST_F(EventRpcDeathTest, FailedDeferredSyncFailStops)
 {
-  // The commit reply is sent before the record's fsyncs run, so a sync that
-  // fails has no caller to report to and leaves an acknowledged record in an
-  // unknown state. It must fail stop; restart reconciles.
-  //
-  // The whole sequence runs inside the death-test child, as in
-  // DuplicateCloseFailStops.
+  // The commit was already acknowledged, so a failed sync must fail stop.
   X23_EXPECT_DEATH(
       {
         EventRPCContext ctx(temp_dir());

@@ -432,15 +432,9 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
 
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
-  // The previous commit's record must be durable before this one is written:
-  // recovery can rebuild only the newest record. This is the wait that
-  // replaces fsyncing on the reply path. It also makes the previous height
-  // pullable, which the tail checks below rely on.
-  //
-  // Not flush_outbox_sync(): that releases outbox_sync_lock_ when it returns,
-  // and this commit has to keep it until its own sync is registered below.
-  // Otherwise another commit could publish and start a sync in the gap, and
-  // this record would be written above one that is not yet durable.
+  // The previous commit's record must be durable before this one is written.
+  // Not flush_outbox_sync(): the lock must stay held until this commit's own
+  // sync is registered below.
   x23::CoroGuard sync_guard;
   co_await sync_guard(outbox_sync_lock_);
   co_await drain_outbox_sync(sync_guard);
@@ -495,10 +489,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",
             block_id, published.error());
-      // A publication can fail after it linked the record. No background sync
-      // is started for a failed publication, so make whatever it left durable
-      // here: a retry treats an existing record as committed, and no record
-      // may sit unsynced below a later one.
+      // A failed publication may have linked the record; sync what it left.
       if (indexer_outbox_store_.has_committed(block_height).value_or(true)) {
         if (auto synced = indexer_outbox_store_.sync_committed(block_height);
             !synced) {

@@ -64,18 +64,9 @@ public:
   // Publishes a closed block's committed record and GCs the block context.
   // Returns the block height on success.
   //
-  // The record is written and linked before this returns, but its fsyncs run
-  // in the background: the reply does not wait for them. What it does wait
-  // for is the previous commit's sync, so at most the newest record is ever
-  // not yet durable. That is the one state startup reconciliation repairs:
-  // the block's events file was made durable at close, and
-  // reconcile_outbox_tip() republishes the record from it.
-  //
-  // The indexer does not see the record until it is durable. The pullable
-  // tail advances when the sync completes, not when this returns.
-  //
-  // A sync that fails leaves an acknowledged record in an unknown state. That
-  // should never happen, and the process panics; restart reconciles.
+  // The reply does not wait for the record's fsyncs, only for the previous
+  // commit's. The record is pullable once its own sync completes; a sync that
+  // fails panics. See docs/component-failure-model.md.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
 

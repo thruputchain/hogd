@@ -123,10 +123,8 @@ connect_event_indexer(std::uint16_t port)
   return std::move(*client);
 }
 
-// A commit replies before its record is durable, and the record is pullable
-// only once it is. A pull that follows the commit reply can therefore be
-// answered "caught up" for the few milliseconds the sync takes; ask again, as
-// a live indexer does.
+// A commit replies before its record is durable, so retry until the record
+// appears.
 EventIndexerPullResult
 pull_committed_block(event_indexer_client &indexer,
                      const EventIndexerPullRequest &request)

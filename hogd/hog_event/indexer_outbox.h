@@ -177,11 +177,8 @@ public:
   // if it does not -- and its size is checked against the pull RPC replay
   // bound so an unservable record is rejected at commit, not at first pull.
   //
-  // The record is readable when this returns but not yet durable: it is
-  // linked with neither the file fsync nor the directory fsync. The caller
-  // owes a sync_committed() for its height and must not publish the next
-  // height until that has succeeded. A crash in between can lose the record
-  // or leave its name on an incomplete file, which open() settles.
+  // Not durable on return: call sync_committed() for this height before
+  // publishing the next.
   x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
       const IndexerOutboxCommittedStoredPayload &stored) const;
   // Makes a publish_committed_reference() record durable: fsyncs the record,

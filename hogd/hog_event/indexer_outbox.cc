@@ -1981,18 +1981,11 @@ IndexerOutboxStore::settle_committed_tail()
   }
   auto intact = check_committed_record_intact(tail_name, *tail);
   if (intact) {
-    // Reading back complete does not make it durable. If only the process
-    // died, the page cache still holds a record whose sync never ran; without
-    // this, the restarted process would serve it and append above it, and a
-    // later host crash could lose a record that is no longer the newest.
+    // Reading back complete is not durable: the sync may never have run.
     return sync_committed(*tail);
   }
-  // A deferred publication links the name before its bytes are durable, and
-  // the next height is not published until the sync has finished, so a crash
-  // can leave exactly one such record and only at the tail. Dropping it is
-  // safe whatever the cause: reconciliation republishes it from the events
-  // file when the canonical tip is this height, has nothing to restore when
-  // the tip is one below, and fails closed when the tip is beyond it.
+  // Only the tail can be unsynced, and reconciliation can rebuild the tail,
+  // so dropping it is safe. See docs/component-failure-model.md.
   warn("discarding incomplete committed indexer outbox record at height {}: {}",
        *tail, intact.error());
   if (unlinkat(directory_fd_.get(), tail_name.c_str(), 0) != 0) {
