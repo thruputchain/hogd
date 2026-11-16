@@ -143,11 +143,8 @@ min_encoded_bytes()
   }
 }
 
-// Native decoding is billed per calldata byte (NativeContractBuilder::
-// decode_gas), but decode work is per element. A vector whose elements can
-// each be a byte or two packs far more elements into a byte than that rate
-// pays for, so native arguments may not contain one unless its length is
-// bounded small. Byte strings are exempt: they decode as one copy.
+// decode_gas bills per byte, but decoding costs per element, so long vectors of
+// one- or two-byte elements are refused. Byte strings decode as one copy.
 inline constexpr size_t kMaxDenseVectorLen = 64;
 inline constexpr size_t kMinVectorElementBytes = 16;
 
@@ -207,20 +204,8 @@ public:
   constexpr static SerializationFormat kDefaultSerializationFormat =
       SerializationFormat::kTxs;
 
-  // What the wrapper charges, before decoding, for decoding a frame's
-  // calldata. Decoding is proportional to the calldata and runs before the
-  // method body, so the body cannot meter it (#4236).
-  //
-  // Priced against what an RV32 contract's entrypoint glue pays to decode the
-  // same argument. That is ~50-90 gas per decoded scalar plus ~3 gas per byte
-  // copied, so its per-byte rate depends on how densely the elements encode:
-  // 2.5-3.4 for byte strings, addresses and hashes; 5.5 for the default
-  // wallet's WalletCall; 6.6-7.8 for structs and vectors of 32-byte items; but
-  // 53-82 for vectors of one-byte elements (small integers, bools, absent
-  // optionals, empty vectors). The rate here covers the first three groups,
-  // with ~600 gas for the glue itself. add() rejects argument types in the
-  // last group (detail::has_dense_vector): this rate would undercharge them
-  // ~10x.
+  // Charged before decoding a frame's calldata, at or above what RV32 glue pays
+  // to decode the same argument (#4236). add() rejects dense-vector arguments.
   constexpr static GasAmount kDecodeBaseGas = 600;
   constexpr static GasAmount kDecodeByteGas = 8;
 

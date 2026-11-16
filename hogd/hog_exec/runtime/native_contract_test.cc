@@ -221,7 +221,7 @@ test_contract_address(uint8_t tag)
 
 } // namespace
 
-// add() refuses argument types whose decode decode_gas would undercharge:
+// add() refuses argument types whose decode cost decode_gas would undercharge:
 // long vectors of elements that can each encode in a byte or two.
 namespace dense_vector_guard {
 using detail::kArgsHaveDenseVector;
@@ -438,10 +438,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies boundary gas accounting for native invokes: a child that pays
-  // its decode and then consumes 255 gas fits a limit one above that total,
-  // while a limit of exactly that total is converted to OutOfGas/Deterministic
-  // and still charges the full child limit.
+  // A child that pays its decode then consumes 255 fits a limit one above that;
+  // a limit of exactly that runs out of gas and is charged in full.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -529,11 +527,8 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  // Decode plus 255 for each child -- the one that fits and the one that is
-  // converted to OutOfGas and still charged its full limit -- plus the
-  // crossing each of the two invoke syscalls pays, plus the entry's own
-  // decode. The children's own limits are unaffected: the crossing is billed
-  // to the caller, outside the budget it hands down.
+  // Each child's decode plus 255, each invoke's crossing, and the entry's own
+  // decode.
   ASSERT_EQ(res.gas_consumed_, (2 * (kDecodeU32Gas + 255)) +
                                    (2 * kSyscallBaseCost) + kDecodeNoArgsGas);
 }

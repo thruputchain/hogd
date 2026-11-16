@@ -1555,12 +1555,8 @@ TEST_F(DefaultWalletParityTest, CalleeReturnsAuthHandle)
   expect_parity_success(calls);
 }
 
-// #4236: the wrapper charges NativeContractBuilder::decode_gas(len) before it
-// decodes. Every input here is one the rv32 wallet decodes in full and rejects
-// as DecodingArgs (larger inputs fault on its 64 KiB memory before decoding),
-// so its gas is its decode cost; the native wallet must charge exactly the
-// decode price and never less than the reference. calls=280 is the largest
-// input the reference can decode.
+// #4236: for inputs the rv32 wallet decodes in full and rejects, native charges
+// exactly decode_gas(len), never less than the reference.
 TEST_F(DefaultWalletParityTest, DecodeChargeCoversRv32Reference)
 {
   setup_wallets_and_targets();
