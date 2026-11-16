@@ -19,8 +19,11 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   // Refuse the read unless the frame can pay its full cost, so an underfunded
   // child cannot force unpriced first-touch database work across fresh
   // addresses.
-  const GasAmount charge =
-      kStorageAccessCost + handler_.peek_native_token_balance_load_gas(address);
+  const GasAmount load_gas =
+      handler_.peek_native_token_balance_load_gas(address);
+  // The peek created the view, so its surcharge is owed even if refused.
+  const GasAmount view_gas = handler_.take_item_view_gas();
+  const GasAmount charge = kStorageAccessCost + load_gas + view_gas;
   if (charge > gas_remaining()) {
     // Saturate the meter so the caller's error becomes an OutOfGas fault.
     std::ignore = consume_gas(charge);
@@ -36,8 +39,7 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   // Match ordinary storage reads and the sibling write helper: the flat access
   // cost on top of load_gas, which is zero once the view is loaded.
   // Affordable: the refusal above checked the charge before the read.
-  std::ignore = consume_gas(kStorageAccessCost + status->load_gas +
-                            handler_.take_item_view_gas());
+  std::ignore = consume_gas(kStorageAccessCost + status->load_gas + view_gas);
   co_return std::move(status->result);
 }
 
