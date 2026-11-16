@@ -33,6 +33,8 @@ namespace hogd {
 class EventRPCContext {
 public:
   explicit EventRPCContext(std::string_view work_directory);
+  // Waits for a commit's background sync, which refers to this object.
+  ~EventRPCContext();
 
   // Wakes every indexer pull parked on the next publication so it answers
   // now. ~EventIndexerServer calls this before RpcServer drains: destruction
@@ -59,10 +61,28 @@ public:
   x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
                                                   BlockHeight block_height);
 
-  // Durably publishes a closed block and GCs the block context.
+  // Publishes a closed block's committed record and GCs the block context.
   // Returns the block height on success.
+  //
+  // The record is written and linked before this returns, but its fsyncs run
+  // in the background: the reply does not wait for them. What it does wait
+  // for is the previous commit's sync, so at most the newest record is ever
+  // not yet durable. That is the one state startup reconciliation repairs:
+  // the block's events file was made durable at close, and
+  // reconcile_outbox_tip() republishes the record from it.
+  //
+  // The indexer does not see the record until it is durable. The pullable
+  // tail advances when the sync completes, not when this returns.
+  //
+  // A sync that fails leaves an acknowledged record in an unknown state, so
+  // every later commit fails until the process restarts and reconciles.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
+
+  // Waits for the newest commit's background sync, if one is running. False
+  // if that sync, or an earlier one, failed. Afterwards every committed
+  // record is durable and pullable, until the next commit.
+  x23::Async<bool> flush_outbox_sync();
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -143,6 +163,14 @@ private:
   // the mailbox after sampling.
   void publish_indexer_wake();
 
+  // Awaits and clears pending_outbox_sync_. Caller holds outbox_sync_lock_.
+  // False if this or an earlier sync failed.
+  x23::Async<bool> drain_outbox_sync_locked();
+  // The background half of a deferred commit: fsyncs the committed record at
+  // [block_height] off the pool, then advances the pullable tail to it under
+  // outbox_commit_lock_. False if the record could not be made durable.
+  x23::Async<bool> sync_committed_record(BlockHeight block_height);
+
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
   x23::Async<void>
@@ -167,6 +195,16 @@ private:
   };
 
   x23::CoroLock lock_;
+  // Orders each commit after the previous commit's background sync. Held for
+  // the publication half of commit_block(), and taken before
+  // outbox_commit_lock_; the sync itself takes only outbox_commit_lock_, so a
+  // commit can wait for it while holding this.
+  x23::CoroLock outbox_sync_lock_;
+  // The newest commit's background sync, guarded by outbox_sync_lock_. Its
+  // result must be collected before the handle is destroyed.
+  std::optional<x23::Async<bool>> pending_outbox_sync_;
+  // Sticky, guarded by outbox_sync_lock_.
+  bool outbox_sync_failed_ = false;
   // Serializes origin selection, committed publication, and pullable-tail
   // snapshots. Pull payload I/O is always performed after releasing it.
   x23::CoroLock outbox_commit_lock_;
@@ -188,7 +226,8 @@ private:
   // those is startup reconciliation's job.
   std::unordered_map<SHA256Hash, size_t, SipHash24Hasher> events_file_refs_;
   // Guarded by outbox_commit_lock_. Every record through this finalized
-  // height is pullable, including a crash-window record one ahead of HogDB.
+  // height is durable and pullable, including a crash-window record one ahead
+  // of HogDB. A record whose sync is still running is above it.
   std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;

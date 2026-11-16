@@ -124,6 +124,76 @@ EventRPCContext::EventRPCContext(std::string_view work_directory)
   tx_failure_mailbox_.reserve(kMaxTxFailureNotices);
 }
 
+EventRPCContext::~EventRPCContext()
+{
+  // Nothing else can be using the object by now, so the unlocked read is
+  // safe, and a context that never deferred a sync does not touch the pool.
+  if (!pending_outbox_sync_) {
+    return;
+  }
+  // Not a coroutine, so hop onto the pool and block on the result, as
+  // release_indexer_pulls() does. The sync holds a pointer to this object and
+  // its handle must be awaited before it is destroyed.
+  [](EventRPCContext &self) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    std::ignore = co_await self.flush_outbox_sync();
+  } (*this)();
+}
+
+x23::Async<bool>
+EventRPCContext::flush_outbox_sync()
+{
+  x23::CoroGuard guard;
+  co_await guard(outbox_sync_lock_);
+  co_return co_await drain_outbox_sync_locked();
+}
+
+x23::Async<bool>
+EventRPCContext::drain_outbox_sync_locked()
+{
+  if (pending_outbox_sync_) {
+    const bool synced = co_await *pending_outbox_sync_;
+    pending_outbox_sync_.reset();
+    if (!synced) {
+      outbox_sync_failed_ = true;
+    }
+  }
+  co_return !outbox_sync_failed_;
+}
+
+x23::Async<bool>
+EventRPCContext::sync_committed_record(BlockHeight block_height)
+{
+  // The fsyncs block for as long as the device takes to flush. Pool workers
+  // are reserved for work that does not block, so run them on a thread
+  // outside the pool; this coroutine resumes in the pool once they are done.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  auto synced = co_await pool->async([this, block_height] {
+    return indexer_outbox_store_.sync_committed(block_height);
+  });
+  if (!synced) {
+    error("failed to sync committed indexer outbox record at height {}: {}",
+          static_cast<std::int64_t>(block_height), synced.error());
+    co_return false;
+  }
+  // Only now is the record pullable. commit_block() checked that it extends
+  // the tail by exactly one; anything else (a retry of the tail itself, a
+  // commit before reconciliation installed a tail) leaves the tail alone.
+  x23::CoroGuard guard;
+  co_await guard(outbox_commit_lock_);
+  if (finalized_indexer_tail_ && *finalized_indexer_tail_ != INT64_MAX &&
+      *finalized_indexer_tail_ + 1 == block_height) {
+    finalized_indexer_tail_ = block_height;
+    // Bumped under the publication lock: a pull that sampled the counter under
+    // this same lock either already saw the new tail or wakes on this bump.
+    publish_indexer_wake();
+  }
+  co_return true;
+}
+
 void
 EventRPCContext::release_indexer_pulls()
 {
@@ -361,6 +431,20 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
 
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
+  // The previous commit's record must be durable before this one is written:
+  // recovery can rebuild only the newest record. This is the wait that
+  // replaces fsyncing on the reply path. It also makes the previous height
+  // pullable, which the tail checks below rely on.
+  x23::CoroGuard sync_guard;
+  co_await sync_guard(outbox_sync_lock_);
+  if (!co_await drain_outbox_sync_locked()) {
+    error("commit_block: block {} refused, an earlier committed indexer "
+          "outbox record could not be made durable",
+          block_id);
+    co_await finish_block_operation(block_id, context_ptr, false);
+    co_return EventError{EventErrorCode::kInternal};
+  }
+  bool sync_deferred = false;
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);
   auto committed_exists = indexer_outbox_store_.has_committed(block_height);
@@ -406,7 +490,8 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
         .consensus_value = consensus_value,
     };
     if (auto published =
-            co_await indexer_outbox_store_.publish_committed_reference(stored);
+            co_await indexer_outbox_store_.publish_committed_reference(
+                stored, IndexerOutboxDurability::kDeferred);
         !published) {
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",
@@ -414,6 +499,11 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
+    // The record is linked but not durable, so its sync is owed from here on
+    // whatever the checks below decide. It cannot move the tail before they
+    // run: it needs outbox_commit_lock_, which this coroutine still holds.
+    sync_deferred = true;
+    pending_outbox_sync_.emplace(sync_committed_record(block_height));
   }
   else {
     // Restart promotion: no live context vouches for the file, so read it
@@ -462,7 +552,9 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
-  if (finalized_indexer_tail_) {
+  // A deferred record becomes pullable when its sync completes; see
+  // sync_committed_record(). Every other path published durably above.
+  if (finalized_indexer_tail_ && !sync_deferred) {
     finalized_indexer_tail_ = block_height;
     // Bumped under the publication lock: a pull that sampled the counter under
     // this same lock either already saw the new tail or wakes on this bump.
@@ -470,6 +562,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
 
   outbox_guard.reset();
+  sync_guard.reset();
 
   // The committed record references the events file rather than embedding the
   // pairs, so the file must outlive every block context that shares its root.
@@ -494,6 +587,13 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
                                       ConsensusValue consensus_value)
 {
   outbox_reconciled_.store(false, std::memory_order_release);
+  // Reconciliation reads the durable outbox, so a sync still running from a
+  // commit before a re-reconcile has to land first.
+  if (!co_await flush_outbox_sync()) {
+    error("an earlier committed indexer outbox record could not be made "
+          "durable");
+    co_return EventError{EventErrorCode::kInternal};
+  }
   const BlockHeight tip_height = consensus_value.proposal_header.block_height;
   const ConsensusValueHash tip_hash =
       tip_height == -1 ? ConsensusValueHash{} : sha256(consensus_value);

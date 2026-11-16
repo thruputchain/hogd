@@ -102,7 +102,19 @@ enum class IndexerOutboxFaultPoint {
   kUnlinkPublishedTemp,
   kFsyncPublishedDirectory,
   kFsyncParentDirectory,
+  kSyncDeferredCommitted,
 };
+
+// Whether a publication is durable when it returns.
+//
+// kSynced is the crash-safe sequence: the bytes are fsynced before the final
+// name is linked, and the directory is fsynced after. kDeferred links the name
+// with neither fsync and leaves both to a later sync_committed() call, so a
+// crash in between can lose the record or leave its name on an empty or
+// partial file. Only the newest committed record may be in that state: open()
+// discards such a tail, and startup reconciliation rebuilds it from the
+// events file.
+enum class IndexerOutboxDurability { kSynced, kDeferred };
 
 // Process-global, one-shot syscall fault injection for durability tests.
 void fail_next_indexer_outbox_operation_for_test(IndexerOutboxFaultPoint point);
@@ -175,8 +187,18 @@ public:
   // full payload. The referenced file must exist -- publication fails closed
   // if it does not -- and its size is checked against the pull RPC replay
   // bound so an unservable record is rejected at commit, not at first pull.
+  //
+  // With kDeferred the record is readable when this returns but not yet
+  // durable; the caller owes a sync_committed() for its height and must not
+  // publish the next height until that has succeeded.
   x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
-      const IndexerOutboxCommittedStoredPayload &stored) const;
+      const IndexerOutboxCommittedStoredPayload &stored,
+      IndexerOutboxDurability durability =
+          IndexerOutboxDurability::kSynced) const;
+  // Makes a kDeferred committed record durable: fsyncs the record, then the
+  // directory. Blocking, and safe to call off the publication lock from any
+  // thread -- it touches only the record's own file and the directory fd.
+  IndexerOutboxStatus<void> sync_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
@@ -242,6 +264,16 @@ private:
   static IndexerOutboxStatus<IndexerOutboxStore>
   finish_opening(UniqueFd directory_fd);
   IndexerOutboxStatus<void> cleanup_stale_temp_files();
+  // Removes the newest committed record if it does not read back as a
+  // complete record: the residue of a kDeferred publication that crashed
+  // before sync_committed(). Older records are left for validation to reject.
+  IndexerOutboxStatus<void> discard_torn_committed_tail();
+  // Whether [filename] holds a complete committed record for [block_height]:
+  // a well-formed header and, for the current protocol, a stored payload that
+  // decodes and matches it. Does not look at the events file.
+  IndexerOutboxStatus<void>
+  check_committed_record_intact(std::string_view filename,
+                                BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<void>>
   initialize_current_epoch_origin_unlocked(
       BlockHeight first_height, ConsensusValueHash first_prev_hash) const;
@@ -254,11 +286,14 @@ private:
       std::optional<BlockHeight> max_height = std::nullopt) const;
   IndexerOutboxStatus<std::vector<std::string>> list_names() const;
   IndexerOutboxStatus<void>
-  publish_bytes(std::string_view filename,
-                std::span<const std::byte> bytes) const;
+  publish_bytes(std::string_view filename, std::span<const std::byte> bytes,
+                IndexerOutboxDurability durability =
+                    IndexerOutboxDurability::kSynced) const;
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
-                std::span<const std::span<const std::byte>> pieces) const;
+                std::span<const std::span<const std::byte>> pieces,
+                IndexerOutboxDurability durability =
+                    IndexerOutboxDurability::kSynced) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
@@ -302,7 +337,8 @@ private:
   // (publish_committed_reference).
   x23::Async<IndexerOutboxStatus<void>> publish_committed_stored(
       const IndexerOutboxCommittedStoredPayload &stored,
-      const IndexerOutboxCommittedPayload *payload_for_ensure) const;
+      const IndexerOutboxCommittedPayload *payload_for_ensure,
+      IndexerOutboxDurability durability) const;
 
   UniqueFd directory_fd_;
   // The parent directory, where <event_root>.events files live. A committed

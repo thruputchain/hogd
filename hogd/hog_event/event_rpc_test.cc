@@ -363,6 +363,9 @@ commit_empty_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
       make_consensus_value(height, closed.root_hash(), /*proposal_bodies=*/{});
   value.prev_hash = std::move(prev_hash);
   CHECK_EQ(rpc.eventsched_commit_block(block_id, value)(), RPCError::kRPCNone);
+  // The commit reply does not wait for the record's fsyncs, and the record is
+  // not pullable until they finish.
+  CHECK(ctx.flush_outbox_sync()());
   return value;
 }
 
@@ -593,11 +596,12 @@ TEST_F(EventRpcTest, FinalizedCommitMakesRecordPullable)
 
 TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
 {
+  // The live commit defers the directory fsync to its background sync, so
+  // that fault is covered by FailedDeferredSyncFailsLaterCommitsUntilRestart.
   constexpr std::array kFaults{
       IndexerOutboxFaultPoint::kVerifyPublishedInode,
       IndexerOutboxFaultPoint::kClosePublishedTemp,
       IndexerOutboxFaultPoint::kUnlinkPublishedTemp,
-      IndexerOutboxFaultPoint::kFsyncPublishedDirectory,
   };
   for (size_t i = 0; i < kFaults.size(); ++i) {
     TmpDir dir;
@@ -636,6 +640,203 @@ TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
     ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
     EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
   }
+}
+
+TEST_F(EventRpcTest, FailedDeferredSyncFailsLaterCommitsUntilRestart)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue block_one;
+  ConsensusValue block_two;
+  {
+    EventRPCContext ctx(temp_dir());
+    EventMempoolRpc event_rpc(ctx);
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    block_one = commit_empty_block(ctx, 880, 1, sha256(genesis));
+    EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
+    ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+    const IndexerProgress first_progress = progress_at(first.pulled_block());
+
+    ASSERT_EQ(event_rpc.eventsched_open_block(881)(), RPCError::kRPCNone);
+    EventBlockResult closed = event_rpc.eventsched_close_block(881, 2)();
+    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+    block_two =
+        make_consensus_value(2, closed.root_hash(), /*proposal_bodies=*/{});
+    block_two.prev_hash = sha256(block_one);
+
+    // The reply is sent before the sync runs, so the commit itself succeeds.
+    fail_next_indexer_outbox_operation_for_test(
+        IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+    ASSERT_EQ(event_rpc.eventsched_commit_block(881, block_two)(),
+              RPCError::kRPCNone);
+    EXPECT_FALSE(ctx.flush_outbox_sync()());
+    // Written, but never made durable, so never shown to the indexer.
+    EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value_or(false));
+    EXPECT_EQ(ctx.pull_indexer_next(pull_request(first_progress))().outcome(),
+              EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+    // The failure is sticky: a retry and the next height are both refused.
+    EXPECT_EQ(event_rpc.eventsched_commit_block(881, block_two)(),
+              RPCError::kRPCUnrecoverable);
+    ASSERT_EQ(event_rpc.eventsched_open_block(882)(), RPCError::kRPCNone);
+    EventBlockResult closed_three = event_rpc.eventsched_close_block(882, 3)();
+    ASSERT_EQ(closed_three.error(), RPCError::kRPCNone);
+    ConsensusValue block_three = make_consensus_value(
+        3, closed_three.root_hash(), /*proposal_bodies=*/{});
+    block_three.prev_hash = sha256(block_two);
+    EXPECT_EQ(event_rpc.eventsched_commit_block(882, block_three)(),
+              RPCError::kRPCUnrecoverable);
+    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(3).value_or(true));
+    EXPECT_FALSE(ctx.reconcile_outbox_tip(881, block_two)().has_value());
+  }
+
+  // A restart reconciles against whatever reached the disk.
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(881, block_two)().has_value());
+  EventIndexerPullResult first = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EventIndexerPullResult second = restarted.pull_indexer_next(
+      pull_request(progress_at(first.pulled_block())))();
+  ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
+}
+
+TEST_F(EventRpcTest, CommitWaitsForThePreviousCommitsSync)
+{
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+
+  // No flush between commits: each one has to collect the sync before it, or
+  // its record would not extend the pullable tail and the commit would fail.
+  EventMempoolRpc rpc(ctx);
+  ConsensusValue previous = genesis;
+  std::vector<ConsensusValue> blocks;
+  for (BlockHeight height = 1; height <= 8; ++height) {
+    const BlockID block_id = 890 + static_cast<BlockID>(height);
+    ASSERT_EQ(rpc.eventsched_open_block(block_id)(), RPCError::kRPCNone);
+    EventBlockResult closed = rpc.eventsched_close_block(block_id, height)();
+    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
+    ConsensusValue value = make_consensus_value(height, closed.root_hash(),
+                                                /*proposal_bodies=*/{});
+    value.prev_hash = sha256(previous);
+    ASSERT_EQ(rpc.eventsched_commit_block(block_id, value)(),
+              RPCError::kRPCNone);
+    // A retry of the newest commit waits for that commit's own sync.
+    ASSERT_EQ(rpc.eventsched_commit_block(block_id, value)(),
+              RPCError::kRPCNone);
+    previous = value;
+    blocks.push_back(std::move(value));
+  }
+  ASSERT_TRUE(ctx.flush_outbox_sync()());
+
+  IndexerProgress progress(IndexerProgressState::IndexerProgressUninitialized);
+  for (const ConsensusValue &block : blocks) {
+    EventIndexerPullResult pulled =
+        ctx.pull_indexer_next(pull_request(progress))();
+    ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+    EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, block);
+    progress = progress_at(pulled.pulled_block());
+  }
+  EXPECT_EQ(ctx.pull_indexer_next(pull_request(progress))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+}
+
+// A commit links its record before the bytes are durable, so a crash can
+// leave the newest record's name on an empty file. The events file was made
+// durable at close, and reconciliation rebuilds the record from it.
+TEST_F(EventRpcTest, RestartRebuildsTornNewestCommittedRecord)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue block_one;
+  ConsensusValue block_two;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    block_one = commit_empty_block(ctx, 900, 1, sha256(genesis));
+    block_two = commit_empty_block(ctx, 901, 2, sha256(block_one));
+  }
+  const std::filesystem::path record =
+      std::filesystem::path(temp_dir()) / "indexer-outbox" /
+      IndexerOutboxStore::committed_filename(2);
+  ASSERT_TRUE(std::filesystem::exists(record));
+  std::filesystem::resize_file(record, 0);
+
+  EventRPCContext restarted(temp_dir());
+  EXPECT_FALSE(
+      restarted.indexer_outbox_store().has_committed(2).value_or(true));
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(901, block_two)().has_value());
+  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(2).value_or(false));
+  EventIndexerPullResult first = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(first.pulled_block().block.payload.consensus_value, block_one);
+  EventIndexerPullResult second = restarted.pull_indexer_next(
+      pull_request(progress_at(first.pulled_block())))();
+  ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
+}
+
+// The same crash when HogDB did not get as far as committing the block: the
+// torn record is dropped, the outbox ends at the canonical tip, and the block
+// commits again when consensus redelivers it.
+TEST_F(EventRpcTest, RestartDropsTornNewestRecordAheadOfTheCanonicalTip)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue block_one;
+  ConsensusValue block_two;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    block_one = commit_empty_block(ctx, 910, 1, sha256(genesis));
+    block_two = commit_empty_block(ctx, 911, 2, sha256(block_one));
+  }
+  std::filesystem::resize_file(std::filesystem::path(temp_dir()) /
+                                   "indexer-outbox" /
+                                   IndexerOutboxStore::committed_filename(2),
+                               0);
+
+  EventRPCContext restarted(temp_dir());
+  ASSERT_TRUE(restarted.reconcile_outbox_tip(910, block_one)().has_value());
+  EventIndexerPullResult first = restarted.pull_indexer_next(pull_request())();
+  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  const IndexerProgress progress = progress_at(first.pulled_block());
+  EXPECT_EQ(restarted.pull_indexer_next(pull_request(progress))().outcome(),
+            EventIndexerPullOutcome::EventIndexerPullCaughtUp);
+
+  ASSERT_TRUE(restarted.commit_block(911, block_two)().has_value());
+  ASSERT_TRUE(restarted.flush_outbox_sync()());
+  EventIndexerPullResult second =
+      restarted.pull_indexer_next(pull_request(progress))();
+  ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
+  EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
+}
+
+// Only the newest record can be an unsynced publication. Damage anywhere
+// else is not crash residue and still fails closed.
+TEST_F(EventRpcTest, RestartStillRejectsTornRecordBelowTheNewest)
+{
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ConsensusValue block_two;
+  {
+    EventRPCContext ctx(temp_dir());
+    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+    ConsensusValue block_one =
+        commit_empty_block(ctx, 920, 1, sha256(genesis));
+    block_two = commit_empty_block(ctx, 921, 2, sha256(block_one));
+  }
+  std::filesystem::resize_file(std::filesystem::path(temp_dir()) /
+                                   "indexer-outbox" /
+                                   IndexerOutboxStore::committed_filename(1),
+                               0);
+
+  EventRPCContext restarted(temp_dir());
+  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(1).value_or(false));
+  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(2).value_or(false));
+  EXPECT_FALSE(restarted.reconcile_outbox_tip(921, block_two)().has_value());
 }
 
 TEST_F(EventRpcTest, ReconciledFinalizedOneAheadRecordRemainsPullable)
