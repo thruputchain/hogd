@@ -74,15 +74,15 @@ public:
   // The indexer does not see the record until it is durable. The pullable
   // tail advances when the sync completes, not when this returns.
   //
-  // A sync that fails leaves an acknowledged record in an unknown state, so
-  // every later commit fails until the process restarts and reconciles.
+  // A sync that fails leaves an acknowledged record in an unknown state. That
+  // should never happen, and the process panics; restart reconciles.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
 
-  // Waits for the newest commit's background sync, if one is running. False
-  // if that sync, or an earlier one, failed. Afterwards every committed
-  // record is durable and pullable, until the next commit.
-  x23::Async<bool> flush_outbox_sync();
+  // Waits for the newest commit's background sync, if one is running.
+  // Afterwards every committed record is durable and pullable, until the next
+  // commit.
+  x23::Async<void> flush_outbox_sync();
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -164,12 +164,11 @@ private:
   void publish_indexer_wake();
 
   // Awaits and clears pending_outbox_sync_. Caller holds outbox_sync_lock_.
-  // False if this or an earlier sync failed.
-  x23::Async<bool> drain_outbox_sync_locked();
+  x23::Async<void> drain_outbox_sync_locked();
   // The background half of a deferred commit: fsyncs the committed record at
   // [block_height] off the pool, then advances the pullable tail to it under
-  // outbox_commit_lock_. False if the record could not be made durable.
-  x23::Async<bool> sync_committed_record(BlockHeight block_height);
+  // outbox_commit_lock_. Panics if the record cannot be made durable.
+  x23::Async<void> sync_committed_record(BlockHeight block_height);
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
@@ -200,11 +199,9 @@ private:
   // outbox_commit_lock_; the sync itself takes only outbox_commit_lock_, so a
   // commit can wait for it while holding this.
   x23::CoroLock outbox_sync_lock_;
-  // The newest commit's background sync, guarded by outbox_sync_lock_. Its
-  // result must be collected before the handle is destroyed.
-  std::optional<x23::Async<bool>> pending_outbox_sync_;
-  // Sticky, guarded by outbox_sync_lock_.
-  bool outbox_sync_failed_ = false;
+  // The newest commit's background sync, guarded by outbox_sync_lock_. It
+  // must be awaited before the handle is destroyed.
+  std::optional<x23::Async<void>> pending_outbox_sync_;
   // Serializes origin selection, committed publication, and pullable-tail
   // snapshots. Pull payload I/O is always performed after releasing it.
   x23::CoroLock outbox_commit_lock_;

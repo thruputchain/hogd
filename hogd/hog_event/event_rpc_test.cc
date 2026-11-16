@@ -365,7 +365,7 @@ commit_empty_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
   CHECK_EQ(rpc.eventsched_commit_block(block_id, value)(), RPCError::kRPCNone);
   // The commit reply does not wait for the record's fsyncs, and the record is
   // not pullable until they finish.
-  CHECK(ctx.flush_outbox_sync()());
+  ctx.flush_outbox_sync()();
   return value;
 }
 
@@ -597,7 +597,7 @@ TEST_F(EventRpcTest, FinalizedCommitMakesRecordPullable)
 TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
 {
   // The live commit defers the directory fsync to its background sync, so
-  // that fault is covered by FailedDeferredSyncFailsLaterCommitsUntilRestart.
+  // that fault no longer applies here; see FailedDeferredSyncFailStops.
   constexpr std::array kFaults{
       IndexerOutboxFaultPoint::kVerifyPublishedInode,
       IndexerOutboxFaultPoint::kClosePublishedTemp,
@@ -642,65 +642,6 @@ TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
   }
 }
 
-TEST_F(EventRpcTest, FailedDeferredSyncFailsLaterCommitsUntilRestart)
-{
-  ConsensusValue genesis{};
-  genesis.proposal_header.block_height = 0;
-  ConsensusValue block_one;
-  ConsensusValue block_two;
-  {
-    EventRPCContext ctx(temp_dir());
-    EventMempoolRpc event_rpc(ctx);
-    ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-    block_one = commit_empty_block(ctx, 880, 1, sha256(genesis));
-    EventIndexerPullResult first = ctx.pull_indexer_next(pull_request())();
-    ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
-    const IndexerProgress first_progress = progress_at(first.pulled_block());
-
-    ASSERT_EQ(event_rpc.eventsched_open_block(881)(), RPCError::kRPCNone);
-    EventBlockResult closed = event_rpc.eventsched_close_block(881, 2)();
-    ASSERT_EQ(closed.error(), RPCError::kRPCNone);
-    block_two =
-        make_consensus_value(2, closed.root_hash(), /*proposal_bodies=*/{});
-    block_two.prev_hash = sha256(block_one);
-
-    // The reply is sent before the sync runs, so the commit itself succeeds.
-    fail_next_indexer_outbox_operation_for_test(
-        IndexerOutboxFaultPoint::kSyncDeferredCommitted);
-    ASSERT_EQ(event_rpc.eventsched_commit_block(881, block_two)(),
-              RPCError::kRPCNone);
-    EXPECT_FALSE(ctx.flush_outbox_sync()());
-    // Written, but never made durable, so never shown to the indexer.
-    EXPECT_TRUE(ctx.indexer_outbox_store().has_committed(2).value_or(false));
-    EXPECT_EQ(ctx.pull_indexer_next(pull_request(first_progress))().outcome(),
-              EventIndexerPullOutcome::EventIndexerPullCaughtUp);
-
-    // The failure is sticky: a retry and the next height are both refused.
-    EXPECT_EQ(event_rpc.eventsched_commit_block(881, block_two)(),
-              RPCError::kRPCUnrecoverable);
-    ASSERT_EQ(event_rpc.eventsched_open_block(882)(), RPCError::kRPCNone);
-    EventBlockResult closed_three = event_rpc.eventsched_close_block(882, 3)();
-    ASSERT_EQ(closed_three.error(), RPCError::kRPCNone);
-    ConsensusValue block_three = make_consensus_value(
-        3, closed_three.root_hash(), /*proposal_bodies=*/{});
-    block_three.prev_hash = sha256(block_two);
-    EXPECT_EQ(event_rpc.eventsched_commit_block(882, block_three)(),
-              RPCError::kRPCUnrecoverable);
-    EXPECT_FALSE(ctx.indexer_outbox_store().has_committed(3).value_or(true));
-    EXPECT_FALSE(ctx.reconcile_outbox_tip(881, block_two)().has_value());
-  }
-
-  // A restart reconciles against whatever reached the disk.
-  EventRPCContext restarted(temp_dir());
-  ASSERT_TRUE(restarted.reconcile_outbox_tip(881, block_two)().has_value());
-  EventIndexerPullResult first = restarted.pull_indexer_next(pull_request())();
-  ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
-  EventIndexerPullResult second = restarted.pull_indexer_next(
-      pull_request(progress_at(first.pulled_block())))();
-  ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
-  EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
-}
-
 TEST_F(EventRpcTest, CommitWaitsForThePreviousCommitsSync)
 {
   EventRPCContext ctx(temp_dir());
@@ -729,7 +670,7 @@ TEST_F(EventRpcTest, CommitWaitsForThePreviousCommitsSync)
     previous = value;
     blocks.push_back(std::move(value));
   }
-  ASSERT_TRUE(ctx.flush_outbox_sync()());
+  ctx.flush_outbox_sync()();
 
   IndexerProgress progress(IndexerProgressState::IndexerProgressUninitialized);
   for (const ConsensusValue &block : blocks) {
@@ -807,7 +748,7 @@ TEST_F(EventRpcTest, RestartDropsTornNewestRecordAheadOfTheCanonicalTip)
             EventIndexerPullOutcome::EventIndexerPullCaughtUp);
 
   ASSERT_TRUE(restarted.commit_block(911, block_two)().has_value());
-  ASSERT_TRUE(restarted.flush_outbox_sync()());
+  restarted.flush_outbox_sync()();
   EventIndexerPullResult second =
       restarted.pull_indexer_next(pull_request(progress))();
   ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
@@ -2041,6 +1982,34 @@ TEST_F(EventRpcDeathTest, DuplicateCloseFailStops)
         std::ignore = mempool_rpc.eventsched_close_block(46, 14)();
       },
       "");
+}
+
+TEST_F(EventRpcDeathTest, FailedDeferredSyncFailStops)
+{
+  // The commit reply is sent before the record's fsyncs run, so a sync that
+  // fails has no caller to report to and leaves an acknowledged record in an
+  // unknown state. It must fail stop; restart reconciles.
+  //
+  // The whole sequence runs inside the death-test child, as in
+  // DuplicateCloseFailStops.
+  X23_EXPECT_DEATH(
+      {
+        EventRPCContext ctx(temp_dir());
+        EventMempoolRpc mempool_rpc(ctx);
+        ConsensusValue genesis{};
+        genesis.proposal_header.block_height = 0;
+        std::ignore = ctx.reconcile_outbox_tip(0, genesis)();
+        std::ignore = mempool_rpc.eventsched_open_block(880)();
+        EventBlockResult closed = mempool_rpc.eventsched_close_block(880, 1)();
+        ConsensusValue value = make_consensus_value(1, closed.root_hash(),
+                                                    /*proposal_bodies=*/{});
+        value.prev_hash = sha256(genesis);
+        fail_next_indexer_outbox_operation_for_test(
+            IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+        std::ignore = mempool_rpc.eventsched_commit_block(880, value)();
+        ctx.flush_outbox_sync()();
+      },
+      "failed to sync committed indexer outbox record");
 }
 
 TEST_F(EventRpcTest, CommitPromotesEventsFileAfterContextRestart)
