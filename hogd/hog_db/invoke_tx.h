@@ -118,6 +118,12 @@ public:
 
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }
+  // reserve_changes makes room for [additional] more keys, so a large batch of
+  // requests does not rehash the change map repeatedly as it grows.
+  void reserve_changes(size_t additional)
+  {
+    changes_.reserve(changes_.size() + additional);
+  }
   // The chain's savepoint limit for the block this transaction runs in.
   uint32_t max_savepoint_depth() const
   {

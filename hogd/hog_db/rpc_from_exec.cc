@@ -253,6 +253,7 @@ HogDbExecutorRpc::try_push_new_subtransaction(
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
   int depth = itx->create_savepoint(id);
+  itx->reserve_changes(batch.size());
 
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
