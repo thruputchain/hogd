@@ -721,7 +721,9 @@ public:
   }
 };
 
-static TimePoint
+namespace {
+
+TimePoint
 wall_clock_timepoint()
 {
   return static_cast<TimePoint>(
@@ -729,6 +731,8 @@ wall_clock_timepoint()
           std::chrono::system_clock::now().time_since_epoch())
           .count());
 }
+
+} // namespace
 
 TEST(ViewGatewayRpc, ViewTimepointNeverPrecedesTheTip)
 {
