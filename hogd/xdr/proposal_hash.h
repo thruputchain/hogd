@@ -39,7 +39,7 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   // In cxs the three fields encode back to back, the hash as its 32 bytes.
   // A count takes at most 5 bytes, so one allocation holds the preimage.
   x23::Buf preimage;
-  preimage.reserve(10 * (1 + batch.segment_bytes.size()) +
+  preimage.reserve((10 * (1 + batch.segment_bytes.size())) +
                    segment_hashes_hash.size());
   CHECK(x23::serialize_cxs_to(preimage, batch.segment_tokens) &&
         x23::serialize_cxs_to(preimage, batch.segment_bytes) &&
