@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <cstdlib>
@@ -11,6 +12,7 @@
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
 #include <unistd.h>
@@ -119,6 +121,26 @@ connect_event_indexer(std::uint16_t port)
                                                kIndexerRpcMaxMessageSize)();
   CHECK(client.has_value());
   return std::move(*client);
+}
+
+// A commit replies before its record is durable, and the record is pullable
+// only once it is. A pull that follows the commit reply can therefore be
+// answered "caught up" for the few milliseconds the sync takes; ask again, as
+// a live indexer does.
+EventIndexerPullResult
+pull_committed_block(event_indexer_client &indexer,
+                     const EventIndexerPullRequest &request)
+{
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (true) {
+    EventIndexerPullResult pulled = indexer.event_indexer_pull_next(request)();
+    if (pulled.outcome() != EventIndexerPullOutcome::EventIndexerPullCaughtUp ||
+        std::chrono::steady_clock::now() >= deadline) {
+      return pulled;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
 }
 
 ConsensusValue
@@ -320,7 +342,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
       block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
       event_indexer_client indexer = connect_event_indexer(event_indexer_port);
       EventIndexerPullResult pulled =
-          indexer.event_indexer_pull_next(uninitialized_pull())();
+          pull_committed_block(indexer, uninitialized_pull());
       ASSERT_EQ(pulled.outcome(),
                 EventIndexerPullOutcome::EventIndexerPullBlock);
       EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, block_one);
@@ -363,8 +385,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   EventIndexerPullRequest next_request{.protocol = version::kHogdProtocol(),
                                        .progress =
                                            progress_at(first.pulled_block())};
-  EventIndexerPullResult second =
-      indexer.event_indexer_pull_next(next_request)();
+  EventIndexerPullResult second = pull_committed_block(indexer, next_request);
   ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
 

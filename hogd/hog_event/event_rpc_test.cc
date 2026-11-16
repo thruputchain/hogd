@@ -635,6 +635,7 @@ TEST_F(EventRpcTest, FailedCommittedPublishPreservesValidatedPulls)
 
     ASSERT_EQ(event_rpc.eventsched_commit_block(block_two_id, block_two)(),
               RPCError::kRPCNone);
+    ctx.flush_outbox_sync()();
     EventIndexerPullResult second =
         ctx.pull_indexer_next(pull_request(first_progress))();
     ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
@@ -3198,6 +3199,7 @@ TEST_F(EventRpcTest, CrashBeforeCloseLeavesNothingPullableAfterRestart)
   value.prev_hash = sha256(genesis);
   EXPECT_EQ(rpc.eventsched_commit_block(kNextBlockId, value)(),
             RPCError::kRPCNone);
+  restarted.flush_outbox_sync()();
   EventIndexerPullResult pulled = restarted.pull_indexer_next(pull_request())();
   ASSERT_EQ(pulled.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, value);
