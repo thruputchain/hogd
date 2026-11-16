@@ -433,6 +433,11 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   // recovery can rebuild only the newest record. This is the wait that
   // replaces fsyncing on the reply path. It also makes the previous height
   // pullable, which the tail checks below rely on.
+  //
+  // Not flush_outbox_sync(): that releases outbox_sync_lock_ when it returns,
+  // and this commit has to keep it until its own sync is registered below.
+  // Otherwise another commit could publish and start a sync in the gap, and
+  // this record would be written above one that is not yet durable.
   x23::CoroGuard sync_guard;
   co_await sync_guard(outbox_sync_lock_);
   co_await drain_outbox_sync(sync_guard);
