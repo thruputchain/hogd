@@ -62,6 +62,12 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
              config_params.max_savepoint_depth, kSavepointDepthCeiling);
     return false;
   }
+  if (config_params.max_auth_token_depth > kAuthTokenDepthCeiling) {
+    critical("recovered tip max_auth_token_depth {} exceeds the {} this "
+             "build's decoder stacks sustain",
+             config_params.max_auth_token_depth, kAuthTokenDepthCeiling);
+    return false;
+  }
   // The tip row is outside the state hash, so a tampered type can pass the
   // config hash (#4293); kMockTest is test-only, never a real default wallet.
   switch (tip.default_wallet.contract_type) {

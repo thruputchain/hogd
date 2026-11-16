@@ -4,6 +4,7 @@
 
 #include <cstddef>
 
+#include "auth_token.hh"
 #include "hog_exec_constants.hh"
 #include "hogd/base/types.h"
 #include "integration.hh"
@@ -19,6 +20,13 @@ static_assert(kMaxBytesTransaction < kMaxBytesSignedTransaction);
 // depth those stacks are sized for.
 inline constexpr uint32_t kSavepointDepthCeiling =
     static_cast<uint32_t>(kMaxSavepointDepth);
+
+// Ceiling on kConfigParamMaxAuthTokenDepth, checked at genesis load and on a
+// recovered tip: x23 decodes a contract-supplied token one native frame per
+// level, so the configured depth must stay far below what a thread's stack
+// sustains (#4788).
+inline constexpr uint32_t kAuthTokenDepthCeiling = 256;
+static_assert(kAuthTokenDepthCeiling >= kAuthTokenMaxDepth);
 
 // The budget the executor holds itself to on the HogDb link (pinned to
 // kBulkRpcMaxMessageSize). Raising it changes which transactions abort.

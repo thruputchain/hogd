@@ -443,6 +443,13 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, kSavepointDepthCeiling);
     co_return DbSchedResult::DbSchedResultError;
   }
+  if (const uint32_t stated = config_params.max_auth_token_depth;
+      stated > kAuthTokenDepthCeiling) {
+    error("genesis max_auth_token_depth {} exceeds the {} this build's "
+          "decoder stacks sustain",
+          stated, kAuthTokenDepthCeiling);
+    co_return DbSchedResult::DbSchedResultError;
+  }
   // The ceiling bounds the wire type, so a genesis naming more would let a
   // contract write a bytestring no peer could carry.
   if (const uint32_t stated = config_params.max_bytestring_len;

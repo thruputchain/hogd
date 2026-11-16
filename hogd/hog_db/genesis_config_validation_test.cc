@@ -204,6 +204,23 @@ TEST_F(GenesisConfigValidationTest, BoundsSavepointDepthByExecutorCeiling)
             DbSchedResult::DbSchedResultOK);
 }
 
+// Auth-token depth may be raised up to the decoder's stack ceiling, not past
+// it (#4788).
+TEST_F(GenesisConfigValidationTest, BoundsAuthTokenDepthByDecoderCeiling)
+{
+  auto load_with_auth_token_depth = [&](uint32_t depth) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxAuthTokenDepth,
+                                   depth);
+    return load(config, std::nullopt);
+  };
+  EXPECT_EQ(load_with_auth_token_depth(kAuthTokenDepthCeiling + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_auth_token_depth(kAuthTokenDepthCeiling),
+            DbSchedResult::DbSchedResultOK);
+}
+
 // Root commits need one savepoint even when child TryInvokes are disabled.
 TEST_F(GenesisConfigValidationTest, RequiresSavepointForRootCommit)
 {

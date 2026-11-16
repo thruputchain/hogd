@@ -354,6 +354,32 @@ TEST_F(RecoveredTipTest, RejectsMaxSavepointDepthOutsideGenesisBounds)
   }
 }
 
+// The tip row is outside the state hash, so a CRC-valid rewrite can raise
+// max_auth_token_depth past what the recursive token decoder's stack sustains;
+// recovery must reapply the genesis ceiling (#4788).
+TEST_F(RecoveredTipTest, RejectsMaxAuthTokenDepthAboveCeiling)
+{
+  HogDbDAO db = reopen();
+  HogDbStatus<DbTip> tip = db.read_dbtip();
+  ASSERT_TRUE(tip.has_value());
+
+  NetworkConfigParams::set_param(tip->network_config,
+                                 ConfigParamID::kConfigParamMaxAuthTokenDepth,
+                                 kAuthTokenDepthCeiling + 1);
+  // Recompute so the config-hash guard passes and the bound is what bites.
+  tip->value.proposal_header.config_hash = compute_config_hash(
+      make_config_hash_preimage(cost_model_, tip->network_config,
+                                tip->default_wallet));
+  ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+  ASSERT_TRUE(db.commit().has_value());
+
+  HogDbDAO recovered_db = reopen();
+  const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+  ASSERT_TRUE(recovered.has_value());
+  EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                  cost_model_));
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace
