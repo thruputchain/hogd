@@ -2,6 +2,7 @@
 
 #pragma once
 
+#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -23,6 +24,17 @@
 #include "x23/corosync.h"
 
 namespace hogd {
+
+// A view stands in for a hypothetical block on top of the tip. No block has
+// been proposed there, so there is no agreed timepoint: use now, but never
+// earlier than the tip's, because the next real block cannot be earlier.
+// A local node can pin a tip ahead of the wall clock. TimePoint is Unix
+// nanoseconds.
+inline TimePoint
+view_block_timepoint(TimePoint tip_timepoint, TimePoint now)
+{
+  return std::max(tip_timepoint, now);
+}
 
 // Executor-owned read-only invocation server exposed to the public RPC gateway.
 // The response height is captured from the DbTip used to construct the
@@ -62,17 +74,16 @@ private:
   using ViewDeadline = std::chrono::steady_clock::time_point;
   static constexpr std::uint32_t kMaxViewAttempts = 3;
 
-  // A view stands in for a hypothetical block on top of the tip: height is
-  // the tip's plus one, and since no block has been proposed there is no
-  // agreed timepoint, so use now. TimePoint is Unix nanoseconds.
   static BlockExecutionContext view_block_execution_context(DbTip const &tip)
   {
     return BlockExecutionContext{
         .block_height = tip.value.proposal_header.block_height + 1,
-        .block_timepoint = static_cast<TimePoint>(
-            std::chrono::duration_cast<std::chrono::nanoseconds>(
-                std::chrono::system_clock::now().time_since_epoch())
-                .count()),
+        .block_timepoint = view_block_timepoint(
+            tip.value.proposal_header.block_timepoint,
+            static_cast<TimePoint>(
+                std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count())),
     };
   }
 
