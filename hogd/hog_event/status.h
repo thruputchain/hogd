@@ -13,6 +13,7 @@ enum class EventErrorCode {
   kBadBlockID,
   kExists,
   kInternal,
+  kBlockTooLarge,
 };
 
 class EventErrorCategory : public std::error_category {

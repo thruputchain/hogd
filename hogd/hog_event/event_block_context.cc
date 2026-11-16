@@ -147,6 +147,13 @@ EventBlockContext::add_event(TxEventLog event, ProposedTransaction body)
   pair_buf->append_range(std::span(*serialize_buf).first(event_xdr_size));
   x23::serialize_to(&*pair_buf, body);
 
+  // The pair is written to the file exactly once, so this running sum is the
+  // finalized file's size. close_block() reads it to reject a block whose
+  // events cannot be replayed through the indexer pull RPC before it is
+  // finalized or nominated. Order of events across threads does not affect the
+  // sum, so the total is deterministic for a given transaction set.
+  total_pair_bytes_.fetch_add(pair_buf->size(), std::memory_order_relaxed);
+
   using write_event_result_t =
       decltype(std::declval<EventBlockContext &>().write_event(
           std::declval<std::span<const uint8_t>>()));

@@ -470,6 +470,19 @@ indexer_event_pull_rpc_record_size_for_parts(size_t consensus_value_xdr_size,
   return *size;
 }
 
+bool
+events_file_fits_indexer_replay_record(size_t events_file_size)
+{
+  auto batches_size = checked_add(events_file_size, 8);
+  if (!batches_size) {
+    return false;
+  }
+  return indexer_event_pull_rpc_record_size_for_parts(
+             x23::detail::xdr_size_bounds<ConsensusValue>().max_, *batches_size,
+             0)
+      .has_value();
+}
+
 IndexerOutboxStatus<IndexerOutboxStore>
 IndexerOutboxStore::open(std::string_view directory)
 {

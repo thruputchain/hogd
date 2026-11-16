@@ -118,6 +118,33 @@ TEST_F(EventBlockContextTest, BasicTest)
             ContractAddress{"test_address"});
 }
 
+TEST_F(EventBlockContextTest, TotalPairBytesTracksFinalizedFileSize)
+{
+  // close_block() admits a block by total_pair_bytes(); the check is only sound
+  // if that running sum equals the finalized events file's size. Verify the
+  // invariant directly, and that add_event() feeds the counter.
+  EventBlockContext context(temp_dir_, 1);
+  EXPECT_EQ(context.total_pair_bytes(), 0U);
+  context.executor_open_block();
+  for (int i = 0; i < 3; ++i) {
+    EXPECT_TRUE(context.add_event(
+        TxEventLog{.tx_hash = sha256(std::as_bytes(std::span(&i, 1))),
+                   .events = {TxEmittedEvent{
+                       .contract_address = {"test_address"},
+                       .serialized_event = {1, 2, 3, 4, 5},
+                   }}},
+        ProposedTransaction{})());
+  }
+  context.executor_close_block();
+  EXPECT_GT(context.total_pair_bytes(), 0U);
+
+  finish_file(context);
+  auto hash = context.get_root_hash();
+  const std::string filename =
+      EventBlockContext::final_events_filename(temp_dir_, hash);
+  EXPECT_EQ(context.total_pair_bytes(), std::filesystem::file_size(filename));
+}
+
 TEST_F(EventBlockContextTest, TestEmptyBlockWithExecutor)
 {
   EventBlockContext context(temp_dir_, 1,

@@ -26,6 +26,11 @@ to_rpc_error(EventErrorCode error_code)
     return RPCError::kRPCBadBlockID;
   case EventErrorCode::kInternal:
     return RPCError::kRPCUnrecoverable;
+  case EventErrorCode::kBlockTooLarge:
+    // A distinct, recoverable status: the block's events overflow the indexer
+    // pull RPC replay record. The scheduler rejects such a block at nomination
+    // and validation instead of treating it as a fatal commit invariant.
+    return RPCError::kRPCTransactionFailed;
   }
   error("Invalid event error code: {}", static_cast<int>(error_code));
   return RPCError::kRPCUnrecoverable;
