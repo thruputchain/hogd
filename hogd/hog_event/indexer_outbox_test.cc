@@ -924,6 +924,25 @@ TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
   EXPECT_FALSE(store.sync_committed(3).has_value());
 }
 
+// A process that dies between linking a record and syncing it leaves a record
+// that reads back complete from the page cache. Open has to sync it before it
+// is served or appended to.
+TEST_F(IndexerOutboxTest, OpenSyncsTheRetainedNewestCommittedRecord)
+{
+  const auto committed = make_committed(1, {}, {});
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  }
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(IndexerOutboxStore::open(store_path(dir_)).has_value());
+  auto reopened = IndexerOutboxStore::open(store_path(dir_));
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->has_committed(1).value());
+}
+
 TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
 {
   const auto first = make_committed(1, {}, {});

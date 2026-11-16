@@ -264,10 +264,11 @@ private:
   static IndexerOutboxStatus<IndexerOutboxStore>
   finish_opening(UniqueFd directory_fd);
   IndexerOutboxStatus<void> cleanup_stale_temp_files();
-  // Removes the newest committed record if it does not read back as a
-  // complete record: the residue of a kDeferred publication that crashed
-  // before sync_committed(). Older records are left for validation to reject.
-  IndexerOutboxStatus<void> discard_torn_committed_tail();
+  // Leaves the newest committed record either durable or gone, since a
+  // kDeferred publication may have crashed before its sync_committed(). A
+  // record that reads back complete is synced; one that does not is removed.
+  // Older records are left for validation to reject.
+  IndexerOutboxStatus<void> settle_committed_tail();
   // Whether [filename] holds a complete committed record for [block_height]:
   // a well-formed header and, for the current protocol, a stored payload that
   // decodes and matches it. Does not look at the events file.

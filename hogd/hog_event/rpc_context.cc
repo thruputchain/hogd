@@ -487,6 +487,18 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",
             block_id, published.error());
+      // A publication can fail after it linked the record. No background sync
+      // is started for a failed publication, so make whatever it left durable
+      // here: a retry treats an existing record as committed, and no record
+      // may sit unsynced below a later one.
+      if (indexer_outbox_store_.has_committed(block_height).value_or(true)) {
+        if (auto synced = indexer_outbox_store_.sync_committed(block_height);
+            !synced) {
+          panic("failed to sync committed indexer outbox record left at "
+                "height {} by a failed publication: {}",
+                static_cast<std::int64_t>(block_height), synced.error());
+        }
+      }
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }

@@ -564,8 +564,8 @@ IndexerOutboxStore::finish_opening(UniqueFd directory_fd)
   if (auto cleaned = store.cleanup_stale_temp_files(); !cleaned) {
     return std::unexpected(cleaned.error());
   }
-  if (auto discarded = store.discard_torn_committed_tail(); !discarded) {
-    return std::unexpected(discarded.error());
+  if (auto settled = store.settle_committed_tail(); !settled) {
+    return std::unexpected(settled.error());
   }
   return store;
 }
@@ -1945,7 +1945,7 @@ IndexerOutboxStore::check_committed_record_intact(
 }
 
 IndexerOutboxStatus<void>
-IndexerOutboxStore::discard_torn_committed_tail()
+IndexerOutboxStore::settle_committed_tail()
 {
   auto names = list_names();
   if (!names) {
@@ -1976,7 +1976,11 @@ IndexerOutboxStore::discard_torn_committed_tail()
   }
   auto intact = check_committed_record_intact(tail_name, *tail);
   if (intact) {
-    return {};
+    // Reading back complete does not make it durable. If only the process
+    // died, the page cache still holds a record whose sync never ran; without
+    // this, the restarted process would serve it and append above it, and a
+    // later host crash could lose a record that is no longer the newest.
+    return sync_committed(*tail);
   }
   // A deferred publication links the name before its bytes are durable, and
   // the next height is not published until the sync has finished, so a crash
