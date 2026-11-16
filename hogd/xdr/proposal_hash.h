@@ -8,24 +8,19 @@
 #include "parallel.hh"
 #include "proposal.hh"
 #include "x23/serialize.h"
+#include "x23/serialize_cxs.h"
 
 namespace hogd {
 
-// Shared with chuckd and the coordinator; changing it is a protocol change.
-// The segment hashes are combined in order, not by XOR (hogd#4508).
+// The hash that commits to batch, shared with chuckd and the coordinator:
+// SHA256(cxs(DomainSeparator("ParallelBatch")) || cxs(segment_tokens) ||
+// cxs(segment_bytes) || SHA256(SHA256(segment_0) || SHA256(segment_1) || ...)).
 inline SHA256Hash
 hash_parallel_batch_compatibility(const ParallelBatch &batch)
 {
   CHECK_EQ(batch.segment_tokens.size(), batch.segment_bytes.size());
 
-  ParallelBatch index{
-      .segment_tokens = batch.segment_tokens,
-      .segment_bytes = batch.segment_bytes,
-  };
-  SHA256Hasher hasher;
-  hasher.update(kParallelBatchDomainSeparatorCxs);
-  hasher.update(sha256(index));
-
+  SHA256Hasher segment_hashes_hasher;
   size_t offset = 0;
   for (uint32_t segment_size : batch.segment_bytes) {
     CHECK_LE(offset, batch.xdr.size());
@@ -35,10 +30,23 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
     if (segment_size != 0) {
       segment = x23::BufView(batch.xdr.data() + offset, segment_size);
     }
-    hasher.update(sha256(segment));
+    segment_hashes_hasher.update(sha256(segment));
     offset += segment_size;
   }
   CHECK_EQ(offset, batch.xdr.size());
+  const SHA256Hash segment_hashes_hash = segment_hashes_hasher.finalize();
+
+  // In cxs the three fields encode back to back, the hash as its 32 bytes.
+  // A count takes at most 5 bytes, so one allocation holds the preimage.
+  x23::Buf preimage;
+  preimage.reserve(10 * (1 + batch.segment_bytes.size()) +
+                   segment_hashes_hash.size());
+  CHECK(x23::serialize_cxs_to(preimage, batch.segment_tokens) &&
+        x23::serialize_cxs_to(preimage, batch.segment_bytes) &&
+        x23::serialize_cxs_to(preimage, segment_hashes_hash));
+  SHA256Hasher hasher;
+  hasher.update(kParallelBatchDomainSeparatorCxs);
+  hasher.update(preimage);
   return hasher.finalize();
 }
 

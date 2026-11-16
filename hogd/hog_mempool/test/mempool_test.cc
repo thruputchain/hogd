@@ -183,12 +183,67 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   // Shared with chuckd's TestHashProposalTxsFastCompatibilityVector and the
   // coordinator's proposal_txs_hash_golden_vector.
   const ProposalTxsHash expected = {
-      0xac, 0x7e, 0x6e, 0x65, 0xe3, 0xf3, 0x6e, 0xc7, 0x88, 0x45, 0xdd,
-      0xf3, 0xf3, 0xd9, 0x5a, 0xcf, 0x99, 0xea, 0xdb, 0xbd, 0xbc, 0xfd,
-      0x39, 0x1e, 0x44, 0x23, 0x9a, 0x7d, 0xc4, 0xb5, 0x2c, 0x03,
+      0x43, 0xf1, 0xc2, 0x9a, 0xad, 0x59, 0x64, 0x59, 0x48, 0x1d, 0x80,
+      0x7f, 0x00, 0x8e, 0xbe, 0x2e, 0x29, 0x77, 0xea, 0x0e, 0xd6, 0x4a,
+      0x3a, 0xdd, 0x24, 0xa8, 0x95, 0xf1, 0x89, 0xa4, 0xde, 0xc6,
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+// Shared with chuckd's TestHashParallelBatchVectors and the coordinator's
+// hash_parallel_batch_golden_vectors. The second batch has multi-byte token
+// counts. The third has 64 segments and multi-byte byte counts.
+TEST(Mempool, ParallelBatchHashGoldenVectors)
+{
+  const SHA256Hash expected_empty = {
+      0x9b, 0x1a, 0xe5, 0xf1, 0xd0, 0xee, 0xc3, 0xff, 0x77, 0x06, 0xd9,
+      0xf6, 0x6e, 0x0e, 0x39, 0x60, 0xb3, 0x94, 0xba, 0xe6, 0xdf, 0x89,
+      0xda, 0xa7, 0x42, 0x19, 0xbd, 0x75, 0x69, 0x9e, 0xed, 0x84,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(ParallelBatch{}), expected_empty);
+
+  ParallelBatch multibyte{};
+  multibyte.segment_tokens = {63, 300, 70000};
+  multibyte.segment_bytes = {1, 2, 3};
+  multibyte.xdr = {1, 2, 3, 4, 5, 6};
+  const SHA256Hash expected_multibyte = {
+      0x04, 0xd5, 0x83, 0x41, 0xd9, 0xc4, 0xad, 0x95, 0x38, 0xd7, 0xdc,
+      0x7d, 0x0b, 0x92, 0x0e, 0xd4, 0x0c, 0xb9, 0x00, 0xa9, 0x26, 0x41,
+      0xcf, 0xd6, 0x2a, 0x61, 0x42, 0x55, 0xd0, 0x12, 0x25, 0xfa,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(multibyte), expected_multibyte);
+
+  ParallelBatch many_segments{};
+  for (uint32_t i = 0; i < 64; ++i) {
+    many_segments.segment_tokens.push_back(i);
+    many_segments.segment_bytes.push_back(1);
+  }
+  many_segments.segment_bytes[0] = 300;
+  many_segments.segment_bytes[1] = 70000;
+  for (uint32_t j = 0; j < 70362; ++j)
+    many_segments.xdr.push_back(static_cast<uint8_t>(j % 251));
+  const SHA256Hash expected_many_segments = {
+      0x49, 0x7d, 0xf8, 0xdb, 0x36, 0x4d, 0xd1, 0xbf, 0x0f, 0xf5, 0x0b,
+      0xf0, 0xa8, 0x25, 0xab, 0x57, 0xd7, 0xa6, 0x55, 0xb4, 0xf9, 0xc5,
+      0xde, 0x64, 0xf7, 0x8d, 0xe9, 0x53, 0x91, 0x81, 0x75, 0xb2,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(many_segments),
+            expected_many_segments);
+}
+
+// The token counts are part of the preimage, though no segment hash reads them.
+TEST(Mempool, ParallelBatchHashBindsSegmentTokens)
+{
+  ParallelBatch batch{};
+  batch.segment_tokens = {2, 2};
+  batch.segment_bytes = {8, 8};
+  batch.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4};
+  ParallelBatch recounted = batch;
+  recounted.segment_tokens = {1, 3};
+
+  EXPECT_NE(hash_parallel_batch_compatibility(batch),
+            hash_parallel_batch_compatibility(recounted));
 }
 
 // Swapping two segments reverses the transaction order and changes the hash.

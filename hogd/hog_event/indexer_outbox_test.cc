@@ -1120,13 +1120,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
   // Full-key leaves and then direct key/value commitments changed the roots.
   // The proposal_txs_hash moved again when its parts began combining in order
-  // instead of by XOR (hogd#4508).
+  // instead of by XOR (hogd#4508), and again when a batch began hashing the
+  // cxs of its counts with the hash of its segment hashes.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
-                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
-                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
-                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
-                                   0x21, 0x07, 0xcc, 0x31};
+  const SHA256Hash kExpectedDigest{0xea, 0x97, 0x6a, 0x0a, 0xef, 0x83, 0x86,
+                                   0x7e, 0x58, 0x96, 0x32, 0xab, 0x7a, 0x17,
+                                   0x57, 0x12, 0xbf, 0x08, 0x5b, 0x08, 0xd1,
+                                   0x4a, 0x79, 0x9c, 0x08, 0x9f, 0xfe, 0x13,
+                                   0xc8, 0x9b, 0xf6, 0x43};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
