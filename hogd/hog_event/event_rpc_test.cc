@@ -710,7 +710,8 @@ TEST_F(EventRpcTest, RestartRebuildsTornNewestCommittedRecord)
   EXPECT_FALSE(
       restarted.indexer_outbox_store().has_committed(2).value_or(true));
   ASSERT_TRUE(restarted.reconcile_outbox_tip(901, block_two)().has_value());
-  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(2).value_or(false));
+  EXPECT_TRUE(
+      restarted.indexer_outbox_store().has_committed(2).value_or(false));
   EventIndexerPullResult first = restarted.pull_indexer_next(pull_request())();
   ASSERT_EQ(first.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(first.pulled_block().block.payload.consensus_value, block_one);
@@ -766,8 +767,7 @@ TEST_F(EventRpcTest, RestartStillRejectsTornRecordBelowTheNewest)
   {
     EventRPCContext ctx(temp_dir());
     ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
-    ConsensusValue block_one =
-        commit_empty_block(ctx, 920, 1, sha256(genesis));
+    ConsensusValue block_one = commit_empty_block(ctx, 920, 1, sha256(genesis));
     block_two = commit_empty_block(ctx, 921, 2, sha256(block_one));
   }
   std::filesystem::resize_file(std::filesystem::path(temp_dir()) /
@@ -776,8 +776,10 @@ TEST_F(EventRpcTest, RestartStillRejectsTornRecordBelowTheNewest)
                                0);
 
   EventRPCContext restarted(temp_dir());
-  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(1).value_or(false));
-  EXPECT_TRUE(restarted.indexer_outbox_store().has_committed(2).value_or(false));
+  EXPECT_TRUE(
+      restarted.indexer_outbox_store().has_committed(1).value_or(false));
+  EXPECT_TRUE(
+      restarted.indexer_outbox_store().has_committed(2).value_or(false));
   EXPECT_FALSE(restarted.reconcile_outbox_tip(921, block_two)().has_value());
 }
 

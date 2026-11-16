@@ -191,10 +191,10 @@ public:
   // With kDeferred the record is readable when this returns but not yet
   // durable; the caller owes a sync_committed() for its height and must not
   // publish the next height until that has succeeded.
-  x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
-      const IndexerOutboxCommittedStoredPayload &stored,
-      IndexerOutboxDurability durability =
-          IndexerOutboxDurability::kSynced) const;
+  x23::Async<IndexerOutboxStatus<void>>
+  publish_committed_reference(const IndexerOutboxCommittedStoredPayload &stored,
+                              IndexerOutboxDurability durability =
+                                  IndexerOutboxDurability::kSynced) const;
   // Makes a kDeferred committed record durable: fsyncs the record, then the
   // directory. Blocking, and safe to call off the publication lock from any
   // thread -- it touches only the record's own file and the directory fd.

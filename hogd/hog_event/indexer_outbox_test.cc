@@ -907,10 +907,11 @@ TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
   };
 
   // Readable as soon as it is published, before any fsync.
-  ASSERT_TRUE(store
-                  .publish_committed_reference(
-                      stored, IndexerOutboxDurability::kDeferred)()
-                  .has_value());
+  ASSERT_TRUE(
+      store
+          .publish_committed_reference(stored,
+                                       IndexerOutboxDurability::kDeferred)()
+          .has_value());
   ASSERT_TRUE(store.has_committed(2).value());
   auto loaded = store.load_committed(2)();
   ASSERT_TRUE(loaded.has_value()) << loaded.error();
@@ -943,8 +944,9 @@ TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
     EXPECT_TRUE(store.has_committed(2).value());
   }
   // An incomplete record below the newest is left in place to fail closed.
-  std::filesystem::resize_file(
-      outbox / IndexerOutboxStore::committed_filename(1), 0);
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(1),
+                               0);
   {
     IndexerOutboxStore store = open_store(dir_);
     EXPECT_TRUE(store.has_committed(1).value());
@@ -953,8 +955,9 @@ TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
   }
   // An incomplete newest record is removed. Height 1 was not the newest at
   // this open, so it stays.
-  std::filesystem::resize_file(
-      outbox / IndexerOutboxStore::committed_filename(2), 0);
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(2),
+                               0);
   {
     IndexerOutboxStore store = open_store(dir_);
     EXPECT_TRUE(store.has_committed(1).value());

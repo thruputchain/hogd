@@ -826,8 +826,8 @@ IndexerOutboxStore::publish_committed(
       .format_version = payload.format_version,
       .consensus_value = payload.consensus_value,
   };
-  co_return co_await publish_committed_stored(
-      stored, &payload, IndexerOutboxDurability::kSynced);
+  co_return co_await publish_committed_stored(stored, &payload,
+                                              IndexerOutboxDurability::kSynced);
 }
 
 x23::Async<IndexerOutboxStatus<void>>
@@ -999,9 +999,8 @@ IndexerOutboxStore::publish_committed_stored(
 
   // The one publication that may be deferred: a new record at the append tip.
   // The idempotent-retry publication above stays synced.
-  auto published =
-      publish_bytes(committed_filename(height),
-                    std::as_bytes(std::span(*bytes)), durability);
+  auto published = publish_bytes(committed_filename(height),
+                                 std::as_bytes(std::span(*bytes)), durability);
   if (!published) {
     co_return co_await fail_committed_publication_unlocked(
         std::move(published.error()));
@@ -1992,8 +1991,9 @@ IndexerOutboxStore::discard_torn_committed_tail()
         system_error("remove incomplete committed outbox record", errno));
   }
   if (fsync(directory_fd_.get()) != 0) {
-    return std::unexpected(system_error(
-        "fsync indexer outbox directory after discarding tail", errno));
+    return std::unexpected(
+        system_error("fsync indexer outbox directory after discarding tail",
+                     errno));
   }
   return {};
 }
