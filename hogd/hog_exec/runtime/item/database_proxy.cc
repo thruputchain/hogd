@@ -490,8 +490,8 @@ x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
-                                           size_t max_message_bytes,
-                                           DbConflictResult *conflict_out)
+                                           DbConflictResult *conflict_out,
+                                           size_t max_message_bytes)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
@@ -646,8 +646,8 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
 
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
-      block_id_, tx_id_, current_subtransaction_batch_,
-      max_subtransaction_output_bytes_, &last_push_conflict_);
+      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_,
+      max_subtransaction_output_bytes_);
   current_subtransaction_batch_.clear();
   co_return r;
 }

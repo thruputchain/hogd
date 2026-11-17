@@ -107,11 +107,11 @@ public:
   //
   // A batch whose request would exceed [max_message_bytes] is rejected as a
   // conflict without being sent.
-  [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                              StorageDeltaBatch const &delta_batch,
-                              size_t max_message_bytes,
-                              DbConflictResult *conflict_out = nullptr);
+  [[nodiscard]] x23::Async<SystemStatus<bool>> try_push_new_subtransaction(
+      BlockID block_id, TransactionID tx_id,
+      StorageDeltaBatch const &delta_batch,
+      DbConflictResult *conflict_out = nullptr,
+      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes);
 
   // [new_contracts] is borrowed across the suspension; see above.
   [[nodiscard]] x23::Async<SystemStatus<void>>
