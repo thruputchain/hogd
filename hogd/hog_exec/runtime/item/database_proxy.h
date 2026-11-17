@@ -150,9 +150,14 @@ private:
 // A DatabaseProxy that is scoped to a single transaction.
 class PerTransactionDatabaseProxy {
 public:
+  // [config_params] is the chain's configuration for [block_id]; its
+  // max_subtransaction_output_bytes bounds each push.
   PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
-                              TransactionID tx_id)
-    : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
+                              TransactionID tx_id,
+                              NetworkConfigParams const &config_params)
+    : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id),
+      max_subtransaction_output_bytes_(
+          config_params.max_subtransaction_output_bytes)
   {}
 
   // A copy would fork the staged delta batch below, which used to be a shared
@@ -180,13 +185,6 @@ public:
   DbConflictResult const &last_push_conflict() const
   {
     return last_push_conflict_;
-  }
-
-  // Sets the chain's max_subtransaction_output_bytes: the largest request a
-  // push may send. Larger batches are rejected as a conflict.
-  void set_max_subtransaction_output_bytes(uint32_t bytes)
-  {
-    max_subtransaction_output_bytes_ = bytes;
   }
 
   // Coroutine: the staged batch stays owned by this object across the
@@ -248,7 +246,8 @@ private:
   const BlockID block_id_;
   const TransactionID tx_id_;
   DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
-  uint32_t max_subtransaction_output_bytes_ =
-      kDefaultMaxSubtransactionOutputBytes;
+  // The largest request a push may send; larger batches are rejected as a
+  // conflict.
+  uint32_t max_subtransaction_output_bytes_;
 };
 } // namespace hogd

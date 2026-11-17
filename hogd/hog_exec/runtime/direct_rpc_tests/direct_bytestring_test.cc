@@ -8,8 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -1835,7 +1837,7 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
 
 // The gate uses the chain's max_subtransaction_output_bytes, not a build
 // constant: the same batch is rejected under a lowered limit and pushed under
-// the default.
+// the framework's stock one.
 TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
 {
   auto contract_addr = make_contract_address(0);
@@ -1850,8 +1852,10 @@ TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
   };
 
   {
-    auto tx = make_new_per_tx_db_proxy();
-    tx.set_max_subtransaction_output_bytes(4096);
+    NetworkConfigParams lowered;
+    lowered.max_subtransaction_output_bytes = 4096;
+    PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
+                                   TransactionID{900'000}, lowered);
     stage(tx);
     auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
@@ -1862,7 +1866,7 @@ TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
     stage(tx);
     auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r.value()) << "the same batch fits the default limit";
+    EXPECT_TRUE(r.value()) << "the same batch fits the stock limit";
   }
 }
 

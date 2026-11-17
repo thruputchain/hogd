@@ -209,9 +209,6 @@ SystemCallHandler::SystemCallHandler(
     contracts_to_deploy_(tx.contracts_to_deploy),
     snapshot_cache_(snapshot_cache)
 {
-  db_proxy_.set_max_subtransaction_output_bytes(
-      snapshot_cache.get_network_config_params()
-          .max_subtransaction_output_bytes);
   // Real transactions execute in proposal or validation mode only; viewing
   // mode goes through the tx-less constructor. CHECK, not assert: the old
   // per-ctor construction failed loudly (bad_variant_access) on this misuse
@@ -235,11 +232,7 @@ SystemCallHandler::SystemCallHandler(
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
-{
-  db_proxy_.set_max_subtransaction_output_bytes(
-      snapshot_cache.get_network_config_params()
-          .max_subtransaction_output_bytes);
-}
+{}
 
 std::pair<InvokeStatus<void>, GasAmount>
 SystemCallHandler::perform_initial_validation()
