@@ -1,3 +1,9 @@
+add_library(heap_profile heap_profile.cc)
+add_executable(heap_profile_test heap_profile_test.cc)
+target_link_libraries(heap_profile_test heap_profile)
+add_test(NAME heap_profile_test COMMAND heap_profile_test
+  ${CMAKE_CURRENT_SOURCE_DIR}/testdata/jemalloc.heap)
+
 add_library(
   metrics
   health.cc
