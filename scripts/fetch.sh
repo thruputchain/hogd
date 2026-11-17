@@ -31,3 +31,16 @@ if [ "$("$RV32_LOWER_BIN" --version 2>/dev/null | awk '{print $2}')" != "${THRUP
   echo "Installing the RV32 lowerer..."
   cargo "+${TOOL_RUST}" install --locked --force "thruput-rv32-lower@${THRUPUT_CLI_VERSION}"
 fi
+
+# thruput-xdr-codegen, the XDR-to-Rust compiler, generates the Rust side of
+# the roundtrip contracts from their .x file (built_contracts/gen_xdr_rs.sh).
+# It is built from the commit of thruputchain/xdrs pinned in xdr-codegen-rev;
+# `thruput-xdr-codegen --version` names the commit it was built from.
+XDR_CODEGEN_REV="$(cat "${SCRIPT_DIR}/xdr-codegen-rev")"
+XDR_CODEGEN_BIN="${CARGO_INSTALL_ROOT:-${CARGO_HOME:-$HOME/.cargo}}/bin/thruput-xdr-codegen"
+if ! "$XDR_CODEGEN_BIN" --version 2>/dev/null | grep -Fq "(xdrs ${XDR_CODEGEN_REV})"; then
+  echo "Installing thruput-xdr-codegen..."
+  cargo "+${TOOL_RUST}" install --locked --force \
+    --git https://github.com/thruputchain/xdrs --rev "${XDR_CODEGEN_REV}" \
+    thruput-xdr-codegen
+fi

@@ -23,10 +23,8 @@ run_compiler(0 --help)
 require_text("${output}" "usage:")
 run_compiler(0 --version)
 require_text("${output}" "x23")
-foreach(option -o --recursive_type --rust-feature --rust-no-feature)
-  run_compiler(2 ${option})
-  require_text("${error}" "missing")
-endforeach()
+run_compiler(2 -o)
+require_text("${error}" "missing")
 run_compiler(2 --not-an-option)
 require_text("${error}" "invalid option")
 run_compiler(2)
@@ -59,81 +57,6 @@ if(NOT regenerated STREQUAL cpp)
 endif()
 run_compiler(1 -o "${TEST_DIR}/missing/output.hh" "${INPUT}")
 require_text("${error}" "output.hh")
-
-run_compiler(0 --rust --rust-no-feature serde --rust-feature xdrs
-  --recursive_type Record "${INPUT}")
-file(READ "${TEST_DIR}/compiler.rs" rust)
-require_text("${rust}" "pub struct Record")
-require_text("${rust}" "pub next: Option<Box<Record>>")
-require_text("${rust}" "pub payload: BytesM<LIMIT>")
-require_text("${rust}" "#[derive(ReadXDR, WriteXDR, ConstXDRSize)]")
-# Generated clients encode into a CallBuf taken from the sender and pass it
-# to send_call_decoded by value, for zero-, one- and two-argument procedures.
-# The xdrs writer runs inside CallBuf::append_with: thruput_rpc_api has no
-# xdrs dependency, so the serializer call is the generated code's.
-require_text("${rust}" "let mut call = self.handle.call_buf();")
-require_text("${rust}" "call.append_with(|buf| {
-             let mut w = xdrs::txs::buf_writer::BufWriter::from(::core::mem::take(buf));
-             let r = xdrs::write_xdr(&(), &mut w);
-             *buf = w.into();
-             r
-         }).map_err(|_| ::thruput_rpc_api::RpcError::GarbageArguments)?;")
-require_text("${rust}" "let r = xdrs::write_xdr(&(arg0), &mut w);")
-require_text("${rust}" "let r = xdrs::write_xdr(&(arg0, arg1), &mut w);")
-string(FIND "${rust}" "call.encode(" encode_pos)
-if(NOT encode_pos EQUAL -1)
-  message(FATAL_ERROR "generated client still calls the removed CallBuf::encode")
-endif()
-# The reply is decoded by the sender, straight from the reader's buffer on
-# driver connections, into a slot the method returns.
-require_text("${rust}" "out = ::core::option::Option::Some(xdrs::txs::decode(reply)")
-require_text("${rust}" "unsafe { self.handle.send_call_decoded(Self::prog_vers(), 2, call, &mut decode) }.await?;")
-require_text("${rust}" "out.ok_or(::thruput_rpc_api::RpcError::SystemError)")
-string(FIND "${rust}" "::rpc_api::" old_api_pos)
-if(NOT old_api_pos EQUAL -1)
-  message(FATAL_ERROR "generated Rust still names the old rpc_api crate")
-endif()
-# The borrowed read x23c writes out for a newtype fixed-opaque typedef is a
-# plain impl: ReadXDR is a safe trait again as of xdrs 0.12.
-require_text("${rust}" "impl<'r: 'a, 'a> ReadXDR<'r> for &'a Fingerprint {")
-string(FIND "${rust}" "unsafe impl" unsafe_impl_pos)
-if(NOT unsafe_impl_pos EQUAL -1)
-  message(FATAL_ERROR "generated Rust contains an unsafe impl")
-endif()
-string(FIND "${rust}" "::serde::" serde_pos)
-if(NOT serde_pos EQUAL -1)
-  message(FATAL_ERROR "--rust-no-feature serde did not disable serde")
-endif()
-
-# #[rust(no_debug)] drops Debug from the derive list of the type carrying it,
-# leaving the impl to hand-written code, and is stripped from the comment
-# rather than passed through to the generated source.  Types without the
-# marker still derive Debug.
-require_text("${rust}" "#[derive(Clone, PartialEq, Eq, Hash, PartialOrd, Ord)]
-#[derive(Default, Copy)]
-#[repr(transparent)]
-pub struct Fingerprint {")
-require_text("${rust}" "#[derive(Clone, Debug, PartialEq, Eq, Hash, PartialOrd, Ord)]")
-string(FIND "${rust}" "no_debug" no_debug_pos)
-if(NOT no_debug_pos EQUAL -1)
-  message(FATAL_ERROR "#[rust(no_debug)] marker leaked into the generated Rust")
-endif()
-
-# A union's default arm is marked for the xdrs derives, and the marker is
-# gated like them: rustc rejects an attribute that no derive declares.
-require_text("${rust}" "#[xdr(default_variant)] Default { status: Status }")
-run_compiler(0 --rust -o default_gated.rs --recursive_type Record "${INPUT}")
-file(READ "${TEST_DIR}/default_gated.rs" default_gated)
-require_text("${default_gated}"
-  "#[cfg_attr(feature = \"xdrs\", xdr(default_variant))] Default { status: Status }")
-run_compiler(0 --rust --rust-no-feature xdrs -o default_plain.rs
-  --recursive_type Record "${INPUT}")
-file(READ "${TEST_DIR}/default_plain.rs" default_plain)
-require_text("${default_plain}" "    Default { status: Status }")
-string(FIND "${default_plain}" "default_variant" default_variant_pos)
-if(NOT default_variant_pos EQUAL -1)
-  message(FATAL_ERROR "--rust-no-feature xdrs left the default_variant marker")
-endif()
 
 run_compiler(0 --ts "${INPUT}")
 file(READ "${TEST_DIR}/compiler.ts" ts)
@@ -190,15 +113,6 @@ require_text("${file_header}" "// -*-C++-*-
 
 #pragma once")
 require_text("${file_header}" "// Documents Head\nstruct Head {")
-run_compiler(0 --rust -o file_header.rs file_header.x)
-file(READ "${TEST_DIR}/file_header.rs" file_header)
-require_text("${file_header}" "// Copyright notice
-// License line
-
-/* Second header block */
-
-#![allow(non_camel_case_types)]")
-require_text("${file_header}" "// Documents Head\n#[cfg_attr(")
 run_compiler(0 --ts -o file_header.ts file_header.x)
 file(READ "${TEST_DIR}/file_header.ts" file_header)
 require_text("${file_header}" "// Copyright notice
@@ -236,11 +150,6 @@ require_text("${trailing_comment}" "  // trails a
   std::int32_t a;
   /// Documents b.
   std::int32_t b;")
-run_compiler(0 --rust -o trailing_comment.rs trailing_comment.x)
-file(READ "${TEST_DIR}/trailing_comment.rs" trailing_comment)
-require_text("${trailing_comment}" "    pub a: i32,
-    /// Documents b.
-    pub b: i32,")
 
 file(WRITE "${TEST_DIR}/invalid.x" "struct Broken { int value };\n")
 run_compiler(1 -o invalid.hh invalid.x)

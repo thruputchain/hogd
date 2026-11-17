@@ -9,7 +9,6 @@
 #include <cstdio>
 #include <fcntl.h>
 #include <getopt.h>
-#include <set>
 #include <string>
 #include <string_view>
 #include <sys/fcntl.h>
@@ -162,20 +161,10 @@ usage(bool error)
   --help       print usage and exit
   --strict     fail if there are any warnings
   --version    print version and exit
-  --rust       generate rust code
-  --ts         generate TypeScript code
-  --recursive_type <typename>  generate (rust) code for a recursive type
-  --rust-feature <feature>      force the generated code to enable a given feature (instead of cfg(feature = "<feature>"))
-  --rust-no-feature <feature>   force the generated code to disable a given feature)",
+  --ts         generate TypeScript code)",
                progname.string());
   exit(error ? 2 : 0);
 }
-
-// In our code, we should use the kRustBoxPtr comment to indicate that a type
-// should be wrapped in a Box<T> in rust.  However, for generating code
-// for xdr we do not control (i.e. stellar's) we cannot add those annotations,
-// and so need the --recursive_type option to indicate which types are
-// recursive.
 
 int
 main(int argc, char **argv)
@@ -185,11 +174,7 @@ main(int argc, char **argv)
   bool strict = false;
   std::filesystem::path outfile;
 
-  bool rust_module = false;
   bool ts_module = false;
-  std::set<std::string> recursive_types;
-  std::set<std::string> rust_features;
-  std::set<std::string> rust_no_features;
 
   int optind;
   for (optind = 1; optind < argc; ++optind) {
@@ -203,9 +188,6 @@ main(int argc, char **argv)
     else if (opt == "--version") {
       std::println("{}", X23_PACKAGE_STRING);
       exit(0);
-    }
-    else if (opt == "--rust") {
-      rust_module = true;
     }
     else if (opt == "--ts") {
       ts_module = true;
@@ -226,30 +208,6 @@ main(int argc, char **argv)
         outfile = argv[optind];
       }
     }
-    else if (opt == "--recursive_type") {
-      ++optind;
-      if (optind >= argc) {
-        std::println(stderr, "missing recursive type name");
-        exit(2);
-      }
-      recursive_types.insert(argv[optind]);
-    }
-    else if (opt == "--rust-feature") {
-      ++optind;
-      if (optind >= argc) {
-        std::println(stderr, "missing rust feature name");
-        exit(2);
-      }
-      rust_features.insert(argv[optind]);
-    }
-    else if (opt == "--rust-no-feature") {
-      ++optind;
-      if (optind >= argc) {
-        std::println(stderr, "missing rust no feature name");
-        exit(2);
-      }
-      rust_no_features.insert(argv[optind]);
-    }
     else {
       std::println(stderr, "invalid option {}", opt);
       usage(true);
@@ -264,15 +222,10 @@ main(int argc, char **argv)
   if (outfile.empty()) {
     outfile = infile.filename();
     if (outfile.extension() == ".x") {
-      if (rust_module)
-        outfile.replace_extension(".rs");
-      else if (ts_module)
+      if (ts_module)
         outfile.replace_extension(".ts");
       else
         outfile.replace_extension(".hh");
-    }
-    else if (rust_module) {
-      outfile += ".rs";
     }
     else if (ts_module) {
       outfile += ".ts";
@@ -298,11 +251,7 @@ main(int argc, char **argv)
 
   std::string res;
 
-  if (rust_module) {
-    res = gen_rs(&ctx.defs, ctx.header, recursive_types, rust_features,
-                 rust_no_features);
-  }
-  else if (ts_module) {
+  if (ts_module) {
     res = gen_ts(&ctx.defs, ctx.header);
   }
   else {
