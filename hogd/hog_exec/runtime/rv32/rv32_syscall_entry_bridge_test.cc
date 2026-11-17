@@ -429,6 +429,95 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
 }
 
+TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)
+{
+  // The saved child output can be read any number of times, so each read pays
+  // for the bytes it copies into guest memory, not just the crossing (#4798).
+  constexpr size_t kReturnedLen = 1024;
+  auto handler = make_handler();
+  auto parent_trace = start_frame(handler);
+  auto child_trace = start_frame(handler);
+  ReturnBuffer returned;
+  returned.resize_uninitialized(kReturnedLen);
+  std::ranges::fill(std::span(returned.data(), returned.size()), uint8_t{0x5A});
+  handler.set_return_buffer(std::move(returned), false, {});
+  finish_frame(handler, std::move(child_trace));
+
+  // A guest buffer larger than the saved output, then the three length/range
+  // outputs written past it.
+  constexpr uint32_t kGuestLen = 1536;
+  std::vector<uint8_t> memory(kGuestLen + (3 * sizeof(uint32_t)), 0);
+  auto get_returned_buffer = [&](uint32_t buffer_len) {
+    const std::array<uint32_t, 6> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetReturnedBuffer),
+        0, // buffer ptr
+        buffer_len,
+        kGuestLen,                          // written_len ptr
+        kGuestLen + sizeof(uint32_t),       // auth token start ptr
+        kGuestLen + (2 * sizeof(uint32_t)), // auth token count ptr
+    };
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    return result.gas_consumed;
+  };
+
+  // Nothing copied, truncated to one 512-byte block, then an oversized guest
+  // buffer, which pays for the two blocks copied rather than the space offered.
+  EXPECT_EQ(get_returned_buffer(0), kSyscallBaseCost);
+  EXPECT_EQ(get_returned_buffer(500),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(get_returned_buffer(kGuestLen),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(kReturnedLen));
+
+  finish_frame(handler, std::move(parent_trace));
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, GetCalldataChargesForBytesCopied)
+{
+  // Like GetReturnedBuffer: the frame's calldata can be read any number of
+  // times, so each read pays for the bytes it copies.
+  constexpr size_t kCalldataLen = 1024;
+  auto handler = make_handler();
+  Calldata calldata;
+  calldata.resize_uninitialized(kCalldataLen);
+  std::ranges::fill(std::span(calldata.data(), calldata.size()), uint8_t{0x5A});
+  auto trace =
+      handler.start_frame(Invocation{.invoked_address =
+                                         make_contract_address(0),
+                                     .entrypoint = ContractEntrypointID{},
+                                     .gas_limit = kPlentyOfGas,
+                                     .calldata = std::move(calldata)},
+                          std::to_underlying(InvokeFlag::None),
+                          ValidatedAuthTokens{});
+  ASSERT_TRUE(trace.has_value());
+
+  // A guest buffer larger than the calldata, then the two outputs past it.
+  constexpr uint32_t kGuestLen = 1536;
+  std::vector<uint8_t> memory(kGuestLen + (2 * sizeof(uint32_t)), 0);
+  auto get_calldata = [&](uint32_t buffer_len) {
+    const std::array<uint32_t, 5> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetCalldata),
+        0, // buffer ptr
+        buffer_len,
+        kGuestLen,                    // written_len ptr
+        kGuestLen + sizeof(uint32_t), // auth token count ptr
+    };
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    return result.gas_consumed;
+  };
+
+  EXPECT_EQ(get_calldata(0), kSyscallBaseCost);
+  EXPECT_EQ(get_calldata(500),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(get_calldata(kGuestLen),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(kCalldataLen));
+
+  finish_frame(handler, std::move(trace).value());
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 {
   std::vector<uint8_t> memory(256, 0xCC);

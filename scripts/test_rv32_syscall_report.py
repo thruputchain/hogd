@@ -727,6 +727,43 @@ class GateTests(unittest.TestCase):
                                       report.stddevs(with_sweep))
         self.assertEqual(before, after)
 
+    def test_the_frame_copies_are_guarded_at_every_length(self):
+        # Priced per block like the bytestring reads, so gated per length too,
+        # and kept out of the syscall table and the gating baseline even though
+        # their zero-length rows cost little more than the crossing.
+        plain = guardable_run()
+        run = guardable_run()
+        for family in ("GetCalldata", "GetReturnedBuffer"):
+            for size in BYTESTRING_SIZES:
+                name = f"entry/{family}/{size}"
+                ns = 70.0 + size * 0.05
+                run["benchmarks"].append(row(name, ns))
+                run["benchmarks"].append(row(name, ns * 0.002,
+                                             aggregate="stddev"))
+        text = reference_text(run)
+        for size in BYTESTRING_SIZES:
+            self.assertIn(f"guard copy/GetCalldata/{size} ", text)
+            self.assertIn(f"guard copy/GetReturnedBuffer/{size} ", text)
+        names = report.syscall_names(report.rows(run))
+        self.assertFalse([n for n in names if n.startswith("Get") and "/" in n])
+        self.assertEqual(
+            report.guard_baseline(report.rows(plain), report.stddevs(plain)),
+            report.guard_baseline(report.rows(run), report.stddevs(run)))
+
+        # An older reference passes and names the rows it did not gate; once
+        # they are in the reference, a doubled copy fails.
+        status, text = self.check(run, write_reference(self,
+                                                       reference_text(plain)))
+        self.assertEqual(status, 0)
+        self.assertIn(f"{2 * len(BYTESTRING_SIZES)} frame-copy row(s)", text)
+        path = write_reference(self, reference_text(run))
+        for entry in run["benchmarks"]:
+            if entry["name"] == "entry/GetReturnedBuffer/32768":
+                entry["real_time"] *= 2.5
+        status, text = self.check(run, path)
+        self.assertEqual(status, 1)
+        self.assertIn("copy/GetReturnedBuffer/32768", text)
+
     def test_reference_guards_both_syscalls_and_storage(self):
         text = reference_text(guardable_run())
         self.assertIn("guard syscall/NNIntGet ", text)
