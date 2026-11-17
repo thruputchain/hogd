@@ -674,6 +674,11 @@ public:
 
 class ViewGatewayBatchTest : public ViewGatewayRefreshTest {
 public:
+  static BlockExecutionContext view_context(DbTip const &tip)
+  {
+    return ViewGatewayRpc::view_block_execution_context(tip);
+  }
+
   static void stop_refresh_worker(ViewGatewayRpc &gateway)
   {
     gateway.refresh_thread_.request_stop();
@@ -715,6 +720,53 @@ public:
     return result;
   }
 };
+
+namespace {
+
+TimePoint
+wall_clock_timepoint()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
+} // namespace
+
+TEST(ViewGatewayRpc, ViewTimepointNeverPrecedesTheTip)
+{
+  EXPECT_EQ(view_block_timepoint(10, 20), 20U);
+  EXPECT_EQ(view_block_timepoint(20, 20), 20U);
+  EXPECT_EQ(view_block_timepoint(30, 20), 30U);
+}
+
+TEST_F(ViewGatewayBatchTest, ViewContextUsesTheWallClockAfterAnOlderTip)
+{
+  DbTip tip{};
+  tip.value.proposal_header.block_height = 7;
+  tip.value.proposal_header.block_timepoint = 1;
+
+  const TimePoint before = wall_clock_timepoint();
+  const BlockExecutionContext context = view_context(tip);
+  const TimePoint after = wall_clock_timepoint();
+
+  EXPECT_EQ(context.block_height, 8);
+  EXPECT_GE(context.block_timepoint, before);
+  EXPECT_LE(context.block_timepoint, after);
+}
+
+TEST_F(ViewGatewayBatchTest, ViewContextKeepsATipPinnedAheadOfTheWallClock)
+{
+  constexpr TimePoint kThreeDays = 3ULL * 24 * 60 * 60 * 1'000'000'000;
+  DbTip tip{};
+  tip.value.proposal_header.block_height = 7;
+  tip.value.proposal_header.block_timepoint =
+      wall_clock_timepoint() + kThreeDays;
+
+  EXPECT_EQ(view_context(tip).block_timepoint,
+            tip.value.proposal_header.block_timepoint);
+}
 
 TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
 {
