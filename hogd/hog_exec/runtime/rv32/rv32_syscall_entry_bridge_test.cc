@@ -429,6 +429,46 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
 }
 
+TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)
+{
+  // The saved child output can be read any number of times, so each read pays
+  // for the bytes it copies into guest memory, not just the crossing (#4798).
+  constexpr size_t kReturnedLen = 1024;
+  auto handler = make_handler();
+  auto parent_trace = start_frame(handler);
+  auto child_trace = start_frame(handler);
+  ReturnBuffer returned;
+  returned.resize_uninitialized(kReturnedLen);
+  std::ranges::fill(std::span(returned.data(), returned.size()), uint8_t{0x5A});
+  handler.set_return_buffer(std::move(returned), false, {});
+  finish_frame(handler, std::move(child_trace));
+
+  // The guest buffer, then the three length/range outputs written past it.
+  std::vector<uint8_t> memory(kReturnedLen + (3 * sizeof(uint32_t)), 0);
+  auto get_returned_buffer = [&](uint32_t buffer_len) {
+    const std::array<uint32_t, 6> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetReturnedBuffer),
+        0, // buffer ptr
+        buffer_len,
+        kReturnedLen,                          // written_len ptr
+        kReturnedLen + sizeof(uint32_t),       // auth token start ptr
+        kReturnedLen + (2 * sizeof(uint32_t)), // auth token count ptr
+    };
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    return result.gas_consumed;
+  };
+
+  // Truncated to one 512-byte block, then the whole two-block buffer.
+  EXPECT_EQ(get_returned_buffer(500),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(get_returned_buffer(kReturnedLen),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(kReturnedLen));
+
+  finish_frame(handler, std::move(parent_trace));
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)
 {
   std::vector<uint8_t> memory(256, 0xCC);

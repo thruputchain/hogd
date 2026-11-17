@@ -11,6 +11,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -327,7 +328,11 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
         .returned_auth_token_count = returned_auth_tokens.count});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered: the saved output can be read
+  // again and again, and max_return_buffer_len is configurable (#4798).
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), return_buffer.size()))}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

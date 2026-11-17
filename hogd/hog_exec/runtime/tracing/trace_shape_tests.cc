@@ -141,7 +141,10 @@ get_returned_buffer_entry(GasAmount gas, std::span<const uint8_t> buffer)
                                           .returned_auth_token_count = 0};
   outputs.buffer.append_range(buffer);
   body.get_returned_buffer().outputs = std::move(outputs);
-  return make_entry(gas, gas - kSyscallBaseCost, std::move(body), ok_status());
+  return make_entry(gas,
+                    gas - kSyscallBaseCost -
+                        GasCost::guest_buffer_copy(buffer.size()),
+                    std::move(body), ok_status());
 }
 
 // The SDK derives a static storage key by hashing a length-prefixed contract
@@ -564,7 +567,7 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         make_entry(61'216, 60'556, std::move(body), ok_status()));
   }
   expected.push_back(get_returned_buffer_entry(60'529, inner_calldata));
-  expected.push_back(return_entry(60'307, {}));
+  expected.push_back(return_entry(60'300, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
