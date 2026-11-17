@@ -1,9 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <initializer_list>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,6 +21,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
+#include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -28,14 +32,17 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/rpc_msg.hh"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -54,6 +61,13 @@ public:
   {}
 
 protected:
+  explicit ProposeValidateRoundtripTest(NetworkConfig const &network_config)
+    : NativeContractTestFramework(
+          false, BlockExecutionMode::kBlockExecutionModeProposal,
+          /*empty_genesis=*/true, /*genesis_cost_model=*/std::nullopt,
+          network_config)
+  {}
+
   void SetUp() override
   {
     // Deploy two native contracts
@@ -561,6 +575,204 @@ TEST_F(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
       discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
   EXPECT_EQ(proposal_hash, validation_hash)
       << "Proposal and validation trie root hashes must match";
+}
+
+// Validation replays each concurrent RCQ entry a tx peeked as an
+// observed_concurrent_entries delta in the tx's root push, which the
+// proposer's own push does not carry, and both pushes are held to the same
+// executor->HogDb message cap. Unless the proposer counts those bytes, a tx
+// that writes just under the cap and peeks concurrent entries is included by
+// the proposer and rejected by every validator (TxNonDeterministicError),
+// which invalidates an honest block.
+//
+// Bytestrings may be as long as kBytestringCeilingLen here, so a push near the
+// cap takes a few hundred writes rather than ~16000.
+// NOLINTNEXTLINE(misc-use-internal-linkage)
+class ProposeValidatePushCapTest : public ProposeValidateRoundtripTest {
+protected:
+  ProposeValidatePushCapTest()
+    : ProposeValidateRoundtripTest(max_bytestring_config())
+  {}
+
+  static NetworkConfig max_bytestring_config()
+  {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxBytestringLen,
+                                   kBytestringCeilingLen);
+    return config;
+  }
+
+  // The queues tx_insert puts one entry in and the fill tx peeks.
+  static constexpr uint32_t kQueues = 100;
+
+  static StorageKeyContractData queue_key(uint32_t i)
+  {
+    return make_storage_key("q" + std::to_string(i));
+  }
+
+  template<typename T>
+  static constexpr size_t kXdrMaxOf = x23::detail::xdr_size_bounds<T>().max_;
+
+  // The push budget and bytestring delta bound, mirrored from
+  // database_proxy.cc as in DirectBytestringTest's
+  // DeltaBatchFootprintCapExactBoundary.
+  static constexpr size_t kWord = 4;
+  static constexpr size_t kBudget =
+      kExecToDbMessageCap - (kXdrMaxOf<x23::rpc_msg> + kXdrMaxOf<BlockID> +
+                             kXdrMaxOf<TransactionID> + kWord);
+  static constexpr size_t kMinBytestringDelta =
+      kXdrMaxOf<AddressAndKey> + kXdrMaxOf<StorageDeltaFlagSet> +
+      kXdrMaxOf<StorageDeltaType> + kWord;
+  static constexpr size_t bytestring_delta_bound(size_t len)
+  {
+    return kMinBytestringDelta + ((len + 3) & ~size_t{3});
+  }
+
+  // Bytestring lengths whose delta bounds sum to exactly [target].
+  static std::vector<uint32_t> lens_for_target(size_t target)
+  {
+    constexpr size_t kPerMax = bytestring_delta_bound(kBytestringCeilingLen);
+    std::vector<uint32_t> lens;
+    size_t left = target;
+    while (left > 2 * kPerMax) {
+      lens.push_back(kBytestringCeilingLen);
+      left -= kPerMax;
+    }
+    const size_t half = (left / 2) & ~size_t{3};
+    lens.push_back(half - kMinBytestringDelta);
+    lens.push_back((left - half) - kMinBytestringDelta);
+    size_t total = 0;
+    for (uint32_t len : lens) {
+      total += bytestring_delta_bound(len);
+    }
+    EXPECT_EQ(total, target);
+    return lens;
+  }
+};
+
+TEST_F(ProposeValidatePushCapTest, ProposerCountsRCQObservationsAgainstPushCap)
+{
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(
+      0, make_contract(
+             // Method 0: insert calldata[0] into each queue.
+             [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+               auto const &cd = ctx.handler().get_calldata();
+               for (uint32_t q = 0; q < kQueues; ++q) {
+                 auto res =
+                     co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                         queue_key(q), std::as_bytes(std::span(cd.data(), 1)));
+                 if (!res.has_value()) {
+                   co_return NativeContractBuilder::host_fn_error_conversion(
+                       res.error());
+                 }
+               }
+               co_return InvokeStatus<void>{};
+             },
+             // Method 1: write one bytestring per u32 length in calldata, then
+             // peek each queue's concurrent entry.
+             [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+               auto const &cd = ctx.handler().get_calldata();
+               const std::string chunk(kBytestringCeilingLen, 'x');
+               for (size_t i = 0; i < cd.size() / sizeof(uint32_t); ++i) {
+                 uint32_t len = 0;
+                 std::memcpy(&len, cd.data() + (i * sizeof(len)), sizeof(len));
+                 auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+                     make_storage_key("fill" + std::to_string(i)),
+                     std::as_bytes(std::span(chunk.data(), len)));
+                 if (!ws.has_value()) {
+                   co_return NativeContractBuilder::host_fn_error_conversion(
+                       ws.error());
+                 }
+                 if (ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   co_return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+               }
+               for (uint32_t q = 0; q < kQueues; ++q) {
+                 RuntimeMemoryLength peek_len = 0;
+                 auto peek =
+                     co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                         queue_key(q), /*peek=*/true, std::span<std::byte>{},
+                         peek_len);
+                 if (!peek.has_value()) {
+                   co_return NativeContractBuilder::host_fn_error_conversion(
+                       peek.error());
+                 }
+                 if (peek.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                   co_return InvokeError{InvokeErrorCode::Deterministic};
+                 }
+               }
+               co_return InvokeStatus<void>{};
+             }));
+  auto context = std::make_unique<NativeContext>(std::move(contract_map));
+
+  const Transaction tx_insert = make_rcq_insert_tx({10});
+  auto make_fill_tx = [&](std::vector<uint32_t> const &lens) {
+    std::vector<uint8_t> bytes(lens.size() * sizeof(uint32_t));
+    std::memcpy(bytes.data(), lens.data(), bytes.size());
+    return Transaction{.invocation =
+                           Invocation{.invoked_address = kAddrA,
+                                      .entrypoint =
+                                          entrypoint_from_method_id(1),
+                                      .gas_limit = kDefaultMaxTxGas,
+                                      .calldata =
+                                          Calldata(bytes.begin(), bytes.end())},
+                       .uniquifier = make_new_uniquifier()};
+  };
+
+  // Proposes tx_insert then [tx_fill] in a fresh block and returns the fill
+  // tx's proposal result. If the proposer included it, also checks that
+  // validation reproduces the block.
+  auto propose_and_validate = [&](Transaction const &tx_fill) {
+    NondeterministicProposalData insert_p, fill_p;
+    auto ha = make_new_system_call_handler(tx_insert, *context);
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto hb = make_new_system_call_handler(tx_fill, *context);
+    EXPECT_TRUE(hb.root_invoke()().is_root_success());
+    fill_p = hb.extract_proposal_data();
+    EXPECT_EQ(fill_p.observed_queue_entry_sequence.size(), kQueues);
+    const ExecResult proposed = hb.try_commit_transaction()();
+    if (proposed != ExecResult::ExecResultOK) {
+      discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
+      return proposed;
+    }
+    StorageShortHash proposal_hash =
+        discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+    auto va =
+        make_new_system_call_handler_validation(tx_insert, *context, insert_p);
+    EXPECT_TRUE(va.root_invoke()().is_root_success());
+    EXPECT_EQ(va.try_commit_transaction()(), ExecResult::ExecResultOK);
+    auto vb =
+        make_new_system_call_handler_validation(tx_fill, *context, fill_p);
+    EXPECT_TRUE(vb.root_invoke()().is_root_success());
+    EXPECT_EQ(vb.try_commit_transaction()(), ExecResult::ExecResultOK)
+        << "validation rejected a tx the proposer included";
+
+    StorageShortHash validation_hash =
+        discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
+    EXPECT_EQ(proposal_hash, validation_hash);
+    return proposed;
+  };
+
+  // Validation adds at least this much to the fill tx's push.
+  constexpr size_t kObservedBytes = kQueues * kXdrMaxOf<QueueEntry>;
+
+  // Writes leaving half that under the budget fit the proposer's push with
+  // room for its few other deltas, but not with the observations validation
+  // adds, so the proposer must not include the tx.
+  EXPECT_EQ(propose_and_validate(
+                make_fill_tx(lens_for_target(kBudget - (kObservedBytes / 2)))),
+            ExecResult::ExecResultTxNonDeterministicError);
+
+  // Writes leaving room for the observations are included and validate.
+  EXPECT_EQ(propose_and_validate(
+                make_fill_tx(lens_for_target(kBudget - (4 * kObservedBytes)))),
+            ExecResult::ExecResultOK);
 }
 
 // Insert 1 entry in block 1.  Block 2: consume past entry (deterministic),

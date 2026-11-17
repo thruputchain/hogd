@@ -43,6 +43,11 @@ struct ShardedDB {
 // LocalMockDB redirects RPC calls to a server on localhost.
 using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 
+// What a push's footprint check charges for [entry_count]
+// observed_concurrent_entries: in a RetrocausalQueue delta of their own if
+// [own_delta], else appended to the key's existing RetrocausalQueue delta.
+size_t observed_entries_footprint_bound(size_t entry_count, bool own_delta);
+
 // Abstract away database sharding from the rest of the executor.
 // Handles the RPC Error codes, changing them into restricted forms
 // that the executor can handle (or abort on).
@@ -102,10 +107,15 @@ public:
   // the caller must keep the referent alive until the call completes.  The
   // batch is far too large to copy per push, which is why it stays a
   // reference; PerTransactionDatabaseProxy owns both for the whole call.
+  //
+  // [reserved_footprint] bytes count against the message cap on top of
+  // [delta_batch], for deltas a validator's push would carry that this one
+  // does not.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
-                              DbConflictResult *conflict_out = nullptr);
+                              DbConflictResult *conflict_out = nullptr,
+                              size_t reserved_footprint = 0);
 
   // [new_contracts] is borrowed across the suspension; see above.
   [[nodiscard]] x23::Async<SystemStatus<void>>
@@ -182,8 +192,9 @@ public:
   // Defined out of line: GCC emits an inline coroutine's ramp even where it is
   // unused, so a header definition would make every includer's link need
   // DatabaseProxy.
+  // [reserved_footprint]: see DatabaseProxy::try_push_new_subtransaction.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_current_subtransaction();
+  try_push_current_subtransaction(size_t reserved_footprint = 0);
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   pop_subtransactions(uint32_t count)

@@ -153,9 +153,14 @@ public:
   // returns pointer to the newly created view
   ItemView *add_item_view(FrameItemKey const &key, ItemView new_view);
 
+  // [observations] are the transaction's concurrent queue observations. If
+  // [push_observations], they ride in the push as observed_concurrent_entries
+  // for HogDb to match; otherwise (proposal) the push only counts their bytes
+  // against its message cap, since every validator's push carries them.
   [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
-      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
+      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+      bool push_observations);
 
   // Records a successful child TryInvoke against the depth cap. finish_frame
   // calls this once a child's success is settled in any execution mode, so

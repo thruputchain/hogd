@@ -177,7 +177,8 @@ InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
 x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+    bool push_observations)
 {
   // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
   // true on a successful lock acquisition, false on contention failure.
@@ -194,6 +195,11 @@ InvocationFrame::try_acquire_frame_locks(
   db_proxy.reserve(modified_items_.size() + new_contract_deployments_.size() +
                    observations.size());
 
+  // The bytes of observation deltas a validator's push carries and this one
+  // does not. Counting them keeps a proposer from including a transaction
+  // whose push only fits without them, which every validator would reject.
+  size_t reserved_footprint = 0;
+
   for (auto const &[key, item_view] : modified_items_) {
     const AddressAndKey addrkey = key.to_address_and_key();
     bool has_observations = false;
@@ -204,10 +210,16 @@ InvocationFrame::try_acquire_frame_locks(
       CHECK_LE(consumed, it->second.size());
       uncovered_obs = std::span<QueueEntry const>(it->second).subspan(consumed);
     }
-    auto [delta, flags] = item_view.get_delta(uncovered_obs);
-    if (has_observations && delta &&
+    auto [delta, flags] = item_view.get_delta(
+        push_observations ? uncovered_obs : std::span<QueueEntry const>{});
+    if (push_observations && has_observations && delta &&
         delta->type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
       co_return SystemStatus<bool>{false};
+    }
+    if (!push_observations && !uncovered_obs.empty()) {
+      reserved_footprint +=
+          observed_entries_footprint_bound(uncovered_obs.size(),
+                                           /*own_delta=*/!delta.has_value());
     }
     if (delta) {
       db_proxy.add_delta(addrkey, std::move(*delta), flags);
@@ -217,6 +229,12 @@ InvocationFrame::try_acquire_frame_locks(
   for (auto const &[addrkey, entries] : observations) {
     if (!entries.empty() &&
         !modified_items_.contains(FrameItemKey::from(addrkey))) {
+      if (!push_observations) {
+        reserved_footprint +=
+            observed_entries_footprint_bound(entries.size(),
+                                             /*own_delta=*/true);
+        continue;
+      }
       StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
       delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
                                                                entries.end()};
@@ -232,7 +250,8 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  auto res = co_await db_proxy.try_push_current_subtransaction();
+  auto res =
+      co_await db_proxy.try_push_current_subtransaction(reserved_footprint);
   if (!res.has_value()) {
     co_return res.error();
   }
@@ -351,9 +370,8 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
-        auto acq_res =
-            co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
-                                                                 no_obs);
+        auto acq_res = co_await frame_stack_.back().try_acquire_frame_locks(
+            db_proxy_, no_obs, /*push_observations=*/false);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           co_return acq_res.error();
