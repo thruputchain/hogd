@@ -25,11 +25,8 @@
 
 namespace hogd {
 
-// A view stands in for a hypothetical block on top of the tip. No block has
-// been proposed there, so there is no agreed timepoint: use now, but never
-// earlier than the tip's, because the next real block cannot be earlier.
-// A local node can pin a tip ahead of the wall clock. TimePoint is Unix
-// nanoseconds.
+// A view's timepoint (Unix nanoseconds): now, but never before the tip's,
+// because the next real block cannot be earlier.
 inline TimePoint
 view_block_timepoint(TimePoint tip_timepoint, TimePoint now)
 {
