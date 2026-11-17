@@ -1003,7 +1003,7 @@ bm_frame_payload_copy(benchmark::State &state, SyscallCall call)
   }
   SyscallBenchFixture &fixture = *fixture_ptr;
   const bool calldata =
-      call.words[0] == std::to_underlying(SyscallNo::kGetCalldata);
+      call.words[0] == static_cast<uint32_t>(SyscallNo::kGetCalldata);
   Calldata payload;
   payload.resize_uninitialized(call.payload_bytes);
   std::ranges::fill(payload, uint8_t{0xAB});
