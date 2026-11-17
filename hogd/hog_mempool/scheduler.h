@@ -433,7 +433,8 @@ private:
   x23::Async<bool> account_is_ready(const ContractAddress &account,
                                     bool remove_expired_txs);
 
-  bool add_txs_helper(const SignedTransaction &tx,
+  // The caller holds the lock of [account_state], the tx's account.
+  bool add_txs_helper(AccountState &account_state, const SignedTransaction &tx,
                       const TransactionHash &tx_hash,
                       const SignedTransactionHash &signed_tx_hash,
                       CachedVariant on_variant);

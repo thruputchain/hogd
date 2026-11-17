@@ -719,15 +719,14 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx,
+Scheduler::add_txs_helper(AccountState &account_state,
+                          const SignedTransaction &tx,
                           const TransactionHash &tx_hash,
                           const SignedTransactionHash &signed_tx_hash,
                           CachedVariant on_variant)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
   const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
-  auto [account_state, account_lock] = get_account_state(account);
 
   // Publish the cache and runqueue entries while holding both locks in the
   // account-then-cache order used by removal. Otherwise, [schedule()] could
@@ -774,8 +773,8 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     replacement->signed_tx_hashes->insert(signed_tx_hash);
 
     *tx_ptr = replacement;
-    if (auto it = account_state->txs.find(key);
-        it != account_state->txs.end()) {
+    if (auto it = account_state.txs.find(key);
+        it != account_state.txs.end()) {
       it->second = replacement;
     }
     txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
@@ -787,7 +786,7 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
   // [tx_cache_size_] happens after the tx is added to the cache from the
   // perspective of anyone accessing the tx in the cache.
   tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
-  return account_state->txs.insert({key, *tx_ptr}).second;
+  return account_state.txs.insert({key, *tx_ptr}).second;
 }
 
 void
@@ -889,6 +888,12 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           continue;
         }
         const TransactionHash &tx_hash = tx_hashes[tx_idx];
+        // Clear and insert under the account lock, which [schedule()] holds
+        // while it records a drop and erases the tx. Otherwise, a drop
+        // recorded between the clear and the insert would mask the
+        // re-admitted tx.
+        auto [account_state, account_lock] = scheduler.get_account_state(
+            txs[tx_idx].tx.invocation.invoked_address);
         // Only failed outcomes need clearing before resubmission. Check
         // before entering a coroutine so the common success-only path does
         // not allocate coroutine frames for each incoming transaction.
@@ -898,7 +903,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           co_await scheduler.clear_transaction_outcome_if_not_already_committed(
               tx_hash);
         }
-        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash,
+        if (scheduler.add_txs_helper(*account_state, txs[tx_idx], tx_hash,
                                      signed_tx_hashes[tx_idx], on_variant)) {
           num_added++;
         }
