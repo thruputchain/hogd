@@ -5,11 +5,14 @@
 #include <chrono> // IWYU pragma: keep
 #include <fcntl.h>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <ios>
 #include <latch>
 #include <limits>
 #include <memory>
+#include <mutex>
+#include <source_location>
 #include <span>
 #include <string>
 #include <string_view>
@@ -367,6 +370,50 @@ commit_empty_block(EventRPCContext &ctx, BlockID block_id, BlockHeight height,
 }
 
 } // namespace
+
+TEST_F(EventRpcTest, CommitLogsOneSummaryIncludingCollectedValues)
+{
+  class SummaryLogger : public Logger {
+  public:
+    void vlog(LogLevel level, std::string_view fmt,
+              const std::source_location & /*location*/,
+              std::format_args args) override
+    {
+      std::scoped_lock lock(mutex);
+      if (level == LogLevel::kInfo) {
+        lines.push_back(std::vformat(fmt, args));
+      }
+    }
+    void flush() override {}
+    std::mutex mutex;
+    std::vector<std::string> lines;
+  };
+  auto logger = std::make_unique<SummaryLogger>();
+  auto &captured = *logger;
+  auto previous = swap_logger(std::move(logger));
+  x23::Defer restore([&] { swap_logger(std::move(previous)); });
+  EventRPCContext ctx(temp_dir());
+  ConsensusValue genesis{};
+  genesis.proposal_header.block_height = 0;
+  ASSERT_TRUE(ctx.reconcile_outbox_tip(0, genesis)().has_value());
+  const auto value = commit_empty_block(ctx, 710, 1, sha256(genesis));
+  // A successful retry after context GC must not emit a second summary.
+  ASSERT_TRUE(ctx.commit_block(710, value)().has_value());
+  std::scoped_lock lock(captured.mutex);
+  ASSERT_EQ(captured.lines.size(), 1U);
+  const auto &line = captured.lines.front();
+  EXPECT_TRUE(line.starts_with("block committed height=1 block_id=710 "));
+  for (std::string_view key :
+       {"open_lock_wait_ns", "close_lock_wait_ns", "commit_lock_wait_ns",
+        "write_events_ns", "pending_writes_ns", "residual_write_ns",
+        "residual_buffers", "sync_ns", "publish_ns", "wait_executors_closed_s",
+        "wait_lock_s", "prepare_context_and_async_s", "close_total_s",
+        "close_total_ns", "residual_bytes"}) {
+    EXPECT_NE(line.find(std::format(" {}=", key)), std::string::npos) << key;
+  }
+  EXPECT_NE(line.find(" residual_bytes=0"), std::string::npos);
+  EXPECT_TRUE(line.ends_with(" outcome=ok"));
+}
 
 TEST_F(EventRpcTest, PullRejectsMismatchedProtocol)
 {
