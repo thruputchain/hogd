@@ -3,10 +3,12 @@
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -99,6 +101,31 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash);
 
 class EventBlockContext {
 public:
+  // Open initializes before publishing the context. Close owns these fields
+  // until its operation reservation is released; its file-write task is joined
+  // before then. Commit reads them while holding its operation reservation.
+  struct BlockLogStats {
+    std::optional<std::int64_t> open_lock_wait_ns;
+    std::optional<std::int64_t> close_lock_wait_ns;
+    std::optional<std::int64_t> commit_lock_wait_ns;
+    std::optional<std::int64_t> write_events_ns;
+    std::optional<std::int64_t> pending_writes_ns;
+    std::optional<std::int64_t> residual_write_ns;
+    std::optional<size_t> residual_buffers;
+    // Bytes in the close-time residual write; earlier buffer flushes are
+    // not counted (the old "total bytes at end" value).
+    std::optional<size_t> residual_bytes;
+    std::optional<std::int64_t> sync_ns;
+    std::optional<std::int64_t> publish_ns;
+    std::optional<double> wait_executors_closed_s;
+    std::optional<double> wait_lock_s;
+    std::optional<double> prepare_context_and_async_s;
+    std::optional<double> close_total_s;
+    std::optional<std::int64_t> close_total_ns;
+  } log_stats;
+
+  static void warn_slow_phase(std::string_view phase, BlockID block_id,
+                              std::int64_t elapsed_ns);
   static std::string temp_events_filename(std::string_view work_directory,
                                           BlockID block_id)
   {

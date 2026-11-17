@@ -8,6 +8,7 @@
 #include "types.hh"
 #include "x23/async.h"
 
+#include <tuple>
 #include <utility>
 
 namespace hogd {
@@ -22,7 +23,7 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
       kStorageAccessCost + handler_.peek_native_token_balance_load_gas(address);
   if (charge > gas_remaining()) {
     // Saturate the meter so the caller's error becomes an OutOfGas fault.
-    consume_gas(charge);
+    std::ignore = consume_gas(charge);
     const SyscallStatus<int128_t> refused =
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     co_return refused;
@@ -34,7 +35,8 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   }
   // Match ordinary storage reads and the sibling write helper: the flat access
   // cost on top of load_gas, which is zero once the view is loaded.
-  consume_gas(kStorageAccessCost + status->load_gas);
+  // Affordable: the refusal above checked the charge before the read.
+  std::ignore = consume_gas(kStorageAccessCost + status->load_gas);
   co_return std::move(status->result);
 }
 
@@ -46,12 +48,13 @@ NativeSyscallContext::modify_native_token_balance(
   // deltas past its gas budget (priced as kNonnegativeIntSetAdd, no load_gas).
   if (kStorageAccessCost > gas_remaining()) {
     // Saturate the meter so the caller's error becomes an OutOfGas fault.
-    consume_gas(kStorageAccessCost);
+    std::ignore = consume_gas(kStorageAccessCost);
     const SyscallStatus<void> refused =
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     co_return refused;
   }
-  consume_gas(kStorageAccessCost);
+  // Affordable: checked just above.
+  std::ignore = consume_gas(kStorageAccessCost);
   co_return co_await handler_.modify_native_token_balance(address, amount);
 }
 
