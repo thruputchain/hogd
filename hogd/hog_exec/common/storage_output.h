@@ -21,10 +21,8 @@
 
 namespace hogd {
 
-// The fixed charges of storage output, which the protocol leaves to the node
-// (see kConfigParamMaxSubtransactionOutputBytes). Consensus-critical: they
-// decide which transactions fail the limit, so every validator must agree on
-// them.
+// The fixed charges of storage output, which the protocol leaves to the node.
+// Consensus-critical: they decide which transactions fail the limit.
 //
 // Charged for every delta. Covers the storage key, the flags and every
 // fixed-size value an arm carries.
@@ -36,16 +34,10 @@ inline constexpr uint32_t kStorageOutputBytesPerQueueEntry = 8;
 // scheme. Covers the largest public key a signer can carry.
 inline constexpr uint32_t kStorageOutputBytesPerAuthSigner = 2048;
 
-// The storage output `delta` carries against max_subtransaction_output_bytes,
-// as the protocol defines it for that parameter. Counts the
-// values the delta carries, never their encoding, so every node computes the
-// same figure however its link frames a batch. The flags and storage key are
-// covered by the per-delta charge, so only the delta itself is read.
-//
-// Observed entries are not counted, and a delta staged only to carry them is
-// not counted at all (PerTransactionDatabaseProxy::add_observation_delta):
-// validators rebuild both from the proposal, and a proposer's batch has
-// neither.
+// The storage output `delta` carries against max_subtransaction_output_bytes.
+// Counts the values the delta carries, never their encoding, so every node
+// computes the same figure. Observed entries are not counted; see
+// PerTransactionDatabaseProxy::add_observation_delta.
 inline uint64_t
 storage_output_bytes(StorageDelta const &delta)
 {
@@ -83,14 +75,10 @@ storage_output_bytes(StorageDelta const &delta)
         std::to_underlying(delta.type()));
 }
 
-// Why max_subtransaction_output_bytes can bound what hogd sends HogDb. The
-// protocol defines storage output apart from any encoding; hogd's XDR encoding
-// must then never be larger, or a subtransaction the configuration admits
-// could still overflow the executor->HogDb budget. The static_asserts below
-// prove, arm by arm and for every value, that a delta encodes to at most its
-// storage output plus its observed entries, whose count the protocol bounds
-// separately (kMaxConcurrentRcqReadsPerTx). A layout change that breaks the
-// proof fails to compile here rather than overflowing at run time.
+// The static_asserts below prove that a delta's XDR encoding never exceeds its
+// storage output plus its observed entries (bounded by
+// kMaxConcurrentRcqReadsPerTx), so an admitted subtransaction always fits the
+// executor->HogDb budget.
 namespace storage_output_detail {
 
 template<typename T>

@@ -299,8 +299,7 @@ bulk_key(size_t i)
 
 // max_subtransaction_output_bytes bounds each subtransaction a transaction
 // pushes. Every case replays its proposal in validation mode and requires the
-// same outcome and the same resulting state, since a root commit over the
-// limit is a deterministic failure every node must agree on.
+// same outcome and the same resulting state.
 class SubtransactionOutputLimitTest : public ::testing::Test,
                                       public NativeContractTestFramework {
 protected:

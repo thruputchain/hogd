@@ -767,14 +767,9 @@ SystemCallHandler::add_replay_nonce_delta()
 x23::Async<ExecResult>
 SystemCallHandler::commit_output_limit_exceeded(InvocationFrame &last_frame)
 {
-  // The root frame's writes are more storage output than one subtransaction
-  // may carry. That depends only on what the transaction wrote, so every node
-  // reaches it, and it fails the transaction the way a root-frame fault does:
-  // included, with its body discarded and its side-records committed. The
-  // writes themselves were never sent.
-  //
-  // In proposal mode each successful TryInvoke pushed a savepoint holding part
-  // of the body; drop those too (a no-op in validation, which pushes none).
+  // The root frame's writes were never sent. In proposal mode each successful
+  // TryInvoke pushed a savepoint holding part of the body; drop those too (a
+  // no-op in validation, which pushes none).
   auto popped = co_await last_frame.mark_frame_as_failed(db_proxy_);
   if (!popped.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(

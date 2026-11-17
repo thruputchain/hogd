@@ -181,9 +181,9 @@ InvocationFrame::try_acquire_frame_locks(
     uint64_t max_output_bytes)
 {
   // Pushes the accumulated delta batch as a HogDb subtransaction. On success,
-  // counts the pushed subtransaction against this frame; the root
-  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
-  // count, since the root frame is discarded immediately after commit.
+  // counts the pushed subtransaction against this frame; the root commit
+  // caller (SystemCallHandler::try_commit_transaction) ignores that count,
+  // since the root frame is discarded immediately after commit.
   //
   // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
   // or advanced here; InvocationFrameStack::finish_frame checks it before

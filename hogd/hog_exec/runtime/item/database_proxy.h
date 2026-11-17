@@ -172,11 +172,9 @@ public:
                                                std::move(delta), flags);
   }
 
-  // Stages an RCQ delta carrying only a validator's rebuilt observations, for
-  // a queue the transaction did not otherwise modify. Not counted as storage
-  // output: a proposer's batch has no such delta, so counting it would make
-  // the two disagree about a transaction's output. kMaxConcurrentRcqReadsPerTx
-  // bounds these instead.
+  // Stages an RCQ delta carrying only a validator's rebuilt observations.
+  // Validators rebuild these and a proposer's batch has none, so they are not
+  // counted as storage output; kMaxConcurrentRcqReadsPerTx bounds them instead.
   void add_observation_delta(AddressAndKey addrkey, StorageDelta delta)
   {
     CHECK(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
