@@ -443,16 +443,18 @@ TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)
   handler.set_return_buffer(std::move(returned), false, {});
   finish_frame(handler, std::move(child_trace));
 
-  // The guest buffer, then the three length/range outputs written past it.
-  std::vector<uint8_t> memory(kReturnedLen + (3 * sizeof(uint32_t)), 0);
+  // A guest buffer larger than the saved output, then the three length/range
+  // outputs written past it.
+  constexpr uint32_t kGuestLen = 1536;
+  std::vector<uint8_t> memory(kGuestLen + (3 * sizeof(uint32_t)), 0);
   auto get_returned_buffer = [&](uint32_t buffer_len) {
     const std::array<uint32_t, 6> arg_words = {
         static_cast<uint32_t>(SyscallNo::kGetReturnedBuffer),
         0, // buffer ptr
         buffer_len,
-        kReturnedLen,                          // written_len ptr
-        kReturnedLen + sizeof(uint32_t),       // auth token start ptr
-        kReturnedLen + (2 * sizeof(uint32_t)), // auth token count ptr
+        kGuestLen,                          // written_len ptr
+        kGuestLen + sizeof(uint32_t),       // auth token start ptr
+        kGuestLen + (2 * sizeof(uint32_t)), // auth token count ptr
     };
     const rv32::HostResult result =
         call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
@@ -460,10 +462,12 @@ TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)
     return result.gas_consumed;
   };
 
-  // Truncated to one 512-byte block, then the whole two-block buffer.
+  // Nothing copied, truncated to one 512-byte block, then an oversized guest
+  // buffer, which pays for the two blocks copied rather than the space offered.
+  EXPECT_EQ(get_returned_buffer(0), kSyscallBaseCost);
   EXPECT_EQ(get_returned_buffer(500),
             kSyscallBaseCost + GasCost::guest_buffer_copy(500));
-  EXPECT_EQ(get_returned_buffer(kReturnedLen),
+  EXPECT_EQ(get_returned_buffer(kGuestLen),
             kSyscallBaseCost + GasCost::guest_buffer_copy(kReturnedLen));
 
   finish_frame(handler, std::move(parent_trace));
