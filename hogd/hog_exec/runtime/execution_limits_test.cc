@@ -301,13 +301,13 @@ bulk_key(size_t i)
 // pushes. Every case replays its proposal in validation mode and requires the
 // same outcome and the same resulting state, since a root commit over the
 // limit is a deterministic failure every node must agree on.
-class SubtransactionOutputLimitTest : public ::testing::TestWithParam<TestDB>,
+class SubtransactionOutputLimitTest : public ::testing::Test,
                                       public NativeContractTestFramework {
 protected:
   SubtransactionOutputLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam(),
-          true, std::nullopt, lowered_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, lowered_network_config())
   {}
 
   void SetUp() override
@@ -346,7 +346,7 @@ protected:
   {
     auto proposer = make_new_system_call_handler(tx, *context_);
     EXPECT_TRUE(proposer.root_invoke()().is_root_success());
-    auto proposal_data = proposer.get_proposal_data();
+    auto proposal_data = proposer.extract_proposal_data();
     EXPECT_EQ(proposer.try_commit_transaction()(), expected);
     const StorageShortHash proposed =
         discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -430,7 +430,7 @@ private:
 };
 
 // Positive control: a transaction within the limit commits as usual.
-TEST_P(SubtransactionOutputLimitTest, WithinLimitCommits)
+TEST_F(SubtransactionOutputLimitTest, WithinLimitCommits)
 {
   propose_then_validate(make_tx(kAddressWriter, kWriteOne),
                         ExecResult::ExecResultOK);
@@ -441,16 +441,13 @@ TEST_P(SubtransactionOutputLimitTest, WithinLimitCommits)
 // conflict: the transaction is included with its body discarded, so none of
 // its writes land but its replay record does, and resubmitting it is refused
 // as a replay.
-TEST_P(SubtransactionOutputLimitTest, RootCommitOverLimitFailsDeterministically)
+TEST_F(SubtransactionOutputLimitTest, RootCommitOverLimitFailsDeterministically)
 {
   const Transaction tx = make_tx(kAddressWriter, kWriteBulk);
   propose_then_validate(tx, ExecResult::ExecResultTxDeterministicError);
   EXPECT_FALSE(has_item(kAddressWriter, bulk_key(0)));
   EXPECT_FALSE(has_item(kAddressWriter, bulk_key(kBulkWrites - 1)));
 
-  if (GetParam() == TestDB::kMockInMemory) {
-    return; // MockInMemory does not support the replay cache.
-  }
   auto replay = make_new_system_call_handler(tx, *context_);
   ASSERT_TRUE(replay.root_invoke()().is_root_success());
   EXPECT_EQ(replay.try_commit_transaction()(),
@@ -459,7 +456,7 @@ TEST_P(SubtransactionOutputLimitTest, RootCommitOverLimitFailsDeterministically)
 
 // A TryInvoke child over the limit fails as a lock conflict does: the child is
 // rolled back, the proposal logs its bit, and the caller carries on.
-TEST_P(SubtransactionOutputLimitTest, TryInvokeOverLimitRollsBackChild)
+TEST_F(SubtransactionOutputLimitTest, TryInvokeOverLimitRollsBackChild)
 {
   const uint32_t bits = propose_then_validate(make_tx(kAddressCaller, 0),
                                               ExecResult::ExecResultOK);
@@ -467,11 +464,6 @@ TEST_P(SubtransactionOutputLimitTest, TryInvokeOverLimitRollsBackChild)
   EXPECT_FALSE(has_item(kAddressWriter, bulk_key(0)));
   EXPECT_TRUE(has_item(kAddressCaller, "after"));
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, SubtransactionOutputLimitTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
