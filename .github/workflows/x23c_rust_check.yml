@@ -39,7 +39,7 @@ jobs:
             exit 0
           fi
           # Fetch first so an API failure fails this job instead of reading as "no changes".
-          files=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[].filename')
+          files=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)')
           # The files API stops at 3000 entries; a PR that large always runs the check.
           if [ "$(printf '%s\n' "$files" | wc -l)" -ge 3000 ]; then
             echo "x23c=true" >> "$GITHUB_OUTPUT"
