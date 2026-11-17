@@ -13,6 +13,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -143,6 +144,21 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
 
 // A database loads genesis once, so each case below ends in at most one
 // successful load, after any it expects refused.
+
+// max_subtransaction_output_bytes may be as large as one executor->HogDb
+// message; one byte past that is refused.
+TEST_F(GenesisConfigValidationTest, BoundsSubtransactionOutputLimitByLink)
+{
+  const auto load_with_limit = [this](uint32_t limit) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes, limit);
+    return load(config, std::nullopt);
+  };
+  constexpr auto kLinkCap = static_cast<uint32_t>(kBulkRpcMaxMessageSize);
+  EXPECT_EQ(load_with_limit(kLinkCap + 1), DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_limit(kLinkCap), DbSchedResult::DbSchedResultOK);
+}
 
 // A contract at the ceiling loads with the stock attachment count; one byte
 // past it is refused.

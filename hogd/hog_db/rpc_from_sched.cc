@@ -23,6 +23,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -449,6 +450,15 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
     error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
           stated, kBytestringCeilingLen);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A subtransaction push is one message on the executor->HogDb link, so a
+  // genesis naming more than the link carries could never be honored.
+  if (const uint32_t stated = config_params.max_subtransaction_output_bytes;
+      stated > kBulkRpcMaxMessageSize) {
+    error("genesis max_subtransaction_output_bytes {} exceeds the {} one "
+          "executor->HogDb message carries",
+          stated, kBulkRpcMaxMessageSize);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

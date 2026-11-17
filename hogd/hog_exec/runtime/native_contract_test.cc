@@ -105,7 +105,8 @@ protected:
     handler_txs_.push_back(std::move(tx));
     return SystemCallHandler(
         handler_txs_.back(), snapshot,
-        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id,
+                                    snapshot.get_network_config_params()),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }

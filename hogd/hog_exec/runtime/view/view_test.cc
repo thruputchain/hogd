@@ -1673,7 +1673,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();
@@ -1772,7 +1773,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();

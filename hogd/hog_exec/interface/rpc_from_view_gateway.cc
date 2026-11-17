@@ -577,8 +577,10 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
   // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = co_await View::run_view_transaction(
       view_state.snapshot_cache,
-      PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+      PerTransactionDatabaseProxy(
+          db_proxy_, view_state.block_id,
+          std::numeric_limits<TransactionID>::max(),
+          view_state.snapshot_cache.get_network_config_params()),
       PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
       query, *context, {});

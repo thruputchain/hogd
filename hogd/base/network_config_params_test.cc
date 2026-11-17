@@ -15,7 +15,7 @@
 namespace hogd {
 
 // Wire names, spelled out so a rename has to be made here too.
-constexpr std::array<std::pair<ConfigParamID, std::string_view>, 16> kNames{{
+constexpr std::array<std::pair<ConfigParamID, std::string_view>, 17> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},
     {ConfigParamID::kConfigParamMaxNewContractsPerTx,
@@ -37,6 +37,8 @@ constexpr std::array<std::pair<ConfigParamID, std::string_view>, 16> kNames{{
      "min_rv32_artifact_version"},
     {ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
      "max_rv32_artifact_version"},
+    {ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+     "max_subtransaction_output_bytes"},
 }};
 
 TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
