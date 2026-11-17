@@ -8,7 +8,14 @@ ci_enable_error_trace
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
+# The mempool under test. A drop-in replacement that takes hog-mempool's flags
+# is benchmarked by pointing HOGD_MEMPOOL_BINARY at it; thruputchain/benchmarks
+# builds one beside this checkout.
+MEMPOOL_BINARY="${HOGD_MEMPOOL_BINARY:-./$BUILD_DIR/hogd/hog_mempool/hog-mempool}"
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
+if [[ "$(basename "$MEMPOOL_BINARY")" != hog-mempool ]]; then
+  STALE_PROCESSES+=" $(basename "$MEMPOOL_BINARY")"
+fi
 CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
@@ -143,9 +150,9 @@ $CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
-echo 'launch mempool'
+echo "launch mempool ($MEMPOOL_BINARY)"
 set +e
-timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
+timeout 180s "$MEMPOOL_BINARY" \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 11111111111111111111111111111112 \
