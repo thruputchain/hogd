@@ -6,8 +6,11 @@
 #include <exception>
 #include <expected>
 #include <iterator>
+#include <numeric>
 #include <optional>
 #include <random>
+#include <ranges>
+#include <span>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -292,6 +295,7 @@ void
 InvokeTX::rollback_to_savepoint(int depth)
 {
   tx_depth_ = depth;
+  savepoint_ids_.resize(tx_depth_);
   // Entries emptied by this rollback are erased, not just cleared. An empty
   // vector holds no lock and is invisible to commit/abort/sync_balance_locks,
   // but the skip below means no later rollback would ever prune it -- so a
@@ -351,31 +355,130 @@ InvokeTX::rollback_to_savepoint(int depth)
   assert_is_valid();
 }
 
-void
-InvokeTX::release_savepoint(int depth)
+bool
+InvokeTX::can_merge_savepoints(std::span<const uint32_t> ids,
+                               uint32_t pushed_id) const
 {
-  assert_is_valid();
+  std::vector<uint32_t> stack(savepoint_ids_.begin(), savepoint_ids_.end());
+  stack.push_back(pushed_id);
+  std::vector<bool> named(stack.size());
+  for (uint32_t id : ids) {
+    auto it = std::ranges::lower_bound(stack, id);
+    if (it == stack.end() || *it != id || it == stack.begin()) {
+      return false;
+    }
+    auto pos = static_cast<size_t>(it - stack.begin());
+    if (named[pos]) {
+      return false;
+    }
+    named[pos] = true;
+  }
+  return true;
+}
 
-  tx_depth_ = std::max(depth - 1, 0);
-  for (auto &[key, vec] : changes_) {
-    // skip if no changes made after savepoint.
-    if (vec.empty() || vec.back().tx_depth <= tx_depth_)
-      continue;
+void
+InvokeTX::merge_savepoints(std::span<const uint32_t> ids)
+{
+  if (ids.empty()) {
+    return;
+  }
+  // merged[i]: savepoint i + 1 joins the one below it.
+  std::vector<bool> merged(savepoint_ids_.size());
+  for (uint32_t id : ids) {
+    auto it = std::ranges::lower_bound(savepoint_ids_, id);
+    assert(it != savepoint_ids_.end() && *it == id &&
+           it != savepoint_ids_.begin());
+    merged[static_cast<size_t>(it - savepoint_ids_.begin())] = true;
+  }
+  // A run is a savepoint that keeps its start together with the merged ones
+  // above it; counted down from the head, as fold_savepoints() takes them.
+  std::vector<uint32_t> runs;
+  uint32_t run = 0;
+  for (size_t i = merged.size(); i-- > 0;) {
+    ++run;
+    if (!merged[i]) {
+      runs.push_back(run);
+      run = 0;
+    }
+  }
+  assert(run == 0);
+  // The ids go first: fold_savepoints() checks them against the new head.
+  size_t out = 0;
+  for (size_t i = 0; i < merged.size(); ++i) {
+    if (!merged[i]) {
+      savepoint_ids_[out++] = savepoint_ids_[i];
+    }
+  }
+  savepoint_ids_.resize(out);
+  fold_savepoints(runs);
+  assert(savepoint_ids_.size() == tx_depth_);
+}
 
-    // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change), tx_depth_, vec.back().lock);
-    vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
-                                       &ItemVersion::tx_depth),
-              vec.end());
-    if (!vec.empty() && vec.back().tx_depth == tx_depth_) {
-      vec.back().change = std::move(tmp.change);
-      // TODO(geoff): abelay had left this as return; that seems incorrect.
+void
+InvokeTX::fold_savepoints(std::span<const uint32_t> runs)
+{
+  if (std::ranges::all_of(runs, [](uint32_t run) { return run <= 1; })) {
+    return;
+  }
+  unsigned int folded = 0;
+  for (uint32_t run : runs) {
+    folded += run;
+  }
+  assert(folded <= tx_depth_);
+
+  // remap[d] is the depth savepoint d moves to. Depths below [lowest] belong
+  // to no run and keep theirs.
+  const unsigned int lowest = tx_depth_ - folded + 1;
+  std::vector<unsigned int> remap(tx_depth_ + 1);
+  std::iota(remap.begin(), remap.begin() + lowest, 0U);
+  unsigned int old_depth = lowest;
+  unsigned int new_depth = lowest;
+  for (uint32_t run : std::ranges::reverse_view(runs)) {
+    if (run == 0) {
       continue;
     }
-    vec.push_back(std::move(tmp));
+    std::fill_n(remap.begin() + old_depth, run, new_depth);
+    old_depth += run;
+    ++new_depth;
   }
+  assert(old_depth == tx_depth_ + 1);
+  tx_depth_ = new_depth - 1;
 
-  panic("not implemented releasing balance versions");
+  // Every version records the item's whole value at its depth, and the item's
+  // lock already holds the newest one, so folding needs no lock calls: each
+  // version moves to its run's depth and, of the versions that land on the
+  // same depth, only the newest stays. locked_storage_cost moves with it, so
+  // the per-address storage totals that assert_is_valid() checks are
+  // unchanged.
+  auto fold = [&remap, lowest](auto &vec, auto depth_of) {
+    if (vec.empty() || depth_of(vec.back()) < lowest) {
+      return;
+    }
+    auto first = std::ranges::lower_bound(vec, lowest, {}, depth_of);
+    auto out = first;
+    for (auto in = first; in != vec.end(); ++in) {
+      unsigned int depth = remap[depth_of(*in)];
+      if (out != vec.begin() && depth_of(*std::prev(out)) == depth) {
+        *std::prev(out) = std::move(*in);
+      }
+      else {
+        if (out != in) {
+          *out = std::move(*in);
+        }
+        ++out;
+      }
+      depth_of(*std::prev(out)) = depth;
+    }
+    vec.erase(out, vec.end());
+  };
+  for (auto &[key, vec] : changes_) {
+    fold(vec, [](ItemVersion &v) -> unsigned int & { return v.tx_depth; });
+  }
+  for (auto &[addr, vec] : balance_deltas_) {
+    fold(vec,
+         [](StorageBalanceVersion &v) -> unsigned int & { return v.tx_depth; });
+  }
+  assert_is_valid();
 }
 
 void
