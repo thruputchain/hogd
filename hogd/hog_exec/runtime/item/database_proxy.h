@@ -13,10 +13,10 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/components/borrowed_contract_batch.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -104,9 +104,13 @@ public:
   // the caller must keep the referent alive until the call completes.  The
   // batch is far too large to copy per push, which is why it stays a
   // reference; PerTransactionDatabaseProxy owns both for the whole call.
+  //
+  // A batch whose request would exceed [max_message_bytes] is rejected as a
+  // conflict without being sent.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
   try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
                               StorageDeltaBatch const &delta_batch,
+                              size_t max_message_bytes,
                               DbConflictResult *conflict_out = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
@@ -163,39 +167,11 @@ public:
     current_subtransaction_batch_.reserve(delta_count);
   }
 
-  // Stages a delta the transaction wrote, counting its storage output.
   void add_delta(AddressAndKey addrkey, StorageDelta delta,
                  StorageDeltaFlagSet flags)
   {
-    staged_output_bytes_ += storage_output_bytes(delta);
     current_subtransaction_batch_.emplace_back(std::move(addrkey),
                                                std::move(delta), flags);
-  }
-
-  // Stages an RCQ delta carrying only a validator's rebuilt observations.
-  // Validators rebuild these and a proposer's batch has none, so they are not
-  // counted as storage output; kMaxConcurrentRcqReadsPerTx bounds them instead.
-  void add_observation_delta(AddressAndKey addrkey, StorageDelta delta)
-  {
-    CHECK(delta.type() == StorageDeltaType::kDeltaTypeRetrocausalQueue);
-    current_subtransaction_batch_.emplace_back(std::move(addrkey),
-                                               std::move(delta),
-                                               std::to_underlying(
-                                                   StorageDeltaFlags::None));
-  }
-
-  // Storage output staged since the last push or discard: what the next
-  // push would count against max_subtransaction_output_bytes.
-  uint64_t staged_output_bytes() const { return staged_output_bytes_; }
-
-  // Drops the staged deltas without sending them, as a push refused before
-  // reaching HogDb must.
-  void discard_current_subtransaction()
-  {
-    current_subtransaction_batch_.clear();
-    staged_output_bytes_ = 0;
-    last_push_conflict_ =
-        DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   }
 
   // Conflict diagnostics from the most recent failed push, at the level
@@ -204,6 +180,13 @@ public:
   DbConflictResult const &last_push_conflict() const
   {
     return last_push_conflict_;
+  }
+
+  // Sets the chain's max_subtransaction_output_bytes: the largest request a
+  // push may send. Larger batches are rejected as a conflict.
+  void set_max_subtransaction_output_bytes(uint32_t bytes)
+  {
+    max_subtransaction_output_bytes_ = bytes;
   }
 
   // Coroutine: the staged batch stays owned by this object across the
@@ -261,10 +244,11 @@ private:
   // acquire and release both touch only the running thread's pool, so that
   // stays correct under interleaving.
   StorageDeltaBatch current_subtransaction_batch_;
-  uint64_t staged_output_bytes_ = 0;
   DatabaseProxy &db_proxy_;
   const BlockID block_id_;
   const TransactionID tx_id_;
   DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
+  uint32_t max_subtransaction_output_bytes_ =
+      kDefaultMaxSubtransactionOutputBytes;
 };
 } // namespace hogd

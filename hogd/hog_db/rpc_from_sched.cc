@@ -23,9 +23,9 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
-#include "hogd/hog_exec/common/storage_output.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/storage_cost/storage_cost_model.h"
@@ -444,28 +444,21 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, kSavepointDepthCeiling);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Every root commit carries at least the replay-cache record, so a limit
-  // below one delta would fail every transaction.
-  if (const uint32_t stated = config_params.max_subtransaction_output_bytes;
-      stated < static_cast<uint32_t>(kStorageOutputBytesPerDelta)) {
-    error("genesis max_subtransaction_output_bytes {} is below the {} one "
-          "delta is charged",
-          stated, kStorageOutputBytesPerDelta);
-    co_return DbSchedResult::DbSchedResultError;
-  }
-  if (const uint32_t stated = config_params.max_subtransaction_output_bytes;
-      stated > kSubtransactionOutputCeilingBytes) {
-    error("genesis max_subtransaction_output_bytes {} exceeds the {} this "
-          "build sends HogDb in one message",
-          stated, kSubtransactionOutputCeilingBytes);
-    co_return DbSchedResult::DbSchedResultError;
-  }
   // The ceiling bounds the wire type, so a genesis naming more would let a
   // contract write a bytestring no peer could carry.
   if (const uint32_t stated = config_params.max_bytestring_len;
       stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
     error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
           stated, kBytestringCeilingLen);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A subtransaction push is one message on the executor->HogDb link, so a
+  // genesis naming more than the link carries could never be honored.
+  if (const uint32_t stated = config_params.max_subtransaction_output_bytes;
+      stated > kBulkRpcMaxMessageSize) {
+    error("genesis max_subtransaction_output_bytes {} exceeds the {} one "
+          "executor->HogDb message carries",
+          stated, kBulkRpcMaxMessageSize);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

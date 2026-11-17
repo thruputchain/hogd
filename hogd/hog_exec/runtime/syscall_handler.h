@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -294,13 +293,6 @@ public:
   // (forged observation or replay) aborts the transaction and returns
   // ExecResultTxNonDeterministicError; otherwise returns success_result.
   x23::Async<ExecResult> commit_body_discarded(ExecResult success_result);
-
-  // Fails a transaction whose root commit carries more storage output than
-  // max_subtransaction_output_bytes: pops the body's TryInvoke savepoints and
-  // commits it with its body discarded, as ExecResultTxDeterministicError.
-  x23::Async<ExecResult>
-  commit_output_limit_exceeded(InvocationFrame &last_frame);
-
   // Emit the transaction's event log, including the gas the root result
   // consumed, to the event server.
   // Called for all deterministic outcomes (OK, DeterministicError, Reverted).
@@ -538,11 +530,6 @@ private:
   // Transaction), in which case no replay nonce is consumed.
   const std::optional<Uniquifier> tx_uniquifier_;
   const std::optional<ContractAddress> root_invoked_address_;
-
-  // max_subtransaction_output_bytes, read when the handler is made. The root
-  // commit needs it after the snapshot cache may have moved to a later block
-  // (which it then reports as a stale block), so it is not read from there.
-  const uint64_t max_subtransaction_output_bytes_;
 
   ExecutionModeData execution_mode_data_;
 

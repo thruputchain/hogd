@@ -174,16 +174,16 @@ InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
   total_try_invoke_depth_++;
 }
 
-x23::Async<SystemStatus<FrameLockResult>>
+x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
-    uint64_t max_output_bytes)
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
 {
-  // Pushes the accumulated delta batch as a HogDb subtransaction. On success,
-  // counts the pushed subtransaction against this frame; the root commit
-  // caller (SystemCallHandler::try_commit_transaction) ignores that count,
-  // since the root frame is discarded immediately after commit.
+  // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
+  // true on a successful lock acquisition, false on contention failure.
+  // On success, counts the pushed subtransaction against this frame; the root
+  // commit caller (SystemCallHandler::try_commit_transaction) ignores that
+  // count, since the root frame is discarded immediately after commit.
   //
   // The deterministic TryInvoke depth cap (max_savepoint_depth) is NOT enforced
   // or advanced here; InvocationFrameStack::finish_frame checks it before
@@ -207,7 +207,7 @@ InvocationFrame::try_acquire_frame_locks(
     auto [delta, flags] = item_view.get_delta(uncovered_obs);
     if (has_observations && delta &&
         delta->type() != StorageDeltaType::kDeltaTypeRetrocausalQueue) {
-      co_return FrameLockResult::kConflict;
+      co_return SystemStatus<bool>{false};
     }
     if (delta) {
       db_proxy.add_delta(addrkey, std::move(*delta), flags);
@@ -220,7 +220,8 @@ InvocationFrame::try_acquire_frame_locks(
       StorageDelta delta(StorageDeltaType::kDeltaTypeRetrocausalQueue);
       delta.retrocausal_queue().observed_concurrent_entries = {entries.begin(),
                                                                entries.end()};
-      db_proxy.add_observation_delta(addrkey, std::move(delta));
+      db_proxy.add_delta(addrkey, std::move(delta),
+                         std::to_underlying(StorageDeltaFlags::None));
     }
   }
 
@@ -231,25 +232,14 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  // Checked on the whole staged batch, so deltas the caller staged first
-  // (the root commit's replay-cache record) count too.
-  if (db_proxy.staged_output_bytes() > max_output_bytes) {
-    debug("subtransaction storage output {} exceeds "
-          "max_subtransaction_output_bytes {}; not pushing it",
-          db_proxy.staged_output_bytes(), max_output_bytes);
-    db_proxy.discard_current_subtransaction();
-    co_return FrameLockResult::kOutputLimitExceeded;
-  }
-
   auto res = co_await db_proxy.try_push_current_subtransaction();
   if (!res.has_value()) {
     co_return res.error();
   }
-  if (!res.value()) {
-    co_return FrameLockResult::kConflict;
+  if (res.value()) {
+    try_invoke_frame_count_++;
   }
-  try_invoke_frame_count_++;
-  co_return FrameLockResult::kAcquired;
+  co_return res.value();
 }
 
 void
@@ -361,16 +351,14 @@ InvocationFrameStack::finish_frame(InvokeStatus<void> result,
       }
       else if (std::holds_alternative<ProposalModeData>(execution_mode_data)) {
         static const std::map<AddressAndKey, std::vector<QueueEntry>> no_obs;
-        auto acq_res = co_await frame_stack_.back().try_acquire_frame_locks(
-            db_proxy_, no_obs, config_params_.max_subtransaction_output_bytes);
+        auto acq_res =
+            co_await frame_stack_.back().try_acquire_frame_locks(db_proxy_,
+                                                                 no_obs);
         if (!acq_res.has_value()) {
           frame_stack_.pop_back();
           co_return acq_res.error();
         }
-        // An over-limit child fails as a conflicting one does. Its output is
-        // deterministic, but the bit logged below carries the outcome either
-        // way, and validators replay the bit rather than re-probing.
-        acq_success = acq_res.value() == FrameLockResult::kAcquired;
+        acq_success = acq_res.value();
 
         // Hand the just-attempted push's conflict diagnostic back to the caller
         // so it can be recorded on this frame's trace. None on a successful
