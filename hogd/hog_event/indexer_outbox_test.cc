@@ -889,6 +889,97 @@ TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
   EXPECT_TRUE(store.publish_committed(committed)().has_value());
 }
 
+TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  const auto committed = make_committed(1, {}, {});
+  ASSERT_TRUE(store
+                  .initialize_current_epoch_origin(
+                      1, committed.consensus_value.prev_hash)()
+                  .has_value());
+  // A reference publication needs the events file in place.
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto next = make_committed(2, {}, {});
+  next.consensus_value.prev_hash = sha256(committed.consensus_value);
+  const IndexerOutboxCommittedStoredPayload stored{
+      .format_version = committed.format_version,
+      .consensus_value = next.consensus_value,
+  };
+
+  // Readable as soon as it is published, before any fsync.
+  ASSERT_TRUE(store.publish_committed_reference(stored)().has_value());
+  ASSERT_TRUE(store.has_committed(2).value());
+  auto loaded = store.load_committed(2)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  EXPECT_EQ(loaded->consensus_value, next.consensus_value);
+
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(store.sync_committed(2).has_value());
+  EXPECT_TRUE(store.sync_committed(2).has_value());
+  EXPECT_FALSE(store.sync_committed(3).has_value());
+}
+
+// A process that dies between linking a record and syncing it leaves a record
+// that reads back complete from the page cache. Open has to sync it before it
+// is served or appended to.
+TEST_F(IndexerOutboxTest, OpenSyncsTheRetainedNewestCommittedRecord)
+{
+  const auto committed = make_committed(1, {}, {});
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  }
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(IndexerOutboxStore::open(store_path(dir_)).has_value());
+  auto reopened = IndexerOutboxStore::open(store_path(dir_));
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->has_committed(1).value());
+}
+
+TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
+{
+  const auto first = make_committed(1, {}, {});
+  auto second = make_committed(2, {}, {});
+  second.consensus_value.prev_hash = sha256(first.consensus_value);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, first);
+    ASSERT_TRUE(store.publish_committed(first)().has_value());
+    ASSERT_TRUE(store.publish_committed(second)().has_value());
+  }
+  const std::filesystem::path outbox = store_path(dir_);
+
+  // Intact records survive a reopen.
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+  }
+  // An incomplete record below the newest is left in place to fail closed.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(1),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+    EXPECT_FALSE(store.enumerate_committed_records_raw().has_value());
+  }
+  // An incomplete newest record is removed. Height 1 was not the newest at
+  // this open, so it stays.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(2),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_FALSE(store.has_committed(2).value());
+  }
+}
+
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
 {
   IndexerOutboxOrigin origin{

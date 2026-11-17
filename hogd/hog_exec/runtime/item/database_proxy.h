@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <utility>
 #include <variant>
@@ -12,6 +13,7 @@
 #include "executor_to_db_rpc.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -102,10 +104,14 @@ public:
   // the caller must keep the referent alive until the call completes.  The
   // batch is far too large to copy per push, which is why it stays a
   // reference; PerTransactionDatabaseProxy owns both for the whole call.
-  [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_new_subtransaction(BlockID block_id, TransactionID tx_id,
-                              StorageDeltaBatch const &delta_batch,
-                              DbConflictResult *conflict_out = nullptr);
+  //
+  // A batch whose request would exceed [max_message_bytes] is rejected as a
+  // conflict without being sent.
+  [[nodiscard]] x23::Async<SystemStatus<bool>> try_push_new_subtransaction(
+      BlockID block_id, TransactionID tx_id,
+      StorageDeltaBatch const &delta_batch,
+      DbConflictResult *conflict_out = nullptr,
+      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes);
 
   // [new_contracts] is borrowed across the suspension; see above.
   [[nodiscard]] x23::Async<SystemStatus<void>>
@@ -144,9 +150,14 @@ private:
 // A DatabaseProxy that is scoped to a single transaction.
 class PerTransactionDatabaseProxy {
 public:
+  // [config_params] is the chain's configuration for [block_id]; its
+  // max_subtransaction_output_bytes bounds each push.
   PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
-                              TransactionID tx_id)
-    : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id)
+                              TransactionID tx_id,
+                              NetworkConfigParams const &config_params)
+    : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id),
+      max_subtransaction_output_bytes_(
+          config_params.max_subtransaction_output_bytes)
   {}
 
   // A copy would fork the staged delta batch below, which used to be a shared
@@ -235,5 +246,8 @@ private:
   const BlockID block_id_;
   const TransactionID tx_id_;
   DbConflictResult last_push_conflict_{DbDiagnosticLevel::kDbDiagnosticNone};
+  // The largest request a push may send; larger batches are rejected as a
+  // conflict.
+  uint32_t max_subtransaction_output_bytes_;
 };
 } // namespace hogd

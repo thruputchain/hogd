@@ -39,7 +39,8 @@ protected:
         LocalMockDB{.read_port_number_ = server_.port()});
     per_tx_db_proxy_ =
         std::make_unique<PerTransactionDatabaseProxy>(*db_proxy_, kBlockId,
-                                                      kTxId);
+                                                      kTxId,
+                                                      NetworkConfigParams{});
   }
 
   static constexpr BlockID kBlockId = 1;

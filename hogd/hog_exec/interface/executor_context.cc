@@ -34,7 +34,9 @@ namespace hogd {
 PerTransactionDatabaseProxy
 ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
 {
-  return PerTransactionDatabaseProxy(db_proxy_, block_id_, tx_id);
+  return PerTransactionDatabaseProxy(
+      db_proxy_, block_id_, tx_id,
+      snapshot_cache_->get_network_config_params());
 }
 
 PerTransactionEventServerProxy

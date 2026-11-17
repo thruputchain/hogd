@@ -103,7 +103,9 @@ public:
                                  TransactionID txid,
                                  RuntimeContext &runtime_context)
   {
-    auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
+    auto proxy = PerTransactionDatabaseProxy(
+        *db_proxy_, block_number_, txid,
+        snapshot_cache_->get_network_config_params());
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx.tx, *snapshot_cache_, std::move(proxy),

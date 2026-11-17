@@ -122,6 +122,10 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
+// Per-block cost of copying a frame payload (GetCalldata, GetReturnedBuffer)
+// into a guest buffer; the bytestring read rate with no storage access.
+constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
+
 constexpr static uint64_t kNoSyscallCost = 10;
 constexpr static uint64_t kGenericBadSyscallCost = 10;
 
@@ -231,6 +235,11 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  static constexpr uint64_t guest_buffer_copy(uint64_t bytes_len)
+  {
+    return kGuestBufferCopyBlockCost * bytestring_blocks(bytes_len);
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);
@@ -258,7 +267,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 19> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -279,6 +288,7 @@ constexpr std::array<SyscallGasCostEntry, 18> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmTerm", .cost = kRistretto255MsmTermCost},
     {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
+    {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
 }};
 
 } // namespace hogd

@@ -45,6 +45,11 @@ inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 // one now gets this cap rather than none.
 inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
 
+// The executor->HogDb message budget every chain ran under before the
+// parameter, so a chain that does not state one keeps the same limit.
+inline constexpr uint32_t kDefaultMaxSubtransactionOutputBytes =
+    16 * 1024 * 1024;
+
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
@@ -70,6 +75,8 @@ struct NetworkConfigParams {
       static_cast<uint32_t>(kMinRv32ArtifactVersion);
   uint32_t max_rv32_artifact_version =
       static_cast<uint32_t>(kMaxRv32ArtifactVersion);
+  uint32_t max_subtransaction_output_bytes =
+      kDefaultMaxSubtransactionOutputBytes;
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -116,7 +123,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxRv32ArtifactVersion;
+    ConfigParamID::kConfigParamMaxSubtransactionOutputBytes;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -155,6 +162,8 @@ config_param_name(ConfigParamID id)
     return "min_rv32_artifact_version";
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return "max_rv32_artifact_version";
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return "max_subtransaction_output_bytes";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -210,6 +219,7 @@ config_param_max_value(ConfigParamID id)
   case ConfigParamID::kConfigParamMaxAuthTokens:
   case ConfigParamID::kConfigParamMaxCalldataLen:
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return std::numeric_limits<uint32_t>::max();
   case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
@@ -255,6 +265,8 @@ config_param_value(ConfigParam const &param)
     return param.min_rv32_artifact_version();
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return param.max_rv32_artifact_version();
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return param.max_subtransaction_output_bytes();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -336,6 +348,9 @@ NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     out.max_rv32_artifact_version() = to_u32(value);
     break;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    out.max_subtransaction_output_bytes() = to_u32(value);
+    break;
   }
   return out;
 }
@@ -376,6 +391,8 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return min_rv32_artifact_version;
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return max_rv32_artifact_version;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return max_subtransaction_output_bytes;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -440,7 +457,11 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
             .value_or(kMinRv32ArtifactVersion))),
     max_rv32_artifact_version(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion)
-            .value_or(kMaxRv32ArtifactVersion)))
+            .value_or(kMaxRv32ArtifactVersion))),
+    max_subtransaction_output_bytes(to_u32(
+        stated_param(config,
+                     ConfigParamID::kConfigParamMaxSubtransactionOutputBytes)
+            .value_or(kDefaultMaxSubtransactionOutputBytes)))
 {}
 
 inline void

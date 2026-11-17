@@ -27,9 +27,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0xa6, 0x13, 0x8c, 0x38, 0x99, 0x49, 0xe9, 0x51, 0x2e, 0xe4, 0xf0,
-      0x1a, 0x09, 0xa6, 0x38, 0x72, 0xe0, 0x43, 0x94, 0x78, 0x9e, 0x04,
-      0xe3, 0xa8, 0xce, 0x86, 0x21, 0x72, 0x80, 0xcc, 0x28, 0x47,
+      0xc7, 0x9e, 0x6c, 0xd5, 0xf3, 0x7c, 0x78, 0x38, 0xbc, 0x58, 0xd0,
+      0xbc, 0x21, 0x54, 0xba, 0xfb, 0x25, 0x56, 0x20, 0x85, 0x85, 0x34,
+      0xa2, 0x4c, 0xad, 0x3a, 0x2f, 0x0f, 0xbd, 0x74, 0x9b, 0x7a,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -65,7 +65,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 13> variants;
+  std::array<NetworkConfig, 14> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -108,6 +108,9 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(
       variants[12], ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
       stock.max_rv32_artifact_version - 1);
+  NetworkConfigParams::set_param(
+      variants[13], ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      stock.max_subtransaction_output_bytes + 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -159,7 +162,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 16U);
+  EXPECT_EQ(config.v0().params.size(), 17U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -266,6 +269,8 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
   EXPECT_EQ(defaults.max_rv32_code_bytes, 256_KiB);
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
+  EXPECT_EQ(defaults.max_subtransaction_output_bytes,
+            kDefaultMaxSubtransactionOutputBytes);
 
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,

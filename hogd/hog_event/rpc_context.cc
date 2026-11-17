@@ -4,6 +4,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -19,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 #include <vector>
@@ -124,6 +126,77 @@ EventRPCContext::EventRPCContext(std::string_view work_directory)
   tx_failure_mailbox_.reserve(kMaxTxFailureNotices);
 }
 
+EventRPCContext::~EventRPCContext()
+{
+  // Nothing else can be using the object by now, so the unlocked read is
+  // safe, and a context that never deferred a sync does not touch the pool.
+  if (!pending_outbox_sync_) {
+    return;
+  }
+  // Not a coroutine, so hop onto the pool and block on the result, as
+  // release_indexer_pulls() does. The sync holds a pointer to this object and
+  // its handle must be awaited before it is destroyed.
+  [](EventRPCContext &self) -> x23::Async<void> {
+    co_await default_threadpool().bg();
+    co_await self.flush_outbox_sync();
+  } (*this)();
+}
+
+x23::Async<void>
+EventRPCContext::flush_outbox_sync()
+{
+  x23::CoroGuard guard;
+  co_await guard(outbox_sync_lock_);
+  co_await drain_outbox_sync(guard);
+}
+
+x23::Async<void>
+EventRPCContext::drain_outbox_sync(const x23::CoroGuard &sync_guard)
+{
+  CHECK(sync_guard.lkp_ == &outbox_sync_lock_);
+  if (pending_outbox_sync_) {
+    co_await *pending_outbox_sync_;
+    pending_outbox_sync_.reset();
+  }
+}
+
+x23::Async<void>
+EventRPCContext::sync_committed_record(BlockHeight block_height)
+{
+  // The fsyncs block for as long as the device takes to flush. Pool workers
+  // are reserved for work that does not block, so run them on a thread
+  // outside the pool; this coroutine resumes in the pool once they are done.
+  auto *pool = x23::ThreadPool::get_thread_pool();
+  if (pool == nullptr) {
+    pool = &default_threadpool();
+  }
+  auto synced = co_await pool->async([this, block_height] {
+    if (outbox_sync_test_hook_) {
+      outbox_sync_test_hook_(block_height);
+    }
+    return indexer_outbox_store_.sync_committed(block_height);
+  });
+  if (!synced) {
+    // The commit was already acknowledged, and after a failed fsync the
+    // record's state on disk is unknown. There is nothing to return this to;
+    // a restart reconciles against whatever reached the disk.
+    panic("failed to sync committed indexer outbox record at height {}: {}",
+          static_cast<std::int64_t>(block_height), synced.error());
+  }
+  // Only now is the record pullable. commit_block() checked that it extends
+  // the tail by exactly one; anything else (a retry of the tail itself, a
+  // commit before reconciliation installed a tail) leaves the tail alone.
+  x23::CoroGuard guard;
+  co_await guard(outbox_commit_lock_);
+  if (finalized_indexer_tail_ && *finalized_indexer_tail_ != INT64_MAX &&
+      *finalized_indexer_tail_ + 1 == block_height) {
+    finalized_indexer_tail_ = block_height;
+    // Bumped under the publication lock: a pull that sampled the counter under
+    // this same lock either already saw the new tail or wakes on this bump.
+    publish_indexer_wake();
+  }
+}
+
 void
 EventRPCContext::release_indexer_pulls()
 {
@@ -155,11 +228,19 @@ EventRPCContext::publish_indexer_wake()
 x23::Async<EventStatus<void>>
 EventRPCContext::open_block(BlockID block_id)
 {
-  info("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
+  ElapsedTimer open_timer;
+  const auto lock_start = std::chrono::steady_clock::now();
+  std::int64_t lock_wait_ns;
+  debug("EventRPCContext::open_block: block_id={} acquiring lock", block_id);
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    info("EventRPCContext::open_block: block_id={} lock acquired", block_id);
+    lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - lock_start)
+                       .count();
+    EventBlockContext::warn_slow_phase("open_lock_wait", block_id,
+                                       lock_wait_ns);
+    debug("EventRPCContext::open_block: block_id={} lock acquired", block_id);
     // Reserve the id before creating its file.  A duplicate open must not
     // reach create_events_file(): that unlinks and recreates the temp name,
     // which would pull the live block's file out from under it and fail its
@@ -203,6 +284,11 @@ EventRPCContext::open_block(BlockID block_id)
                                           std::move(events_file));
   }
   CHECK(inserted);
+  event_block_contexts_.at(block_id).get().log_stats.open_lock_wait_ns =
+      lock_wait_ns;
+  EventBlockContext::warn_slow_phase("open", block_id,
+                                     static_cast<std::int64_t>(
+                                         open_timer.elapsed() * 1e9));
   block_operations_.erase(block_id);
   co_return EventStatus<void>();
 }
@@ -246,14 +332,24 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
 
   bool executors_closed = co_await context->get().await_all_executors_closed();
   record_stage(stage_wait_executors_closed);
+  EventBlockContext::warn_slow_phase("wait_executors_closed", block_id,
+                                     static_cast<std::int64_t>(
+                                         stage_wait_executors_closed * 1e9));
   if (!executors_closed) {
     co_await finish_block_operation(block_id, context, false);
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
+  std::int64_t close_lock_wait_ns;
   {
+    const auto lock_start = std::chrono::steady_clock::now();
     x23::CoroGuard g;
     co_await g(lock_);
+    close_lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             std::chrono::steady_clock::now() - lock_start)
+                             .count();
+    EventBlockContext::warn_slow_phase("close_lock_wait", block_id,
+                                       close_lock_wait_ns);
     record_stage(stage_wait_lock);
 
     context->get().set_block_height(block_height);
@@ -324,31 +420,53 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
     panic("failed to durably close event block {} with unknown exception",
           block_id);
   }
-  co_await finish_block_operation(block_id, context, false);
   record_stage(stage_prepare_context_and_async);
+  // Complete diagnostics before releasing the reservation/reference: commit
+  // may start and destroy the context as soon as it is released.
+  auto &stats = context->get().log_stats;
+  stats.wait_executors_closed_s = stage_wait_executors_closed;
+  stats.wait_lock_s = stage_wait_lock;
+  stats.close_lock_wait_ns = close_lock_wait_ns;
+  stats.prepare_context_and_async_s = stage_prepare_context_and_async;
+  stats.close_total_s = timer.elapsed();
+  stats.close_total_ns = static_cast<std::int64_t>(*stats.close_total_s * 1e9);
+  EventBlockContext::warn_slow_phase(
+      "prepare_context_and_async", block_id,
+      static_cast<std::int64_t>(stage_prepare_context_and_async * 1e9));
+  EventBlockContext::warn_slow_phase("close_total", block_id,
+                                     *stats.close_total_ns);
 
-  info("close_block() stages: wait_executors_closed={:.6f}, "
-       "wait_lock={:.6f}, prepare_context_and_async={:.6f}, total={:.6f}, "
-       "outcome={}, block_id={}",
-       stage_wait_executors_closed, stage_wait_lock,
-       stage_prepare_context_and_async, timer.elapsed(), "ok", block_id);
+  debug("close_block() stages: wait_executors_closed={:.6f}, "
+        "wait_lock={:.6f}, prepare_context_and_async={:.6f}, total={:.6f}, "
+        "outcome={}, block_id={}",
+        stage_wait_executors_closed, stage_wait_lock,
+        stage_prepare_context_and_async, timer.elapsed(), "ok", block_id);
+  co_await finish_block_operation(block_id, context, false);
   co_return out_hash;
 }
 
 x23::Async<EventStatus<BlockHeight>>
 EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
 {
+  ElapsedTimer commit_timer;
   if (!co_await reserve_block_operation(block_id,
                                         BlockOperation::kCommitting)) {
     co_return EventError{EventErrorCode::kBadBlockID};
   }
 
-  info("EventRPCContext::commit_block: block_id={} acquiring lock", block_id);
+  const auto lock_start = std::chrono::steady_clock::now();
+  std::int64_t lock_wait_ns;
+  debug("EventRPCContext::commit_block: block_id={} acquiring lock", block_id);
   PerThreadARC<EventBlockContext> *context_ptr = nullptr;
   {
     x23::CoroGuard g;
     co_await g(lock_);
-    info("EventRPCContext::commit_block: block_id={} lock acquired", block_id);
+    lock_wait_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       std::chrono::steady_clock::now() - lock_start)
+                       .count();
+    EventBlockContext::warn_slow_phase("commit_lock_wait", block_id,
+                                       lock_wait_ns);
+    debug("EventRPCContext::commit_block: block_id={} lock acquired", block_id);
     auto it = event_block_contexts_.find(block_id);
     if (it != event_block_contexts_.end()) {
       context_ptr = &it->second;
@@ -361,6 +479,13 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
 
   const BlockHeight block_height = consensus_value.proposal_header.block_height;
+  // The previous commit's record must be durable before this one is written.
+  // Not flush_outbox_sync(): the lock must stay held until this commit's own
+  // sync is registered below.
+  x23::CoroGuard sync_guard;
+  co_await sync_guard(outbox_sync_lock_);
+  co_await drain_outbox_sync(sync_guard);
+  bool sync_deferred = false;
   x23::CoroGuard outbox_guard;
   co_await outbox_guard(outbox_commit_lock_);
   auto committed_exists = indexer_outbox_store_.has_committed(block_height);
@@ -411,9 +536,23 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
       error("failed to publish committed indexer outbox record for block {}: "
             "{}",
             block_id, published.error());
+      // A failed publication may have linked the record; sync what it left.
+      if (indexer_outbox_store_.has_committed(block_height).value_or(true)) {
+        if (auto synced = indexer_outbox_store_.sync_committed(block_height);
+            !synced) {
+          panic("failed to sync committed indexer outbox record left at "
+                "height {} by a failed publication: {}",
+                static_cast<std::int64_t>(block_height), synced.error());
+        }
+      }
       co_await finish_block_operation(block_id, context_ptr, false);
       co_return EventError{EventErrorCode::kInternal};
     }
+    // The record is linked but not durable, so its sync is owed from here on
+    // whatever the checks below decide. It cannot move the tail before they
+    // run: it needs outbox_commit_lock_, which this coroutine still holds.
+    sync_deferred = true;
+    pending_outbox_sync_.emplace(sync_committed_record(block_height));
   }
   else {
     // Restart promotion: no live context vouches for the file, so read it
@@ -462,7 +601,17 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     co_await finish_block_operation(block_id, context_ptr, false);
     co_return EventError{EventErrorCode::kInternal};
   }
-  if (finalized_indexer_tail_) {
+  // A record may have been durably written by an earlier attempt that failed
+  // the tail checks above. Its first successful publication still needs a
+  // summary; a retry of an already visible height does not. A live context
+  // always means this process opened and closed the block (commit GCs it),
+  // including a re-execution after a crash between outbox and HogDB commit.
+  const bool log_commit =
+      !*committed_exists || context_ptr != nullptr ||
+      (finalized_indexer_tail_ && block_height > *finalized_indexer_tail_);
+  // A deferred record becomes pullable when its sync completes; see
+  // sync_committed_record(). Every other path published durably above.
+  if (finalized_indexer_tail_ && !sync_deferred) {
     finalized_indexer_tail_ = block_height;
     // Bumped under the publication lock: a pull that sampled the counter under
     // this same lock either already saw the new tail or wakes on this bump.
@@ -470,6 +619,7 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
   }
 
   outbox_guard.reset();
+  sync_guard.reset();
 
   // The committed record references the events file rather than embedding the
   // pairs, so the file must outlive every block context that shares its root.
@@ -482,8 +632,51 @@ EventRPCContext::commit_block(BlockID block_id, ConsensusValue consensus_value)
     retain_events_file(consensus_value.proposal_header.events_hash);
   }
 
-  info("EventRPCContext::commit_block: block_id={} height={} done, gc",
-       block_id, static_cast<std::int64_t>(block_height));
+  EventBlockContext::warn_slow_phase("commit", block_id,
+                                     static_cast<std::int64_t>(
+                                         commit_timer.elapsed() * 1e9));
+  // Recovery without a context omits timings this process did not collect.
+  if (log_commit) {
+    std::string fields;
+    auto append = [&fields](std::string_view key, const auto &value) {
+      if (!value) {
+        return;
+      }
+      if constexpr (std::is_floating_point_v<
+                        std::remove_cvref_t<decltype(*value)>>) {
+        fields += std::format(" {}={:.6f}", key, *value);
+      }
+      else {
+        fields += std::format(" {}={}", key, *value);
+      }
+    };
+    if (context_ptr != nullptr) {
+      auto &s = context_ptr->get().log_stats;
+      s.commit_lock_wait_ns = lock_wait_ns;
+      append("open_lock_wait_ns", s.open_lock_wait_ns);
+      append("close_lock_wait_ns", s.close_lock_wait_ns);
+      append("commit_lock_wait_ns", s.commit_lock_wait_ns);
+      append("write_events_ns", s.write_events_ns);
+      append("pending_writes_ns", s.pending_writes_ns);
+      append("residual_write_ns", s.residual_write_ns);
+      append("residual_buffers", s.residual_buffers);
+      append("sync_ns", s.sync_ns);
+      append("publish_ns", s.publish_ns);
+      append("wait_executors_closed_s", s.wait_executors_closed_s);
+      append("wait_lock_s", s.wait_lock_s);
+      append("prepare_context_and_async_s", s.prepare_context_and_async_s);
+      append("close_total_s", s.close_total_s);
+      append("close_total_ns", s.close_total_ns);
+      append("residual_bytes", s.residual_bytes);
+    }
+    else {
+      fields += std::format(" commit_lock_wait_ns={}", lock_wait_ns);
+    }
+    info("block committed height={} block_id={}{} outcome=ok",
+         static_cast<std::int64_t>(block_height), block_id, fields);
+  }
+  debug("EventRPCContext::commit_block: block_id={} height={} done, gc",
+        block_id, static_cast<std::int64_t>(block_height));
   co_await finish_block_operation(block_id, context_ptr,
                                   context_ptr != nullptr);
   co_return block_height;
@@ -494,6 +687,9 @@ EventRPCContext::reconcile_outbox_tip(BlockID block_id,
                                       ConsensusValue consensus_value)
 {
   outbox_reconciled_.store(false, std::memory_order_release);
+  // Reconciliation reads the durable outbox, so a sync still running from a
+  // commit before a re-reconcile has to land first.
+  co_await flush_outbox_sync();
   const BlockHeight tip_height = consensus_value.proposal_header.block_height;
   const ConsensusValueHash tip_hash =
       tip_height == -1 ? ConsensusValueHash{} : sha256(consensus_value);

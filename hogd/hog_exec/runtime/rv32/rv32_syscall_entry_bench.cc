@@ -413,18 +413,21 @@ public:
     return address;
   }
   static ContractAddress cold_address() { return make_address(0x50); }
+  // The child frame the frame-payload copy rows read calldata in, or that
+  // leaves its return buffer in the fixture's inner frame.
+  static ContractAddress copy_address() { return make_address(0x60); }
 
   // Return admission failures to the benchmark so one invalid depth or
   // reentrance case fails its row without truncating the whole JSON output.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-  push_frame(ContractAddress address)
+  push_frame(ContractAddress address, Calldata calldata = {})
   {
     return handler_.start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
             .gas_limit = kPlentyOfGas,
-            .calldata = Calldata{},
+            .calldata = std::move(calldata),
         },
         std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
   }
@@ -779,6 +782,31 @@ bytestring_get_len_call(uint32_t bytes)
   return call;
 }
 
+// GetCalldata({payload, bytes}, &written_len, &auth_token_count), in a frame
+// whose calldata is `bytes` long, the guest buffer sized exactly to it.
+SyscallCall
+get_calldata_call(uint32_t bytes)
+{
+  SyscallCall call = make_call("GetCalldata", SyscallNo::kGetCalldata,
+                               {kBytestringPayloadAddress, bytes,
+                                kOutputAddressA, kOutputAddressB});
+  call.payload_bytes = bytes;
+  return call;
+}
+
+// GetReturnedBuffer({payload, bytes}, &written_len, &auth_start, &auth_count),
+// reading a saved child output `bytes` long.
+SyscallCall
+get_returned_buffer_call(uint32_t bytes)
+{
+  SyscallCall call =
+      make_call("GetReturnedBuffer", SyscallNo::kGetReturnedBuffer,
+                {kBytestringPayloadAddress, bytes, kOutputAddressA,
+                 kOutputAddressB, kBytestringWrittenLenAddress});
+  call.payload_bytes = bytes;
+  return call;
+}
+
 // Use a fixed keypair and valid signatures so timings cover verification,
 // without an early invalid-signature rejection.
 std::vector<uint8_t>
@@ -959,6 +987,52 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   // Report declared host gas beside timing; omit ns/gas when the charge is
   // zero.
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
+}
+
+// The frame-payload copies, swept on length. GetCalldata runs in a child
+// frame pushed with that much calldata and discarded afterwards. For
+// GetReturnedBuffer a child returns that many bytes and commits, leaving its
+// output in the fixture's inner frame, where the row then reads it; the next
+// row's child replaces it.
+void
+bm_frame_payload_copy(benchmark::State &state, SyscallCall call)
+{
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
+  const bool calldata =
+      call.words[0] == static_cast<uint32_t>(SyscallNo::kGetCalldata);
+  Calldata payload;
+  payload.resize_uninitialized(call.payload_bytes);
+  std::ranges::fill(payload, uint8_t{0xAB});
+  auto pushed = fixture.push_frame(SyscallBenchFixture::copy_address(),
+                                   calldata ? std::move(payload) : Calldata{});
+  if (!pushed.has_value()) {
+    state.SkipWithError(
+        SyscallBenchFixture::frame_push_error("copy", pushed.error()));
+    return;
+  }
+  std::unique_ptr<InvocationFrameTrace> trace = std::move(pushed).value();
+  if (!calldata) {
+    ReturnBuffer returned;
+    returned.resize_uninitialized(call.payload_bytes);
+    std::ranges::fill(returned, uint8_t{0xAB});
+    fixture.handler().set_return_buffer(std::move(returned), false, {});
+    const std::string popped = fixture.pop_frame(std::move(trace), true);
+    if (!popped.empty()) {
+      state.SkipWithError(popped);
+      return;
+    }
+  }
+  bm_syscall_entry(state, std::move(call));
+  if (calldata) {
+    const std::string popped = fixture.pop_frame(std::move(trace), false);
+    if (!popped.empty()) {
+      state.SkipWithError(popped);
+    }
+  }
 }
 
 // Fixtures and reference outputs are built outside timing. The direct FFI
@@ -1698,6 +1772,19 @@ register_benchmarks()
   benchmark::RegisterBenchmark(std::format("vm/BytestringGetLen/{}", vm_bytes),
                                bm_syscall_vm,
                                bytestring_get_len_call(vm_bytes));
+
+  // The frame-payload copies, over the same lengths: max_calldata_len and
+  // max_return_buffer_len are configurable, so a copy is not bounded by the
+  // stock limits.
+  for (const uint32_t bytes : kBytestringBytes) {
+    benchmark::RegisterBenchmark(std::format("entry/GetCalldata/{}", bytes),
+                                 bm_frame_payload_copy,
+                                 get_calldata_call(bytes));
+    benchmark::RegisterBenchmark(std::format("entry/GetReturnedBuffer/{}",
+                                             bytes),
+                                 bm_frame_payload_copy,
+                                 get_returned_buffer_call(bytes));
+  }
 
   // Depth counts frames above the fixture's two. The floor's depth is always
   // swept: it is the row the committed reference guards, and a chain raising

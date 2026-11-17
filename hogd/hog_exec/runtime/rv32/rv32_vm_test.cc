@@ -1504,6 +1504,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
           {u8"Ristretto255MsmTerm", 13'000},
           {u8"Ristretto255MsmTermBytes", 64},
           {u8"Ristretto255MsmMaxTerms", 256},
+          {u8"GuestBufferCopyBlock", 7},
       }};
 
   EXPECT_EQ(kOpCount, 49U);
