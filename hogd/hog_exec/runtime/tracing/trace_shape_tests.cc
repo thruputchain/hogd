@@ -626,14 +626,14 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
   SyscallTraceVec expected;
   expected.push_back(get_calldata_entry(99'872, tx.tx.invocation.calldata));
   {
-    constexpr std::array<GasAmount, 6> kKeyGas = {99'783, 99'696, 99'604,
-                                                  99'517, 99'430, 99'314};
+    constexpr std::array<GasAmount, 6> kKeyGas = {99'776, 99'689, 99'597,
+                                                  99'510, 99'423, 99'307};
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'048, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'041, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'530, storage_key,
+      bytestring_get_entry(61'523, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
