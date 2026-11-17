@@ -47,7 +47,9 @@ jobs:
           fi
           # x23c compiles against the x23 runtime headers, so those count as inputs too.
           pattern='^(x23/(x23c|x23|cmake|tests/rust_check)/|x23/CMakeLists\.txt$|\.github/workflows/x23c_rust_check\.yml$)'
-          if printf '%s\n' "$files" | grep -Eq "$pattern"; then
+          # Here-string, not a pipe: grep -q exits on the first match, and under pipefail the
+          # writer's SIGPIPE would turn a match into "no changes".
+          if grep -Eq "$pattern" <<< "$files"; then
             echo "x23c=true" >> "$GITHUB_OUTPUT"
           else
             echo "x23c=false" >> "$GITHUB_OUTPUT"
