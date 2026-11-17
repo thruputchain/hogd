@@ -443,7 +443,10 @@ public:
   void clear_storage_flags(StorageKeyContractData const &storage_key);
 
   // === Retrocausal Queue syscalls ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  // [load_gas] is the first-touch load charge, set on success and handleable
+  // errors; see get_bytestring(). The caller adds the access and insert
+  // charges.
+  [[nodiscard]] x23::Async<SystemStatus<StorageRead<void>>>
   retrocausal_queue_insert(StorageKeyContractData const &key,
                            std::span<const std::byte> queue_entry);
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<QueueEntry>>>

@@ -231,6 +231,13 @@ struct GasCost {
            (kBytestringReadBlockCost * bytestring_blocks(bytes_len));
   }
 
+  // Priced like a bytestring write: an RCQ insert copies and retains the entry.
+  static constexpr uint64_t retrocausal_queue_insert(uint64_t bytes_len)
+  {
+    return kStorageAccessCost +
+           (kBytestringWriteBlockCost * bytestring_blocks(bytes_len));
+  }
+
   static constexpr uint64_t verify_signature(uint64_t message_len)
   {
     assert(message_len <= kMaxCostBytes);

@@ -7,9 +7,11 @@
 #include <span>
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
+#include "retrocausal_queue.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -29,14 +31,21 @@ syscall_RetrocausalQueueInsert_inner(
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &rcq_syscall_status = *status;
-  if (!rcq_syscall_status) {
-    co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+  auto const &[result, load_gas] = *status;
+
+  // The oversize guard rejects the entry before any lookup, load, or copy, so
+  // it pays only the syscall crossing.
+  if (!result && input_queue_entry.size() > kQueueEntryMaxLen) {
+    co_return SyscallInnerResult{result.error().code(), WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  // Every other exit (success, or a full-block rejection) has already loaded
+  // and copied the entry, so all pay the same access, load, and size charge.
+  co_return SyscallInnerResult{
+      result ? SyscallErrorCode::kSyscallErrorCodeNone : result.error().code(),
+      WrappedGasAmount{
+          GasCost::retrocausal_queue_insert(input_queue_entry.size()) +
+          load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult
