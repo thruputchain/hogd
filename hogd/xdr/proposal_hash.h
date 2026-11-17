@@ -48,16 +48,15 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   return hasher.finalize();
 }
 
-// Ordered SHA-256 over the base (txs with empty batches) and both batch
-// hashes, so the batches cannot trade places (hogd#4508).
+// SHA256(cxs(ProposalTxsCommit)), with the ProposalTxsCommit of
+// thruput-protocol#266: the domain separator, then the two batch hashes.
 inline ProposalTxsHash
 proposal_txs_compatibility_hash(const ProposalTxs &txs)
 {
-  ProposalTxs base{.ext = txs.ext};
-
+  // The pinned protocol has no ProposalTxsCommit yet. cxs writes a SHA256Hash
+  // as its 32 bytes, so the fields go to the hasher one after another.
   SHA256Hasher hasher;
   hasher.update(kProposalTxsDomainSeparatorCxs);
-  hasher.update(sha256(base));
   hasher.update(hash_parallel_batch_compatibility(txs.signed_hash));
   hasher.update(hash_parallel_batch_compatibility(txs.nondeterministic_data));
   return hasher.finalize();
