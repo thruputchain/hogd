@@ -773,8 +773,7 @@ Scheduler::add_txs_helper(AccountState &account_state,
     replacement->signed_tx_hashes->insert(signed_tx_hash);
 
     *tx_ptr = replacement;
-    if (auto it = account_state.txs.find(key);
-        it != account_state.txs.end()) {
+    if (auto it = account_state.txs.find(key); it != account_state.txs.end()) {
       it->second = replacement;
     }
     txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
