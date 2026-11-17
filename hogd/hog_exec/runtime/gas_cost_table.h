@@ -122,8 +122,8 @@ constexpr static uint64_t kBytestringBlockBytes = 512;
 constexpr static uint64_t kBytestringWriteBlockCost = 13;
 constexpr static uint64_t kBytestringReadBlockCost = 7;
 
-// Per-block cost of copying a frame payload into a guest buffer; the
-// bytestring read rate with no storage-access term (#4798).
+// Per-block cost of copying a frame payload (GetCalldata, GetReturnedBuffer)
+// into a guest buffer; the bytestring read rate with no storage access.
 constexpr static uint64_t kGuestBufferCopyBlockCost = 7;
 
 constexpr static uint64_t kNoSyscallCost = 10;

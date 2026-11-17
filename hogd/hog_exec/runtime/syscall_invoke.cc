@@ -111,7 +111,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
         SyscallGetCalldataOutputs{.calldata = calldata,
                                   .auth_token_count = output_auth_token_count});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered, as for GetReturnedBuffer.
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), calldata.size()))}};
 }
 
 MaybeAsyncSyscallInnerResult

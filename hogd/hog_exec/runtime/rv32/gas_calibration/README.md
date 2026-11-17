@@ -129,7 +129,8 @@ each occupancy, rather than assuming one linear fit across cache sizes.
 
 Hashing is priced per compression block; stream creation is measured separately.
 Bytestring reports examine adjacent length bands because copy cost per byte
-changes with size. Signature verification includes valid signatures for each
+changes with size. `GetCalldata` and `GetReturnedBuffer` are swept on length
+the same way and guarded per length (`copy/` keys). Signature verification includes valid signatures for each
 message length. See [MEASUREMENTS.md](MEASUREMENTS.md) for retained evidence
 behind the committed prices and the limits of those runs.
 
