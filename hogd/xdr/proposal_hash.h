@@ -13,7 +13,7 @@
 namespace hogd {
 
 // The hash that commits to batch, shared with chuckd and the coordinator:
-// SHA256(cxs(BatchCommit)), with BatchCommit as defined in parallel.x.
+// SHA256(cxs(BatchCommit)), with the BatchCommit of thruput-protocol#266.
 inline SHA256Hash
 hash_parallel_batch_compatibility(const ParallelBatch &batch)
 {
@@ -35,8 +35,8 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   }
   CHECK_EQ(offset, batch.xdr.size());
 
-  // The fields of a BatchCommit after its domain separator, back to back as
-  // cxs encodes a struct. A count or a length takes at most 5 bytes.
+  // The pinned protocol has no BatchCommit yet, so the fields after its domain
+  // separator are encoded in order. A count or a length takes at most 5 bytes.
   x23::Buf fields;
   fields.reserve(15 + (42 * segment_hashes.size()));
   CHECK(x23::serialize_cxs_to(fields, batch.segment_tokens) &&

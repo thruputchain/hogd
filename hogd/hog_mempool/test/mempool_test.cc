@@ -192,8 +192,7 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
 }
 
 // Shared with chuckd's TestHashParallelBatchVectors and the coordinator's
-// hash_parallel_batch_golden_vectors. The second batch has multi-byte token
-// counts. The third has 64 segments and multi-byte byte counts.
+// hash_parallel_batch_golden_vectors. The last two have multi-byte counts.
 TEST(Mempool, ParallelBatchHashGoldenVectors)
 {
   const SHA256Hash expected_empty = {
