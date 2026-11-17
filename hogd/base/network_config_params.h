@@ -45,6 +45,12 @@ inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 // one now gets this cap rather than none.
 inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
 
+// Below the ceiling hogd's executor->HogDb message budget allows
+// (hog_exec/common/storage_output.h), which is the bound that applied before
+// this parameter.
+inline constexpr uint32_t kDefaultMaxSubtransactionOutputBytes =
+    8 * 1024 * 1024;
+
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
@@ -71,7 +77,7 @@ struct NetworkConfigParams {
   uint32_t max_rv32_artifact_version =
       static_cast<uint32_t>(kMaxRv32ArtifactVersion);
   uint32_t max_subtransaction_output_bytes =
-      static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes);
+      kDefaultMaxSubtransactionOutputBytes;
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;

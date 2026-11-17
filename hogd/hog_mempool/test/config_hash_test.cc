@@ -270,7 +270,7 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
   EXPECT_EQ(defaults.max_subtransaction_output_bytes,
-            static_cast<uint32_t>(kDefaultMaxSubtransactionOutputBytes));
+            kDefaultMaxSubtransactionOutputBytes);
 
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,

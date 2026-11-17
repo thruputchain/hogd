@@ -10,6 +10,7 @@
 
 #include "address_auth.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -20,8 +21,23 @@
 
 namespace hogd {
 
+// The fixed charges of storage output, which the protocol leaves to the node
+// (see kConfigParamMaxSubtransactionOutputBytes). Consensus-critical: they
+// decide which transactions fail the limit, so every validator must agree on
+// them.
+//
+// Charged for every delta. Covers the storage key, the flags and every
+// fixed-size value an arm carries.
+inline constexpr uint32_t kStorageOutputBytesPerDelta = 128;
+// Charged for each retrocausal queue entry a delta inserts or consumes, on top
+// of the entry's own length.
+inline constexpr uint32_t kStorageOutputBytesPerQueueEntry = 8;
+// Charged for each signer an auth data change states, whatever its key
+// scheme. Covers the largest public key a signer can carry.
+inline constexpr uint32_t kStorageOutputBytesPerAuthSigner = 2048;
+
 // The storage output `delta` carries against max_subtransaction_output_bytes,
-// as the protocol defines it beside kStorageOutputBytesPerDelta. Counts the
+// as the protocol defines it for that parameter. Counts the
 // values the delta carries, never their encoding, so every node computes the
 // same figure however its link frames a batch. The flags and storage key are
 // covered by the per-delta charge, so only the delta itself is read.
@@ -163,6 +179,6 @@ static_assert(storage_output_detail::kPushMessageOverhead +
               kExecToDbMessageCap);
 static_assert(kDefaultMaxSubtransactionOutputBytes <=
                   kSubtransactionOutputCeilingBytes,
-              "the protocol default must fit this build's HogDb link");
+              "the default must fit this build's HogDb link");
 
 } // namespace hogd
