@@ -50,8 +50,8 @@ constexpr static auto kPublicKeyHashDomainSeparatorCxs =
 constexpr static auto kTransactionSignatureDomainSeparatorCxs =
     domain_separator_cxs<u8"Transaction">();
 
-// Prefix the ProposalTxsHash of a ConsensusValue and the hash of each of its
-// ParallelBatches (see hogd/xdr/proposal_hash.h).
+// Prefixes the ProposalTxsHash of a ConsensusValue, and is the first field of
+// the BatchCommit of a ParallelBatch (see hogd/xdr/proposal_hash.h).
 constexpr static auto kProposalTxsDomainSeparatorCxs =
     domain_separator_cxs<u8"ProposalTxs">();
 

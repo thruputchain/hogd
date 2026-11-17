@@ -1112,22 +1112,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
       make_committed_payload_golden_fixture();
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
-  // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
-  // the one event log, between its root output and its events. It moved again
-  // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body. It moved again, at the
-  // same length, when ProposalTxs began naming transactions by
-  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
-  // Full-key leaves and then direct key/value commitments changed the roots.
-  // The proposal_txs_hash moved again when its parts began combining in order
-  // instead of by XOR (hogd#4508), and again when a batch began hashing the
-  // cxs of its counts with the hash of its segment hashes.
+  // Shared with thruput-protocol-go's payload golden. It covers the payload's
+  // XDR and the fixture's proposal_txs_hash, so it moves when either does.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0xea, 0x97, 0x6a, 0x0a, 0xef, 0x83, 0x86,
-                                   0x7e, 0x58, 0x96, 0x32, 0xab, 0x7a, 0x17,
-                                   0x57, 0x12, 0xbf, 0x08, 0x5b, 0x08, 0xd1,
-                                   0x4a, 0x79, 0x9c, 0x08, 0x9f, 0xfe, 0x13,
-                                   0xc8, 0x9b, 0xf6, 0x43};
+  const SHA256Hash kExpectedDigest{0x6d, 0xb3, 0xe4, 0x8d, 0x6f, 0x25, 0x25,
+                                   0x24, 0x67, 0xcb, 0x55, 0x10, 0x31, 0x7e,
+                                   0x5e, 0x30, 0x69, 0xab, 0x22, 0x2f, 0xf9,
+                                   0x6f, 0x73, 0xad, 0x50, 0xf1, 0xa8, 0x3f,
+                                   0x94, 0x97, 0xff, 0x9a};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
