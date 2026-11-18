@@ -174,7 +174,7 @@ TEST(NetworkConfigParamsTest, AListOmittingSyscallApiMinorsAdmitsEveryMinor)
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.min_syscall_api_minor, 0U);
   EXPECT_EQ(params.max_syscall_api_minor,
-            static_cast<uint32_t>(kSyscallApiMinor));
+            static_cast<std::uint32_t>(kSyscallApiMinor));
 }
 
 // Only minors the build implements may be stated.
@@ -184,7 +184,7 @@ TEST(NetworkConfigParamsTest, SyscallApiMinorsAreBoundedByTheBuild)
                         ConfigParamID::kConfigParamMaxSyscallApiMinor}) {
     EXPECT_EQ(config_param_min_value(id), 0U);
     EXPECT_EQ(config_param_max_value(id),
-              static_cast<uint64_t>(kSyscallApiMinor));
+              static_cast<std::uint64_t>(kSyscallApiMinor));
   }
 }
 
