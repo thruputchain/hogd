@@ -296,11 +296,9 @@ TEST_F(GenesisConfigValidationTest, BoundsSyscallApiMinorsByTheBuild)
   auto load_with_minors = [&](uint32_t min, uint32_t max) {
     NetworkConfig config = stock_network_config();
     auto &params = config.v0().params;
-    params.at(std::to_underlying(
-                  ConfigParamID::kConfigParamMinSyscallApiMinor))
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMinSyscallApiMinor))
         .min_syscall_api_minor() = min;
-    params.at(std::to_underlying(
-                  ConfigParamID::kConfigParamMaxSyscallApiMinor))
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMaxSyscallApiMinor))
         .max_syscall_api_minor() = max;
     return load(config, std::nullopt);
   };

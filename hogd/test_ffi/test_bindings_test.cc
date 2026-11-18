@@ -3879,9 +3879,9 @@ TEST(TestBindingsTest, SetupCreateContractHonorsSyscallApiMinorRange)
   auto *stock_db = make_db();
   ASSERT_NE(stock_db, nullptr);
   x23::Defer d2([stock_db] { free_db(stock_db); });
-  ASSERT_EQ(
-      setup_create_contract(rc, stock_db, baseline.data(), baseline.size()),
-      kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_create_contract(rc, stock_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeNone);
   ASSERT_EQ(setup_create_contract(rc, stock_db, newest.data(), newest.size()),
             kTestFFIErrorCodeNone);
 
@@ -3889,24 +3889,22 @@ TEST(TestBindingsTest, SetupCreateContractHonorsSyscallApiMinorRange)
   auto *capped_db = db_with(ConfigParamID::kConfigParamMaxSyscallApiMinor, 0);
   ASSERT_NE(capped_db, nullptr);
   x23::Defer d3([capped_db] { free_db(capped_db); });
-  EXPECT_EQ(
-      setup_create_contract(rc, capped_db, baseline.data(), baseline.size()),
-      kTestFFIErrorCodeNone);
+  EXPECT_EQ(setup_create_contract(rc, capped_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeNone);
   EXPECT_EQ(setup_create_contract(rc, capped_db, newest.data(), newest.size()),
             kTestFFIErrorCodeContractVerificationFailed);
 
   // A minimum above the baseline refuses an artifact declaring the baseline.
-  auto *floored_db =
-      db_with(ConfigParamID::kConfigParamMinSyscallApiMinor,
-              static_cast<uint32_t>(kSyscallApiMinor));
+  auto *floored_db = db_with(ConfigParamID::kConfigParamMinSyscallApiMinor,
+                             static_cast<uint32_t>(kSyscallApiMinor));
   ASSERT_NE(floored_db, nullptr);
   x23::Defer d4([floored_db] { free_db(floored_db); });
-  EXPECT_EQ(
-      setup_create_contract(rc, floored_db, baseline.data(), baseline.size()),
-      kTestFFIErrorCodeContractVerificationFailed);
-  EXPECT_EQ(
-      setup_create_contract(rc, floored_db, newest.data(), newest.size()),
-      kTestFFIErrorCodeNone);
+  EXPECT_EQ(setup_create_contract(rc, floored_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+  EXPECT_EQ(setup_create_contract(rc, floored_db, newest.data(), newest.size()),
+            kTestFFIErrorCodeNone);
 }
 
 // Regression test for #3592: a native precompile (here the default wallet)
