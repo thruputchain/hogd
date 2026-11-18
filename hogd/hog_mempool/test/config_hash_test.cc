@@ -65,7 +65,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 14> variants;
+  std::array<NetworkConfig, 16> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -111,6 +111,12 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(
       variants[13], ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
       stock.max_subtransaction_output_bytes + 1);
+  NetworkConfigParams::set_param(
+      variants[14], ConfigParamID::kConfigParamMinSyscallApiMinor,
+      stock.min_syscall_api_minor + 1);
+  NetworkConfigParams::set_param(
+      variants[15], ConfigParamID::kConfigParamMaxSyscallApiMinor,
+      stock.max_syscall_api_minor - 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -162,7 +168,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 17U);
+  EXPECT_EQ(config.v0().params.size(), 19U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -271,6 +277,9 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
   EXPECT_EQ(defaults.max_subtransaction_output_bytes,
             kDefaultMaxSubtransactionOutputBytes);
+  EXPECT_EQ(defaults.min_syscall_api_minor, 0U);
+  EXPECT_EQ(defaults.max_syscall_api_minor,
+            static_cast<uint32_t>(kSyscallApiMinor));
 
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,

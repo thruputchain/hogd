@@ -16,6 +16,7 @@
 #include "hogd/base/log.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -77,6 +78,10 @@ struct NetworkConfigParams {
       static_cast<uint32_t>(kMaxRv32ArtifactVersion);
   uint32_t max_subtransaction_output_bytes =
       kDefaultMaxSubtransactionOutputBytes;
+  // Unstated, every minor this build implements attaches. A chain that needs
+  // nodes on different builds to agree states the maximum.
+  uint32_t min_syscall_api_minor = 0;
+  uint32_t max_syscall_api_minor = static_cast<uint32_t>(kSyscallApiMinor);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -123,7 +128,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxSubtransactionOutputBytes;
+    ConfigParamID::kConfigParamMaxSyscallApiMinor;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -164,6 +169,10 @@ config_param_name(ConfigParamID id)
     return "max_rv32_artifact_version";
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return "max_subtransaction_output_bytes";
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return "min_syscall_api_minor";
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return "max_syscall_api_minor";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -224,6 +233,10 @@ config_param_max_value(ConfigParamID id)
   case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return kMaxRv32ArtifactVersion;
+  // A node admits only minors it implements.
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return kSyscallApiMinor;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -267,6 +280,10 @@ config_param_value(ConfigParam const &param)
     return param.max_rv32_artifact_version();
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return param.max_subtransaction_output_bytes();
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return param.min_syscall_api_minor();
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return param.max_syscall_api_minor();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -351,6 +368,12 @@ NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     out.max_subtransaction_output_bytes() = to_u32(value);
     break;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    out.min_syscall_api_minor() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    out.max_syscall_api_minor() = to_u32(value);
+    break;
   }
   return out;
 }
@@ -393,6 +416,10 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_rv32_artifact_version;
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return max_subtransaction_output_bytes;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return min_syscall_api_minor;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return max_syscall_api_minor;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -461,7 +488,13 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
     max_subtransaction_output_bytes(to_u32(
         stated_param(config,
                      ConfigParamID::kConfigParamMaxSubtransactionOutputBytes)
-            .value_or(kDefaultMaxSubtransactionOutputBytes)))
+            .value_or(kDefaultMaxSubtransactionOutputBytes))),
+    min_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMinSyscallApiMinor)
+            .value_or(0))),
+    max_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxSyscallApiMinor)
+            .value_or(kSyscallApiMinor)))
 {}
 
 inline void

@@ -502,6 +502,36 @@ TEST(Rv32ArtifactTest, rejectsAbiAndGasMismatches)
   }
 }
 
+TEST(Rv32ArtifactTest, refusesSyscallApiMinorsBelowTheCallersFloor)
+{
+  Rv32Limits limits = Rv32Limits::defaults();
+  limits.min_syscall_api_minor = 2;
+  limits.max_syscall_api_minor = 3;
+  for (const uint32_t minor : {0U, 1U}) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactSyscallApiMinorOffset, minor);
+    auto parsed = parse_artifact(artifact, limits);
+    ASSERT_FALSE(parsed.has_value()) << minor;
+    EXPECT_EQ(parsed.error(), ArtifactError::kUnsupportedSyscallApiMinor);
+    auto threaded = parse_threaded_artifact(artifact, limits);
+    ASSERT_FALSE(threaded.has_value()) << minor;
+    EXPECT_EQ(threaded.error(), ArtifactError::kUnsupportedSyscallApiMinor);
+  }
+  for (const uint32_t minor : {2U, 3U}) {
+    auto artifact = valid_artifact_bytes();
+    store_u32_at(artifact, kArtifactSyscallApiMinorOffset, minor);
+    EXPECT_TRUE(parse_artifact(artifact, limits).has_value()) << minor;
+    EXPECT_TRUE(parse_threaded_artifact(artifact, limits).has_value()) << minor;
+  }
+  // v5 and v6 declare no minor, so the floor does not reach them.
+  auto v5 = valid_artifact_bytes();
+  test_artifact::rewrite_as_v5(v5);
+  EXPECT_TRUE(parse_artifact(v5, limits).has_value());
+  auto v6 = valid_artifact_bytes();
+  test_artifact::rewrite_as_v6(v6);
+  EXPECT_TRUE(parse_artifact(v6, limits).has_value());
+}
+
 TEST(Rv32ArtifactTest, admitsSyscallApiMinorsUpToTheCallersBound)
 {
   // A v7 artifact declares the syscall API minor it was built against, and

@@ -432,6 +432,16 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           static_cast<uint32_t>(kMaxRv32ArtifactVersion));
     co_return DbSchedResult::DbSchedResultError;
   }
+  // Admitting a syscall API minor this build does not implement would attach
+  // a guest that may call a syscall this node lacks.
+  if (const uint32_t oldest = config_params.min_syscall_api_minor,
+      newest = config_params.max_syscall_api_minor;
+      oldest > newest || newest > kSyscallApiMinor) {
+    error("genesis syscall API minors [{}, {}] are not a range within the "
+          "[0, {}] this build implements",
+          oldest, newest, static_cast<uint32_t>(kSyscallApiMinor));
+    co_return DbSchedResult::DbSchedResultError;
+  }
   // Every root commit pushes a savepoint, even without child TryInvokes.
   if (config_params.max_savepoint_depth == 0) {
     error("genesis max_savepoint_depth must be at least 1 for root commits");
