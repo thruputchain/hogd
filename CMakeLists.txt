@@ -36,6 +36,9 @@ option(HOGD_RV32_STACK_USAGE
   ${HOGD_RV32_STACK_USAGE_DEFAULT})
 option(HOGD_FRAME_POINTERS "Keep frame pointers in Release builds for continuous profiling" ON)
 option(HOGD_RELEASE_DEBUGINFO "Emit debug info in Release builds for split debuginfo packaging" OFF)
+option(HOGD_STATIC_DEPS
+  "Link third-party libraries and the GCC runtime statically, so Linux binaries need only glibc"
+  OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
 
@@ -115,7 +118,43 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
-  link_libraries(atomic) # needed for std::atomic<int128_t>
+  # needed for std::atomic<int128_t>
+  if(HOGD_STATIC_DEPS)
+    link_libraries(-l:libatomic.a)
+  else()
+    link_libraries(atomic)
+  endif()
+endif()
+
+# Release binaries for Linux link everything but glibc statically, so they
+# start on hosts without the build image's libraries.
+if(HOGD_STATIC_DEPS)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+     OR CMAKE_VERSION VERSION_LESS 3.24)
+    message(FATAL_ERROR "HOGD_STATIC_DEPS requires GCC on Linux and CMake 3.24 or later")
+  endif()
+  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+  add_link_options(-static-libstdc++ -static-libgcc)
+
+  # RocksDB looks for Snappy's package config first, whose Snappy::snappy is
+  # the shared library. Redirect the package to the static library.
+  find_library(HOGD_SNAPPY_LIBRARY snappy REQUIRED)
+  file(WRITE "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/snappy-config.cmake"
+    "if(NOT TARGET Snappy::snappy)\n"
+    "  add_library(Snappy::snappy STATIC IMPORTED)\n"
+    "  set_target_properties(Snappy::snappy PROPERTIES\n"
+    "    IMPORTED_LOCATION \"${HOGD_SNAPPY_LIBRARY}\")\n"
+    "endif()\n")
+
+  # Subdirectories reuse this OpenSSL::Crypto. The static libcrypto also needs
+  # the libraries `pkg-config --static --libs libcrypto` lists.
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
+  find_package(OpenSSL REQUIRED)
+  find_package(ZLIB REQUIRED)
+  find_library(HOGD_ZSTD_LIBRARY zstd REQUIRED)
+  find_library(HOGD_JITTERENTROPY_LIBRARY jitterentropy REQUIRED)
+  set_property(TARGET OpenSSL::Crypto APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    ZLIB::ZLIB "${HOGD_ZSTD_LIBRARY}" "${HOGD_JITTERENTROPY_LIBRARY}")
 endif()
 
 message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
@@ -295,6 +334,11 @@ add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
 message(STATUS "Rust version: ${Rust_VERSION}")
+if(HOGD_STATIC_DEPS)
+  # -static-libgcc already links the unwinder that Rust's standard library
+  # asks for as gcc_s.
+  list(REMOVE_ITEM Rust_CARGO_TARGET_LINK_NATIVE_LIBS gcc_s)
+endif()
 
 # Enable model-checker
 add_subdirectory(external/model-checker)
