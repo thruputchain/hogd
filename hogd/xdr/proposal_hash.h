@@ -13,7 +13,7 @@
 namespace hogd {
 
 // The hash that commits to batch, shared with chuckd and the coordinator:
-// SHA256(cxs(BatchCommit)), with the BatchCommit of thruput-protocol#266.
+// SHA256(cxs(DomainSeparator("ParallelBatch")) || cxs(BatchCommit)).
 inline SHA256Hash
 hash_parallel_batch_compatibility(const ParallelBatch &batch)
 {
@@ -35,11 +35,12 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   }
   CHECK_EQ(offset, batch.xdr.size());
 
-  // The pinned protocol has no BatchCommit yet, so the fields after its domain
-  // separator are encoded in order. A count or a length takes at most 5 bytes.
+  // The pinned protocol has no BatchCommit yet, so its fields are encoded in
+  // order: an ext of 0, then the arrays. A count or length is at most 5 bytes.
   x23::Buf fields;
-  fields.reserve(15 + (42 * segment_hashes.size()));
-  CHECK(x23::serialize_cxs_to(fields, batch.segment_tokens) &&
+  fields.reserve(16 + (42 * segment_hashes.size()));
+  CHECK(x23::serialize_cxs_to(fields, ExtensionPoint(0)) &&
+        x23::serialize_cxs_to(fields, batch.segment_tokens) &&
         x23::serialize_cxs_to(fields, batch.segment_bytes) &&
         x23::serialize_cxs_to(fields, segment_hashes));
   SHA256Hasher hasher;
@@ -48,17 +49,26 @@ hash_parallel_batch_compatibility(const ParallelBatch &batch)
   return hasher.finalize();
 }
 
-// SHA256(cxs(ProposalTxsCommit)), with the ProposalTxsCommit of
-// thruput-protocol#266: the domain separator, then the two batch hashes.
+// SHA256(cxs(DomainSeparator("ProposalTxs")) || cxs(ProposalTxsCommit)), with
+// the ProposalTxsCommit of thruput-protocol#266.
 inline ProposalTxsHash
 proposal_txs_compatibility_hash(const ProposalTxs &txs)
 {
-  // The pinned protocol has no ProposalTxsCommit yet. cxs writes a SHA256Hash
-  // as its 32 bytes, so the fields go to the hasher one after another.
+  const SHA256Hash signed_hash =
+      hash_parallel_batch_compatibility(txs.signed_hash);
+  const SHA256Hash nondeterministic_data =
+      hash_parallel_batch_compatibility(txs.nondeterministic_data);
+
+  // The pinned protocol has no ProposalTxsCommit yet, so its fields are encoded
+  // in order: the ext of txs, then the hashes of the two batches.
+  x23::Buf fields;
+  fields.reserve(65);
+  CHECK(x23::serialize_cxs_to(fields, txs.ext) &&
+        x23::serialize_cxs_to(fields, signed_hash) &&
+        x23::serialize_cxs_to(fields, nondeterministic_data));
   SHA256Hasher hasher;
   hasher.update(kProposalTxsDomainSeparatorCxs);
-  hasher.update(hash_parallel_batch_compatibility(txs.signed_hash));
-  hasher.update(hash_parallel_batch_compatibility(txs.nondeterministic_data));
+  hasher.update(fields);
   return hasher.finalize();
 }
 
