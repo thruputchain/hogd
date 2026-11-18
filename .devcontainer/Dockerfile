@@ -69,6 +69,7 @@ RUN if [ "$(id -u)" = "0" ]; then SUDO=""; else SUDO="sudo"; fi && \
     jq \
     libjemalloc-dev \
     libssl-dev \
+    libjitterentropy3-dev \
     lz4 \
     liblz4-dev \
     libsnappy-dev \
