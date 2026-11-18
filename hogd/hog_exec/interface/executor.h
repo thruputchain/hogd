@@ -62,7 +62,9 @@ public:
     server_->impl()->init(std::move(exec_result));
 
     // init() has published all state the RPC handlers read; it is now safe to
-    // begin serving RPCs to the coordinator.
+    // begin serving RPCs to the coordinator.  Each connection goes to the next
+    // LLC lane, so the mempool's connections spread the load over the lanes.
+    server_.set_stream_placement(lane_stream_placement);
     server_.start_accepting(std::move(listen_fd));
 
     return executor_port;

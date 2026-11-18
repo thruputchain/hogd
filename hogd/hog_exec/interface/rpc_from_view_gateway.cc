@@ -100,7 +100,7 @@ ViewGatewayRpc::viewgateway_view(TransactionViewQuery query)
   // -- the body cannot simply return run_view_with_retries(...), because that
   // takes its query by reference and would be left pointing at this frame's
   // local once the frame went away.
-  co_await default_threadpool().bg();
+  co_await current_threadpool().bg();
   query = normalize_public_view_query(std::move(query));
   co_return co_await run_view_with_retries(query);
 }
@@ -109,7 +109,7 @@ x23::Async<ViewGatewayBatchResult>
 ViewGatewayRpc::viewgateway_view_batch(ViewGatewayBatchQuery query)
 {
   const auto received = std::chrono::steady_clock::now();
-  co_await default_threadpool().bg();
+  co_await current_threadpool().bg();
   if (query.calls.empty() || query.budget_millis == 0 ||
       query.max_response_bytes == 0 ||
       (query.min_height && *query.min_height < 0)) {

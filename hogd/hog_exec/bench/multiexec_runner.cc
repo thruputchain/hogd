@@ -320,9 +320,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const int account_count = num_accounts.value();
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
+  // 16 connections per executor, as the mempool opens
+  // (MempoolCoordinatorRpc::kNumClientsPerExecutor).
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 1, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 5, 1'000'000);
+  hogd::run_multiexec_bench(server_addrs, account_count, 16, 100, 10,
                             1'000'000);
 
   std::fflush(stdout);

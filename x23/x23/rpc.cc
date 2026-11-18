@@ -18,6 +18,7 @@
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
+#include <x23/threadpool.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
@@ -120,6 +121,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
   // bounds checks in deserialization.
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
+  if (reader_cpu_)
+    co_await cp_->pool_.bg(*reader_cpu_);
   Buf b;
   if constexpr (kMinBuf != 0U)
     b.reserve(kMinBuf);
