@@ -10,6 +10,7 @@
 
 #include "hogd/base/network_config_params.h"
 #include "network_config.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {

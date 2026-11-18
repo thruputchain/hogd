@@ -29,6 +29,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {

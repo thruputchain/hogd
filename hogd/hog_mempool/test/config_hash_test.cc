@@ -15,6 +15,7 @@
 #include "network_config.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {

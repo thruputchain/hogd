@@ -19,6 +19,7 @@
 #include "genesis.hh"
 #include "hog_exec_constants.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
