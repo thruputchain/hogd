@@ -85,14 +85,15 @@ private:
   // blocks on syscall_entry for the same reason. Blocking is illegal on a
   // thread pool worker, and this is reached from root_invoke(), whose
   // coroutine resumes onto one -- so hand the machine to a thread outside the
-  // pool and await it.
+  // pool and await it.  The thread starts with its creator's CPU affinity,
+  // and the caller resumes in its own pool, so both stay in the caller's LLC
+  // lane.
   x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_off_pool(MethodID method_id, uint64_t gas_limit)
   {
-    co_return co_await default_coropoll().pool_.async(
-        [this, method_id, gas_limit] {
-          return run_machine(method_id, gas_limit);
-        });
+    co_return co_await current_threadpool().async([this, method_id, gas_limit] {
+      return run_machine(method_id, gas_limit);
+    });
   }
 
   std::pair<InvokeStatus<void>, GasAmount> run_machine(MethodID method_id,

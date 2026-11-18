@@ -90,6 +90,7 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
         std::make_unique<ViewGatewayServer>(*db_executor_addr,
                                             event_executor.host,
                                             event_executor.port);
+    view_gateway_server->set_stream_placement(lane_stream_placement);
     const uint16_t actual_view_gateway_port = view_gateway_server->start_server(
         make_bind_host_port(bind_ip, *view_gateway_port));
     CHECK(actual_view_gateway_port == *view_gateway_port ||
