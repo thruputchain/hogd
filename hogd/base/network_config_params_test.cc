@@ -8,6 +8,7 @@
 #include <string_view>
 #include <utility>
 
+#include "hog_exec_constants.hh"
 #include "hogd/base/network_config_params.h"
 #include "network_config.hh"
 #include "syscall.hh"
@@ -186,6 +187,48 @@ TEST(NetworkConfigParamsTest, SyscallApiMinorsAreBoundedByTheBuild)
     EXPECT_EQ(config_param_max_value(id),
               static_cast<std::uint64_t>(kSyscallApiMinor));
   }
+}
+
+// The defaults are servable, and each way a range can leave what the build
+// reads or implements is reported by naming the parameter and the bound.
+TEST(NetworkConfigParamsTest, ReportsAdmissionRangesTheBuildCannotServe)
+{
+  EXPECT_EQ(unsupported_admission_range(NetworkConfigParams{}), std::nullopt);
+
+  const auto reason = [](auto mutate) {
+    NetworkConfigParams params;
+    mutate(params);
+    return unsupported_admission_range(params).value_or("");
+  };
+  const std::uint32_t newest_format = kMaxRv32ArtifactVersion;
+  const std::uint32_t newest_minor = kSyscallApiMinor;
+
+  EXPECT_EQ(reason([&](NetworkConfigParams &p) {
+              p.max_rv32_artifact_version = newest_format + 1;
+            }),
+            "max_rv32_artifact_version 8 admits an RV32 artifact format newer "
+            "than 7, the newest this build reads; run a build that reads "
+            "format 8");
+  EXPECT_EQ(reason([](NetworkConfigParams &p) {
+              p.min_rv32_artifact_version = 4;
+            }),
+            "min_rv32_artifact_version 4 admits an RV32 artifact format older "
+            "than 5, the oldest this build reads");
+  EXPECT_EQ(reason([](NetworkConfigParams &p) {
+              p.min_rv32_artifact_version = 7;
+              p.max_rv32_artifact_version = 6;
+            }),
+            "min_rv32_artifact_version 7 exceeds max_rv32_artifact_version 6");
+  EXPECT_EQ(reason([&](NetworkConfigParams &p) {
+              p.max_syscall_api_minor = newest_minor + 1;
+            }),
+            "max_syscall_api_minor 2 admits syscall API 1.2, newer than the "
+            "1.1 this build implements; run a build that implements it");
+  EXPECT_EQ(reason([](NetworkConfigParams &p) {
+              p.min_syscall_api_minor = 1;
+              p.max_syscall_api_minor = 0;
+            }),
+            "min_syscall_api_minor 1 exceeds max_syscall_api_minor 0");
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)

@@ -62,6 +62,16 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
              config_params.max_savepoint_depth, kSavepointDepthCeiling);
     return false;
   }
+  // Genesis load refuses these ranges, but a tip may come from a chain a
+  // newer build created, or from a rewritten row. Serving it would have this
+  // node attach contracts it cannot read or run, or refuse ones its peers
+  // attach.
+  if (const auto unsupported = unsupported_admission_range(config_params)) {
+    critical("recovered tip network config is not one this build can serve: "
+             "{}",
+             *unsupported);
+    return false;
+  }
   // The tip row is outside the state hash, so a tampered type can pass the
   // config hash (#4293); kMockTest is test-only, never a real default wallet.
   switch (tip.default_wallet.contract_type) {

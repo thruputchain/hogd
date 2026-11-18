@@ -10,6 +10,7 @@
 
 #include "consensus.hh"
 #include "contract.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
@@ -31,6 +32,7 @@
 #include "precompiles.hh"
 #include "rpc_types.hh"
 #include "storage_cost.hh"
+#include "syscall.hh"
 #include "types.hh"
 #include "x23/serialize.h"
 
@@ -351,6 +353,74 @@ TEST_F(RecoveredTipTest, RejectsMaxSavepointDepthOutsideGenesisBounds)
     ASSERT_TRUE(recovered.has_value());
     EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
                                                     cost_model_));
+  }
+}
+
+// Genesis load refuses a configuration admitting an artifact format the build
+// does not read or a syscall API minor it does not implement. A recovered tip
+// can still carry one, written by a newer build or rewritten in place, and
+// recovery must refuse it too.
+TEST_F(RecoveredTipTest, RejectsAdmissionRangesTheBuildCannotServe)
+{
+  struct Case {
+    ConfigParamID id;
+    uint32_t value;
+  };
+  // The arms are assigned directly: set_param refuses a value outside what
+  // the build may state.
+  const auto state = [](NetworkConfig &config, Case c) {
+    auto &param = config.v0().params.at(std::to_underlying(c.id));
+    switch (c.id) {
+    case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+      param.min_rv32_artifact_version() = c.value;
+      break;
+    case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+      param.max_rv32_artifact_version() = c.value;
+      break;
+    case ConfigParamID::kConfigParamMinSyscallApiMinor:
+      param.min_syscall_api_minor() = c.value;
+      break;
+    case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+      param.max_syscall_api_minor() = c.value;
+      break;
+    default:
+      FAIL() << "not an admission range parameter";
+    }
+  };
+  const uint32_t oldest_format = kMinRv32ArtifactVersion;
+  const uint32_t newest_format = kMaxRv32ArtifactVersion;
+  const uint32_t newest_minor = kSyscallApiMinor;
+  for (const Case c : {
+           Case{.id = ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+                .value = newest_format + 1},
+           Case{.id = ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+                .value = oldest_format - 1},
+           Case{.id = ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+                .value = newest_format + 1},
+           Case{.id = ConfigParamID::kConfigParamMaxSyscallApiMinor,
+                .value = newest_minor + 1},
+           Case{.id = ConfigParamID::kConfigParamMinSyscallApiMinor,
+                .value = newest_minor + 1},
+       }) {
+    HogDbDAO db = reopen();
+    HogDbStatus<DbTip> tip = db.read_dbtip();
+    ASSERT_TRUE(tip.has_value());
+
+    tip->network_config = NetworkConfigParams::stated_defaults();
+    state(tip->network_config, c);
+    // Recompute so the config-hash guard passes and the range is what bites.
+    tip->value.proposal_header.config_hash = compute_config_hash(
+        make_config_hash_preimage(cost_model_, tip->network_config,
+                                  tip->default_wallet));
+    ASSERT_TRUE(db.write_dbtip(*tip).has_value());
+    ASSERT_TRUE(db.commit().has_value());
+
+    HogDbDAO recovered_db = reopen();
+    const HogDbStatus<DbTip> recovered = recovered_db.read_dbtip();
+    ASSERT_TRUE(recovered.has_value());
+    EXPECT_FALSE(StartupValidation::tip_is_servable(recovered_db, *recovered,
+                                                    cost_model_))
+        << config_param_name(c.id) << "=" << c.value;
   }
 }
 
