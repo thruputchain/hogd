@@ -193,6 +193,27 @@ jobs:
           cd build/gcc
           ctest --output-on-failure --parallel $(nproc) --timeout 120
 
+      # thruput-tools drives local blocks by rebuilding the ConsensusValue
+      # itself, so it reimplements consensus hashing (proposal_hash.h) in Rust.
+      # Commit real blocks through it against the devnode built above, so a
+      # hashing change that tools has not followed fails here, not in a
+      # developer's local node. A change that is meant to break tools moves
+      # TOOLS_REF to the tools commit that follows it.
+      - name: Tools block driver smoke
+        env:
+          TOOLS_REF: a4535f36e4fa42ba731b9f66bf0c27a59419fb26
+        run: |
+          set -euo pipefail
+          tools="$RUNNER_TEMP/thruput-tools"
+          git init --quiet "$tools"
+          git -C "$tools" fetch --quiet --depth=1 \
+            https://github.com/thruputchain/thruput-tools.git "$TOOLS_REF"
+          git -C "$tools" checkout --quiet FETCH_HEAD
+          export THRUPUT_DEVNODE_BINARY="$PWD/build/gcc/hogd/devnode/hog-devnode"
+          cd "$tools"
+          cargo test --locked -p thruput-node-supervisor --test real_block_time \
+            -- --ignored --test-threads=1
+
       - name: Print backtraces from timed-out tests
         if: failure()
         run: |
