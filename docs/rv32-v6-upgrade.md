@@ -39,6 +39,27 @@ chain that states none admits a newer format as soon as a node's build reads
 it, so every validator must run a build that reads v7 before a v7 contract is
 deployed there.
 
+## Admitted syscall API minors
+
+A v7 artifact declares the syscall API version its guest was built against.
+The major is fixed by the build. Which minors a chain admits is network
+configuration: `min_syscall_api_minor` and `max_syscall_api_minor`
+(`kConfigParamMinSyscallApiMinor` and `kConfigParamMaxSyscallApiMinor`) bound
+the declared minor, inclusively, of an artifact attached to a transaction. An
+artifact outside the range is rejected with `ContractRejectUnsupportedAbi`.
+
+A guest built against minor n may call anything introduced up to n, so the
+maximum is what activates the syscalls a new minor adds. A configuration that
+states none admits every minor the build implements, so a chain whose
+validators run different builds must state it and raise it only once every
+validator implements the new minor. The minimum is policy: an older minor is
+a subset of a newer one, and a chain raises the floor only to stop admitting
+guests built against an API it considers too old.
+
+Like the format range, this is checked only at attachment, and genesis load
+rejects a range that inverts or reaches past the newest minor the build
+implements. v5 and v6 artifacts declare no minor and are not subject to it.
+
 ## Release order
 
 1. Merge and publish the compatible generated protocol bindings.

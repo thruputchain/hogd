@@ -10,12 +10,13 @@
 
 #include "hogd/base/network_config_params.h"
 #include "network_config.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
 
 // Wire names, spelled out so a rename has to be made here too.
-constexpr std::array<std::pair<ConfigParamID, std::string_view>, 17> kNames{{
+constexpr std::array<std::pair<ConfigParamID, std::string_view>, 19> kNames{{
     {ConfigParamID::kConfigParamMaxSHA256Buffers, "max_sha256_buffers"},
     {ConfigParamID::kConfigParamMaxCrossInvokeDepth, "max_cross_invoke_depth"},
     {ConfigParamID::kConfigParamMaxNewContractsPerTx,
@@ -39,6 +40,8 @@ constexpr std::array<std::pair<ConfigParamID, std::string_view>, 17> kNames{{
      "max_rv32_artifact_version"},
     {ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
      "max_subtransaction_output_bytes"},
+    {ConfigParamID::kConfigParamMinSyscallApiMinor, "min_syscall_api_minor"},
+    {ConfigParamID::kConfigParamMaxSyscallApiMinor, "max_syscall_api_minor"},
 }};
 
 TEST(ConfigParamNameTest, EveryParameterCarriesItsWireName)
@@ -153,6 +156,36 @@ TEST(NetworkConfigParamsTest, AListOmittingArtifactVersionsAdmitsEveryFormat)
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.min_rv32_artifact_version, 5U);
   EXPECT_EQ(params.max_rv32_artifact_version, 7U);
+}
+
+// Likewise for the syscall API: a configuration that states neither bound
+// admits every minor the build implements.
+TEST(NetworkConfigParamsTest, AListOmittingSyscallApiMinorsAdmitsEveryMinor)
+{
+  NetworkConfig config;
+  config.v(0);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      kDefaultMaxSubtransactionOutputBytes);
+  ASSERT_EQ(config.v0().params.size(),
+            static_cast<std::size_t>(std::to_underlying(
+                ConfigParamID::kConfigParamMinSyscallApiMinor)));
+
+  const NetworkConfigParams params(config.v0());
+  EXPECT_EQ(params.min_syscall_api_minor, 0U);
+  EXPECT_EQ(params.max_syscall_api_minor,
+            static_cast<std::uint32_t>(kSyscallApiMinor));
+}
+
+// Only minors the build implements may be stated.
+TEST(NetworkConfigParamsTest, SyscallApiMinorsAreBoundedByTheBuild)
+{
+  for (const auto id : {ConfigParamID::kConfigParamMinSyscallApiMinor,
+                        ConfigParamID::kConfigParamMaxSyscallApiMinor}) {
+    EXPECT_EQ(config_param_min_value(id), 0U);
+    EXPECT_EQ(config_param_max_value(id),
+              static_cast<std::uint64_t>(kSyscallApiMinor));
+  }
 }
 
 TEST(NetworkConfigParamsTest, StatedDefaultsStatesEveryParameterAtItsDefault)
