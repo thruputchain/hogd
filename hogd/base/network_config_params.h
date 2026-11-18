@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -542,6 +544,54 @@ NetworkConfigParams::stated_defaults()
   set_param(config, kHighestConfigParamID,
             NetworkConfigParams{}.in_force(kHighestConfigParamID));
   return config;
+}
+
+// Why this build cannot serve a chain whose configuration is `params`, or
+// nullopt when it can. A configuration admitting an artifact format this
+// build does not read, or a syscall API minor it does not implement, would
+// have this node refuse or mis-run a contract its peers attach. Every place a
+// node takes a configuration into force checks this: genesis load and
+// recovery of a stored tip.
+inline std::optional<std::string>
+unsupported_admission_range(NetworkConfigParams const &params)
+{
+  const uint32_t oldest_format = params.min_rv32_artifact_version;
+  const uint32_t newest_format = params.max_rv32_artifact_version;
+  if (oldest_format > newest_format) {
+    return std::format("min_rv32_artifact_version {} exceeds "
+                       "max_rv32_artifact_version {}",
+                       oldest_format, newest_format);
+  }
+  if (oldest_format < kMinRv32ArtifactVersion) {
+    return std::format("min_rv32_artifact_version {} admits an RV32 artifact "
+                       "format older than {}, the oldest this build reads",
+                       oldest_format,
+                       static_cast<uint32_t>(kMinRv32ArtifactVersion));
+  }
+  if (newest_format > kMaxRv32ArtifactVersion) {
+    return std::format("max_rv32_artifact_version {} admits an RV32 artifact "
+                       "format newer than {}, the newest this build reads; "
+                       "run a build that reads format {}",
+                       newest_format,
+                       static_cast<uint32_t>(kMaxRv32ArtifactVersion),
+                       newest_format);
+  }
+  const uint32_t oldest_minor = params.min_syscall_api_minor;
+  const uint32_t newest_minor = params.max_syscall_api_minor;
+  if (oldest_minor > newest_minor) {
+    return std::format("min_syscall_api_minor {} exceeds "
+                       "max_syscall_api_minor {}",
+                       oldest_minor, newest_minor);
+  }
+  if (newest_minor > kSyscallApiMinor) {
+    return std::format("max_syscall_api_minor {} admits syscall API {}.{}, "
+                       "newer than the {}.{} this build implements; run a "
+                       "build that implements it",
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       static_cast<uint32_t>(kSyscallApiMinor));
+  }
+  return std::nullopt;
 }
 
 } // namespace hogd
