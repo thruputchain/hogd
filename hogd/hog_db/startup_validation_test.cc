@@ -391,16 +391,16 @@ TEST_F(RecoveredTipTest, RejectsAdmissionRangesTheBuildCannotServe)
   const uint32_t newest_format = kMaxRv32ArtifactVersion;
   const uint32_t newest_minor = kSyscallApiMinor;
   for (const Case c : {
-           Case{ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
-                newest_format + 1},
-           Case{ConfigParamID::kConfigParamMinRv32ArtifactVersion,
-                oldest_format - 1},
-           Case{ConfigParamID::kConfigParamMinRv32ArtifactVersion,
-                newest_format + 1},
-           Case{ConfigParamID::kConfigParamMaxSyscallApiMinor,
-                newest_minor + 1},
-           Case{ConfigParamID::kConfigParamMinSyscallApiMinor,
-                newest_minor + 1},
+           Case{.id = ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+                .value = newest_format + 1},
+           Case{.id = ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+                .value = oldest_format - 1},
+           Case{.id = ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+                .value = newest_format + 1},
+           Case{.id = ConfigParamID::kConfigParamMaxSyscallApiMinor,
+                .value = newest_minor + 1},
+           Case{.id = ConfigParamID::kConfigParamMinSyscallApiMinor,
+                .value = newest_minor + 1},
        }) {
     HogDbDAO db = reopen();
     HogDbStatus<DbTip> tip = db.read_dbtip();
