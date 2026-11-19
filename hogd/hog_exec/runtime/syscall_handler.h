@@ -482,10 +482,8 @@ public:
   BlockHeight get_block_height() const;
   NetworkHash const &get_network_hash() const;
 
-  // Fixed at construction. Proposal and validation take it from the
-  // BlockExecutionContext the block was opened with (the tip cannot supply
-  // it: for an open block that is the parent, whose timepoint is the previous
-  // block's); a view takes whatever its caller stated.
+  // Fixed at construction: proposal and validation take it from the block's
+  // BlockExecutionContext, a view from its query.
   TimePoint get_block_timepoint() const { return block_timepoint_; }
 
   // == General access methods ==
