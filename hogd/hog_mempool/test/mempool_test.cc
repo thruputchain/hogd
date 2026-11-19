@@ -4216,6 +4216,60 @@ unregistered_signer()
 
 } // namespace
 
+TEST(Mempool, SubmitMixedOutcomesAcrossParallelThreshold)
+{
+  // Pruning the bad signature and the overflow leaves two fewer entries at
+  // add and notify. Exercise both sides of their cutoff as well as decode's.
+  for (size_t count : {size_t{5}, kMinParallelBatchSize - 1,
+                       kMinParallelBatchSize, kMinParallelBatchSize + 1,
+                       kMinParallelBatchSize + 2, kMinParallelBatchSize + 3}) {
+    SCOPED_TRACE(count);
+    fib_client_t client(MempoolTestInfra::kAccountAddresses[0]);
+    SignedTransactionBatch txs = generate_unsigned_txs(client, count);
+    MempoolTestInfra server(/*skip_genesis_block=*/false,
+                            /*mempool_tx_size_limit=*/count - 3);
+    const SecretKey sk = register_single_signer(server, txs[0].tx);
+    for (auto &tx : txs) {
+      tx.tx.auth_claim = make_sign_claim(0);
+      tx.signatures.push_back(
+          make_signature(sk, tx.tx, 0, MempoolTestInfra::kNetworkHash));
+    }
+    txs[1].signatures[0].signature.ed25519()[0] ^= 0xff;
+    txs.back() = txs[0]; // Still admitted after capacity is exhausted.
+
+    auto &rpc = server.mempool_coord_rpc();
+    auto notification = server.coord_sched_rpc().next_vetted_notification();
+    const auto outcomes =
+        rpc.submit_unvetted_with_outcomes(t_to_parallel_batch(txs)())();
+    ASSERT_EQ(outcomes.size(), count);
+    EXPECT_EQ(rpc.scheduler()->size(), count - 3);
+    SignedTransactionBatch expected_vetted;
+    for (size_t i = 0; i < count; ++i) {
+      auto expected = SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted;
+      if (i == 1) {
+        expected =
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAuthenticationRejected;
+      }
+      else if (i == count - 2) {
+        expected = SchedGatewaySubmitOutcome::SchedGatewaySubmitRetryable;
+      }
+      else {
+        expected_vetted.push_back(txs[i]);
+      }
+      EXPECT_EQ(outcomes[i], expected) << i;
+      EXPECT_EQ(rpc.scheduler()->is_pending(txs[i], sha256(txs[i].tx)),
+                expected ==
+                    SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted)
+          << i;
+    }
+    ASSERT_EQ(notification.wait_for(std::chrono::seconds(5)),
+              std::future_status::ready);
+    SignedTransactionBatch vetted;
+    ASSERT_TRUE(parallel_batch_to_t(notification.get(), vetted, count)());
+    EXPECT_EQ(vetted, expected_vetted);
+  }
+}
+
 TEST(Mempool, AuthenticationFailureIsNotRecorded)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
