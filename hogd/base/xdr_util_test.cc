@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "parallel.hh"
@@ -166,19 +167,19 @@ TEST(ParallelBatchToTTest, AcceptsABatchAtTheObjectLimit)
 
 TEST(ParallelBatchToTTest, AppendPreservesWireSegmentsAcrossParallelThreshold)
 {
-  for (size_t count : {size_t{0}, kMinParallelBatchSize - 1,
-                       kMinParallelBatchSize, kMinParallelBatchSize + 1}) {
-    SCOPED_TRACE(count);
+  for (size_t num_txs : {size_t{0}, kMinParallelBatchSize - 1,
+                         kMinParallelBatchSize, kMinParallelBatchSize + 1}) {
+    SCOPED_TRACE(num_txs);
     SignedTransaction tx = make_minimal_signed_transaction();
     SignedTransactionBatch txs;
-    for (size_t i = 0; i < count; ++i) {
+    for (size_t i = 0; i < num_txs; ++i) {
       tx.tx.uniquifier.nonce = i + 1;
       txs.push_back(tx);
     }
     const SignedTransactionBatch prefix{make_minimal_signed_transaction()};
     auto actual = t_to_parallel_batch(prefix)();
     auto expected = actual;
-    for (ChunkRange chunk : make_chunks(count, kNumThreadsForParallelBatch)) {
+    for (ChunkRange chunk : make_chunks(num_txs, kNumThreadsForParallelBatch)) {
       const size_t start = expected.xdr.size();
       for (size_t i = chunk.start; i < chunk.end; ++i) {
         expected.xdr += x23::serialize(txs[i]);
@@ -195,7 +196,7 @@ TEST(ParallelBatchToTTest, AppendPreservesWireSegmentsAcrossParallelThreshold)
                                appended, hint)();
       EXPECT_EQ(appended, expected);
       SignedTransactionBatch decoded;
-      ASSERT_TRUE(parallel_batch_to_t(appended, decoded, count + 1)());
+      ASSERT_TRUE(parallel_batch_to_t(appended, decoded, num_txs + 1)());
       auto all = prefix;
       all += txs;
       EXPECT_EQ(decoded, all);
