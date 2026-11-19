@@ -550,7 +550,15 @@ private:
     x23::XdrVec<TransactionHash> result_tx_hashes;
     SignedTransactionHashBatch result_signed_tx_hashes;
     x23::XdrVec<NondeterministicProposalData> result_tx_nominations;
-    SchedulerProposalResult proposal_result;
+    SchedulerProposalResult proposal_result{
+        SchedulerProposalOutcome::SchedulerProposalError};
+
+    void clear_nomination()
+    {
+      block_id = 0;
+      // Switching to the void arm releases the cached reply and its tx batches.
+      proposal_result.outcome(SchedulerProposalOutcome::SchedulerProposalError);
+    }
 
     x23::Vec<ExecResult> statuses =
         x23::Vec<ExecResult>(kMaxBlockSize, ExecResult::ExecResultSystemError);
@@ -565,6 +573,8 @@ private:
   };
 
   struct NominationTelemetry {
+    // A retry answered from the cached nomination; not a new nomination.
+    bool retry = false;
     bool succeeded = false;
     double duration = 0.0;
     size_t scheduled_tx_count = 0;
