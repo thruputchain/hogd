@@ -193,8 +193,23 @@ xdr_cpu_to_be(T value)
 // to/from a parallel batch.
 constexpr size_t kNumThreadsForParallelBatch = 20;
 
-// Below this object count, batch helpers avoid dispatching work to the pool.
+// Batch helpers run a batch on the calling thread, instead of dispatching
+// chunks to the pool, when it holds fewer than kMinParallelBatchSize objects
+// and, where its encoded size is known, at most kMaxInlineBatchBytes. The byte
+// bound keeps a few large transactions from tying up an RPC read loop.
 inline constexpr size_t kMinParallelBatchSize = 32;
+inline constexpr size_t kMaxInlineBatchBytes = 64 * 1024;
+
+inline constexpr bool
+run_batch_inline(size_t num_objects, size_t num_bytes)
+{
+  return num_objects < kMinParallelBatchSize &&
+         num_bytes <= kMaxInlineBatchBytes;
+}
+
+// Encoded size for callers that do not know it. Such batches keep the pool
+// dispatch: sizing nested XDR just to decide would itself walk the batch.
+inline constexpr size_t kUnknownEncodedBytes = SIZE_MAX;
 
 // [max_objects] for input this node produced itself.  Grep it to find every
 // decode that trusts its source.
@@ -312,7 +327,9 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
     return true;
   };
   bool ret = true;
-  if (total_segment_tokens < kMinParallelBatchSize) {
+  // Empty segments cost a scan but no payload bytes, so cap their count too.
+  if (run_batch_inline(total_segment_tokens, parallel.xdr.size()) &&
+      parallel.segment_tokens.size() <= kNumThreadsForParallelBatch) {
     for (ChunkRange chunk : chunks) {
       ret = decode_chunk(chunk) && ret;
     }
@@ -340,7 +357,8 @@ parallel_batch_to_t(const ParallelBatch &parallel, x23::XdrVec<T> &objs,
 
 template<typename T>
 inline x23::Async<void>
-append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
+append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel,
+                         size_t encoded_bytes = kUnknownEncodedBytes)
 {
   // [t] and [{t}] (i.e., a vector with [t]) serialize differently. Thus, we
   // serialize each object individually rather than serialize [objs] once.
@@ -351,7 +369,7 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
   parallel.segment_tokens.resize(segment_offset + chunks.size(), 0);
   // Segment boundaries are part of the wire encoding. Keep the same chunks
   // even when serializing directly into the destination on this thread.
-  if (objs.size() < kMinParallelBatchSize) {
+  if (run_batch_inline(objs.size(), encoded_bytes)) {
     for (size_t i = 0; i < chunks.size(); i++) {
       const ChunkRange &chunk = chunks[i];
       const size_t start = parallel.xdr.size();
@@ -399,12 +417,13 @@ append_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
 
 template<typename T>
 inline x23::Async<void>
-t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel)
+t_to_parallel_batch(x23::span<T> objs, ParallelBatch &parallel,
+                    size_t encoded_bytes = kUnknownEncodedBytes)
 {
   // [ParallelBatch] is a struct, and the caller likely allocated it without
   // zeroing it out. Thus, we zero it out here.
   parallel = {};
-  co_await append_to_parallel_batch(objs, parallel);
+  co_await append_to_parallel_batch(objs, parallel, encoded_bytes);
   co_return;
 }
 
@@ -427,9 +446,11 @@ append_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
 
 template<typename T>
 inline x23::Async<void>
-t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel)
+t_to_parallel_batch(const x23::XdrVec<T> &objs, ParallelBatch &parallel,
+                    size_t encoded_bytes = kUnknownEncodedBytes)
 {
-  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel);
+  co_await t_to_parallel_batch(x23::span<const T>(objs), parallel,
+                               encoded_bytes);
   co_return;
 }
 
