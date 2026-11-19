@@ -2,7 +2,6 @@
 
 #include <atomic>
 #include <cassert>
-#include <limits>
 #include <mutex>
 #include <new>
 #include <optional>
@@ -22,10 +21,8 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/view/view.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "view.hh"
 #include "x23/async.h"
 #include "x23/serialize.h"
 
@@ -81,22 +78,6 @@ ExecutorContext::propose_transaction_batch(SignedTransactionBatch signed_txs,
   }
   assert(batch_res.size() == signed_txs.size());
   co_return std::move(batch_res);
-}
-
-x23::Async<ExpectedViewResult>
-ExecutorContext::view_transaction(TransactionViewQuery const &query)
-{
-  assert(mode_ == ExecutionMode::kViewing);
-  // Get off the RPC reader before executing.  x23's reader coroutine calls
-  // serve() inline, so without this hop the body runs on the reader up to its
-  // first database read and every other request on that connection waits
-  // behind it -- and a connection serves many transactions at once.  main did
-  // not have this problem because it submitted to a DispatchPool and parked on
-  // the result, which returned to the reader immediately.
-  co_await default_threadpool().bg();
-  // query stays borrowed from the caller across the hop; the RPC service keeps
-  // the request alive until the returned Async completes.
-  co_return co_await run_view_transaction(query);
 }
 
 x23::Async<ExecValidateBatchResult>
@@ -291,18 +272,6 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
     spawn_event_emission(*syscall_handler, exec_res, std::move(tx));
   }
   co_return exec_res;
-}
-
-x23::Async<ExpectedViewResult>
-ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
-{
-  assert(mode_ == ExecutionMode::kViewing);
-  static thread_local auto context = make_hog_exec_context();
-  co_return co_await View::run_view_transaction(
-      *snapshot_cache_,
-      make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
-      make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
-      query, *context, {});
 }
 
 x23::Detached
