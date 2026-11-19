@@ -3901,9 +3901,192 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
   expect_clean_exit(process);
 }
 
+// GetBlockTimepoint (35) into memory at 256, then Return (6) those 8 bytes --
+// or, if the syscall reported an error, an empty reverting Return. Return's
+// arguments: a1/a2 the buffer, a3 revert_frame, a4/a5 the returned auth token
+// ids (none). The RV32 loader decodes every word at admission, so the failure
+// path is a syscall rather than an illegal instruction.
+Contract
+block_timepoint_probe()
+{
+  using rv32::test_program::addi;
+  using rv32::test_program::branch;
+  constexpr uint32_t kEcall = 0x00000073U;
+  constexpr int32_t kOut = 256;
+  const std::vector<uint32_t> words{
+      addi(10, 0, 35),
+      addi(11, 0, kOut),
+      kEcall,
+      branch(1, 10, 0, 32), // bne a0, x0, +8 words: the revert below
+      addi(10, 0, 6),
+      addi(11, 0, kOut),
+      addi(12, 0, 8),
+      addi(13, 0, 0),
+      addi(14, 0, 0),
+      addi(15, 0, 0),
+      kEcall,
+      addi(10, 0, 6),
+      addi(11, 0, 0),
+      addi(12, 0, 0),
+      addi(13, 0, 1),
+      addi(14, 0, 0),
+      addi(15, 0, 0),
+      kEcall,
+  };
+  const std::vector<uint8_t> initial_memory(4096, 0);
+  Contract contract(ContractType::kRv32);
+  contract.rv32_contract().data.append_range(
+      rv32::test_artifact::build_artifact(words, initial_memory));
+  return contract;
+}
+
+// The little-endian u64 at the end of `bytes`: the whole of a probe's return
+// from a direct view, the tail of the wallet's encoded return list from a
+// transaction. The caller checks there are at least 8 bytes.
+TimePoint
+trailing_timepoint(auto const &bytes)
+{
+  uint64_t out = 0;
+  for (size_t i = 0; i < 8; ++i) {
+    out |= uint64_t{bytes[bytes.size() - 8 + i]} << (8 * i);
+  }
+  return out;
+}
+
+// The wallet of fixture account 1 under the "thruput-dev-accounts" seed: the
+// account `--fixture-accounts 1` creates, and persistent_data_dir_args() too.
+ContractAddress
+fixture_account_wallet()
+{
+  return build_local_bootstrap_account_artifact(fixture_config(1))
+      .accounts[1]
+      .address;
+}
+
+SignedTransaction
+sign_as_fixture_account(Readiness const &readiness, Transaction tx)
+{
+  auto keypair =
+      derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
+  Signature signature(CryptographicScheme::Ed25519);
+  auto signed_bytes = ed25519_sign(
+      keypair.second,
+      transaction_signature_preimage(readiness_network_hash(readiness), tx));
+  EXPECT_TRUE(signed_bytes.has_value());
+  signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
+  return SignedTransaction{
+      .tx = std::move(tx),
+      .signatures = {DecoratedSignature{
+          .public_key_id = 0,
+          .signature = signature,
+      }},
+      .pubkey_claim_key = ed25519_public_key(keypair.first),
+  };
+}
+
+// Deploys block_timepoint_probe() from the fixture wallet, with `nonce` as both
+// the deployment nonce and the uniquifier nonce.
+Transaction
+deploy_probe_tx(Contract const &probe, std::uint64_t nonce)
+{
+  using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+  return Transaction{
+      .invocation =
+          Invocation{
+              .invoked_address = fixture_account_wallet(),
+              .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
+              .gas_limit = GasAmount{10'000'000},
+              .calldata = wallet_meta::make_calldata<u8"deploy">(
+                  make_nonce(nonce), sha256(probe),
+                  make_erc20_amount(100'000'000),
+                  x23::Ptr<default_wallet::WalletInitCall>{}),
+          },
+      .uniquifier = Uniquifier{.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = nonce},
+      .contracts_to_deploy = {probe},
+      .auth_claim = native_account_auth_claim(),
+  };
+}
+
+ContractAddress
+deployed_probe_address(Contract const &probe, std::uint64_t nonce)
+{
+  return sha256(ContractDeploymentHashPreimage{
+      .deployer_address = fixture_account_wallet(),
+      .nonce = make_nonce(nonce),
+      .contract_hash = sha256(probe)});
+}
+
+// Calls the probe at `probe` through the fixture wallet's execute.
+Transaction
+call_probe_tx(ContractAddress const &probe, std::uint64_t nonce)
+{
+  using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+  return Transaction{
+      .invocation =
+          Invocation{
+              .invoked_address = fixture_account_wallet(),
+              .entrypoint = wallet_meta::entrypoint<u8"execute">(),
+              .gas_limit = GasAmount{10'000'000},
+              .calldata = wallet_meta::make_calldata<u8"execute">(
+                  x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
+                      default_wallet::WalletCall{
+                          .target = probe,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = 1'000'000,
+                          .calldata = {},
+                      }}),
+          },
+      .uniquifier = Uniquifier{.block_expiry_height =
+                                   std::numeric_limits<BlockHeight>::max(),
+                               .nonce = nonce},
+      .auth_claim = native_account_auth_claim(),
+  };
+}
+
+// Commits `signed_tx` alone in a block at `timepoint` and returns its indexed
+// record: TxInfoNotFound if it was not nominated or never indexed.
+TxInfoResult
+commit_alone_at(sched_coord_client_t &scheduler, auto &reader,
+                SignedTransaction const &signed_tx, TimePoint timepoint)
+{
+  const TransactionHash tx_hash = sha256(signed_tx.tx);
+  TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+  if (submit_and_commit(scheduler, SignedTransactionBatch{signed_tx},
+                        ProposalContext{.block_timepoint = timepoint})
+          .size() != 1UL) {
+    return result;
+  }
+  const auto deadline = std::chrono::steady_clock::now() + kIndexPollTimeout;
+  while (std::chrono::steady_clock::now() < deadline) {
+    result = reader.get_transaction_info(tx_hash)();
+    if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+      break;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  }
+  return result;
+}
+
+// What the probe read in a committed call: the timepoint it returned, through
+// the wallet's return list.
+void
+expect_probe_read(TxInfoResult const &called, TimePoint expected)
+{
+  ASSERT_EQ(called.outcome(), TxInfoOutcome::TxInfoFound);
+  EXPECT_EQ(called.info().events.exec_result, ExecResult::ExecResultOK);
+  auto const &output = called.info().events.root_output;
+  ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
+  ASSERT_GE(output.return_buffer().size(), 8UL);
+  EXPECT_EQ(trailing_timepoint(output.return_buffer()), expected);
+}
+
+constexpr TimePoint kOneHourNanos = 3'600'000'000'000ULL;
+
 // A transaction reads GetBlockTimepoint as the timepoint its block was
 // proposed at; a view of the same contract reads the timepoint its query
-// states. The contract returns the 8 bytes the syscall wrote, so the indexed
+// states. The probe returns the 8 bytes the syscall wrote, so the indexed
 // transaction output carries exactly what the contract saw.
 TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
 {
@@ -3931,158 +4114,29 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    // GetBlockTimepoint (35) into memory at 256, then Return (6) those 8
-    // bytes -- or, if the syscall reported an error, an empty reverting Return.
-    // Return's arguments: a1/a2 the buffer, a3 revert_frame, a4/a5 the
-    // returned auth token ids (none).
-    using rv32::test_program::addi;
-    using rv32::test_program::branch;
-    constexpr uint32_t kEcall = 0x00000073U;
-    constexpr int32_t kOut = 256;
-    const std::vector<uint32_t> words{
-        addi(10, 0, 35),
-        addi(11, 0, kOut),
-        kEcall,
-        branch(1, 10, 0, 32), // bne a0, x0, +8 words: the revert below
-        addi(10, 0, 6),
-        addi(11, 0, kOut),
-        addi(12, 0, 8),
-        addi(13, 0, 0),
-        addi(14, 0, 0),
-        addi(15, 0, 0),
-        kEcall,
-        addi(10, 0, 6),
-        addi(11, 0, 0),
-        addi(12, 0, 0),
-        addi(13, 0, 1),
-        addi(14, 0, 0),
-        addi(15, 0, 0),
-        kEcall,
-    };
-    const std::vector<uint8_t> initial_memory(4096, 0);
-    Contract contract(ContractType::kRv32);
-    contract.rv32_contract().data.append_range(
-        rv32::test_artifact::build_artifact(words, initial_memory));
-
-    auto keypair =
-        derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
-    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
-    const ContractAddress wallet_address =
-        build_local_bootstrap_account_artifact(fixture_config(1))
-            .accounts[1]
-            .address;
-    const NetworkHash network_hash = readiness_network_hash(readiness);
-    auto sign = [&](Transaction tx) {
-      Signature signature(CryptographicScheme::Ed25519);
-      auto signed_bytes = ed25519_sign(
-          keypair.second, transaction_signature_preimage(network_hash, tx));
-      EXPECT_TRUE(signed_bytes.has_value());
-      signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
-      return SignedTransaction{
-          .tx = std::move(tx),
-          .signatures = {DecoratedSignature{
-              .public_key_id = 0,
-              .signature = signature,
-          }},
-          .pubkey_claim_key = ed25519_public_key(keypair.first),
-      };
-    };
-    auto committed_info = [&](TransactionHash const &tx_hash) {
-      const auto deadline =
-          std::chrono::steady_clock::now() + kIndexPollTimeout;
-      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
-      while (std::chrono::steady_clock::now() < deadline) {
-        result = reader.get_transaction_info(tx_hash)();
-        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
-          break;
-        }
-        std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      }
-      return result;
-    };
-    auto le_u64 = [](auto const &bytes) {
-      uint64_t out = 0;
-      for (size_t i = 0; i < 8; ++i) {
-        out |= uint64_t{bytes[bytes.size() - 8 + i]} << (8 * i);
-      }
-      return out;
-    };
-
+    const Contract probe = block_timepoint_probe();
     const TimePoint deploy_timepoint = view_timepoint_now();
-    const TimePoint call_timepoint = deploy_timepoint + 3'600'000'000'000ULL;
+    const TimePoint call_timepoint = deploy_timepoint + kOneHourNanos;
 
-    const SHA256Hash deploy_nonce = make_nonce(11);
-    const SHA256Hash contract_hash = sha256(contract);
-    SignedTransaction deploy_tx = sign(Transaction{
-        .invocation =
-            Invocation{
-                .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
-                .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<u8"deploy">(
-                    deploy_nonce, contract_hash, make_erc20_amount(100'000'000),
-                    x23::Ptr<default_wallet::WalletInitCall>{}),
-            },
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 11},
-        .contracts_to_deploy = {contract},
-        .auth_claim = native_account_auth_claim(),
-    });
-    const TransactionHash deploy_hash = sha256(deploy_tx.tx);
-    if (submit_and_commit(
-            scheduler, SignedTransactionBatch{deploy_tx},
-            ProposalContext{.block_timepoint = deploy_timepoint})
-            .size() != 1UL) {
+    TxInfoResult deployed = commit_alone_at(
+        scheduler, reader,
+        sign_as_fixture_account(readiness, deploy_probe_tx(probe, 11)),
+        deploy_timepoint);
+    if (deployed.outcome() != TxInfoOutcome::TxInfoFound) {
       int status = process.terminate();
-      FAIL() << "deploy was not nominated; hog-devnode exited with status "
+      FAIL() << "deploy was not committed; hog-devnode exited with status "
              << status << "\nstderr:\n"
              << process.read_remaining_stderr();
     }
-    TxInfoResult deployed = committed_info(deploy_hash);
-    ASSERT_EQ(deployed.outcome(), TxInfoOutcome::TxInfoFound);
     ASSERT_EQ(deployed.info().events.exec_result, ExecResult::ExecResultOK);
-    const ContractAddress contract_address = sha256(
-        ContractDeploymentHashPreimage{.deployer_address = wallet_address,
-                                       .nonce = deploy_nonce,
-                                       .contract_hash = contract_hash});
+    const ContractAddress probe_address = deployed_probe_address(probe, 11);
 
-    SignedTransaction call_tx = sign(Transaction{
-        .invocation =
-            Invocation{
-                .invoked_address = wallet_address,
-                .entrypoint = wallet_meta::entrypoint<u8"execute">(),
-                .gas_limit = GasAmount{10'000'000},
-                .calldata = wallet_meta::make_calldata<u8"execute">(
-                    x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
-                        default_wallet::WalletCall{
-                            .target = contract_address,
-                            .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = 1'000'000,
-                            .calldata = {},
-                        }}),
-            },
-        .uniquifier = Uniquifier{.block_expiry_height =
-                                     std::numeric_limits<BlockHeight>::max(),
-                                 .nonce = 12},
-        .auth_claim = native_account_auth_claim(),
-    });
-    const TransactionHash call_hash = sha256(call_tx.tx);
-    if (submit_and_commit(scheduler, SignedTransactionBatch{call_tx},
-                          ProposalContext{.block_timepoint = call_timepoint})
-            .size() != 1UL) {
-      int status = process.terminate();
-      FAIL() << "call was not nominated; hog-devnode exited with status "
-             << status << "\nstderr:\n"
-             << process.read_remaining_stderr();
-    }
-    TxInfoResult called = committed_info(call_hash);
-    ASSERT_EQ(called.outcome(), TxInfoOutcome::TxInfoFound);
-    EXPECT_EQ(called.info().events.exec_result, ExecResult::ExecResultOK);
-    auto const &tx_output = called.info().events.root_output;
-    ASSERT_EQ(tx_output.status_code(), InvocationFrameStatusCode::Return);
-    ASSERT_GE(tx_output.return_buffer().size(), 8UL);
-    EXPECT_EQ(le_u64(tx_output.return_buffer()), call_timepoint);
+    expect_probe_read(
+        commit_alone_at(scheduler, reader,
+                        sign_as_fixture_account(
+                            readiness, call_probe_tx(probe_address, 12)),
+                        call_timepoint),
+        call_timepoint);
 
     // Control: the same contract, viewed directly, reads the view's timepoint.
     auto view = create_client<ViewGateway1>(readiness.view_gateway.host,
@@ -4093,7 +4147,7 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
               ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
     const TimePoint view_timepoint = call_timepoint + 1;
     const auto viewed = view.viewgateway_view(TransactionViewQuery{
-        .invocation = Invocation{.invoked_address = contract_address,
+        .invocation = Invocation{.invoked_address = probe_address,
                                  .gas_limit = GasAmount{1'000'000}},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
         .block_timepoint = view_timepoint,
@@ -4102,7 +4156,7 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
     auto const &view_output = viewed.payload().output;
     ASSERT_EQ(view_output.status_code(), InvocationFrameStatusCode::Return);
     ASSERT_EQ(view_output.return_buffer().size(), 8UL);
-    EXPECT_EQ(le_u64(view_output.return_buffer()), view_timepoint);
+    EXPECT_EQ(trailing_timepoint(view_output.return_buffer()), view_timepoint);
   }
 
   expect_clean_exit(process);
@@ -4843,6 +4897,106 @@ TEST(HogDevnode, DataDirRecoversCommittedStateAfterUngracefulKill)
 
     expect_clean_exit(process);
   }
+}
+
+// Restarts the devnode on one data dir between deploying the probe and calling
+// it, so the call runs on a chain the node recovered: the recovered tip still
+// carries the last block's timepoint, and a block proposed after the restart
+// is read at its own.
+void
+expect_probe_reads_block_timepoint_across_restart(bool kill)
+{
+  std::filesystem::path data_dir = make_test_data_dir();
+  Defer cleanup_data_dir([&] { std::filesystem::remove_all(data_dir); });
+  const std::vector<std::string> args = persistent_data_dir_args(data_dir);
+  const Contract probe = block_timepoint_probe();
+  const ContractAddress probe_address = deployed_probe_address(probe, 61);
+  const TimePoint before_restart = view_timepoint_now() + kOneHourNanos;
+  const TimePoint after_restart = before_restart + kOneHourNanos;
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "fresh");
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+
+    TxInfoResult deployed = commit_alone_at(
+        scheduler, reader,
+        sign_as_fixture_account(readiness, deploy_probe_tx(probe, 61)),
+        before_restart);
+    if (deployed.outcome() != TxInfoOutcome::TxInfoFound) {
+      int status = process.terminate();
+      FAIL() << "deploy was not committed; hog-devnode exited with status "
+             << status << "\nstderr:\n"
+             << process.read_remaining_stderr();
+    }
+    ASSERT_EQ(deployed.info().events.exec_result, ExecResult::ExecResultOK);
+    expect_probe_read(
+        commit_alone_at(scheduler, reader,
+                        sign_as_fixture_account(
+                            readiness, call_probe_tx(probe_address, 62)),
+                        before_restart),
+        before_restart);
+
+    if (kill) {
+      expect_killed_exit(process);
+    } else {
+      expect_clean_exit(process);
+    }
+  }
+
+  {
+    HogDevnodeProcess process = HogDevnodeProcess::start(args);
+    Readiness readiness = process.wait_for_readiness();
+    ASSERT_EQ(readiness.chain_state, "recovered");
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+
+    SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    EXPECT_EQ(tip.db_tip().value.proposal_header.block_timepoint,
+              before_restart);
+
+    TxInfoResult called = commit_alone_at(
+        scheduler, reader,
+        sign_as_fixture_account(readiness, call_probe_tx(probe_address, 63)),
+        after_restart);
+    if (called.outcome() != TxInfoOutcome::TxInfoFound) {
+      int status = process.terminate();
+      FAIL() << "post-restart call was not committed; hog-devnode exited "
+                "with status "
+             << status << "\nstderr:\n"
+             << process.read_remaining_stderr();
+    }
+    expect_probe_read(called, after_restart);
+
+    expect_clean_exit(process);
+  }
+}
+
+TEST(HogDevnode, TransactionReadsItsBlockTimepointAfterCleanRestart)
+{
+  expect_probe_reads_block_timepoint_across_restart(/*kill=*/false);
+}
+
+TEST(HogDevnode, TransactionReadsItsBlockTimepointAfterUngracefulKill)
+{
+  expect_probe_reads_block_timepoint_across_restart(/*kill=*/true);
 }
 
 TEST(HogDevnode, DataDirRecoversAcrossRepeatedUngracefulKills)
