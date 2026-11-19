@@ -95,13 +95,56 @@ def emit_type_def(td: dict[str, Any]) -> str | None:
         return None
 
 
+def named_refs(ty: dict[str, Any]) -> list[str]:
+    """The declared names of the user-defined types `ty` mentions."""
+    kind: str = ty["kind"]
+    if kind == "named":
+        return [declared_name(ty["name"])]
+    refs: list[str] = []
+    for key in ("element", "inner"):
+        if key in ty:
+            refs += named_refs(ty[key])
+    for item in ty.get("items", []):
+        refs += named_refs(item)
+    return refs
+
+
+def definition_order(type_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Order type_defs so each follows the type_defs its fields name.
+
+    XDR, like the C++ generated from it, needs a type defined before a struct
+    uses it, and the spec lists type_defs in no such order. Types that do not
+    depend on each other keep their spec order.
+    """
+    by_name = {declared_name(td["name"]): td for td in type_defs}
+    ordered: list[dict[str, Any]] = []
+    placed: set[str] = set()
+
+    def place(td: dict[str, Any], pending: tuple[str, ...]) -> None:
+        name = declared_name(td["name"])
+        if name in placed:
+            return
+        if name in pending:
+            raise ValueError(f"type '{name}' contains itself; XDR cannot define it")
+        for field in td.get("fields", []):
+            for ref in named_refs(field["type"]):
+                if ref in by_name:
+                    place(by_name[ref], pending + (name,))
+        placed.add(name)
+        ordered.append(td)
+
+    for td in type_defs:
+        place(td, ())
+    return ordered
+
+
 def generate_xdr(type_defs: list[dict[str, Any]], namespace: str) -> str:
     """Generate XDR .x content from type_defs."""
     if not type_defs:
         return f"namespace {namespace} {{\n\n}} // namespace\n"
 
     body_parts: list[str] = []
-    for td in type_defs:
+    for td in definition_order(type_defs):
         result = emit_type_def(td)
         if result:
             body_parts.append(result)

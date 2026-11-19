@@ -119,6 +119,51 @@ class TestGenerateXdr(unittest.TestCase):
         self.assertIn("enum E {", result)
         self.assertIn("struct S {", result)
 
+    def test_types_are_defined_before_the_structs_that_use_them(self) -> None:
+        # The spec lists these by name, which puts each user before its use.
+        named = lambda n: {"kind": "named", "name": spec_id(n)}
+        type_defs = [
+            {"kind": "struct", "name": spec_id("Call"), "fields": [
+                {"name": "tokens", "type": {
+                    "kind": "vec", "element": named("Ref"), "max_len": 64}},
+            ]},
+            {"kind": "struct", "name": spec_id("Ref"), "fields": [
+                {"name": "source", "type": named("Source")},
+                {"name": "index", "type": {"kind": "u32"}},
+            ]},
+            {"kind": "enum", "name": spec_id("Source"),
+             "variants": [{"name": "A", "value": 0}]},
+            {"kind": "struct", "name": spec_id("Unrelated"), "fields": [
+                {"name": "x", "type": {"kind": "u32"}}
+            ]},
+        ]
+        result = generate_xdr(type_defs, "test_ns")
+        positions = [result.index(d) for d in (
+            "enum Source {", "struct Ref {", "struct Call {",
+            "struct Unrelated {")]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_spec_order_is_kept_without_dependencies(self) -> None:
+        type_defs = [
+            {"kind": "struct", "name": spec_id(n), "fields": [
+                {"name": "x", "type": {"kind": "u32"}}
+            ]} for n in ("B", "A", "C")
+        ]
+        result = generate_xdr(type_defs, "test_ns")
+        positions = [result.index(f"struct {n} {{") for n in ("B", "A", "C")]
+        self.assertEqual(positions, sorted(positions))
+
+    def test_self_containing_type_raises(self) -> None:
+        type_defs = [
+            {"kind": "struct", "name": spec_id("Loop"), "fields": [
+                {"name": "next", "type": {
+                    "kind": "option",
+                    "inner": {"kind": "named", "name": spec_id("Loop")}}},
+            ]},
+        ]
+        with self.assertRaises(ValueError):
+            generate_xdr(type_defs, "test_ns")
+
 
 if __name__ == "__main__":
     unittest.main()
