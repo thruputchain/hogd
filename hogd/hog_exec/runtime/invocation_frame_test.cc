@@ -280,9 +280,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
 }
 
-// The ExecutionModeData alternatives, which the depth-cap test below is
-// parameterized over. Not ExecutionMode: a view is not a block mode, only a
-// mode-data arm.
+// The ExecutionModeData arms the depth-cap test is parameterized over.
 namespace {
 
 enum class ModeDataArm : uint8_t { kProposal, kValidation, kViewing };
