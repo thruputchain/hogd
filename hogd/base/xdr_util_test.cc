@@ -186,13 +186,20 @@ TEST(ParallelBatchToTTest, AppendPreservesWireSegmentsAcrossParallelThreshold)
       expected.segment_tokens.push_back(chunk.end - chunk.start);
       expected.segment_bytes.push_back(expected.xdr.size() - start);
     }
-    append_to_parallel_batch(txs, actual)();
-    EXPECT_EQ(actual, expected);
-    SignedTransactionBatch decoded;
-    ASSERT_TRUE(parallel_batch_to_t(actual, decoded, count + 1)());
-    auto all = prefix;
-    all += txs;
-    EXPECT_EQ(decoded, all);
+    // An unknown size keeps the pool dispatch; a known small size lets a
+    // batch under the object cutoff serialize inline. Both must match.
+    for (size_t hint : {kUnknownEncodedBytes, size_t{0}}) {
+      SCOPED_TRACE(hint);
+      auto appended = actual;
+      append_to_parallel_batch(x23::span<const SignedTransaction>(txs),
+                               appended, hint)();
+      EXPECT_EQ(appended, expected);
+      SignedTransactionBatch decoded;
+      ASSERT_TRUE(parallel_batch_to_t(appended, decoded, count + 1)());
+      auto all = prefix;
+      all += txs;
+      EXPECT_EQ(decoded, all);
+    }
   }
 }
 
@@ -290,8 +297,10 @@ TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
 
 // The cases above decode on the calling thread (fewer than
 // kMinParallelBatchSize objects). This one is large enough to take the pooled
-// path, so a bad final segment must still fail after every chunk is awaited.
-TEST(ParallelBatchToTTest, PooledPathRejectsOverclaimedFinalSegment)
+// path. A trailing byte in the first segment passes the aggregate token and
+// byte checks, so only that segment's pooled worker can reject it, and the
+// valid segments after it must not mask the failure.
+TEST(ParallelBatchToTTest, PooledPathRejectsTrailingByteInEarlySegment)
 {
   SignedTransactionBatch txs(kMinParallelBatchSize,
                              make_minimal_signed_transaction());
@@ -302,8 +311,25 @@ TEST(ParallelBatchToTTest, PooledPathRejectsOverclaimedFinalSegment)
   ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
   EXPECT_EQ(parsed.size(), kMinParallelBatchSize);
 
-  batch.segment_tokens.back() += 1;
+  const size_t first_end = batch.segment_bytes[0];
+  decltype(batch.xdr) xdr;
+  for (size_t i = 0; i < batch.xdr.size(); i++) {
+    if (i == first_end) {
+      xdr.push_back(0);
+    }
+    xdr.push_back(batch.xdr[i]);
+  }
+  batch.xdr = std::move(xdr);
+  batch.segment_bytes[0] += 1;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+TEST(ParallelBatchToTTest, InlineChoiceRespectsByteBound)
+{
+  EXPECT_TRUE(run_batch_inline(kMinParallelBatchSize - 1, 0));
+  EXPECT_TRUE(run_batch_inline(1, kMaxInlineBatchBytes));
+  EXPECT_FALSE(run_batch_inline(kMinParallelBatchSize, 0));
+  EXPECT_FALSE(run_batch_inline(1, kMaxInlineBatchBytes + 1));
 }
 
 TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)

@@ -15,6 +15,7 @@
 #include "db_sched.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
+#include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/block_transfers.h"
@@ -82,10 +83,15 @@ public:
   // [txs] and [tx_hashes]. [on_variant] decides between a submission and a
   // different signed encoding of its body that is already cached.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
+  //
+  // [encoded_bytes] bounds the txs' total encoded size. A small batch within
+  // [kMaxInlineBatchBytes] is added on the calling thread; an unknown size
+  // keeps the pool dispatch.
   add_txs(const x23::XdrVec<SignedTransaction> &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes,
           const SignedTransactionHashBatch &signed_tx_hashes,
-          CachedVariant on_variant);
+          CachedVariant on_variant,
+          size_t encoded_bytes = kUnknownEncodedBytes);
 
   // [add_txs()] for callers that have not hashed the signed encodings, as an
   // unvetted submission.

@@ -93,7 +93,8 @@ remove_indices(x23::XdrVec<T> &remove_from, const x23::Vec<size_t> &indices)
 x23::Async<void>
 hash_transactions(const SignedTransactionBatch &txs,
                   TransactionHashBatch &tx_hashes,
-                  SignedTransactionHashBatch &signed_tx_hashes)
+                  SignedTransactionHashBatch &signed_tx_hashes,
+                  size_t encoded_bytes)
 {
   tx_hashes.resize(txs.size());
   signed_tx_hashes.resize(txs.size());
@@ -104,7 +105,7 @@ hash_transactions(const SignedTransactionBatch &txs,
       signed_tx_hashes[i] = hashes.signed_tx_hash;
     }
   };
-  if (txs.size() < kMinParallelBatchSize) {
+  if (run_batch_inline(txs.size(), encoded_bytes)) {
     hash_range({0, txs.size()});
     co_return;
   }
@@ -443,6 +444,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_unvetted", default_threadpool());
+  const size_t batch_bytes = batch.xdr.size();
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
@@ -480,11 +482,14 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         co_return;
       });
 
-  auto hash_node = submit_dag.async<void>(
-      "hash transactions", submit_dag.after(decode_node),
-      [&, tx_hashes, signed_tx_hashes]() -> x23::Async<void> {
-        co_await hash_transactions(*txs, *tx_hashes, *signed_tx_hashes);
-      });
+  auto hash_node =
+      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
+                             [&, tx_hashes,
+                              signed_tx_hashes]() -> x23::Async<void> {
+                               co_await hash_transactions(*txs, *tx_hashes,
+                                                          *signed_tx_hashes,
+                                                          batch_bytes);
+                             });
 
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(ready_node, hash_node),
@@ -638,7 +643,7 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
         const SchedGatewaySubmitOutcomeBatch add_outcomes =
             co_await scheduler_->add_txs(
                 *txs, *tx_hashes, *signed_tx_hashes,
-                Scheduler::CachedVariant::kSubmitUnvetted);
+                Scheduler::CachedVariant::kSubmitUnvetted, batch_bytes);
         CHECK_EQ(add_outcomes.size(), txs->size());
         CHECK_EQ(original_indices->size(), txs->size());
         SignedTransactionBatch admitted_txs;
@@ -667,15 +672,18 @@ MempoolCoordinatorRpc::submit_unvetted(ParallelSignedTransactionBatch batch,
       [&, txs]() -> x23::Async<void> {
         pending_detached_coroutines_.fetch_add(1, std::memory_order_acquire);
         [](MempoolCoordinatorRpc &coord,
-           std::shared_ptr<SignedTransactionBatch> txs) -> x23::Detached {
+           std::shared_ptr<SignedTransactionBatch> txs,
+           size_t batch_bytes) -> x23::Detached {
           // We serialize and send the response in a detached coroutine so that
           // the admission RPC does not wait on the coordinator notification.
+          // The admitted txs are a subset of the submission, so its encoded
+          // size bounds theirs.
           ParallelBatch response;
-          co_await t_to_parallel_batch(*txs, response);
+          co_await t_to_parallel_batch(*txs, response, batch_bytes);
           co_await coord.coord_client_->coordscheduler_notify_vetted(response);
           coord.pending_detached_coroutines_.fetch_sub(
               1, std::memory_order_release);
-        }(*this, txs);
+        }(*this, txs, batch_bytes);
         co_return;
       });
 
@@ -736,6 +744,7 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
       MempoolMetrics::instance().ingestion_commit_lock_wait_seconds,
       MempoolMetrics::instance().ingestion_commit_lock_hold_seconds);
   x23::Dag submit_dag("schedulercoord_submit_vetted", default_threadpool());
+  const size_t batch_bytes = batch.xdr.size();
 
   auto decode_node =
       submit_dag.async<void>("decode batch", [&]() -> x23::Async<void> {
@@ -752,11 +761,14 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         co_return;
       });
 
-  auto hash_node = submit_dag.async<void>(
-      "hash transactions", submit_dag.after(decode_node),
-      [&, tx_hashes, signed_tx_hashes]() -> x23::Async<void> {
-        co_await hash_transactions(*txs, *tx_hashes, *signed_tx_hashes);
-      });
+  auto hash_node =
+      submit_dag.async<void>("hash transactions", submit_dag.after(decode_node),
+                             [&, tx_hashes,
+                              signed_tx_hashes]() -> x23::Async<void> {
+                               co_await hash_transactions(*txs, *tx_hashes,
+                                                          *signed_tx_hashes,
+                                                          batch_bytes);
+                             });
 
   auto verify_node = submit_dag.async<AuthErrorCodeBatch>(
       "verify transactions", submit_dag.after(hash_node),
@@ -795,7 +807,8 @@ MempoolCoordinatorRpc::schedulercoord_submit_vetted(
         // validation executes, so they replace other encodings of their
         // bodies.
         co_await scheduler_->add_txs(*txs, *tx_hashes, *signed_tx_hashes,
-                                     Scheduler::CachedVariant::kSubmitVetted);
+                                     Scheduler::CachedVariant::kSubmitVetted,
+                                     batch_bytes);
         MempoolMetrics::instance().accepted_vetted_tx_count.increment(
             txs->size());
         // [commit_guard] is a smart pointer that has a [reset()] method just
