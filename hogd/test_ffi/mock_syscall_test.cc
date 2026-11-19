@@ -489,9 +489,18 @@ TEST(MockSyscallTest, NoSyscallTest)
 
 TEST(MockSyscallTest, Ristretto255EmptySum)
 {
-  DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
-                       NetworkHash{}, make_test_genesis_root_contract(),
-                       stock_network_config());
+  // Open the DB through the create_db entry point, not a DBContext directly.
+  // The first FFI call runs lazy_init(), which replaces the process logger. If
+  // a DB already exists, its background thread can log while the logger is
+  // replaced, and TSAN reports a data race on hogd::detail::logger.
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto db_result =
+      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
+                genesis_root.size(), nullptr, 0);
+  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
+  x23::Defer free_db_defer([&] { free_db(db_result.db); });
+  auto &db_context = *static_cast<DBContext *>(db_result.db);
+
   auto runtime_context =
       std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
   SyscallHandlerContext context(runtime_context, SignedTransaction{},
