@@ -86,18 +86,6 @@ protected:
                               RuntimeContext &context,
                               NondeterministicProposalData ndet = {})
   {
-    return run_view_at(query,
-                       framework_.get_storage_snapshot_cache()
-                           ->block_execution_context()
-                           .block_timepoint,
-                       context, std::move(ndet));
-  }
-
-  ExpectedViewResult run_view_at(TransactionViewQuery const &query,
-                                 TimePoint block_timepoint,
-                                 RuntimeContext &context,
-                                 NondeterministicProposalData ndet = {})
-  {
     framework_.ensure_db_tip_loaded();
     return View::run_view_transaction(
         *framework_.get_storage_snapshot_cache(),
@@ -105,7 +93,7 @@ protected:
             std::numeric_limits<TransactionID>::max()),
         framework_.make_new_per_tx_event_server_proxy(
             std::numeric_limits<TransactionID>::max()),
-        query, block_timepoint, context, std::move(ndet))();
+        query, context, std::move(ndet))();
   }
 
   static TransactionViewQuery make_query(Invocation invocation,
@@ -117,6 +105,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -130,6 +119,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -405,7 +395,9 @@ TEST_F(ViewTest, ViewObservesItsOwnBlockTimepoint)
                                         .block_timepoint;
   for (TimePoint stated : {cache_timepoint + 1'000, cache_timepoint + 2'000}) {
     observed = 0;
-    auto result = run_view_at(make_query(invocation), stated, *setup.context);
+    auto query = make_query(invocation);
+    query.block_timepoint = stated;
+    auto result = run_view(query, *setup.context);
     EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
     EXPECT_EQ(observed, stated);
   }
@@ -1735,9 +1727,7 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
                                   snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation),
-      snapshot_cache.block_execution_context().block_timepoint, *setup.context,
-      {})();
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
@@ -1837,9 +1827,7 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
                                   snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation),
-      snapshot_cache.block_execution_context().block_timepoint, *setup.context,
-      {})();
+      make_query(invocation), *setup.context, {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 
