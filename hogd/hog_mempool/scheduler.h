@@ -388,7 +388,7 @@ private:
     //
     // Nearly every body has one encoding, so this is empty and costs no
     // allocation on the submission path and no free on the commit path.
-    std::vector<SignedTransactionHash> displaced_signed_tx_hashes{};
+    std::vector<SignedTransactionHash> displaced_signed_tx_hashes;
   };
 
   struct AccountState {
