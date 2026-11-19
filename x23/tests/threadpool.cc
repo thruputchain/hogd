@@ -363,8 +363,9 @@ run_bursts(bool batch, unsigned rounds, bool vary_gap = false)
     }
   }
   Defer restore{[&] {
-    if (pin)
+    if (pin) {
       EXPECT_FALSE(saved.set_affinity());
+    }
   }};
 #endif
   ThreadPool pool(4);
