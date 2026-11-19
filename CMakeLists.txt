@@ -134,7 +134,10 @@ if(HOGD_STATIC_DEPS)
     message(FATAL_ERROR "HOGD_STATIC_DEPS requires GCC on Linux and CMake 3.24 or later")
   endif()
   set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
-  add_link_options(-static-libstdc++ -static-libgcc)
+  # --gc-sections drops unused code from the Rust standard library. Without
+  # LTO, as in Debug builds, its process spawning stays in and requires
+  # glibc 2.39 (pidfd_spawnp, pidfd_getpid).
+  add_link_options(-static-libstdc++ -static-libgcc -Wl,--gc-sections)
 
   # RocksDB looks for Snappy's package config first, whose Snappy::snappy is
   # the shared library. Redirect the package to the static library.
@@ -146,13 +149,23 @@ if(HOGD_STATIC_DEPS)
     "    IMPORTED_LOCATION \"${HOGD_SNAPPY_LIBRARY}\")\n"
     "endif()\n")
 
-  # Subdirectories reuse this OpenSSL::Crypto. The static libcrypto also needs
-  # the libraries `pkg-config --static --libs libcrypto` lists.
+  # Subdirectories reuse these OpenSSL targets. The static libcrypto also needs
+  # the libraries `pkg-config --static --libs libcrypto` lists. FindOpenSSL
+  # adds some of them to both targets by bare name, and the linker resolves a
+  # bare zstd to libzstd.so, so replace it with the static library.
   set(OPENSSL_USE_STATIC_LIBS TRUE)
   find_package(OpenSSL REQUIRED)
   find_package(ZLIB REQUIRED)
   find_library(HOGD_ZSTD_LIBRARY zstd REQUIRED)
   find_library(HOGD_JITTERENTROPY_LIBRARY jitterentropy REQUIRED)
+  foreach(hogd_openssl_target IN ITEMS OpenSSL::SSL OpenSSL::Crypto)
+    get_target_property(hogd_openssl_deps ${hogd_openssl_target} INTERFACE_LINK_LIBRARIES)
+    if(hogd_openssl_deps)
+      list(TRANSFORM hogd_openssl_deps REPLACE "^zstd$" "${HOGD_ZSTD_LIBRARY}")
+      set_property(TARGET ${hogd_openssl_target}
+        PROPERTY INTERFACE_LINK_LIBRARIES ${hogd_openssl_deps})
+    endif()
+  endforeach()
   set_property(TARGET OpenSSL::Crypto APPEND PROPERTY INTERFACE_LINK_LIBRARIES
     ZLIB::ZLIB "${HOGD_ZSTD_LIBRARY}" "${HOGD_JITTERENTROPY_LIBRARY}")
 endif()
