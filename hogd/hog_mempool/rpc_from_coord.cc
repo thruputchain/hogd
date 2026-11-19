@@ -97,24 +97,27 @@ hash_transactions(const SignedTransactionBatch &txs,
 {
   tx_hashes.resize(txs.size());
   signed_tx_hashes.resize(txs.size());
+  auto hash_range = [&](ChunkRange chunk) {
+    for (size_t i = chunk.start; i < chunk.end; i++) {
+      const SignedTransactionHashes hashes = hash_signed_transaction(txs[i]);
+      tx_hashes[i] = hashes.tx_hash;
+      signed_tx_hashes[i] = hashes.signed_tx_hash;
+    }
+  };
+  if (txs.size() < kMinParallelBatchSize) {
+    hash_range({0, txs.size()});
+    co_return;
+  }
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](const ChunkRange *chunk,
-                         const SignedTransactionBatch &txs,
-                         TransactionHashBatch &tx_hashes,
-                         SignedTransactionHashBatch &signed_tx_hashes) noexcept
-                          -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
-      for (size_t i = chunk->start; i < chunk->end; i++) {
-        const SignedTransactionHashes hashes = hash_signed_transaction(txs[i]);
-        tx_hashes[i] = hashes.tx_hash;
-        signed_tx_hashes[i] = hashes.signed_tx_hash;
-      }
-      co_return;
-    }(&chunk, txs, tx_hashes, signed_tx_hashes));
+    handles.push_back(
+        [](ChunkRange chunk, auto &hash_range) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          hash_range(chunk);
+        }(chunk, hash_range));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

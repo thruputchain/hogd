@@ -848,7 +848,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   const auto &[found, missing] = co_await read_average_native_token_ages(txs);
 
   const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), available_parallelism());
+      make_chunks(txs.size(), txs.size() < kMinParallelBatchSize
+                                  ? 1
+                                  : available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
@@ -861,7 +863,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                                                   SipHash24Hasher> &missing,
                          SchedGatewaySubmitOutcomeBatch &outcomes,
                          Scheduler &scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
+      if (txs.size() >= kMinParallelBatchSize) {
+        co_await default_coropoll().pool_.bg();
+      }
 
       size_t num_added = 0;
       for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
