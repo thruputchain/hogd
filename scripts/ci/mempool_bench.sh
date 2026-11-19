@@ -150,6 +150,15 @@ $CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
+# The mempool's own timings are only on its metrics port, and `timeout` below
+# reaps it at 180 s, so take a snapshot shortly before then.
+rm -f mempool_metrics.txt
+(
+  sleep 170
+  curl --silent --max-time 5 "http://$(hog_ip hog10):$MEMPOOL_HTTP_PORT/metrics" \
+    > mempool_metrics.txt || true
+) &
+
 echo "launch mempool ($MEMPOOL_BINARY)"
 set +e
 timeout 180s "$MEMPOOL_BINARY" \
@@ -193,6 +202,11 @@ fi
 
 echo 'coordinator benchmark results'
 cat coordinator_output.txt
+
+echo 'mempool metrics snapshot'
+# Counters, sums and gauges only: the histogram buckets are long and the
+# sums and counts give the means.
+grep -v -E '^#|_bucket\{' mempool_metrics.txt || echo 'no mempool metrics snapshot'
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
