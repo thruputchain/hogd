@@ -35,14 +35,14 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
                            PerTransactionDatabaseProxy proxy,
                            PerTransactionEventServerProxy event_proxy,
                            TransactionViewQuery const &query,
-                           TimePoint block_timepoint, RuntimeContext &context,
+                           RuntimeContext &context,
                            NondeterministicProposalData ndet)
 {
   ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
   SystemCallHandler syscall_handler(snapshot_cache, std::move(proxy),
                                     std::move(event_proxy), std::move(ctor),
                                     context, query.auth_claim, SHA256Hash{},
-                                    block_timepoint);
+                                    query.block_timepoint);
 
   assert(!syscall_handler.is_running());
 

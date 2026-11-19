@@ -572,10 +572,13 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
 
   static thread_local auto context = make_hog_exec_context();
 
-  // Until the query carries a timepoint of its own, every view on this state
-  // runs at the one its snapshot was opened with (view_block_timepoint()).
-  const TimePoint block_timepoint =
-      view_state.snapshot_cache.block_execution_context().block_timepoint;
+  if (!view_block_timepoint_admissible(
+          tip.value.proposal_header.block_timepoint, query.block_timepoint)) {
+    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayInvalidInput);
+    result.error_code() =
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+    co_return result;
+  }
 
   // WAI: empty nondeterministic data causes ViewingModeData to default
   // TryInvoke outcomes to success. This is deliberate — see the comment on
@@ -588,7 +591,7 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
           view_state.snapshot_cache.get_network_config_params()),
       PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
-      query, block_timepoint, *context, {});
+      query, *context, {});
   co_return view_gateway_result_from_raw_view_result(
       tip.value.proposal_header.block_height, std::move(raw));
 }
