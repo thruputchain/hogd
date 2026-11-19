@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
+#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -29,6 +30,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cpumap.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -242,6 +244,36 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 namespace {
 
+// Experiment: start chunk [index] of a call on a CPU of last-level cache
+// (index mod LLCs). x23's pool queues a job on the LLC it was created on, so
+// chunks spawned with bg() from one coroutine otherwise all start on that
+// LLC's run queue, and other LLCs' workers take them only after idling.
+unsigned
+spread_cpu(size_t index)
+{
+  static const std::vector<std::vector<unsigned>> by_llc = [] {
+    const auto &map = x23::llc_map->get_map();
+    std::vector<std::vector<unsigned>> llcs(
+        static_cast<size_t>(x23::llc_map->nbuckets()));
+    for (size_t cpu = 0; cpu < map.size(); cpu++) {
+      llcs[static_cast<size_t>(map[cpu])].push_back(
+          static_cast<unsigned>(cpu));
+    }
+    std::erase_if(llcs, [](const auto &llc) { return llc.empty(); });
+    return llcs;
+  }();
+  const auto &llc = by_llc[index % by_llc.size()];
+  return llc[(index / by_llc.size()) % llc.size()];
+}
+
+struct [[nodiscard]] OnCpu {
+  x23::ThreadPool &pool;
+  unsigned cpu;
+  bool await_ready() const noexcept { return false; }
+  void await_suspend(auto h) const noexcept { pool.go({h, cpu}); }
+  void await_resume() const noexcept {}
+};
+
 // Auth is the one place the whole SignedTransaction is measured; the executor
 // caps only the body (#3844).
 bool
@@ -306,8 +338,9 @@ AuthServer::verify_transactions(BlockHeight height,
                                     SipHash24Hasher> &auth_data,
            NetworkHash network_hash, AuthErrorCodeBatch &results,
            std::chrono::steady_clock::time_point spawned,
-           rpc_profile::CpuSet &cpus_used) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
+           rpc_profile::CpuSet &cpus_used,
+           size_t index) noexcept -> x23::Async<void> {
+          co_await OnCpu{default_coropoll().pool_, spread_cpu(index)};
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
@@ -336,7 +369,7 @@ AuthServer::verify_transactions(BlockHeight height,
           }
           co_return;
         }(chunk, txs, auth_data, network_hash_, results, looked_up,
-          cpus_used));
+          cpus_used, handles.size()));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
