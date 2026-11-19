@@ -302,7 +302,7 @@ ExecutorContext::run_view_transaction(TransactionViewQuery const &query)
       *snapshot_cache_,
       make_per_tx_db_proxy(std::numeric_limits<TransactionID>::max()),
       make_per_tx_event_server_proxy(std::numeric_limits<TransactionID>::max()),
-      query, *context, {});
+      query, block_execution().block_timepoint, *context, {});
 }
 
 x23::Detached

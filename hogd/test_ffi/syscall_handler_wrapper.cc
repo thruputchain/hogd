@@ -56,7 +56,8 @@ SyscallHandlerContext::SyscallHandlerContext(
     runtime_context_owner_(std::move(context)),
     handler_(*this, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *runtime_context_owner_, auth_claim, source_tx_hash),
+             *runtime_context_owner_, auth_claim, source_tx_hash,
+             db.block_execution_context().block_timepoint),
     is_mocked_handler_(true)
 {}
 

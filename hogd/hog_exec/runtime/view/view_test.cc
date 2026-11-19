@@ -86,6 +86,18 @@ protected:
                               RuntimeContext &context,
                               NondeterministicProposalData ndet = {})
   {
+    return run_view_at(query,
+                       framework_.get_storage_snapshot_cache()
+                           ->block_execution_context()
+                           .block_timepoint,
+                       context, std::move(ndet));
+  }
+
+  ExpectedViewResult run_view_at(TransactionViewQuery const &query,
+                                 TimePoint block_timepoint,
+                                 RuntimeContext &context,
+                                 NondeterministicProposalData ndet = {})
+  {
     framework_.ensure_db_tip_loaded();
     return View::run_view_transaction(
         *framework_.get_storage_snapshot_cache(),
@@ -93,7 +105,7 @@ protected:
             std::numeric_limits<TransactionID>::max()),
         framework_.make_new_per_tx_event_server_proxy(
             std::numeric_limits<TransactionID>::max()),
-        query, context, std::move(ndet))();
+        query, block_timepoint, context, std::move(ndet))();
   }
 
   static TransactionViewQuery make_query(Invocation invocation,
@@ -355,6 +367,52 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
 
   auto result = run_view(make_query(invocation), *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
+// A view runs at the timepoint its caller states, not the one the shared
+// snapshot cache was opened with: two views off one cache see their own.
+TEST_F(ViewTest, ViewObservesItsOwnBlockTimepoint)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  static TimePoint observed = 0;
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        TimePoint block_timepoint = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kGetBlockTimepoint>(
+            block_timepoint);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "get_block_timepoint syscall failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        observed = block_timepoint;
+        co_return InvokeStatus<void>{};
+      });
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  const TimePoint cache_timepoint = framework_.get_storage_snapshot_cache()
+                                        ->block_execution_context()
+                                        .block_timepoint;
+  for (TimePoint stated : {cache_timepoint + 1'000, cache_timepoint + 2'000}) {
+    observed = 0;
+    auto result = run_view_at(make_query(invocation), stated, *setup.context);
+    EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+    EXPECT_EQ(observed, stated);
+  }
+  EXPECT_EQ(framework_.get_storage_snapshot_cache()
+                ->block_execution_context()
+                .block_timepoint,
+            cache_timepoint);
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
@@ -1677,7 +1735,9 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
                                   snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {})();
+      make_query(invocation),
+      snapshot_cache.block_execution_context().block_timepoint, *setup.context,
+      {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
 
@@ -1777,7 +1837,9 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
                                   snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
-      make_query(invocation), *setup.context, {})();
+      make_query(invocation),
+      snapshot_cache.block_execution_context().block_timepoint, *setup.context,
+      {})();
 
   EXPECT_EQ(result.status(), TransactionViewStatus::Abandoned);
 

@@ -113,13 +113,15 @@ public:
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context) = delete;
 
-  // Constructor for test harness, mock infrastructure
+  // Constructor for views, test harness, mock infrastructure.
+  // `block_timepoint` is what GetBlockTimepoint reports: there is no
+  // transaction's block to take it from, so the caller states it.
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context, AuthClaim auth_claim,
-                    SHA256Hash source_tx_hash);
+                    SHA256Hash source_tx_hash, TimePoint block_timepoint);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -480,9 +482,11 @@ public:
   BlockHeight get_block_height() const;
   NetworkHash const &get_network_hash() const;
 
-  // Served from the BlockExecutionContext the block was opened with: for an
-  // open block the tip is the parent, whose timepoint is the previous block's.
-  TimePoint get_block_timepoint() const;
+  // Fixed at construction. Proposal and validation take it from the
+  // BlockExecutionContext the block was opened with (the tip cannot supply
+  // it: for an open block that is the parent, whose timepoint is the previous
+  // block's); a view takes whatever its caller stated.
+  TimePoint get_block_timepoint() const { return block_timepoint_; }
 
   // == General access methods ==
   //
@@ -567,6 +571,10 @@ private:
   bool two_phase_commit_failed_{false};
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // What GetBlockTimepoint reports. Per handler rather than read through
+  // snapshot_cache_, so views sharing one snapshot can each run at their own.
+  const TimePoint block_timepoint_;
 
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
