@@ -164,6 +164,38 @@ TEST(ParallelBatchToTTest, AcceptsABatchAtTheObjectLimit)
   EXPECT_EQ(parsed.size(), 2UL);
 }
 
+TEST(ParallelBatchToTTest, AppendPreservesWireSegmentsAcrossParallelThreshold)
+{
+  for (size_t count : {size_t{0}, kMinParallelBatchSize - 1,
+                       kMinParallelBatchSize, kMinParallelBatchSize + 1}) {
+    SCOPED_TRACE(count);
+    SignedTransaction tx = make_minimal_signed_transaction();
+    SignedTransactionBatch txs;
+    for (size_t i = 0; i < count; ++i) {
+      tx.tx.uniquifier.nonce = i + 1;
+      txs.push_back(tx);
+    }
+    const SignedTransactionBatch prefix{make_minimal_signed_transaction()};
+    auto actual = t_to_parallel_batch(prefix)();
+    auto expected = actual;
+    for (ChunkRange chunk : make_chunks(count, kNumThreadsForParallelBatch)) {
+      const size_t start = expected.xdr.size();
+      for (size_t i = chunk.start; i < chunk.end; ++i) {
+        expected.xdr += x23::serialize(txs[i]);
+      }
+      expected.segment_tokens.push_back(chunk.end - chunk.start);
+      expected.segment_bytes.push_back(expected.xdr.size() - start);
+    }
+    append_to_parallel_batch(txs, actual)();
+    EXPECT_EQ(actual, expected);
+    SignedTransactionBatch decoded;
+    ASSERT_TRUE(parallel_batch_to_t(actual, decoded, count + 1)());
+    auto all = prefix;
+    all += txs;
+    EXPECT_EQ(decoded, all);
+  }
+}
+
 TEST(ParallelBatchToTTest, RejectsABatchOverTheObjectLimit)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(
@@ -253,6 +285,24 @@ TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
   batch.segment_bytes[0] += 4;
 
   SignedTransactionBatch parsed;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+// The cases above decode on the calling thread (fewer than
+// kMinParallelBatchSize objects). This one is large enough to take the pooled
+// path, so a bad final segment must still fail after every chunk is awaited.
+TEST(ParallelBatchToTTest, PooledPathRejectsOverclaimedFinalSegment)
+{
+  SignedTransactionBatch txs(kMinParallelBatchSize,
+                             make_minimal_signed_transaction());
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
+  ASSERT_GT(batch.segment_tokens.size(), 1UL);
+
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+  EXPECT_EQ(parsed.size(), kMinParallelBatchSize);
+
+  batch.segment_tokens.back() += 1;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
 }
 
