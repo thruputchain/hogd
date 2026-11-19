@@ -1,6 +1,5 @@
 #include "hogd/hog_auth/auth_server.h"
 
-#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -30,7 +29,6 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
-#include "x23/cpumap.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
@@ -244,36 +242,6 @@ AuthServer::populate_auth_data(BlockHeight height,
 
 namespace {
 
-// Experiment: start chunk [index] of a call on a CPU of last-level cache
-// (index mod LLCs). x23's pool queues a job on the LLC it was created on, so
-// chunks spawned with bg() from one coroutine otherwise all start on that
-// LLC's run queue, and other LLCs' workers take them only after idling.
-unsigned
-spread_cpu(size_t index)
-{
-  static const std::vector<std::vector<unsigned>> by_llc = [] {
-    const auto &map = x23::llc_map->get_map();
-    std::vector<std::vector<unsigned>> llcs(
-        static_cast<size_t>(x23::llc_map->nbuckets()));
-    for (size_t cpu = 0; cpu < map.size(); cpu++) {
-      llcs[static_cast<size_t>(map[cpu])].push_back(
-          static_cast<unsigned>(cpu));
-    }
-    std::erase_if(llcs, [](const auto &llc) { return llc.empty(); });
-    return llcs;
-  }();
-  const auto &llc = by_llc[index % by_llc.size()];
-  return llc[(index / by_llc.size()) % llc.size()];
-}
-
-struct [[nodiscard]] OnCpu {
-  x23::ThreadPool &pool;
-  unsigned cpu;
-  bool await_ready() const noexcept { return false; }
-  void await_suspend(auto h) const noexcept { pool.go({h, cpu}); }
-  void await_resume() const noexcept {}
-};
-
 // Auth is the one place the whole SignedTransaction is measured; the executor
 // caps only the body (#3844).
 bool
@@ -338,12 +306,14 @@ AuthServer::verify_transactions(BlockHeight height,
                                     SipHash24Hasher> &auth_data,
            NetworkHash network_hash, AuthErrorCodeBatch &results,
            std::chrono::steady_clock::time_point spawned,
-           rpc_profile::CpuSet &cpus_used,
-           size_t index) noexcept -> x23::Async<void> {
-          co_await OnCpu{default_coropoll().pool_, spread_cpu(index)};
+           rpc_profile::CpuSet &cpus_used) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
+          Ed25519SignatureVerifier batch;
+          std::vector<size_t> batched;
+          batched.reserve(chunk.end - chunk.start);
           for (size_t i = chunk.start; i < chunk.end; i++) {
             const SignedTransaction &tx = txs[i];
             if (results[i] != AuthErrorCode::kAuthSuccess) {
@@ -356,20 +326,39 @@ AuthServer::verify_transactions(BlockHeight height,
             const std::optional<AddressAuthData> &source_auth_data =
                 account_it->second->second;
 
+            // Experiment: the chunk's Ed25519 signatures are checked
+            // together below; everything else about the claim is checked
+            // here, as before.
             AuthVerifyStatus<void> verify_result =
                 verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash, signature_preimage);
+                            network_hash, signature_preimage, &batch);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
             }
+            batched.push_back(i);
             // [results] is initialized with all of its members as
             // [AuthErrorCode::kAuthSuccess], so there is no need for us to
             // write this result to [results] again.
           }
+          if (!batched.empty() && !batch.verify()) {
+            // Some signature is bad: find which, one transaction at a time.
+            for (const size_t i : batched) {
+              const SignedTransaction &tx = txs[i];
+              const std::optional<AddressAuthData> &source_auth_data =
+                  auth_data.find(tx.tx.invocation.invoked_address)
+                      ->second->second;
+              if (!verify_auth(tx,
+                               source_auth_data ? &*source_auth_data : nullptr,
+                               network_hash, signature_preimage)
+                       .has_value()) {
+                results[i] = AuthErrorCode::kAuthFailed;
+              }
+            }
+          }
           co_return;
         }(chunk, txs, auth_data, network_hash_, results, looked_up,
-          cpus_used, handles.size()));
+          cpus_used));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
