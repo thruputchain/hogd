@@ -354,11 +354,13 @@ run_bursts(bool batch, unsigned rounds, bool vary_gap = false)
   const bool pin = llc_map->nbuckets() > 1;
   CpuSet saved;
   if (pin) {
-    if (sched_getaffinity(0, saved.size(), saved.set()) != 0)
+    if (sched_getaffinity(0, saved.size(), saved.set()) != 0) {
       GTEST_SKIP() << "cannot read CPU affinity: " << std::strerror(errno);
+    }
     auto local = saved & llc_map->cpuset(llc_map->bucket());
-    if (local.set_affinity())
+    if (local.set_affinity()) {
       GTEST_SKIP() << "cannot pin to one LLC: " << std::strerror(errno);
+    }
   }
   Defer restore{[&] {
     if (pin)
