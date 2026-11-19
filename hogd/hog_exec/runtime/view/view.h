@@ -17,13 +17,14 @@ public:
   // The syscalls the view runs read tip-derived values (executing height,
   // network hash, configuration parameters) off `snapshot_cache`, whose tip
   // the caller must have loaded or seeded before calling this. The block
-  // timepoint is the exception: the view runs at `block_timepoint`, whatever
-  // the cache's BlockExecutionContext says.
+  // timepoint is the exception: the view runs at query.block_timepoint,
+  // whatever the cache's BlockExecutionContext says. Checking it against the
+  // tip is the caller's job.
   static x23::Async<ExpectedViewResult> run_view_transaction(
       StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy proxy,
       PerTransactionEventServerProxy event_proxy,
-      TransactionViewQuery const &query, TimePoint block_timepoint,
-      RuntimeContext &context, NondeterministicProposalData ndet);
+      TransactionViewQuery const &query, RuntimeContext &context,
+      NondeterministicProposalData ndet);
 };
 
 } // namespace hogd

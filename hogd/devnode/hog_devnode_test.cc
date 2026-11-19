@@ -115,6 +115,17 @@ namespace hogd {
 
 namespace {
 
+// A view timepoint the devnode's tip cannot be ahead of: its blocks are
+// stamped from this same clock.
+TimePoint
+view_timepoint_now()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
+
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
 // Grace [HogDevnodeProcess::terminate] gives SIGTERM before SIGKILL. Generous
@@ -2547,6 +2558,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .auth_claim = native_account_auth_claim(),
         .forwarded_tokens = {},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+        .block_timepoint = view_timepoint_now(),
     };
 
     ViewGatewayResult result = client.viewgateway_view(query)();
@@ -3878,6 +3890,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
         .invocation = Invocation{.invoked_address = deployed_address,
                                  .gas_limit = GasAmount{10'000'000}},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+        .block_timepoint = view_timepoint_now(),
     })();
     ASSERT_EQ(output.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_EQ(output.payload().output.status_code(),

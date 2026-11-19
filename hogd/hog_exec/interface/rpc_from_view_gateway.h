@@ -2,7 +2,6 @@
 
 #pragma once
 
-#include <algorithm>
 #include <atomic>
 #include <chrono>
 #include <cstddef>
@@ -25,12 +24,13 @@
 
 namespace hogd {
 
-// A view's timepoint (Unix nanoseconds): now, but never before the tip's,
-// because the next real block cannot be earlier.
-inline TimePoint
-view_block_timepoint(TimePoint tip_timepoint, TimePoint now)
+// Whether a view may run at `stated` against a snapshot whose tip is at
+// `tip_timepoint` (both Unix nanoseconds): the next real block cannot be
+// earlier than the tip, so neither can a view of it.
+constexpr bool
+view_block_timepoint_admissible(TimePoint tip_timepoint, TimePoint stated)
 {
-  return std::max(tip_timepoint, now);
+  return stated >= tip_timepoint;
 }
 
 // Executor-owned read-only invocation server exposed to the public RPC gateway.
@@ -71,16 +71,13 @@ private:
   using ViewDeadline = std::chrono::steady_clock::time_point;
   static constexpr std::uint32_t kMaxViewAttempts = 3;
 
+  // The context the shared snapshot cache is opened with. No view reads its
+  // timepoint -- each runs at its query's -- so it is simply the tip's.
   static BlockExecutionContext view_block_execution_context(DbTip const &tip)
   {
     return BlockExecutionContext{
         .block_height = tip.value.proposal_header.block_height + 1,
-        .block_timepoint = view_block_timepoint(
-            tip.value.proposal_header.block_timepoint,
-            static_cast<TimePoint>(
-                std::chrono::duration_cast<std::chrono::nanoseconds>(
-                    std::chrono::system_clock::now().time_since_epoch())
-                    .count())),
+        .block_timepoint = tip.value.proposal_header.block_timepoint,
     };
   }
 
