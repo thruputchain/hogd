@@ -97,6 +97,8 @@ TEST(DefaultWalletPrecompile, ConstructsAndCoversAllEntrypoints)
   ASSERT_NE(contract, nullptr);
   EXPECT_EQ(wallet_meta::method_id<u8"execute">(), 0xc3edb11fdd6d5d58ULL);
   EXPECT_EQ(wallet_meta::method_id<u8"deploy">(), 0x6be0cb0f6de0917aULL);
+  EXPECT_EQ(wallet_meta::method_id<u8"execute_with_tokens">(),
+            0xbc5951e395886a25ULL);
 }
 
 // Differential test: the native default_wallet precompile vs the rv32
@@ -543,8 +545,8 @@ protected:
   }
 
   // An encoded AuthTokenNode, as execute_with_tokens takes its mints.
-  static wallet_mints_t::value_type
-  mint_node(ContractAddress const &consumer, std::span<uint8_t const> payload)
+  static wallet_mints_t::value_type mint_node(ContractAddress const &consumer,
+                                              std::span<uint8_t const> payload)
   {
     AuthTokenNode node{.consumer_address = consumer,
                        .payload = {},
@@ -552,9 +554,9 @@ protected:
     node.payload.append_range(payload);
     auto serialized = x23::serialize(node);
     wallet_mints_t::value_type out;
-    out.append_range(std::span<uint8_t const>{
-        reinterpret_cast<uint8_t const *>(serialized.data()),
-        serialized.size()});
+    out.append_range(std::span<uint8_t const>{reinterpret_cast<uint8_t const *>(
+                                                  serialized.data()),
+                                              serialized.size()});
     return out;
   }
 
@@ -589,7 +591,8 @@ protected:
 
   // Has the desk consume `tokens` in order and return, for each, its payload
   // byte and who minted it.
-  static WalletTokenCall desk_redeem(std::initializer_list<WalletTokenRef> tokens)
+  static WalletTokenCall
+  desk_redeem(std::initializer_list<WalletTokenRef> tokens)
   {
     return token_call(kDeskAddr, kDeskRedeem, {}, tokens);
   }
@@ -685,11 +688,9 @@ protected:
                                      TokenBatch const &batch)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute_with_tokens">(kDefaultMaxTxGas,
-                                                         batch.mints,
-                                                         batch.calls),
-        make_pubkey_claim(preimage));
+    return run_wallet_root_tx(client.make_invocation<u8"execute_with_tokens">(
+                                  kDefaultMaxTxGas, batch.mints, batch.calls),
+                              make_pubkey_claim(preimage));
   }
 
   // Runs the batch `make_batch` builds for each wallet through that wallet,
@@ -724,13 +725,13 @@ protected:
                                  std::vector<uint8_t> const &expected)
   {
     ASSERT_EQ(record.size(), 2U + expected.size());
-    EXPECT_EQ(record[0], 0);
-    EXPECT_TRUE(std::equal(expected.begin(), expected.end(),
-                           record.begin() + 2));
+    EXPECT_EQ(record[1],
+              static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
+    EXPECT_TRUE(
+        std::equal(expected.begin(), expected.end(), record.begin() + 2));
   }
 
-  static void expect_wallet_error(CapturedRecord const &record,
-                                  WalletError err)
+  static void expect_wallet_error(CapturedRecord const &record, WalletError err)
   {
     expect_abort_bytes(record, wallet_error_abort_bytes(err));
   }
@@ -1842,6 +1843,9 @@ TEST_F(DefaultWalletParityTest, TokensMintedPermitGrantSpendsAtNativeToken)
   make_ctx();
   static constexpr ContractAddress kNativeReceiver = make_contract_address(225);
   static constexpr ContractAddress kRv32Receiver = make_contract_address(226);
+  // Enough that the receiver's new balance covers its own storage cost.
+  static constexpr int128_t kSpent = 10'000'000;
+  static constexpr int128_t kGranted = 2 * kSpent;
   auto stored_balance = [this](ContractAddress const &address) -> int128_t {
     auto item = lookup_storage_item_from_db(
         make_free_native_token_balance_addrkey(address));
@@ -1853,8 +1857,9 @@ TEST_F(DefaultWalletParityTest, TokensMintedPermitGrantSpendsAtNativeToken)
   };
   auto spend = [&](int128_t spent) {
     return [&, spent](ContractAddress const &wallet) {
-      auto grant = x23::serialize_cxs(itc_erc20_permit::PermitGrant{
-          .spender = wallet, .amount = to_xdr(int128_t{500})});
+      auto grant = x23::serialize_cxs(
+          itc_erc20_permit::PermitGrant{.spender = wallet,
+                                        .amount = to_xdr(kGranted)});
       CHECK(grant.has_value());
       auto calldata = permit_meta::make_calldata<u8"transfer_from_signed">(
           SignedToken{},
@@ -1872,7 +1877,7 @@ TEST_F(DefaultWalletParityTest, TokensMintedPermitGrantSpendsAtNativeToken)
 
   auto native_before = stored_balance(native_wallet_);
   auto rv32_before = stored_balance(rv32_wallet_);
-  expect_committed(expect_token_parity(spend(300)));
+  expect_committed(expect_token_parity(spend(kSpent)));
   EXPECT_GT(stored_balance(kNativeReceiver), 0);
   EXPECT_EQ(stored_balance(kNativeReceiver), stored_balance(kRv32Receiver));
   EXPECT_LT(stored_balance(native_wallet_), native_before);
@@ -1881,9 +1886,10 @@ TEST_F(DefaultWalletParityTest, TokensMintedPermitGrantSpendsAtNativeToken)
 
   // More than the grant allows: the token's own error, re-thrown verbatim.
   auto received = stored_balance(kNativeReceiver);
-  auto over = expect_token_parity(spend(501));
+  auto over = expect_token_parity(spend(kGranted + 1));
   ASSERT_GE(over.size(), 2U);
-  EXPECT_EQ(over[0], 0);
+  EXPECT_EQ(over[1],
+            static_cast<uint8_t>(ExecResult::ExecResultTxRootFrameReverted));
   EXPECT_EQ(stored_balance(kNativeReceiver), received);
 }
 
@@ -1952,8 +1958,7 @@ TEST_F(DefaultWalletParityTest, TokensCallCountChecked)
   for (int i = 0; i < 17; ++i) {
     too_many.calls.push_back(desk_issue(0x11));
   }
-  expect_wallet_error(expect_token_parity(too_many),
-                      WalletError::TooManyCalls);
+  expect_wallet_error(expect_token_parity(too_many), WalletError::TooManyCalls);
 }
 
 TEST_F(DefaultWalletParityTest, TokensMaxMintsSucceed)
@@ -1982,8 +1987,9 @@ TEST_F(DefaultWalletParityTest, TokensRefusedMintAborts)
   batch.calls.push_back(desk_redeem({minted(0)}));
   expect_abort_bytes(
       expect_token_parity(batch),
-      syscall_abort_bytes(SyscallNo::kMintAuthToken,
-                          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+      syscall_abort_bytes(
+          SyscallNo::kMintAuthToken,
+          SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
 }
 
 // A token minted for another consumer is forwarded like any other; it is the
@@ -2049,9 +2055,9 @@ TEST_F(DefaultWalletParityTest, TokensListsPastTheirBoundsFailDecoding)
   auto id = wallet_meta::method_id<u8"execute_with_tokens">();
   std::vector<uint8_t> raw(calldata->begin(), calldata->end());
   expect_raw_parity(id, raw);
-  expect_abort_bytes(
-      run_wallet_raw_tx(native_wallet_, native_preimage_, id, raw),
-      decoding_args_abort_bytes());
+  expect_abort_bytes(run_wallet_raw_tx(native_wallet_, native_preimage_, id,
+                                       raw),
+                     decoding_args_abort_bytes());
 }
 
 // #4236: for inputs the rv32 wallet decodes in full and rejects, native charges

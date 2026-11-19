@@ -71,9 +71,8 @@ using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
 // execute_with_tokens returns and throws exactly what execute does, so the
 // two share their result type and their return accounting.
-static_assert(
-    std::is_same_v<wallet_meta::return_t<u8"execute_with_tokens">,
-                   execute_result_t>);
+static_assert(std::is_same_v<wallet_meta::return_t<u8"execute_with_tokens">,
+                             execute_result_t>);
 using token_execute_args_t = wallet_meta::args_t<u8"execute_with_tokens">;
 using wallet_mints_t = std::tuple_element_t<0, token_execute_args_t>;
 using wallet_token_calls_t = std::tuple_element_t<1, token_execute_args_t>;
@@ -172,8 +171,7 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   };
   CopyableInvokeOutputs outputs{};
   auto inv = co_await ctx.syscall<SyscallNo::kInvoke>(
-      target, std::as_bytes(std::span(calldata)), auth_tokens, inputs,
-      outputs);
+      target, std::as_bytes(std::span(calldata)), auth_tokens, inputs, outputs);
   if (!inv.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(inv.error());
   }
