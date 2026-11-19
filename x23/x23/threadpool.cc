@@ -160,16 +160,13 @@ ThreadPool::unlock_and_wake(QPtr &lq, size_t added)
     wakes = queued > ready ? std::min(wakes, queued - ready) : 0;
     lq->signalled += wakes;
   }
-  // When every sleeper is now reserved, one broadcast replaces a futex
-  // wake per worker.
-  bool all = wakes > 1 && lq->signalled == lq->waiters;
+  // Signal after unlocking, one notify_one per reservation. A broadcast
+  // here would be unbounded: by the time it runs, other workers may have
+  // drained the jobs and parked again.
   auto &nonempty = lq->nonempty;
   lq.reset();
-  if (all)
-    nonempty.notify_all();
-  else
-    for (size_t i = 0; i < wakes; ++i)
-      nonempty.notify_one();
+  for (size_t i = 0; i < wakes; ++i)
+    nonempty.notify_one();
 }
 
 void
