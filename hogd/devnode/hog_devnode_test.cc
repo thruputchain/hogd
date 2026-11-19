@@ -741,7 +741,8 @@ sign_transaction(Transaction tx, MlDsa65SigningKey const &key,
 }
 
 TransactionHashBatch
-propose_and_commit(sched_coord_client_t &scheduler)
+propose_and_commit(sched_coord_client_t &scheduler,
+                   ProposalContext const &context = {})
 {
   SchedulerGetTipResult tip = scheduler.schedcoord_get_tip()();
   if (tip.outcome() != SchedulerGetTipOutcome::SchedulerGetTipOK) {
@@ -749,8 +750,7 @@ propose_and_commit(sched_coord_client_t &scheduler)
     return {};
   }
   SchedulerProposalResult proposal =
-      scheduler.schedulercoord_propose_block(tip.db_tip().id,
-                                             ProposalContext{})();
+      scheduler.schedulercoord_propose_block(tip.db_tip().id, context)();
   if (proposal.outcome() != SchedulerProposalOutcome::SchedulerProposalOK) {
     ADD_FAILURE() << "schedulercoord_propose_block did not return OK";
     return {};
@@ -779,10 +779,11 @@ propose_and_commit(sched_coord_client_t &scheduler)
 
 TransactionHashBatch
 submit_and_commit(sched_coord_client_t &scheduler,
-                  SignedTransactionBatch const &txs)
+                  SignedTransactionBatch const &txs,
+                  ProposalContext const &context = {})
 {
   scheduler.schedulercoord_submit_unvetted(t_to_parallel_batch(txs)())();
-  return propose_and_commit(scheduler);
+  return propose_and_commit(scheduler, context);
 }
 
 // Deterministic keys are owned by this harness. Only their public allocations
@@ -3895,6 +3896,192 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
     ASSERT_EQ(output.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_EQ(output.payload().output.status_code(),
               InvocationFrameStatusCode::Return);
+  }
+
+  expect_clean_exit(process);
+}
+
+// A transaction reads GetBlockTimepoint as the timepoint its block was
+// proposed at; a view of the same contract reads the timepoint its query
+// states. The contract returns the 8 bytes the syscall wrote, so the indexed
+// transaction output carries exactly what the contract saw.
+TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
+{
+  HogDevnodeProcess process = HogDevnodeProcess::start({
+      "--fixture-accounts",
+      "1",
+      "--fixture-seed",
+      "thruput-dev-accounts",
+      "--fixture-tokens",
+      "1000000000",
+  });
+  Readiness readiness = process.wait_for_readiness();
+  ASSERT_EQ(readiness.bootstrap_accounts.size(), 2UL);
+
+  {
+    sched_coord_client_t scheduler =
+        create_client<SchedulerCoord1>(readiness.scheduler.host,
+                                       readiness.scheduler.port,
+                                       /*retry=*/true)()
+            .value();
+    auto reader = create_client<IndexerBlockExplorer1>(readiness.indexer.host,
+                                                       readiness.indexer.port,
+                                                       /*retry=*/true)()
+                      .value();
+    EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
+              IndexerBlockExplorerIntroOutcome::IntroSuccess);
+
+    // GetBlockTimepoint (35) into memory at 256; trap if the syscall reports
+    // an error, else Return (6) those 8 bytes.
+    constexpr int32_t kOut = 256;
+    const std::vector<uint32_t> words{
+        rv32::test_program::addi(10, 0, 35),
+        rv32::test_program::addi(11, 0, kOut),
+        0x00000073U, // ecall
+        rv32::test_program::branch(1, 10, 0, 20), // bne a0, x0, trap
+        rv32::test_program::addi(10, 0, 6),
+        rv32::test_program::addi(11, 0, kOut),
+        rv32::test_program::addi(12, 0, 8),
+        0x00000073U, // ecall
+        0x00000000U, // trap: illegal instruction
+    };
+    const std::vector<uint8_t> initial_memory(4096, 0);
+    Contract contract(ContractType::kRv32);
+    contract.rv32_contract().data.append_range(
+        rv32::test_artifact::build_artifact(words, initial_memory));
+
+    auto keypair =
+        derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
+    using wallet_meta = ContractTraitMeta<default_wallet::DefaultWallet>;
+    const ContractAddress wallet_address =
+        build_local_bootstrap_account_artifact(fixture_config(1))
+            .accounts[1]
+            .address;
+    const NetworkHash network_hash = readiness_network_hash(readiness);
+    auto sign = [&](Transaction tx) {
+      Signature signature(CryptographicScheme::Ed25519);
+      auto signed_bytes = ed25519_sign(
+          keypair.second, transaction_signature_preimage(network_hash, tx));
+      EXPECT_TRUE(signed_bytes.has_value());
+      signature.ed25519() = signed_bytes.value_or(Ed25519Signature{});
+      return SignedTransaction{
+          .tx = std::move(tx),
+          .signatures = {DecoratedSignature{
+              .public_key_id = 0,
+              .signature = signature,
+          }},
+          .pubkey_claim_key = ed25519_public_key(keypair.first),
+      };
+    };
+    auto committed_info = [&](TransactionHash const &tx_hash) {
+      const auto deadline =
+          std::chrono::steady_clock::now() + kIndexPollTimeout;
+      TxInfoResult result(TxInfoOutcome::TxInfoNotFound);
+      while (std::chrono::steady_clock::now() < deadline) {
+        result = reader.get_transaction_info(tx_hash)();
+        if (result.outcome() == TxInfoOutcome::TxInfoFound) {
+          break;
+        }
+        std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
+      return result;
+    };
+    auto le_u64 = [](auto const &bytes) {
+      uint64_t out = 0;
+      for (size_t i = 0; i < 8; ++i) {
+        out |= uint64_t{bytes[bytes.size() - 8 + i]} << (8 * i);
+      }
+      return out;
+    };
+
+    const TimePoint deploy_timepoint = view_timepoint_now();
+    const TimePoint call_timepoint = deploy_timepoint + 3'600'000'000'000ULL;
+
+    const SHA256Hash deploy_nonce = make_nonce(11);
+    const SHA256Hash contract_hash = sha256(contract);
+    SignedTransaction deploy_tx = sign(Transaction{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<u8"deploy">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<u8"deploy">(
+                    deploy_nonce, contract_hash, make_erc20_amount(100'000'000),
+                    x23::Ptr<default_wallet::WalletInitCall>{}),
+            },
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 11},
+        .contracts_to_deploy = {contract},
+        .auth_claim = native_account_auth_claim(),
+    });
+    const TransactionHash deploy_hash = sha256(deploy_tx.tx);
+    ASSERT_EQ(submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx},
+                                ProposalContext{.block_timepoint =
+                                                    deploy_timepoint})
+                  .size(),
+              1UL);
+    TxInfoResult deployed = committed_info(deploy_hash);
+    ASSERT_EQ(deployed.outcome(), TxInfoOutcome::TxInfoFound);
+    ASSERT_EQ(deployed.info().events.exec_result, ExecResult::ExecResultOK);
+    const ContractAddress contract_address = sha256(
+        ContractDeploymentHashPreimage{.deployer_address = wallet_address,
+                                       .nonce = deploy_nonce,
+                                       .contract_hash = contract_hash});
+
+    SignedTransaction call_tx = sign(Transaction{
+        .invocation =
+            Invocation{
+                .invoked_address = wallet_address,
+                .entrypoint = wallet_meta::entrypoint<u8"execute">(),
+                .gas_limit = GasAmount{10'000'000},
+                .calldata = wallet_meta::make_calldata<u8"execute">(
+                    x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
+                        default_wallet::WalletCall{
+                            .target = contract_address,
+                            .entrypoint = entrypoint_from_method_id(0),
+                            .gas_limit = 1'000'000,
+                            .calldata = {},
+                        }}),
+            },
+        .uniquifier = Uniquifier{.block_expiry_height =
+                                     std::numeric_limits<BlockHeight>::max(),
+                                 .nonce = 12},
+        .auth_claim = native_account_auth_claim(),
+    });
+    const TransactionHash call_hash = sha256(call_tx.tx);
+    ASSERT_EQ(submit_and_commit(
+                  scheduler, SignedTransactionBatch{call_tx},
+                  ProposalContext{.block_timepoint = call_timepoint})
+                  .size(),
+              1UL);
+    TxInfoResult called = committed_info(call_hash);
+    ASSERT_EQ(called.outcome(), TxInfoOutcome::TxInfoFound);
+    EXPECT_EQ(called.info().events.exec_result, ExecResult::ExecResultOK);
+    auto const &tx_output = called.info().events.root_output;
+    ASSERT_EQ(tx_output.status_code(), InvocationFrameStatusCode::Return);
+    ASSERT_GE(tx_output.return_buffer().size(), 8UL);
+    EXPECT_EQ(le_u64(tx_output.return_buffer()), call_timepoint);
+
+    // Control: the same contract, viewed directly, reads the view's timepoint.
+    auto view = create_client<ViewGateway1>(readiness.view_gateway.host,
+                                            readiness.view_gateway.port,
+                                            /*retry=*/true)()
+                    .value();
+    ASSERT_EQ(view.viewgateway_intro(version::kHogdProtocol())(),
+              ViewGatewayIntroOutcome::ViewGatewayIntroSuccess);
+    const TimePoint view_timepoint = call_timepoint + 1;
+    const auto viewed = view.viewgateway_view(TransactionViewQuery{
+        .invocation = Invocation{.invoked_address = contract_address,
+                                 .gas_limit = GasAmount{1'000'000}},
+        .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+        .block_timepoint = view_timepoint,
+    })();
+    ASSERT_EQ(viewed.outcome(), ViewGatewayOutcome::ViewGatewayOk);
+    auto const &view_output = viewed.payload().output;
+    ASSERT_EQ(view_output.status_code(), InvocationFrameStatusCode::Return);
+    ASSERT_EQ(view_output.return_buffer().size(), 8UL);
+    EXPECT_EQ(le_u64(view_output.return_buffer()), view_timepoint);
   }
 
   expect_clean_exit(process);
