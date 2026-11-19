@@ -14,6 +14,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
 #include "hogd/base/network_hash.h"
+#include "hogd/base/rpc_profile.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -52,6 +53,7 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // instance() is otherwise lazy on the first RPC, which would hide
   // resident_bytes on an idle mempool.
   MempoolMetrics::instance();
+  rpc_profile::start("mempool");
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =

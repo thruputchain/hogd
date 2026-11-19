@@ -82,6 +82,8 @@
 
 #include <atomic>
 #include <cassert>
+#include <chrono>
+#include <cstddef>
 #include <concepts>
 #include <cstdint>
 #include <cstdio>
@@ -117,6 +119,25 @@
 #include <x23/x23.h>
 
 namespace x23 {
+
+// Measurement hooks, null unless a program installs them. A server calls
+// [rpc_serve_hook] on a connection's reader after a call record arrives:
+// [body_read_ns] runs from the record's first length word to its last byte,
+// [serve_ns] is the synchronous part of serving it (argument decoding and the
+// handler up to its first suspension). A client calls [rpc_encode_hook] after
+// encoding a call record.
+struct RpcServeSample {
+  std::uint64_t body_read_ns;
+  std::uint64_t serve_ns;
+  std::size_t bytes;
+};
+inline std::atomic<void (*)(const RpcServeSample &)> rpc_serve_hook{nullptr};
+struct RpcEncodeSample {
+  const char *proc_name;
+  std::uint64_t encode_ns;
+  std::size_t bytes;
+};
+inline std::atomic<void (*)(const RpcEncodeSample &)> rpc_encode_hook{nullptr};
 
 struct RpcService {
   virtual ~RpcService() = default;
@@ -327,6 +348,8 @@ protected:
   std::stop_source ss_;
   std::atomic<unsigned> nclients_{0};
   SrvMap<RpcService> srvmap_;
+  // When the record [read_record] last returned began arriving.
+  std::chrono::steady_clock::time_point record_start_;
 
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
@@ -442,7 +465,16 @@ struct RpcStream : public detail::RpcStreamImpl {
   send_call(const is_xdr_serializable auto &...args)
   {
     auto msg = call_msg<ProcMeta>();
+    const auto encode_start = std::chrono::steady_clock::now();
     Buf record = make_record(msg, args...);
+    if (auto *hook = rpc_encode_hook.load(std::memory_order_relaxed))
+      hook(RpcEncodeSample{
+          .proc_name = ProcMeta::proc_name,
+          .encode_ns = static_cast<std::uint64_t>(
+              std::chrono::duration_cast<std::chrono::nanoseconds>(
+                  std::chrono::steady_clock::now() - encode_start)
+                  .count()),
+          .bytes = record.size()});
 
     if (record.size() - 4 > max_message_size) [[unlikely]]
       throw XdrBadInput("{}::{}: message size {} exceeds maximum {}",

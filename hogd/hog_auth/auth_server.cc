@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
+#include <chrono>
 #include <memory>
 #include <optional>
 #include <span>
@@ -12,6 +13,7 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
+#include "hogd/base/rpc_profile.h"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
@@ -262,7 +264,10 @@ AuthServer::verify_transactions(BlockHeight height,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
+  rpc_profile::InFlight in_flight;
+  const auto entered = std::chrono::steady_clock::now();
   co_await default_coropoll().pool_.bg();
+  const auto started = std::chrono::steady_clock::now();
 
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
@@ -288,6 +293,7 @@ AuthServer::verify_transactions(BlockHeight height,
     }
   }
 
+  const auto looked_up = std::chrono::steady_clock::now();
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), max_parallelism);
   std::vector<x23::Async<void>> handles;
@@ -331,6 +337,13 @@ AuthServer::verify_transactions(BlockHeight height,
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
+  const auto verified = std::chrono::steady_clock::now();
+  auto &profile = rpc_profile::profile();
+  profile.handler_queue.add(rpc_profile::ns_between(entered, started));
+  profile.handler_lookup.add(rpc_profile::ns_between(started, looked_up));
+  profile.handler_verify.add(rpc_profile::ns_between(looked_up, verified));
+  profile.handler_total.add(rpc_profile::ns_between(entered, verified));
+  profile.handler_txs.fetch_add(txs.size(), std::memory_order_relaxed);
   co_return results;
 }
 

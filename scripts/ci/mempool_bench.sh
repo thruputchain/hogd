@@ -204,9 +204,16 @@ echo 'coordinator benchmark results'
 cat coordinator_output.txt
 
 echo 'mempool metrics snapshot'
-# Counters, sums and gauges only: the histogram buckets are long and the
-# sums and counts give the means.
+# Counters, sums and gauges, plus the buckets of the per-call timings whose
+# means mix full and empty blocks.
 grep -v -E '^#|_bucket\{' mempool_metrics.txt || echo 'no mempool metrics snapshot'
+grep -E '^mempool_(nomination_duration|commit_duration|ingestion_auth_rpc|submit_unvetted_duration)_seconds_bucket' \
+  mempool_metrics.txt || true
+
+echo 'auth rpc profile'
+# hog-auth logs to its control server's newest stderr file on hog8.
+ssh -n hog8 'grep -h RPCPROF "$(ls -1t /tmp/hogd_stderr_* | head -n 1)" "$(ls -1t /tmp/hogd_stdout_* | head -n 1)" | tail -n 8' \
+  || echo 'no auth rpc profile'
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

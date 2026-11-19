@@ -19,6 +19,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
+#include "hogd/base/rpc_profile.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
@@ -35,6 +36,7 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 {
   register_resident_bytes(Metrics::ComponentName::kAuth);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kAuth);
+  rpc_profile::start("auth");
 
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
