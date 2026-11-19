@@ -3931,19 +3931,33 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
     EXPECT_EQ(reader.indexer_block_explorer_intro(version::kHogdProtocol())(),
               IndexerBlockExplorerIntroOutcome::IntroSuccess);
 
-    // GetBlockTimepoint (35) into memory at 256; trap if the syscall reports
-    // an error, else Return (6) those 8 bytes.
+    // GetBlockTimepoint (35) into memory at 256, then Return (6) those 8
+    // bytes -- or, if the syscall reported an error, an empty reverting Return.
+    // Return's arguments: a1/a2 the buffer, a3 revert_frame, a4/a5 the
+    // returned auth token ids (none).
+    using rv32::test_program::addi;
+    using rv32::test_program::branch;
+    constexpr uint32_t kEcall = 0x00000073U;
     constexpr int32_t kOut = 256;
     const std::vector<uint32_t> words{
-        rv32::test_program::addi(10, 0, 35),
-        rv32::test_program::addi(11, 0, kOut),
-        0x00000073U, // ecall
-        rv32::test_program::branch(1, 10, 0, 20), // bne a0, x0, trap
-        rv32::test_program::addi(10, 0, 6),
-        rv32::test_program::addi(11, 0, kOut),
-        rv32::test_program::addi(12, 0, 8),
-        0x00000073U, // ecall
-        0x00000000U, // trap: illegal instruction
+        addi(10, 0, 35),
+        addi(11, 0, kOut),
+        kEcall,
+        branch(1, 10, 0, 32), // bne a0, x0, +8 words: the revert below
+        addi(10, 0, 6),
+        addi(11, 0, kOut),
+        addi(12, 0, 8),
+        addi(13, 0, 0),
+        addi(14, 0, 0),
+        addi(15, 0, 0),
+        kEcall,
+        addi(10, 0, 6),
+        addi(11, 0, 0),
+        addi(12, 0, 0),
+        addi(13, 0, 1),
+        addi(14, 0, 0),
+        addi(15, 0, 0),
+        kEcall,
     };
     const std::vector<uint8_t> initial_memory(4096, 0);
     Contract contract(ContractType::kRv32);
@@ -4016,11 +4030,15 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
         .auth_claim = native_account_auth_claim(),
     });
     const TransactionHash deploy_hash = sha256(deploy_tx.tx);
-    ASSERT_EQ(submit_and_commit(scheduler, SignedTransactionBatch{deploy_tx},
-                                ProposalContext{.block_timepoint =
-                                                    deploy_timepoint})
-                  .size(),
-              1UL);
+    if (submit_and_commit(
+            scheduler, SignedTransactionBatch{deploy_tx},
+            ProposalContext{.block_timepoint = deploy_timepoint})
+            .size() != 1UL) {
+      int status = process.terminate();
+      FAIL() << "deploy was not nominated; hog-devnode exited with status "
+             << status << "\nstderr:\n"
+             << process.read_remaining_stderr();
+    }
     TxInfoResult deployed = committed_info(deploy_hash);
     ASSERT_EQ(deployed.outcome(), TxInfoOutcome::TxInfoFound);
     ASSERT_EQ(deployed.info().events.exec_result, ExecResult::ExecResultOK);
@@ -4050,11 +4068,14 @@ TEST(HogDevnode, TransactionReadsItsBlockTimepoint)
         .auth_claim = native_account_auth_claim(),
     });
     const TransactionHash call_hash = sha256(call_tx.tx);
-    ASSERT_EQ(submit_and_commit(
-                  scheduler, SignedTransactionBatch{call_tx},
-                  ProposalContext{.block_timepoint = call_timepoint})
-                  .size(),
-              1UL);
+    if (submit_and_commit(scheduler, SignedTransactionBatch{call_tx},
+                          ProposalContext{.block_timepoint = call_timepoint})
+            .size() != 1UL) {
+      int status = process.terminate();
+      FAIL() << "call was not nominated; hog-devnode exited with status "
+             << status << "\nstderr:\n"
+             << process.read_remaining_stderr();
+    }
     TxInfoResult called = committed_info(call_hash);
     ASSERT_EQ(called.outcome(), TxInfoOutcome::TxInfoFound);
     EXPECT_EQ(called.info().events.exec_result, ExecResult::ExecResultOK);
