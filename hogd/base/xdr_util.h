@@ -200,7 +200,7 @@ constexpr size_t kNumThreadsForParallelBatch = 20;
 inline constexpr size_t kMinParallelBatchSize = 32;
 inline constexpr size_t kMaxInlineBatchBytes = 64 * 1024;
 
-inline constexpr bool
+constexpr bool
 run_batch_inline(size_t num_objects, size_t num_bytes)
 {
   return num_objects < kMinParallelBatchSize &&

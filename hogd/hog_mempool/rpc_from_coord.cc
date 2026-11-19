@@ -106,7 +106,7 @@ hash_transactions(const SignedTransactionBatch &txs,
     }
   };
   if (run_batch_inline(txs.size(), encoded_bytes)) {
-    hash_range({0, txs.size()});
+    hash_range({.start = 0, .end = txs.size()});
     co_return;
   }
   const std::vector<ChunkRange> chunks =
