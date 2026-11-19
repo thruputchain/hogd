@@ -159,6 +159,11 @@ rm -f mempool_metrics.txt
     > mempool_metrics.txt || true
 ) &
 
+# hog-mempool writes each submission's DAG, with per-node timings, here.
+export MEMPOOL_DAG_DOT_DIR="$WORK_ROOT/submit_dags"
+rm -rf "$MEMPOOL_DAG_DOT_DIR"
+mkdir -p "$MEMPOOL_DAG_DOT_DIR"
+
 echo "launch mempool ($MEMPOOL_BINARY)"
 set +e
 timeout 180s "$MEMPOOL_BINARY" \
@@ -209,6 +214,30 @@ echo 'mempool metrics snapshot'
 grep -v -E '^#|_bucket\{' mempool_metrics.txt || echo 'no mempool metrics snapshot'
 grep -E '^mempool_(nomination_duration|commit_duration|ingestion_auth_rpc|submit_unvetted_duration)_seconds_bucket' \
   mempool_metrics.txt || true
+
+echo 'submit dag timings'
+# Median wait and run per node over every submission, from hog-mempool's
+# DOT dumps (the coordinator pumps only batches of a million).
+python3 - "$MEMPOOL_DAG_DOT_DIR" <<'PY' || echo 'no submit dag timings'
+import glob, re, statistics, sys
+def secs(v):
+    m = re.match(r'([\d.]+)(us|ms|s)$', v)
+    return float(m.group(1)) * {'us': 1e-6, 'ms': 1e-3, 's': 1.0}[m.group(2)]
+rows = {}
+files = sorted(glob.glob(sys.argv[1] + '/mempool_submit_unvetted_*.dot'))
+for path in files:
+    text = open(path).read()
+    for name, body in re.findall(r'label="\d+: ([^\\"]+)((?:\\n[^"]*)?)"', text):
+        fields = dict(re.findall(r'\\n(wait|run|total): ([\d.]+(?:us|ms|s))', body))
+        if 'run' in fields:
+            rows.setdefault(name, []).append((secs(fields['wait']), secs(fields['run'])))
+print(f'{len(files)} submit dags')
+for name, v in rows.items():
+    waits = [w for w, _ in v]
+    runs = [r for _, r in v]
+    print(f'{name:28s} n={len(v):4d} wait_med={statistics.median(waits)*1e3:8.1f}ms '
+          f'run_med={statistics.median(runs)*1e3:8.1f}ms run_max={max(runs)*1e3:8.1f}ms')
+PY
 
 echo 'auth rpc profile'
 # hog-auth logs to its control server's newest stderr file on hog8.
