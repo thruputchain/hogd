@@ -280,16 +280,14 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
 }
 
-// The child TryInvoke depth cap is a deterministic rule of the frame stack, so
-// it must hold identically in every execution mode. Each mode takes its own
-// arm in finish_frame to decide whether a child succeeded, and a bump missed
-// in one arm lets that mode run past the cap (viewing did, #3943 audit).
-//
-// Parameterized over the ExecutionModeData alternatives rather than
-// ExecutionMode: a view is not a block mode, only a mode-data arm.
+// The ExecutionModeData alternatives, which the depth-cap test below is
+// parameterized over. Not ExecutionMode: a view is not a block mode, only a
+// mode-data arm.
+namespace {
+
 enum class ModeDataArm : uint8_t { kProposal, kValidation, kViewing };
 
-static constexpr const char *
+constexpr const char *
 mode_data_arm_name(ModeDataArm arm)
 {
   switch (arm) {
@@ -303,6 +301,12 @@ mode_data_arm_name(ModeDataArm arm)
   return "Unknown";
 }
 
+} // namespace
+
+// The child TryInvoke depth cap is a deterministic rule of the frame stack, so
+// it must hold identically in every execution mode. Each mode takes its own
+// arm in finish_frame to decide whether a child succeeded, and a bump missed
+// in one arm lets that mode run past the cap (viewing did, #3943 audit).
 class InvocationFrameDepthCapTest
   : public InvocationFrameTest,
     public ::testing::WithParamInterface<ModeDataArm> {
