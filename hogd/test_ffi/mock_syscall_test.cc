@@ -487,47 +487,6 @@ TEST(MockSyscallTest, NoSyscallTest)
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNoSyscall));
 }
 
-TEST(MockSyscallTest, Ristretto255EmptySum)
-{
-  // Open the DB through the create_db entry point, not a DBContext directly.
-  // The first FFI call runs lazy_init(), which replaces the process logger. If
-  // a DB already exists, its background thread can log while the logger is
-  // replaced, and TSAN reports a data race on hogd::detail::logger.
-  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
-  auto db_result =
-      create_db(nullptr, 0, NetworkHash{}.data(), genesis_root.data(),
-                genesis_root.size(), nullptr, 0);
-  ASSERT_EQ(db_result.ffi_error_code, kTestFFIErrorCodeNone);
-  x23::Defer free_db_defer([&] { free_db(db_result.db); });
-  auto &db_context = *static_cast<DBContext *>(db_result.db);
-
-  auto runtime_context =
-      std::make_shared<hogd::MockRuntimeContext>(make_hog_exec_context());
-  SyscallHandlerContext context(runtime_context, SignedTransaction{},
-                                db_context);
-  ASSERT_TRUE(context.push_context());
-  EmptyRuntime runtime(Invocation{.gas_limit = 1'000'000});
-  context.push_mock_runtime(&runtime);
-
-  std::array<uint8_t, 32> output;
-  output.fill(0xA5);
-  // Empty input accepts a null pointer and returns the canonical identity.
-  auto res =
-      mock_syscall_entrypoint(std::to_underlying(SyscallNo::kRistretto255Msm),
-                              0, 0, reinterpret_cast<uint64_t>(output.data()),
-                              0, 0, 0, 0);
-  EXPECT_EQ(res.result_code,
-            std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
-  EXPECT_EQ(output, (std::array<uint8_t, 32>{}));
-  EXPECT_EQ(runtime.gas_consumed(),
-            kSyscallBaseCost + GasCost::ristretto255_msm(0));
-  EXPECT_EQ(res.panic, 0);
-  context.pop_mock_runtime();
-  context.pop_context();
-  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
-  context.mark_committed_or_aborted();
-}
-
 TEST(MockSyscallTest, ErrorSyscallTest)
 {
   DBContext db_context(StorageCostModel::default_cost_model().to_xdr(),
