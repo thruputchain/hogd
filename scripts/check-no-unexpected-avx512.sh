@@ -15,15 +15,8 @@ for binary in "$@"; do
     continue
   fi
 
-  # Some libraries carry hand-written AVX-512 code that they run only after a
-  # runtime CPU check. Those symbols are allowed; generic dependency or
-  # application code is not.
-  #
-  # - BLAKE3: the *_avx512 implementations.
-  # - OpenSSL libcrypto, linked statically with HOGD_STATIC_DEPS: the AES-XTS,
-  #   AES-GCM, ChaCha20, Poly1305 and RSAZ assembly modules. OpenSSL selects
-  #   them from OPENSSL_ia32cap_P. The labels iv_len_12_init_IV and
-  #   skip_iv_len_12_init_IV belong to the AES-GCM module.
+  # BLAKE3 and static OpenSSL ship hand-written AVX-512 behind a runtime CPU
+  # check. Those symbols are allowed; generic dependency or application code is not.
   if objdump -d --demangle "$binary" | awk -v binary="$binary" '
     function runtime_dispatched(name) {
       return name ~ /^_?blake3_.*_avx512$/ ||
