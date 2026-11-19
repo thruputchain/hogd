@@ -298,14 +298,17 @@ AuthServer::verify_transactions(BlockHeight height,
       make_chunks(txs.size(), max_parallelism);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
+  rpc_profile::CpuSet cpus_used;
   for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
-           NetworkHash network_hash,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
+           NetworkHash network_hash, AuthErrorCodeBatch &results,
+           std::chrono::steady_clock::time_point spawned,
+           rpc_profile::CpuSet &cpus_used) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
+          rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
           for (size_t i = chunk.start; i < chunk.end; i++) {
@@ -332,7 +335,8 @@ AuthServer::verify_transactions(BlockHeight height,
             // write this result to [results] again.
           }
           co_return;
-        }(chunk, txs, auth_data, network_hash_, results));
+        }(chunk, txs, auth_data, network_hash_, results, looked_up,
+          cpus_used));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -344,6 +348,11 @@ AuthServer::verify_transactions(BlockHeight height,
   profile.handler_verify.add(rpc_profile::ns_between(looked_up, verified));
   profile.handler_total.add(rpc_profile::ns_between(entered, verified));
   profile.handler_txs.fetch_add(txs.size(), std::memory_order_relaxed);
+  profile.chunks.fetch_add(chunks.size(), std::memory_order_relaxed);
+  profile.cpus_per_call_sum.fetch_add(cpus_used.count(),
+                                      std::memory_order_relaxed);
+  profile.llcs_per_call_sum.fetch_add(cpus_used.llc_count(),
+                                      std::memory_order_relaxed);
   co_return results;
 }
 

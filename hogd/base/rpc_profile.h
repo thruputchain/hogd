@@ -12,8 +12,12 @@
 #include <cstring>
 #include <string>
 #include <thread>
+#include <time.h>
+
+#include <sched.h>
 
 #include "hogd/base/log.h"
+#include "x23/cpumap.h"
 #include "x23/rpc.h"
 
 namespace hogd::rpc_profile {
@@ -84,6 +88,14 @@ struct Profile {
   Acc handler_verify;
   Acc handler_total;
   std::atomic<uint64_t> handler_txs{0};
+  // Verification chunks: from the handler spawning them to each starting,
+  // each one's wall and thread CPU time, and how widely a call spread.
+  Acc chunk_delay;
+  Acc chunk_wall;
+  Acc chunk_cpu;
+  std::atomic<uint64_t> chunks{0};
+  std::atomic<uint64_t> cpus_per_call_sum{0};
+  std::atomic<uint64_t> llcs_per_call_sum{0};
   std::atomic<int64_t> in_flight{0};
   std::atomic<int64_t> max_in_flight{0};
   std::atomic<uint64_t> in_flight_at_entry_sum{0};
@@ -110,6 +122,70 @@ on_encode(const x23::RpcEncodeSample &s)
     profile().auth_encode.add(s.encode_ns, s.bytes);
   }
 }
+
+// The CPUs a call's chunks ran on.
+struct CpuSet {
+  std::array<std::atomic<uint64_t>, 8> bits{};
+  void add(unsigned cpu)
+  {
+    if (cpu < 64 * bits.size()) {
+      bits[cpu / 64].fetch_or(uint64_t{1} << (cpu % 64),
+                              std::memory_order_relaxed);
+    }
+  }
+  uint64_t count() const
+  {
+    uint64_t n = 0;
+    for (const auto &b : bits) {
+      n += static_cast<uint64_t>(std::popcount(b.load()));
+    }
+    return n;
+  }
+  // Distinct last-level caches, by x23's LLC map.
+  uint64_t llc_count() const
+  {
+    uint64_t llcs = 0;
+    for (unsigned c = 0; c < 64 * bits.size(); c++) {
+      if (((bits[c / 64].load() >> (c % 64)) & 1U) != 0) {
+        llcs |= uint64_t{1}
+                << (static_cast<unsigned>(x23::llc_map->bucket(static_cast<int>(c))) % 64);
+      }
+    }
+    return static_cast<uint64_t>(std::popcount(llcs));
+  }
+};
+
+inline uint64_t
+thread_cpu_ns()
+{
+  timespec ts{};
+  clock_gettime(CLOCK_THREAD_CPUTIME_ID, &ts);
+  return static_cast<uint64_t>(ts.tv_sec) * 1000000000U +
+         static_cast<uint64_t>(ts.tv_nsec);
+}
+
+// Times one verification chunk from its start, which must not suspend.
+struct ChunkTimer {
+  std::chrono::steady_clock::time_point started =
+      std::chrono::steady_clock::now();
+  uint64_t cpu_started = thread_cpu_ns();
+  ChunkTimer(std::chrono::steady_clock::time_point spawned, CpuSet &cpus)
+  {
+    const int cpu = sched_getcpu();
+    if (cpu >= 0) {
+      cpus.add(static_cast<unsigned>(cpu));
+    }
+    profile().chunk_delay.add(ns_between(spawned, started));
+  }
+  ~ChunkTimer()
+  {
+    profile().chunk_wall.add(
+        ns_between(started, std::chrono::steady_clock::now()));
+    profile().chunk_cpu.add(thread_cpu_ns() - cpu_started);
+  }
+  ChunkTimer(const ChunkTimer &) = delete;
+  ChunkTimer &operator=(const ChunkTimer &) = delete;
+};
 
 struct InFlight {
   InFlight()
@@ -154,6 +230,12 @@ start(const char *component)
       const std::string total = p.handler_total.show();
       const uint64_t txs = p.handler_txs.load();
       const int64_t max_in_flight = p.max_in_flight.load();
+      const std::string chunk_delay = p.chunk_delay.show();
+      const std::string chunk_wall = p.chunk_wall.show();
+      const std::string chunk_cpu = p.chunk_cpu.show();
+      const uint64_t chunks = p.chunks.load();
+      const uint64_t cpus = p.cpus_per_call_sum.load();
+      const uint64_t llcs = p.llcs_per_call_sum.load();
       const uint64_t entry_sum = p.in_flight_at_entry_sum.load();
       info("RPCPROF {} body_read {}", component, body_read);
       info("RPCPROF {} serve_sync {}", component, serve_sync);
@@ -162,8 +244,12 @@ start(const char *component)
       info("RPCPROF {} handler_lookup {}", component, lookup);
       info("RPCPROF {} handler_verify {}", component, verify);
       info("RPCPROF {} handler_total {}", component, total);
-      info("RPCPROF {} handler_txs={} max_in_flight={} in_flight_at_entry_sum={}",
-           component, txs, max_in_flight, entry_sum);
+      info("RPCPROF {} chunk_delay {}", component, chunk_delay);
+      info("RPCPROF {} chunk_wall {}", component, chunk_wall);
+      info("RPCPROF {} chunk_cpu {}", component, chunk_cpu);
+      info("RPCPROF {} handler_txs={} max_in_flight={} in_flight_at_entry_sum={} "
+           "chunks={} cpus_per_call_sum={} llcs_per_call_sum={}",
+           component, txs, max_in_flight, entry_sum, chunks, cpus, llcs);
     }
   }).detach();
 }
