@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <format>
 #include <memory>
 #include <span>
 #include <string>
@@ -290,7 +289,7 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
 // ExecutionMode: a view is not a block mode, only a mode-data arm.
 enum class ModeDataArm : uint8_t { kProposal, kValidation, kViewing };
 
-constexpr const char *
+static constexpr const char *
 mode_data_arm_name(ModeDataArm arm)
 {
   switch (arm) {
