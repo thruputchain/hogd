@@ -184,7 +184,9 @@ private:
     }
   }
 
-  template<typename T>
+  // The requirement parse() and parse_mock() place on a by-reference argument.
+  template<typename T> requires (std::is_trivially_copyable_v<T> &&
+                                 std::has_unique_object_representations_v<T>)
   static void register_object(AliasGuard &guard, T const &object)
   {
     auto const addr = reinterpret_cast<uintptr_t>(std::addressof(object));
