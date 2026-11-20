@@ -221,23 +221,6 @@ AuthServer::subscribe_and_register(AuthCard card)
   co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
 }
 
-x23::Async<AuthStatus<AuthCacheEntry>>
-AuthServer::populate_auth_data(BlockHeight height,
-                               ContractAddress const &address)
-{
-  auto entry = co_await lookup_auth_data(height, address);
-  if (!entry.has_value()) {
-    co_return entry.error();
-  }
-
-  CHECK_PTR(entry->get());
-
-  // A missing auth entry (nullopt) is returned as-is: whether that is
-  // acceptable depends on the transaction's claim type (pubkey claims
-  // require it), so the policy lives in verify_auth.
-  co_return std::move(*entry);
-}
-
 namespace {
 
 // Auth is the one place the whole SignedTransaction is measured; the executor
@@ -277,13 +260,14 @@ AuthServer::verify_transactions(BlockHeight height,
     }
     if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
       auto entry =
-          co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
+          co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
       if (!entry.has_value()) {
         trace("Populate auth data error: {}",
               std::to_underlying(entry.error().code()));
         results[i] = entry.error().code();
         continue;
       }
+      CHECK_PTR(entry->get());
       auth_data[tx.tx.invocation.invoked_address] = std::move(*entry);
     }
   }

@@ -97,9 +97,6 @@ public:
   }
 
 private:
-  x23::Async<AuthStatus<AuthCacheEntry>>
-  populate_auth_data(BlockHeight height, ContractAddress const &address);
-
   // Issues one chunk of [height]'s run to the mempool.
   struct ForwardKeyChangeChunk {
     sched_auth_client_t client;
