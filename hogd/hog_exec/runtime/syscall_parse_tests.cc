@@ -286,6 +286,32 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   EXPECT_EQ(memory[47], 0x22);
 }
 
+// A mock span is a host pointer, so a null one with bytes to move cannot be
+// used. That holds for an output span exactly as for an input span; an empty
+// span moves nothing and may be null either way.
+TEST(SyscallParseTests, MockSpansRejectNullWithNonZeroLength)
+{
+  using output_span = SyscallArgParams<std::span<std::byte>>;
+  using input_span = SyscallArgParams<std::span<const std::byte>>;
+
+  AliasGuard guard;
+  EXPECT_FALSE(output_span::validate(output_span::parse_mock(guard, 0, 4)));
+  EXPECT_FALSE(input_span::validate(input_span::parse_mock(guard, 0, 4)));
+  EXPECT_TRUE(output_span::validate(output_span::parse_mock(guard, 0, 0)));
+  EXPECT_TRUE(input_span::validate(input_span::parse_mock(guard, 0, 0)));
+  // None of the above names memory another argument could overlap.
+  EXPECT_TRUE(guard.check());
+
+  std::array<std::byte, 4> buffer{};
+  auto parsed =
+      output_span::parse_mock(guard, reinterpret_cast<uint64_t>(buffer.data()),
+                              buffer.size());
+  ASSERT_TRUE(output_span::validate(parsed));
+  EXPECT_EQ(output_span::deref(parsed).data(), buffer.data());
+  EXPECT_EQ(output_span::deref(parsed).size(), buffer.size());
+  EXPECT_TRUE(guard.check());
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace hogd
