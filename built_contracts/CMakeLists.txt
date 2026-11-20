@@ -239,6 +239,7 @@ add_riscv_builds(
     local_test_contracts/drip_faucet
     local_test_contracts/erc165_probe
     local_test_contracts/faucet_caller
+    local_test_contracts/input_alias_test
     local_test_contracts/invoke_malformed_tokens_test
     local_test_contracts/itc_erc20_permit
     local_test_contracts/storage_reads
@@ -320,6 +321,7 @@ add_contract_header(auth_weight_test)
 add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
 add_contract_header(erc165_probe)
 add_contract_header(faucet_caller)
+add_contract_header(input_alias_test)
 add_contract_header(invoke_malformed_tokens_test)
 add_contract_header(storage_reads)
 add_contract_header(tx_context_test)

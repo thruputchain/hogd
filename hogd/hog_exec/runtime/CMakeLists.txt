@@ -94,6 +94,7 @@ add_library(runtime_test_objects OBJECT
   faucet_scenario_test.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
+  input_alias_test_rv32_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
   validated_auth_tokens_test.cc
@@ -127,7 +128,6 @@ add_library(runtime_test_objects OBJECT
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
   storage_flags_test.cc
-  syscall_alias_test.cc
   syscall_auth_config_test.cc
   syscall_auth_token_test.cc
   syscall_block_data_test.cc
