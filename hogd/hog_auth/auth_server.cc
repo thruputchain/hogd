@@ -346,39 +346,19 @@ AuthServer::verify_transactions(BlockHeight height,
 }
 
 x23::Async<AuthErrorCode>
-AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
+AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs,
+                         size_t max_parallelism)
 {
-  Ed25519SignatureVerifier signature_verifier;
-  x23::Buf signature_preimage;
-  for (const auto &tx : txs) {
-    if (wrapper_over_cap(tx)) {
-      co_return AuthErrorCode::kAuthFailed;
-    }
-    AuthCacheEntry source_addr =
-        try_cached_auth_data(height, tx.tx.invocation.invoked_address);
-    if (source_addr == nullptr) {
-      auto looked_up =
-          co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
-      if (!looked_up.has_value()) {
-        co_return looked_up.error().code();
-      }
-      source_addr = std::move(*looked_up);
-    }
-    CHECK_PTR(source_addr.get());
-    const std::optional<AddressAuthData> &source_auth_data =
-        source_addr->second;
-
-    auto verify_result =
-        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                    network_hash_, signature_preimage);
-    if (!verify_result.has_value()) {
-      co_return AuthErrorCode::kAuthFailed;
+  // All or nothing, as the code of the first transaction, in order, that
+  // fails: the answer a serial check stopping at the first failure gives.
+  const AuthErrorCodeBatch results = co_await verify_transactions(
+      height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
+      max_parallelism);
+  for (AuthErrorCode code : results) {
+    if (code != AuthErrorCode::kAuthSuccess) {
+      co_return code;
     }
   }
-  if (signature_verifier.verify()) {
-    co_return AuthErrorCode::kAuthSuccess;
-  }
-  trace("Signature verification failed");
-  co_return AuthErrorCode::kAuthFailed;
+  co_return AuthErrorCode::kAuthSuccess;
 }
 } // namespace hogd

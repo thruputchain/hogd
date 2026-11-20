@@ -60,8 +60,12 @@ public:
   verify_transactions(BlockHeight height,
                       std::span<const SignedTransaction> txs,
                       size_t max_parallelism = 1);
+  // Whether every transaction in [txs] verifies, for checking a proposal: the
+  // code of the first transaction, in order, that does not, or kAuthSuccess.
+  // Verifies as verify_transactions() does.
   x23::Async<AuthErrorCode> verify_batch(BlockHeight height,
-                                         SignedTransactionBatch txs);
+                                         SignedTransactionBatch txs,
+                                         size_t max_parallelism = 1);
 
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
@@ -225,7 +229,9 @@ public:
   {
     CHECK_PTR(auth_server_);
 
-    return auth_server_->verify_batch(height, std::move(txs));
+    return auth_server_->verify_batch(
+        height, std::move(txs),
+        /*max_parallelism=*/available_parallelism());
   }
 
 private:

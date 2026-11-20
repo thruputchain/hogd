@@ -233,6 +233,63 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
   EXPECT_EQ(bad_result[0], AuthErrorCode::kAuthFailed);
 }
 
+// verify_batch() answers with the code of the first transaction, in order, that
+// fails, whatever the order the transactions are verified in.
+TEST_F(AuthVerifyTest, VerifyBatchReturnsFirstFailureInOrder)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  // [cached]'s account is looked up at height 0; [uncached]'s is not.
+  auto make_stx = [&](uint64_t nonce, const SecretKey &signer) {
+    PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, nonce);
+    Transaction tx{};
+    tx.invocation.invoked_address = pubkey_auth_address(preimage).value();
+    tx.auth_claim = make_pubkey_claim(preimage);
+    SignedTransaction stx{};
+    stx.tx = tx;
+    stx.pubkey_claim_key = pk;
+    stx.signatures.push_back(make_signature(signer, tx, /*public_key_id=*/0));
+    return stx;
+  };
+  SignedTransaction cached = make_stx(42, sk);
+  SignedTransaction cached_bad = make_stx(42, sk2);
+  SignedTransaction uncached = make_stx(43, sk);
+  EXPECT_EQ(auth_server().verify_batch(0, {cached})(),
+            AuthErrorCode::kAuthSuccess);
+
+  // Once the server is past height 0, [uncached]'s account cannot be looked
+  // up at height 0 any more.
+  mock_db().increment_height(); // height 1
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  EXPECT_EQ(auth_server().verify_batch(0, {cached_bad, uncached},
+                                       /*max_parallelism=*/8)(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {uncached, cached_bad},
+                                       /*max_parallelism=*/8)(),
+            AuthErrorCode::kAuthStaleBlockHeight);
+
+  // A large batch, split over the pool, fails on one bad transaction anywhere.
+  SignedTransactionBatch many;
+  for (size_t i = 0; i < 600; i++) {
+    many.push_back(i == 517 ? cached_bad : cached);
+  }
+  EXPECT_EQ(auth_server().verify_batch(0, many, /*max_parallelism=*/8)(),
+            AuthErrorCode::kAuthFailed);
+  many[517] = cached;
+  EXPECT_EQ(auth_server().verify_batch(0, many, /*max_parallelism=*/8)(),
+            AuthErrorCode::kAuthSuccess);
+}
+
 TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
