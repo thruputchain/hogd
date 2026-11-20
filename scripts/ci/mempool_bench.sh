@@ -152,11 +152,22 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 # The mempool's own timings are only on its metrics port, and `timeout` below
 # reaps it at 180 s, so take a snapshot shortly before then.
-rm -f mempool_metrics.txt
+rm -f mempool_metrics.txt auth_proc_30.txt auth_proc_170.txt
+# hog-auth's scheduling counters on hog8, summed over its threads: CPU time,
+# context switches and migrations between CPUs.
+AUTH_PROC_SNAPSHOT='pid=$(pgrep -x hog-auth | head -n 1); test -n "$pid" || exit 0
+echo "threads=$(ls /proc/$pid/task | wc -l)"
+read -r -a st < /proc/$pid/stat
+echo "utime_ticks=${st[13]} stime_ticks=${st[14]} clk_tck=$(getconf CLK_TCK)"
+cat /proc/$pid/task/*/status | awk "/^voluntary_ctxt_switches/ {v += \$2} /^nonvoluntary_ctxt_switches/ {n += \$2} END {print \"voluntary_ctxt=\" v, \"nonvoluntary_ctxt=\" n}"
+cat /proc/$pid/task/*/sched 2>/dev/null | awk "/nr_migrations/ {m += \$NF} END {print \"nr_migrations=\" m}"'
 (
-  sleep 170
+  sleep 30
+  ssh -n hog8 "$AUTH_PROC_SNAPSHOT" > auth_proc_30.txt 2>&1 || true
+  sleep 140
   curl --silent --max-time 5 "http://$(hog_ip hog10):$MEMPOOL_HTTP_PORT/metrics" \
     > mempool_metrics.txt || true
+  ssh -n hog8 "$AUTH_PROC_SNAPSHOT" > auth_proc_170.txt 2>&1 || true
 ) &
 
 # hog-mempool writes each submission's DAG, with per-node timings, here.
@@ -245,6 +256,11 @@ echo 'curve25519-dalek backend'
 find "$BUILD_DIR" -path '*build/curve25519-dalek-*/output' -exec grep -h curve25519_dalek_backend {} + \
   2>/dev/null | sort -u || echo 'no curve25519-dalek build output found'
 grep -o -w -m1 'avx512ifma' /proc/cpuinfo || echo 'this CPU has no avx512ifma'
+
+echo 'auth process snapshot at 30 s'
+cat auth_proc_30.txt 2>/dev/null || echo 'none'
+echo 'auth process snapshot at 170 s'
+cat auth_proc_170.txt 2>/dev/null || echo 'none'
 
 echo 'auth rpc profile'
 # hog-auth logs to its control server's newest stderr file on hog8.
