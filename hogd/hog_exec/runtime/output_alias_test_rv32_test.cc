@@ -130,42 +130,10 @@ TEST_F(OutputAliasTestRv32Test, CalldataNoOverlap)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// Two input pointers at the same address should fault
-TEST_F(OutputAliasTestRv32Test, InputInputOverlapFault)
-{
-  auto handler = make_new_system_call_handler(
-      Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_log_event_input_input_alias">(
-                  kDefaultMaxTxGas),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}},
-      *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-}
-
-// Zero-length spans under the half-open alias predicate: strictly inside a
-// prior range faults, at its exact edges does not.
-TEST_F(OutputAliasTestRv32Test, ZeroLenSpanAliasEdges)
-{
-  // The non-aliasing arms log real events, so this test commits and emits
-  // rather than dropping the handler.
-  auto signed_tx = SignedTransaction{
-      .tx = Transaction{
-          .invocation =
-              client_.make_invocation<u8"test_log_event_zero_len_data_alias">(
-                  kDefaultMaxTxGas),
-          .uniquifier = Uniquifier{.block_expiry_height =
-                                       std::numeric_limits<BlockHeight>::max(),
-                                   .nonce = nonce_++}}};
-  auto handler = make_new_system_call_handler(signed_tx, *runtime_context_);
-  ASSERT_TRUE(handler.root_invoke()().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
-  ASSERT_TRUE(
-      handler.emit_events(ExecResult::ExecResultOK,
-                          ProposedTransaction{.signed_tx = signed_tx})());
-}
+// The fixture's test_log_event_input_input_alias and
+// test_log_event_zero_len_data_alias assert that overlapping inputs fault.
+// Inputs may overlap now, so they are not called here: syscall_alias_test.cc
+// covers inputs, and zero-length spans against outputs.
 
 // Overlapping input with output should fault
 TEST_F(OutputAliasTestRv32Test, InputOutputOverlapFault)

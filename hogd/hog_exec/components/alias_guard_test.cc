@@ -100,6 +100,168 @@ TEST(AliasGuardTest, TwoZeroLengthRangesAtSamePointSucceed)
   EXPECT_TRUE(guard.check());
 }
 
+// The tests above register outputs, which may overlap nothing. An input may
+// overlap another input in any way: the host reads both and writes neither.
+TEST(AliasGuardTest, IdenticalInputsSucceed)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, PartiallyOverlappingInputsSucceed)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(108, 16));
+  EXPECT_TRUE(guard.check_and_register_input(92, 16));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, ContainedInputsSucceed)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 32));
+  EXPECT_TRUE(guard.check_and_register_input(108, 8));
+  EXPECT_TRUE(guard.check_and_register_input(92, 64));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, ZeroLengthInputInsidePriorInputSucceeds)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(108, 0));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, InputOverZeroLengthPriorInputSucceeds)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(108, 0));
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check());
+}
+
+// An output still may not overlap an input, whichever is registered first.
+TEST(AliasGuardTest, InputOverlappingPriorOutputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_output(100, 16));
+  EXPECT_FALSE(guard.check_and_register_input(100, 16));
+  EXPECT_FALSE(guard.check_and_register_input(108, 16));
+  EXPECT_FALSE(guard.check_and_register_input(92, 16));
+  EXPECT_FALSE(guard.check_and_register_input(104, 4));
+  EXPECT_FALSE(guard.check());
+}
+
+TEST(AliasGuardTest, OutputOverlappingPriorInputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_FALSE(guard.check_and_register_output(100, 16));
+  EXPECT_FALSE(guard.check_and_register_output(108, 16));
+  EXPECT_FALSE(guard.check_and_register_output(92, 16));
+  EXPECT_FALSE(guard.check_and_register_output(104, 4));
+  EXPECT_FALSE(guard.check());
+}
+
+// Sharing bytes with another input does not hide an input from the outputs
+// that follow.
+TEST(AliasGuardTest, OutputOverlappingOneOfTwoSharedInputsFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(108, 16));
+  // [116, 124) is inside the second input only.
+  EXPECT_FALSE(guard.check_and_register_output(116, 8));
+  EXPECT_FALSE(guard.check());
+}
+
+TEST(AliasGuardTest, InputsAndOutputsThatOnlyTouchSucceed)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_output(116, 16));
+  EXPECT_TRUE(guard.check_and_register_input(132, 16));
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check());
+}
+
+// The zero-length rule is the same one between an input and an output as
+// between two outputs: strictly inside conflicts, at an edge does not.
+TEST(AliasGuardTest, ZeroLengthInputInsidePriorOutputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_output(100, 16));
+  EXPECT_FALSE(guard.check_and_register_input(108, 0));
+  EXPECT_FALSE(guard.check());
+}
+
+TEST(AliasGuardTest, ZeroLengthInputAtPriorOutputEdgesSucceeds)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_output(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(100, 0));
+  EXPECT_TRUE(guard.check_and_register_input(116, 0));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, ZeroLengthOutputInsidePriorInputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_FALSE(guard.check_and_register_output(108, 0));
+  EXPECT_FALSE(guard.check());
+}
+
+TEST(AliasGuardTest, ZeroLengthOutputAtPriorInputEdgesSucceeds)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_output(100, 0));
+  EXPECT_TRUE(guard.check_and_register_output(116, 0));
+  EXPECT_TRUE(guard.check());
+}
+
+TEST(AliasGuardTest, OutputOverZeroLengthPriorInputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_input(108, 0));
+  EXPECT_FALSE(guard.check_and_register_output(100, 16));
+}
+
+TEST(AliasGuardTest, InputOverZeroLengthPriorOutputFails)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_output(108, 0));
+  EXPECT_FALSE(guard.check_and_register_input(100, 16));
+}
+
+// A conflict is remembered: nothing registered afterwards clears it.
+TEST(AliasGuardTest, LaterRegistrationsDoNotClearAConflict)
+{
+  AliasGuard guard;
+  EXPECT_TRUE(guard.check_and_register_output(100, 16));
+  EXPECT_FALSE(guard.check_and_register_input(100, 16));
+  EXPECT_TRUE(guard.check_and_register_input(200, 16));
+  EXPECT_TRUE(guard.check_and_register_input(200, 16));
+  EXPECT_TRUE(guard.check_and_register_output(300, 16));
+  EXPECT_FALSE(guard.check());
+}
+
+// A syscall has seven argument words, so at most seven memory arguments; all
+// of them may be one shared input.
+TEST(AliasGuardTest, SevenIdenticalInputsSucceed)
+{
+  AliasGuard guard;
+  for (int i = 0; i < 7; ++i) {
+    EXPECT_TRUE(guard.check_and_register_input(100, 16));
+  }
+  EXPECT_TRUE(guard.check());
+}
+
 TEST(AliasGuardTest, MultipleNonOverlappingRegistrationsSucceed)
 {
   AliasGuard guard;

@@ -632,26 +632,10 @@ TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
   ASSERT_TRUE(res.is_root_success());
 }
 
-// Checks that aliasing guards (returning kFault) are performed before the read
-// only guard
-TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
-{
-  deploy_callee();
-
-  auto context = make_hog_exec_context();
-
-  auto handler_tx = SignedTransaction{
-      .tx = Transaction{
-          .invocation = client_.make_invocation<
-              u8"read_only_aliasing_before_read_only_check">(kDefaultMaxTxGas,
-                                                             callee_addr_),
-          .uniquifier = make_new_uniquifier(),
-      }};
-  auto handler = make_new_system_call_handler(handler_tx, *context);
-
-  auto res = handler.root_invoke()();
-  ASSERT_TRUE(res.is_root_success());
-}
+// That the argument checks come before the read-only check is covered by
+// SyscallAliasEntryTest.AnOverlapFaultsBeforeTheReadOnlyCheck. The fixture's
+// read_only_aliasing_before_read_only_check gets its fault by overlapping two
+// inputs, which no longer faults, so it is not called here.
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd
