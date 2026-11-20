@@ -1,12 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
 #include <cstdint>
+#include <functional>
+#include <initializer_list>
 #include <limits>
 #include <memory>
 #include <optional>
 #include <span>
+#include <string>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -48,6 +52,7 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
+#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -666,9 +671,14 @@ protected:
               co_return InvokeError{InvokeErrorCode::Deterministic};
             }
             out.push_back(static_cast<uint8_t>(payload[0]));
-            out.push_back(minter == caller      ? kMintedByCaller
-                          : minter == kDeskAddr ? kMintedByDesk
-                                                : uint8_t{0});
+            uint8_t minted_by = 0;
+            if (minter == caller) {
+              minted_by = kMintedByCaller;
+            }
+            else if (minter == kDeskAddr) {
+              minted_by = kMintedByDesk;
+            }
+            out.push_back(minted_by);
           }
           ctx.handler().set_return_buffer(std::move(out), false, {});
           co_return InvokeStatus<void>{};
@@ -2031,7 +2041,9 @@ TEST_F(DefaultWalletParityTest, TokensListsPastTheirBoundsFailDecoding)
           std::tuple<unbounded_mints_t, wallet_calls_t>{mints, calls});
   ASSERT_TRUE(calldata.has_value());
   auto id = wallet_meta::method_id<u8"execute">();
-  std::vector<uint8_t> raw(calldata->begin(), calldata->end());
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  auto const &encoded = calldata.value();
+  std::vector<uint8_t> raw(encoded.begin(), encoded.end());
   expect_raw_parity(id, raw);
   expect_abort_bytes(run_wallet_raw_tx(native_wallet_, native_preimage_, id,
                                        raw),
