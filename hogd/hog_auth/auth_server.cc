@@ -311,9 +311,6 @@ AuthServer::verify_transactions(BlockHeight height,
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
-          Ed25519SignatureVerifier batch;
-          std::vector<size_t> batched;
-          batched.reserve(chunk.end - chunk.start);
           for (size_t i = chunk.start; i < chunk.end; i++) {
             const SignedTransaction &tx = txs[i];
             if (results[i] != AuthErrorCode::kAuthSuccess) {
@@ -326,35 +323,16 @@ AuthServer::verify_transactions(BlockHeight height,
             const std::optional<AddressAuthData> &source_auth_data =
                 account_it->second->second;
 
-            // Experiment: the chunk's Ed25519 signatures are checked
-            // together below; everything else about the claim is checked
-            // here, as before.
             AuthVerifyStatus<void> verify_result =
                 verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash, signature_preimage, &batch);
+                            network_hash, signature_preimage);
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
             }
-            batched.push_back(i);
             // [results] is initialized with all of its members as
             // [AuthErrorCode::kAuthSuccess], so there is no need for us to
             // write this result to [results] again.
-          }
-          if (!batched.empty() && !batch.verify()) {
-            // Some signature is bad: find which, one transaction at a time.
-            for (const size_t i : batched) {
-              const SignedTransaction &tx = txs[i];
-              const std::optional<AddressAuthData> &source_auth_data =
-                  auth_data.find(tx.tx.invocation.invoked_address)
-                      ->second->second;
-              if (!verify_auth(tx,
-                               source_auth_data ? &*source_auth_data : nullptr,
-                               network_hash, signature_preimage)
-                       .has_value()) {
-                results[i] = AuthErrorCode::kAuthFailed;
-              }
-            }
           }
           co_return;
         }(chunk, txs, auth_data, network_hash_, results, looked_up,
