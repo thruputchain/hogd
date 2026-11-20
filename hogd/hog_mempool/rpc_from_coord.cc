@@ -343,36 +343,6 @@ MempoolCoordinatorRpc::submit_unvetted_with_outcomes(
 }
 
 x23::Async<AuthErrorCodeBatch>
-MempoolCoordinatorRpc::verify_in_auth_rpcs(BlockHeight height,
-                                           const SignedTransactionBatch &txs)
-{
-  AuthErrorCodeBatch results;
-  results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
-  const size_t rpcs = (txs.size() + kAuthRpcTxs - 1) / kAuthRpcTxs;
-  std::vector<x23::Async<void>> calls;
-  calls.reserve(rpcs);
-  for (size_t r = 0; r < rpcs; r++) {
-    const size_t start = r * kAuthRpcTxs;
-    const size_t end = std::min(start + kAuthRpcTxs, txs.size());
-    calls.push_back(
-        [](auth_sched_client_t &client, BlockHeight height,
-           x23::span<const SignedTransaction> part, AuthErrorCodeBatch &results,
-           size_t start) -> x23::Async<void> {
-          const AuthErrorCodeBatch verified =
-              co_await client.authmempool_verify_transactions(height, part);
-          CHECK_EQ(verified.size(), part.size());
-          std::ranges::copy(verified, results.begin() + start);
-        }(*auth_clients_[r % auth_clients_.size()], height,
-          x23::span<const SignedTransaction>(txs.data() + start, end - start),
-          results, start));
-  }
-  for (x23::Async<void> &call : calls) {
-    co_await call;
-  }
-  co_return results;
-}
-
-x23::Async<AuthErrorCodeBatch>
 MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
                                          InstrumentedCoroGuard &commit_guard)
 {
@@ -440,7 +410,8 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
       MempoolMetrics::instance().ingestion_auth_retry_count.increment();
     repeated_auth = true;
     const AuthErrorCodeBatch verified =
-        co_await verify_in_auth_rpcs(verify_height, retry_txs);
+        co_await auth_client_->authmempool_verify_transactions(verify_height,
+                                                               retry_txs);
     MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
         auth_timer.elapsed());
     if (submission_auth_test_hook_) {

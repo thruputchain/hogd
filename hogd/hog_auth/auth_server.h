@@ -66,6 +66,8 @@ public:
 
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
+  AuthCacheEntry try_cached_auth_data(BlockHeight height,
+                                      const ContractAddress &address);
 
   // Applies a committed block's key changes to the cache, then forwards them
   // to the mempool as a run of KeyChangeChunk records. Forwards of consecutive

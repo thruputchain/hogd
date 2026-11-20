@@ -496,11 +496,6 @@ private:
     std::unordered_set<ContractAddress, SipHash24Hasher> dirty;
   };
 
-  // Verifies [txs] at [height] in kAuthRpcTxs-transaction RPCs, all in flight
-  // at once, dealt over [auth_clients_].
-  x23::Async<AuthErrorCodeBatch>
-  verify_in_auth_rpcs(BlockHeight height, const SignedTransactionBatch &txs);
-
   // Returns with [commit_guard] held, so results stay valid through admission.
   x23::Async<AuthErrorCodeBatch>
   verify_submission(const SignedTransactionBatch &txs,
@@ -633,14 +628,8 @@ private:
         scheduler_->tx_cache_size());
     scheduler_->transfer_finished_.store(
         last_committed_block_.value.proposal_header.block_height);
-    // Experiment: kAuthConnections connections to auth; submissions verify
-    // over all of them in kAuthRpcTxs-transaction RPCs.
-    auth_clients_.clear();
-    for (size_t i = 0; i < kAuthConnections; i++) {
-      auth_clients_.push_back(std::make_unique<auth_sched_client_t>(
-          co_await MempoolAuthRpc::get_client()));
-    }
-    auth_client_ = auth_clients_.front().get();
+    auth_client_ = std::make_unique<auth_sched_client_t>(
+        co_await MempoolAuthRpc::get_client());
     co_await db_rpc_->register_scheduler(scheduler_);
     co_await auth_rpc_->register_callback(
         [this](BlockHeight height, ChunkedVector<KeyChangeBatch> key_changes) {
@@ -867,10 +856,7 @@ private:
                                  bool)>
       submission_auth_test_hook_;
   std::function<void(BlockHeight)> auth_data_wait_test_hook_;
-  static constexpr size_t kAuthConnections = 16;
-  static constexpr size_t kAuthRpcTxs = 256;
-  std::vector<std::unique_ptr<auth_sched_client_t>> auth_clients_;
-  auth_sched_client_t *auth_client_ = nullptr;
+  std::unique_ptr<auth_sched_client_t> auth_client_;
 
   std::shared_ptr<Scheduler> scheduler_;
 
