@@ -41,7 +41,6 @@ else
   git clean -ffd -e .ssh/ -e .gitconfig
 
   git submodule update --init --recursive --depth 1 --jobs 8 --quiet
-
 fi
 
 # Warm developer builds with the host's default GCC as the system toolchain moves.

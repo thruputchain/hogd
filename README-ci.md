@@ -154,8 +154,9 @@ artifact to the GitHub Actions run. It contains `hackathon-results.tar.gz`, with
 results and signed corpora retained even after a replay fails. A copy also stays
 under `WORK_DIR` and, when set, the worker's `HOG_DUMP_DIR`; the exact paths
 appear in the job log.
-This job does not publish to `metrics_history`. The trusted controller stages public sources and dependencies before execution;
-the workload containers receive no deploy key or SSH access.
+This job does not publish to `metrics_history`.
+The trusted controller stages public sources and dependencies before execution.
+The workload containers receive no deploy key or SSH access.
 The gateway source and qualified hogd protocol revision are pinned together.
 The schedule fails before building if the protocol pin no longer matches hogd;
 update both pins after checking wire compatibility. The qualified pin uses

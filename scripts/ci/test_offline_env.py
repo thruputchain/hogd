@@ -12,10 +12,10 @@ ROOT = Path(__file__).resolve().parents[2]
 
 class OfflineTests(unittest.TestCase):
     def setUp(self):
-        self.temporary = tempfile.TemporaryDirectory()
-        self.root = Path(self.temporary.name)
-        self.bin = self.root / 'bin'
-        self.bin.mkdir()
+        self.tempdir = tempfile.TemporaryDirectory()
+        self.root = Path(self.tempdir.name)
+        self.bin_dir = self.root / 'bin'
+        self.bin_dir.mkdir()
         for tool in (
             'cargo',
             'rustup',
@@ -27,7 +27,7 @@ class OfflineTests(unittest.TestCase):
             'thruput',
             'git',
         ):
-            script = self.bin / tool
+            script = self.bin_dir / tool
             script.write_text(
                 '#!/bin/sh\n'
                 'echo "unexpected tool execution: $0" >&2\nexit 99\n'
@@ -36,12 +36,12 @@ class OfflineTests(unittest.TestCase):
         self.env = dict(
             os.environ,
             HOGD_CI_OFFLINE='1',
-            PATH=f'{self.bin}:/usr/bin',
+            PATH=f'{self.bin_dir}:/usr/bin',
             HOME=str(self.root),
         )
 
     def tearDown(self):
-        self.temporary.cleanup()
+        self.tempdir.cleanup()
 
     def run_script(self, relative, **kwargs):
         return subprocess.run(
@@ -97,10 +97,10 @@ class OfflineTests(unittest.TestCase):
         )
 
     def test_hog_ip_resolves_run_local_address(self):
-        (self.bin / 'getent').write_text(
+        (self.bin_dir / 'getent').write_text(
             '#!/bin/sh\nprintf "172.28.1.12 STREAM hog4\\n"\n'
         )
-        (self.bin / 'getent').chmod(0o755)
+        (self.bin_dir / 'getent').chmod(0o755)
         self.env['HOGD_CI_CONTAINER'] = '1'
         result = subprocess.run(
             ['bash', '-c', f'source "{ROOT}/scripts/hog-ip.sh"; hog_ip hog4'],
