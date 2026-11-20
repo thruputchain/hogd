@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -284,6 +285,31 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   EXPECT_EQ(memory[39], 0x11);
   EXPECT_EQ(memory[40], 0x22);
   EXPECT_EQ(memory[47], 0x22);
+}
+
+// A null mock span with a non-zero length is rejected for input and output
+// alike; an empty one is fine.
+TEST(SyscallParseTests, MockSpansRejectNullWithNonZeroLength)
+{
+  using output_span = SyscallArgParams<std::span<std::byte>>;
+  using input_span = SyscallArgParams<std::span<const std::byte>>;
+
+  AliasGuard guard;
+  EXPECT_FALSE(output_span::validate(output_span::parse_mock(guard, 0, 4)));
+  EXPECT_FALSE(input_span::validate(input_span::parse_mock(guard, 0, 4)));
+  EXPECT_TRUE(output_span::validate(output_span::parse_mock(guard, 0, 0)));
+  EXPECT_TRUE(input_span::validate(input_span::parse_mock(guard, 0, 0)));
+  // None of the above names memory another argument could overlap.
+  EXPECT_TRUE(guard.check());
+
+  std::array<std::byte, 4> buffer{};
+  auto parsed =
+      output_span::parse_mock(guard, reinterpret_cast<uint64_t>(buffer.data()),
+                              buffer.size());
+  ASSERT_TRUE(output_span::validate(parsed));
+  EXPECT_EQ(output_span::deref(parsed).data(), buffer.data());
+  EXPECT_EQ(output_span::deref(parsed).size(), buffer.size());
+  EXPECT_TRUE(guard.check());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
