@@ -2091,7 +2091,10 @@ TEST_F(DefaultWalletParityTest, DecodeChargeCoversRv32Reference)
     SCOPED_TRACE("execute/empty");
     check(exec_id, {});
   }
-  for (size_t n : {1, 16, 280}) {
+  // 256 calls is near the most the reference can decode: its guest has 64K of
+  // memory and an allocator that never frees, and past roughly 260 calls it
+  // runs out and faults before it can reject the calldata.
+  for (size_t n : {1, 16, 256}) {
     SCOPED_TRACE(testing::Message() << "execute/truncated/calls=" << n);
     wallet_calls_t calls;
     calls.resize(n);
