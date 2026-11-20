@@ -122,12 +122,15 @@ public:
   x23::Async<void> apply_committed_block_native_token_ages(
       const SharedSignedTransactionBatch &txs, BlockHeight block_height);
 
+  // Lookups alias the cache entry rather than copy the tx: the result keeps
+  // the [TxValue], and with it the signed-hash set its body's encodings share,
+  // alive after the entry leaves the cache, for as long as it is held.
   std::shared_ptr<const SignedTransaction>
   find_tx(const TransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_by_body_.find(tx_hash);
     if (tx_value_ptr) {
-      return std::as_const((*tx_value_ptr)->tx).share();
+      return alias_tx(*tx_value_ptr);
     }
     return {};
   }
@@ -145,7 +148,7 @@ public:
       if (tx_hash) {
         *tx_hash = (*tx_value_ptr)->tx_hash;
       }
-      return std::as_const((*tx_value_ptr)->tx).share();
+      return alias_tx(*tx_value_ptr);
     }
     return {};
   }
@@ -396,6 +399,14 @@ private:
         signed_tx_hashes = std::make_shared<
             std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
   };
+
+  // The tx of a cache entry, owned through the entry (see [find_tx]).
+  static std::shared_ptr<const SignedTransaction>
+  alias_tx(const std::shared_ptr<TxValue> &tx_value)
+  {
+    return std::shared_ptr<const SignedTransaction>(
+        tx_value, std::as_const(tx_value->tx).get());
+  }
 
   struct AccountState {
     NativeTokenAge native_token_age{};
