@@ -267,7 +267,7 @@ AuthServer::verify_transactions(BlockHeight height,
   CHECK_GT(max_parallelism, 0UL);
   rpc_profile::InFlight in_flight;
   const auto entered = std::chrono::steady_clock::now();
-  co_await default_coropoll().pool_.bg();
+  co_await current_threadpool().bg();
   const auto started = std::chrono::steady_clock::now();
 
   AuthErrorCodeBatch results;
@@ -316,7 +316,7 @@ AuthServer::verify_transactions(BlockHeight height,
            rpc_profile::CpuSet &cpus_used,
            bool hop) noexcept -> x23::Async<void> {
           if (hop) {
-            co_await default_coropoll().pool_.bg();
+            co_await current_threadpool().bg();
           }
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
