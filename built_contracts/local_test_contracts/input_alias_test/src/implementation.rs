@@ -327,7 +327,11 @@ impl InputAliasTest for InputAliasTestContract {
         assert!(arena.untouched(0, ARENA_LEN));
 
         // The fault above only shows an ordering if this frame really is
-        // read-only: the same call without the overlap is refused as a write.
+        // read-only: a BytestringSet that succeeds in any other frame is
+        // refused here.
+        assert_eq!(bytestring_set(&mut arena, A, B, 16), INVALID_INPUT);
+
+        // So is the same DeployContract without the overlap.
         let words = [arena.at(A), arena.at(B), arena.at(OUT)];
         assert_eq!(syscall(SyscallNo::kDeployContract, words), INVALID_INPUT);
         assert!(arena.untouched(0, ARENA_LEN));

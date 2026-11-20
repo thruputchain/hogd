@@ -7,12 +7,12 @@
 // with nothing. ReadOnlyTest.AliasingBeforeReadOnlyCheck drives the same
 // contract for the ordering against the read-only check.
 
-#include <cstdint>
 #include <memory>
 #include <utility>
 
 #include "built_contracts/input_alias_test.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
