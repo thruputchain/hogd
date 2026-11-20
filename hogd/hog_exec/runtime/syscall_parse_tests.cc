@@ -287,9 +287,8 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   EXPECT_EQ(memory[47], 0x22);
 }
 
-// A mock span is a host pointer, so a null one with bytes to move cannot be
-// used. That holds for an output span exactly as for an input span; an empty
-// span moves nothing and may be null either way.
+// A null mock span with a non-zero length is rejected for input and output
+// alike; an empty one is fine.
 TEST(SyscallParseTests, MockSpansRejectNullWithNonZeroLength)
 {
   using output_span = SyscallArgParams<std::span<std::byte>>;

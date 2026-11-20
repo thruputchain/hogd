@@ -1198,9 +1198,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   ASSERT_TRUE(res.is_root_success());
 }
 
-// A native contract's syscall arguments go through the same alias guard a
-// guest's do: overlapping arguments fault before the body runs, whether the
-// overlap involves an output or only inputs. Disjoint arguments are untouched.
+// Overlapping native syscall args fault before the body runs; disjoint ones
+// do not.
 TEST_F(NativeContractTest, SyscallArgumentsAreAliasChecked)
 {
   NativeContractBuilder builder;

@@ -127,13 +127,8 @@ private:
   //
   // Everything else (values, input refs, spans): wrap in std::optional.
   //
-  // Every argument that names memory -- as opposed to a by-value scalar --
-  // registers the caller's bytes with [guard], exactly as parse() does for a
-  // guest and parse_mock() does for the test harness. A native contract that
-  // hands a syscall overlapping arguments therefore gets the same Fault a guest
-  // would, instead of a body running against arguments the other two entry
-  // paths would have refused. As on those paths, a null optional input names no
-  // memory and registers nothing.
+  // Memory-naming args register with [guard], as parse() and parse_mock() do;
+  // a null optional input registers nothing.
   template<typename ArgParam, typename Arg>
   static auto to_parsed(AliasGuard &guard, Arg &&arg)
   {
@@ -184,7 +179,7 @@ private:
         // paths register the caller's bytes all the same, so this does too.
         register_object(guard, arg);
       }
-      // Value types, input refs: wrap in optional
+      // Value types: wrap in optional
       return std::optional{std::forward<Arg>(arg)};
     }
   }
@@ -192,9 +187,8 @@ private:
   template<typename T>
   static void register_object(AliasGuard &guard, T const &object)
   {
-    guard.check_and_register(reinterpret_cast<uintptr_t>(
-                                 std::addressof(object)),
-                             sizeof(T));
+    auto const addr = reinterpret_cast<uintptr_t>(std::addressof(object));
+    guard.check_and_register(addr, sizeof(T));
   }
 
   static void register_bytes(AliasGuard &guard,
