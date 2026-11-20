@@ -105,7 +105,7 @@ pub unsafe extern "C" fn ed25519_dalek_verify_batch(
         ));
     }
 
-    match batch.verify(rand::thread_rng()) {
+    match batch.verify(rand::rng()) {
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
     }
@@ -204,12 +204,12 @@ pub const ED25519_PUBLIC_KEY_SIZE: usize = 32;
 mod tests {
     use super::*;
     use ed25519_zebra::SigningKey;
-    use rand::{rngs::OsRng, RngCore};
+    use rand::Rng as _;
 
     #[test]
     fn test_ed25519_verify_success() {
         // Generate a test key pair
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
@@ -237,7 +237,7 @@ mod tests {
     #[test]
     fn test_ed25519_verify_invalid_signature() {
         // Generate a test key pair
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
@@ -265,7 +265,7 @@ mod tests {
     #[test]
     fn test_ed25519_sign_and_verify() {
         // Generate a test key pair
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
 
@@ -318,7 +318,7 @@ mod tests {
 
     #[test]
     fn test_ed25519_verify_empty_message() {
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
         let signing_key = SigningKey::from_bytes(&secret_key_bytes);
@@ -344,7 +344,7 @@ mod tests {
     fn signed_triple(
         message: &'static [u8],
     ) -> ([u8; 32], [u8; 64], &'static [u8]) {
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut seed = [0u8; 32];
         csprng.fill_bytes(&mut seed);
         let signing_key = SigningKey::from_bytes(&seed);
@@ -429,7 +429,7 @@ mod tests {
 
     #[test]
     fn test_ed25519_sign_empty_message() {
-        let mut csprng = OsRng;
+        let mut csprng = rand::rng();
         let mut secret_key_bytes = [0u8; 32];
         csprng.fill_bytes(&mut secret_key_bytes);
 
