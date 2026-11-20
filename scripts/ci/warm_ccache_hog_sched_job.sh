@@ -27,7 +27,10 @@ hog11) WARMUP_SPECS=("clang Debug x23-coro-trace-off" "clang Debug test-ffi-no-b
 esac
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
-  [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || { echo 'Staged source revision mismatch' >&2; exit 1; }
+  [[ "$(git rev-parse HEAD)" == "$TARGET_SHA" ]] || {
+    echo 'Staged source revision mismatch' >&2
+    exit 1
+  }
 else
   echo 'cloning hogd'
   git init -q .

@@ -6,11 +6,14 @@ set -ex
 # Keep this branch separate from Namespace and developer environment setup.
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   for tool in cargo rustup cbindgen sccache gcc-15 g++-15 clang; do
-    command -v "$tool" >/dev/null || { echo "Missing image tool: $tool" >&2; return 1; }
+    command -v "$tool" >/dev/null || {
+      echo "Missing image tool: $tool" >&2
+      return 1
+    }
   done
   export CARGO_NET_OFFLINE=true GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
   export HOGD_SCCACHE_REMOTE=0
-  printf 'GCC_CC=%q\nGCC_CXX=%q\n' "${HOGD_CI_GCC_CC:-gcc-15}" "${HOGD_CI_GCC_CXX:-g++-15}" > ./scripts/conf.sh
+  printf 'GCC_CC=%q\nGCC_CXX=%q\n' "${HOGD_CI_GCC_CC:-gcc-15}" "${HOGD_CI_GCC_CXX:-g++-15}" >./scripts/conf.sh
   return 0
 fi
 
