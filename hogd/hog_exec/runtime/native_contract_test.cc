@@ -17,7 +17,6 @@
 #include <vector>
 
 #include "contract.hh"
-#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"

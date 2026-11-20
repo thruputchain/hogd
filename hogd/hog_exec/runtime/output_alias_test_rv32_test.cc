@@ -4,7 +4,6 @@
 #include <memory>
 
 #include "built_contracts/output_alias_test.h"
-#include "exec_result.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/precompiles/context.h"
