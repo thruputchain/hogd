@@ -9,7 +9,6 @@
 #include <utility>
 #include <vector>
 
-#include "ffi_enums.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
