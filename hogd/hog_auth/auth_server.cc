@@ -262,7 +262,12 @@ AuthServer::verify_transactions(BlockHeight height,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
-  co_await default_coropoll().pool_.bg();
+  // Off the RPC reader, but in its pool: on a connection placed in an LLC
+  // lane (lane_stream_placement()), the call is looked up and verified on the
+  // L3 it was read and decoded on, and its request is freed there too. Chunks
+  // of a call split over several workers still go to the default pool, so a
+  // large call can use every CPU.
+  co_await current_threadpool().bg();
 
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);

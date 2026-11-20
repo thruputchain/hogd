@@ -109,6 +109,9 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   auth_mempool_rpc->impl()->set_auth_server(auth_server);
 
   auth_db_rpc.start_accepting(std::move(db_lfd));
+  // Each mempool connection's reader, calls and replies run in one LLC lane,
+  // so a call is decoded, verified and freed on the L3 it arrived on.
+  auth_mempool_rpc.set_stream_placement(lane_stream_placement);
   auth_mempool_rpc.start_accepting(std::move(mempool_lfd));
 
   IntroAuthResult intro = auth_server.subscribe_and_register(auth_card)();
