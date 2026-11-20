@@ -182,12 +182,16 @@ class TestGenerateXdr(unittest.TestCase):
             result)
         self.assertIn(
             "struct RefPair {\n\tunsigned int item0;\n\tLeaf item1;\n};", result)
+        # The discriminants are the spec's, under the cases' own names.
         self.assertIn(
-            "union Ref switch (int kind) {\n"
-            "case 0:\n\tvoid;\n"
-            "case 1:\n\tunsigned int minted;\n"
-            "case 2:\n\tRefFromCall from_call;\n"
-            "case 3:\n\tRefPair pair;\n"
+            "enum RefKind {\n\tNone = 0,\n\tMinted = 1,\n"
+            "\tFromCall = 2,\n\tPair = 3,\n};", result)
+        self.assertIn(
+            "union Ref switch (RefKind kind) {\n"
+            "case None:\n\tvoid;\n"
+            "case Minted:\n\tunsigned int minted;\n"
+            "case FromCall:\n\tRefFromCall from_call;\n"
+            "case Pair:\n\tRefPair pair;\n"
             "};", result)
         # A union follows what its cases name, and precedes what names it.
         positions = [result.index(d) for d in (

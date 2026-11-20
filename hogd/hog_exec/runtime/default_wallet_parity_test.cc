@@ -77,6 +77,11 @@ using default_wallet::WalletCall;
 using CapturedRecord = std::vector<uint8_t>;
 using wallet_calls_t = x23::Vec<WalletCall, 4294967295>;
 using default_wallet::WalletTokenRef;
+using default_wallet::WalletTokenRefKind;
+// The reference contract states these discriminants; they are part of the
+// wallet's calldata encoding.
+static_assert(std::to_underlying(WalletTokenRefKind::Minted) == 0);
+static_assert(std::to_underlying(WalletTokenRefKind::Returned) == 1);
 using permit_meta = ContractTraitMeta<itc_erc20_permit::ERC20Permit>;
 using wallet_mints_t =
     std::tuple_element_t<0, wallet_meta::args_t<u8"execute">>;
@@ -532,7 +537,7 @@ protected:
   static WalletTokenRef minted(uint32_t index)
   {
     WalletTokenRef token;
-    token.kind(0);
+    token.kind(WalletTokenRefKind::Minted);
     token.minted() = index;
     return token;
   }
@@ -540,7 +545,7 @@ protected:
   static WalletTokenRef returned(uint32_t call, uint32_t index)
   {
     WalletTokenRef token;
-    token.kind(1);
+    token.kind(WalletTokenRefKind::Returned);
     token.returned() = {.call = call, .index = index};
     return token;
   }

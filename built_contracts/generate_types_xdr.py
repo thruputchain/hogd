@@ -97,16 +97,22 @@ def arm_name(case_name: str) -> str:
 def emit_union(name: str, cases: list[dict[str, Any]]) -> str:
     """Emit a data-carrying enum as an XDR union switched on its discriminant.
 
-    An XDR arm holds one declaration, so a case with several fields gets a
-    struct of its own, named for the union and the case and emitted ahead of
-    the union. A one-item tuple case holds that item directly.
+    The discriminant gets an enum of its own, `<name>Kind`, carrying each
+    case's name and the value the spec states for it, so C++ names a case
+    instead of repeating its number. An XDR arm holds one declaration, so a
+    case with several fields gets a struct of its own, named for the union and
+    the case. Both are emitted ahead of the union. A one-item tuple case holds
+    that item directly.
     """
+    kind_name = f"{name}Kind"
+    kinds = emit_enum(kind_name, [
+        {"name": case["name"], "value": case["discriminant"]} for case in cases])
     structs: list[str] = []
     arms: list[str] = []
     for case in cases:
         case_type = case["case_type"]
         kind: str = case_type["kind"]
-        arms.append(f"case {case['discriminant']}:")
+        arms.append(f"case {case['name']}:")
         if kind == "void":
             arms.append("\tvoid;")
             continue
@@ -125,8 +131,9 @@ def emit_union(name: str, cases: list[dict[str, Any]]) -> str:
         struct_name = f"{name}{case['name']}"
         structs.append(emit_struct(struct_name, fields))
         arms.append(f"\t{struct_name} {arm};")
-    union = "\n".join([f"union {name} switch (int kind) {{", *arms, "};"])
-    return "\n\n".join([*structs, union])
+    union = "\n".join(
+        [f"union {name} switch ({kind_name} kind) {{", *arms, "};"])
+    return "\n\n".join([kinds, *structs, union])
 
 
 def emit_type_def(td: dict[str, Any]) -> str | None:
