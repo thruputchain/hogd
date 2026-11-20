@@ -96,10 +96,23 @@ struct Profile {
   std::atomic<uint64_t> chunks{0};
   std::atomic<uint64_t> cpus_per_call_sum{0};
   std::atomic<uint64_t> llcs_per_call_sum{0};
+  // Inside chunks, per chunk: auth-data map lookups, verify_auth as a whole,
+  // and within it the signature preimage and the signature check itself.
+  Acc phase_lookup;
+  Acc phase_verify_auth;
+  Acc phase_preimage;
+  Acc phase_sig;
+  // Destroying a call's decoded transactions after the handler returns.
+  Acc request_free;
   std::atomic<int64_t> in_flight{0};
   std::atomic<int64_t> max_in_flight{0};
   std::atomic<uint64_t> in_flight_at_entry_sum{0};
 };
+
+// Per-thread phase timers, summed per verification chunk (the chunk loop
+// never suspends, so a chunk runs on one thread).
+inline thread_local uint64_t tl_preimage_ns = 0;
+inline thread_local uint64_t tl_sig_ns = 0;
 
 inline Profile &
 profile()
@@ -247,6 +260,11 @@ start(const char *component)
       info("RPCPROF {} chunk_delay {}", component, chunk_delay);
       info("RPCPROF {} chunk_wall {}", component, chunk_wall);
       info("RPCPROF {} chunk_cpu {}", component, chunk_cpu);
+      info("RPCPROF {} phase_lookup {}", component, p.phase_lookup.show());
+      info("RPCPROF {} phase_verify_auth {}", component, p.phase_verify_auth.show());
+      info("RPCPROF {} phase_preimage {}", component, p.phase_preimage.show());
+      info("RPCPROF {} phase_sig {}", component, p.phase_sig.show());
+      info("RPCPROF {} request_free {}", component, p.request_free.show());
       info("RPCPROF {} handler_txs={} max_in_flight={} in_flight_at_entry_sum={} "
            "chunks={} cpus_per_call_sum={} llcs_per_call_sum={}",
            component, txs, max_in_flight, entry_sum, chunks, cpus, llcs);

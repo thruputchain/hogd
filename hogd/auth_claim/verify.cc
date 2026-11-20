@@ -1,6 +1,7 @@
 #include "verify.h"
 
 #include <algorithm>
+#include <chrono>
 #include <cassert>
 #include <cstddef>
 #include <optional>
@@ -12,6 +13,7 @@
 #include "hogd/auth_claim/signature_preimage.h"
 #include "hogd/auth_claim/status.h"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_profile.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
@@ -108,7 +110,12 @@ verify_signature(const PublicKey &key, const Signature &sig,
                                         signature_preimage);
       return {};
     }
-    ok = ed25519_verify(key.ed25519(), sig.ed25519(), signature_preimage);
+    {
+      const auto sig_started = std::chrono::steady_clock::now();
+      ok = ed25519_verify(key.ed25519(), sig.ed25519(), signature_preimage);
+      rpc_profile::tl_sig_ns += rpc_profile::ns_between(
+          sig_started, std::chrono::steady_clock::now());
+    }
     break;
   case CryptographicScheme::MlDsa65:
     // The preimage is already domain-separated, so the context is empty.
@@ -410,7 +417,10 @@ verify_auth(const SignedTransaction &stx,
             const NetworkHash &network_hash, x23::Buf &signature_preimage,
             Ed25519SignatureVerifier *signature_verifier)
 {
+  const auto preimage_started = std::chrono::steady_clock::now();
   transaction_signature_preimage(network_hash, stx.tx, signature_preimage);
+  rpc_profile::tl_preimage_ns += rpc_profile::ns_between(
+      preimage_started, std::chrono::steady_clock::now());
   return verify_auth_claims_internal<VerificationType::kSignaturesValid>(
       stx, source_auth_data, signature_preimage, signature_verifier);
 }

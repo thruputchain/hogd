@@ -248,7 +248,7 @@ grep -o -w -m1 'avx512ifma' /proc/cpuinfo || echo 'this CPU has no avx512ifma'
 
 echo 'auth rpc profile'
 # hog-auth logs to its control server's newest stderr file on hog8.
-ssh -n hog8 'grep -h RPCPROF "$(ls -1t /tmp/hogd_stderr_* | head -n 1)" "$(ls -1t /tmp/hogd_stdout_* | head -n 1)" | tail -n 8' \
+ssh -n hog8 'grep -h RPCPROF "$(ls -1t /tmp/hogd_stderr_* | head -n 1)" "$(ls -1t /tmp/hogd_stdout_* | head -n 1)" | tail -n 16' \
   || echo 'no auth rpc profile'
 
 echo 'clone metrics history # This is idempotent'

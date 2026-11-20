@@ -311,21 +311,30 @@ AuthServer::verify_transactions(BlockHeight height,
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
+          uint64_t lookup_ns = 0;
+          uint64_t verify_auth_ns = 0;
+          rpc_profile::tl_preimage_ns = 0;
+          rpc_profile::tl_sig_ns = 0;
           for (size_t i = chunk.start; i < chunk.end; i++) {
             const SignedTransaction &tx = txs[i];
             if (results[i] != AuthErrorCode::kAuthSuccess) {
               continue;
             }
 
+            const auto lookup_started = std::chrono::steady_clock::now();
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const auto account_it = auth_data.find(account);
             CHECK(account_it != auth_data.end());
             const std::optional<AddressAuthData> &source_auth_data =
                 account_it->second->second;
 
+            const auto verify_started = std::chrono::steady_clock::now();
+            lookup_ns += rpc_profile::ns_between(lookup_started, verify_started);
             AuthVerifyStatus<void> verify_result =
                 verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
                             network_hash, signature_preimage);
+            verify_auth_ns += rpc_profile::ns_between(
+                verify_started, std::chrono::steady_clock::now());
             if (!verify_result.has_value()) {
               results[i] = AuthErrorCode::kAuthFailed;
               continue;
@@ -333,6 +342,13 @@ AuthServer::verify_transactions(BlockHeight height,
             // [results] is initialized with all of its members as
             // [AuthErrorCode::kAuthSuccess], so there is no need for us to
             // write this result to [results] again.
+          }
+          {
+            auto &prof = rpc_profile::profile();
+            prof.phase_lookup.add(lookup_ns);
+            prof.phase_verify_auth.add(verify_auth_ns);
+            prof.phase_preimage.add(rpc_profile::tl_preimage_ns);
+            prof.phase_sig.add(rpc_profile::tl_sig_ns);
           }
           co_return;
         }(chunk, txs, auth_data, network_hash_, results, looked_up,

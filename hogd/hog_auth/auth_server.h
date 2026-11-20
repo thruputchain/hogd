@@ -18,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/base/rpc_profile.h"
 #include "hogd/hog_auth/auth_data_cache.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
@@ -205,9 +206,18 @@ public:
     // The txs object is valid until the end of the coroutine.
     // Because auth_server_->verify_transactions does not hold onto the txs
     // input after verify_transactions returns, it is safe to pass a span to it.
-    co_return co_await auth_server_->verify_transactions(
+    auto results = co_await auth_server_->verify_transactions(
         height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
         /*max_parallelism=*/available_parallelism());
+    // Measurement: free the decoded request here, timed, rather than when the
+    // coroutine frame goes away.
+    const auto free_started = std::chrono::steady_clock::now();
+    {
+      SignedTransactionBatch freed = std::move(txs);
+    }
+    rpc_profile::profile().request_free.add(rpc_profile::ns_between(
+        free_started, std::chrono::steady_clock::now()));
+    co_return results;
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,
