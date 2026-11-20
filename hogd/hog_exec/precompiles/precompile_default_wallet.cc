@@ -8,7 +8,6 @@
 #include <optional>
 #include <span>
 #include <tuple>
-#include <type_traits>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -50,7 +49,6 @@ namespace {
 
 using default_wallet::WalletCall;
 using default_wallet::WalletError;
-using default_wallet::WalletTokenCall;
 using default_wallet::WalletTokenRef;
 using default_wallet::WalletTokenSource;
 
@@ -69,13 +67,8 @@ using WalletException = result_exception<execute_result_t>::type;
 using wallet_bytes_vec_t = execute_result_t::ok_type;
 using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
-// execute_with_tokens returns and throws exactly what execute does, so the
-// two share their result type and their return accounting.
-static_assert(std::is_same_v<wallet_meta::return_t<u8"execute_with_tokens">,
-                             execute_result_t>);
-using token_execute_args_t = wallet_meta::args_t<u8"execute_with_tokens">;
-using wallet_mints_t = std::tuple_element_t<0, token_execute_args_t>;
-using wallet_token_calls_t = std::tuple_element_t<1, token_execute_args_t>;
+using wallet_mints_t =
+    std::tuple_element_t<0, wallet_meta::args_t<u8"execute">>;
 
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
@@ -224,52 +217,6 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   co_return child_result_t::make_ok(std::move(return_buf));
 }
 
-// Mirrors require_call_count(); nullopt = the count is acceptable.
-std::optional<WalletError>
-check_call_count(size_t call_count)
-{
-  if (call_count == 0) {
-    return WalletError::EmptyCallList;
-  }
-  if (call_count > kMaxCalls) {
-    return WalletError::TooManyCalls;
-  }
-  return std::nullopt;
-}
-
-// Mirrors BatchReturns: the batch's return value as it accumulates, held to
-// the return-data limit after every call.
-class BatchReturns {
-public:
-  // Running CXS size of the eventual Vec<WalletBytes> return: the outer
-  // length prefix now, each item's prefix + bytes as it lands. All operands
-  // are bounded (<= 16 calls, <= 1024-byte returns), so the reference's
-  // u32/checked_add overflow guards are unreachable here and elided.
-  explicit BatchReturns(size_t call_count)
-    : encoded_len_(x23::cxs_size(static_cast<uint32_t>(call_count)))
-  {}
-
-  // False when `return_buf` takes the batch past the limit.
-  [[nodiscard]] bool push(std::vector<uint8_t> const &return_buf)
-  {
-    encoded_len_ += x23::cxs_size(static_cast<uint32_t>(return_buf.size())) +
-                    return_buf.size();
-    if (encoded_len_ > kMaxReturnDataBytes) {
-      return false;
-    }
-    wallet_bytes_t item;
-    item.append_range(return_buf);
-    returns_.push_back(std::move(item));
-    return true;
-  }
-
-  wallet_bytes_vec_t take() && { return std::move(returns_); }
-
-private:
-  wallet_bytes_vec_t returns_;
-  size_t encoded_len_;
-};
-
 // Mirrors BatchTokens: the auth tokens a batch holds, by where each came
 // from.
 class BatchTokens {
@@ -364,47 +311,12 @@ make_native_default_wallet_contract()
 
   builder.add<default_wallet::DefaultWallet, u8"execute">(
       // The builder decays this lambda to a function pointer and deduces the
-      // deserialized argument tuple from its parameter types, so `calls` must
-      // be taken by value (a reference would not satisfy serializes_like).
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      [](NativeSyscallContext &ctx, x23::Vec<WalletCall, 4294967295> calls)
-          -> x23::Async<InvokeStatus<execute_result_t>> {
-        auto auth_err = co_await check_root_pubkey_auth(ctx);
-        if (!auth_err.has_value()) {
-          co_return auth_err.error();
-        }
-        if (auth_err->has_value()) {
-          co_return execute_result_t::make_err(WalletException{**auth_err});
-        }
-
-        if (auto count_err = check_call_count(calls.size())) {
-          co_return execute_result_t::make_err(WalletException{*count_err});
-        }
-
-        BatchReturns returns(calls.size());
-        for (auto const &call : calls) {
-          auto child = co_await invoke_child(ctx, call.target, call.entrypoint,
-                                             call.gas_limit, call.calldata);
-          if (!child.has_value()) {
-            co_return child.error();
-          }
-          if (!child->is_ok()) {
-            co_return execute_result_t::make_err(child->err());
-          }
-          if (!returns.push(child->ok())) {
-            co_return execute_result_t::make_err(
-                WalletException{WalletError::ReturnDataTooLarge});
-          }
-        }
-
-        co_return execute_result_t::make_ok(std::move(returns).take());
-      });
-
-  builder.add<default_wallet::DefaultWallet, u8"execute_with_tokens">(
-      // The builder requires owned arguments for its deserialized tuple.
+      // deserialized argument tuple from its parameter types, so the arguments
+      // must be taken by value (a reference would not satisfy
+      // serializes_like).
       // NOLINTBEGIN(performance-unnecessary-value-param)
       [](NativeSyscallContext &ctx, wallet_mints_t mints,
-         wallet_token_calls_t calls)
+         x23::Vec<WalletCall, 4294967295> calls)
           -> x23::Async<InvokeStatus<execute_result_t>> {
         // NOLINTEND(performance-unnecessary-value-param)
         auto auth_err = co_await check_root_pubkey_auth(ctx);
@@ -415,8 +327,13 @@ make_native_default_wallet_contract()
           co_return execute_result_t::make_err(WalletException{**auth_err});
         }
 
-        if (auto count_err = check_call_count(calls.size())) {
-          co_return execute_result_t::make_err(WalletException{*count_err});
+        if (calls.empty()) {
+          co_return execute_result_t::make_err(
+              WalletException{WalletError::EmptyCallList});
+        }
+        if (calls.size() > kMaxCalls) {
+          co_return execute_result_t::make_err(
+              WalletException{WalletError::TooManyCalls});
         }
 
         // Minted before any call runs, so no callee's behavior can change
@@ -447,7 +364,15 @@ make_native_default_wallet_contract()
           tokens.add_minted(token_id);
         }
 
-        BatchReturns returns(calls.size());
+        // Running CXS size of the eventual Vec<WalletBytes> return: the
+        // outer length prefix now, each item's prefix + bytes as it lands.
+        // All operands are bounded (<= 16 calls, <= 1024-byte returns), so
+        // the reference's u32/checked_add overflow guards are unreachable
+        // here and elided.
+        wallet_bytes_vec_t returns;
+        size_t encoded_return_data_len =
+            x23::cxs_size(static_cast<uint32_t>(calls.size()));
+
         for (auto const &call : calls) {
           std::vector<uint32_t> auth_tokens;
           auth_tokens.reserve(call.tokens.size());
@@ -470,13 +395,22 @@ make_native_default_wallet_contract()
             co_return execute_result_t::make_err(child->err());
           }
           tokens.add_returned(returned_tokens);
-          if (!returns.push(child->ok())) {
+          auto const &return_buf = child->ok();
+
+          encoded_return_data_len +=
+              x23::cxs_size(static_cast<uint32_t>(return_buf.size())) +
+              return_buf.size();
+          if (encoded_return_data_len > kMaxReturnDataBytes) {
             co_return execute_result_t::make_err(
                 WalletException{WalletError::ReturnDataTooLarge});
           }
+
+          wallet_bytes_t item;
+          item.append_range(return_buf);
+          returns.push_back(std::move(item));
         }
 
-        co_return execute_result_t::make_ok(std::move(returns).take());
+        co_return execute_result_t::make_ok(std::move(returns));
       });
 
   builder.add<default_wallet::DefaultWallet, u8"deploy">(
