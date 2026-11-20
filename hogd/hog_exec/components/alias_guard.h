@@ -8,9 +8,28 @@
 
 namespace hogd {
 
+// Checks the memory arguments of one syscall against each other. Every
+// argument that names memory is registered as an input, which the host only
+// reads, or as an output, which it writes.
 class AliasGuard {
 public:
-  // Returns false if [ptr, ptr+len) overlaps any previously registered range.
+  // Returns false if [start, start+len) overlaps any previously registered
+  // range.
+  bool check_and_register_input(uintptr_t start, size_t len) noexcept
+  {
+    return check_and_register(start, len);
+  }
+
+  // Returns false if [start, start+len) overlaps any previously registered
+  // range.
+  bool check_and_register_output(uintptr_t start, size_t len) noexcept
+  {
+    return check_and_register(start, len);
+  }
+
+  bool check() const { return no_aliasing_violation_; }
+
+private:
   bool check_and_register(uintptr_t start, size_t len) noexcept
   {
     auto end = start + len;
@@ -26,9 +45,6 @@ public:
     return true;
   }
 
-  bool check() const { return no_aliasing_violation_; }
-
-private:
   struct Range {
     uintptr_t start;
     uintptr_t end;
