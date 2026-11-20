@@ -1,6 +1,5 @@
 #include "hogd/hog_auth/auth_server.h"
 
-#include <algorithm>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -267,7 +266,7 @@ AuthServer::verify_transactions(BlockHeight height,
   CHECK_GT(max_parallelism, 0UL);
   rpc_profile::InFlight in_flight;
   const auto entered = std::chrono::steady_clock::now();
-  co_await current_threadpool().bg();
+  co_await default_coropoll().pool_.bg();
   const auto started = std::chrono::steady_clock::now();
 
   AuthErrorCodeBatch results;
@@ -295,14 +294,8 @@ AuthServer::verify_transactions(BlockHeight height,
   }
 
   const auto looked_up = std::chrono::steady_clock::now();
-  // Experiment: give each chunk at least kMinChunkTxs transactions, so a call
-  // is split into at most txs.size() / kMinChunkTxs pieces and a small call
-  // runs whole on this thread, without a hop to the pool.
-  constexpr size_t kMinChunkTxs = 256;
-  const std::vector<ChunkRange> chunks = make_chunks(
-      txs.size(), std::clamp<size_t>(txs.size() / kMinChunkTxs, 1,
-                                     max_parallelism));
-  const bool inline_single_chunk = chunks.size() == 1;
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(), max_parallelism);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   rpc_profile::CpuSet cpus_used;
@@ -313,11 +306,8 @@ AuthServer::verify_transactions(BlockHeight height,
                                     SipHash24Hasher> &auth_data,
            NetworkHash network_hash, AuthErrorCodeBatch &results,
            std::chrono::steady_clock::time_point spawned,
-           rpc_profile::CpuSet &cpus_used,
-           bool hop) noexcept -> x23::Async<void> {
-          if (hop) {
-            co_await current_threadpool().bg();
-          }
+           rpc_profile::CpuSet &cpus_used) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
@@ -362,7 +352,7 @@ AuthServer::verify_transactions(BlockHeight height,
           }
           co_return;
         }(chunk, txs, auth_data, network_hash_, results, looked_up,
-          cpus_used, !inline_single_chunk));
+          cpus_used));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
