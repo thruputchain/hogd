@@ -96,6 +96,10 @@ struct Profile {
   std::atomic<uint64_t> chunks{0};
   std::atomic<uint64_t> cpus_per_call_sum{0};
   std::atomic<uint64_t> llcs_per_call_sum{0};
+  // Self-scheduled verification: ranges claimed, and claimants that started
+  // after every range was taken.
+  std::atomic<uint64_t> claims{0};
+  std::atomic<uint64_t> empty_claimants{0};
   // Inside chunks, per chunk: auth-data map lookups, verify_auth as a whole,
   // and within it the signature preimage and the signature check itself.
   Acc phase_lookup;
@@ -266,8 +270,11 @@ start(const char *component)
       info("RPCPROF {} phase_sig {}", component, p.phase_sig.show());
       info("RPCPROF {} request_free {}", component, p.request_free.show());
       info("RPCPROF {} handler_txs={} max_in_flight={} in_flight_at_entry_sum={} "
-           "chunks={} cpus_per_call_sum={} llcs_per_call_sum={}",
-           component, txs, max_in_flight, entry_sum, chunks, cpus, llcs);
+           "chunks={} cpus_per_call_sum={} llcs_per_call_sum={} claims={} "
+           "empty_claimants={}",
+           component, txs, max_in_flight, entry_sum, chunks, cpus, llcs,
+           p.claims.load(std::memory_order_relaxed),
+           p.empty_claimants.load(std::memory_order_relaxed));
     }
   }).detach();
 }

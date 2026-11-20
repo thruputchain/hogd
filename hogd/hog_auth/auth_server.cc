@@ -1,6 +1,7 @@
 #include "hogd/hog_auth/auth_server.h"
 
 #include <algorithm>
+#include <atomic>
 #include <chrono>
 #include <memory>
 #include <optional>
@@ -295,63 +296,70 @@ AuthServer::verify_transactions(BlockHeight height,
   }
 
   const auto looked_up = std::chrono::steady_clock::now();
-  // Experiment: give each chunk at least kMinChunkTxs transactions, so a call
-  // is split into at most txs.size() / kMinChunkTxs pieces and a small call
-  // runs whole on this thread, without a hop to the pool.
-  constexpr size_t kMinChunkTxs = 256;
-  const std::vector<ChunkRange> chunks = make_chunks(
-      txs.size(), std::clamp<size_t>(txs.size() / kMinChunkTxs, 1,
-                                     max_parallelism));
-  const bool inline_single_chunk = chunks.size() == 1;
+  // Experiment: self-scheduled verification. Up to max_parallelism claimants
+  // each hop to the pool and claim kClaimTxs transactions at a time from a
+  // shared cursor until none are left. A static split leaves a fixed share
+  // behind any worker that starts late (a busy LLC queue keeps its jobs while
+  // idle workers elsewhere sleep); here a late claimant finds nothing left.
+  constexpr size_t kClaimTxs = 64;
+  const size_t claimants = std::min(
+      max_parallelism, std::max<size_t>(1, (txs.size() + kClaimTxs - 1) / kClaimTxs));
+  std::atomic<size_t> cursor{0};
   std::vector<x23::Async<void>> handles;
-  handles.reserve(chunks.size());
+  handles.reserve(claimants);
   rpc_profile::CpuSet cpus_used;
-  for (const ChunkRange &chunk : chunks) {
+  for (size_t c = 0; c < claimants; ++c) {
     handles.push_back(
-        [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
+        [](std::atomic<size_t> &cursor, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
            NetworkHash network_hash, AuthErrorCodeBatch &results,
            std::chrono::steady_clock::time_point spawned,
-           rpc_profile::CpuSet &cpus_used,
-           bool hop) noexcept -> x23::Async<void> {
-          if (hop) {
-            co_await default_coropoll().pool_.bg();
-          }
+           rpc_profile::CpuSet &cpus_used) noexcept -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
           rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
 
           x23::Buf signature_preimage;
           uint64_t lookup_ns = 0;
           uint64_t verify_auth_ns = 0;
+          uint64_t claims = 0;
           rpc_profile::tl_preimage_ns = 0;
           rpc_profile::tl_sig_ns = 0;
-          for (size_t i = chunk.start; i < chunk.end; i++) {
-            const SignedTransaction &tx = txs[i];
-            if (results[i] != AuthErrorCode::kAuthSuccess) {
-              continue;
+          for (;;) {
+            const size_t start =
+                cursor.fetch_add(kClaimTxs, std::memory_order_relaxed);
+            if (start >= txs.size()) {
+              break;
             }
+            ++claims;
+            const size_t end = std::min(start + kClaimTxs, txs.size());
+            for (size_t i = start; i < end; i++) {
+              const SignedTransaction &tx = txs[i];
+              if (results[i] != AuthErrorCode::kAuthSuccess) {
+                continue;
+              }
 
-            const auto lookup_started = std::chrono::steady_clock::now();
-            const ContractAddress &account = tx.tx.invocation.invoked_address;
-            const auto account_it = auth_data.find(account);
-            CHECK(account_it != auth_data.end());
-            const std::optional<AddressAuthData> &source_auth_data =
-                account_it->second->second;
+              const auto lookup_started = std::chrono::steady_clock::now();
+              const ContractAddress &account = tx.tx.invocation.invoked_address;
+              const auto account_it = auth_data.find(account);
+              CHECK(account_it != auth_data.end());
+              const std::optional<AddressAuthData> &source_auth_data =
+                  account_it->second->second;
 
-            const auto verify_started = std::chrono::steady_clock::now();
-            lookup_ns += rpc_profile::ns_between(lookup_started, verify_started);
-            AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash, signature_preimage);
-            verify_auth_ns += rpc_profile::ns_between(
-                verify_started, std::chrono::steady_clock::now());
-            if (!verify_result.has_value()) {
-              results[i] = AuthErrorCode::kAuthFailed;
-              continue;
+              const auto verify_started = std::chrono::steady_clock::now();
+              lookup_ns +=
+                  rpc_profile::ns_between(lookup_started, verify_started);
+              AuthVerifyStatus<void> verify_result = verify_auth(
+                  tx, source_auth_data ? &*source_auth_data : nullptr,
+                  network_hash, signature_preimage);
+              verify_auth_ns += rpc_profile::ns_between(
+                  verify_started, std::chrono::steady_clock::now());
+              if (!verify_result.has_value()) {
+                results[i] = AuthErrorCode::kAuthFailed;
+                continue;
+              }
+              // [results] starts as all kAuthSuccess.
             }
-            // [results] is initialized with all of its members as
-            // [AuthErrorCode::kAuthSuccess], so there is no need for us to
-            // write this result to [results] again.
           }
           {
             auto &prof = rpc_profile::profile();
@@ -359,10 +367,14 @@ AuthServer::verify_transactions(BlockHeight height,
             prof.phase_verify_auth.add(verify_auth_ns);
             prof.phase_preimage.add(rpc_profile::tl_preimage_ns);
             prof.phase_sig.add(rpc_profile::tl_sig_ns);
+            prof.claims.fetch_add(claims, std::memory_order_relaxed);
+            if (claims == 0) {
+              prof.empty_claimants.fetch_add(1, std::memory_order_relaxed);
+            }
           }
           co_return;
-        }(chunk, txs, auth_data, network_hash_, results, looked_up,
-          cpus_used, !inline_single_chunk));
+        }(cursor, txs, auth_data, network_hash_, results, looked_up,
+          cpus_used));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -374,7 +386,7 @@ AuthServer::verify_transactions(BlockHeight height,
   profile.handler_verify.add(rpc_profile::ns_between(looked_up, verified));
   profile.handler_total.add(rpc_profile::ns_between(entered, verified));
   profile.handler_txs.fetch_add(txs.size(), std::memory_order_relaxed);
-  profile.chunks.fetch_add(chunks.size(), std::memory_order_relaxed);
+  profile.chunks.fetch_add(claimants, std::memory_order_relaxed);
   profile.cpus_per_call_sum.fetch_add(cpus_used.count(),
                                       std::memory_order_relaxed);
   profile.llcs_per_call_sum.fetch_add(cpus_used.llc_count(),

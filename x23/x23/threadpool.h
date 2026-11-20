@@ -393,8 +393,6 @@ private:
   };
   struct QueueState {
     std::deque<QueueItem> q;
-    size_t waiters{0};
-    size_t signalled{0}; // Waiters reserved by enqueue, still to reacquire lock
     bool need_consumed_signal{false};
     std::condition_variable nonempty;
     std::condition_variable consumed;
@@ -406,20 +404,6 @@ private:
     // outside the queue state in its own cache line so it can be
     // checked approximately without acquiring the mutex.
     std::atomic_uint64_t qtime_{kEmpty};
-    // Workers contending for this lock that will take a job if available.
-    // Written on every contended take, so it gets its own cache line and
-    // leaves qtime_ cheap for other LLCs to probe.
-    alignas(hardware_destructive_interference_size) std::atomic_uint incoming_{
-        0};
-    QPtr take_for_work() noexcept
-    {
-      if (auto ptr = try_take())
-        return ptr;
-      incoming_.fetch_add(1, std::memory_order_relaxed);
-      auto ptr = take();
-      incoming_.fetch_sub(1, std::memory_order_relaxed);
-      return ptr;
-    }
     uint64_t qtime() const { return qtime_.load(std::memory_order_relaxed); }
     static void set_qtime(const QPtr &ptr, uint64_t newqt)
     {
@@ -452,8 +436,16 @@ private:
     }
   }
 
-  static void enqueue(QPtr &lq, const Job &job, uint64_t now);
-  static void unlock_and_wake(QPtr &lq, size_t added);
+  // Returns true if the queue was previously empty
+  bool enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  {
+    qselect(&lq, job.cpuhint);
+    bool wasempty = lq->q.empty();
+    lq->q.emplace_back(job, now);
+    if (wasempty)
+      RunQueue::set_qtime(lq, now);
+    return wasempty;
+  }
 
   class Worker {
   public:
@@ -470,7 +462,6 @@ private:
     int bucket_;
 
     void lock_affinity_queue(QPtr &ptr) noexcept;
-    void lock_for_work(QPtr &ptr, int bucket) noexcept;
     QPtr getq() noexcept;
     std::coroutine_handle<> qpop(QPtr &ptr) const;
   };

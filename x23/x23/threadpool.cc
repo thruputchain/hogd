@@ -127,46 +127,21 @@ ThreadPool::go(std::vector<Job> &&jobs)
   });
 
   uint64_t now = fastclock::get_ns();
-  for (auto it = jobs.begin(); it != jobs.end();) {
-    QPtr lq;
-    qselect(&lq, it->cpuhint);
-    auto first = it;
-    Defer notify{[&] { unlock_and_wake(lq, it - first); }};
-    do {
-      enqueue(lq, *it, now);
-      ++it;
-    } while (it != jobs.end() && llc_map->bucket(it->cpuhint) == qno(lq));
+  QPtr lq;
+  std::condition_variable *nonempty = nullptr;
+  for (auto &j : jobs) {
+    int affinity_queue = llc_map->bucket(j.cpuhint);
+    if (nonempty && qno(lq) != affinity_queue) {
+      lq.reset();
+      nonempty->notify_all();
+      nonempty = nullptr;
+    }
+    if (enqueue_selected(lq, j, now))
+      nonempty = &lq->nonempty;
   }
-}
-
-void
-ThreadPool::enqueue(QPtr &lq, const Job &job, uint64_t now)
-{
-  lq->q.emplace_back(job, now);
-  if (lq->q.size() == 1)
-    RunQueue::set_qtime(lq, now);
-}
-
-void
-ThreadPool::unlock_and_wake(QPtr &lq, size_t added)
-{
-  size_t wakes = std::min(added, lq->waiters - lq->signalled);
-  if (wakes) {
-    // A registered worker can only withdraw under this lock, where it
-    // checks for work. Workers executing jobs cannot cover this backlog.
-    auto *rq = static_cast<RunQueue *>(lq.get_mvar());
-    auto ready = lq->signalled + rq->incoming_.load(std::memory_order_relaxed);
-    auto queued = lq->q.size();
-    wakes = queued > ready ? std::min(wakes, queued - ready) : 0;
-    lq->signalled += wakes;
-  }
-  // Signal after unlocking, one notify_one per reservation. A broadcast
-  // here would be unbounded: by the time it runs, other workers may have
-  // drained the jobs and parked again.
-  auto &nonempty = lq->nonempty;
   lq.reset();
-  for (size_t i = 0; i < wakes; ++i)
-    nonempty.notify_one();
+  if (nonempty)
+    nonempty->notify_all();
 }
 
 void
@@ -179,9 +154,11 @@ ThreadPool::go(Job job)
 
   uint64_t now = fastclock::get_ns();
   QPtr lq;
-  qselect(&lq, job.cpuhint);
-  enqueue(lq, job, now);
-  unlock_and_wake(lq, 1);
+  bool wasempty = enqueue_selected(lq, job, now);
+  auto *nonempty = &lq->nonempty;
+  lq.reset();
+  if (wasempty)
+    nonempty->notify_all();
 }
 
 void
@@ -304,18 +281,9 @@ ThreadPool::Worker::Worker(ThreadPool *pool, size_t threadno) noexcept
 {}
 
 void
-ThreadPool::Worker::lock_for_work(QPtr &ptr, int bucket) noexcept
-{
-  if (pool_->qno(ptr) != bucket) {
-    ptr.reset();
-    ptr = pool_->runqueues_[bucket].take_for_work();
-  }
-}
-
-void
 ThreadPool::Worker::lock_affinity_queue(QPtr &ptr) noexcept
 {
-  Defer _relock{[this, &ptr] { lock_for_work(ptr, bucket_); }};
+  Defer _relock{[this, &ptr] { pool_->relock(ptr, bucket_); }};
 
   cpu_ = cpuid();
   auto newbucket = llc_map->bucket(cpu_);
@@ -354,26 +322,16 @@ ThreadPool::Worker::getq() noexcept
       return ptr;
     if (pool_->ss_.stop_requested())
       return {};
-    bool timed_out = false;
-    ++ptr->waiters;
-    if (count >= kTimeouts.size() || nqueues == 1)
+    if (count >= kTimeouts.size() || nqueues == 1) {
       ptr.wait(ptr->nonempty);
-    else {
-      auto delay = kTimeouts[count++];
-      timed_out = ptr.with_lock([&](auto &ul) {
-        return ptr->nonempty.wait_for(ul, delay);
-      }) == std::cv_status::timeout;
+      continue;
     }
-    --ptr->waiters;
-    if (ptr->signalled)
-      --ptr->signalled;
-    // A timeout or spurious wake can also claim a reservation. Service
-    // this queue under the same lock before migrating or trying to steal.
-    if (!ptr->q.empty()) {
-      cpu_ = cpuid();
-      return ptr;
-    }
-    if (!timed_out)
+
+    // Wait a little bit, and if we timeout try work stealing
+    auto delay = kTimeouts[count++];
+    if (delay.count() != 0 && ptr.with_lock([&ptr, delay](auto &ul) {
+          return ptr->nonempty.wait_for(ul, delay);
+        }) == std::cv_status::no_timeout)
       continue;
 
     // Pick two random other runqueues
@@ -393,7 +351,7 @@ ThreadPool::Worker::getq() noexcept
 
     // Don't bother with mutex if probably empty
     if (qt[i] != kEmpty) {
-      lock_for_work(ptr, qn[i]);
+      pool_->relock(ptr, qn[i]);
       if (!ptr->q.empty())
         return ptr;
     }
