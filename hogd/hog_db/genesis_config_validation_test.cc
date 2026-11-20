@@ -29,6 +29,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -285,6 +286,31 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_versions(kNewest, kNewest),
             DbSchedResult::DbSchedResultOK);
+}
+
+// The admitted syscall API minors must be a range within what this build
+// implements.
+TEST_F(GenesisConfigValidationTest, BoundsSyscallApiMinorsByTheBuild)
+{
+  // set_param states every lower id, so build the list by hand to state a
+  // value the named setters would refuse.
+  auto load_with_minors = [&](uint32_t min, uint32_t max) {
+    NetworkConfig config = stock_network_config();
+    auto &params = config.v0().params;
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMinSyscallApiMinor))
+        .min_syscall_api_minor() = min;
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMaxSyscallApiMinor))
+        .max_syscall_api_minor() = max;
+    return load(config, std::nullopt);
+  };
+  constexpr uint32_t kNewest = kSyscallApiMinor;
+  ASSERT_GT(kNewest, 0U);
+
+  EXPECT_EQ(load_with_minors(0, kNewest + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_minors(kNewest, kNewest - 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_minors(kNewest, kNewest), DbSchedResult::DbSchedResultOK);
 }
 
 TEST_F(GenesisConfigValidationTest, AcceptsOnlyTheOldestRv32ArtifactVersion)

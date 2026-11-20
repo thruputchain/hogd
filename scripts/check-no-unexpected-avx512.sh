@@ -15,9 +15,19 @@ for binary in "$@"; do
     continue
   fi
 
-  # BLAKE3 includes explicit runtime-dispatched AVX-512 implementations. Those
-  # symbols are allowed; generic dependency or application code is not.
+  # BLAKE3 and static OpenSSL ship hand-written AVX-512 behind a runtime CPU
+  # check. Those symbols are allowed; generic dependency or application code is not.
   if objdump -d --demangle "$binary" | awk -v binary="$binary" '
+    function runtime_dispatched(name) {
+      return name ~ /^_?blake3_.*_avx512$/ ||
+        name ~ /^aesni_xts_(128|256)_(en|de)crypt_avx512$/ ||
+        name ~ /^ossl_(aes_gcm_[a-z_]+|gcm_gmult)_avx512$/ ||
+        name ~ /^(skip_)?iv_len_12_init_IV$/ ||
+        name ~ /^ChaCha20_(16x|8xvl|avx512|avx512vl)$/ ||
+        name ~ /^poly1305_blocks_(avx512|vpmadd52(_4x|_8x)?)$/ ||
+        name ~ /^ossl_rsaz_amm52x[0-9]+_x[12]_ifma256$/ ||
+        name ~ /^ossl_extract_multiplier_2x[0-9]+_win5$/
+    }
     {
       delete fields
       has_evex = 0
@@ -54,7 +64,7 @@ for binary in "$@"; do
         $0 ~ /(^|[^[:alnum:]_])k[1-7]([^[:alnum:]_]|$)/
     }
     has_avx512 {
-      if (symbol ~ /^_?blake3_.*_avx512$/) {
+      if (runtime_dispatched(symbol)) {
         next
       }
       found++

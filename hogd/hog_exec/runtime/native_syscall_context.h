@@ -1,7 +1,9 @@
 #pragma once
 
 #include <cstddef>
+#include <cstdint>
 #include <limits>
+#include <memory>
 #include <optional>
 #include <span>
 #include <tuple>
@@ -46,8 +48,10 @@ public:
     AliasGuard guard;
 
     auto parsed = [&]<size_t... Is>(std::index_sequence<Is...>) {
+      // Braced so the arguments register with the guard left to right, as
+      // the other two entry paths do.
       return std::tuple{to_parsed<typename syscall_t::template arg_i<Is>>(
-          std::forward<Args>(args))...};
+          guard, std::forward<Args>(args))...};
     }(std::make_index_sequence<sizeof...(Args)>{});
 
     auto [res, gas_consumed] =
@@ -122,7 +126,11 @@ private:
   // Optional pointers (const T*): wrap in OptionalInputParseResult.
   //
   // Everything else (values, input refs, spans): wrap in std::optional.
-  template<typename ArgParam, typename Arg> static auto to_parsed(Arg &&arg)
+  //
+  // Memory-naming args register with [guard], as parse() and parse_mock() do;
+  // a null optional input registers nothing.
+  template<typename ArgParam, typename Arg>
+  static auto to_parsed(AliasGuard &guard, Arg &&arg)
   {
     if constexpr (std::is_lvalue_reference_v<ArgParam> &&
                   !std::is_const_v<std::remove_reference_t<ArgParam>>) {
@@ -138,12 +146,16 @@ private:
       static_assert(std::is_same_v<std::remove_cvref_t<Arg>, T>,
                     "native syscall output argument type must exactly match "
                     "the syscall's declared output parameter type");
+      register_object(guard, arg);
       return WritableOutput<T>(static_cast<void *>(&arg));
     }
     else if constexpr (std::is_pointer_v<ArgParam> &&
                        std::is_const_v<std::remove_pointer_t<ArgParam>>) {
       // Optional input pointer: const T*
       using T = std::remove_const_t<std::remove_pointer_t<ArgParam>>;
+      if (arg) {
+        register_object(guard, *arg);
+      }
       return typename SyscallArgParams<ArgParam>::OptionalInputParseResult{
           .is_valid = true,
           .value = arg ? std::optional<T>(*arg) : std::nullopt};
@@ -151,16 +163,41 @@ private:
     else if constexpr (x23::is_bytespan<ArgParam>) {
       using Span = std::remove_cvref_t<ArgParam>;
       if constexpr (std::is_const_v<typename Span::element_type>) {
-        return std::optional{std::as_bytes(std::span(arg))};
+        auto bytes = std::as_bytes(std::span(arg));
+        register_bytes(guard, bytes);
+        return std::optional{bytes};
       }
       else {
-        return std::optional{std::as_writable_bytes(std::span(arg))};
+        auto bytes = std::as_writable_bytes(std::span(arg));
+        register_bytes(guard, bytes);
+        return std::optional{bytes};
       }
     }
     else {
-      // Value types, input refs, spans: wrap in optional
+      if constexpr (std::is_lvalue_reference_v<ArgParam>) {
+        // Input ref: const T&. The body gets a copy, but the guest and mock
+        // paths register the caller's bytes all the same, so this does too.
+        register_object(guard, arg);
+      }
+      // Value types: wrap in optional
       return std::optional{std::forward<Arg>(arg)};
     }
+  }
+
+  // The requirement parse() and parse_mock() place on a by-reference argument.
+  template<typename T> requires (std::is_trivially_copyable_v<T> &&
+                                 std::has_unique_object_representations_v<T>)
+  static void register_object(AliasGuard &guard, T const &object)
+  {
+    auto const addr = reinterpret_cast<uintptr_t>(std::addressof(object));
+    guard.check_and_register(addr, sizeof(T));
+  }
+
+  static void register_bytes(AliasGuard &guard,
+                             std::span<const std::byte> bytes)
+  {
+    guard.check_and_register(reinterpret_cast<uintptr_t>(bytes.data()),
+                             bytes.size());
   }
 };
 

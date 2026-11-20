@@ -5,8 +5,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
 #include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -16,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -77,6 +80,10 @@ struct NetworkConfigParams {
       static_cast<uint32_t>(kMaxRv32ArtifactVersion);
   uint32_t max_subtransaction_output_bytes =
       kDefaultMaxSubtransactionOutputBytes;
+  // Unstated, every minor this build implements attaches. A chain that needs
+  // nodes on different builds to agree states the maximum.
+  uint32_t min_syscall_api_minor = 0;
+  uint32_t max_syscall_api_minor = static_cast<uint32_t>(kSyscallApiMinor);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -123,7 +130,7 @@ private:
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxSubtransactionOutputBytes;
+    ConfigParamID::kConfigParamMaxSyscallApiMinor;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -164,6 +171,10 @@ config_param_name(ConfigParamID id)
     return "max_rv32_artifact_version";
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return "max_subtransaction_output_bytes";
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return "min_syscall_api_minor";
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return "max_syscall_api_minor";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -224,6 +235,10 @@ config_param_max_value(ConfigParamID id)
   case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
   case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
     return kMaxRv32ArtifactVersion;
+  // A node admits only minors it implements.
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return kSyscallApiMinor;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -267,6 +282,10 @@ config_param_value(ConfigParam const &param)
     return param.max_rv32_artifact_version();
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return param.max_subtransaction_output_bytes();
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return param.min_syscall_api_minor();
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return param.max_syscall_api_minor();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
@@ -351,6 +370,12 @@ NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     out.max_subtransaction_output_bytes() = to_u32(value);
     break;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    out.min_syscall_api_minor() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    out.max_syscall_api_minor() = to_u32(value);
+    break;
   }
   return out;
 }
@@ -393,6 +418,10 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_rv32_artifact_version;
   case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
     return max_subtransaction_output_bytes;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return min_syscall_api_minor;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return max_syscall_api_minor;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -461,7 +490,13 @@ inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
     max_subtransaction_output_bytes(to_u32(
         stated_param(config,
                      ConfigParamID::kConfigParamMaxSubtransactionOutputBytes)
-            .value_or(kDefaultMaxSubtransactionOutputBytes)))
+            .value_or(kDefaultMaxSubtransactionOutputBytes))),
+    min_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMinSyscallApiMinor)
+            .value_or(0))),
+    max_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxSyscallApiMinor)
+            .value_or(kSyscallApiMinor)))
 {}
 
 inline void
@@ -509,6 +544,54 @@ NetworkConfigParams::stated_defaults()
   set_param(config, kHighestConfigParamID,
             NetworkConfigParams{}.in_force(kHighestConfigParamID));
   return config;
+}
+
+// Why this build cannot serve a chain whose configuration is `params`, or
+// nullopt when it can. A configuration admitting an artifact format this
+// build does not read, or a syscall API minor it does not implement, would
+// have this node refuse or mis-run a contract its peers attach. Every place a
+// node takes a configuration into force checks this: genesis load and
+// recovery of a stored tip.
+inline std::optional<std::string>
+unsupported_admission_range(NetworkConfigParams const &params)
+{
+  const uint32_t oldest_format = params.min_rv32_artifact_version;
+  const uint32_t newest_format = params.max_rv32_artifact_version;
+  if (oldest_format > newest_format) {
+    return std::format("min_rv32_artifact_version {} exceeds "
+                       "max_rv32_artifact_version {}",
+                       oldest_format, newest_format);
+  }
+  if (oldest_format < kMinRv32ArtifactVersion) {
+    return std::format("min_rv32_artifact_version {} admits an RV32 artifact "
+                       "format older than {}, the oldest this build reads",
+                       oldest_format,
+                       static_cast<uint32_t>(kMinRv32ArtifactVersion));
+  }
+  if (newest_format > kMaxRv32ArtifactVersion) {
+    return std::format("max_rv32_artifact_version {} admits an RV32 artifact "
+                       "format newer than {}, the newest this build reads; "
+                       "run a build that reads format {}",
+                       newest_format,
+                       static_cast<uint32_t>(kMaxRv32ArtifactVersion),
+                       newest_format);
+  }
+  const uint32_t oldest_minor = params.min_syscall_api_minor;
+  const uint32_t newest_minor = params.max_syscall_api_minor;
+  if (oldest_minor > newest_minor) {
+    return std::format("min_syscall_api_minor {} exceeds "
+                       "max_syscall_api_minor {}",
+                       oldest_minor, newest_minor);
+  }
+  if (newest_minor > kSyscallApiMinor) {
+    return std::format("max_syscall_api_minor {} admits syscall API {}.{}, "
+                       "newer than the {}.{} this build implements; run a "
+                       "build that implements it",
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       static_cast<uint32_t>(kSyscallApiMinor));
+  }
+  return std::nullopt;
 }
 
 } // namespace hogd

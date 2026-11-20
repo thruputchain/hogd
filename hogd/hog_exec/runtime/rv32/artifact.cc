@@ -153,9 +153,11 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (!declares_gas_schedule) {
     // The major was checked above. A guest built against minor n may call
     // anything introduced up to n, so it is admitted only where all of that
-    // exists.
-    if (load_u32_le(bytes, kArtifactSyscallApiMinorOffset) >
-        limits.max_syscall_api_minor) {
+    // exists. The floor is the caller's policy, not a compatibility rule.
+    const uint32_t syscall_api_minor =
+        load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
+    if (syscall_api_minor < limits.min_syscall_api_minor ||
+        syscall_api_minor > limits.max_syscall_api_minor) {
       return std::unexpected(ArtifactError::kUnsupportedSyscallApiMinor);
     }
   }

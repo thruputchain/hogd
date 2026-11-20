@@ -75,6 +75,7 @@ make_query()
       .auth_claim = std::move(claim),
       .forwarded_tokens = {},
       .invoke_flags = {},
+      .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
   };
 }
 
@@ -241,6 +242,7 @@ public:
         .auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -699,6 +701,25 @@ public:
                                  .max_response_bytes = 1'048'576};
   }
 
+  // One view attempt on the current snapshot, judged against a tip whose
+  // timepoint is `tip_timepoint` rather than whatever the framework committed.
+  static ViewGatewayResult
+  attempt_against_tip_at(ViewGatewayRpc &gateway,
+                         TransactionViewQuery const &query,
+                         TimePoint tip_timepoint)
+  {
+    auto *state = gateway.get_current_view_state()();
+    CHECK(static_cast<bool>(state));
+    const auto id = state->get().block_id;
+    DbTip tip = state->get().tip;
+    tip.value.proposal_header.block_timepoint = tip_timepoint;
+    auto result = gateway.run_view_attempt(query, tip, state->get())();
+    if (state->release_reference()) {
+      gateway.gc_view_state(id)();
+    }
+    return result;
+  }
+
   ViewGatewayBatchResult pinned_attempt(ViewGatewayRpc &gateway,
                                         ViewGatewayBatchQuery const &query,
                                         bool commit, bool expired)
@@ -721,51 +742,49 @@ public:
   }
 };
 
-namespace {
-
-TimePoint
-wall_clock_timepoint()
-{
-  return static_cast<TimePoint>(
-      std::chrono::duration_cast<std::chrono::nanoseconds>(
-          std::chrono::system_clock::now().time_since_epoch())
-          .count());
-}
-
-} // namespace
-
 TEST(ViewGatewayRpc, ViewTimepointNeverPrecedesTheTip)
 {
-  EXPECT_EQ(view_block_timepoint(10, 20), 20U);
-  EXPECT_EQ(view_block_timepoint(20, 20), 20U);
-  EXPECT_EQ(view_block_timepoint(30, 20), 30U);
+  EXPECT_FALSE(view_block_timepoint_admissible(20, 19));
+  EXPECT_TRUE(view_block_timepoint_admissible(20, 20));
+  EXPECT_TRUE(view_block_timepoint_admissible(20, 21));
 }
 
-TEST_F(ViewGatewayBatchTest, ViewContextUsesTheWallClockAfterAnOlderTip)
+// The cache's context is the tip's own timepoint: the gateway reads no clock.
+TEST_F(ViewGatewayBatchTest, ViewContextTakesTheTipsTimepoint)
 {
   DbTip tip{};
   tip.value.proposal_header.block_height = 7;
-  tip.value.proposal_header.block_timepoint = 1;
+  tip.value.proposal_header.block_timepoint = 1'234;
 
-  const TimePoint before = wall_clock_timepoint();
   const BlockExecutionContext context = view_context(tip);
-  const TimePoint after = wall_clock_timepoint();
-
   EXPECT_EQ(context.block_height, 8);
-  EXPECT_GE(context.block_timepoint, before);
-  EXPECT_LE(context.block_timepoint, after);
+  EXPECT_EQ(context.block_timepoint, 1'234U);
 }
 
-TEST_F(ViewGatewayBatchTest, ViewContextKeepsATipPinnedAheadOfTheWallClock)
+TEST_F(ViewGatewayBatchTest, RejectsAViewStatedBeforeTheTip)
 {
-  constexpr TimePoint kThreeDays = 3ULL * 24 * 60 * 60 * 1'000'000'000;
-  DbTip tip{};
-  tip.value.proposal_header.block_height = 7;
-  tip.value.proposal_header.block_timepoint =
-      wall_clock_timepoint() + kThreeDays;
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
 
-  EXPECT_EQ(view_context(tip).block_timepoint,
-            tip.value.proposal_header.block_timepoint);
+  constexpr TimePoint kTip = 5'000;
+  auto query = make_read_query();
+
+  query.block_timepoint = kTip - 1;
+  auto early = attempt_against_tip_at(gateway, query, kTip);
+  ASSERT_EQ(early.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+  EXPECT_EQ(early.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  for (TimePoint stated : {kTip, kTip + 1}) {
+    query.block_timepoint = stated;
+    EXPECT_EQ(attempt_against_tip_at(gateway, query, kTip).outcome(),
+              ViewGatewayOutcome::ViewGatewayOk)
+        << "stated " << stated;
+  }
 }
 
 TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)

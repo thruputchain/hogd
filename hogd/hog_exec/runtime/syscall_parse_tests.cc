@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
 #include <array>
+#include <cstddef>
 #include <cstring>
 #include <limits>
 #include <span>
@@ -199,6 +200,29 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   ASSERT_FALSE(SyscallArgParams<const uint32_t *>::validate(bad_arg));
 }
 
+// On the mock path only the all-ones sentinel means None; a null host pointer
+// faults instead of passing for an omitted argument.
+TEST(SyscallParseTests, MockOptionalPointerUsesExplicitNullSentinel)
+{
+  using optional_u32 = SyscallArgParams<const uint32_t *>;
+  AliasGuard guard;
+
+  const uint32_t value = 0x01020304;
+  auto valid_arg =
+      optional_u32::parse_mock(guard, reinterpret_cast<uint64_t>(&value));
+  ASSERT_TRUE(optional_u32::validate(valid_arg));
+  ASSERT_NE(optional_u32::deref(valid_arg), nullptr);
+  EXPECT_EQ(*optional_u32::deref(valid_arg), value);
+
+  auto none_arg =
+      optional_u32::parse_mock(guard, std::numeric_limits<uint64_t>::max());
+  ASSERT_TRUE(optional_u32::validate(none_arg));
+  EXPECT_EQ(optional_u32::deref(none_arg), nullptr);
+
+  auto null_arg = optional_u32::parse_mock(guard, 0);
+  EXPECT_FALSE(optional_u32::validate(null_arg));
+}
+
 TEST(SyscallParseTests, WritableOutputBool)
 {
   std::array<uint8_t, 8> memory = {0, 1, 2, 3, 4, 5, 6, 7};
@@ -284,6 +308,31 @@ TEST(SyscallParseTests, WritableOutputWritesNoStackBytesForAuthClaim)
   EXPECT_EQ(memory[39], 0x11);
   EXPECT_EQ(memory[40], 0x22);
   EXPECT_EQ(memory[47], 0x22);
+}
+
+// A null mock span with a non-zero length is rejected for input and output
+// alike; an empty one is fine.
+TEST(SyscallParseTests, MockSpansRejectNullWithNonZeroLength)
+{
+  using output_span = SyscallArgParams<std::span<std::byte>>;
+  using input_span = SyscallArgParams<std::span<const std::byte>>;
+
+  AliasGuard guard;
+  EXPECT_FALSE(output_span::validate(output_span::parse_mock(guard, 0, 4)));
+  EXPECT_FALSE(input_span::validate(input_span::parse_mock(guard, 0, 4)));
+  EXPECT_TRUE(output_span::validate(output_span::parse_mock(guard, 0, 0)));
+  EXPECT_TRUE(input_span::validate(input_span::parse_mock(guard, 0, 0)));
+  // None of the above names memory another argument could overlap.
+  EXPECT_TRUE(guard.check());
+
+  std::array<std::byte, 4> buffer{};
+  auto parsed =
+      output_span::parse_mock(guard, reinterpret_cast<uint64_t>(buffer.data()),
+                              buffer.size());
+  ASSERT_TRUE(output_span::validate(parsed));
+  EXPECT_EQ(output_span::deref(parsed).data(), buffer.data());
+  EXPECT_EQ(output_span::deref(parsed).size(), buffer.size());
+  EXPECT_TRUE(guard.check());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

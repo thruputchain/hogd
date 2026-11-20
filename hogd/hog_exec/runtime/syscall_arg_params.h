@@ -233,6 +233,11 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   constexpr static std::optional<std::span<std::byte>>
   parse_mock(AliasGuard &guard, uint64_t offset, uint64_t len)
   {
+    if (offset == 0 && len != 0) {
+      // nullptr with non-zero length is invalid in native exec: the body would
+      // write through it. Matches the input span below.
+      return std::nullopt;
+    }
     guard.check_and_register(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto *output_pointer = reinterpret_cast<std::byte *>(offset);
@@ -390,8 +395,14 @@ struct SyscallArgParams<const T *> {
       return {.is_valid = true, .value = std::nullopt};
     }
 
-    return {.is_valid = true,
-            .value = check_user_argument_mock<const T>(guard, offset)};
+    // Only the sentinel means None. A null host pointer faults, as any other
+    // unreadable offset does on the rv32 path, where 0 is read as an address.
+    auto value = check_user_argument_mock<const T>(guard, offset);
+    if (!value.has_value()) {
+      return {.is_valid = false, .value = std::nullopt};
+    }
+
+    return {.is_valid = true, .value = std::move(value)};
   }
 
   constexpr static bool validate(OptionalInputParseResult const &arg)

@@ -2,13 +2,13 @@ name: x23c Rust output check
 
 # Builds x23c, type-checks its Rust output and runs a round trip through it in a small crate, since nothing
 # else in this repository compiles generated Rust.
+#
+# This is a required status check, so it triggers on every PR: a path-filtered workflow that never starts
+# leaves the required check pending forever. The changes job decides whether the check needs to build;
+# when it doesn't, x23c-rust-check is skipped, which GitHub counts as passing.
 on:
   pull_request:
     branches: ["main"]
-    paths:
-      - 'x23/x23c/**'
-      - 'x23/tests/rust_check/**'
-      - '.github/workflows/x23c_rust_check.yml'
   workflow_dispatch:
 
 concurrency:
@@ -19,9 +19,57 @@ permissions:
   contents: read
 
 jobs:
+  changes:
+    runs-on: ubuntu-24.04
+    permissions:
+      contents: read
+      pull-requests: read
+    outputs:
+      x23c: ${{ steps.filter.outputs.x23c }}
+    steps:
+      - name: Detect x23c inputs
+        id: filter
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        run: |
+          set -euo pipefail
+          if [ "$GITHUB_EVENT_NAME" != pull_request ]; then
+            echo "x23c=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # Fetch first so an API failure fails this job instead of reading as "no changes".
+          files=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/pulls/${PR_NUMBER}/files" --jq '.[] | .filename, (.previous_filename // empty)')
+          # The files API stops at 3000 entries; a PR that large always runs the check.
+          if [ "$(printf '%s\n' "$files" | wc -l)" -ge 3000 ]; then
+            echo "x23c=true" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          # x23c compiles against the x23 runtime headers, so those count as inputs too.
+          pattern='^(x23/(x23c|x23|cmake|tests/rust_check)/|x23/CMakeLists\.txt$|\.github/workflows/x23c_rust_check\.yml$)'
+          # Here-string, not a pipe: grep -q exits on the first match, and under pipefail the
+          # writer's SIGPIPE would turn a match into "no changes".
+          if grep -Eq "$pattern" <<< "$files"; then
+            echo "x23c=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "x23c=false" >> "$GITHUB_OUTPUT"
+            echo "No x23c inputs changed; skipping the build."
+          fi
+
   check:
+    name: x23c-rust-check
+    needs: changes
+    # !cancelled() so a failed changes job fails this check rather than skipping it, since a skipped
+    # required check counts as passing.
+    if: ${{ !cancelled() && (needs.changes.result != 'success' || needs.changes.outputs.x23c == 'true') }}
     runs-on: namespace-profile-hogd-linux-2604
     steps:
+      - name: Require change detection
+        if: needs.changes.result != 'success'
+        run: |
+          echo "::error::The changes job did not succeed; refusing to report this check as passed."
+          exit 1
+
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8.2.2
         with:

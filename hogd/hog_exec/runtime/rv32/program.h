@@ -36,9 +36,10 @@ struct Rv32Limits {
   // reads. Unbounded unless a caller narrows it to its chain's configuration.
   uint32_t min_artifact_version = 0;
   uint32_t max_artifact_version = std::numeric_limits<uint32_t>::max();
-  // The latest syscall API minor version a v6 artifact may declare. Unbounded
-  // unless a caller narrows it: attachment narrows it to the minor this
-  // runtime implements, and a deployed contract was admitted under one.
+  // Inclusive range of syscall API minor versions a v7 artifact may declare.
+  // Unbounded unless a caller narrows it: attachment narrows it to the
+  // chain's configuration, and a deployed contract was admitted under one.
+  uint32_t min_syscall_api_minor = 0;
   uint32_t max_syscall_api_minor = std::numeric_limits<uint32_t>::max();
 
   static constexpr Rv32Limits defaults()

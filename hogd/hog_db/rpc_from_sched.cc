@@ -17,7 +17,6 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hog_exec_constants.hh"
 #include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
@@ -420,16 +419,12 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, rv32::kMemoryCeilingBytes);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Admitting a format this build cannot read would let a node on a build
-  // that can attach a contract this one refuses.
-  if (const uint32_t oldest = config_params.min_rv32_artifact_version,
-      newest = config_params.max_rv32_artifact_version;
-      oldest > newest || oldest < kMinRv32ArtifactVersion ||
-      newest > kMaxRv32ArtifactVersion) {
-    error("genesis rv32 artifact versions [{}, {}] are not a range within "
-          "the [{}, {}] this build's VM reads",
-          oldest, newest, static_cast<uint32_t>(kMinRv32ArtifactVersion),
-          static_cast<uint32_t>(kMaxRv32ArtifactVersion));
+  // Admitting a format this build cannot read, or a syscall API minor it
+  // does not implement, would let a node on a build that can attach a
+  // contract this one refuses or cannot run.
+  if (const auto unsupported = unsupported_admission_range(config_params)) {
+    error("genesis network config is not one this build can serve: {}",
+          *unsupported);
     co_return DbSchedResult::DbSchedResultError;
   }
   // Every root commit pushes a savepoint, even without child TryInvokes.
