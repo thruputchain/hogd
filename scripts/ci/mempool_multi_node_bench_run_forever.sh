@@ -170,6 +170,8 @@ publish_multi_node_logs() {
     echo "copying ${label} logs from ${host}"
     copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
     copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stdout.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 
@@ -312,7 +314,7 @@ node1_mempool_host="${MEMPOOL_HOSTS[1]}"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -325,7 +327,7 @@ node0_mempool_cmd=(
 node1_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node1_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"

@@ -111,14 +111,17 @@ add_local_network_config_override(LocalNetworkConfigOverrides &overrides,
   }
   const auto name = assignment.substr(0, separator);
   const auto raw = assignment.substr(separator + 1);
-  static_cast<void>(local_parameter_id(name));
-  std::uint32_t value = 0;
+  const ConfigParamID id = local_parameter_id(name);
+  const std::uint64_t min_value = config_param_min_value(id);
+  const std::uint64_t max_value = config_param_max_value(id);
+  std::uint64_t value = 0;
   const auto [end, error] =
       std::from_chars(raw.data(), raw.data() + raw.size(), value);
-  if (error != std::errc{} || end != raw.data() + raw.size()) {
-    throw std::runtime_error(
-        std::format("network parameter '{}' requires a decimal uint32 value",
-                    name));
+  if (error != std::errc{} || end != raw.data() + raw.size() ||
+      value < min_value || value > max_value) {
+    throw std::runtime_error(std::format(
+        "network parameter '{}' requires a decimal value from {} to {}", name,
+        min_value, max_value));
   }
   if (!overrides.emplace(std::string(name), value).second) {
     throw std::runtime_error(

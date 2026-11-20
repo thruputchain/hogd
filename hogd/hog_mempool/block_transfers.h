@@ -7,10 +7,10 @@
 
 namespace hogd {
 
-// The deltas of one HogsTransferredChunk, as x23 decodes them.
-using DeltaChunk = decltype(HogsTransferredChunk::deltas);
+// The deltas of one NativeTokensTransferredChunk, as x23 decodes them.
+using DeltaChunk = decltype(NativeTokensTransferredChunk::deltas);
 
-// Reassembles a block's run of HogsTransferredChunk payloads.
+// Reassembles a block's run of NativeTokensTransferredChunk payloads.
 using TransferRunAssembler = ChunkRunAssembler<BlockHeight, DeltaChunk>;
 
 // A committed block's native-token balance deltas, reassembled from the run of

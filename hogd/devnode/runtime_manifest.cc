@@ -1,5 +1,6 @@
 #include "hogd/devnode/runtime_manifest.h"
 
+#include "hogd/base/base58.h"
 #include "hogd/base/network_hash.h"
 
 #include <algorithm>
@@ -23,7 +24,6 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/devnode/hog_devnode_node.h"
-#include "hogd/devnode/manifest_hex.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
@@ -102,7 +102,7 @@ storage_cost_model_hash(StorageCostModel const &model)
 void
 write_storage_cost_model(json::Writer &w, StorageCostModel const &model)
 {
-  w.field("hash", hex_string(storage_cost_model_hash(model)));
+  w.field("hash", encode_base58(storage_cost_model_hash(model)));
   w.field("baseDataItemCost", int128_to_decimal(model.kBaseItemCost));
   w.field("bytestringCostPerByte",
           std::to_string(model.kBytestringCostPerByte));
@@ -126,7 +126,7 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
 
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{4});
+    w.field("schemaVersion", std::int64_t{5});
     w.field("kind", "hogd-dev-runtime");
     w.field("chainState",
             node.recovered_existing_chain() ? "recovered" : "fresh");
@@ -161,8 +161,8 @@ build_runtime_manifest_json(HogDevnodeNode const &node,
           w.field("role", account.role == BootstrapAccountRole::kFaucet
                               ? "faucet"
                               : "local_user");
-          w.field("publicKey", hex_string(account.public_key));
-          w.field("walletAddress", hex_string(account.address));
+          w.field("publicKey", encode_base58(account.public_key));
+          w.field("walletAddress", encode_base58(account.address));
           w.field("initialStorageTokens",
                   std::to_string(account.initial_storage_tokens));
         });
@@ -251,10 +251,10 @@ build_readiness_payload(std::filesystem::path const &manifest_path,
 {
   std::string buffer;
   json::Writer(buffer).object([&](json::Writer &w) {
-    w.field("schemaVersion", std::int64_t{3});
+    w.field("schemaVersion", std::int64_t{4});
     w.field("status", "ready");
     w.field("manifestPath", manifest_path.string());
-    w.field("manifestHash", hex_string(manifest_hash));
+    w.field("manifestHash", encode_base58(manifest_hash));
   });
   return buffer;
 }
@@ -262,9 +262,9 @@ build_readiness_payload(std::filesystem::path const &manifest_path,
 } // namespace
 
 std::string
-format_hex_hash(SHA256Hash const &hash)
+format_manifest_hash(SHA256Hash const &hash)
 {
-  return hex_string(hash);
+  return encode_base58(hash);
 }
 
 RuntimeManifestPointer

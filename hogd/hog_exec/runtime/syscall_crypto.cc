@@ -2,6 +2,7 @@
 
 #include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <span>
 #include <type_traits>
 #include <utility>
@@ -10,10 +11,12 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/mldsa.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"
@@ -43,6 +46,45 @@ syscall_SHA256_inner(SystemCallHandler &handler, WrappedGasAmount remaining_gas,
   }
   return {SyscallErrorCode::kSyscallErrorCodeNone, required_gas};
 };
+
+// Experimental API; encoding and pricing may change before stabilization.
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+syscall_Ristretto255Msm_inner(SystemCallHandler &handler,
+                              WrappedGasAmount remaining_gas,
+                              std::span<const std::byte> input_terms,
+                              Ristretto255Point &output_point)
+{
+  if (input_terms.size() % RISTRETTO255_MSM_TERM_BYTES != 0 ||
+      input_terms.size() / RISTRETTO255_MSM_TERM_BYTES >
+          RISTRETTO255_MSM_MAX_TERMS) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+            WrappedGasAmount{0}};
+  }
+  const WrappedGasAmount gas{GasCost::ristretto255_msm(
+      input_terms.size() / RISTRETTO255_MSM_TERM_BYTES)};
+  // Reserve decoding, allocation and arithmetic before entering Rust.
+  // Exact exhaustion faults before entering Rust too.
+  if (remaining_gas.get() <= gas.get()) {
+    return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+  }
+  static_assert(sizeof(output_point) == 32);
+  const MessageSpan terms{
+      .message_ptr = reinterpret_cast<const uint8_t *>(input_terms.data()),
+      .message_len = input_terms.size(),
+  };
+  // The parser owns this staged output. The Rust kernel writes it only after
+  // every encoding has passed validation; no second staging buffer is needed.
+  if (!ristretto255_msm(terms, reinterpret_cast<uint8_t (*)[32]>(
+                                   output_point.data()))) {
+    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
+  }
+  if (auto *trace_data =
+          handler.get_syscall_trace_data<SyscallNo::kRistretto255Msm>()) {
+    trace_data->outputs.emplace(
+        SyscallRistretto255MsmOutputs{.point = output_point});
+  }
+  return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
+}
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_SHA256Update_inner(SystemCallHandler &handler,
@@ -154,6 +196,40 @@ syscall_VerifySignature_inner(WrappedGasAmount remaining_gas,
     if (!ed25519_verify(input_public_key.subspan<0, sizeof(Ed25519PublicKey)>(),
                         input_signature.subspan<0, sizeof(Ed25519Signature)>(),
                         input_message)) {
+      trace("Signature verification failed");
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
+    }
+    return {SyscallErrorCode::kSyscallErrorCodeNone, gas};
+  }
+  case CryptographicScheme::MlDsa65:
+  {
+    // Rejected on inspection, before any lattice arithmetic: owes only the
+    // crossing.
+    if (input_public_key.size() != sizeof(MlDsa65PublicKey) ||
+        input_signature.size() != sizeof(MlDsa65Signature)) {
+      return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+              WrappedGasAmount{0}};
+    }
+    // Priced on its own (see kVerifySignatureMlDsa65BaseCost) and reserved
+    // before verifying, as for ed25519 (#4172).
+    const WrappedGasAmount gas{
+        GasCost::verify_signature_mldsa65(input_message.size())};
+    if (remaining_gas.get() <= gas.get()) {
+      return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
+    }
+    // Charged whether or not verification succeeds. A malformed hint or an
+    // oversized response vector does end ML-DSA verification early, but only
+    // after it has hashed the key, and the attacker choosing the signature
+    // controls that path, so charging less for it would sell part of the work
+    // for the price of the crossing. The verifier takes the protocol's
+    // fixed-size key and signature types, so the guest's bytes are copied into
+    // them rather than aliased.
+    MlDsa65PublicKey public_key;
+    MlDsa65Signature signature;
+    std::memcpy(public_key.data(), input_public_key.data(), public_key.size());
+    std::memcpy(signature.data(), input_signature.data(), signature.size());
+    // Pure ML-DSA with an empty context, as transaction authentication uses.
+    if (!mldsa65_verify(public_key, signature, input_message)) {
       trace("Signature verification failed");
       return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput, gas};
     }

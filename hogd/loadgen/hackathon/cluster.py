@@ -321,7 +321,7 @@ class Cluster:
         def binary(name):
             return a.build / BINS[name]
 
-        network = "0" * 63 + "1"
+        network = "1" * 31 + "2"
         self.start(
             "mempool",
             [
@@ -745,7 +745,7 @@ def main():
         ).strip(),
         "chuckdRevision": subprocess.check_output(
             ["git", "rev-parse", "HEAD"],
-            cwd=ROOT / "groundhog-go/chuckd",
+            cwd=ROOT / "thruput-go/chuckd",
             text=True,
         ).strip(),
         "singleValidator": True,

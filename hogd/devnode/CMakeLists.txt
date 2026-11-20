@@ -75,6 +75,7 @@ target_link_libraries(
   contract_loader
   crypto
   genesis
+  mldsa_signer
   hog_devnode
   storage_cost
   GTest::gtest

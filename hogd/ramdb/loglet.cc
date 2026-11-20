@@ -7,6 +7,7 @@ extern "C" {
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <chrono>
 #include <condition_variable>
 #include <cstddef>
 #include <functional>
@@ -237,28 +238,50 @@ LogletAllocator::free(Loglet *ll)
   }
 }
 
-void
-LogletAllocator::print_stats()
+LogletUsageStats
+LogletAllocator::usage_stats() const
 {
-  size_t disk = 0, mem = 0, free = 0;
+  LogletUsageStats stats{.region_bytes = len_};
   for (const Loglet &ll : loglets_) {
     using enum LogletMode;
     switch (ll.get_usage_mode()) {
     case kMemoryItems:
-      mem++;
+      stats.memory_items++;
       break;
     case kDiskBuffer:
-      disk++;
+      stats.disk_buffering++;
       break;
     default:
-      free++;
+      stats.free++;
     }
   }
+  return stats;
+}
 
-  size_t total = mem + disk + free;
-  info("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
-       print_iec_bytes(len_), mem * 100 / total, disk * 100 / total,
-       free * 100 / total);
+void
+LogletAllocator::print_stats(bool force) const
+{
+  const auto now = std::chrono::steady_clock::now();
+  auto last = last_stats_time_.load(std::memory_order_relaxed);
+  do {
+    if (!force && last != std::chrono::steady_clock::time_point{} &&
+        now - last < std::chrono::seconds(60)) {
+      return;
+    }
+  } while (!last_stats_time_.compare_exchange_weak(last, now,
+                                                   std::memory_order_relaxed));
+  const LogletUsageStats stats = usage_stats();
+  const size_t total = stats.memory_items + stats.disk_buffering + stats.free;
+  size_t memory_pct = 0;
+  size_t disk_pct = 0;
+  size_t free_pct = 0;
+  if (total) {
+    memory_pct = stats.memory_items * 100 / total;
+    disk_pct = stats.disk_buffering * 100 / total;
+    free_pct = stats.free * 100 / total;
+  }
+  debug("mem stats: {} ({}% memory items, {}% disk buffering, {}% free)",
+        print_iec_bytes(stats.region_bytes), memory_pct, disk_pct, free_pct);
 }
 
 void

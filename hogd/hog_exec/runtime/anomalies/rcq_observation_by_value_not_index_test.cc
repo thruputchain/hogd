@@ -21,13 +21,12 @@
 //     order.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/2359
-//   - https://github.com/groundhogchain/hogd/issues/2381
-//   - https://github.com/groundhogchain/hogd/issues/2382
+//   - https://github.com/thruputchain/hogd/issues/2359
+//   - https://github.com/thruputchain/hogd/issues/2381
+//   - https://github.com/thruputchain/hogd/issues/2382
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -37,6 +36,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -65,8 +65,7 @@ class RCQObservationByValueTest : public ::testing::Test,
 public:
   RCQObservationByValueTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override
@@ -95,7 +94,7 @@ public:
         .invocation =
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -168,17 +167,17 @@ TEST_F(RCQObservationByValueTest, PeekObservationSwappedToAnotherInsertedValue)
   {
     auto h10 = make_new_system_call_handler(tx_insert_10, *ctx);
     ASSERT_TRUE(h10.root_invoke()().is_root_success());
-    insert_10_p = h10.get_proposal_data();
+    insert_10_p = h10.extract_proposal_data();
     ASSERT_EQ(h10.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h20 = make_new_system_call_handler(tx_insert_20, *ctx);
     ASSERT_TRUE(h20.root_invoke()().is_root_success());
-    insert_20_p = h20.get_proposal_data();
+    insert_20_p = h20.extract_proposal_data();
     ASSERT_EQ(h20.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hpeek = make_new_system_call_handler(tx_peek, *ctx);
     ASSERT_TRUE(hpeek.root_invoke()().is_root_success());
-    peek_p = hpeek.get_proposal_data();
+    peek_p = hpeek.extract_proposal_data();
     ASSERT_EQ(hpeek.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -294,12 +293,12 @@ TEST_F(RCQObservationByValueTest,
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
     ASSERT_TRUE(hb.root_invoke()().is_root_success());
-    consume_p = hb.get_proposal_data();
+    consume_p = hb.extract_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
     EXPECT_EQ(consume_p.observed_queue_entry_sequence[0], QueueEntry{10});
     ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
@@ -399,7 +398,7 @@ TEST_F(RCQObservationByValueTest, ForgedPeekSatisfiedByLaterSelfInsert)
     auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success())
         << "honest proposal on an empty RCQ cannot see the entry";
-    auto honest_p = handler.get_proposal_data();
+    auto honest_p = handler.extract_proposal_data();
     ASSERT_EQ(honest_p.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_p.observed_queue_entry_sequence.size(), 0U);
     EXPECT_EQ(honest_p.nondeterministic_bits[0] & uint8_t{1}, 0);
@@ -503,7 +502,7 @@ TEST_F(RCQObservationByValueTest, ObserverSeesLaterInserterEntry)
   {
     auto handler = make_new_system_call_handler(tx_insert, *ctx);
     ASSERT_TRUE(handler.root_invoke()().is_root_success());
-    insert_p = handler.get_proposal_data();
+    insert_p = handler.extract_proposal_data();
     ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 

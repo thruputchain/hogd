@@ -511,10 +511,11 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_create_contract()) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    lock_contents_.emplace<NewContractLock>(
-        after->to_new_contract().value().new_contract());
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    // Read the change in place: to_new_contract() would copy the whole
+    // contract into an optional before NewContractLock copies it again.
+    auto const *new_contract = after->get_inner<NewContractData>();
+    CHECK_PTR(new_contract);
+    lock_contents_.emplace<NewContractLock>(new_contract->new_contract());
     return;
   }
 
@@ -527,11 +528,12 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_auth_data()) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    auto auth_data = after->to_auth_data();
-    lock_contents_.emplace<PointerLock<AuthLock>>(auth_data->base_auth_data(),
-                                                  auth_data->row_exists());
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    // Read the change in place: to_auth_data() would copy the whole auth
+    // table into an optional before AuthLock copies its base again.
+    auto const *auth_data = after->get_inner<PointerItem<AuthDataItem>>();
+    CHECK_PTR(auth_data);
+    lock_contents_.emplace<PointerLock<AuthLock>>(
+        (*auth_data)->base_auth_data(), (*auth_data)->row_exists());
     return;
   }
 

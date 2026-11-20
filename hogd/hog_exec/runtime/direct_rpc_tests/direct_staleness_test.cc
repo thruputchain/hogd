@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -13,6 +12,7 @@
 #include "db_sched.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -47,8 +47,7 @@ class DirectStalenessTest : public ::testing::Test,
 public:
   DirectStalenessTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   struct SiblingBlocks {
@@ -188,7 +187,8 @@ TEST_F(DirectStalenessTest,
   auto deployed_contract_hash = make_deployed_contract_hash(contract_ptr);
 
   constexpr TransactionID kTxId = 42;
-  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);
+  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId,
+                                 NetworkConfigParams{});
   AddressAndKey addrkey{.address = contract_addr,
                         .key = StorageKey(StorageKeyType::Metadata)};
   StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
@@ -249,7 +249,8 @@ TEST_F(DirectStalenessTest, StaleOversizedNewContractCommitReturnsAbandon)
       x23::xdr_size(contract)));
 
   constexpr TransactionID kTxId = 43;
-  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);
+  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId,
+                                 NetworkConfigParams{});
   AddressAndKey addrkey{.address = contract_addr,
                         .key = StorageKey(StorageKeyType::Metadata)};
   StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
@@ -301,7 +302,8 @@ TEST_F(DirectStalenessTest, StaleOverlimitNewContractCommitReturnsAbandon)
   ASSERT_GT(x23::xdr_size(contract), kMaxSerializedContractBytes);
 
   constexpr TransactionID kTxId = 44;
-  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId);
+  PerTransactionDatabaseProxy tx(get_db_proxy(), block_b, kTxId,
+                                 NetworkConfigParams{});
   AddressAndKey addrkey{.address = contract_addr,
                         .key = StorageKey(StorageKeyType::Metadata)};
   StorageDelta delta(StorageDeltaType::kDeltaTypeDeployContract);
@@ -585,11 +587,10 @@ TEST_F(DirectStalenessTest,
   forged.observed_queue_entry_sequence = {QueueEntry{kForgedEntry}};
 
   Transaction tx{
-      .invocation =
-          Invocation{.invoked_address = kContractAddr,
-                     .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = std::numeric_limits<GasAmount>::max(),
-                     .calldata = {}},
+      .invocation = Invocation{.invoked_address = kContractAddr,
+                               .entrypoint = entrypoint_from_method_id(0),
+                               .gas_limit = kDefaultMaxTxGas,
+                               .calldata = {}},
       // Non-expired uniquifier: this test drives a manual revert and a
       // staleness abort, not replay expiry, and a default (height-0) uniquifier
       // is now rejected as expired during initial validation.
@@ -605,7 +606,8 @@ TEST_F(DirectStalenessTest,
       x23::HostPort{"localhost", get_event_exec_port()});
   SystemCallHandler handler(
       tx, block_b_cache,
-      PerTransactionDatabaseProxy(get_db_proxy(), block_b, kTxId),
+      PerTransactionDatabaseProxy(get_db_proxy(), block_b, kTxId,
+                                  block_b_cache.get_network_config_params()),
       PerTransactionEventServerProxy(event_proxy, block_b, kTxId),
       ValidationModeCtor{std::move(forged)}, runtime_context);
 
@@ -633,7 +635,8 @@ TEST_F(DirectStalenessTest,
   // With the InvokeTX already closed and block_b removed, a fresh proxy can no
   // longer find or abort the original (block_b, tx_id) transaction.  Before the
   // fix this abort succeeded, proving the InvokeTX had been leaked open.
-  PerTransactionDatabaseProxy cleanup(get_db_proxy(), block_b, kTxId);
+  PerTransactionDatabaseProxy cleanup(get_db_proxy(), block_b, kTxId,
+                                      NetworkConfigParams{});
   EXPECT_FALSE(cleanup.abort_transaction()().has_value())
       << "manual-revert observation push system error left the InvokeTX open";
 

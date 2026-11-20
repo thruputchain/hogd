@@ -41,7 +41,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
   SystemCallHandler syscall_handler(snapshot_cache, std::move(proxy),
                                     std::move(event_proxy), std::move(ctor),
-                                    context, query.auth_claim, SHA256Hash{});
+                                    context, query.auth_claim, SHA256Hash{},
+                                    query.block_timepoint);
 
   assert(!syscall_handler.is_running());
 
@@ -157,10 +158,10 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   assert(syscall_handler.last_frame_finished() == (!query.parent_address));
 
   ExpectedViewResult result(TransactionViewStatus::Ok);
-  // TODO(geoff): we could almost certainly elide a copy or two here
-  result.result().output = syscall_handler.get_most_recent_frame_output();
+  // The handler is discarded after this, so move rather than copy.
+  result.result().output = syscall_handler.extract_most_recent_frame_output();
   result.result().gas_consumed = gas_consumed;
-  result.result().events = syscall_handler.get_most_recent_frame_events();
+  result.result().events = syscall_handler.extract_most_recent_frame_events();
   co_return result;
 }
 

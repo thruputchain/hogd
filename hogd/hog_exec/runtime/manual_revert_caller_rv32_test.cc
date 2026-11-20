@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstdint>
 #include <memory>
 #include <string_view>
 
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/manual_revert_caller.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -25,12 +25,12 @@ namespace hogd {
 //
 // Test fixture for manual revert caller RV32 contract tests
 //
-class ManualRevertCallerRv32Test : public ::testing::TestWithParam<TestDB>,
+class ManualRevertCallerRv32Test : public ::testing::Test,
                                    public NativeContractTestFramework {
 public:
   ManualRevertCallerRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -60,7 +60,7 @@ protected:
 //
 // Test that basic cross-contract revert functionality works
 //
-TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, BasicCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -75,7 +75,7 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<u8"initialize">(
-                                    UINT64_MAX, target_contract_addr_),
+                                    kDefaultMaxTxGas, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -93,7 +93,8 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
   auto call_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation = caller_client.make_invocation<
-                                u8"call_basic_manual_revert">(UINT64_MAX, true),
+                                u8"call_basic_manual_revert">(kDefaultMaxTxGas,
+                                                              true),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -128,7 +129,7 @@ TEST_P(ManualRevertCallerRv32Test, BasicCrossContractRevert)
 }
 
 // Test nested manual revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, NestedCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -142,7 +143,7 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<u8"initialize">(
-                                    UINT64_MAX, target_contract_addr_),
+                                    kDefaultMaxTxGas, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -159,10 +160,10 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
   // Call the manual_revert_caller contract's call_nested_manual_revert method
   auto call_handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx =
-              Transaction{.invocation = caller_client.make_invocation<
-                              u8"call_nested_manual_revert">(UINT64_MAX, true),
-                          .uniquifier = make_new_uniquifier()}},
+          .tx = Transaction{.invocation = caller_client.make_invocation<
+                                u8"call_nested_manual_revert">(kDefaultMaxTxGas,
+                                                               true),
+                            .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto call_res = call_handler.root_invoke()();
@@ -196,7 +197,7 @@ TEST_P(ManualRevertCallerRv32Test, NestedCrossContractRevert)
 }
 
 // Test error type revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -211,7 +212,7 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<u8"initialize">(
-                                    UINT64_MAX, target_contract_addr_),
+                                    kDefaultMaxTxGas, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -229,7 +230,7 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
   auto call_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation = caller_client.make_invocation<
-                                u8"call_error_type_revert">(UINT64_MAX,
+                                u8"call_error_type_revert">(kDefaultMaxTxGas,
                                                             uint32_t{1}),
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -265,7 +266,7 @@ TEST_P(ManualRevertCallerRv32Test, ErrorTypeCrossContractRevert)
 }
 
 // Test storage manual revert scenarios across contracts
-TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
+TEST_F(ManualRevertCallerRv32Test, StorageCrossContractRevert)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -280,7 +281,7 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<u8"initialize">(
-                                    UINT64_MAX, target_contract_addr_),
+                                    kDefaultMaxTxGas, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -299,7 +300,8 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
       SignedTransaction{
           .tx =
               Transaction{.invocation = caller_client.make_invocation<
-                              u8"call_storage_manual_revert">(UINT64_MAX, true),
+                              u8"call_storage_manual_revert">(kDefaultMaxTxGas,
+                                                              true),
                           .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -334,7 +336,7 @@ TEST_P(ManualRevertCallerRv32Test, StorageCrossContractRevert)
 }
 
 // Test that caller's state persists and can be checked
-TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
+TEST_F(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
 {
   // Use ContractTraitClient to call the manual_revert_caller contract
   using caller_client_t =
@@ -349,7 +351,7 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
       SignedTransaction{
           .tx = Transaction{.invocation =
                                 caller_client.make_invocation<u8"initialize">(
-                                    UINT64_MAX, target_contract_addr_),
+                                    kDefaultMaxTxGas, target_contract_addr_),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -370,9 +372,10 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
       reinterpret_cast<const uint8_t *>(test_str.data() + test_str.size()));
   auto write_handler = make_new_system_call_handler(
       SignedTransaction{
-          .tx = Transaction{.invocation = caller_client.make_invocation<
-                                u8"write_own_state">(UINT64_MAX, test_data),
-                            .uniquifier = make_new_uniquifier()}},
+          .tx =
+              Transaction{.invocation = caller_client.make_invocation<
+                              u8"write_own_state">(kDefaultMaxTxGas, test_data),
+                          .uniquifier = make_new_uniquifier()}},
       *context);
 
   auto write_res = write_handler.root_invoke()();
@@ -388,7 +391,7 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
   auto check_handler = make_new_system_call_handler(
       SignedTransaction{
           .tx = Transaction{.invocation = caller_client.make_invocation<
-                                u8"check_own_state_exists">(UINT64_MAX),
+                                u8"check_own_state_exists">(kDefaultMaxTxGas),
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
@@ -416,7 +419,7 @@ TEST_P(ManualRevertCallerRv32Test, StatePersistenceAndCheck)
 
 // Check that the native contract test framework's implementation of static_key
 // matches the sdk's version
-TEST_P(ManualRevertCallerRv32Test, StaticKeyMacro)
+TEST_F(ManualRevertCallerRv32Test, StaticKeyMacro)
 {
   auto native_key =
       make_storage_key_matching_static_key_sdk_macro("caller_state");
@@ -430,11 +433,6 @@ TEST_P(ManualRevertCallerRv32Test, StaticKeyMacro)
                               0x52, 0xa4, 0x6b, 0xa3, 0x8a, 0x6a, 0xe1, 0x7d};
   ASSERT_EQ(sdk_key, native_key);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertCallerRv32Test,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 

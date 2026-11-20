@@ -19,13 +19,12 @@
 //     block's total set of inserts.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/2359
-//   - https://github.com/groundhogchain/hogd/issues/2381
-//   - https://github.com/groundhogchain/hogd/issues/2382
+//   - https://github.com/thruputchain/hogd/issues/2359
+//   - https://github.com/thruputchain/hogd/issues/2381
+//   - https://github.com/thruputchain/hogd/issues/2382
 
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <span>
 #include <string_view>
@@ -35,6 +34,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -62,8 +62,7 @@ class RCQCyclicCrossQueueTest : public ::testing::Test,
 public:
   RCQCyclicCrossQueueTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override
@@ -92,7 +91,7 @@ public:
         .invocation =
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier = make_new_uniquifier()};
   }

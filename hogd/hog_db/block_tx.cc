@@ -370,8 +370,8 @@ BlockTX::commit(WorkerPool &pool)
             return;
           }
 
-          balance_deltas->push_back(
-              Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
+          balance_deltas->push_back(Delta{.address = v.first.get_raw(),
+                                          .native_token_delta = to_xdr(value)});
         },
         pool);
 

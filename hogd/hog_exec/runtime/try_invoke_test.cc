@@ -19,6 +19,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
@@ -51,12 +52,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class TryInvokeTest : public ::testing::TestWithParam<TestDB>,
+class TryInvokeTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
   TryInvokeTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -72,7 +73,7 @@ protected:
 
 // Not really a try invoke test, but it's a convenient way to test general
 // invocation.
-TEST_P(TryInvokeTest, ReadWriteBytestring)
+TEST_F(TryInvokeTest, ReadWriteBytestring)
 { // Storage contract: 0 writes calldata to a hardcoded key; 1 reads it back
   // into the return buffer.  Orchestrator contract: invokes storage 0 then
   // storage 1 and checks the returned bytes match root calldata.
@@ -211,7 +212,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0, 1, 2, 3, 4, 5}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -235,7 +236,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
           Transaction{.invocation =
                           Invocation{.invoked_address = addr_orchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(signed_tx2, *context);
@@ -249,7 +250,7 @@ TEST_P(TryInvokeTest, ReadWriteBytestring)
                            ProposedTransaction{.signed_tx = signed_tx2})());
 }
 
-TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
+TEST_F(TryInvokeTest, TryInvokeGoodWorkflow)
 { // Writer: method 0 writes "hello" to a bytestring key. Caller: method 0
   // try_invokes writer:0 (no self-reentrance).
   static constexpr ContractAddress kAddressWriter = make_contract_address(0);
@@ -327,7 +328,7 @@ TEST_P(TryInvokeTest, TryInvokeGoodWorkflow)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressCaller,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -513,7 +514,7 @@ make_try_invoke_handle_errors_context()
 // Writer: 0 = "hello", 1 = "world" on shared key.
 // Orchestrator: 0 = try_invoke writer 0 then try_invoke writer 1; 1 =
 // try_invoke writer 0 then error.
-TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
+TEST_F(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
 {
   auto context = make_try_invoke_handle_errors_context();
 
@@ -538,7 +539,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(1),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -561,7 +562,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsSequentialGoodTryInvokes)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
+TEST_F(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
 {
   auto context = make_try_invoke_handle_errors_context();
 
@@ -587,7 +588,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(2),
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -607,7 +608,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsUnwindFrameWithTryInvoke)
 // Fault: 0 = same as orchestrator 1 (try_invoke writer 0, deterministic error)
 // — callee of a regular invoke from the bridge.
 // Bridge: 0 = regular invoke fault:0, then try_invoke writer 1.
-TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
+TEST_F(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
 {
   auto context = make_try_invoke_handle_errors_context();
 
@@ -633,7 +634,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = make_contract_address(3),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -656,7 +657,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleErrorsBridgeInvokeFaultThenTryInvokeWriter)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
+TEST_F(TryInvokeTest, TryInvokeNNIntAdd)
 {
   // Test on try invoke with nnint_add.
   //
@@ -770,7 +771,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressCaller,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -793,12 +794,12 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAdd)
   ASSERT_FALSE(data_item_opt.has_value());
 }
 
-TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
+TEST_F(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
 {
   // Test to make sure that the system does not crash when a transaction
   // is aborted while locks are held.
   // Asserts that bug like
-  // https://github.com/groundhogchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
+  // https://github.com/thruputchain/hogd/commit/f7a7b0f3737627a42814cea81923322c678df518
   // does not occur again.
   //
   // Writer contract — method 0: loads the calldata, then performs a bytestring
@@ -947,7 +948,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -963,7 +964,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -972,7 +973,7 @@ TEST_P(TryInvokeTest, TryInvokeCrashWhileLocksHeld)
   ASSERT_FALSE(res2.is_root_success()); // Should return error
 }
 
-TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
+TEST_F(TryInvokeTest, TryInvokeOnExclusiveLock)
 {
   // Test on try invoke where a transaction fails after a try_invoke fails.
   //
@@ -1121,7 +1122,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -1137,7 +1138,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -1166,27 +1167,24 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
   auto const &child_trace = *invoke_trace.outputs->child_trace;
   // HogDb proposal mode reports all conflicts in debug builds, first-only in
-  // release builds. MockInMemory does not populate conflict diagnostics; skip
-  // that assertion.
-  if (GetParam() == TestDB::kHogDb) {
-    if constexpr (is_debug_build()) {
-      ASSERT_EQ(child_trace.commit_conflict.level(),
-                DbDiagnosticLevel::kDbDiagnosticAll);
-      bool found_excl = false;
-      for (auto const &c : child_trace.commit_conflict.conflicts()) {
-        if (c.code == DbConflictCode::ExclusiveLockDenied) {
-          found_excl = true;
-        }
+  // release builds.
+  if constexpr (is_debug_build()) {
+    ASSERT_EQ(child_trace.commit_conflict.level(),
+              DbDiagnosticLevel::kDbDiagnosticAll);
+    bool found_excl = false;
+    for (auto const &c : child_trace.commit_conflict.conflicts()) {
+      if (c.code == DbConflictCode::ExclusiveLockDenied) {
+        found_excl = true;
       }
-      ASSERT_TRUE(found_excl);
     }
-    else {
-      // First mode reports whichever conflicting delta hog_db hit first,
-      // which is not deterministic when the batch can conflict more than
-      // once, so don't assert a specific code.
-      ASSERT_EQ(child_trace.commit_conflict.level(),
-                DbDiagnosticLevel::kDbDiagnosticFirst);
-    }
+    ASSERT_TRUE(found_excl);
+  }
+  else {
+    // First mode reports whichever conflicting delta hog_db hit first,
+    // which is not deterministic when the batch can conflict more than
+    // once, so don't assert a specific code.
+    ASSERT_EQ(child_trace.commit_conflict.level(),
+              DbDiagnosticLevel::kDbDiagnosticFirst);
   }
 
   // Now commit the first transaction (should succeed)
@@ -1209,7 +1207,7 @@ TEST_P(TryInvokeTest, TryInvokeOnExclusiveLock)
   ASSERT_EQ(data_item_opt.value().bytestring(), expect);
 }
 
-TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
+TEST_F(TryInvokeTest, TryInvokeNNIntAddThenAbort)
 {
   // Test on try invoke where a transaction fails after a try_invoke fails.
   //
@@ -1357,7 +1355,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler1 = make_new_system_call_handler(handler1_tx, *context);
@@ -1372,7 +1370,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context);
@@ -1400,7 +1398,7 @@ TEST_P(TryInvokeTest, TryInvokeNNIntAddThenAbort)
   EXPECT_EQ(from_xdr(data_item_opt.value().nnint()), 1);
 }
 
-TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
+TEST_F(TryInvokeTest, TryInvokeHandleDBFailure)
 {
   // Test on try invoke responding to rejection from the database.
 
@@ -1604,7 +1602,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1, 1}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1624,7 +1622,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1650,7 +1648,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc1,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1}},
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1688,7 +1686,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc2,
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {1}}, // true
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1709,7 +1707,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kOrchTc2,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {0, 1}}, // {false, true}
           .uniquifier = make_new_uniquifier(),
       }};
@@ -1728,7 +1726,7 @@ TEST_P(TryInvokeTest, TryInvokeHandleDBFailure)
   advance_block();
 }
 
-TEST_P(TryInvokeTest, StorageCostAccounting)
+TEST_F(TryInvokeTest, StorageCostAccounting)
 {
   // Test that checks that storage costs are accounted for correctly in try
   // invoke. The writer contract has enough storage tokens for one bytestring
@@ -1870,7 +1868,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -1906,7 +1904,7 @@ TEST_P(TryInvokeTest, StorageCostAccounting)
   ASSERT_FALSE(data_item1_opt.has_value());
 }
 
-TEST_P(TryInvokeTest, MarginalCostAccounting)
+TEST_F(TryInvokeTest, MarginalCostAccounting)
 {
   // Test to demonstrate necessity for memoizing locked costs.
   // Root frame invokes three try_invoke frames on the writer. Each one writes a
@@ -2070,7 +2068,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2111,7 +2109,7 @@ TEST_P(TryInvokeTest, MarginalCostAccounting)
   ASSERT_FALSE(data_item2_opt.has_value());
 }
 
-TEST_P(TryInvokeTest, CostChangeAccounting)
+TEST_F(TryInvokeTest, CostChangeAccounting)
 {
   // Test to check how marginal costs are accounted for when a try_invoke
   // updates, not creates, an item.
@@ -2285,7 +2283,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2316,7 +2314,7 @@ TEST_P(TryInvokeTest, CostChangeAccounting)
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_medium);
 }
 
-TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
+TEST_F(TryInvokeTest, CostChangeDecreaseSuccessCase)
 {
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly. Root invocation makes two try_invoke
@@ -2439,7 +2437,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2473,7 +2471,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseSuccessCase)
   ASSERT_EQ(data_item0_opt.value().bytestring(), str_short);
 }
 
-TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
+TEST_F(TryInvokeTest, CostChangeDecreaseFailCase)
 {
   // Test to make sure that if the cost of an item decreases, the storage token
   // balance is calculated correctly.
@@ -2646,7 +2644,7 @@ TEST_P(TryInvokeTest, CostChangeDecreaseFailCase)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2693,12 +2691,8 @@ check_result(HostFnStatus<SyscallStatus<std::optional<T>>> res)
 };
 } // namespace
 
-TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
+TEST_F(TryInvokeTest, TransferAndUseStorageWithinTransaction)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP()
-        << "MockDB is broken when having manual transfers + storage costs";
-  }
   // Test to make sure that if a contract transfers storage tokens to another
   // contract, the new storage tokens can be used at the receiver contract
   // within the same transaction.
@@ -2847,7 +2841,7 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
           Transaction{.invocation =
                           Invocation{.invoked_address = sender_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -2888,15 +2882,13 @@ TEST_P(TryInvokeTest, TransferAndUseStorageWithinTransaction)
   ASSERT_EQ(data_item_opt.value().bytestring(), str_hello);
 
   // check that hog_db streamed out the results correctly
-  if (GetParam() == TestDB::kHogDb) {
-    auto hogs_transferred = get_hogs_transferred(1);
-    ASSERT_EQ(hogs_transferred.size(), 1);
-    // The sender's net balance delta for the block is the transfer out plus the
-    // replay-cache cost newly locked against it as the root invoked address.
-    ASSERT_EQ(hogs_transferred.at(sender_addr),
-              -write_cost - replay_cache_cost_charged(1));
-    ASSERT_FALSE(hogs_transferred.contains(receiver_addr));
-  }
+  auto native_tokens_transferred = get_native_tokens_transferred(1);
+  ASSERT_EQ(native_tokens_transferred.size(), 1);
+  // The sender's net balance delta for the block is the transfer out plus the
+  // replay-cache cost newly locked against it as the root invoked address.
+  ASSERT_EQ(native_tokens_transferred.at(sender_addr),
+            -write_cost - replay_cache_cost_charged(1));
+  ASSERT_FALSE(native_tokens_transferred.contains(receiver_addr));
 }
 
 namespace {
@@ -2908,7 +2900,7 @@ constexpr ContractAddress kNNIntInterleavingOrchestrator =
 
 } // namespace
 
-TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
+TEST_F(TryInvokeTest, NNIntAddSimpleInterleavings)
 {
 
   constexpr static StorageKeyContractData kKey = make_storage_key("test");
@@ -3059,7 +3051,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                                                  kNNIntInterleavingOrchestrator,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = self->make_new_uniquifier()}};
           auto handler =
@@ -3093,7 +3085,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
                   .invocation =
                       Invocation{.invoked_address = kNNIntInterleavingWriter,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = calldata},
                   .uniquifier = self->make_new_uniquifier()}};
           auto handler =
@@ -3118,7 +3110,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
               .invocation =
                   Invocation{.invoked_address = kNNIntInterleavingWriter,
                              .entrypoint = entrypoint_from_method_id(3),
-                             .gas_limit = UINT64_MAX,
+                             .gas_limit = kDefaultMaxTxGas,
                              .calldata = {}},
               .uniquifier = make_new_uniquifier()}};
       auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3150,7 +3142,7 @@ TEST_P(TryInvokeTest, NNIntAddSimpleInterleavings)
   }
 }
 
-TEST_P(TryInvokeTest, InvokeErrorHandling)
+TEST_F(TryInvokeTest, InvokeErrorHandling)
 {
   // This test is a guard against an unchecked error condition in the
   // invoke syscall handler (fixing an earlier bug, PR #200).
@@ -3340,7 +3332,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
           Transaction{.invocation =
                           Invocation{.invoked_address = caller_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -3354,7 +3346,7 @@ TEST_P(TryInvokeTest, InvokeErrorHandling)
                           ProposedTransaction{.signed_tx = handler_tx})());
 }
 
-TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
+TEST_F(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 {
   // Assert that if a try_invoke frame successfully acquires locks but then its
   // parent frame does a manual revert, then the locks are released. This test
@@ -3522,7 +3514,7 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressEntry,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *runtime_context);
@@ -3544,13 +3536,8 @@ TEST_P(TryInvokeTest, ManualRevertUndoesTryInvokeLocks)
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
+TEST_F(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP()
-        << "HogDb-only: this exercises subtransaction narrow() behavior";
-  }
-
   static constexpr ContractAddress kAddressTarget = make_contract_address(72);
   static constexpr ContractAddress kAddressOrchestrator =
       make_contract_address(73);
@@ -3653,7 +3640,7 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3663,13 +3650,8 @@ TEST_P(TryInvokeTest, RCQSelfConsumeAfterPriorTryInvokeSucceeds)
       << "RCQ self-consume across TryInvoke frames must not be Unrecoverable";
 }
 
-TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
+TEST_F(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP()
-        << "HogDb-only: this exercises subtransaction narrow() behavior";
-  }
-
   static constexpr ContractAddress kAddressTarget = make_contract_address(74);
   static constexpr ContractAddress kAddressOrchestrator =
       make_contract_address(75);
@@ -3762,7 +3744,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressOrchestrator,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3772,7 +3754,7 @@ TEST_P(TryInvokeTest, RCQMultipleSelfConsumeAndReinsert)
       << "insert-consume-insert via TryInvoke must succeed";
 }
 
-TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
+TEST_F(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
 {
   // One savepoint slot is reserved for the root commit frame, so the
   // effective child TryInvoke cap is kMaxSavepointDepth - 1.
@@ -3844,7 +3826,7 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressLooper,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3853,13 +3835,10 @@ TEST_P(TryInvokeTest, TryInvokeHitsSavepointDepthLimit)
   ASSERT_TRUE(res.is_root_success());
 }
 
-TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
+TEST_F(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
 {
   // Regression test: after exhausting the child TryInvoke cap, root commit
   // must still succeed because one savepoint slot is reserved for it.
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "HogDb savepoint cap is required for this regression";
-  }
 
   static constexpr int kChildCap = kMaxSavepointDepth - 1;
 
@@ -3929,7 +3908,7 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
           Transaction{.invocation =
                           Invocation{.invoked_address = kAddressLooper,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
                       .uniquifier = make_new_uniquifier()}};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -3940,11 +3919,6 @@ TEST_P(TryInvokeTest, RootCommitSucceedsAfterMaxChildTryInvokeDepth)
   auto commit_res = handler.try_commit_transaction()();
   EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, TryInvokeTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

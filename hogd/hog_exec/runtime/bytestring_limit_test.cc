@@ -1,7 +1,8 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <cstdint>
+#include <cstddef>
+#include <cstring>
 #include <memory>
 #include <optional>
 #include <span>
@@ -16,13 +17,19 @@
 #include "hogd/base/types.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/runtime/runtime_exports.h"
+#include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
+#include "invoke_flag.hh"
 #include "network_config.hh"
 #include "rpc_types.hh"
 #include "storage_item.hh"
@@ -62,8 +69,8 @@ class BytestringLimitTest : public ::testing::Test,
 protected:
   BytestringLimitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, true, std::nullopt, genesis_network_config())
+          false, BlockExecutionMode::kBlockExecutionModeProposal, true,
+          std::nullopt, genesis_network_config())
   {}
 
   void SetUp() override
@@ -78,8 +85,7 @@ protected:
   {
     auto value = make_bytestring(std::string(kLegacyItemLen, byte));
     write_item(make_contract_data_addrkey(make_contract_address(0), kKeyName),
-               std::make_shared<StorageItemWrapper>(value,
-                                                    get_default_cost_model()));
+               make_bytestring_item(value));
     advance_block();
     return value;
   }
@@ -104,7 +110,7 @@ protected:
         Transaction{.invocation =
                         Invocation{.invoked_address = make_contract_address(0),
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier()},
         *runtime_context);
@@ -201,6 +207,54 @@ TEST_F(BytestringLimitTest, ItemOverConfiguredLimitStaysReadable)
     }
     co_return InvokeStatus<void>{};
   });
+}
+
+// A write the frame cannot pay for faults before the value is copied into
+// storage, rather than after (#4674).
+TEST_F(BytestringLimitTest, WriteChecksGasBeforeCopying)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+  ASSERT_TRUE(
+      handler
+          .start_frame(Invocation{.invoked_address = make_contract_address(0),
+                                  .entrypoint = {},
+                                  .gas_limit = kDefaultMaxTxGas,
+                                  .calldata = {}},
+                       std::to_underlying(InvokeFlag::None),
+                       ValidatedAuthTokens{})
+          .has_value());
+
+  const GasAmount cost =
+      kSyscallBaseCost + GasCost::bytestring_set(kMaxBytestringLen);
+  // Ascending, so only the last budget leaves an item behind.
+  for (GasAmount budget : {kSyscallBaseCost + 1, cost - 1, cost, cost + 1}) {
+    SCOPED_TRACE(::testing::Message() << "budget=" << budget);
+    std::vector<std::byte> memory(sizeof(kKey) + kMaxBytestringLen,
+                                  std::byte{0xab});
+    std::memcpy(memory.data(), kKey.data(), sizeof(kKey));
+    auto [result, charged] = wrap_outer<SyscallMeta<SyscallNo::kBytestringSet>>(
+        handler, ExecutionContext{.memory = memory, .gas_remaining = budget},
+        SyscallNo::kBytestringSet, 0, sizeof(kKey), kMaxBytestringLen, 0, 0, 0,
+        0)();
+    auto stored = handler.get_bytestring(kKey)();
+    ASSERT_TRUE(stored.has_value());
+    if (budget <= cost) {
+      ASSERT_FALSE(result.has_value());
+      EXPECT_EQ(result.error().code(), HostFnErrorCode::OutOfGas);
+      EXPECT_EQ(charged, budget);
+      EXPECT_FALSE(stored->result.has_value());
+    }
+    else {
+      ASSERT_TRUE(result.has_value());
+      EXPECT_EQ(*result, SyscallErrorCode::kSyscallErrorCodeNone);
+      EXPECT_EQ(charged, cost);
+      ASSERT_TRUE(stored->result.has_value());
+      EXPECT_EQ(stored->result->size(), kMaxBytestringLen);
+    }
+  }
+  EXPECT_TRUE(
+      handler.finish_frame(InvokeStatus<void>{}, nullptr)().has_value());
 }
 
 // NOLINTEND(bugprone-exception-escape)

@@ -52,7 +52,7 @@ TEST(TestBindingsTest, VerifyNativeContractAfterCreatorThreadExit)
 
   Contract contract(ContractType::kNative);
   contract.native_contract_id() =
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken;
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken;
   auto bytes = x23::serialize(contract);
 
   // Dispatches through MultiplexedContext -> the borrowed native sub-context.

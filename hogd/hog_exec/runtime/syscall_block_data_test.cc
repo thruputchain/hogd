@@ -1,12 +1,12 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <utility>
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -30,8 +30,7 @@ class SyscallBlockDataTest : public ::testing::Test,
 public:
   SyscallBlockDataTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -95,7 +94,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightSuccess)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -172,7 +171,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightAfterMultipleAdvances)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -246,7 +245,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightReturnsExecutingHeight)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -308,7 +307,7 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointReturnsOpenedContext)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = calldata.value()},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -374,7 +373,7 @@ TEST_F(SyscallBlockDataTest, GetBlockHeightIsTraced)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -436,7 +435,7 @@ TEST_F(SyscallBlockDataTest, GetBlockTimepointIsTraced)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);

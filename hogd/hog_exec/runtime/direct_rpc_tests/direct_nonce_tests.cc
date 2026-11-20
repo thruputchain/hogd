@@ -16,12 +16,12 @@
 namespace hogd {
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-class DirectNonceTests : public ::testing::TestWithParam<TestDB>,
+class DirectNonceTests : public ::testing::Test,
                          public NativeContractTestFramework {
 public:
   DirectNonceTests()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override { cost_model_ = get_default_cost_model(); }
@@ -41,11 +41,8 @@ public:
   }
 };
 
-TEST_P(DirectNonceTests, ConsumeConflicts)
+TEST_F(DirectNonceTests, ConsumeConflicts)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -85,11 +82,11 @@ TEST_P(DirectNonceTests, ConsumeConflicts)
             1'000'000'000 - cost_model_->get_replay_cache_cost(1));
 }
 
-// Exclusive lock on ConsumeUniquifier should be rejected by both backends.
+// Exclusive lock on ConsumeUniquifier should be rejected by the db.
 // Consuming a nonce is already a unique event, so there is no situation in
 // which an honest executor sets ExclusiveLock on a replay cache delta: this is
 // executor misbehavior, not a recoverable transaction conflict (issue #1080).
-TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
+TEST_F(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
 {
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
@@ -107,13 +104,9 @@ TEST_P(DirectNonceTests, ConsumeUniquifierExclusiveLockRejected)
   ASSERT_TRUE(tx.abort_transaction()().has_value());
 }
 
-TEST_P(DirectNonceTests,
+TEST_F(DirectNonceTests,
        ReplayCacheGCStillRejectsPostExpiryConsumeWithoutExtraReservation)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   auto contract_addr = make_contract_address(10);
   setup_grant_storage_token(contract_addr,
                             cost_model_->get_replay_cache_cost(2));
@@ -178,13 +171,9 @@ TEST_P(DirectNonceTests,
   EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
 }
 
-TEST_P(DirectNonceTests,
+TEST_F(DirectNonceTests,
        ReplayCacheGCKeepsCorrectCommittedBalanceAcrossTwoTxsInSameBlock)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   auto contract_addr = make_contract_address(11);
   const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
                                    (2 * cost_model_->kReplayCacheCostPerEntry);
@@ -262,12 +251,8 @@ TEST_P(DirectNonceTests,
   EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
 }
 
-TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
+TEST_F(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   auto contract_addr = make_contract_address(12);
   const int128_t initial_balance = cost_model_->get_replay_cache_cost(3) +
                                    (2 * cost_model_->kReplayCacheCostPerEntry);
@@ -344,12 +329,8 @@ TEST_P(DirectNonceTests, ReplayCacheGCDoesNotRefundLaterAbortedReservation)
   EXPECT_EQ(1, replay_meta->heights[0].nonce_count);
 }
 
-TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
+TEST_F(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   // Three concurrent in-block replay-cache additions where the middle tx
   // aborts. If the aborted tx's reservation somehow leaked into
   // committed_additions_, or if the two committed txs didn't properly
@@ -449,12 +430,8 @@ TEST_P(DirectNonceTests, ReplayCacheGCHandlesThreeInBlockTxsWithMiddleAbort)
   EXPECT_EQ(2, replay_meta->heights[0].nonce_count);
 }
 
-TEST_P(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
+TEST_F(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   auto contract_addr = make_contract_address(42);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -512,12 +489,8 @@ TEST_P(DirectNonceTests, ReplayCacheHeightCapRejects4001stHeight)
 // brand-new height can still be inserted -- the freed (expired) slot must be
 // reclaimable. Pre-fix, get_base() counted the expired height against the cap
 // and rejected the insert, leaving the cache permanently locked out.
-TEST_P(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
+TEST_F(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockInMemory does not support replay cache";
-  }
-
   auto contract_addr = make_contract_address(43);
   setup_grant_storage_token(contract_addr, 1'000'000'000);
 
@@ -591,10 +564,5 @@ TEST_P(DirectNonceTests, ExpiredHeightFreesCapSlotForNewHeightNextBlock)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DirectNonceTests,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

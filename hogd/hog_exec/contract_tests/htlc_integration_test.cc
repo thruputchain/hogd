@@ -12,6 +12,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
@@ -42,8 +43,7 @@ class HTLCIntegrationTest : public ::testing::Test,
 public:
   HTLCIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       rv32_runtime_context_(make_hog_exec_context())
   {}
 
@@ -148,7 +148,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, mint_sig, mint_calldata),
+                kDefaultMaxTxGas, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -182,7 +182,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, allowance_sig, allowance_calldata),
+                kDefaultMaxTxGas, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -218,7 +218,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, create_sig, create_htlc_calldata),
+                kDefaultMaxTxGas, create_sig, create_htlc_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -242,8 +242,8 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"claim_htlc">(UINT64_MAX, hash,
-                                                             preimage),
+                htlc_client_.make_invocation<u8"claim_htlc">(kDefaultMaxTxGas,
+                                                             hash, preimage),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -272,7 +272,8 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"refund_htlc">(UINT64_MAX, hash),
+                htlc_client_.make_invocation<u8"refund_htlc">(kDefaultMaxTxGas,
+                                                              hash),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -309,7 +310,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"initialize">(UINT64_MAX),
+                htlc_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -331,7 +332,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = erc20_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, kWalletContractAddress),
+                kDefaultMaxTxGas, kWalletContractAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -351,7 +352,7 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, wallet_public_key_),
+                kDefaultMaxTxGas, wallet_public_key_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
@@ -460,7 +461,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
             .invocation =
                 Invocation{.invoked_address = kBalanceCheckerAddress,
                            .entrypoint = entrypoint_from_method_id(100),
-                           .gas_limit = UINT64_MAX,
+                           .gas_limit = kDefaultMaxTxGas,
                            .calldata =
                                x23::serialize(to_xdr(uint128_t{htlc_amount}))},
             .uniquifier =

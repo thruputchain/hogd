@@ -60,9 +60,42 @@ fi
 # also retries uploads that failed during an earlier warmup.
 export CCACHE_RESHARE=1
 
+source "$SCRIPT_DIR/../sccache-env.sh"
+if ! command -v sccache >/dev/null 2>&1; then
+  echo "sccache is required for Rust cache warmup; source scripts/ci/setup_sccache.sh first" >&2
+  exit 1
+fi
+if [[ -n "${SCCACHE_WEBDAV_ENDPOINT:-}" ]]; then
+  # Disk hits do not upload to WebDAV. Warm the shared backend directly.
+  export SCCACHE_MULTILEVEL_CHAIN=webdav
+fi
+
+show_cache_stats() {
+  echo "ccache stats"
+  ccache -s || true
+  echo "sccache stats"
+  sccache --show-stats || true
+}
 exec 9>"$LOCK_FILE"
 echo "waiting for warmup lock: $LOCK_FILE"
 flock 9
+
+# A running daemon keeps its startup backend settings. Give each warmup a new
+# server so local/disk-first daemons cannot swallow writes intended for WebDAV.
+SCCACHE_WARMUP_RUNTIME="$(mktemp -d /tmp/hogd-sccache-warmup.XXXXXX)"
+export SCCACHE_SERVER_UDS="$SCCACHE_WARMUP_RUNTIME/server.sock"
+export SCCACHE_CACHED_CONF="$SCCACHE_WARMUP_RUNTIME/cached-config"
+unset SCCACHE_SERVER_PORT
+
+finish_warmup() {
+  local status=$?
+  show_cache_stats
+  sccache --stop-server >/dev/null 2>&1 || true
+  rm -rf -- "$SCCACHE_WARMUP_RUNTIME" || true
+  return "$status"
+}
+# Report failures and stop only this warmup's daemon, leaving other builds alone.
+trap finish_warmup EXIT
 
 cd "$ROOT_DIR"
 
@@ -82,8 +115,8 @@ if [[ "$CURRENT_SHA" != "$TARGET_SHA" ]]; then
   exit 1
 fi
 
-echo "ccache stats before warmup"
-ccache -s || true
+echo "compiler cache stats before warmup"
+show_cache_stats
 
 FAILURES=0
 
@@ -165,9 +198,6 @@ run_variant() {
 if [[ -n "$SELECTED_COMPILER" ]]; then
   run_variant "$SELECTED_COMPILER" "$SELECTED_BUILD_TYPE" "$SELECTED_VARIANT"
 
-  echo
-  echo "ccache stats after warmup"
-  ccache -s || true
   exit 0
 fi
 
@@ -180,10 +210,6 @@ for compiler in gcc clang; do
     done
   done
 done
-
-echo
-echo "ccache stats after warmup"
-ccache -s || true
 
 if ((FAILURES > 0)); then
   echo "$FAILURES ccache warmup build(s) failed" >&2

@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <gtest/gtest.h>
 
 #include <memory>
@@ -9,6 +8,7 @@
 #include "db_conflict.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -31,21 +31,20 @@ namespace hogd {
 // hog_db produces diagnostics for proposal blocks; the mock produces none, so
 // no report may be sent.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class TxFailureReportTest : public ::testing::TestWithParam<TestDB>,
+class TxFailureReportTest : public ::testing::Test,
                             public NativeContractTestFramework {
 public:
   TxFailureReportTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
-TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
+TEST_F(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
 {
   // Conflict recipe adapted from NNIntAddTest.SetAddWithAdd: method 0
   // set_adds (0, 200); method 1 adds -100. NNIntAddTest runs both methods
-  // back-to-back within one block, which the mock db test double permits
-  // (it does not model per-block lock capacity). Real hog_db's two-phase
+  // back-to-back within one block. hog_db's two-phase
   // commit binds a key's subtraction capacity for the whole block to the
   // item's value as of the block's start (so same-block ops compose
   // order-independently regardless of push order); a set_add that creates
@@ -106,7 +105,7 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
                         Invocation{.invoked_address = contract_addr,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
                     .uniquifier = make_new_uniquifier(),
                 }},
@@ -136,27 +135,19 @@ TEST_P(TxFailureReportTest, NonDeterministicFailureForwardsOneReport)
   ASSERT_EQ(handler4.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 
-  if (GetParam() == TestDB::kHogDb) {
-    // hog_db attached diagnostics; exactly one best-effort report must reach
-    // the event server, carrying this tx's hash and the executing height.
-    wait_for_failure_reports(1)();
-    auto reports = get_failure_reports()();
-    ASSERT_EQ(reports.size(), 1);
-    EXPECT_EQ(reports[0].first, handler4.get_source_tx_hash());
-    EXPECT_GE(reports[0].second.attempt_height, 1);
-  }
-  else {
-    // The mock db test double produces no diagnostics (level None), so the
-    // executor must not send anything. No send is ever initiated in this
-    // case (the level check is synchronous), so this read does not race.
-    EXPECT_EQ(get_failure_reports()().size(), 0);
-  }
+  // hog_db attached diagnostics; exactly one best-effort report must reach
+  // the event server, carrying this tx's hash and the executing height.
+  wait_for_failure_reports(1)();
+  auto reports = get_failure_reports()();
+  ASSERT_EQ(reports.size(), 1);
+  EXPECT_EQ(reports[0].first, handler4.get_source_tx_hash());
+  EXPECT_GE(reports[0].second.attempt_height, 1);
 }
 
 // A refused contract attachment reaches the event server as this tx's
 // diagnostic, naming the first offending attachment in transaction order.
 // Independent of the db: the rejection happens before any storage is touched.
-TEST_P(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
+TEST_F(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
 {
   NativeContext context(
       std::unordered_map<int32_t, std::unique_ptr<NativeContract>>{});
@@ -168,7 +159,7 @@ TEST_P(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
   Transaction tx{
       .invocation = Invocation{.invoked_address = make_contract_address(0),
                                .entrypoint = entrypoint_from_method_id(0),
-                               .gas_limit = UINT64_MAX,
+                               .gas_limit = kDefaultMaxTxGas,
                                .calldata = {}},
       .uniquifier = make_new_uniquifier(),
   };
@@ -190,10 +181,5 @@ TEST_P(TxFailureReportTest, RefusedContractAttachmentForwardsOneReport)
   EXPECT_EQ(cause.contract().code,
             ContractRejectCode::ContractRejectNotDeployable);
 }
-
-INSTANTIATE_TEST_SUITE_P(TxFailureReportTest, TxFailureReportTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

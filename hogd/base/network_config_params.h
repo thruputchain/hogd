@@ -5,7 +5,10 @@
 
 #include <algorithm>
 #include <cstdint>
+#include <format>
+#include <limits>
 #include <optional>
+#include <string>
 #include <string_view>
 #include <utility>
 
@@ -15,6 +18,7 @@
 #include "hogd/base/log.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 
 namespace hogd {
 
@@ -39,6 +43,16 @@ inline constexpr uint32_t kDefaultMaxCalldataLen = 65536;
 // does not state one keeps exactly the limit it already ran under.
 inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 
+// Not permissive: native-token availability was the only bound on a
+// transaction's budget before this parameter, and a chain that does not state
+// one now gets this cap rather than none.
+inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
+
+// The executor->HogDb message budget every chain ran under before the
+// parameter, so a chain that does not state one keeps the same limit.
+inline constexpr uint32_t kDefaultMaxSubtransactionOutputBytes =
+    16 * 1024 * 1024;
+
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
 struct NetworkConfigParams {
@@ -59,6 +73,17 @@ struct NetworkConfigParams {
   uint32_t max_auth_tokens = kDefaultMaxAuthTokens;
   uint32_t max_calldata_len = kDefaultMaxCalldataLen;
   uint32_t max_return_buffer_len = kDefaultMaxReturnBufferLen;
+  GasAmount max_tx_gas = kDefaultMaxTxGas;
+  uint32_t min_rv32_artifact_version =
+      static_cast<uint32_t>(kMinRv32ArtifactVersion);
+  uint32_t max_rv32_artifact_version =
+      static_cast<uint32_t>(kMaxRv32ArtifactVersion);
+  uint32_t max_subtransaction_output_bytes =
+      kDefaultMaxSubtransactionOutputBytes;
+  // Unstated, every minor this build implements attaches. A chain that needs
+  // nodes on different builds to agree states the maximum.
+  uint32_t min_syscall_api_minor = 0;
+  uint32_t max_syscall_api_minor = static_cast<uint32_t>(kSyscallApiMinor);
 
   // The defaults in force: what an empty parameter list resolves to.
   NetworkConfigParams() = default;
@@ -75,10 +100,12 @@ struct NetworkConfigParams {
   // States `value` for `id`, rebuilding the list as a canonical prefix that
   // carries every other parameter's value in force.
   static void set_param(NetworkConfig &config, ConfigParamID id,
-                        uint32_t value);
+                        uint64_t value);
 
   // A ConfigParam stating `value` for `id`.
-  static ConfigParam make_param(ConfigParamID id, uint32_t value);
+  // `value` must fit the arm's type: a uint32 arm CHECKs rather than
+  // narrowing, which would state a value the caller never asked for.
+  static ConfigParam make_param(ConfigParamID id, uint64_t value);
 
   // A canonical configuration stating every parameter this build knows at its
   // default, so the defaults above are the only place those values live.
@@ -91,16 +118,19 @@ private:
   // The value the list states for `id`, or nullopt past its end. Canonical
   // form puts it at its own index, so a mismatch is a bug: CHECK, don't hide
   // it.
-  static std::optional<uint32_t> stated_param(NetworkConfigV0 const &config,
+  static std::optional<uint64_t> stated_param(NetworkConfigV0 const &config,
                                               ConfigParamID id);
 
-  uint32_t in_force(ConfigParamID id) const;
+  // Narrows a uint32 arm's value, which its arm type guarantees fits.
+  static uint32_t to_u32(uint64_t value);
+
+  uint64_t in_force(ConfigParamID id) const;
 };
 
 // The highest parameter id this build knows. A configuration states its ids
 // contiguously from zero, so this bounds a scan across all of them.
 inline constexpr ConfigParamID kHighestConfigParamID =
-    ConfigParamID::kConfigParamMaxReturnBufferLen;
+    ConfigParamID::kConfigParamMaxSyscallApiMinor;
 
 // Wire name for `id`: --network-config, recorded overrides, genesis JSON.
 inline std::string_view
@@ -133,6 +163,18 @@ config_param_name(ConfigParamID id)
     return "max_calldata_len";
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
     return "max_return_buffer_len";
+  case ConfigParamID::kConfigParamMaxTxGas:
+    return "max_tx_gas";
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return "min_rv32_artifact_version";
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return "max_rv32_artifact_version";
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return "max_subtransaction_output_bytes";
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return "min_syscall_api_minor";
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return "max_syscall_api_minor";
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -152,8 +194,57 @@ config_param_id(std::string_view name)
   return std::nullopt;
 }
 
+// The smallest value that may be stated for `id`: zero unless the parameter
+// has a floor of its own.
+inline uint64_t
+config_param_min_value(ConfigParamID id)
+{
+  switch (id) {
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return kMinRv32ArtifactVersion;
+  default:
+    return 0;
+  }
+}
+
+// The largest value that may be stated for `id`: the parameter's own ceiling
+// where it has one, otherwise what its arm can carry (most are
+// `unsigned int`).
+inline uint64_t
+config_param_max_value(ConfigParamID id)
+{
+  switch (id) {
+  case ConfigParamID::kConfigParamMaxTxGas:
+    return std::numeric_limits<GasAmount>::max();
+  case ConfigParamID::kConfigParamMaxSHA256Buffers:
+  case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
+  case ConfigParamID::kConfigParamMaxNewContractsPerTx:
+  case ConfigParamID::kConfigParamMaxBytestringLen:
+  case ConfigParamID::kConfigParamMaxContractSizeBytes:
+  case ConfigParamID::kConfigParamMaxSavepointDepth:
+  case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
+  case ConfigParamID::kConfigParamMaxAuthTokenDepth:
+  case ConfigParamID::kConfigParamMaxRv32CodeBytes:
+  case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
+  case ConfigParamID::kConfigParamMaxAuthTokens:
+  case ConfigParamID::kConfigParamMaxCalldataLen:
+  case ConfigParamID::kConfigParamMaxReturnBufferLen:
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return std::numeric_limits<uint32_t>::max();
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return kMaxRv32ArtifactVersion;
+  // A node admits only minors it implements.
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return kSyscallApiMinor;
+  }
+  panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
+}
+
 // The value `param` states, read from the arm it names.
-inline uint32_t
+inline uint64_t
 config_param_value(ConfigParam const &param)
 {
   switch (param.param()) {
@@ -183,12 +274,24 @@ config_param_value(ConfigParam const &param)
     return param.max_calldata_len();
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
     return param.max_return_buffer_len();
+  case ConfigParamID::kConfigParamMaxTxGas:
+    return param.max_tx_gas();
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return param.min_rv32_artifact_version();
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return param.max_rv32_artifact_version();
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return param.max_subtransaction_output_bytes();
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return param.min_syscall_api_minor();
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return param.max_syscall_api_minor();
   }
   panic("Unrecoverable; unknown ConfigParamID: {}",
         std::to_underlying(param.param()));
 }
 
-inline std::optional<uint32_t>
+inline std::optional<uint64_t>
 NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
                                   ConfigParamID id)
 {
@@ -204,55 +307,80 @@ NetworkConfigParams::stated_param(NetworkConfigV0 const &config,
   return config_param_value(param);
 }
 
+inline uint32_t
+NetworkConfigParams::to_u32(uint64_t value)
+{
+  CHECK_LE(value, std::numeric_limits<uint32_t>::max());
+  return static_cast<uint32_t>(value);
+}
+
 inline ConfigParam
-NetworkConfigParams::make_param(ConfigParamID id, uint32_t value)
+NetworkConfigParams::make_param(ConfigParamID id, uint64_t value)
 {
   ConfigParam out(id);
   switch (id) {
   case ConfigParamID::kConfigParamMaxSHA256Buffers:
-    out.max_sha256_buffers() = value;
+    out.max_sha256_buffers() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxCrossInvokeDepth:
-    out.max_cross_invoke_depth() = value;
+    out.max_cross_invoke_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxNewContractsPerTx:
-    out.max_new_contracts_per_tx() = value;
+    out.max_new_contracts_per_tx() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxBytestringLen:
-    out.max_bytestring_len() = value;
+    out.max_bytestring_len() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxContractSizeBytes:
-    out.max_contract_size_bytes() = value;
+    out.max_contract_size_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxSavepointDepth:
-    out.max_savepoint_depth() = value;
+    out.max_savepoint_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxSHA256BufferBytes:
-    out.max_sha256_buffer_bytes() = value;
+    out.max_sha256_buffer_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxAuthTokenDepth:
-    out.max_auth_token_depth() = value;
+    out.max_auth_token_depth() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxRv32CodeBytes:
-    out.max_rv32_code_bytes() = value;
+    out.max_rv32_code_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxRv32MemoryBytes:
-    out.max_rv32_memory_bytes() = value;
+    out.max_rv32_memory_bytes() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxAuthTokens:
-    out.max_auth_tokens() = value;
+    out.max_auth_tokens() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxCalldataLen:
-    out.max_calldata_len() = value;
+    out.max_calldata_len() = to_u32(value);
     break;
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
-    out.max_return_buffer_len() = value;
+    out.max_return_buffer_len() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxTxGas:
+    out.max_tx_gas() = value;
+    break;
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    out.min_rv32_artifact_version() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    out.max_rv32_artifact_version() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    out.max_subtransaction_output_bytes() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    out.min_syscall_api_minor() = to_u32(value);
+    break;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    out.max_syscall_api_minor() = to_u32(value);
     break;
   }
   return out;
 }
 
-inline uint32_t
+inline uint64_t
 NetworkConfigParams::in_force(ConfigParamID id) const
 {
   switch (id) {
@@ -282,6 +410,18 @@ NetworkConfigParams::in_force(ConfigParamID id) const
     return max_calldata_len;
   case ConfigParamID::kConfigParamMaxReturnBufferLen:
     return max_return_buffer_len;
+  case ConfigParamID::kConfigParamMaxTxGas:
+    return max_tx_gas;
+  case ConfigParamID::kConfigParamMinRv32ArtifactVersion:
+    return min_rv32_artifact_version;
+  case ConfigParamID::kConfigParamMaxRv32ArtifactVersion:
+    return max_rv32_artifact_version;
+  case ConfigParamID::kConfigParamMaxSubtransactionOutputBytes:
+    return max_subtransaction_output_bytes;
+  case ConfigParamID::kConfigParamMinSyscallApiMinor:
+    return min_syscall_api_minor;
+  case ConfigParamID::kConfigParamMaxSyscallApiMinor:
+    return max_syscall_api_minor;
   }
   panic("Unrecoverable; unknown ConfigParamID: {}", std::to_underlying(id));
 }
@@ -301,49 +441,67 @@ NetworkConfigParams::is_canonical(NetworkConfigV0 const &config)
 
 inline NetworkConfigParams::NetworkConfigParams(NetworkConfigV0 const &config)
   : max_sha256_buffers(
-        stated_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
-            .value_or(kDefaultMaxSHA256Buffers)),
-    max_cross_invoke_depth(
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxSHA256Buffers)
+                   .value_or(kDefaultMaxSHA256Buffers))),
+    max_cross_invoke_depth(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxCrossInvokeDepth)
-            .value_or(kDefaultMaxCrossInvokeDepth)),
-    max_new_contracts_per_tx(
+            .value_or(kDefaultMaxCrossInvokeDepth))),
+    max_new_contracts_per_tx(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxNewContractsPerTx)
-            .value_or(kDefaultMaxNewContractsPerTx)),
+            .value_or(kDefaultMaxNewContractsPerTx))),
     max_bytestring_len(
-        stated_param(config, ConfigParamID::kConfigParamMaxBytestringLen)
-            .value_or(static_cast<uint32_t>(kDefaultMaxBytestringLen))),
-    max_contract_size_bytes(
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxBytestringLen)
+                   .value_or(kDefaultMaxBytestringLen))),
+    max_contract_size_bytes(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxContractSizeBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxContractSizeBytes))),
-    max_savepoint_depth(
+            .value_or(kDefaultMaxContractSizeBytes))),
+    max_savepoint_depth(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxSavepointDepth)
-            .value_or(static_cast<uint32_t>(kMaxSavepointDepth))),
-    max_sha256_buffer_bytes(
+            .value_or(kMaxSavepointDepth))),
+    max_sha256_buffer_bytes(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxSHA256BufferBytes)
-            .value_or(static_cast<uint32_t>(kSHA256BufferMaxSize))),
-    max_auth_token_depth(
+            .value_or(kSHA256BufferMaxSize))),
+    max_auth_token_depth(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxAuthTokenDepth)
-            .value_or(static_cast<uint32_t>(kAuthTokenMaxDepth))),
+            .value_or(kAuthTokenMaxDepth))),
     max_rv32_code_bytes(
-        stated_param(config, ConfigParamID::kConfigParamMaxRv32CodeBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32CodeBytes))),
-    max_rv32_memory_bytes(
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxRv32CodeBytes)
+                   .value_or(kDefaultMaxRv32CodeBytes))),
+    max_rv32_memory_bytes(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxRv32MemoryBytes)
-            .value_or(static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes))),
+            .value_or(kDefaultMaxRv32MemoryBytes))),
     max_auth_tokens(
-        stated_param(config, ConfigParamID::kConfigParamMaxAuthTokens)
-            .value_or(kDefaultMaxAuthTokens)),
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxAuthTokens)
+                   .value_or(kDefaultMaxAuthTokens))),
     max_calldata_len(
-        stated_param(config, ConfigParamID::kConfigParamMaxCalldataLen)
-            .value_or(kDefaultMaxCalldataLen)),
-    max_return_buffer_len(
+        to_u32(stated_param(config, ConfigParamID::kConfigParamMaxCalldataLen)
+                   .value_or(kDefaultMaxCalldataLen))),
+    max_return_buffer_len(to_u32(
         stated_param(config, ConfigParamID::kConfigParamMaxReturnBufferLen)
-            .value_or(kDefaultMaxReturnBufferLen))
+            .value_or(kDefaultMaxReturnBufferLen))),
+    max_tx_gas(stated_param(config, ConfigParamID::kConfigParamMaxTxGas)
+                   .value_or(kDefaultMaxTxGas)),
+    min_rv32_artifact_version(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMinRv32ArtifactVersion)
+            .value_or(kMinRv32ArtifactVersion))),
+    max_rv32_artifact_version(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxRv32ArtifactVersion)
+            .value_or(kMaxRv32ArtifactVersion))),
+    max_subtransaction_output_bytes(to_u32(
+        stated_param(config,
+                     ConfigParamID::kConfigParamMaxSubtransactionOutputBytes)
+            .value_or(kDefaultMaxSubtransactionOutputBytes))),
+    min_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMinSyscallApiMinor)
+            .value_or(0))),
+    max_syscall_api_minor(to_u32(
+        stated_param(config, ConfigParamID::kConfigParamMaxSyscallApiMinor)
+            .value_or(kSyscallApiMinor)))
 {}
 
 inline void
 NetworkConfigParams::set_param(NetworkConfig &config, ConfigParamID id,
-                               uint32_t value)
+                               uint64_t value)
 {
   const NetworkConfigParams params(config.v0());
 
@@ -386,6 +544,54 @@ NetworkConfigParams::stated_defaults()
   set_param(config, kHighestConfigParamID,
             NetworkConfigParams{}.in_force(kHighestConfigParamID));
   return config;
+}
+
+// Why this build cannot serve a chain whose configuration is `params`, or
+// nullopt when it can. A configuration admitting an artifact format this
+// build does not read, or a syscall API minor it does not implement, would
+// have this node refuse or mis-run a contract its peers attach. Every place a
+// node takes a configuration into force checks this: genesis load and
+// recovery of a stored tip.
+inline std::optional<std::string>
+unsupported_admission_range(NetworkConfigParams const &params)
+{
+  const uint32_t oldest_format = params.min_rv32_artifact_version;
+  const uint32_t newest_format = params.max_rv32_artifact_version;
+  if (oldest_format > newest_format) {
+    return std::format("min_rv32_artifact_version {} exceeds "
+                       "max_rv32_artifact_version {}",
+                       oldest_format, newest_format);
+  }
+  if (oldest_format < kMinRv32ArtifactVersion) {
+    return std::format("min_rv32_artifact_version {} admits an RV32 artifact "
+                       "format older than {}, the oldest this build reads",
+                       oldest_format,
+                       static_cast<uint32_t>(kMinRv32ArtifactVersion));
+  }
+  if (newest_format > kMaxRv32ArtifactVersion) {
+    return std::format("max_rv32_artifact_version {} admits an RV32 artifact "
+                       "format newer than {}, the newest this build reads; "
+                       "run a build that reads format {}",
+                       newest_format,
+                       static_cast<uint32_t>(kMaxRv32ArtifactVersion),
+                       newest_format);
+  }
+  const uint32_t oldest_minor = params.min_syscall_api_minor;
+  const uint32_t newest_minor = params.max_syscall_api_minor;
+  if (oldest_minor > newest_minor) {
+    return std::format("min_syscall_api_minor {} exceeds "
+                       "max_syscall_api_minor {}",
+                       oldest_minor, newest_minor);
+  }
+  if (newest_minor > kSyscallApiMinor) {
+    return std::format("max_syscall_api_minor {} admits syscall API {}.{}, "
+                       "newer than the {}.{} this build implements; run a "
+                       "build that implements it",
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       newest_minor, static_cast<uint32_t>(kSyscallApiMajor),
+                       static_cast<uint32_t>(kSyscallApiMinor));
+  }
+  return std::nullopt;
 }
 
 } // namespace hogd

@@ -1,10 +1,13 @@
 #include <x23/fileio.h>
 
+#include <algorithm>
+#include <climits>
 #include <cstdio>
 #include <expected>
 #include <fcntl.h>
 #include <filesystem>
 #include <sys/socket.h>
+#include <sys/uio.h>
 
 #include <x23/cleanup.h>
 #include <x23/err.h>
@@ -34,6 +37,31 @@ fullwrite(BorrowedFd fd, BufView buf)
     else if (size_t(n) == buf.size())
       return {};
     buf = buf.subspan(n);
+  }
+}
+
+std::expected<void, Errno>
+fullwritev(BorrowedFd fd, std::span<iovec> iov)
+{
+  for (;;) {
+    while (!iov.empty() && iov.front().iov_len == 0)
+      iov = iov.subspan(1);
+    if (iov.empty())
+      return {};
+    ssize_t n =
+        ::writev(fd.get(), iov.data(),
+                 static_cast<int>(std::min<size_t>(iov.size(), IOV_MAX)));
+    if (n < 0)
+      return Errno{};
+    auto done = static_cast<size_t>(n);
+    while (done >= iov.front().iov_len) {
+      done -= iov.front().iov_len;
+      iov = iov.subspan(1);
+      if (iov.empty())
+        return {};
+    }
+    iov.front().iov_base = static_cast<char *>(iov.front().iov_base) + done;
+    iov.front().iov_len -= done;
   }
 }
 

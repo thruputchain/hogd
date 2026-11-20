@@ -1,11 +1,17 @@
 #include <cerrno>
+#include <climits>
+#include <csignal>
 #include <cstdlib>
 #include <filesystem>
+#include <span>
 #include <string>
 #include <string_view>
+#include <sys/uio.h>
 #include <system_error>
+#include <vector>
 
 #include <fcntl.h>
+#include <sys/resource.h>
 #include <sys/stat.h>
 #include <unistd.h>
 
@@ -168,6 +174,96 @@ TEST_F(FileIO, MissingFileAndParent)
   EXPECT_EQ(written.error().raw_code(), ENOENT);
 }
 
+// More pieces than one writev() takes, with empty ones among them, land in
+// order.
+TEST_F(FileIO, FullWritevManyPieces)
+{
+  std::vector<std::string> pieces;
+  std::string expected;
+  for (int i = 0; i < 2 * IOV_MAX + 3; i++) {
+    pieces.push_back(i % 7 == 0 ? std::string() : std::to_string(i) + ",");
+    expected += pieces.back();
+  }
+  std::vector<iovec> iov;
+  for (auto &piece : pieces) {
+    iov.push_back({piece.data(), piece.size()});
+  }
+  {
+    UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+    ASSERT_TRUE(fd);
+    ASSERT_TRUE(fullwritev(fd, iov));
+  }
+  auto contents = readfile(path_);
+  ASSERT_TRUE(contents);
+  EXPECT_EQ(std::string_view(*contents), expected);
+}
+
+// A file size limit makes writev() stop short at a chosen offset, then fail
+// with EFBIG. What reached the file, and the entry left at the front of what
+// remains, must let a second call finish the write exactly.
+TEST_F(FileIO, FullWritevShortWrite)
+{
+  const std::vector<std::string> pieces{"abc", "",   "defgh", "",
+                                        "",    "ij", "klmnop"};
+  std::string expected;
+  for (const auto &piece : pieces) {
+    expected += piece;
+  }
+  struct Case {
+    rlim_t limit;     // where the short write stops
+    size_t resume;    // the entry to resume from
+    size_t remaining; // how much of that entry is left
+  };
+  // Inside "defgh", at the boundary after it, and inside "klmnop".
+  for (auto [limit, resume, remaining] :
+       {Case{5, 2, 3}, Case{8, 3, 0}, Case{12, 6, 4}}) {
+    SCOPED_TRACE(limit);
+    std::vector<std::string> copy = pieces;
+    std::vector<iovec> iov;
+    for (auto &piece : copy) {
+      iov.push_back({piece.data(), piece.size()});
+    }
+    UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+    ASSERT_TRUE(fd);
+
+    rlimit old{};
+    ASSERT_EQ(getrlimit(RLIMIT_FSIZE, &old), 0);
+    auto *old_handler = std::signal(SIGXFSZ, SIG_IGN);
+    rlimit low = old;
+    low.rlim_cur = limit;
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &low), 0);
+    auto written = fullwritev(fd, iov);
+    ASSERT_EQ(setrlimit(RLIMIT_FSIZE, &old), 0);
+    std::signal(SIGXFSZ, old_handler);
+
+    ASSERT_FALSE(written);
+    EXPECT_EQ(written.error().raw_code(), EFBIG);
+    auto contents = readfile(path_);
+    ASSERT_TRUE(contents);
+    EXPECT_EQ(std::string_view(*contents), expected.substr(0, limit));
+    if (remaining > 0) {
+      EXPECT_EQ(iov[resume].iov_base,
+                copy[resume].data() + copy[resume].size() - remaining);
+      EXPECT_EQ(iov[resume].iov_len, remaining);
+    }
+
+    ASSERT_TRUE(fullwritev(fd, std::span(iov).subspan(resume)));
+    contents = readfile(path_);
+    ASSERT_TRUE(contents);
+    EXPECT_EQ(std::string_view(*contents), expected);
+  }
+}
+
+TEST_F(FileIO, FullWritevNothing)
+{
+  UniqueFd fd(open(path_.c_str(), O_CREAT | O_TRUNC | O_WRONLY, 0666));
+  ASSERT_TRUE(fd);
+  std::string empty;
+  std::vector<iovec> iov{{empty.data(), 0}, {empty.data(), 0}};
+  EXPECT_TRUE(fullwritev(fd, iov));
+  EXPECT_TRUE(fullwritev(fd, {}));
+}
+
 TEST_F(FileIO, InvalidDescriptorPreservesBuffer)
 {
   BorrowedFd fd(-1);
@@ -185,6 +281,11 @@ TEST_F(FileIO, InvalidDescriptorPreservesBuffer)
   EXPECT_EQ(result.error().raw_code(), EBADF);
   EXPECT_EQ(std::string_view(buf), "unchanged");
   auto written = fullwrite(fd, std::string_view("data"));
+  ASSERT_FALSE(written);
+  EXPECT_EQ(written.error().raw_code(), EBADF);
+  std::string data = "data";
+  std::vector<iovec> iov{{data.data(), data.size()}};
+  written = fullwritev(fd, iov);
   ASSERT_FALSE(written);
   EXPECT_EQ(written.error().raw_code(), EBADF);
 }

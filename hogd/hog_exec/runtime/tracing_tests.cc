@@ -17,6 +17,7 @@
 #include "built_contracts/sha256_wrapper.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -50,8 +51,7 @@ class TracingTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   TracingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -146,7 +146,7 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   {
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = caller_client.make_invocation<u8"initialize">(
-                        UINT64_MAX, fibonacci_addr),
+                        kDefaultMaxTxGas, fibonacci_addr),
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     auto res = handler.root_invoke()();
@@ -328,7 +328,7 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
       Transaction{.invocation =
                       Invocation{.invoked_address = contract_0_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
@@ -426,7 +426,7 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
       Transaction{.invocation =
                       Invocation{.invoked_address = caller_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
@@ -549,7 +549,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
       Transaction{.invocation =
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *context);
@@ -563,7 +563,7 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
       Transaction{.invocation =
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *context);
@@ -651,7 +651,7 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
       Transaction{.invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
@@ -738,7 +738,7 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
       Transaction{.invocation =
                       Invocation{.invoked_address = kCallerAddress,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
@@ -867,7 +867,7 @@ TEST_F(TracingTest, AuthTokenRangesAreTraced)
       Transaction{.invocation =
                       Invocation{.invoked_address = kCallerAddress,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);

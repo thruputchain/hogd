@@ -33,6 +33,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/init.h"
+#include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
@@ -625,6 +626,32 @@ TEST_F(DatabaseTest, RestoreToLsnInsideSnapshotRange)
   ASSERT_TRUE(got_a);
   EXPECT_EQ(to_string(got_a->value), value_a);
   EXPECT_FALSE(static_cast<bool>(db_->get(std::as_bytes(std::span(key_b)))));
+}
+
+// The log writer's backlog is published as a gauge and drains to zero once
+// sync() returns.
+TEST_F(DatabaseTest, MetricsTrackLogQueuedBytes)
+{
+  Metrics::instance().clear();
+  db_->register_metrics();
+
+  auto value = [](std::string_view name) -> int64_t {
+    const std::string dump = Metrics::instance().dump_to_prometheus_string();
+    // Match the sample line, not the "# TYPE <name> ..." line above it.
+    const std::string line = "\n" + std::string(name) + " ";
+    const size_t pos = dump.find(line);
+    EXPECT_NE(pos, std::string::npos) << "missing metric " << name;
+    if (pos == std::string::npos)
+      return -1;
+    return static_cast<int64_t>(std::stoll(dump.substr(pos + line.size())));
+  };
+
+  insert_n(kInsertions);
+  ASSERT_TRUE(db_->sync());
+  db_->record_metrics();
+  // sync() returns once everything handed to the log writer is on disk.
+  EXPECT_EQ(value("db_ramdb_log_queued_bytes"), 0);
+  EXPECT_GT(value("db_ramdb_disk_writer_bytes_out"), 0);
 }
 
 TEST_F(DatabaseTest, Compact)

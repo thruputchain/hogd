@@ -11,6 +11,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -45,12 +46,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class CrossContractRevertTest : public ::testing::TestWithParam<TestDB>,
+class CrossContractRevertTest : public ::testing::Test,
                                 public NativeContractTestFramework {
 public:
   CrossContractRevertTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -66,7 +67,7 @@ public:
 // - Contract A's state changes persist
 // - Transaction succeeds despite B's revert
 //
-TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
+TEST_F(CrossContractRevertTest, BasicCrossContractRevert)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -188,7 +189,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
                                 Invocation{.invoked_address = contract_a_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -224,7 +225,7 @@ TEST_P(CrossContractRevertTest, BasicCrossContractRevert)
 // - Contract A receives B's return data
 // - Only Contract A's state persists
 //
-TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
+TEST_F(CrossContractRevertTest, DeepNestedRevertPropagation)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -422,7 +423,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
                                 Invocation{.invoked_address = contract_a_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -460,7 +461,7 @@ TEST_P(CrossContractRevertTest, DeepNestedRevertPropagation)
 // Scenario: Contract A calls Contract B, Contract B reverts with return data.
 // This is a simpler version of the basic test to ensure the pattern works.
 //
-TEST_P(CrossContractRevertTest, RevertWithReturnData)
+TEST_F(CrossContractRevertTest, RevertWithReturnData)
 {
   ContractAddress contract_a_addr = make_contract_address(0);
   ContractAddress contract_b_addr = make_contract_address(1);
@@ -568,7 +569,7 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
                                 Invocation{.invoked_address = contract_a_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -590,11 +591,6 @@ TEST_P(CrossContractRevertTest, RevertWithReturnData)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, CrossContractRevertTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

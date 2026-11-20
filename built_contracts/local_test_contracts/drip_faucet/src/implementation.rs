@@ -56,7 +56,7 @@ impl DripFaucet for DripFaucetContract {
 
         let receiver = get_caller();
         let token =
-            ERC20Client::new(&thruput_sdk::precompiles::ADDRESS_PRECOMPILED_HOG_TOKEN);
+            ERC20Client::new(&thruput_sdk::types::genesis_addresses::ADDRESS_NATIVE_TOKEN);
         token.mint(&receiver, amount);
     }
 }

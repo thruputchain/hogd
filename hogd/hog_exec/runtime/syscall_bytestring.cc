@@ -6,6 +6,7 @@
 #include <cstring>
 #include <span>
 
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
@@ -103,9 +104,18 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
 
 MaybeAsyncSyscallInnerResult
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
+                            WrappedGasAmount remaining_gas,
                             const StorageKeyContractData &input_key,
                             std::span<const std::byte> input_bytestring)
 {
+  const WrappedGasAmount required_gas{
+      GasCost::bytestring_set(input_bytestring.size())};
+  // Reject before set_bytestring copies the value, as SHA256 does before
+  // hashing; exact exhaustion also faults in the outer wrapper.
+  if (remaining_gas.get() <= required_gas.get()) {
+    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                                 remaining_gas};
+  }
   auto status =
       co_await syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
@@ -119,8 +129,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{GasCost::bytestring_set(
-                                   input_bytestring.size())}};
+                               required_gas};
 }
 
 } // namespace hogd

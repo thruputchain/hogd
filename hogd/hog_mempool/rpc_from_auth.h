@@ -1,10 +1,14 @@
 #pragma once
 
 #include <cstddef>
+#include <optional>
 #include <utility>
 
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/rpc_server.h"
@@ -22,7 +26,8 @@ class MempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
   using auth_data_callback =
-      std::function<x23::Async<void>(BlockHeight, KeyChangeBatch)>;
+      std::function<x23::Async<void>(BlockHeight,
+                                     ChunkedVector<KeyChangeBatch>)>;
 
   MempoolAuthRpc() = default;
 
@@ -64,30 +69,43 @@ public:
     }
   }
 
+  // Registering is what lets the mempool start serving the coordinator, so an
+  // auth server calls this only once it has subscribed to the db. Only one
+  // auth server is supported, so a second registration fails.
   static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard card)
   {
-    info("got {}, expected {}", protocol_text(card.protocol),
-         protocol_text(version::kHogdProtocol()));
-    if (card.protocol != version::kHogdProtocol()) {
+    IntroAuthResult result = auth_info(card.protocol);
+    if (result.outcome() == IntroAuthOutcome::kSuccess &&
+        !Registration::registration().register_auth(card)) {
+      warn("Rejecting auth registration: an auth server is already "
+           "registered");
       co_return IntroAuthResult(IntroAuthOutcome::kFailure);
     }
-
-    Registration::registration().register_auth(card);
-    x23::XdrVec<ShardCard> shard_cards;
-    Registration::registration().shards_registered(&shard_cards);
-    NetworkHash network_hash{};
-    Registration::registration().get_network_hash(&network_hash);
-    IntroAuthResult result(IntroAuthOutcome::kSuccess);
-    result.success() = MempoolAuthIntroSuccess{
-        .shards = shard_cards,
-        .network_hash = network_hash,
-    };
     co_return result;
   }
 
-  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
-                                                 KeyChangeBatch key_changes)
+  // What an auth server needs to subscribe to the db before it registers.
+  static x23::Async<IntroAuthResult>
+  mempoolauth_get_auth_info(ProtocolCommit protocol)
   {
+    co_return auth_info(protocol);
+  }
+
+  // Collects the run of chunks the auth server sends for a height and runs
+  // the callback once per complete height. Chunks may arrive in any order.
+  x23::Async<void> mempoolauth_auth_data_changed_chunk(KeyChangeChunk chunk)
+  {
+    std::optional<KeyChangeRunAssembler::Run> run =
+        run_assembler_.push(chunk.height,
+                            ChunkPosition{.index = chunk.chunk_index,
+                                          .count = chunk.chunk_count},
+                            std::move(chunk.changes));
+    if (!run.has_value()) {
+      co_return;
+    }
+    const BlockHeight height = run->key;
+    ChunkedVector<KeyChangeBatch> key_changes = std::move(run->parts);
+
     std::optional<auth_data_callback> callback;
     while (true) {
       x23::CoroGuard cg;
@@ -136,6 +154,32 @@ public:
   }
 
 private:
+  // The registered db shards and the network hash, or a failure if
+  // [protocol] is not ours.
+  static IntroAuthResult auth_info(const ProtocolCommit &protocol)
+  {
+    info("got {}, expected {}", protocol_text(protocol),
+         protocol_text(version::kHogdProtocol()));
+    if (protocol != version::kHogdProtocol()) {
+      return IntroAuthResult(IntroAuthOutcome::kFailure);
+    }
+
+    x23::XdrVec<ShardCard> shard_cards;
+    Registration::registration().shards_registered(&shard_cards);
+    NetworkHash network_hash{};
+    Registration::registration().get_network_hash(&network_hash);
+    IntroAuthResult result(IntroAuthOutcome::kSuccess);
+    result.success() = MempoolAuthIntroSuccess{
+        .shards = shard_cards,
+        .network_hash = network_hash,
+    };
+    return result;
+  }
+
+  using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
+
+  KeyChangeRunAssembler run_assembler_;
+
   x23::CoroLock callback_lock_;
   std::optional<auth_data_callback> callback_;
   x23::CoroFutex<bool> callback_set_{false};

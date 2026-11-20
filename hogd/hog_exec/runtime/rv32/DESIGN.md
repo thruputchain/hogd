@@ -70,7 +70,7 @@ The producer and consumer are maintained in different repositories:
 | Owner | Contract |
 |---|---|
 | SDK (`sdk_rs`) | Guest startup, method dispatch, and typed syscall wrappers |
-| Tooling (`groundhog-rpc`, `crates/rv32/artifact` and `crates/rv32/lower`) | ELF validation and artifact writing; shared by the CLI and standalone lowerer |
+| Tooling (`thruput-tools`, `crates/rv32/artifact` and `crates/rv32/lower`) | ELF validation and artifact writing; shared by the CLI and standalone lowerer |
 | This directory | Artifact admission, preparation, and execution |
 
 Guest dispatch removes the need for the lowerer to discover method symbols or
@@ -85,8 +85,8 @@ policies with an explicit encoding. A compile-time assertion pins the C++
 value; `LoweredSdkArtifactFormatFingerprintMatchesRuntime` checks generated
 lowerer metadata against `kAcceptedFormatFingerprints`. The fingerprint is a
 compatibility check, not a substitute for parsing or instruction validation.
-Format, entry ABI, syscall ABI, and gas schedule are separate versioned
-contracts; update the relevant producer, consumer, fixtures, and checks together.
+Format, entry ABI, and syscall API are separate versioned contracts; update the
+relevant producer, consumer, fixtures, and checks together.
 
 ## Execution engines
 
@@ -118,14 +118,21 @@ boundary. [CMakeLists.txt](CMakeLists.txt) defines these targets, while
 ## Gas and traps
 
 Instruction costs are in [program.h](program.h); host costs are in
-[gas_cost_table.h](../gas_cost_table.h). The artifact gas digest covers both.
-`kAcceptedGasSchedules` accepts explicit `(version, digest)` pairs, including
-transitional declarations. **Every accepted artifact executes at this build's
-current prices**, regardless of the declaration it carries. Validators must
-agree on both prices and accepted declarations. Removing an accepted entry
-requires accounting for stored artifacts as well as the producing toolchain.
-The [calibration guide](gas_calibration/README.md) describes measurement and
+[gas_cost_table.h](../gas_cost_table.h). **Every artifact executes at this
+build's current prices.** Prices are consensus, so validators must agree on
+them, but they are not part of an artifact: changing one, or adding a syscall,
+changes no artifact, lowerer, or admission rule. `rv32_vm_test` spells the
+schedule out so a price change is deliberate. The
+[calibration guide](gas_calibration/README.md) describes measurement and
 schedule changes.
+
+A v7 artifact instead declares the syscall API version it was built against
+(`syscall_api_version` in the protocol's `syscalls.yaml`, which states the
+versioning rules). It is admitted when its major matches and its minor is no
+later than `kSyscallApiMinor`, so adding a syscall is a minor bump in
+`syscalls.yaml` and nothing here. v5 and v6 artifacts carry a gas schedule
+version and digest instead; `kV5V6GasSchedules` is the frozen list of pairs
+they may carry.
 
 `Machine` charges each instruction before executing it. `ThreadedMachine`
 charges a run at entry, including its terminating control-flow or host-boundary
@@ -160,6 +167,35 @@ atomic output must stage its writes before touching those spans. The test-only
 writeback. Its rollback behavior does not describe production syscall output.
 Production resolves host errors in `Rv32Runtime`; it does not pass
 `HostStatus::kTrap` back into the threaded engine.
+
+## Stack-usage diagnostic
+
+Debug builds configured with `HOGD_RV32_STACK_USAGE=ON` (the default when
+`ENABLE_TEST_FFI` is on) record the first and the lowest value the guest
+writes to `sp` (x2). Each handler store goes through `write_rd` in
+[threaded_machine.h](threaded_machine.h), which keeps the first `sp` store and
+lowers the `ThreadedMachine`'s minimum on every one. The first store is the
+stack top `_start` establishes and the stack grows down from it, so the
+minimum is the deepest point the stack reached and their difference is the
+invocation's stack usage; a per-write record sees a leaf frame that is pushed
+and popped within one run. When an invocation finishes, `Rv32Runtime` appends
+both values, with the contract address and method id, to its
+`SystemCallHandler`; the test FFI returns those records through
+`get_rv32_stack_usage()` ([test_bindings.h](../../../test_ffi/test_bindings.h)).
+Nothing is logged and nothing in the executor reads the records back.
+
+A guest that never writes `sp` is recorded as `kSpUnwritten` for both. A fused
+`lui;addi` stores only the pair's final value on the untraced path, so the
+initial value is the constant the pair materializes rather than the `lui`'s
+higher intermediate, and the minimum cannot be raised by it.
+
+[stack_usage.h](stack_usage.h) owns the flag and constants. The define is
+global because it adds members to `ThreadedMachine` and `SystemCallHandler`,
+and CMake applies it to the Debug configuration only, so optimized
+interpreters never carry the per-write check. The canonical `Machine` and the
+test-only adapters are not instrumented. `Rv32ThreadedStackUsage` in
+[rv32_threaded_test.cc](rv32_threaded_test.cc) covers the record and
+`Rv32StackUsageTest` in the test FFI covers the round trip.
 
 ## Verification
 

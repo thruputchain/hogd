@@ -22,8 +22,23 @@ option(BUILD_FUZZERS "Build fuzz targets" OFF)
 # Turning test ffi on requires building with fPIC
 option(ENABLE_TEST_FFI "Enable mock contracts & test FFI" OFF)
 option(STATIC_LIBCXX "Statically link libc++ into test_ffi" OFF)
+# Debug-only diagnostic: record the lowest sp each rv32 invocation's guest
+# reached, read back through the test FFI's get_rv32_stack_usage() (see
+# hogd/hog_exec/runtime/rv32/stack_usage.h). Defaults to ON with the test FFI,
+# where contract authors measure their stack; inactive outside Debug.
+if(ENABLE_TEST_FFI)
+  set(HOGD_RV32_STACK_USAGE_DEFAULT ON)
+else()
+  set(HOGD_RV32_STACK_USAGE_DEFAULT OFF)
+endif()
+option(HOGD_RV32_STACK_USAGE
+  "Record rv32 guest stack usage per invocation (Debug builds only)"
+  ${HOGD_RV32_STACK_USAGE_DEFAULT})
 option(HOGD_FRAME_POINTERS "Keep frame pointers in Release builds for continuous profiling" ON)
 option(HOGD_RELEASE_DEBUGINFO "Emit debug info in Release builds for split debuginfo packaging" OFF)
+option(HOGD_STATIC_DEPS
+  "Link third-party libraries and the GCC runtime statically, so Linux binaries need only glibc"
+  OFF)
 set(BUILD_ARCHITECTURE "native" CACHE STRING "Architecture to build for (default 'native')")
 set(RUST_BUILD_CPU "native" CACHE STRING "Rust target CPU to build for (default 'native')")
 
@@ -72,6 +87,21 @@ endif()
 if(ENABLE_TEST_FFI)
   set(CMAKE_POSITION_INDEPENDENT_CODE ON)
 endif()
+if(HOGD_RV32_STACK_USAGE)
+  # Global on purpose: the define adds members to ThreadedMachine, so every
+  # translation unit that includes threaded_machine.h must agree on it. The
+  # generator expression keeps it out of optimized configurations, where the
+  # interpreter's handlers must stay free of the per-write check.
+  add_compile_definitions($<$<CONFIG:Debug>:HOGD_RV32_STACK_USAGE=1>)
+  if(CMAKE_BUILD_TYPE STREQUAL "Debug")
+    message(STATUS "HOGD_RV32_STACK_USAGE: ON")
+  else()
+    message(STATUS "HOGD_RV32_STACK_USAGE: ON (Debug-only; inactive for "
+                   "CMAKE_BUILD_TYPE=${CMAKE_BUILD_TYPE})")
+  endif()
+else()
+  message(STATUS "HOGD_RV32_STACK_USAGE: OFF")
+endif()
 
 # Set up compiler flags for release and debug build types
 include(cmake/compiler_cache.cmake)
@@ -88,7 +118,56 @@ endif()
 if (CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-interference-size")
   link_libraries(stdc++exp) # needed for C++23 stacktrace library
-  link_libraries(atomic) # needed for std::atomic<int128_t>
+  # needed for std::atomic<int128_t>
+  if(HOGD_STATIC_DEPS)
+    link_libraries(-l:libatomic.a)
+  else()
+    link_libraries(atomic)
+  endif()
+endif()
+
+# Release binaries for Linux link everything but glibc statically, so they
+# start on hosts without the build image's libraries.
+if(HOGD_STATIC_DEPS)
+  if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux" OR NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU"
+     OR CMAKE_VERSION VERSION_LESS 3.24)
+    message(FATAL_ERROR "HOGD_STATIC_DEPS requires GCC on Linux and CMake 3.24 or later")
+  endif()
+  set(CMAKE_FIND_LIBRARY_SUFFIXES .a)
+  # --gc-sections drops unused code from the Rust standard library. Without
+  # LTO, as in Debug builds, its process spawning stays in and requires
+  # glibc 2.39 (pidfd_spawnp, pidfd_getpid).
+  add_link_options(-static-libstdc++ -static-libgcc -Wl,--gc-sections)
+
+  # RocksDB looks for Snappy's package config first, whose Snappy::snappy is
+  # the shared library. Redirect the package to the static library.
+  find_library(HOGD_SNAPPY_LIBRARY snappy REQUIRED)
+  file(WRITE "${CMAKE_FIND_PACKAGE_REDIRECTS_DIR}/snappy-config.cmake"
+    "if(NOT TARGET Snappy::snappy)\n"
+    "  add_library(Snappy::snappy STATIC IMPORTED)\n"
+    "  set_target_properties(Snappy::snappy PROPERTIES\n"
+    "    IMPORTED_LOCATION \"${HOGD_SNAPPY_LIBRARY}\")\n"
+    "endif()\n")
+
+  # Subdirectories reuse these OpenSSL targets. The static libcrypto also needs
+  # the libraries `pkg-config --static --libs libcrypto` lists. FindOpenSSL
+  # adds some of them to both targets by bare name, and the linker resolves a
+  # bare zstd to libzstd.so, so replace it with the static library.
+  set(OPENSSL_USE_STATIC_LIBS TRUE)
+  find_package(OpenSSL REQUIRED)
+  find_package(ZLIB REQUIRED)
+  find_library(HOGD_ZSTD_LIBRARY zstd REQUIRED)
+  find_library(HOGD_JITTERENTROPY_LIBRARY jitterentropy REQUIRED)
+  foreach(hogd_openssl_target IN ITEMS OpenSSL::SSL OpenSSL::Crypto)
+    get_target_property(hogd_openssl_deps ${hogd_openssl_target} INTERFACE_LINK_LIBRARIES)
+    if(hogd_openssl_deps)
+      list(TRANSFORM hogd_openssl_deps REPLACE "^zstd$" "${HOGD_ZSTD_LIBRARY}")
+      set_property(TARGET ${hogd_openssl_target}
+        PROPERTY INTERFACE_LINK_LIBRARIES ${hogd_openssl_deps})
+    endif()
+  endforeach()
+  set_property(TARGET OpenSSL::Crypto APPEND PROPERTY INTERFACE_LINK_LIBRARIES
+    ZLIB::ZLIB "${HOGD_ZSTD_LIBRARY}" "${HOGD_JITTERENTROPY_LIBRARY}")
 endif()
 
 message(STATUS "Using CMAKE_C_FLAGS: ${CMAKE_C_FLAGS}")
@@ -268,6 +347,11 @@ add_subdirectory(external/corrosion)
 list(APPEND CMAKE_MODULE_PATH "${CMAKE_CURRENT_SOURCE_DIR}/external/corrosion/cmake")
 include(Corrosion)
 message(STATUS "Rust version: ${Rust_VERSION}")
+if(HOGD_STATIC_DEPS)
+  # -static-libgcc already links the unwinder that Rust's standard library
+  # asks for as gcc_s.
+  list(REMOVE_ITEM Rust_CARGO_TARGET_LINK_NATIVE_LIBS gcc_s)
+endif()
 
 # Enable model-checker
 add_subdirectory(external/model-checker)
@@ -327,6 +411,12 @@ endif()
 # Fix for macOS/LLVM: atomic operations are built-in, no need for -latomic
 set(BUILTIN_ATOMIC ON CACHE BOOL "" FORCE)
 add_subdirectory(external/rocksdb EXCLUDE_FROM_ALL)
+if(APPLE)
+  # The pinned RocksDB logger uses free() without including stdlib.h.
+  set_property(SOURCE external/rocksdb/util/stderr_logger.cc
+    DIRECTORY external/rocksdb APPEND PROPERTY COMPILE_OPTIONS
+    -include "${CMAKE_CURRENT_SOURCE_DIR}/cmake/rocksdb_stdlib.h")
+endif()
 # RocksDB's CMakeLists globally installs ccache as RULE_LAUNCH_* when ccache is
 # present. The wrapper already configures ccache through CMAKE_*_COMPILER_LAUNCHER,
 # and leaving both enabled generates nested `ccache ccache ...` Ninja commands.

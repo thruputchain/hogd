@@ -33,13 +33,14 @@ public:
   using rpc_service = SchedDb1;
 
   void scheddb_intro_shard(ShardCard const & /*unused*/) {}
-  void scheddb_hogs_transferred_chunk(HogsTransferredChunk const &chunk)
+  void scheddb_native_tokens_transferred_chunk(
+      NativeTokensTransferredChunk const &chunk)
   {
     std::lock_guard<std::mutex> lock(mtx_);
     chunks_.push_back(chunk);
   }
 
-  std::vector<HogsTransferredChunk> chunks()
+  std::vector<NativeTokensTransferredChunk> chunks()
   {
     std::lock_guard<std::mutex> lock(mtx_);
     return chunks_;
@@ -47,7 +48,7 @@ public:
 
 private:
   std::mutex mtx_;
-  std::vector<HogsTransferredChunk> chunks_;
+  std::vector<NativeTokensTransferredChunk> chunks_;
 };
 
 static_assert(is_SchedDb1<ChunkRecordingSchedDbRpc *, std::type_identity_t>);
@@ -55,7 +56,8 @@ static_assert(is_SchedDb1<ChunkRecordingSchedDbRpc *, std::type_identity_t>);
 Delta
 make_delta(uint64_t i)
 {
-  Delta delta{.address = {}, .hog_delta = to_xdr(static_cast<int128_t>(i) + 1)};
+  Delta delta{.address = {},
+              .native_token_delta = to_xdr(static_cast<int128_t>(i) + 1)};
   for (size_t byte = 0; byte < sizeof(i); ++byte) {
     delta.address[byte] = static_cast<uint8_t>(i >> (8 * byte));
   }
@@ -65,7 +67,7 @@ make_delta(uint64_t i)
 // Runs a block of [num_deltas] deltas through a worker that chunks at
 // [max_deltas_per_chunk] and returns what the scheduler side received. Both
 // ends of the link cap a record at [max_message_size].
-std::vector<HogsTransferredChunk>
+std::vector<NativeTokensTransferredChunk>
 run_block(size_t num_deltas, size_t max_deltas_per_chunk,
           size_t expected_chunks,
           size_t max_message_size = x23::default_max_message_size)
@@ -113,18 +115,18 @@ run_block(size_t num_deltas, size_t max_deltas_per_chunk,
 // Checks [arrived] is the whole run, split at [max_deltas_per_chunk], in
 // whatever order the chunks were sent.
 void
-expect_run(std::vector<HogsTransferredChunk> arrived, size_t num_deltas,
+expect_run(std::vector<NativeTokensTransferredChunk> arrived, size_t num_deltas,
            size_t max_deltas_per_chunk)
 {
   ASSERT_FALSE(arrived.empty());
-  std::vector<HogsTransferredChunk> chunks = std::move(arrived);
-  std::ranges::sort(chunks, {}, [](const HogsTransferredChunk &chunk) {
+  std::vector<NativeTokensTransferredChunk> chunks = std::move(arrived);
+  std::ranges::sort(chunks, {}, [](const NativeTokensTransferredChunk &chunk) {
     return chunk.chunk_index;
   });
   const auto chunk_count = static_cast<uint32_t>(chunks.size());
   uint64_t next = 0;
   for (uint32_t index = 0; index < chunk_count; ++index) {
-    const HogsTransferredChunk &chunk = chunks[index];
+    const NativeTokensTransferredChunk &chunk = chunks[index];
     EXPECT_EQ(chunk.block, 9);
     EXPECT_EQ(chunk.chunk_index, index);
     EXPECT_EQ(chunk.chunk_count, chunk_count);
@@ -134,7 +136,8 @@ expect_run(std::vector<HogsTransferredChunk> arrived, size_t num_deltas,
       EXPECT_EQ(chunk.deltas.size(), max_deltas_per_chunk);
     }
     for (const Delta &delta : chunk.deltas) {
-      EXPECT_EQ(from_xdr(delta.hog_delta), static_cast<int128_t>(next + 1));
+      EXPECT_EQ(from_xdr(delta.native_token_delta),
+                static_cast<int128_t>(next + 1));
       EXPECT_EQ(delta.address[0], static_cast<uint8_t>(next));
       ++next;
     }
@@ -169,10 +172,10 @@ TEST(BackgroundCommitWorker, ABlockOverTheRecordCapGoesThroughAsChunks)
   constexpr size_t kNumDeltas = 40'000;
   constexpr size_t kMaxDeltasPerChunk = 10'000;
 
-  HogsTransferredChunk as_one_record{.block = 9,
-                                     .chunk_index = 0,
-                                     .chunk_count = 1,
-                                     .deltas = {}};
+  NativeTokensTransferredChunk as_one_record{.block = 9,
+                                             .chunk_index = 0,
+                                             .chunk_count = 1,
+                                             .deltas = {}};
   for (uint64_t i = 0; i < kNumDeltas; ++i) {
     as_one_record.deltas.push_back(make_delta(i));
   }
@@ -181,7 +184,7 @@ TEST(BackgroundCommitWorker, ABlockOverTheRecordCapGoesThroughAsChunks)
   const auto chunks = run_block(kNumDeltas, kMaxDeltasPerChunk,
                                 /*expected_chunks=*/4, kMaxMessageSize);
   ASSERT_EQ(chunks.size(), 4U);
-  for (const HogsTransferredChunk &chunk : chunks) {
+  for (const NativeTokensTransferredChunk &chunk : chunks) {
     EXPECT_LT(x23::xdr_size(chunk), kMaxMessageSize);
   }
   expect_run(chunks, kNumDeltas, kMaxDeltasPerChunk);

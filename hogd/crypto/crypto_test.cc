@@ -29,6 +29,22 @@ TEST(DomainSeparators, PubkeyAuthCxs)
   static_assert(kPubkeyAuthDomainSeparatorCxs == kExpected);
 }
 
+TEST(DomainSeparators, ProposalTxsHashCxs)
+{
+  // chuckd and the coordinator spell these bytes out as literals, so pin them
+  // here the same way.
+  constexpr std::array<uint8_t, 13> kExpectedProposalTxs{
+      0x00, 0x0B, 0x50, 0x72, 0x6F, 0x70, 0x6F,
+      0x73, 0x61, 0x6C, 0x54, 0x78, 0x73,
+  };
+  static_assert(kProposalTxsDomainSeparatorCxs == kExpectedProposalTxs);
+  constexpr std::array<uint8_t, 15> kExpectedParallelBatch{
+      0x00, 0x0D, 0x50, 0x61, 0x72, 0x61, 0x6C, 0x6C,
+      0x65, 0x6C, 0x42, 0x61, 0x74, 0x63, 0x68,
+  };
+  static_assert(kParallelBatchDomainSeparatorCxs == kExpectedParallelBatch);
+}
+
 TEST(SHA256, BasicUsage)
 {
   std::vector<uint8_t> a = {0, 1, 2, 3};

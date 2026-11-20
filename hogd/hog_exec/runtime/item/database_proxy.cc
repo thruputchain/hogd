@@ -21,6 +21,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/types.h"
 #include "hogd/debug/key_type_check.h"
@@ -467,6 +468,9 @@ footprint_bound(FlaggedStorageDelta const &fd)
 constexpr size_t kMessageOverhead = kXdrMax<x23::rpc_msg> + kXdrMax<BlockID> +
                                     kXdrMax<TransactionID> + kXdrWord;
 static_assert(kMessageOverhead < kExecToDbMessageCap);
+// A chain that does not state max_subtransaction_output_bytes keeps the budget
+// this gate enforced before the parameter existed.
+static_assert(kDefaultMaxSubtransactionOutputBytes == kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
 
@@ -486,7 +490,8 @@ x23::Async<SystemStatus<bool>>
 DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
-                                           DbConflictResult *conflict_out)
+                                           DbConflictResult *conflict_out,
+                                           size_t max_message_bytes)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
@@ -505,12 +510,10 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
            "footprint_bound overload for the changed delta layout");
     footprint += bound;
   }
-  if (footprint + kMessageOverhead > kExecToDbMessageCap) {
-    debug(
-        "rejecting subtransaction push as a conflict: delta-batch footprint "
-        "{} + message overhead {} exceeds the {}-byte executor->HogDb message "
-        "cap",
-        footprint, kMessageOverhead, kExecToDbMessageCap);
+  if (footprint + kMessageOverhead > max_message_bytes) {
+    debug("rejecting subtransaction push as a conflict: delta-batch footprint "
+          "{} + message overhead {} exceeds max_subtransaction_output_bytes {}",
+          footprint, kMessageOverhead, max_message_bytes);
     co_return false;
   }
 
@@ -643,7 +646,8 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
 
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
-      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_);
+      block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_,
+      max_subtransaction_output_bytes_);
   current_subtransaction_batch_.clear();
   co_return r;
 }

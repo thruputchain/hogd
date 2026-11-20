@@ -17,6 +17,8 @@ enum class IndexerErrorCode {
   kUnsupportedCompressionAlgorithm,
   kQueryNotReady,
   kMigrationRequired,
+  kInvalidCursor,
+  kHistoryUnavailable,
 };
 
 class IndexerErrorCategory : public std::error_category {

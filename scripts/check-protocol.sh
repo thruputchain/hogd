@@ -13,7 +13,7 @@ ROOT_DIR="$(cd "${SCRIPT_DIR}/.." && pwd -P)"
 cd "${ROOT_DIR}"
 
 PROTOCOL_HASH=$(git -C protocol rev-parse HEAD)
-GO_FILE="groundhog-go/protocol-go/hogp.go"
+GO_FILE="thruput-go/protocol-go/hogp.go"
 GO_HASH=$(sed -n 's/^const ProtocolGitCommit string = "\([0-9a-f]\{40\}\)"/\1/p' "${GO_FILE}")
 
 if [ -z "${GO_HASH}" ]; then
@@ -34,7 +34,7 @@ fi
 if [ "${PROTOCOL_HASH}" != "${GO_HASH}" ]; then
   printf "protocol hash mismatch\n" >&2
   printf "protocol/ HEAD: %s\n" "${PROTOCOL_HASH}" >&2
-  printf "groundhog-go/protocol-go/ hash: %s\n" "${GO_HASH}" >&2
+  printf "thruput-go/protocol-go/ hash: %s\n" "${GO_HASH}" >&2
   exit 1
 fi
 

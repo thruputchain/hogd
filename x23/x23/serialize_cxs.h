@@ -596,18 +596,15 @@ struct CxsSerializer<Box<T>> {
   }
 };
 
-// float and double are special cased because they are not integral types
+// float and double are raw little-endian IEEE 754 bytes, not compressed like
+// integers (CXS.md).
 template<typename T>
 requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
 struct CxsSerializer<T> {
-  using uint_type = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-  static_assert(sizeof(uint_type) == sizeof(T),
-                "uint_type must be the same size as T");
-
   static constexpr CxsStatus<void> store(x23::Buf &buf, T value)
   {
-    return CxsSerializer<uint_type>::store(buf,
-                                           std::bit_cast<uint_type>(value));
+    buf.append_range(std::bit_cast<std::array<uint8_t, sizeof(T)>>(value));
+    return {};
   }
 };
 
@@ -676,10 +673,8 @@ cxs_size(const T &x)
     return cxs_integral_encoded_size(cxs_uint_get_function_index(x));
   else if constexpr (std::is_enum_v<X>)
     return cxs_size(static_cast<std::underlying_type_t<X>>(x));
-  else if constexpr (std::same_as<X, float> || std::same_as<X, double>) {
-    using uint_type = std::conditional_t<sizeof(X) == 4, uint32_t, uint64_t>;
-    return cxs_size(std::bit_cast<uint_type>(x));
-  }
+  else if constexpr (std::same_as<X, float> || std::same_as<X, double>)
+    return sizeof(X);
   else if constexpr (is_xdr_cat<X, kOpaqueArray>)
     return std::tuple_size_v<X>;
   else if constexpr (is_xdr_cat<X, kOpaqueVec, kString>)
@@ -799,13 +794,10 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
   requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
   CxsStatus<void> go(T &value)
   {
-    using uint_type =
-        std::conditional_t<sizeof(T) == sizeof(uint32_t), uint32_t, uint64_t>;
-    static_assert(sizeof(uint_type) == sizeof(T));
-    uint_type bits;
-    if (auto status = go(bits); !status) [[unlikely]]
+    if (auto status = check_size(data, sizeof(T)); !status) [[unlikely]]
       return status.error();
-    value = std::bit_cast<T>(bits);
+    std::memcpy(&value, data.data(), sizeof(T));
+    data = data.subspan(sizeof(T));
     return {};
   }
 

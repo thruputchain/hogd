@@ -92,6 +92,29 @@ bm_ed25519_sign_and_verify(benchmark::State &state)
 // NOLINTNEXTLINE(bugprone-throwing-static-initialization)
 BENCHMARK(bm_ed25519_sign_and_verify)->RangeMultiplier(2)->Range(kMin, kMax);
 
+// Verification alone, shaped like bm_mldsa65_verify so the two compare
+// directly: what the VerifySignature syscall prices per scheme.
+void
+bm_ed25519_verify(benchmark::State &state)
+{
+  auto [pk, sk] = ed25519_keygen();
+  std::vector<std::byte> msg(state.range(0));
+  // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  auto sig = ed25519_sign(sk, msg).value();
+  // NOLINTEND(bugprone-unchecked-optional-access)
+  if (!ed25519_verify(pk, sig, msg)) {
+    state.SkipWithError("signature does not verify");
+    return;
+  }
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(ed25519_verify(pk, sig, msg));
+  }
+  state.SetBytesProcessed(static_cast<int64_t>(state.iterations()) *
+                          static_cast<int64_t>(state.range(0)));
+}
+// NOLINTNEXTLINE(bugprone-throwing-static-initialization)
+BENCHMARK(bm_ed25519_verify)->RangeMultiplier(2)->Range(kMin, kMax);
+
 void
 bm_mldsa65_verify(benchmark::State &state)
 {

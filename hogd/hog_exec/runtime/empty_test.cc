@@ -12,76 +12,68 @@ namespace hogd {
 TEST(EmptyTest, RepeatedInstantiate)
 {
   for (int i = 0; i < 20; i++) {
-    NativeContractTestFramework test_framework_mock(
-        false, BlockExecutionMode::kBlockExecutionModeProposal,
-        TestDB::kMockInMemory);
-    NativeContractTestFramework test_framework_hog(
-        false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+    NativeContractTestFramework test_framework(
+        false, BlockExecutionMode::kBlockExecutionModeProposal);
   }
 }
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 struct EmptyTestStruct : public NativeContractTestFramework,
-                         public ::testing::TestWithParam<TestDB> {
+                         public ::testing::Test {
   EmptyTestStruct()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
-TEST_P(EmptyTestStruct, Basic1)
+TEST_F(EmptyTestStruct, Basic1)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic2)
+TEST_F(EmptyTestStruct, Basic2)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic3)
+TEST_F(EmptyTestStruct, Basic3)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic4)
+TEST_F(EmptyTestStruct, Basic4)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic5)
+TEST_F(EmptyTestStruct, Basic5)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic6)
+TEST_F(EmptyTestStruct, Basic6)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic7)
+TEST_F(EmptyTestStruct, Basic7)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic8)
+TEST_F(EmptyTestStruct, Basic8)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic9)
+TEST_F(EmptyTestStruct, Basic9)
 {
   // Do nothing at all
 }
 
-TEST_P(EmptyTestStruct, Basic10)
+TEST_F(EmptyTestStruct, Basic10)
 {
   // Do nothing at all
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, EmptyTestStruct,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

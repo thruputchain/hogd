@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
+#include <bit>
+#include <concepts>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -17,6 +18,7 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -38,12 +40,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-multiple-inheritance,misc-use-internal-linkage)
-class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
+class SerializeRoundtripTest : public ::testing::Test,
                                public NativeContractTestFramework {
 public:
   SerializeRoundtripTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -236,6 +238,27 @@ protected:
 
           co_return InvokeStatus<void>{};
         });
+    // CXS floats are raw little-endian bytes, not compressed integers; the
+    // Rust contract would misread any other encoding.
+    fns.emplace(
+        12, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          using fl = std::numeric_limits<float>;
+          using dl = std::numeric_limits<double>;
+          for (auto [f, d] : {std::pair{0.0F, 0.0}, std::pair{-0.0F, -0.0},
+                              std::pair{1.0F, 1.0}, std::pair{-2.5F, -2.5},
+                              std::pair{fl::max(), dl::max()},
+                              std::pair{fl::lowest(), dl::lowest()},
+                              std::pair{fl::denorm_min(), dl::denorm_min()},
+                              std::pair{fl::infinity(), -dl::infinity()}}) {
+            ::cxs_test::Floats floats{.f = f, .d = d};
+            co_await roundtrip_test<u8"roundtrip_floats">(floats, ctx, success);
+            if (!success) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     std::unique_ptr<NativeContract> native_contract =
         std::make_unique<NativeContract>(std::move(fns));
 
@@ -285,6 +308,20 @@ protected:
     return res.value().value().value();
   };
 
+  // Floats compare by bits, since -0.0 == 0.0.
+  template<typename T> static void expect_same(T const &got, T const &want)
+  {
+    if constexpr (std::same_as<T, ::cxs_test::Floats>) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(got.f),
+                std::bit_cast<uint32_t>(want.f));
+      EXPECT_EQ(std::bit_cast<uint64_t>(got.d),
+                std::bit_cast<uint64_t>(want.d));
+    }
+    else {
+      EXPECT_EQ(got, want);
+    }
+  }
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   // Coroutine, so gtest's ASSERT_* (which expand to a bare `return`) cannot be
   // used here; failures report via EXPECT_* and bail out leaving `success`
@@ -310,7 +347,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     {
       // TXS
@@ -328,7 +365,7 @@ protected:
         ADD_FAILURE() << "deserialize failed";
         co_return;
       }
-      EXPECT_EQ(roundtrip_value.value(), value);
+      expect_same(roundtrip_value.value(), value);
     }
     success = true;
   }
@@ -343,7 +380,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripFoo)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -351,7 +388,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -361,7 +398,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSenum)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -369,7 +406,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -379,7 +416,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -387,7 +424,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(2),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -397,7 +434,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripI32)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -405,7 +442,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(3),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -415,7 +452,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -423,7 +460,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(4),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -433,7 +470,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripUunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -441,7 +478,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(5),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -451,7 +488,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripUunionBool)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -459,7 +496,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(6),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -469,7 +506,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -477,7 +514,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(7),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -490,7 +527,7 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
 // Tests for Error, ContractError, and StorageError roundtrips were removed.
 // These types were deleted in the SDK Exceptions PR.
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -498,7 +535,25 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(11),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *multiplexed_context_);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SerializeRoundtripTest, SerializeRoundtripFloats)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(12),
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
@@ -537,9 +592,5 @@ TEST(FormatConversion, CxsSignToUnsignedRoundtrip)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

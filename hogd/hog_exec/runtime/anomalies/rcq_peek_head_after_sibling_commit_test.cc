@@ -34,12 +34,11 @@
 // the same transaction is also empty.
 //
 // See:
-//   - https://github.com/groundhogchain/hogd/issues/1653
+//   - https://github.com/thruputchain/hogd/issues/1653
 
 #include <gtest/gtest.h>
 
 #include <atomic>
-#include <cstdint>
 #include <functional>
 #include <memory>
 #include <optional>
@@ -52,6 +51,7 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
@@ -80,8 +80,7 @@ class RcqPeekHeadAfterSiblingCommitTest : public ::testing::Test,
 public:
   RcqPeekHeadAfterSiblingCommitTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override
@@ -221,7 +220,7 @@ public:
         .invocation =
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -244,7 +243,7 @@ public:
     std::thread worker([&] {
       auto handler = make_new_system_call_handler(tx, ctx);
       run.root_ok = handler.root_invoke()().is_root_success();
-      run.proposal_data = handler.get_proposal_data();
+      run.proposal_data = handler.extract_proposal_data();
       if (run.root_ok) {
         run.commit = handler.try_commit_transaction()();
       }
@@ -289,7 +288,7 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   auto run = run_peek_consume_interleaved(tx_peek_consume, *ctx, [&] {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
     EXPECT_TRUE(ha.root_invoke()().is_root_success());
-    insert_p = ha.get_proposal_data();
+    insert_p = ha.extract_proposal_data();
     EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   });
 
@@ -370,7 +369,7 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   {
     auto ha = make_new_system_call_handler(tx_insert_10, *ctx);
     ASSERT_TRUE(ha.root_invoke()().is_root_success());
-    insert_10_p = ha.get_proposal_data();
+    insert_10_p = ha.extract_proposal_data();
     ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
@@ -378,7 +377,7 @@ TEST_F(RcqPeekHeadAfterSiblingCommitTest,
   auto run = run_peek_consume_interleaved(tx_peek_consume, *ctx, [&] {
     auto ha = make_new_system_call_handler(tx_insert_20, *ctx);
     EXPECT_TRUE(ha.root_invoke()().is_root_success());
-    insert_20_p = ha.get_proposal_data();
+    insert_20_p = ha.extract_proposal_data();
     EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   });
 

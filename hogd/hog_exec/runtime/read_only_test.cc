@@ -15,6 +15,7 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
@@ -42,12 +43,12 @@
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-class ReadOnlyTest : public ::testing::TestWithParam<TestDB>,
+class ReadOnlyTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
   ReadOnlyTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -86,7 +87,7 @@ check_result(HostFnStatus<SyscallStatus<std::optional<std::tuple<>>>> res)
 
 } // namespace
 
-TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
+TEST_F(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -141,7 +142,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -159,7 +160,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -172,7 +173,7 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
+TEST_F(ReadOnlyTest, ReadOnlyLogEvent)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
   fns.emplace(0,
@@ -227,7 +228,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -248,7 +249,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -261,7 +262,7 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyPropagation)
+TEST_F(ReadOnlyTest, ReadOnlyPropagation)
 {
   // Root invokes the middle contract with InvokeFlag::ReadOnly. The middle
   // contract invokes the leaf with InvokeFlag::None (no ReadOnly on that
@@ -357,7 +358,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kAddressRoot,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -375,7 +376,7 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 // precompile. get_balance_of is read-only safe and should succeed;
 // transfer calls modify_native_token_balance and log_event which now
 // return errors in read-only mode, causing the transfer to fail.
-TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 {
   using amount_t = std::tuple<int64_t, uint64_t>;
   auto make_amount = [](int128_t amount) -> amount_t {
@@ -450,7 +451,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   contract_map.emplace(kCallerNativeId, std::move(caller_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -473,7 +474,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -491,7 +492,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -509,7 +510,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(2),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
@@ -529,7 +530,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 // native token precompile with the read-only flag. get_balance_of should
 // succeed; transfer should fail because modify_native_token_balance is blocked
 // in read-only mode.
-TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 {
   using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
 
@@ -538,7 +539,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 
   // Deploy the native token precompile so the RV32 contract can invoke it
   auto token_contract_xdr = make_native_contract(std::to_underlying(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
   write_contract(token_contract_xdr);
   write_deployment(kNativeTokenContractAddress, token_contract_xdr);
 
@@ -548,7 +549,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -569,7 +570,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_get_balance">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_get_balance">(
                             kObserverAddr)},
@@ -593,7 +594,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_transfer">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_transfer">(
                             kReceiverAddr)},
@@ -612,7 +613,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 // is rejected and the output address is not zeroed.  The contract hash handed
 // to the inner frame is a real, deployable contract, so read-only mode is the
 // only thing that can make the deploy fail.
-TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
+TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 {
   deploy_callee();
 
@@ -622,7 +623,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
       .tx = Transaction{
           .invocation =
               client_.make_invocation<u8"read_only_deploy_output_preserved">(
-                  UINT64_MAX, callee_addr_, sha256(*contract_)),
+                  kDefaultMaxTxGas, callee_addr_, sha256(*contract_)),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -633,7 +634,7 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 
 // Checks that aliasing guards (returning kFault) are performed before the read
 // only guard
-TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
+TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
   deploy_callee();
 
@@ -642,7 +643,7 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
           .invocation = client_.make_invocation<
-              u8"read_only_aliasing_before_read_only_check">(UINT64_MAX,
+              u8"read_only_aliasing_before_read_only_check">(kDefaultMaxTxGas,
                                                              callee_addr_),
           .uniquifier = make_new_uniquifier(),
       }};
@@ -651,11 +652,6 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

@@ -87,6 +87,29 @@ Run `33557627276` measured direct `HashBuffers` slot creation: approximately
 charge. Warm syscall Copy reuses a destination and misses this allocation cost.
 The occupancy sweep supports the tested range, not every possible configuration.
 
+ML-DSA-65 verification has its own price: 46592 gas plus 160 per 136-byte
+SHAKE256 block, on top of the shared syscall base. Run `39809791818` (hog10,
+AMD EPYC 9554, gas unit 1.6219 ns, no margin) measured it:
+
+| Case | Measured ns (entry) | Measured gas | Billed gas |
+|---|---:|---:|---:|
+| VerifySignatureMlDsa65, 0 bytes | 75891.6 | 46802 | 46802 |
+| VerifySignatureMlDsa65, 64 bytes | 75879.8 | 46734 | 46802 |
+| VerifySignatureMlDsa65, 1024 bytes | 77949.7 | 48071 | 48082 |
+
+Measured and billed gas include the 50-gas shared base and exclude the ECALL
+instruction. The sweep fit 75644.9 ns plus 258.0 ns per block (R-squared 1.0),
+which is 46640 gas at zero blocks and 160 per block. Less the shared base that
+leaves 46590; the base was raised to 46592 so that no measured length bills
+below its measurement. Per gas billed under the ed25519 price the same run put
+ML-DSA-65 at 2.53-2.63x the time of ed25519, which this price removes.
+
+`rv32_syscall_report.py` keeps these rows out of the shared syscall numbers,
+prints them beside the ed25519 row of the same length, and in `--schedule`
+proposes the two ML-DSA constants from each run. Their guards enter
+`syscall_reference.txt` the next time it is regenerated with mode=reference;
+until then `--check` notes them as ungated.
+
 ## Storage
 
 Run `33725560215`, engine `d4697729c27d6dbd`, gas unit 1.6217 ns, recorded five
@@ -150,7 +173,7 @@ GetLen was flat over this range. Set and Get became more expensive per byte at
 larger lengths; the largest adjacent band measured approximately 0.0388 and
 0.0196 ns/byte respectively. Prices use the most expensive measured band:
 13 gas per 512-byte write block and 7 per read block, on top of storage access.
-The block size is a pricing constant included in the gas digest.
+The block size is a pricing constant listed in the gas schedule.
 
 Reads charge bytes copied rather than the offered buffer capacity. This avoids
 billing the SDK's reusable scratch capacity when it reads a small item. The

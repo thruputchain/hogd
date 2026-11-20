@@ -116,8 +116,7 @@ class ContractResultPresetHandlingTest : public ::testing::Test,
 public:
   ContractResultPresetHandlingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kMockInMemory)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -170,7 +169,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkVoid)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  u8"call_return_ok_void">(1000),
+                                  u8"call_return_ok_void">(10'000),
                           .uniquifier = make_new_uniquifier()}},
       *context_);
 
@@ -189,7 +188,7 @@ TEST_F(ContractResultPresetHandlingTest, TestGetOkInt)
           .tx =
               Transaction{.invocation =
                               caller_contract_client_.template make_invocation<
-                                  u8"call_return_ok_int">(1000),
+                                  u8"call_return_ok_int">(10'000),
                           .uniquifier = make_new_uniquifier()}},
       *context_);
 

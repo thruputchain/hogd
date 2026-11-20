@@ -507,6 +507,20 @@ check_contains "a missing control_cli is reported" "reaping by signal only" \
 check_contains "a missing control_cli still signals by name" \
   "killall -TERM control_server" "$(cat "$killall_log")"
 
+## ci_truncate_log_to_tail
+
+CI_LOG_TAIL_BYTES=16
+printf '0123456789abcdefghijklmnopqrstuv' >"$work_dir/long.log"
+printf 'short\n' >"$work_dir/short.log"
+ci_truncate_log_to_tail "$work_dir/long.log"
+ci_truncate_log_to_tail "$work_dir/short.log"
+check_eq "an over-cap log starts with a note of what was dropped" \
+  "[truncated by ci_truncate_log_to_tail: kept the last 16 of 32 bytes]" \
+  "$(head -n 1 "$work_dir/long.log")"
+check_eq "an over-cap log keeps only its last bytes" "ghijklmnopqrstuv" \
+  "$(tail -n +2 "$work_dir/long.log")"
+check_eq "an under-cap log is left alone" "short" "$(cat "$work_dir/short.log")"
+
 if ((fail)); then
   echo "bench_harness selftest FAILED"
   exit 1

@@ -25,6 +25,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/cleanup.h"
 #include "x23/corosync.h"
 
 namespace hogd {
@@ -32,6 +33,8 @@ namespace hogd {
 class EventRPCContext {
 public:
   explicit EventRPCContext(std::string_view work_directory);
+  // Waits for a commit's background sync, which refers to this object.
+  ~EventRPCContext();
 
   // Wakes every indexer pull parked on the next publication so it answers
   // now. ~EventIndexerServer calls this before RpcServer drains: destruction
@@ -46,6 +49,10 @@ public:
 
   // Opens a new block.
   // Returns an error if the block already exists.
+  //
+  // The block's temp events file is created outside lock_, between two short
+  // critical sections: the first reserves the id, the second inserts the
+  // context. Nothing under lock_ touches the disk on this path.
   x23::Async<EventStatus<void>> open_block(BlockID block_id);
 
   // Closes a block.
@@ -54,10 +61,19 @@ public:
   x23::Async<EventStatus<SHA256Hash>> close_block(BlockID block_id,
                                                   BlockHeight block_height);
 
-  // Durably publishes a closed block and GCs the block context.
+  // Publishes a closed block's committed record and GCs the block context.
   // Returns the block height on success.
+  //
+  // The reply does not wait for the record's fsyncs, only for the previous
+  // commit's. The record is pullable once its own sync completes; a sync that
+  // fails panics. See docs/component-failure-model.md.
   x23::Async<EventStatus<BlockHeight>>
   commit_block(BlockID block_id, ConsensusValue consensus_value);
+
+  // Waits for the newest commit's background sync, if one is running.
+  // Afterwards every committed record is durable and pullable, until the next
+  // commit.
+  x23::Async<void> flush_outbox_sync();
 
   x23::Async<EventStatus<void>>
   reconcile_outbox_tip(BlockID block_id, ConsensusValue consensus_value);
@@ -96,16 +112,40 @@ public:
   {
     close_reserved_test_hook_ = std::move(hook);
   }
+  // Runs in open_block() after the id is reserved and lock_ is released,
+  // before the events file is created.
+  void set_open_reserved_test_hook(std::function<void(BlockID)> hook)
+  {
+    open_reserved_test_hook_ = std::move(hook);
+  }
+  // Runs on the background sync's thread before it fsyncs the committed
+  // record at the given height. Set it before the first commit.
+  void set_outbox_sync_test_hook(std::function<void(BlockHeight)> hook)
+  {
+    outbox_sync_test_hook_ = std::move(hook);
+  }
   static constexpr size_t kMaxTxFailureNotices = 256;
 
 private:
-  enum class BlockOperation { kClosing, kCommitting, kAbandoning };
+  enum class BlockOperation { kOpening, kClosing, kCommitting, kAbandoning };
 
   x23::Async<PerThreadARC<EventBlockContext> *>
   get_context_slow(BlockID block_id);
-  void gc_context_internal(
+  // Tears down a settled block's context.  Caller holds lock_.
+  //
+  // Returns the block's events file descriptor, if it still has one, for the
+  // caller to close after releasing lock_ (see close_events_file_async).  The
+  // name may just have been unlinked by release_events_file(); with the
+  // descriptor open that only dropped the directory entry, and the kernel
+  // frees the file's blocks at this close.  For a large losing block that is
+  // milliseconds of filesystem work, which must not happen under the lock
+  // every open_block() waits on.
+  [[nodiscard]] x23::UniqueFd gc_context_internal(
       std::unordered_map<BlockID, PerThreadARC<EventBlockContext>>::iterator
           it);
+  // Closes [events_file] on a thread outside the pool, since the close can
+  // block for milliseconds; see ThreadPool::async.
+  static x23::Detached close_events_file_async(x23::UniqueFd events_file);
 
   // Records that a block published its events file under [hash].  Caller holds
   // lock_.
@@ -119,6 +159,14 @@ private:
   // are ordered; the notice path needs no lock, since a parked handler checks
   // the mailbox after sampling.
   void publish_indexer_wake();
+
+  // Awaits and clears pending_outbox_sync_. [sync_guard] is the caller's hold
+  // on outbox_sync_lock_, checked on entry.
+  x23::Async<void> drain_outbox_sync(const x23::CoroGuard &sync_guard);
+  // The background half of a deferred commit: fsyncs the committed record at
+  // [block_height] off the pool, then advances the pullable tail to it under
+  // outbox_commit_lock_. Panics if the record cannot be made durable.
+  x23::Async<void> sync_committed_record(BlockHeight block_height);
 
   x23::Async<bool> reserve_block_operation(BlockID block_id,
                                            BlockOperation operation);
@@ -144,6 +192,14 @@ private:
   };
 
   x23::CoroLock lock_;
+  // Orders each commit after the previous commit's background sync. Held for
+  // the publication half of commit_block(), and taken before
+  // outbox_commit_lock_; the sync itself takes only outbox_commit_lock_, so a
+  // commit can wait for it while holding this.
+  x23::CoroLock outbox_sync_lock_;
+  // The newest commit's background sync, guarded by outbox_sync_lock_. It
+  // must be awaited before the handle is destroyed.
+  std::optional<x23::Async<void>> pending_outbox_sync_;
   // Serializes origin selection, committed publication, and pullable-tail
   // snapshots. Pull payload I/O is always performed after releasing it.
   x23::CoroLock outbox_commit_lock_;
@@ -165,7 +221,8 @@ private:
   // those is startup reconciliation's job.
   std::unordered_map<SHA256Hash, size_t, SipHash24Hasher> events_file_refs_;
   // Guarded by outbox_commit_lock_. Every record through this finalized
-  // height is pullable, including a crash-window record one ahead of HogDB.
+  // height is durable and pullable, including a crash-window record one ahead
+  // of HogDB. A record whose sync is still running is above it.
   std::optional<BlockHeight> finalized_indexer_tail_;
   std::optional<IndexerOutboxOrigin> current_indexer_origin_;
   std::vector<IndexerOutboxEpochOriginInfo> indexer_origins_;
@@ -187,6 +244,8 @@ private:
   std::string work_directory_;
   IndexerOutboxStore indexer_outbox_store_;
   std::function<void(BlockID)> close_reserved_test_hook_;
+  std::function<void(BlockID)> open_reserved_test_hook_;
+  std::function<void(BlockHeight)> outbox_sync_test_hook_;
 };
 
 } // namespace hogd

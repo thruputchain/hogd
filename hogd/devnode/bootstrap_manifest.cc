@@ -1,5 +1,6 @@
 #include "hogd/devnode/bootstrap_manifest.h"
 
+#include "hogd/base/base58.h"
 #include "hogd/base/network_hash.h"
 
 #include <fcntl.h>
@@ -223,20 +224,14 @@ parse_allocation(json::Value const &value, std::string_view context)
   if (!key) {
     return std::unexpected(key.error());
   }
-  if (key->size() != 66 || !key->starts_with("0x") ||
-      !std::ranges::all_of(key->substr(2), [](char c) {
-        return (c >= '0' && c <= '9') || (c >= 'a' && c <= 'f');
-      })) {
+  const auto public_key = decode_base58_fixed<32>(*key);
+  if (!public_key) {
     return std::unexpected(
-        std::format("{}.publicKey must be 0x-prefixed lowercase 32-byte hex",
+        std::format("{}.publicKey must be base58 encoding of exactly 32 bytes",
                     context));
   }
   LocalAccountAllocation allocation;
-  auto nibble = [](char c) { return c <= '9' ? c - '0' : c - 'a' + 10; };
-  for (std::size_t i = 0; i < allocation.public_key.size(); ++i) {
-    allocation.public_key[i] = static_cast<std::uint8_t>(
-        (nibble((*key)[2 + (2 * i)]) << 4) | nibble((*key)[3 + (2 * i)]));
-  }
+  allocation.public_key = *public_key;
   auto raw = require_string_field(value, "initialStorageTokens", context);
   if (!raw) {
     return std::unexpected(raw.error());
@@ -315,9 +310,9 @@ load_bootstrap_manifest(std::filesystem::path const &path)
   if (!schema_version) {
     return std::unexpected(std::move(schema_version.error()));
   }
-  if (*schema_version != 4) {
+  if (*schema_version != 5) {
     return std::unexpected(std::format(
-        "unsupported bootstrap manifest schemaVersion {}, expected 4; "
+        "unsupported bootstrap manifest schemaVersion {}, expected 5; "
         "use the original runtime for legacy manifests or generate a new "
         "manifest",
         *schema_version));
@@ -351,8 +346,8 @@ load_bootstrap_manifest(std::filesystem::path const &path)
       parse_network_hash(*network_hash_field);
   if (!network_hash ||
       format_network_hash(*network_hash) != *network_hash_field) {
-    return std::unexpected("bootstrap manifest networkHash must be exactly 64 "
-                           "lowercase hexadecimal characters");
+    return std::unexpected("bootstrap manifest networkHash must be base58 "
+                           "encoding of exactly 32 bytes");
   }
 
   std::expected<std::string_view, std::string> profile =

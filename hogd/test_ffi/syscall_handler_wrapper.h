@@ -6,6 +6,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <exception>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -139,7 +140,7 @@ public:
         std::fputs("ScopedContext: cannot grow the context stack: ", stderr);
         std::fputs(e.what(), stderr);
         std::fputc('\n', stderr);
-        throw; // noexcept: terminates here, with the reason already reported
+        std::terminate(); // noexcept: the reason is already reported
       }
     }
     ~ScopedContext()
@@ -159,9 +160,9 @@ public:
 
   // noexcept because this is reachable through the exported C entry point,
   // where a throw would unwind across the ABI into Rust. Growing the stack can
-  // fail; making that a deterministic terminate at the throw point is the
-  // defined behavior, and the diagnostic below is allocation-free so the reason
-  // still lands (same reasoning as the guard logging, issue #2559).
+  // fail; making that an explicit std::terminate() is the defined behavior, and
+  // the diagnostic below is allocation-free so the reason still lands (same
+  // reasoning as the guard logging, issue #2559).
   [[nodiscard]]
   bool push_context() noexcept
   {
@@ -188,7 +189,7 @@ public:
       std::fputs("push_context: cannot grow the context stack: ", stderr);
       std::fputs(e.what(), stderr);
       std::fputc('\n', stderr);
-      throw; // noexcept: terminates here, with the reason already reported
+      std::terminate(); // noexcept: the reason is already reported
     }
     return true;
   }

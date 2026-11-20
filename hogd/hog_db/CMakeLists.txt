@@ -17,12 +17,12 @@ add_library(hog_db_objects OBJECT
   item_lock/replay_cache_lock.cc
   item_lock/retrocausal_queue_lock.cc
   item_lock.cc
-  invariant_hog_age.cc
-  invariant_hog_conservation.cc
+  invariant_native_token_age.cc
+  invariant_native_token_conservation.cc
   invoke_tx.cc
   item_change.cc
   hog_db_dao.cc
-  hog_age_reconciliation.cc
+  native_token_age_reconciliation.cc
   rpc_context.cc
   rpc_from_auth.cc
   rpc_from_exec.cc

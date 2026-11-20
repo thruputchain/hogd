@@ -12,6 +12,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -50,12 +51,12 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class ManualRevertTest : public ::testing::TestWithParam<TestDB>,
+class ManualRevertTest : public ::testing::Test,
                          public NativeContractTestFramework {
 public:
   ManualRevertTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 };
 
@@ -71,7 +72,7 @@ public:
 // - Return data is preserved and passed to the caller
 // - Gas consumption is properly tracked
 //
-TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
+TEST_F(ManualRevertTest, ManualRevertBasicFunctionality)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto str_hello = make_bytestring("hello");
@@ -122,7 +123,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
                                 Invocation{.invoked_address = contract_addr,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -153,7 +154,7 @@ TEST_P(ManualRevertTest, ManualRevertBasicFunctionality)
 // and finishes successfully. Verifies parent's storage persists and child's
 // storage key is absent after commit.
 //
-TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
+TEST_F(ManualRevertTest, NestedManualRevertWithReturnData)
 {
   constexpr ContractAddress kAddressParent = make_contract_address(1);
   constexpr ContractAddress kAddressChild = make_contract_address(2);
@@ -267,7 +268,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
                                 Invocation{.invoked_address = kAddressParent,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -299,7 +300,7 @@ TEST_P(ManualRevertTest, NestedManualRevertWithReturnData)
 // This test validates that manual revert provides the unique "controlled
 // failure" behavior.
 //
-TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
+TEST_F(ManualRevertTest, ManualRevertVsNormalFailure)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("test_state");
@@ -369,7 +370,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(0),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -392,7 +393,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(1),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -422,7 +423,7 @@ TEST_P(ManualRevertTest, ManualRevertVsNormalFailure)
 // - Gas consumption is consistent between manual revert and normal execution
 // - Out-of-gas scenarios are handled correctly with manual revert
 //
-TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
+TEST_F(ManualRevertTest, GasConsumptionWithManualRevert)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("gas_test");
@@ -519,7 +520,7 @@ TEST_P(ManualRevertTest, GasConsumptionWithManualRevert)
 // keys level1 / level2 / level3 on the respective contracts are all absent
 // after the root frame reverts the transaction.
 //
-TEST_P(ManualRevertTest, MultipleNestedManualReverts)
+TEST_F(ManualRevertTest, MultipleNestedManualReverts)
 {
   constexpr static ContractAddress kAddressA = make_contract_address(1);
   constexpr static ContractAddress kAddressB = make_contract_address(2);
@@ -673,7 +674,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
                                 Invocation{.invoked_address = kAddressA,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -707,7 +708,7 @@ TEST_P(ManualRevertTest, MultipleNestedManualReverts)
 // - Caller errors (caller_error)
 // - Normal success case (error_type = 0)
 //
-TEST_P(ManualRevertTest, ErrorTypeManualReverts)
+TEST_F(ManualRevertTest, ErrorTypeManualReverts)
 {
   ContractAddress contract_addr = make_contract_address(1);
   auto test_data = make_bytestring("error_test_data");
@@ -823,7 +824,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                              .entrypoint =
                                                  entrypoint_from_method_id(
                                                      error_type),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -854,7 +855,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
                                   Invocation{.invoked_address = contract_addr,
                                              .entrypoint =
                                                  entrypoint_from_method_id(3),
-                                             .gas_limit = UINT64_MAX,
+                                             .gas_limit = kDefaultMaxTxGas,
                                              .calldata = {}},
                               .uniquifier = make_new_uniquifier()}},
         *context);
@@ -894,7 +895,7 @@ TEST_P(ManualRevertTest, ErrorTypeManualReverts)
 //   address — nested under reverted child frame)
 // - Return data from child is available to parent
 //
-TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
+TEST_F(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
 {
   constexpr static ContractAddress kAddressParent = make_contract_address(1);
   constexpr static ContractAddress kAddressChild = make_contract_address(2);
@@ -1052,7 +1053,7 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
                                 Invocation{.invoked_address = kAddressParent,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *runtime_context);
@@ -1086,11 +1087,6 @@ TEST_P(ManualRevertTest, ManualRevertWithSuccessfulTryInvokeChildren)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, ManualRevertTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

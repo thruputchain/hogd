@@ -20,6 +20,7 @@
 #include "event.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
@@ -104,6 +105,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -117,6 +119,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -181,7 +184,7 @@ protected:
   }
 
   NativeContractTestFramework framework_{
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb};
+      false, BlockExecutionMode::kBlockExecutionModeProposal};
 
   x23::Defer<> force_syscallhandler_commit_ =
       SystemCallHandler::force_commit_or_abort();
@@ -192,7 +195,8 @@ protected:
 TEST_F(ViewTest, BasicViewReturnsOkWithCorrectOutput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
 
   auto result = run_view(make_query(invocation));
   ASSERT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -229,7 +233,7 @@ TEST_F(ViewTest, ViewGasConsumedIsIndependentOfLimit)
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
 
   auto measured = run_view(
-      make_query(client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U)));
+      make_query(client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U)));
   ASSERT_EQ(measured.status(), TransactionViewStatus::Ok);
   ASSERT_EQ(measured.result().output.status_code(),
             InvocationFrameStatusCode::Return);
@@ -254,7 +258,7 @@ TEST_F(ViewTest, ViewGasConsumedIsIndependentOfLimit)
 TEST_F(ViewTest, ViewWithMsgSender)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
 
   auto result = run_view(make_query_with_parent(invocation, kReadOnlyAddress));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -262,16 +266,15 @@ TEST_F(ViewTest, ViewWithMsgSender)
 
 TEST_F(ViewTest, ViewNonexistentContract)
 {
-  // Behavior change: root-resolve fallback (see
-  // docs/superpowers/specs/2026-08-06-default-wallet-root-fallback-resolution-design.md
-  // §4). With the genesis wallet record present, resolve_runtime returns the
-  // default_wallet frame instead of null. The wallet reverts InvalidAuthClaim
-  // (no pubkey claim in the view query), so the result is Ok (frame ran) rather
-  // than InvalidInput (no frame started).
+  // Behavior change: root-resolve fallback. With the genesis wallet record
+  // present, resolve_runtime returns the default_wallet frame instead of null.
+  // The wallet reverts InvalidAuthClaim (no pubkey claim in the view query), so
+  // the result is Ok (frame ran) rather than InvalidInput (no frame started).
   ContractAddress bad_address =
       NativeContractTestFramework::make_contract_address(99);
   ContractTraitClient<fibonacci::Fibonacci> client(bad_address);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -280,7 +283,7 @@ TEST_F(ViewTest, ViewNonexistentContract)
 TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
 
   auto result = run_view(make_query_with_parent(invocation, kFibAddress));
   EXPECT_EQ(result.status(), TransactionViewStatus::InvalidInput);
@@ -292,7 +295,7 @@ TEST_F(ViewTest, ViewReentrantParentMatchesInvoked)
 TEST_F(ViewTest, ViewRejectsUndefinedInvokeFlags)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 5U);
+  auto invocation = client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 5U);
   auto query = make_query(invocation);
   query.invoke_flags = 0x8;
 
@@ -313,7 +316,7 @@ TEST_F(ViewTest, ViewContractSelfInvokeAborts)
   // depth bound as callee faults.
   auto invocation =
       client.make_invocation<u8"read_only_aliasing_before_read_only_check">(
-          UINT64_MAX, kReadOnlyAddress);
+          kDefaultMaxTxGas, kReadOnlyAddress);
 
   auto result = run_view(make_query(invocation));
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
@@ -354,6 +357,54 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
 
   auto result = run_view(make_query(invocation), *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
+// A view runs at the timepoint its caller states, not the one the shared
+// snapshot cache was opened with: two views off one cache see their own.
+TEST_F(ViewTest, ViewObservesItsOwnBlockTimepoint)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  static TimePoint observed = 0;
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        TimePoint block_timepoint = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kGetBlockTimepoint>(
+            block_timepoint);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "get_block_timepoint syscall failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        observed = block_timepoint;
+        co_return InvokeStatus<void>{};
+      });
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  const TimePoint cache_timepoint = framework_.get_storage_snapshot_cache()
+                                        ->block_execution_context()
+                                        .block_timepoint;
+  for (TimePoint stated : {cache_timepoint + 1'000, cache_timepoint + 2'000}) {
+    observed = 0;
+    auto query = make_query(invocation);
+    query.block_timepoint = stated;
+    auto result = run_view(query, *setup.context);
+    EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+    EXPECT_EQ(observed, stated);
+  }
+  EXPECT_EQ(framework_.get_storage_snapshot_cache()
+                ->block_execution_context()
+                .block_timepoint,
+            cache_timepoint);
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
@@ -1303,7 +1354,8 @@ TEST_F(ViewTest, ViewRevertedChildFrameEventsDropped)
 TEST_F(ViewTest, ViewForwardedTokenWithoutParentReturnsInvalidInput)
 {
   ContractTraitClient<fibonacci::Fibonacci> client(kFibAddress);
-  auto invocation = client.make_invocation<u8"fibonacci">(UINT64_MAX, 10U);
+  auto invocation =
+      client.make_invocation<u8"fibonacci">(kDefaultMaxTxGas, 10U);
   auto query = make_query(invocation);
   query.forwarded_tokens.push_back(
       x23::serialize(AuthToken{.mint_address = kFibAddress,
@@ -1671,7 +1723,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();
@@ -1770,7 +1823,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();

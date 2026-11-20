@@ -12,7 +12,6 @@ BINARIES = (("hog_db", "hog-db"), ("hog_exec", "hog-exec"),
             ("hog_mempool", "hog-mempool"), ("hog_auth", "hog-auth"),
             ("hog_event", "hog-event"), ("hog_indexer", "hog-indexer"),
             ("devnode", "hog-devnode"), ("devnode", "hog-hosted-bootstrap"))
-# dev_wallet.rv32a is no longer shipped; check_archives asserts exact members.
 CONTRACTS = ["contracts/genesis_root.rv32a"]
 
 # Text fixtures model ELF sections; these tools reject incorrect objcopy flags.

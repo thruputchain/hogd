@@ -1,10 +1,12 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <atomic>
 #include <chrono>
 #include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
 #include <vector>
 
@@ -32,6 +34,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
 #include "integration.hh"
+#include "network.hh"
 #include "rpc_types.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
@@ -577,35 +580,94 @@ class RecordingMempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
 
-  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  {
+    intro_calls_.fetch_add(1);
+    co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
+  }
+
+  static x23::Async<IntroAuthResult>
+  mempoolauth_get_auth_info(ProtocolCommit /*protocol*/)
   {
     co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
   }
 
-  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
-                                                 KeyChangeBatch key_changes)
+  x23::Async<void> mempoolauth_auth_data_changed_chunk(KeyChangeChunk chunk)
   {
-    std::lock_guard lock(mutex_);
-    height_ = height;
-    changes_ = std::move(key_changes);
+    std::scoped_lock lock(mutex_);
+    chunks_.push_back(std::move(chunk));
     co_return;
   }
 
-  std::pair<std::optional<BlockHeight>, KeyChangeBatch> received()
+  // The chunks received so far, in arrival order.
+  std::vector<KeyChangeChunk> chunks() const
   {
-    std::lock_guard lock(mutex_);
-    return {height_, changes_};
+    std::scoped_lock lock(mutex_);
+    return chunks_;
   }
 
+  int intro_calls() const { return intro_calls_.load(); }
+
 private:
-  std::mutex mutex_;
-  std::optional<BlockHeight> height_;
-  KeyChangeBatch changes_;
+  mutable std::mutex mutex_;
+  std::vector<KeyChangeChunk> chunks_;
+  std::atomic<int> intro_calls_ = 0;
 };
 
 static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
 
+// The changes the mempool received for [height], in chunk order.
+KeyChangeBatch
+changes_received(const RecordingMempoolAuthRpc &mempool, BlockHeight height)
+{
+  std::vector<KeyChangeChunk> chunks = mempool.chunks();
+  std::erase_if(chunks, [height](const KeyChangeChunk &chunk) {
+    return chunk.height != height;
+  });
+  std::ranges::sort(chunks, {}, &KeyChangeChunk::chunk_index);
+  KeyChangeBatch changes;
+  for (const KeyChangeChunk &chunk : chunks) {
+    for (const KeyChange &change : chunk.changes) {
+      changes.push_back(change);
+    }
+  }
+  return changes;
+}
+
 } // namespace
+
+// The mempool starts serving the coordinator once auth registers, so auth
+// registers only after its db intro has returned. Registering first would let
+// a block commit before the subscription, and that block's changes would never
+// reach the mempool (issue #1927).
+TEST_F(AuthServerTest, RegistersWithMempoolOnlyAfterDbIntro)
+{
+  RpcServer<BlockingIntroDBAuthRpc> db_server;
+  const uint16_t db_port = db_server.start_server(0);
+  dbauth_client_t dbauth_client =
+      make_dbauth_client(std::format("localhost:{}", db_port))().value();
+  AuthServer race_auth_server(std::move(dbauth_client), NetworkHash{}, 16);
+
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t mempool_port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", mempool_port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  race_auth_server.set_mempool_client(std::move(*client));
+
+  std::jthread subscribe_thread([&] {
+    IntroAuthResult intro =
+        race_auth_server.subscribe_and_register(AuthCard{})();
+    EXPECT_EQ(intro.outcome(), IntroAuthOutcome::kSuccess);
+  });
+  db_server->impl()->wait_for_intro();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 0);
+
+  db_server->impl()->release_intro(1);
+  subscribe_thread.join();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 1);
+}
 
 TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
 {
@@ -634,17 +696,17 @@ TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
   auth_server().register_auth_data_updates(0, ChunkedVector<KeyChangeBatch>(
                                                   std::move(chunks)))();
 
-  const auto [height, changes] = mempool->impl()->received();
-  ASSERT_EQ(height, 0);
-  EXPECT_EQ(changes, expected);
+  EXPECT_EQ(changes_received(*mempool->impl(), 0), expected);
   auto cached = auth_server().lookup_auth_data(0, expected[0].address)();
   ASSERT_TRUE(cached.has_value());
   EXPECT_EQ(cached.value()->second, auth_data);
 
+  // An empty height is still forwarded, as one chunk with no changes.
   auth_server().register_auth_data_updates(1, KeyChangeBatch{})();
-  const auto [empty_height, empty_changes] = mempool->impl()->received();
-  EXPECT_EQ(empty_height, 1);
-  EXPECT_TRUE(empty_changes.empty());
+  const std::vector<KeyChangeChunk> received = mempool->impl()->chunks();
+  ASSERT_EQ(received.size(), 2U);
+  EXPECT_EQ(received.back().height, 1);
+  EXPECT_TRUE(received.back().changes.empty());
 }
 
 // Regression test for #1448: lookup_auth_data waiters stranded when
@@ -682,6 +744,43 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   EXPECT_TRUE(lookup_finished.load());
 
   lookup_thread.join();
+}
+
+// The forward to the mempool is a run of KeyChangeChunk records under the
+// chunk bound that together carry every change of the height.
+TEST_F(AuthServerTest, ForwardsAHeightToTheMempoolAsARunOfChunks)
+{
+  RpcServer<SimpleDBAuthRpc> db_server(/*intro_height=*/0);
+  const uint16_t db_port = db_server.start_server(0);
+  RpcServer<RecordingMempoolAuthRpc> mempool_server;
+  const uint16_t mempool_port = mempool_server.start_server(0);
+  AuthServer auth_server(
+      make_dbauth_client(std::format("localhost:{}", db_port))().value(),
+      NetworkHash{}, 16, /*max_key_changes_per_chunk=*/2);
+  x23::HostPort mempool_host{"127.0.0.1", mempool_port};
+  auth_server.set_mempool_client(
+      make_rpc_client<MempoolAuth1>(mempool_host)().value());
+
+  KeyChangeBatch key_changes;
+  for (uint8_t i = 1; i <= 5; i++) {
+    key_changes.push_back(
+        KeyChange{.address = make_test_address(i), .auth_data = {}});
+  }
+  auth_server.register_auth_data_updates(1, key_changes)();
+
+  const std::vector<KeyChangeChunk> chunks = mempool_server.impl()->chunks();
+  ASSERT_EQ(chunks.size(), 3U);
+  std::set<uint32_t> indices;
+  size_t changes = 0;
+  for (const KeyChangeChunk &chunk : chunks) {
+    EXPECT_EQ(chunk.height, 1);
+    EXPECT_EQ(chunk.chunk_count, 3U);
+    EXPECT_LE(chunk.changes.size(), 2U);
+    indices.insert(chunk.chunk_index);
+    changes += chunk.changes.size();
+  }
+  EXPECT_EQ(indices, (std::set<uint32_t>{0, 1, 2}));
+  EXPECT_EQ(changes, 5U);
 }
 
 TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)

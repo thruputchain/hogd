@@ -11,6 +11,8 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
 #include "types.hh"
+#include "x23/serialize.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -60,6 +62,16 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
              config_params.max_savepoint_depth, kSavepointDepthCeiling);
     return false;
   }
+  // Genesis load refuses these ranges, but a tip may come from a chain a
+  // newer build created, or from a rewritten row. Serving it would have this
+  // node attach contracts it cannot read or run, or refuse ones its peers
+  // attach.
+  if (const auto unsupported = unsupported_admission_range(config_params)) {
+    critical("recovered tip network config is not one this build can serve: "
+             "{}",
+             *unsupported);
+    return false;
+  }
   // The tip row is outside the state hash, so a tampered type can pass the
   // config hash (#4293); kMockTest is test-only, never a real default wallet.
   switch (tip.default_wallet.contract_type) {
@@ -73,10 +85,27 @@ StartupValidation::tip_is_servable(HogDbDAO &db, const DbTip &tip,
   }
   // Height 0 is exempt: a chain may name a wallet its genesis ceremony
   // deploys in the height-1 block.
-  if (tip.value.proposal_header.block_height > 0 &&
-      !db.read_contract_code(tip.default_wallet.hash)) {
-    critical("no contract stored for the tip's default wallet");
-    return false;
+  if (tip.value.proposal_header.block_height > 0) {
+    const auto code = db.read_contract_code(tip.default_wallet.hash);
+    if (!code) {
+      critical("no contract stored for the tip's default wallet");
+      return false;
+    }
+    // The tip row is outside the state hash, so a tamper can keep the code hash
+    // while rewriting the claimed type (#4306); bind it to the decoded row.
+    Contract contract;
+    try {
+      x23::deserialize(&contract, x23::BufView{*code});
+    } catch (const x23::XdrException &e) {
+      critical("tip default wallet code row does not decode as a contract: {}",
+               e.what());
+      return false;
+    }
+    if (contract.contract_type() != tip.default_wallet.contract_type) {
+      critical("tip default wallet code type {} does not match claimed type {}",
+               contract.contract_type(), tip.default_wallet.contract_type);
+      return false;
+    }
   }
   return true;
 }

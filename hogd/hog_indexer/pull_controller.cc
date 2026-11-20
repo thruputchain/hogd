@@ -16,6 +16,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/metrics.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/metrics/health.h"
@@ -264,10 +265,13 @@ IndexerPullController::run(const std::stop_token &stop)
         // consumed committed blocks (metrics_history#1061).
         if (applied.outcome() ==
             IndexerBlockApplyOutcome::IndexerBlockApplied) {
+          const double apply_seconds =
+              static_cast<double>((apply_end - apply_start).count()) / 1e9;
           info("applied committed block {} ({} event logs) in {} ns ({:.3f} s)",
                static_cast<std::int64_t>(pulled_height), pulled_event_logs,
-               (apply_end - apply_start).count(),
-               static_cast<double>((apply_end - apply_start).count()) / 1e9);
+               (apply_end - apply_start).count(), apply_seconds);
+          record_indexer_apply(applied.progress().contiguous_height,
+                               apply_seconds);
         }
         else {
           info("skipped duplicate committed block {}",

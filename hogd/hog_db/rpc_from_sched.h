@@ -42,10 +42,11 @@ public:
   static x23::Async<void> dbsched_null() { co_return; }
 
   // RPC methods
-  x23::Async<HogAgeResults>
-  dbsched_get_hog_ages(const ContractAddressBatch &addresses);
+  x23::Async<NativeTokenAgeResults>
+  dbsched_get_native_token_ages(const ContractAddressBatch &addresses);
 
-  x23::Async<DbSchedResult> dbsched_write_hog_ages(const HogAgeBatch &ages);
+  x23::Async<DbSchedResult>
+  dbsched_write_native_token_ages(const NativeTokenAgeBatch &ages);
 
   x23::Async<DbAddressAuthDataBatchResult>
   dbsched_get_address_auth_data(BlockID block_id,
@@ -93,10 +94,10 @@ private:
                                  PerThreadARC<BlockTX> *btx,
                                  const StorageLongHash &db_hash);
 
-  // write_hog_ages_locked writes a hog-age batch as one ramdb write pass
-  // under ctx_.ramdb_write_pass_lock(). A plain function, not a coroutine,
-  // so the lock cannot span a suspension point.
-  DbSchedResult write_hog_ages_locked(const HogAgeBatch &ages);
+  // write_native_token_ages_locked writes a native-token-age batch as one ramdb
+  // write pass under ctx_.ramdb_write_pass_lock(). A plain function, not a
+  // coroutine, so the lock cannot span a suspension point.
+  DbSchedResult write_native_token_ages_locked(const NativeTokenAgeBatch &ages);
 };
 static_assert(is_DbSched1<HogDbSchedRpc *, x23::Async>);
 

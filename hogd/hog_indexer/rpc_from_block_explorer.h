@@ -125,18 +125,23 @@ public:
 
 private:
   // query_failure maps a db-level error onto a page-query result union so a
-  // broken or not-yet-open index is distinguishable from an empty result set:
-  // kDBNotOpen and kQueryNotReady are reported as IndexerQueryNotReady;
-  // everything else (corrupt
-  // key, failed XDR parse, RocksDB iterator error) as
-  // IndexerQueryInternalFailure.
+  // broken or not-yet-open index is distinguishable from an empty result set.
+  // Cursor failures and unavailable continuation history have distinct
+  // outcomes. Startup/catch-up remains NotReady; storage failures remain
+  // InternalFailure. None of these outcomes is successful exhaustion.
   template<typename Result>
   static Result query_failure(std::string_view rpc, const IndexerError &err)
   {
+    if (err.code() == IndexerErrorCode::kInvalidCursor) {
+      return Result(IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    }
+    if (err.code() == IndexerErrorCode::kHistoryUnavailable) {
+      return Result(IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+    }
     if (err.code() == IndexerErrorCode::kDBNotOpen ||
         err.code() == IndexerErrorCode::kQueryNotReady) {
-      // Expected during startup or catch-up, including caller-supplied cursors
-      // above the indexed tip. Do not emit an error for each public request.
+      // Expected during startup or projection catch-up. Do not emit an error
+      // for each public request.
       debug("indexer {} query not ready: {}", rpc, err.error_code().message());
       return Result(IndexerQueryOutcome::IndexerQueryNotReady);
     }

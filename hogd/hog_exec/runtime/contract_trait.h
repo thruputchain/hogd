@@ -41,6 +41,16 @@ sdk_entrypoint_derivation(std::u8string_view identifier_name,
                           std::u8string_view method_name);
 Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
+// An SDK interface id: what ERC-165's supports_interface is asked about.
+using InterfaceId = std::array<uint8_t, 8>;
+
+// The interface id the SDK gives a contract trait,
+// sha256("thruput-interface::<name>::<major>")[0..8], matching
+// thruput_contract_util::interface_id. Takes the same u8"" trait metadata as
+// sdk_entrypoint_derivation, for the same charset reason (#2898).
+InterfaceId sdk_interface_id_derivation(std::u8string_view identifier_name,
+                                        std::u8string_view identifier_version);
+
 // `T` is a compile-time tag. XDR/TXS/CXS: 0 bytes (same as void / empty struct
 // / `x23::span<std::uint8_t, 0>`). `std::tuple_size` + 0-field `xdr_meta` make
 // `std::tuple<Signer, ...>` a valid `x23::is_xdr_type` struct for calldata.

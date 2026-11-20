@@ -245,6 +245,13 @@ DiskWriter::sync()
 void
 DiskWriter::print_stats()
 {
+  // Only the maintenance loop calls this, so prev_stats_time_ needs no lock.
+  // Keep its one-second wakeup but log these statistics once a minute.
+  time_point now = std::chrono::steady_clock::now();
+  if (prev_stats_time_ != time_point{} &&
+      now - prev_stats_time_ < std::chrono::seconds(60)) {
+    return;
+  }
   size_t in, out;
   {
     std::scoped_lock guard(to_disk_lock_);
@@ -252,7 +259,6 @@ DiskWriter::print_stats()
   }
   out = bytes_out_.load(std::memory_order_relaxed);
 
-  time_point now = std::chrono::steady_clock::now();
   std::chrono::nanoseconds ns = now - prev_stats_time_;
   // Guard against a zero/non-positive interval: dividing by it yields a
   // non-finite double, and converting that to size_t for print_iec_bytes is
@@ -263,8 +269,8 @@ DiskWriter::print_stats()
                                           static_cast<double>(ns.count()))
                     : 0;
 
-  info("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
-       print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
+  debug("disk stats: bytes enqueued {}, bytes written {}, write bw {}/s",
+        print_iec_bytes(in), print_iec_bytes(out), print_iec_bytes(rate));
 
   prev_bytes_out_ = out;
   prev_stats_time_ = now;
@@ -281,6 +287,9 @@ DiskWriter::register_metrics()
 void
 DiskWriter::record_metrics()
 {
+  if (!bytes_out_metric_) {
+    return;
+  }
   bytes_out_metric_.record(bytes_out_.load(std::memory_order_relaxed));
 }
 

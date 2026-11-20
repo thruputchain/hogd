@@ -3,10 +3,12 @@
 #include <atomic>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <expected>
 #include <fcntl.h>
 #include <memory>
+#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -99,6 +101,31 @@ read_final_events_file(std::string_view work_directory, SHA256Hash const &hash);
 
 class EventBlockContext {
 public:
+  // Open initializes before publishing the context. Close owns these fields
+  // until its operation reservation is released; its file-write task is joined
+  // before then. Commit reads them while holding its operation reservation.
+  struct BlockLogStats {
+    std::optional<std::int64_t> open_lock_wait_ns;
+    std::optional<std::int64_t> close_lock_wait_ns;
+    std::optional<std::int64_t> commit_lock_wait_ns;
+    std::optional<std::int64_t> write_events_ns;
+    std::optional<std::int64_t> pending_writes_ns;
+    std::optional<std::int64_t> residual_write_ns;
+    std::optional<size_t> residual_buffers;
+    // Bytes in the close-time residual write; earlier buffer flushes are
+    // not counted (the old "total bytes at end" value).
+    std::optional<size_t> residual_bytes;
+    std::optional<std::int64_t> sync_ns;
+    std::optional<std::int64_t> publish_ns;
+    std::optional<double> wait_executors_closed_s;
+    std::optional<double> wait_lock_s;
+    std::optional<double> prepare_context_and_async_s;
+    std::optional<double> close_total_s;
+    std::optional<std::int64_t> close_total_ns;
+  } log_stats;
+
+  static void warn_slow_phase(std::string_view phase, BlockID block_id,
+                              std::int64_t elapsed_ns);
   static std::string temp_events_filename(std::string_view work_directory,
                                           BlockID block_id)
   {
@@ -112,18 +139,53 @@ public:
            encode_hex(std::as_bytes(std::span(hash))) + ".events";
   }
 
-  EventBlockContext(std::string_view work_directory, BlockID block_id)
+  // Creates this block's temp events file, <block_id>.events_temp, and
+  // returns it open for writing.  Fail-stops on any error.
+  //
+  // The temp name is only unique among live blocks: block ids are
+  // process-local, so a crash can leave a temp file behind under a name a
+  // later run reuses.  Worse than a stale tail, that leftover can be a hard
+  // link to a PUBLISHED events file -- publish_file() links the final name
+  // before unlinking the temp name, and a crash between the two leaves both
+  // names on one inode -- so opening it in place (with O_TRUNC or otherwise)
+  // would corrupt the published file through the shared inode.  Unlinking the
+  // stale name first breaks any such link, and O_EXCL guarantees this block
+  // writes a fresh, empty inode of its own.
+  //
+  // This is a separate step from construction so EventRPCContext can do the
+  // disk I/O before it takes its global lock: a constructor that opened the
+  // file itself would put a syscall on every open_block() critical section.
+  static x23::UniqueFd create_events_file(std::string_view work_directory,
+                                          BlockID block_id);
+
+  // [events_file] is the descriptor create_events_file() returned for this
+  // block.
+  EventBlockContext(std::string_view work_directory, BlockID block_id,
+                    x23::UniqueFd events_file)
     : trie_(std::make_unique<MerkleTriePrefix>(
           /*alocator_type=*/Allocator<Node>::Type::kBump)),
-      work_directory_(work_directory), block_id_(block_id)
+      work_directory_(work_directory), block_id_(block_id),
+      events_file_(std::move(events_file))
   {
-    open_events_file();
+    CHECK(static_cast<bool>(events_file_));
   }
 
   EventBlockContext(std::string_view work_directory, BlockID block_id,
-                    ReusableEventBlockContextData data);
+                    ReusableEventBlockContextData data,
+                    x23::UniqueFd events_file);
 
   ReusableEventBlockContextData extract_data();
+
+  // Gives up the events file descriptor without closing it.  The block must
+  // be settled: nothing writes to the file once it is published or abandoned.
+  //
+  // This exists so the descriptor can be closed outside EventRPCContext's
+  // global lock.  Unlinking a name whose descriptor is still open only drops
+  // the directory entry; the kernel frees the file's blocks at the last
+  // close, and for a large events file that is milliseconds of filesystem
+  // work.  Letting ~EventBlockContext close it inside the lock made every
+  // concurrent open_block() wait on it.
+  x23::UniqueFd take_events_fd() noexcept { return std::move(events_file_); }
 
   ~EventBlockContext();
 
@@ -228,7 +290,6 @@ private:
   std::atomic<bool> closing_ = false;
 
   x23::Async<void> await_pending_writes_done();
-  void open_events_file();
 
   std::unique_ptr<MerkleTriePrefix> trie_;
   std::string work_directory_;

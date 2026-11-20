@@ -6,6 +6,7 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <sys/types.h>
 #include <unordered_map>
 #include <utility>
@@ -79,6 +80,9 @@ public:
     kExecutor,
     kDb,
     kMempool,
+    kEvent,
+    kIndexer,
+    kAuth,
     // [kComponentCount] is used to determine the number of members in the enum.
     // It is not a component itself. Always keep this field last.
     kComponentCount
@@ -148,6 +152,22 @@ public:
   }
 
   std::string dump_to_prometheus_string();
+
+  // Returns the gauge registered as [metric_name], or an empty handle if there
+  // is none. Requires mark_done_with_init, after which the component's metrics
+  // no longer change.
+  Gauge find_gauge(ComponentName component_name, const std::string &metric_name)
+  {
+    CHECK(done_with_init(component_name));
+    const Component &component =
+        components_[static_cast<size_t>(component_name)];
+    const auto it = component.metrics.find(metric_name);
+    if (it == component.metrics.end() ||
+        std::string_view(it->second->prometheus_type()) != "gauge") {
+      return Gauge{};
+    }
+    return Gauge(static_cast<GaugeImpl *>(it->second.get()));
+  }
 
   bool done_with_init(ComponentName component_name)
   {
@@ -269,6 +289,12 @@ struct std::formatter<hogd::Metrics::ComponentName>
       return std::formatter<const char *>::format("db", ctx);
     case hogd::Metrics::ComponentName::kMempool:
       return std::formatter<const char *>::format("mempool", ctx);
+    case hogd::Metrics::ComponentName::kEvent:
+      return std::formatter<const char *>::format("event", ctx);
+    case hogd::Metrics::ComponentName::kIndexer:
+      return std::formatter<const char *>::format("indexer", ctx);
+    case hogd::Metrics::ComponentName::kAuth:
+      return std::formatter<const char *>::format("auth", ctx);
     case hogd::Metrics::ComponentName::kComponentCount:
       CHECK(false);
       return std::formatter<const char *>::format("invalid", ctx);

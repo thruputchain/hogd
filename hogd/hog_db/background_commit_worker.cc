@@ -41,9 +41,9 @@ BackgroundCommitWorker::BackgroundCommitWorker(
 }
 
 namespace {
-// A HogsTransferredChunk whose deltas are still in the per-thread vectors
-// they were produced in. It serializes identically to the wire struct, so
-// the client sends it as one without copying a delta.
+// A NativeTokensTransferredChunk whose deltas are still in the per-thread
+// vectors they were produced in. It serializes identically to the wire struct,
+// so the client sends it as one without copying a delta.
 struct TransferChunkView {
   BlockHeight block;
   std::uint32_t chunk_index;
@@ -70,8 +70,8 @@ xdr_serialize(auto &serializer, const TransferChunkView &view)
 } // namespace hogd
 
 template<>
-struct x23::serialize_equiv<hogd::HogsTransferredChunk, hogd::TransferChunkView>
-  : std::true_type {};
+struct x23::serialize_equiv<hogd::NativeTokensTransferredChunk,
+                            hogd::TransferChunkView> : std::true_type {};
 
 namespace hogd {
 namespace {
@@ -86,7 +86,7 @@ send_transfer_chunk(BackgroundCommitWorker::sched_db_client_t *sched_db_client,
                                .chunk_index = position.index,
                                .chunk_count = position.count,
                                .deltas = deltas};
-  co_await sched_db_client->scheddb_hogs_transferred_chunk(view);
+  co_await sched_db_client->scheddb_native_tokens_transferred_chunk(view);
 }
 
 // Sends a committed block's balance deltas to the scheduler as a run of

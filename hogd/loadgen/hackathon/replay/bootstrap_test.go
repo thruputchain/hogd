@@ -12,8 +12,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/groundhogchain/lib-go/libxdr"
-	proto "github.com/groundhogchain/protocol-go"
+	"github.com/mr-tron/base58"
+	"github.com/thruputchain/lib-go/libxdr"
+	proto "github.com/thruputchain/thruput-protocol-go"
 )
 
 func TestBootstrapSuppliesOnlyGenesisAndKeepsWorkStreamOpen(t *testing.T) {
@@ -68,7 +69,7 @@ func TestSetupUsesGatewayAndWaitsForDependencyReceipts(t *testing.T) {
 		tx.Tx.Uniquifier.Nonce = uint64(i)
 		genesis.Initialization_txs = append(genesis.Initialization_txs, []proto.SignedTransaction{tx})
 		hash := hashTransaction(&tx)
-		key := "0x" + hex.EncodeToString(hash[:])
+		key := base58.Encode(hash[:])
 		manifest.InitializationHashes = append(manifest.InitializationHashes, key)
 		encoded := libxdr.NewXdrMarshaler().MarshalXdr(&tx)
 		rawToHash["0x"+hex.EncodeToString(encoded.Bytes())] = key

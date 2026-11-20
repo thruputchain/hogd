@@ -26,8 +26,7 @@ class ERC20ExperimentTest : public ::testing::Test,
 public:
   ERC20ExperimentTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb, false)
+          false, BlockExecutionMode::kBlockExecutionModeProposal, false)
   {}
 
 protected:

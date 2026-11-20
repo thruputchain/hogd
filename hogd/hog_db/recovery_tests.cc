@@ -49,13 +49,15 @@ namespace hogd {
 
 namespace {
 
-HogAge
-make_hog_age(uint128_t num_hogs, BlockHeight average_age)
+NativeTokenAge
+make_native_token_age(uint128_t num_native_tokens, BlockHeight average_age)
 {
-  auto num_hogs_xdr = to_xdr(num_hogs);
-  return HogAge{.address = ContractAddress{},
-                .num_hogs = {{num_hogs_xdr, num_hogs_xdr, num_hogs_xdr}},
-                .average_ages = {{average_age, average_age, average_age}}};
+  auto num_native_tokens_xdr = to_xdr(num_native_tokens);
+  return NativeTokenAge{
+      .address = ContractAddress{},
+      .num_native_tokens = {{num_native_tokens_xdr, num_native_tokens_xdr,
+                             num_native_tokens_xdr}},
+      .average_ages = {{average_age, average_age, average_age}}};
 }
 
 } // namespace
@@ -207,7 +209,9 @@ TEST(RecoveryTests, RecoveryVaryingItems)
 
     // add some items to the database
     // some items that are not in the db hash
-    CHECK(dao.write_address_average_hog_age(make_hog_age(0U, 4)).has_value());
+    CHECK(
+        dao.write_address_average_native_token_age(make_native_token_age(0U, 4))
+            .has_value());
     // some items that are in the db hash
 
     RPCContext ctx(std::move(dao), nullptr);

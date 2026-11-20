@@ -82,27 +82,28 @@ make_event(const ProposedTransaction &body, uint8_t marker,
 ProposalTxs
 make_canonical_proposal_txs(const ProposedTransactionBatch &proposal_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : proposal_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
 
   ProposalTxs proposal_txs;
-  const size_t split = std::min<size_t>(2, hashes.size());
+  const size_t split = std::min<size_t>(2, signed_hashes.size());
   if (split != 0) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(hashes.data(),
-                                                              split),
-                             proposal_txs.hash)();
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data(), split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data(), split),
                              proposal_txs.nondeterministic_data)();
   }
-  if (split != hashes.size()) {
-    append_to_parallel_batch(x23::span<const TransactionHash>(
-                                 hashes.data() + split, hashes.size() - split),
-                             proposal_txs.hash)();
+  if (split != signed_hashes.size()) {
+    append_to_parallel_batch(
+        x23::span<const SignedTransactionHash>(signed_hashes.data() + split,
+                                               signed_hashes.size() - split),
+        proposal_txs.signed_hash)();
     append_to_parallel_batch(x23::span<const NondeterministicProposalData>(
                                  nondeterministic_data.data() + split,
                                  nondeterministic_data.size() - split),
@@ -165,7 +166,7 @@ make_committed_with_proposal(BlockHeight height,
   value.proposal_header.block_height = height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(events, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_header.block_timepoint = 100 + height;
@@ -258,7 +259,7 @@ make_committed_payload_golden_fixture()
   ProposalTxs proposal_txs = make_canonical_proposal_txs(payload.tx_bodies);
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(payload.event_logs, payload.tx_bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal_txs)();
+  auto txs_root = compute_indexer_txs_root(payload.tx_bodies);
   CHECK(txs_root.has_value());
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal_txs);
@@ -888,6 +889,97 @@ TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
   EXPECT_TRUE(store.publish_committed(committed)().has_value());
 }
 
+TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  const auto committed = make_committed(1, {}, {});
+  ASSERT_TRUE(store
+                  .initialize_current_epoch_origin(
+                      1, committed.consensus_value.prev_hash)()
+                  .has_value());
+  // A reference publication needs the events file in place.
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto next = make_committed(2, {}, {});
+  next.consensus_value.prev_hash = sha256(committed.consensus_value);
+  const IndexerOutboxCommittedStoredPayload stored{
+      .format_version = committed.format_version,
+      .consensus_value = next.consensus_value,
+  };
+
+  // Readable as soon as it is published, before any fsync.
+  ASSERT_TRUE(store.publish_committed_reference(stored)().has_value());
+  ASSERT_TRUE(store.has_committed(2).value());
+  auto loaded = store.load_committed(2)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  EXPECT_EQ(loaded->consensus_value, next.consensus_value);
+
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(store.sync_committed(2).has_value());
+  EXPECT_TRUE(store.sync_committed(2).has_value());
+  EXPECT_FALSE(store.sync_committed(3).has_value());
+}
+
+// A process that dies between linking a record and syncing it leaves a record
+// that reads back complete from the page cache. Open has to sync it before it
+// is served or appended to.
+TEST_F(IndexerOutboxTest, OpenSyncsTheRetainedNewestCommittedRecord)
+{
+  const auto committed = make_committed(1, {}, {});
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  }
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(IndexerOutboxStore::open(store_path(dir_)).has_value());
+  auto reopened = IndexerOutboxStore::open(store_path(dir_));
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->has_committed(1).value());
+}
+
+TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
+{
+  const auto first = make_committed(1, {}, {});
+  auto second = make_committed(2, {}, {});
+  second.consensus_value.prev_hash = sha256(first.consensus_value);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, first);
+    ASSERT_TRUE(store.publish_committed(first)().has_value());
+    ASSERT_TRUE(store.publish_committed(second)().has_value());
+  }
+  const std::filesystem::path outbox = store_path(dir_);
+
+  // Intact records survive a reopen.
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+  }
+  // An incomplete record below the newest is left in place to fail closed.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(1),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+    EXPECT_FALSE(store.enumerate_committed_records_raw().has_value());
+  }
+  // An incomplete newest record is removed. Height 1 was not the newest at
+  // this open, so it stays.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(2),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_FALSE(store.has_committed(2).value());
+  }
+}
+
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
 {
   IndexerOutboxOrigin origin{
@@ -975,7 +1067,7 @@ TEST_F(IndexerOutboxTest, NonEmptyCandidateAndCommittedRoundTrip)
   ProposedTransaction body_c = make_body(3);
   ProposedTransactionBatch proposal_bodies{body_a, body_b, body_c};
   ProposalTxs proposal_txs = make_canonical_proposal_txs(proposal_bodies);
-  ASSERT_GE(proposal_txs.hash.segment_tokens.size(), 2);
+  ASSERT_GE(proposal_txs.signed_hash.segment_tokens.size(), 2);
   ASSERT_GE(proposal_txs.nondeterministic_data.segment_tokens.size(), 2);
 
   ProposedTransactionBatch arrival_bodies{body_a, body_b, body_c};
@@ -1114,13 +1206,18 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
   // the one event log, between its root output and its events. It moved again
   // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body.
+  // absent key at the end of the one transaction body. It moved again, at the
+  // same length, when ProposalTxs began naming transactions by
+  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
+  // Full-key leaves and then direct key/value commitments changed the roots.
+  // The proposal_txs_hash moved again when its parts began combining in order
+  // instead of by XOR (hogd#4508).
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0xee, 0x08, 0xab, 0x8e, 0xeb, 0x72, 0xa9,
-                                   0x64, 0xa9, 0xb3, 0xd2, 0x90, 0xeb, 0xaf,
-                                   0xbc, 0xa9, 0xb9, 0x07, 0x63, 0xfb, 0xf8,
-                                   0x93, 0x78, 0xff, 0xb9, 0xdd, 0xf8, 0xfc,
-                                   0x6a, 0xa4, 0x41, 0x7e};
+  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
+                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
+                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
+                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
+                                   0x21, 0x07, 0xcc, 0x31};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
@@ -1739,7 +1836,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   TxEventLogBatch events{event_a, event_b};
   ProposedTransactionBatch bodies{body_a, body_b};
 
-  EventBlockContext context(dir_.directory(), 100);
+  EventBlockContext context(
+      dir_.directory(), 100,
+      EventBlockContext::create_events_file(dir_.directory(), 100));
   context.executor_open_block();
   ASSERT_TRUE(context.add_event(event_a, body_a)());
   ASSERT_TRUE(context.add_event(event_b, body_b)());
@@ -1749,7 +1848,9 @@ TEST_F(IndexerOutboxTest, EventRootMatchesEventBlockContext)
   context.finish_file(production_root)();
   EXPECT_EQ(compute_indexer_outbox_event_root(events, bodies), production_root);
 
-  EventBlockContext empty_context(dir_.directory(), 101);
+  EventBlockContext empty_context(
+      dir_.directory(), 101,
+      EventBlockContext::create_events_file(dir_.directory(), 101));
   empty_context.finish_file_write()();
   const SHA256Hash empty_production_root = empty_context.get_root_hash();
   empty_context.finish_file(empty_production_root)();

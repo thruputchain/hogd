@@ -15,6 +15,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -46,6 +47,7 @@
 #include "hogd/hog_db/item_change.h"
 #include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/item_lock/concepts.h"
+#include "hogd/hog_db/item_lock/new_deployment_lock.h"
 #include "hogd/hog_db/item_lock/nnint128_lock.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "precompiles.hh"
@@ -59,9 +61,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_db/change_set.h"
 #include "hogd/hog_db/db_hash.h"
-#include "hogd/hog_db/hog_age_reconciliation.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/init.h"
@@ -69,6 +71,7 @@
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
 
@@ -219,16 +222,17 @@ raw_int128_le_bytes(int128_t value)
 
 constexpr uint64_t kAddress = 0xdeadbeef;
 
-HogAge
-make_hog_age(const Address &addr, uint128_t to_schedule,
-             uint128_t already_scheduled, uint128_t received,
-             BlockHeight to_schedule_age, BlockHeight already_scheduled_age,
-             BlockHeight received_age)
+NativeTokenAge
+make_native_token_age(const Address &addr, uint128_t to_schedule,
+                      uint128_t already_scheduled, uint128_t received,
+                      BlockHeight to_schedule_age,
+                      BlockHeight already_scheduled_age,
+                      BlockHeight received_age)
 {
-  return HogAge{
+  return NativeTokenAge{
       .address = addr.get_raw(),
-      .num_hogs = {to_xdr(to_schedule), to_xdr(already_scheduled),
-                   to_xdr(received)},
+      .num_native_tokens = {to_xdr(to_schedule), to_xdr(already_scheduled),
+                            to_xdr(received)},
       .average_ages = {to_schedule_age, already_scheduled_age, received_age},
   };
 }
@@ -620,7 +624,7 @@ TEST_F(HogDbTest, ItemLockCacheDataNoBalance)
   EXPECT_FALSE(rbalance->second.get_cached_balance().has_value());
 }
 
-TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
+TEST_F(HogDbTest, NativeTokenAgeWrittenOnDeployment)
 {
   Address addr = make_address(kAddress);
   Address addr2 = make_address(kAddress + 1);
@@ -683,10 +687,10 @@ TEST_F(HogDbTest, HogAgeWrittenOnDeployment)
   ASSERT_TRUE(res);
   EXPECT_EQ(0, *res);
 
-  // Creating the new contract should force the creation of the hog age entry
-  // for the address.
-  ASSERT_TRUE(db_.read_address_average_hog_age(addr2));
-  ASSERT_TRUE(db_.read_address_average_hog_age(addr3));
+  // Creating the new contract should force the creation of the native-token age
+  // entry for the address.
+  ASSERT_TRUE(db_.read_address_average_native_token_age(addr2));
+  ASSERT_TRUE(db_.read_address_average_native_token_age(addr3));
 }
 // NOLINTEND(bugprone-unchecked-optional-access)
 
@@ -994,7 +998,7 @@ TEST_F(HogDbTest, DuplicateBytestringRefundLeavesAddCapacityForLaterTransfer)
   EXPECT_TRUE(std::ranges::equal(*stored, kValue));
 }
 
-TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
+TEST_F(HogDbTest, NewBalanceNativeTokenAgeIsAllZeroes)
 {
   Address sender_addr = make_address(kAddress);
   Address recipient_addr = make_address(kAddress + 1);
@@ -1027,133 +1031,179 @@ TEST_F(HogDbTest, NewBalanceHogAgeIsAllZeroes)
   ASSERT_TRUE(block_tx.get().close(StorageLongHash{}));
   ASSERT_TRUE(block_tx.get().commit());
 
-  auto age = db_.read_address_average_hog_age(recipient_addr);
+  auto age = db_.read_address_average_native_token_age(recipient_addr);
   ASSERT_TRUE(age);
 
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0UL);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 0UL);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 0UL);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 0UL);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            0U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 0UL);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 0U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 0UL);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationAddsDeficitToToSchedule)
+TEST_F(HogDbTest, NewDeploymentLockStagesNoNativeTokenAge)
+{
+  // The native-token age row belongs to BalanceLock, which creates it with the
+  // address's first balance. A merge once left NewDeploymentLock writing it
+  // too, staging a second, all-zero put to the same key that raced the
+  // BalanceLock one in apply() (#1282).
+  Address addr = make_address(kAddress);
+  ItemKey item_key = make_address_metadata_item_key(addr);
+  LockContext ctx(&db_, BlockHeight{1}, item_key, &cost_model_);
+  NewDeploymentLock lock(
+      DeployedContractHash{.hash = sha256(Contract(ContractType::kNative)),
+                           .contract_size = 10,
+                           .contract_type = ContractType::kRv32});
+
+  auto changes = db_.create_changeset();
+  ASSERT_TRUE(lock.stage_committed_changes(ctx, changes));
+  ASSERT_TRUE(db_.apply(changes));
+
+  EXPECT_TRUE(db_.read_address_metadata(addr));
+  auto age = db_.read_address_average_native_token_age(addr);
+  ASSERT_FALSE(age);
+  EXPECT_EQ(age.error(), HogDbCode::kNotFound);
+}
+
+TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 15));
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/4,
-                   /*already_scheduled=*/3,
-                   /*received=*/2,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/4,
+                            /*already_scheduled=*/3,
+                            /*received=*/2,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
 
-  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(account);
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 10U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 3U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 2U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            10U);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            3U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 2U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 30);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationDrainsReceivedBeforeOtherGroups)
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationDrainsReceivedBeforeOtherGroups)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 6));
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/4,
-                   /*already_scheduled=*/3,
-                   /*received=*/5,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/4,
+                            /*already_scheduled=*/3,
+                            /*received=*/5,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
 
-  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(account);
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 2U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 4U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 0U);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            2U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            4U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 30);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationDrainsAllGroupsSequentially)
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationDrainsAllGroupsSequentially)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 1));
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/4,
-                   /*already_scheduled=*/3,
-                   /*received=*/2,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/4,
+                            /*already_scheduled=*/3,
+                            /*received=*/2,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_hog_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
 
-  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(account);
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]), 0U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), 0U);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 1U);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 10);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 20);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], 30);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 0U);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            0U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            1U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 30);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceRowLacksHogAge)
+TEST_F(
+    HogDbTest,
+    StartupNativeTokenAgeReconciliationFailsWhenBalanceRowLacksNativeTokenAge)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 10));
 
-  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenHogAgeRowLacksBalance)
+TEST_F(
+    HogDbTest,
+    StartupNativeTokenAgeReconciliationFailsWhenNativeTokenAgeRowLacksBalance)
 {
   Address account = make_address(kAddress);
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/4,
-                   /*already_scheduled=*/3,
-                   /*received=*/2,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/4,
+                            /*already_scheduled=*/3,
+                            /*received=*/2,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenBalanceIsNegative)
+TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationFailsWhenBalanceIsNegative)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, -1));
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/0,
-                   /*already_scheduled=*/0,
-                   /*received=*/0,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/0,
+                            /*already_scheduled=*/0,
+                            /*received=*/0,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationFailsWhenGroupCountsOverflow)
 {
   constexpr uint128_t kMax = std::numeric_limits<uint128_t>::max();
   Address account = make_address(kAddress);
@@ -1162,20 +1212,21 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenGroupCountsOverflow)
   // kMax + 10 + 1 wraps to exactly 10, the persisted balance. An unchecked
   // sum therefore reports this row as already reconciled and leaves it in
   // place, and the corruption only surfaces later in the mempool scheduler.
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/kMax,
-                   /*already_scheduled=*/10,
-                   /*received=*/1,
-                   /*to_schedule_age=*/10,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/kMax,
+                            /*already_scheduled=*/10,
+                            /*received=*/1,
+                            /*to_schedule_age=*/10,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
-TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationFailsWhenAverageAgeIsNegative)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 10));
@@ -1184,61 +1235,65 @@ TEST_F(HogDbTest, StartupHogAgeReconciliationFailsWhenAverageAgeIsNegative)
   // report this row as already reconciled and leave the negative average in
   // place. The scheduler then orders this account ahead of every valid
   // nonnegative age via its ascending ready-account key.
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(account, /*to_schedule=*/5,
-                   /*already_scheduled=*/3,
-                   /*received=*/2,
-                   /*to_schedule_age=*/-1,
-                   /*already_scheduled_age=*/20,
-                   /*received_age=*/30)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/5,
+                            /*already_scheduled=*/3,
+                            /*received=*/2,
+                            /*to_schedule_age=*/-1,
+                            /*already_scheduled_age=*/20,
+                            /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_hog_ages(db_);
+  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
 
-TEST_F(HogDbTest, HogAgeValueOmitsAddressAndReconstructsFromKey)
+TEST_F(HogDbTest, NativeTokenAgeValueOmitsAddressAndReconstructsFromKey)
 {
   const Address key_addr = make_address(kAddress);
-  const auto key = make_address_key(key_addr, Prefix::kHogAge);
+  const auto key = make_address_key(key_addr, Prefix::kNativeTokenAge);
   constexpr size_t kValueSize =
-      x23::detail::size_of_fixed<HogAge>() - kAddressSize;
+      x23::detail::size_of_fixed<NativeTokenAge>() - kAddressSize;
 
   // A write drops the address: the persisted value is exactly kAddressSize
   // bytes shorter than the full struct encoding.
-  ASSERT_TRUE(db_.write_address_average_hog_age(
-      make_hog_age(key_addr, /*to_schedule=*/9, /*already_scheduled=*/0,
-                   /*received=*/0, /*to_schedule_age=*/3,
-                   /*already_scheduled_age=*/0, /*received_age=*/0)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(key_addr, /*to_schedule=*/9,
+                            /*already_scheduled=*/0,
+                            /*received=*/0, /*to_schedule_age=*/3,
+                            /*already_scheduled_age=*/0, /*received_age=*/0)));
   HogDbStatus<size_t> stored_size =
       db_.get_ramdb().get_size(std::as_bytes(std::span(key)));
   ASSERT_TRUE(stored_size);
   EXPECT_EQ(*stored_size, kValueSize);
 
   // The read reconstructs the address from the key. Craft an address-less value
-  // (a full HogAge encoding minus its leading address bytes) whose stripped-off
-  // address differs from the key, and confirm the read reports key_addr -- the
-  // drift that crashed the scheduler in issue #3812 is now impossible.
-  const auto encoded =
-      x23::serialize(make_hog_age(make_address(kAddress + 1), /*to_schedule=*/5,
-                                  /*already_scheduled=*/0, /*received=*/0,
-                                  /*to_schedule_age=*/7,
-                                  /*already_scheduled_age=*/0,
-                                  /*received_age=*/0));
+  // (a full NativeTokenAge encoding minus its leading address bytes) whose
+  // stripped-off address differs from the key, and confirm the read reports
+  // key_addr -- the drift that crashed the scheduler in issue #3812 is now
+  // impossible.
+  const auto encoded = x23::serialize(
+      make_native_token_age(make_address(kAddress + 1), /*to_schedule=*/5,
+                            /*already_scheduled=*/0, /*received=*/0,
+                            /*to_schedule_age=*/7,
+                            /*already_scheduled_age=*/0,
+                            /*received_age=*/0));
   ASSERT_TRUE(db_.get_ramdb().put(
       std::as_bytes(std::span(key)), 0,
       std::as_bytes(std::span(encoded)).subspan(kAddressSize)));
 
-  HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(key_addr);
   ASSERT_TRUE(age);
   EXPECT_EQ(Address(age->address), key_addr);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            5U);
 }
 
-TEST_F(HogDbTest, HogAgeReadRejectsUnexpectedValueSize)
+TEST_F(HogDbTest, NativeTokenAgeReadRejectsUnexpectedValueSize)
 {
   const Address key_addr = make_address(kAddress);
-  const auto key = make_address_key(key_addr, Prefix::kHogAge);
+  const auto key = make_address_key(key_addr, Prefix::kNativeTokenAge);
 
   // Only the address-less layout is accepted; there is no backward
   // compatibility with the legacy full-struct encoding. A junk size and the
@@ -1246,19 +1301,22 @@ TEST_F(HogDbTest, HogAgeReadRejectsUnexpectedValueSize)
   const std::array<std::byte, 7> junk{};
   ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0, junk));
   {
-    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    HogDbStatus<NativeTokenAge> age =
+        db_.read_address_average_native_token_age(key_addr);
     ASSERT_FALSE(age);
     EXPECT_EQ(age.error(), HogDbCode::kCorruption);
   }
 
   const auto legacy = x23::serialize(
-      make_hog_age(key_addr, /*to_schedule=*/1, /*already_scheduled=*/0,
-                   /*received=*/0, /*to_schedule_age=*/1,
-                   /*already_scheduled_age=*/0, /*received_age=*/0));
+      make_native_token_age(key_addr, /*to_schedule=*/1,
+                            /*already_scheduled=*/0,
+                            /*received=*/0, /*to_schedule_age=*/1,
+                            /*already_scheduled_age=*/0, /*received_age=*/0));
   ASSERT_TRUE(db_.get_ramdb().put(std::as_bytes(std::span(key)), 0,
                                   std::as_bytes(std::span(legacy))));
   {
-    HogDbStatus<HogAge> age = db_.read_address_average_hog_age(key_addr);
+    HogDbStatus<NativeTokenAge> age =
+        db_.read_address_average_native_token_age(key_addr);
     ASSERT_FALSE(age);
     EXPECT_EQ(age.error(), HogDbCode::kCorruption);
   }
@@ -1643,23 +1701,47 @@ TEST_F(HogDbTest, ApplyFeedsDebugInvariants)
   EXPECT_FALSE(db_.check_invariants());
 }
 
+TEST_F(HogDbTest, ApplyPanicsOnKeyStagedTwice)
+{
+  // apply() flushes the per-thread change vectors in parallel and in no fixed
+  // order, so two staged changes to one key leave the surviving value up to
+  // the scheduler (#1282). Debug builds refuse to flush such a ChangeSet.
+  if (!is_debug_build()) {
+    GTEST_SKIP() << "the duplicate-key check only runs in debug builds";
+  }
+  // apply() runs on the worker pool, so re-exec the child rather than fork a
+  // threaded parent.
+  GTEST_FLAG_SET(death_test_style, "threadsafe");
+
+  auto balance_key = make_address_key(make_address(kAddress), Prefix::kBalance);
+  auto first_bytes = int128_to_xdr_bytes(1000);
+  auto second_bytes = int128_to_xdr_bytes(2000);
+  std::span<const std::byte> key_span = std::as_bytes(std::span(balance_key));
+
+  auto changeset = db_.create_changeset();
+  changeset.put(key_span, kNNInt128, std::as_bytes(std::span(first_bytes)));
+  changeset.put(key_span, kNNInt128, std::as_bytes(std::span(second_bytes)));
+  X23_EXPECT_DEATH(std::ignore = db_.apply(changeset),
+                   "ChangeSet staged key [0-9a-f]+ twice");
+}
+
 TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
 {
   // Regression guard for a signed-integer overflow in the conservation
   // invariant's running sum, caught by UBSan via
   // NativeTokenAllowanceTest.StorageRefundCreditsAgainstNearMaxBalance:
   //
-  //   invariant_hog_conservation.cc:256: signed integer overflow:
+  //   invariant_native_token_conservation.cc:256: signed integer overflow:
   //   0x80000000000000000000000000000001 + -12007 cannot be represented in
   //   type '__int128'
   //
-  // The sum runs over every HOG-denominated item change and only its final
-  // value has to be zero, but a single term can be as large as INT128_MAX:
-  // minting the whole supply debits the total-supply counter by exactly that.
-  // Once the running sum sits at -INT128_MAX, any further negative term -- a
-  // storage refund of a few thousand -- pushes it past INT128_MIN. Summing in
-  // int128 made that intermediate undefined behaviour even though the total
-  // came back to zero.
+  // The sum runs over every native-token-denominated item change and only its
+  // final value has to be zero, but a single term can be as large as
+  // INT128_MAX: minting the whole supply debits the total-supply counter by
+  // exactly that. Once the running sum sits at -INT128_MAX, any further
+  // negative term -- a storage refund of a few thousand -- pushes it past
+  // INT128_MIN. Summing in int128 made that intermediate undefined behaviour
+  // even though the total came back to zero.
   //
   // Each step below is applied separately so the invariant sees them in this
   // order (within one apply() the worker pool does not fix an order):
@@ -1714,18 +1796,19 @@ TEST_F(HogDbTest, InvariantAccumulatorSurvivesMaxSupplyPartialSum)
 
   Address whale = make_address(kAddress + 74);
   auto whale_balance_key = make_address_key(whale, Prefix::kBalance);
-  auto whale_age_key = make_address_key(whale, Prefix::kHogAge);
+  auto whale_age_key = make_address_key(whale, Prefix::kNativeTokenAge);
   auto balance_bytes = int128_to_xdr_bytes(whale_balance);
-  auto age_buf = x23::serialize(make_hog_age(whale, /*to_schedule=*/0,
-                                             /*already_scheduled=*/0,
-                                             /*received=*/0,
-                                             /*to_schedule_age=*/0,
-                                             /*already_scheduled_age=*/0,
-                                             /*received_age=*/0));
+  auto age_buf =
+      x23::serialize(make_native_token_age(whale, /*to_schedule=*/0,
+                                           /*already_scheduled=*/0,
+                                           /*received=*/0,
+                                           /*to_schedule_age=*/0,
+                                           /*already_scheduled_age=*/0,
+                                           /*received_age=*/0));
   auto credit = db_.create_changeset();
   credit.put(whale_balance_key, kNNInt128, balance_bytes);
-  // The hog age row accompanies every balance creation; without it the
-  // separate hog age invariant reports the balance as unpaired.
+  // The native-token age row accompanies every balance creation; without it the
+  // separate native-token age invariant reports the balance as unpaired.
   credit.put(whale_age_key, 0, age_buf);
   ASSERT_TRUE(db_.apply(credit));
 

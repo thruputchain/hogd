@@ -24,7 +24,10 @@ target_include_directories(
   rv32_vm
   PUBLIC
   ${CMAKE_SOURCE_DIR}
+  ${CMAKE_BINARY_DIR}
 )
+
+add_dependencies(rv32_vm generate_crypto_ffi_h)
 
 # x23 supplies CHECK(): a failed digest computation must stop the node.
 target_link_libraries(
@@ -347,7 +350,9 @@ if(BUILD_FUZZERS)
     rv32_vm_fuzz
     PUBLIC
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
   )
+  add_dependencies(rv32_vm_fuzz generate_crypto_ffi_h)
   target_link_libraries(
     rv32_vm_fuzz
     PUBLIC
@@ -368,6 +373,16 @@ if(BUILD_FUZZERS)
   )
   target_link_libraries(rv32_fuzz_common_test rv32_isa_core GTest::gtest)
   target_include_directories(rv32_fuzz_common_test PRIVATE ${CMAKE_SOURCE_DIR})
+
+  add_executable(
+    rv32_fuzz_artifact_test
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_artifact.cc
+    fuzz/fuzz_artifact_test.cc
+    rv32_vm_test_main.cc
+  )
+  target_link_libraries(rv32_fuzz_artifact_test rv32_vm GTest::gtest)
+  target_include_directories(rv32_fuzz_artifact_test PRIVATE ${CMAKE_SOURCE_DIR})
 
   add_executable(
     rv32_fuzz_engine_diff

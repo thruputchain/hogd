@@ -11,12 +11,15 @@
 #include <optional>
 #include <span>
 #include <string_view>
+#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "contract.hh"
+#include "event.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
@@ -45,6 +48,8 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/sockio.h"
+#include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -101,7 +106,8 @@ protected:
     handler_txs_.push_back(std::move(tx));
     return SystemCallHandler(
         handler_txs_.back(), snapshot,
-        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id,
+                                    snapshot.get_network_config_params()),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }
@@ -217,6 +223,42 @@ test_contract_address(uint8_t tag)
 
 } // namespace
 
+// add() refuses argument types whose decode cost decode_gas would undercharge:
+// long vectors of elements that can each encode in a byte or two.
+namespace dense_vector_guard {
+using detail::kArgsHaveDenseVector;
+constexpr uint32_t kUnbounded = UINT32_MAX;
+using Address = std::array<uint8_t, 32>;
+
+static_assert(kArgsHaveDenseVector<std::tuple<x23::Vec<uint32_t, kUnbounded>>>);
+static_assert(kArgsHaveDenseVector<std::tuple<x23::Vec<bool, kUnbounded>>>);
+static_assert(
+    kArgsHaveDenseVector<std::tuple<x23::Vec<x23::Ptr<uint64_t>, kUnbounded>>>);
+static_assert(kArgsHaveDenseVector<
+              std::tuple<x23::Vec<x23::Vec<uint8_t, kUnbounded>, kUnbounded>>>);
+static_assert(kArgsHaveDenseVector<
+              std::tuple<x23::Vec<std::tuple<int64_t, uint64_t>, kUnbounded>>>);
+// Found below the top level too.
+static_assert(
+    kArgsHaveDenseVector<
+        std::tuple<uint32_t, std::tuple<Address, x23::Vec<uint64_t, 65>>>>);
+
+static_assert(!kArgsHaveDenseVector<std::tuple<>>);
+static_assert(!kArgsHaveDenseVector<std::tuple<uint32_t, Address>>);
+static_assert(!kArgsHaveDenseVector<std::tuple<x23::Vec<uint8_t, kUnbounded>>>);
+static_assert(!kArgsHaveDenseVector<std::tuple<x23::Vec<Address, kUnbounded>>>);
+static_assert(!kArgsHaveDenseVector<std::tuple<x23::Vec<uint64_t, 64>>>);
+static_assert(
+    !kArgsHaveDenseVector<std::tuple<
+        x23::Vec<std::tuple<Address, uint64_t, x23::Vec<uint8_t, kUnbounded>>,
+                 kUnbounded>>>);
+} // namespace dense_vector_guard
+
+// Every NativeContractBuilder frame pays to decode its calldata before its
+// body runs: the consumers here take a 4-byte u32, the callers no arguments.
+constexpr GasAmount kDecodeU32Gas = NativeContractBuilder::decode_gas(4);
+constexpr GasAmount kDecodeNoArgsGas = NativeContractBuilder::decode_gas(0);
+
 TEST_F(NativeContractTest, GasCostsAccumulate)
 {
   // Verifies that gas spent in nested invocations is charged to the root
@@ -266,7 +308,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r1_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g1 != 100 + kSyscallBaseCost) {
+        if (g1 != 100 + kSyscallBaseCost + kDecodeU32Gas) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -291,7 +333,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r2_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g2 != 200 + kSyscallBaseCost) {
+        if (g2 != 200 + kSyscallBaseCost + kDecodeU32Gas) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -316,7 +358,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!r3_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g3 != 150 + kSyscallBaseCost) {
+        if (g3 != 150 + kSyscallBaseCost + kDecodeU32Gas) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -344,7 +386,8 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
         if (!invoke_status.has_value()) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost)) {
+        if (g != 100 + 200 + 150 + (4 * kSyscallBaseCost) +
+                     (3 * kDecodeU32Gas) + kDecodeNoArgsGas) {
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
@@ -382,7 +425,7 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -390,14 +433,15 @@ TEST_F(NativeContractTest, GasCostsAccumulate)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost));
+  ASSERT_EQ(res.gas_consumed_, 100 + 200 + 150 + (4 * kSyscallBaseCost) +
+                                   (3 * kDecodeU32Gas) +
+                                   (2 * kDecodeNoArgsGas));
 }
 
 TEST_F(NativeContractTest, GasCostsAtBoundary)
 {
-  // Verifies boundary gas accounting for native invokes: gas_limit 256 permits
-  // a child that consumes 255 gas, while gas_limit 255 is converted to
-  // OutOfGas/Deterministic and still charges the full child limit.
+  // A child that pays its decode then consumes 255 fits a limit one above that;
+  // a limit of exactly that runs out of gas and is charged in full.
 
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
@@ -418,7 +462,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
       0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<int32_t>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
-            .gas_limit = 256,
+            .gas_limit = kDecodeU32Gas + 256,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         auto invoke_status = co_await ctx.syscall<SyscallNo::kInvoke>(
@@ -430,7 +474,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
         CopyableInvokeInputs inputs2{
             .entrypoint_id = 0,
-            .gas_limit = 255,
+            .gas_limit = kDecodeU32Gas + 255,
             .flags = std::to_underlying(InvokeFlag::None),
         };
         CopyableInvokeOutputs outputs2{};
@@ -477,7 +521,7 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -485,11 +529,10 @@ TEST_F(NativeContractTest, GasCostsAtBoundary)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.result_);
-  // 255 for each child -- the one that fits and the one that is converted to
-  // OutOfGas and still charged its full limit -- plus the crossing each of the
-  // two invoke syscalls pays. The children's own limits are unaffected: the
-  // crossing is billed to the caller, outside the budget it hands down.
-  ASSERT_EQ(res.gas_consumed_, 255 + 255 + (2 * kSyscallBaseCost));
+  // Each child's decode plus 255, each invoke's crossing, and the entry's own
+  // decode.
+  ASSERT_EQ(res.gas_consumed_, (2 * (kDecodeU32Gas + 255)) +
+                                   (2 * kSyscallBaseCost) + kDecodeNoArgsGas);
 }
 
 // NativeContract::invoke error-precedence lattice at exact gas exhaustion
@@ -501,7 +544,8 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
 {
   constexpr static ContractAddress kAddressConsumer = test_contract_address(0);
   constexpr static ContractAddress kAddressEntry = test_contract_address(1);
-  constexpr static uint64_t kChildGas = 256;
+  // The child pays its decode, then consumes the remaining 256 exactly.
+  constexpr static uint64_t kChildGas = kDecodeU32Gas + 256;
   // 256 as the kTxs-encoded big-endian u32 calldata.
   static const Calldata kAmount{0x00, 0x00, 0x01, 0x00};
 
@@ -511,28 +555,28 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
         // Exhaust the limit exactly, then report success.
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return 0;
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       1,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::Abandon};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       2,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::ValidationFailure};
       });
   builder_consumer.add<SerializationFormat::kTxs>(
       3,
       [](NativeSyscallContext &runtime,
          uint32_t test_amount) -> x23::Async<InvokeStatus<int32_t>> {
-        runtime.consume_gas(test_amount);
+        std::ignore = runtime.consume_gas(test_amount);
         co_return InvokeError{InvokeErrorCode::Unrecoverable};
       });
 
@@ -620,7 +664,7 @@ TEST_F(NativeContractTest, ExactGasExhaustionErrorPrecedence)
               {
                   .invoked_address = kAddressEntry,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -722,7 +766,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
 
@@ -738,7 +782,7 @@ TEST_F(NativeContractTest, LazyLoadingBytestring)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(1),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -873,7 +917,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                 {
                     .invoked_address = address,
                     .entrypoint = entrypoint_from_method_id(0),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata = {},
                 },
         },
@@ -889,7 +933,7 @@ TEST_F(NativeContractTest, LazyLoadingNNInt)
                 {
                     .invoked_address = address,
                     .entrypoint = entrypoint_from_method_id(1),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata = {},
                 },
         },
@@ -950,7 +994,7 @@ TEST_F(NativeContractTest, InvalidNativeContractIdRejectedBeforeDeploy)
               {
                   .invoked_address = kDeployerAddr,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
           .contracts_to_deploy = {malicious_contract},
@@ -1062,7 +1106,7 @@ TEST_F(NativeContractTest, ManualRevertTryInvokeDoesNotProbeLocks)
   Transaction tx{.invocation =
                      Invocation{.invoked_address = kAddrParent,
                                 .entrypoint = entrypoint_from_method_id(0),
-                                .gas_limit = UINT64_MAX,
+                                .gas_limit = kDefaultMaxTxGas,
                                 .calldata = {}}};
   SystemCallHandler handler =
       make_handler(tx, snapshot, 0, 0, *runtime_context);
@@ -1144,7 +1188,7 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
               {
                   .invoked_address = address,
                   .entrypoint = entrypoint_from_method_id(0),
-                  .gas_limit = UINT64_MAX,
+                  .gas_limit = kDefaultMaxTxGas,
                   .calldata = {},
               },
       },
@@ -1152,6 +1196,93 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
+}
+
+// Overlapping native syscall args fault before the body runs; disjoint ones
+// do not.
+TEST_F(NativeContractTest, SyscallArgumentsAreAliasChecked)
+{
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto is_code = [](HostFnStatus<SyscallErrorCode> const &res,
+                          SyscallErrorCode code) {
+          return res.has_value() && res.value() == code;
+        };
+
+        std::array<std::byte, 8> message{};
+        SHA256Hash digest{};
+
+        // Input span over the output it would be hashed into.
+        auto in_out = co_await ctx.syscall<SyscallNo::kSHA256>(
+            std::as_bytes(std::span(digest.data(), digest.size())), digest);
+        if (!is_code(in_out, SyscallErrorCode::kSyscallErrorCodeFault)) {
+          ADD_FAILURE() << "input aliasing an output did not fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Two inputs at the same address, nothing written.
+        Topic topic{};
+        const Topic *topic_ptr = &topic;
+        const Topic *no_topic = nullptr;
+        auto in_in = co_await ctx.syscall<SyscallNo::kLogEvent>(
+            topic_ptr, no_topic, topic_ptr, std::span<const std::byte>{});
+        if (!is_code(in_in, SyscallErrorCode::kSyscallErrorCodeFault)) {
+          ADD_FAILURE() << "two inputs at one address did not fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto disjoint = co_await ctx.syscall<SyscallNo::kSHA256>(
+            std::span<const std::byte>(message), digest);
+        if (!is_code(disjoint, SyscallErrorCode::kSyscallErrorCodeNone)) {
+          ADD_FAILURE() << "disjoint arguments were rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (digest != sha256(std::span<const std::byte>(message))) {
+          ADD_FAILURE() << "SHA256 output is wrong";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
+  ContractAddress address{};
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = address,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = kDefaultMaxTxGas,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+  handler.enable_transaction_stats();
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Each alias fault counts as a syscall fault, as on the guest path.
+  auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 2);
 }
 
 // NOLINTEND(bugprone-exception-escape)

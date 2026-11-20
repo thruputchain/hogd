@@ -17,7 +17,6 @@
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
-#include "view.hh"
 #include "x23/async.h"
 
 namespace hogd {
@@ -61,9 +60,6 @@ public:
   x23::Async<ExecResult> validate_transaction(ProposedTransaction proposed_tx,
                                               TransactionID tx_id);
 
-  x23::Async<ExpectedViewResult>
-  view_transaction(TransactionViewQuery const &query);
-
   std::unique_ptr<StorageSnapshotCache> extract_snapshot_cache()
   {
     // NOLINTNEXTLINE(readability-ambiguous-smartptr-reset-call)
@@ -83,9 +79,6 @@ private:
   run_propose_transaction(SignedTransaction signed_tx, TransactionID tx_id);
   x23::Async<ExecResult> run_validate_transaction(ProposedTransaction tx,
                                                   TransactionID tx_id);
-
-  x23::Async<ExpectedViewResult>
-  run_view_transaction(TransactionViewQuery const &query);
 
   // Bump pending_event_calls_ and spawn emit_and_release; on spawn-allocation
   // failure, record a block-level event error and release the counter.

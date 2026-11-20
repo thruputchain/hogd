@@ -578,3 +578,25 @@ ci_remote_killall_hosts() {
   done
   return "$status"
 }
+
+# Cap a log copied into metrics_history at its last [CI_LOG_TAIL_BYTES] bytes,
+# with a first line saying how much was dropped. A healthy multi-node run's
+# chuckd stderr carries scpd's span events and runs past 250 MB; GitHub
+# refuses any file over 100 MB, and one such file sinks the whole
+# metrics_history push, so nothing from the run is recorded at all.
+CI_LOG_TAIL_BYTES=${CI_LOG_TAIL_BYTES:-1048576}
+
+ci_truncate_log_to_tail() {
+  local path=$1
+  local size
+
+  size=$(stat -c %s "$path") || return 1
+  if ((size <= CI_LOG_TAIL_BYTES)); then
+    return 0
+  fi
+  {
+    printf '[truncated by ci_truncate_log_to_tail: kept the last %d of %d bytes]\n' \
+      "$CI_LOG_TAIL_BYTES" "$size"
+    tail -c "$CI_LOG_TAIL_BYTES" "$path"
+  } >"$path.tail" && mv -- "$path.tail" "$path"
+}

@@ -26,6 +26,7 @@
 #include <gtest/gtest.h>
 
 #include "contract.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/test_ffi/test_bindings.h"
@@ -77,7 +78,7 @@ TEST(TestBindingsTest, RootInvokeNonStdCallbackThrowReturnsUnrecoverable)
                  {
                      .invoked_address = addr,
                      .entrypoint = entrypoint_from_method_id(0),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {},
                  },
              .uniquifier = {.block_expiry_height = INT64_MAX, .nonce = 0}},

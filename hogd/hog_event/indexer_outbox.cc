@@ -36,6 +36,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
+#include "hogd/hog_event/metrics.h"
 #include "hogd/version.h"
 #include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
@@ -563,6 +564,9 @@ IndexerOutboxStore::finish_opening(UniqueFd directory_fd)
   if (auto cleaned = store.cleanup_stale_temp_files(); !cleaned) {
     return std::unexpected(cleaned.error());
   }
+  if (auto settled = store.settle_committed_tail(); !settled) {
+    return std::unexpected(settled.error());
+  }
   return store;
 }
 
@@ -611,7 +615,8 @@ IndexerOutboxStore::publish_candidate(
     co_return std::unexpected(bytes.error());
   }
   co_return publish_bytes(candidate_filename(payload.block_id),
-                          std::as_bytes(std::span(*bytes)));
+                          std::as_bytes(std::span(*bytes)),
+                          Durability::kSynced);
 }
 
 IndexerOutboxStatus<void>
@@ -705,7 +710,8 @@ IndexerOutboxStore::publish_candidate_encoded(
   file_pieces.insert(file_pieces.end(), payload_pieces.begin(),
                      payload_pieces.end());
 
-  return publish_bytes(candidate_filename(block_id), file_pieces);
+  return publish_bytes(candidate_filename(block_id), file_pieces,
+                       Durability::kSynced);
 }
 
 x23::Async<IndexerOutboxStatus<IndexerOutboxCandidatePayload>>
@@ -842,6 +848,20 @@ IndexerOutboxStore::publish_committed_stored(
 {
   const BlockHeight height =
       stored.consensus_value.proposal_header.block_height;
+  // Pull-RPC record size for the histogram. The full-payload path can compute
+  // it before the publication lock. The reference path learns the events-file
+  // size under that lock and fills this in there.
+  std::optional<size_t> pull_record_bytes;
+  if (payload_for_ensure) {
+    auto response_size = indexer_event_pull_rpc_record_size_for_parts(
+        x23::xdr_size(stored.consensus_value),
+        x23::xdr_size(payload_for_ensure->event_logs),
+        x23::xdr_size(payload_for_ensure->tx_bodies));
+    if (!response_size) {
+      co_return std::unexpected(response_size.error());
+    }
+    pull_record_bytes = *response_size;
+  }
   auto bytes = encode_file(stored);
   if (!bytes) {
     co_return std::unexpected(bytes.error());
@@ -877,11 +897,12 @@ IndexerOutboxStore::publish_committed_stored(
     if (!batches_size) {
       co_return std::unexpected("events file size overflows replay record");
     }
-    if (auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
-            x23::xdr_size(stored.consensus_value), *batches_size, 0);
-        !rpc_size) {
+    auto rpc_size = indexer_event_pull_rpc_record_size_for_parts(
+        x23::xdr_size(stored.consensus_value), *batches_size, 0);
+    if (!rpc_size) {
       co_return std::unexpected(rpc_size.error());
     }
+    pull_record_bytes = *rpc_size;
   }
   // Either way the file's roots are established: the live block computed
   // the event root over the pairs it streamed, and promotion validated the
@@ -897,8 +918,9 @@ IndexerOutboxStore::publish_committed_stored(
     // publish_bytes accepts only a byte-identical existing file. This check
     // intentionally precedes latest-height validation so an exact retry of an
     // older committed height remains idempotent.
-    auto published = publish_bytes(committed_filename(height),
-                                   std::as_bytes(std::span(*bytes)));
+    auto published =
+        publish_bytes(committed_filename(height),
+                      std::as_bytes(std::span(*bytes)), Durability::kSynced);
     if (!published) {
       co_return co_await fail_committed_publication_unlocked(
           std::move(published.error()));
@@ -975,8 +997,14 @@ IndexerOutboxStore::publish_committed_stored(
     }
   }
 
-  auto published = publish_bytes(committed_filename(height),
-                                 std::as_bytes(std::span(*bytes)));
+  // The one publication that is deferred: a new record at the append tip from
+  // the live commit path, whose caller owes the sync. The idempotent-retry
+  // publication above stays synced.
+  auto published =
+      publish_bytes(committed_filename(height),
+                    std::as_bytes(std::span(*bytes)),
+                    payload_for_ensure != nullptr ? Durability::kSynced
+                                                  : Durability::kDeferred);
   if (!published) {
     co_return co_await fail_committed_publication_unlocked(
         std::move(published.error()));
@@ -996,6 +1024,11 @@ IndexerOutboxStore::publish_committed_stored(
         .height = header->block_height + 1,
         .consensus_hash = header->consensus_hash,
     };
+  }
+  // INT64_MAX is the canonical-boundary sentinel, not a block the firehose
+  // serves. Idempotent retries return above and do not reach here.
+  if (pull_record_bytes && height != std::numeric_limits<BlockHeight>::max()) {
+    record_new_event_block(height, *pull_record_bytes);
   }
   co_return IndexerOutboxStatus<void>{};
 }
@@ -1238,8 +1271,9 @@ IndexerOutboxStore::initialize_current_epoch_origin_unlocked(
   if (!bytes) {
     co_return std::unexpected(bytes.error());
   }
-  auto published = publish_bytes(current_epoch_origin_filename(),
-                                 std::as_bytes(std::span(*bytes)));
+  auto published =
+      publish_bytes(current_epoch_origin_filename(),
+                    std::as_bytes(std::span(*bytes)), Durability::kSynced);
   if (!published) {
     committed_append_cache_.reset();
   }
@@ -1710,10 +1744,11 @@ IndexerOutboxStore::list_names() const
 
 IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(std::string_view filename,
-                                  std::span<const std::byte> bytes) const
+                                  std::span<const std::byte> bytes,
+                                  Durability durability) const
 {
   const std::array<std::span<const std::byte>, 1> pieces{bytes};
-  return publish_bytes(filename, pieces);
+  return publish_bytes(filename, pieces, durability);
 }
 
 // Scatter-list form. Callers whose record is already laid out across several
@@ -1723,8 +1758,10 @@ IndexerOutboxStore::publish_bytes(std::string_view filename,
 IndexerOutboxStatus<void>
 IndexerOutboxStore::publish_bytes(
     std::string_view filename,
-    std::span<const std::span<const std::byte>> pieces) const
+    std::span<const std::span<const std::byte>> pieces,
+    Durability durability) const
 {
+  const bool synced = durability == Durability::kSynced;
   size_t total_bytes = 0;
   for (const auto &piece : pieces) {
     total_bytes += piece.size();
@@ -1765,9 +1802,13 @@ IndexerOutboxStore::publish_bytes(
           std::format("write indexer outbox temp file: {}", written.error()));
     }
   }
-  if (auto synced = temp_file.sync(); !synced) {
-    return std::unexpected(
-        std::format("fsync indexer outbox temp file: {}", synced.error()));
+  // A deferred publication links the name before the bytes are durable;
+  // sync_committed() fsyncs them through the final name afterwards.
+  if (synced) {
+    if (auto result = temp_file.sync(); !result) {
+      return std::unexpected(
+          std::format("fsync indexer outbox temp file: {}", result.error()));
+    }
   }
 
   const std::string final_filename(filename);
@@ -1828,12 +1869,133 @@ IndexerOutboxStore::publish_bytes(
         system_error("remove indexer outbox temp file", errno));
   }
   std::ignore = cleanup.release();
+  if (!synced) {
+    return {};
+  }
   if (consume_fault(IndexerOutboxFaultPoint::kFsyncPublishedDirectory)) {
     return std::unexpected("injected fsync indexer outbox directory");
   }
   if (fsync(directory_fd_.get()) != 0) {
     return std::unexpected(
         system_error("fsync indexer outbox directory", errno));
+  }
+  return {};
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::sync_committed(BlockHeight block_height) const
+{
+  if (block_height < 0) {
+    return std::unexpected("committed outbox height is negative");
+  }
+  if (consume_fault(IndexerOutboxFaultPoint::kSyncDeferredCommitted)) {
+    return std::unexpected("injected sync deferred committed outbox record");
+  }
+  const std::string filename = committed_filename(block_height);
+  const int fd = openat(directory_fd_.get(), filename.c_str(),
+                        O_RDONLY | O_CLOEXEC | O_NOFOLLOW);
+  if (fd < 0) {
+    return std::unexpected(
+        system_error("open committed outbox record to sync", errno));
+  }
+  const UniqueFd file(fd);
+  if (fsync(file.get()) != 0) {
+    return std::unexpected(
+        system_error("fsync committed outbox record", errno));
+  }
+  // Covers the record's link and the unlink of its temp name.
+  if (fsync(directory_fd_.get()) != 0) {
+    return std::unexpected(
+        system_error("fsync indexer outbox directory", errno));
+  }
+  return {};
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::check_committed_record_intact(
+    std::string_view filename, BlockHeight block_height) const
+{
+  auto header = load_header(filename);
+  if (!header) {
+    return std::unexpected(header.error());
+  }
+  if (header->record_identity.kind() !=
+          IndexerOutboxRecordKind::IndexerOutboxCommitted ||
+      header->block_height != block_height) {
+    return std::unexpected("committed outbox filename/header mismatch");
+  }
+  // Only this binary's protocol has a payload it can decode. An archival
+  // record cannot be a deferred publication of this process anyway.
+  if (header->protocol != version::kHogdProtocol()) {
+    return {};
+  }
+  auto bytes = load_payload(filename, *header);
+  if (!bytes) {
+    return std::unexpected(bytes.error());
+  }
+  auto stored =
+      decode_payload<IndexerOutboxCommittedStoredPayload>(*bytes, "committed");
+  if (!stored) {
+    return std::unexpected(stored.error());
+  }
+  if (sha256(stored->consensus_value) != header->consensus_hash ||
+      stored->consensus_value.prev_hash != header->prev_hash ||
+      stored->consensus_value.proposal_header.events_hash !=
+          header->event_root ||
+      stored->consensus_value.proposal_header.block_height !=
+          header->block_height) {
+    return std::unexpected("committed outbox header/payload metadata mismatch");
+  }
+  return {};
+}
+
+IndexerOutboxStatus<void>
+IndexerOutboxStore::settle_committed_tail()
+{
+  auto names = list_names();
+  if (!names) {
+    return std::unexpected(names.error());
+  }
+  std::optional<BlockHeight> tail;
+  std::string tail_name;
+  for (const std::string &name : *names) {
+    auto height = parse_filename_identity<BlockHeight>(name, kCommittedPrefix);
+    if (height && (!tail || *height > *tail)) {
+      tail = height;
+      tail_name = name;
+    }
+  }
+  if (!tail) {
+    return {};
+  }
+  struct stat stat_buf{};
+  if (fstatat(directory_fd_.get(), tail_name.c_str(), &stat_buf,
+              AT_SYMLINK_NOFOLLOW) != 0) {
+    return std::unexpected(
+        system_error("stat committed outbox tail record", errno));
+  }
+  // Anything but a regular file is not publication residue; leave it for
+  // validation to reject.
+  if (!S_ISREG(stat_buf.st_mode)) {
+    return {};
+  }
+  auto intact = check_committed_record_intact(tail_name, *tail);
+  if (intact) {
+    // Reading back complete is not durable: the sync may never have run.
+    return sync_committed(*tail);
+  }
+  // Only the tail can be unsynced, and reconciliation can rebuild the tail,
+  // so dropping it is safe. See docs/component-failure-model.md.
+  warn("discarding incomplete committed indexer outbox record at height {}: {}",
+       *tail, intact.error());
+  if (unlinkat(directory_fd_.get(), tail_name.c_str(), 0) != 0) {
+    return std::unexpected(
+        system_error("remove incomplete committed outbox record", errno));
+  }
+  if (fsync(directory_fd_.get()) != 0) {
+    return std::unexpected(
+        system_error("fsync indexer outbox directory after discarding tail",
+                     errno));
   }
   return {};
 }

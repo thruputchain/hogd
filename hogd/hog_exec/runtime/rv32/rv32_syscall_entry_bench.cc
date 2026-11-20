@@ -21,6 +21,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/crypto/mldsa_signer.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
@@ -40,10 +41,10 @@
 #include "hogd/hog_exec/runtime/syscall_entry.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
-#include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/rust/crypto/bindings.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "network_config.hh"
@@ -163,6 +164,28 @@ static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=
               "the bytestring payload must fit in guest memory");
 static_assert(kMaxBytestringBytes <= kBytestringCeilingLen,
               "the sweep must stay inside the wire format's ceiling");
+
+// ML-DSA-65 VerifySignature material, past the largest hashing and bytestring
+// input: its signatures and key are too large for the low block ed25519 uses.
+// One signature per swept message length, over the same message.
+constexpr uint32_t kMlDsaSignatureAddress =
+    kBytestringPayloadAddress + kMaxBytestringBytes;
+constexpr uint32_t kMlDsaSignatureStride = 3312;
+static_assert(kMlDsaSignatureStride >= sizeof(MlDsa65Signature));
+
+constexpr uint32_t
+mldsa_signature_address(size_t index)
+{
+  return kMlDsaSignatureAddress +
+         (static_cast<uint32_t>(index) * kMlDsaSignatureStride);
+}
+
+constexpr uint32_t kMlDsaPublicKeyAddress =
+    kMlDsaSignatureAddress +
+    (kVerifyMessageBytes.size() * kMlDsaSignatureStride);
+static_assert(kMlDsaPublicKeyAddress + sizeof(MlDsa65PublicKey) <=
+                  kGuestMemoryBytes,
+              "the ML-DSA material must fit in guest memory");
 
 // The cross-invoke depth the fixture admits, and so the deepest parent walk
 // the frame sweeps can measure. The stock chain caps a transaction at
@@ -390,18 +413,21 @@ public:
     return address;
   }
   static ContractAddress cold_address() { return make_address(0x50); }
+  // The child frame the frame-payload copy rows read calldata in, or that
+  // leaves its return buffer in the fixture's inner frame.
+  static ContractAddress copy_address() { return make_address(0x60); }
 
   // Return admission failures to the benchmark so one invalid depth or
   // reentrance case fails its row without truncating the whole JSON output.
   [[nodiscard]] SystemStatus<std::unique_ptr<InvocationFrameTrace>>
-  push_frame(ContractAddress address)
+  push_frame(ContractAddress address, Calldata calldata = {})
   {
     return handler_.start_frame(
         Invocation{
             .invoked_address = address,
             .entrypoint = ContractEntrypointID{},
             .gas_limit = kPlentyOfGas,
-            .calldata = Calldata{},
+            .calldata = std::move(calldata),
         },
         std::to_underlying(InvokeFlag::None), ValidatedAuthTokens{});
   }
@@ -438,7 +464,7 @@ public:
       StorageKey key(StorageKeyType::ContractData);
       key.contract_data_key() = make_item_key(space, index);
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(kNNIntSnapshotValue, &cost_model()));
+                make_nnint_item(kNNIntSnapshotValue));
     }
   }
 
@@ -456,7 +482,7 @@ public:
       // be measuring something other than the copy it is meant to.
       std::ranges::fill(value, uint8_t{0xAB});
       seed_item(AddressAndKey{.address = address, .key = key},
-                StorageItemWrapper(std::move(value), &cost_model()));
+                make_bytestring_item(std::move(value)));
     }
   }
 
@@ -495,23 +521,14 @@ public:
   }
 
 private:
-  static StorageCostModel const &cost_model()
+  void seed_item(AddressAndKey const &addrkey, WireStorageItem const &item)
   {
-    static const StorageCostModel model =
-        StorageCostModel::default_cost_model();
-    return model;
-  }
-
-  void seed_item(AddressAndKey const &addrkey, StorageItemWrapper item)
-  {
-    framework_.write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                                       std::move(item)));
+    framework_.write_item(addrkey, item);
   }
 
   NativeContractTestFramework framework_{
       /*log=*/false,
       BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB::kHogDb,
       /*empty_genesis=*/true,
       /*genesis_cost_model=*/std::nullopt,
       bench_network_config(),
@@ -671,6 +688,24 @@ verify_signature_call(size_t index)
   return call;
 }
 
+// The ML-DSA-65 counterpart of verify_signature_call: the same message, its own
+// signatures and key.
+SyscallCall
+verify_signature_mldsa65_call(size_t index)
+{
+  const uint32_t message_bytes = kVerifyMessageBytes.at(index);
+  SyscallCall call =
+      make_call("VerifySignatureMlDsa65", SyscallNo::kVerifySignature,
+                {static_cast<uint32_t>(CryptographicScheme::MlDsa65),
+                 mldsa_signature_address(index),
+                 static_cast<uint32_t>(sizeof(MlDsa65Signature)),
+                 kMlDsaPublicKeyAddress,
+                 static_cast<uint32_t>(sizeof(MlDsa65PublicKey)),
+                 kMessageAddress, message_bytes});
+  call.payload_bytes = message_bytes;
+  return call;
+}
+
 // force_load distinguishes a snapshot-backed read from a frame-only read.
 // These match the SDK's get_values_force and get_values paths.
 SyscallCall
@@ -747,6 +782,31 @@ bytestring_get_len_call(uint32_t bytes)
   return call;
 }
 
+// GetCalldata({payload, bytes}, &written_len, &auth_token_count), in a frame
+// whose calldata is `bytes` long, the guest buffer sized exactly to it.
+SyscallCall
+get_calldata_call(uint32_t bytes)
+{
+  SyscallCall call = make_call("GetCalldata", SyscallNo::kGetCalldata,
+                               {kBytestringPayloadAddress, bytes,
+                                kOutputAddressA, kOutputAddressB});
+  call.payload_bytes = bytes;
+  return call;
+}
+
+// GetReturnedBuffer({payload, bytes}, &written_len, &auth_start, &auth_count),
+// reading a saved child output `bytes` long.
+SyscallCall
+get_returned_buffer_call(uint32_t bytes)
+{
+  SyscallCall call =
+      make_call("GetReturnedBuffer", SyscallNo::kGetReturnedBuffer,
+                {kBytestringPayloadAddress, bytes, kOutputAddressA,
+                 kOutputAddressB, kBytestringWrittenLenAddress});
+  call.payload_bytes = bytes;
+  return call;
+}
+
 // Use a fixed keypair and valid signatures so timings cover verification,
 // without an early invalid-signature rejection.
 std::vector<uint8_t>
@@ -785,6 +845,22 @@ make_guest_memory()
   }
   std::ranges::copy(public_key, memory.begin() + kPublicKeyAddress);
   std::ranges::copy(message, memory.begin() + kMessageAddress);
+
+  // ML-DSA-65: deterministic signatures (all-zero rnd), so every run measures
+  // the same bytes.
+  const auto mldsa_key = MlDsa65SigningKey::from_seed(MlDsaSeed{1});
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    const auto signature =
+        mldsa_key.sign_with_rnd(std::as_bytes(std::span(message).first(
+                                    kVerifyMessageBytes[i])),
+                                {}, MlDsaRnd{});
+    if (!signature.has_value()) {
+      std::abort();
+    }
+    std::ranges::copy(*signature, memory.begin() + mldsa_signature_address(i));
+  }
+  std::ranges::copy(mldsa_key.public_key(),
+                    memory.begin() + kMlDsaPublicKeyAddress);
 
   // The NNInt block: the warm keys, and SetAdd's two operands. The sweep rows
   // overwrite the key per call; the operands stay.
@@ -911,6 +987,171 @@ bm_syscall_entry(benchmark::State &state, SyscallCall call)
   // Report declared host gas beside timing; omit ns/gas when the charge is
   // zero.
   state.counters["gas"] = benchmark::Counter(static_cast<double>(gas));
+}
+
+// The frame-payload copies, swept on length. GetCalldata runs in a child
+// frame pushed with that much calldata and discarded afterwards. For
+// GetReturnedBuffer a child returns that many bytes and commits, leaving its
+// output in the fixture's inner frame, where the row then reads it; the next
+// row's child replaces it.
+void
+bm_frame_payload_copy(benchmark::State &state, SyscallCall call)
+{
+  SyscallBenchFixture *fixture_ptr = fixture_or_fail(state);
+  if (fixture_ptr == nullptr) {
+    return;
+  }
+  SyscallBenchFixture &fixture = *fixture_ptr;
+  const bool calldata =
+      call.words[0] == static_cast<uint32_t>(SyscallNo::kGetCalldata);
+  Calldata payload;
+  payload.resize_uninitialized(call.payload_bytes);
+  std::ranges::fill(payload, uint8_t{0xAB});
+  auto pushed = fixture.push_frame(SyscallBenchFixture::copy_address(),
+                                   calldata ? std::move(payload) : Calldata{});
+  if (!pushed.has_value()) {
+    state.SkipWithError(
+        SyscallBenchFixture::frame_push_error("copy", pushed.error()));
+    return;
+  }
+  std::unique_ptr<InvocationFrameTrace> trace = std::move(pushed).value();
+  if (!calldata) {
+    ReturnBuffer returned;
+    returned.resize_uninitialized(call.payload_bytes);
+    std::ranges::fill(returned, uint8_t{0xAB});
+    fixture.handler().set_return_buffer(std::move(returned), false, {});
+    const std::string popped = fixture.pop_frame(std::move(trace), true);
+    if (!popped.empty()) {
+      state.SkipWithError(popped);
+      return;
+    }
+  }
+  bm_syscall_entry(state, std::move(call));
+  if (calldata) {
+    const std::string popped = fixture.pop_frame(std::move(trace), false);
+    if (!popped.empty()) {
+      state.SkipWithError(popped);
+    }
+  }
+}
+
+// Fixtures and reference outputs are built outside timing. The direct FFI
+// reference checks dispatch and output wiring; kernel tests cover arithmetic.
+std::vector<uint8_t>
+make_msm_terms(uint32_t count, uint8_t pattern)
+{
+  constexpr std::array<uint8_t, 32> basepoint = {
+      0xe2, 0xf2, 0xae, 0x0a, 0x6a, 0xbc, 0x4e, 0x71, 0xa8, 0x84, 0xa9,
+      0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58, 0xe3, 0x0b, 0x6a, 0xa5, 0x82,
+      0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
+  };
+  std::vector<uint8_t> terms(count * RISTRETTO255_MSM_TERM_BYTES);
+  for (uint32_t i = 0; i < count; ++i) {
+    auto term = std::span(terms).subspan(i * RISTRETTO255_MSM_TERM_BYTES,
+                                         RISTRETTO255_MSM_TERM_BYTES);
+    // Different dense scalars, independent of the point multiples below.
+    const std::array<uint8_t, 4> seed = {0x6d, 0x73, static_cast<uint8_t>(i),
+                                         static_cast<uint8_t>(i >> 8)};
+    SHA256Hasher hasher;
+    hasher.update(std::span<const std::byte>(std::as_bytes(std::span(seed))));
+    const auto scalar = hasher.finalize();
+    std::ranges::copy(scalar, term.begin());
+    if (pattern != 0) {
+      std::fill_n(term.begin(), 32, pattern);
+    }
+    // Values below 2^252 are canonical scalars.
+    term[31] &= 0x0f;
+
+    std::array<uint8_t, 64> point_term{};
+    point_term[0] = static_cast<uint8_t>(i + 1);
+    point_term[1] = static_cast<uint8_t>((i + 1) >> 8);
+    std::ranges::copy(basepoint, point_term.begin() + 32);
+    uint8_t point[32];
+    if (!ristretto255_msm({point_term.data(), point_term.size()}, &point)) {
+      std::abort();
+    }
+    std::ranges::copy(point, term.begin() + 32);
+  }
+  return terms;
+}
+
+enum class MsmInvalid {
+  None,
+  FirstPoint,
+  LastPoint,
+  FirstScalar,
+  LastScalar,
+  OverLimit
+};
+
+void
+bm_ristretto255_msm(benchmark::State &state, uint32_t count, uint8_t pattern,
+                    MsmInvalid invalid)
+{
+  auto *fixture = fixture_or_fail(state);
+  if (fixture == nullptr) {
+    return;
+  }
+  auto terms = make_msm_terms(count, pattern);
+  const bool valid = invalid == MsmInvalid::None;
+  if (!valid && invalid != MsmInvalid::OverLimit) {
+    const bool last =
+        invalid == MsmInvalid::LastPoint || invalid == MsmInvalid::LastScalar;
+    const bool point =
+        invalid == MsmInvalid::FirstPoint || invalid == MsmInvalid::LastPoint;
+    const size_t offset =
+        ((last ? count - 1 : 0) * RISTRETTO255_MSM_TERM_BYTES) +
+        (point ? 32 : 0);
+    std::fill_n(terms.begin() + offset, 32, 0xff);
+  }
+  uint8_t expected[32];
+  std::fill_n(expected, 32, 0xa5);
+  if (valid && !ristretto255_msm({terms.data(), terms.size()}, &expected)) {
+    state.SkipWithError("Ristretto255Msm: fixture rejected");
+    return;
+  }
+  auto memory = make_guest_memory();
+  const std::span<uint8_t> memory_span(memory);
+  std::ranges::copy(terms, memory.begin() + kInputAddress);
+  std::fill_n(memory.begin() + kOutputAddressA, 32, 0xa5);
+  const auto call =
+      make_call("Ristretto255Msm", SyscallNo::kRistretto255Msm,
+                {kInputAddress, static_cast<uint32_t>(terms.size()),
+                 kOutputAddressA});
+  const auto check = [&](const SyscallOutcome &outcome) {
+    const bool status_ok =
+        valid
+            ? outcome.ok
+            : (!outcome.ok && !outcome.host_error &&
+               outcome.error ==
+                   static_cast<int>(
+                       SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+    if (!status_ok || !std::equal(std::begin(expected), std::end(expected),
+                                  memory.begin() + kOutputAddressA)) {
+      state.SkipWithError("Ristretto255Msm: unexpected status or output");
+      return false;
+    }
+    return true;
+  };
+  const auto warm = invoke_syscall_entry(fixture->handler(), memory_span, call);
+  if (!check(warm)) {
+    return;
+  }
+  int64_t calls = 0;
+  for (auto _ : state) {
+    benchmark::DoNotOptimize(
+        invoke_syscall_entry(fixture->handler(), memory_span, call).gas);
+    benchmark::DoNotOptimize(memory.data());
+    benchmark::ClobberMemory();
+    ++calls;
+  }
+  if (!check(invoke_syscall_entry(fixture->handler(), memory_span, call))) {
+    return;
+  }
+  state.SetItemsProcessed(calls);
+  state.SetBytesProcessed(calls * static_cast<int64_t>(terms.size()));
+  state.counters["gas"] = benchmark::Counter(static_cast<double>(warm.gas));
+  state.counters["terms"] = benchmark::Counter(static_cast<double>(count));
 }
 
 // Sequences keep state valid across iterations: Update precedes Finalize,
@@ -1392,6 +1633,31 @@ bm_nnint_cold(benchmark::State &state)
 void
 register_benchmarks()
 {
+  // Include both sides of the kernel's 190-term algorithm threshold.
+  for (const uint32_t count :
+       {0U, 1U, 2U, 4U, 5U, 8U, 16U, 32U, 64U, 128U, 189U, 190U, 191U, 256U}) {
+    for (const auto &[name, pattern] : {std::pair{"dense", uint8_t{0}},
+                                        {"pattern55", uint8_t{0x55}},
+                                        {"patternaa", uint8_t{0xaa}}}) {
+      benchmark::RegisterBenchmark(
+          std::format("entry/Ristretto255Msm/{}/{}", name, count).c_str(),
+          bm_ristretto255_msm, count, pattern, MsmInvalid::None);
+    }
+  }
+  for (const uint32_t count : {2U, 256U}) {
+    for (const auto &[name, invalid] :
+         {std::pair{"invalid_first_point", MsmInvalid::FirstPoint},
+          {"invalid_last_point", MsmInvalid::LastPoint},
+          {"invalid_first_scalar", MsmInvalid::FirstScalar},
+          {"invalid_last_scalar", MsmInvalid::LastScalar}}) {
+      benchmark::RegisterBenchmark(
+          std::format("entry/Ristretto255Msm/{}/{}", name, count).c_str(),
+          bm_ristretto255_msm, count, uint8_t{0}, invalid);
+    }
+  }
+  benchmark::RegisterBenchmark("entry/Ristretto255Msm/over_limit/257",
+                               bm_ristretto255_msm, 257U, uint8_t{0},
+                               MsmInvalid::OverLimit);
   for (const SyscallCall &call : stateless_calls()) {
     benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
                                  bm_syscall_entry, call);
@@ -1456,6 +1722,19 @@ register_benchmarks()
                                    .c_str(),
                                bm_syscall_vm,
                                verify_signature_call(kVerifyVmRow));
+  for (size_t i = 0; i < kVerifyMessageBytes.size(); ++i) {
+    benchmark::RegisterBenchmark(("entry/VerifySignatureMlDsa65/" +
+                                  std::to_string(kVerifyMessageBytes[i]))
+                                     .c_str(),
+                                 bm_syscall_entry,
+                                 verify_signature_mldsa65_call(i));
+  }
+  benchmark::RegisterBenchmark(("vm/VerifySignatureMlDsa65/" +
+                                std::to_string(
+                                    kVerifyMessageBytes[kVerifyVmRow]))
+                                   .c_str(),
+                               bm_syscall_vm,
+                               verify_signature_mldsa65_call(kVerifyVmRow));
 
   // NNInt, warm: the key's view is already in the active frame. The Get rows
   // read a view loaded from the snapshot; SetAdd overwrites a staged write.
@@ -1493,6 +1772,19 @@ register_benchmarks()
   benchmark::RegisterBenchmark(std::format("vm/BytestringGetLen/{}", vm_bytes),
                                bm_syscall_vm,
                                bytestring_get_len_call(vm_bytes));
+
+  // The frame-payload copies, over the same lengths: max_calldata_len and
+  // max_return_buffer_len are configurable, so a copy is not bounded by the
+  // stock limits.
+  for (const uint32_t bytes : kBytestringBytes) {
+    benchmark::RegisterBenchmark(std::format("entry/GetCalldata/{}", bytes),
+                                 bm_frame_payload_copy,
+                                 get_calldata_call(bytes));
+    benchmark::RegisterBenchmark(std::format("entry/GetReturnedBuffer/{}",
+                                             bytes),
+                                 bm_frame_payload_copy,
+                                 get_returned_buffer_call(bytes));
+  }
 
   // Depth counts frames above the fixture's two. The floor's depth is always
   // swept: it is the row the committed reference guards, and a chain raising

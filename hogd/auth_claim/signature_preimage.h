@@ -21,17 +21,26 @@ namespace hogd {
 //
 // Signers and verifiers must both derive the preimage here: any disagreement
 // between the two rejects every signature on the network.
-inline x23::Buf
+// Replaces the contents while retaining capacity for the next transaction.
+inline void
 transaction_signature_preimage(const NetworkHash &network_hash,
-                               const Transaction &tx)
+                               const Transaction &tx, x23::Buf &preimage)
 {
-  x23::Buf preimage;
+  preimage.clear();
   preimage.reserve(kTransactionSignatureDomainSeparatorCxs.size() +
                    network_hash.size() + x23::xdr_size(tx));
   preimage.append(kTransactionSignatureDomainSeparatorCxs.begin(),
                   kTransactionSignatureDomainSeparatorCxs.end());
   preimage.append(network_hash.begin(), network_hash.end());
   x23::serialize_to(&preimage, tx);
+}
+
+inline x23::Buf
+transaction_signature_preimage(const NetworkHash &network_hash,
+                               const Transaction &tx)
+{
+  x23::Buf preimage;
+  transaction_signature_preimage(network_hash, tx, preimage);
   return preimage;
 }
 

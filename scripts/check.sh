@@ -216,7 +216,8 @@ fi
 # Bound these like every other ctest invocation here. They had no --timeout at
 # all, so they leaned on the per-test TIMEOUT property hogd/ramdb used to set
 # (dropped, see #3584) and otherwise fell back to ctest's 1500s default. 300 for
-# tsan and 100 for asan/ubsan match scripts/schedules/{tsan,sanitizer}.toml.
+# tsan and 100 for asan/ubsan match the tsan and sanitizer schedules
+# (hogd/{tsan,sanitizer}.toml in thruputchain/benchmarks).
 if ! ctest --test-dir ${ROOT_DIR}/${BUILD_DIR}/llvm_tsan --output-on-failure --timeout 300; then
   printf "tsan tests failed!\n"
   exit 1

@@ -10,7 +10,9 @@
 #include <optional>
 #include <span>
 #include <string>
+#include <string_view>
 #include <type_traits>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
@@ -33,6 +35,7 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/perthread.h"
 #include "hogd/base/span.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
@@ -192,28 +195,28 @@ HogDbDAO::read_address_balance(const Address &addr)
   return int128_from_xdr_bytes(encoded);
 }
 
-HogDbStatus<HogAge>
-HogDbDAO::read_address_average_hog_age(const Address &addr)
+HogDbStatus<NativeTokenAge>
+HogDbDAO::read_address_average_native_token_age(const Address &addr)
 {
-  auto key = make_address_key(addr, Prefix::kHogAge);
+  auto key = make_address_key(addr, Prefix::kNativeTokenAge);
   HogDbStatus<OwningSpan<const std::byte>> raw =
       db_.get_if_type(std::as_bytes(std::span(key)), 0);
   if (!raw)
     return raw.error();
 
   // The key already identifies the address, so the value persists only the
-  // trailing fields (num_hogs || average_ages) and the address is
-  // reconstructed from the key -- see write_address_average_hog_age. Storing
-  // the address in the value too was redundant and could drift from the key on
-  // untrusted on-disk state (the RAMDB log CRC is unkeyed and kHogAge rows are
-  // excluded from the consensus db_hash), which crashed the scheduler's
-  // CHECK_EQ(age.address, account) (issue #3812).
+  // trailing fields (num_native_tokens || average_ages) and the address is
+  // reconstructed from the key -- see write_address_average_native_token_age.
+  // Storing the address in the value too was redundant and could drift from the
+  // key on untrusted on-disk state (the RAMDB log CRC is unkeyed and
+  // kNativeTokenAge rows are excluded from the consensus db_hash), which
+  // crashed the scheduler's CHECK_EQ(age.address, account) (issue #3812).
   //
   // Only this address-less layout is accepted; a value of any other size is
-  // corruption. address is HogAge's first XDR field, so splicing the stored
-  // fields after the key address reproduces the full struct encoding, which
-  // decodes with the key as the authoritative address.
-  constexpr size_t kFullSize = x23::detail::size_of_fixed<HogAge>();
+  // corruption. address is NativeTokenAge's first XDR field, so splicing the
+  // stored fields after the key address reproduces the full struct encoding,
+  // which decodes with the key as the authoritative address.
+  constexpr size_t kFullSize = x23::detail::size_of_fixed<NativeTokenAge>();
   constexpr size_t kValueSize = kFullSize - kAddressSize;
 
   std::span<const std::byte> stored = *raw;
@@ -226,7 +229,7 @@ HogDbDAO::read_address_average_hog_age(const Address &addr)
   std::ranges::copy(addr.as_bytes(), std::begin(out));
   std::ranges::copy(stored, std::begin(out) + kAddressSize);
 
-  HogAge age;
+  NativeTokenAge age;
   try {
     x23::deserialize(&age, x23::BufViewEnd(std::span(full)));
   } catch (x23::XdrException &e) {
@@ -401,27 +404,29 @@ HogDbDAO::write_address_balance(const Address &addr, int128_t val)
   return ret;
 }
 
-// read/write_address_average_hog_age slice the address off the front of the
-// HogAge XDR encoding and splice the key address back on. That is valid only
-// while address is HogAge's first field and occupies kAddressSize bytes; guard
-// the layout so a later reordering or resize fails to compile instead of
-// silently corrupting kHogAge rows (issue #3812).
-static_assert(std::is_standard_layout_v<HogAge>,
-              "HogAge must be standard-layout for the offsetof check below");
-static_assert(offsetof(HogAge, address) == 0,
-              "address must be HogAge's first field");
-static_assert(sizeof(HogAge::address) == kAddressSize,
-              "HogAge::address must be kAddressSize bytes");
+// read/write_address_average_native_token_age slice the address off the front
+// of the NativeTokenAge XDR encoding and splice the key address back on. That
+// is valid only while address is NativeTokenAge's first field and occupies
+// kAddressSize bytes; guard the layout so a later reordering or resize fails to
+// compile instead of silently corrupting kNativeTokenAge rows (issue #3812).
+static_assert(
+    std::is_standard_layout_v<NativeTokenAge>,
+    "NativeTokenAge must be standard-layout for the offsetof check below");
+static_assert(offsetof(NativeTokenAge, address) == 0,
+              "address must be NativeTokenAge's first field");
+static_assert(sizeof(NativeTokenAge::address) == kAddressSize,
+              "NativeTokenAge::address must be kAddressSize bytes");
 
 HogDbStatus<void>
-HogDbDAO::write_address_average_hog_age(const HogAge &age)
+HogDbDAO::write_address_average_native_token_age(const NativeTokenAge &age)
 {
-  auto key = make_address_key(age.address, Prefix::kHogAge);
+  auto key = make_address_key(age.address, Prefix::kNativeTokenAge);
   auto before_item = get_before_item(key);
   // The key already encodes the address, so persist only the trailing fields
-  // (num_hogs || average_ages) and drop the redundant embedded copy that could
-  // otherwise drift from the key (issue #3812). address is HogAge's first XDR
-  // field; read_address_average_hog_age reconstructs it from the key.
+  // (num_native_tokens || average_ages) and drop the redundant embedded copy
+  // that could otherwise drift from the key (issue #3812). address is
+  // NativeTokenAge's first XDR field; read_address_average_native_token_age
+  // reconstructs it from the key.
   auto buf = x23::serialize(age);
   auto value = std::span(buf).subspan(kAddressSize);
   auto ret = db_.put(std::as_bytes(std::span(key)), 0, std::as_bytes(value));
@@ -843,6 +848,24 @@ HogDbDAO::apply(ChangeSet &changes, WorkerPool &pool)
                                   vecs.push_back(std::move(vec));
                                 }
                               });
+  }
+
+  // Each key may be staged at most once: the vectors flush in parallel and in
+  // no fixed order, so two changes to one key would leave the surviving value
+  // to scheduling (#1282). Locks own disjoint keys, so a repeat means two
+  // locks staged the same row.
+  if constexpr (is_debug_build()) {
+    std::unordered_set<std::string_view> staged;
+    for (const auto &vec : vecs) {
+      for (const auto &change : vec) {
+        auto key = change.key();
+        std::string_view key_view(reinterpret_cast<const char *>(key.data()),
+                                  key.size());
+        if (!staged.insert(key_view).second) {
+          panic("ChangeSet staged key {} twice", encode_hex(key));
+        }
+      }
+    }
   }
 
   std::atomic<bool> had_error{false};

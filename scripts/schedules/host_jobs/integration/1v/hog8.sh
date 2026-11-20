@@ -12,14 +12,14 @@ cat >config-hog8.json <<EOF
     "validator_config": {
         "private_info": {
             "public_info": {
-                "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
+                "public_key": {"scheme": "Ed25519", "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"},
                 "address": "hog8:50000"
             },
-            "secret_key": "b9cb6de12b73f1969adeeb7c1102d9420f692da1c977cdeb15271c6a090d06b8970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+            "secret_key": {"scheme": "Ed25519", "ed25519": "b9cb6de12b73f1969adeeb7c1102d9420f692da1c977cdeb15271c6a090d06b8970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"}
         },
         "known_validators": [
             {
-                "public_key": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56",
+                "public_key": {"scheme": "Ed25519", "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"},
                 "address": "hog8:50000"
             }
         ]
@@ -74,7 +74,7 @@ cat >config-hog8.json <<EOF
             "validators": [
                 {
                     "scheme": "Ed25519",
-                    "ed25519": "970c9ba081452fa7f094bbba51966f4a64c9108ea6fec6d1dcbbad38e25e0f56"
+                    "ed25519": "BAdiM6BcmD46jZJyCPDFDJbp58YyU1129wYk4pLJdPid"
                 }
             ],
             "inner_sets": [

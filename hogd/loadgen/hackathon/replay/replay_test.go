@@ -14,8 +14,9 @@ import (
 	"testing"
 	"time"
 
-	"github.com/groundhogchain/lib-go/libxdr"
-	proto "github.com/groundhogchain/protocol-go"
+	"github.com/mr-tron/base58"
+	"github.com/thruputchain/lib-go/libxdr"
+	proto "github.com/thruputchain/thruput-protocol-go"
 )
 
 func fixture(t *testing.T, n int) (string, []Operation) {
@@ -32,12 +33,12 @@ func fixture(t *testing.T, n int) (string, []Operation) {
 		tx.Tx.Uniquifier.Nonce = uint64(i)
 		hash := hashTransaction(&tx)
 		raw := libxdr.NewXdrMarshaler().MarshalXdr(proto.XDR_SignedTransaction(&tx)).Bytes()
-		ops[i] = Operation{DueNs: int64(i) * int64(time.Millisecond), Phase: 1, Kind: "call", Dependency: -1, Hash: "0x" + hex.EncodeToString(hash[:]), Raw: "0x" + hex.EncodeToString(raw)}
+		ops[i] = Operation{DueNs: int64(i) * int64(time.Millisecond), Phase: 1, Kind: "call", Dependency: -1, Hash: base58.Encode(hash[:]), Raw: "0x" + hex.EncodeToString(raw)}
 		if err = json.NewEncoder(f).Encode(ops[i]); err != nil {
 			t.Fatal(err)
 		}
 	}
-	data, _ := json.Marshal(Manifest{SchemaVersion: 1, Operations: n, DurationSeconds: 1})
+	data, _ := json.Marshal(Manifest{SchemaVersion: 2, Operations: n, DurationSeconds: 1})
 	if err = os.WriteFile(filepath.Join(dir, "manifest.json"), data, 0644); err != nil {
 		t.Fatal(err)
 	}
@@ -71,6 +72,25 @@ func TestCorpusValidation(t *testing.T) {
 		t.Fatal("accepted mismatched transaction hash")
 	}
 }
+func TestCorpusRejectsLegacyHash(t *testing.T) {
+	dir, ops := fixture(t, 1)
+	hash, err := base58.Decode(ops[0].Hash)
+	if err != nil {
+		t.Fatal(err)
+	}
+	ops[0].Hash = "0x" + hex.EncodeToString(hash)
+	data, err := json.Marshal(ops[0])
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, "transactions.jsonl"), append(data, '\n'), 0644); err != nil {
+		t.Fatal(err)
+	}
+	if _, _, err := load(Config{Corpus: dir}); err == nil {
+		t.Fatal("accepted a legacy hex transaction hash")
+	}
+}
+
 func bytesLines(data []byte) [][]byte {
 	var lines [][]byte
 	start := 0

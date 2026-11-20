@@ -110,8 +110,7 @@ class InvokeMalformedTokensRv32Test : public ::testing::Test,
 public:
   InvokeMalformedTokensRv32Test()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:

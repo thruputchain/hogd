@@ -55,8 +55,11 @@ private:
   x23::MaybeAsync<std::pair<InvokeStatus<void>, GasAmount>>
   invoke_internal(MethodID method_id, uint64_t gas_limit) noexcept override;
 
+  // method_id is only consumed by the Debug-only stack-usage report
+  // (HOGD_RV32_STACK_USAGE, see threaded_machine.h).
   x23::Async<std::pair<InvokeStatus<void>, GasAmount>>
-  run_ecall_loop(rv32::ThreadedMachine machine, uint64_t gas_limit);
+  run_ecall_loop(rv32::ThreadedMachine machine, MethodID method_id,
+                 uint64_t gas_limit);
 };
 
 // RuntimeContext for RV32 contracts. Snapshot deployments borrow preparation

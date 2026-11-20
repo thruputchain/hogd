@@ -1,19 +1,26 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <cstddef>
+#include <cstdint>
 #include <filesystem>
 #include <memory>
+#include <span>
+#include <string_view>
 #include <type_traits>
 #include <utility>
 #include <vector>
 
 #include "db_conflict.hh"
 #include "event.hh"
+#include "event_cursor_internal.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
@@ -24,6 +31,7 @@
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 
 namespace hogd {
 
@@ -78,9 +86,10 @@ TxEventLogBatch
 create_event_logs()
 {
   // Create test events
-  SHA256Hash tx_hash0, tx_hash1;
-  std::ranges::fill(tx_hash0, 0x01);
-  std::ranges::fill(tx_hash1, 0x02);
+  ProposedTransaction first{}, second{};
+  second.signed_tx.tx.uniquifier.nonce = 1;
+  const auto tx_hash0 = sha256(first.signed_tx.tx);
+  const auto tx_hash1 = sha256(second.signed_tx.tx);
 
   ContractAddress contract_addr0, contract_addr1;
   std::ranges::fill(contract_addr0, 0xAA);
@@ -100,7 +109,7 @@ create_event_logs()
   TxEmittedEvent event1;
   event1.contract_address = contract_addr1;
   event1.num_topics = 1;
-  event1.serialized_event.resize(20);
+  event1.serialized_event.resize(32);
   std::ranges::fill(event1.serialized_event, 0x22);
   event_log1.events.push_back(event1);
 
@@ -201,7 +210,7 @@ TEST_F(IndexerTest, FindNonExistentTx)
 TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
 {
   BlockHeight block_height = 100;
-  TxEventLogBatch events = create_event_logs(); // tx hashes 0x01, 0x02
+  TxEventLogBatch events = create_event_logs();
   ProposedTransactionBatch bodies =
       create_tx_bodies(events.size()); // nonces 0, 1
 
@@ -215,16 +224,19 @@ TEST_F(IndexerTest, GetTransactionsReturnsBodiesAndEvents)
   TransactionPage page =
       unwrap_page(block_explorer_->get_transactions(query)());
 
-  // Both txs are at block 100; ascending order is by (block, tx_hash), so
-  // 0x01 (index 0) precedes 0x02 (index 1) -- aligned with events/bodies.
+  // Both txs are at block 100; ascending order is by transaction hash.
+  const std::array<size_t, 2> indices = events[0].tx_hash < events[1].tx_hash
+                                            ? std::array<size_t, 2>{0, 1}
+                                            : std::array<size_t, 2>{1, 0};
   ASSERT_EQ(page.transactions.size(), 2);
   for (std::size_t i = 0; i < page.transactions.size(); i++) {
+    const auto source = indices[i];
     EXPECT_EQ(page.transactions[i].height, block_height);
-    EXPECT_EQ(page.transactions[i].tx, bodies[i]);
-    EXPECT_EQ(page.transactions[i].events.tx_hash, events[i].tx_hash);
+    EXPECT_EQ(page.transactions[i].tx, bodies[source]);
+    EXPECT_EQ(page.transactions[i].events.tx_hash, events[source].tx_hash);
     ASSERT_EQ(page.transactions[i].events.events.size(), 1);
     EXPECT_EQ(page.transactions[i].events.events[0].contract_address,
-              events[i].events[0].contract_address);
+              events[source].events[0].contract_address);
   }
 }
 
@@ -256,8 +268,7 @@ TEST_F(IndexerTest, AddressQueryFindsEventlessRootInvocation)
   body.signed_tx.tx.uniquifier.nonce = 42;
   body.signed_tx.tx.invocation.invoked_address = root_addr;
 
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x33);
+  const auto tx_hash = sha256(body.signed_tx.tx);
 
   TxEventLog event_log{}; // no events emitted
   event_log.tx_hash = tx_hash;
@@ -295,8 +306,7 @@ TEST_F(IndexerTest, AddressQuerySeparatesRootFromEmitter)
 
   ProposedTransaction body{};
   body.signed_tx.tx.invocation.invoked_address = root_a;
-  SHA256Hash tx_hash;
-  std::ranges::fill(tx_hash, 0x44);
+  const auto tx_hash = sha256(body.signed_tx.tx);
 
   TxEventLog event_log{};
   event_log.tx_hash = tx_hash;
@@ -349,8 +359,7 @@ TEST_F(IndexerTest, AddressQueryPaginatesInBlockOrder)
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
-    SHA256Hash h;
-    std::ranges::fill(h, static_cast<char>(0x50 + i));
+    const auto h = sha256(body.signed_tx.tx);
     hashes.push_back(h);
     TxEventLog log{};
     log.tx_hash = h;
@@ -394,7 +403,7 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
     body.signed_tx.tx.uniquifier.nonce = fill;
     body.signed_tx.tx.invocation.invoked_address = addr;
     TxEventLog log{};
-    std::ranges::fill(log.tx_hash, fill);
+    log.tx_hash = sha256(body.signed_tx.tx);
     TxEmittedEvent event{};
     event.contract_address = addr;
     log.events.push_back(event);
@@ -461,6 +470,284 @@ TEST_F(IndexerTest, PaginationFreezesRowsButReportsCurrentWatermark)
   EXPECT_TRUE(address_page.cursor.empty());
 }
 
+TEST_F(IndexerTest, HistoryCursorsBindMethodAndRootAddress)
+{
+  ContractAddress root{};
+  std::ranges::fill(root, 0xC1);
+  for (uint8_t i = 0; i < 4; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.invocation.invoked_address = root;
+    body.signed_tx.tx.uniquifier.nonce = i;
+    TxEventLog log{};
+    log.tx_hash = sha256(body.signed_tx.tx);
+    TxEmittedEvent event{};
+    event.contract_address = root;
+    log.events.push_back(event);
+    ingest_legacy_events(10 + i, TxEventLogBatch{log},
+                         ProposedTransactionBatch{body})();
+  }
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    EventQuery events{};
+    events.filters.push_back(
+        EventFilter{.contract_addresses = {root}, .topics = {}});
+    events.order = order;
+    events.anchor.kind(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                 : BlockAnchorKind::AnchorAtEnd);
+    events.limit = 1;
+    TransactionQuery transactions{};
+    transactions.order = order;
+    transactions.anchor = events.anchor;
+    transactions.limit = 1;
+    AddressTransactionQuery address{};
+    address.address = root;
+    address.order = order;
+    address.anchor = events.anchor;
+    address.limit = 1;
+    auto event_page = unwrap_page(block_explorer_->get_events(events)());
+    auto tx_page =
+        unwrap_page(block_explorer_->get_transactions(transactions)());
+    auto address_page =
+        unwrap_page(block_explorer_->get_transactions_by_address(address)());
+    ASSERT_FALSE(event_page.cursor.empty());
+    ASSERT_FALSE(tx_page.cursor.empty());
+    ASSERT_FALSE(address_page.cursor.empty());
+    const std::vector<PaginationCursor> cursors{event_page.cursor,
+                                                tx_page.cursor,
+                                                address_page.cursor};
+    for (size_t i = 0; i < cursors.size(); ++i) {
+      SCOPED_TRACE(i);
+      events.cursor = cursors[i];
+      transactions.cursor = cursors[i];
+      address.cursor = cursors[i];
+      EXPECT_EQ(block_explorer_->get_events(events)().outcome(),
+                i == 0 ? IndexerQueryOutcome::IndexerQueryOk
+                       : IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      EXPECT_EQ(block_explorer_->get_transactions(transactions)().outcome(),
+                i == 1 ? IndexerQueryOutcome::IndexerQueryOk
+                       : IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      EXPECT_EQ(
+          block_explorer_->get_transactions_by_address(address)().outcome(),
+          i == 2 ? IndexerQueryOutcome::IndexerQueryOk
+                 : IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    }
+    address.cursor = address_page.cursor;
+    address.address[0] ^= 0xFF;
+    EXPECT_EQ(block_explorer_->get_transactions_by_address(address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    address.address = root;
+
+    // Continuation owns the direction and anchor, but page size can change.
+    events.cursor = event_page.cursor;
+    transactions.cursor = tx_page.cursor;
+    events.order = transactions.order = address.order =
+        ascending ? IterationOrder::IterationOrderDescending
+                  : IterationOrder::IterationOrderAscending;
+    events.anchor.kind(ascending ? BlockAnchorKind::AnchorAtEnd
+                                 : BlockAnchorKind::AnchorAtBeginning);
+    transactions.anchor = address.anchor = events.anchor;
+    events.limit = transactions.limit = address.limit = 2;
+    event_page = unwrap_page(block_explorer_->get_events(events)());
+    tx_page = unwrap_page(block_explorer_->get_transactions(transactions)());
+    address_page =
+        unwrap_page(block_explorer_->get_transactions_by_address(address)());
+    ASSERT_EQ(event_page.events.size(), 2);
+    ASSERT_EQ(tx_page.transactions.size(), 2);
+    ASSERT_EQ(address_page.refs.size(), 2);
+    for (size_t i = 0; i < 2; ++i) {
+      const BlockHeight height = ascending ? 11 + i : 12 - i;
+      EXPECT_EQ(event_page.events[i].block_height, height);
+      EXPECT_EQ(tx_page.transactions[i].height, height);
+      EXPECT_EQ(address_page.refs[i].height, height);
+    }
+  }
+}
+
+TEST_F(IndexerTest, MalformedHistoryCursorsHaveTypedOutcomes)
+{
+  const auto logs = create_event_logs();
+  const auto bodies = create_tx_bodies(logs.size());
+  ingest_legacy_events(10, logs, bodies)();
+
+  EventQuery events{};
+  events.filters.push_back(
+      EventFilter{.contract_addresses = {logs[0].events[0].contract_address},
+                  .topics = {}});
+  TransactionQuery transactions{};
+  AddressTransactionQuery address{};
+  address.address = bodies[0].signed_tx.tx.invocation.invoked_address;
+
+  const auto invalid_for = [](HistoryCursorMethod method,
+                              SHA256Hash const &query_hash) {
+    EventCursorPayload payload{};
+    payload.schema_version = cursor::kCursorVersion;
+    payload.method = method;
+    payload.query_hash = query_hash;
+    payload.order = IterationOrder::IterationOrderAscending;
+    payload.block_height = 10;
+    payload.max_block_height = 10;
+    std::vector<PaginationCursor> invalid{PaginationCursor(1),
+                                          PaginationCursor(
+                                              cursor::kMaxCursorBytes + 1)};
+    const auto add = [&] {
+      const auto bytes = x23::serialize(payload);
+      PaginationCursor encoded;
+      encoded.append_range(
+          std::span<const std::uint8_t>(bytes.data(), bytes.size()));
+      invalid.push_back(std::move(encoded));
+    };
+    payload.schema_version++;
+    add();
+    payload.schema_version = 2;
+    add();
+    payload.schema_version = cursor::kCursorVersion;
+    payload.order = static_cast<IterationOrder>(2);
+    add();
+    payload.order = IterationOrder::IterationOrderAscending;
+    if (method != HistoryCursorMethod::CursorEvents) {
+      payload.sequence_number = 1;
+      add();
+    }
+    return invalid;
+  };
+  for (auto const &bytes :
+       invalid_for(HistoryCursorMethod::CursorEvents,
+                   cursor::event_query_hash(events.filters))) {
+    events.cursor = bytes;
+    const auto page = db_->get_events(events);
+    ASSERT_FALSE(page);
+    EXPECT_EQ(page.error().code(), IndexerErrorCode::kInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_events(events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+  }
+  for (auto const &bytes :
+       invalid_for(HistoryCursorMethod::CursorTransactions, SHA256Hash{})) {
+    transactions.cursor = bytes;
+    const auto page = db_->get_transactions(transactions);
+    ASSERT_FALSE(page);
+    EXPECT_EQ(page.error().code(), IndexerErrorCode::kInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_transactions(transactions)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+  }
+  for (auto const &bytes :
+       invalid_for(HistoryCursorMethod::CursorAddressTransactions,
+                   cursor::address_query_hash(address.address))) {
+    address.cursor = bytes;
+    const auto page = db_->get_transactions_by_address(address);
+    ASSERT_FALSE(page);
+    EXPECT_EQ(page.error().code(), IndexerErrorCode::kInvalidCursor);
+    EXPECT_EQ(block_explorer_->get_transactions_by_address(address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+  }
+}
+
+TEST_F(IndexerTest, HistoryContinuationsWaitForTheirOriginalWatermark)
+{
+  ContractAddress addr{};
+  std::ranges::fill(addr, 0xD7);
+  auto logs = create_event_logs();
+  auto bodies = create_tx_bodies(logs.size());
+  for (size_t i = 0; i < logs.size(); ++i) {
+    logs[i].events[0].contract_address = addr;
+    // The test event does not carry topics.
+    logs[i].events[0].num_topics = 0;
+    bodies[i].signed_tx.tx.invocation.invoked_address = addr;
+    logs[i].tx_hash = sha256(bodies[i].signed_tx.tx);
+    ingest_legacy_events(static_cast<BlockHeight>(10 + i),
+                         TxEventLogBatch{logs[i]},
+                         ProposedTransactionBatch{bodies[i]})();
+  }
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    EventQuery events{};
+    events.filters.push_back(
+        EventFilter{.contract_addresses = {addr}, .topics = {}});
+    events.order = order;
+    events.anchor.kind(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                 : BlockAnchorKind::AnchorAtEnd);
+    events.limit = 1;
+    TransactionQuery transactions{};
+    transactions.order = order;
+    transactions.anchor = events.anchor;
+    transactions.limit = 1;
+    AddressTransactionQuery address{};
+    address.address = addr;
+    address.order = order;
+    address.anchor = events.anchor;
+    address.limit = 1;
+    const auto first_events = db_->get_events(events);
+    ASSERT_TRUE(first_events && !first_events->cursor.empty());
+    events.cursor = first_events->cursor;
+    const auto first_txs = db_->get_transactions(transactions);
+    ASSERT_TRUE(first_txs && !first_txs->cursor.empty());
+    transactions.cursor = first_txs->cursor;
+    const auto first_refs = db_->get_transactions_by_address(address);
+    ASSERT_TRUE(first_refs && !first_refs->cursor.empty());
+    address.cursor = first_refs->cursor;
+
+    auto replacement =
+        IndexDB::make_new(std::filesystem::path(tmp_dir_.directory()) /
+                          (ascending ? "ascending" : "descending"));
+    ASSERT_TRUE(replacement);
+    ASSERT_TRUE(
+        replacement->consume_events(10, TxEventLogBatch{logs[0]},
+                                    ProposedTransactionBatch{bodies[0]}));
+    RecentTxFailureCache failures;
+    IndexerBlockExplorerRpc rpc(*replacement, failures);
+    auto wrong_events = events;
+    wrong_events.filters[0].contract_addresses[0][0] ^= 0xFF;
+    EXPECT_EQ(rpc.get_events(wrong_events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    auto wrong_address = address;
+    wrong_address.address[0] ^= 0xFF;
+    EXPECT_EQ(rpc.get_transactions_by_address(wrong_address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    auto wrong_method = transactions;
+    wrong_method.cursor = events.cursor;
+    EXPECT_EQ(rpc.get_transactions(wrong_method)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+    const auto missing_events = replacement->get_events(events);
+    ASSERT_FALSE(missing_events);
+    EXPECT_EQ(missing_events.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    const auto missing_txs = replacement->get_transactions(transactions);
+    ASSERT_FALSE(missing_txs);
+    EXPECT_EQ(missing_txs.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    const auto missing_refs = replacement->get_transactions_by_address(address);
+    ASSERT_FALSE(missing_refs);
+    EXPECT_EQ(missing_refs.error().code(),
+              IndexerErrorCode::kHistoryUnavailable);
+    EXPECT_EQ(rpc.get_events(events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+    EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+    EXPECT_EQ(rpc.get_transactions_by_address(address)().outcome(),
+              IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+
+    ASSERT_TRUE(
+        replacement->consume_events(11, TxEventLogBatch{logs[1]},
+                                    ProposedTransactionBatch{bodies[1]}));
+    const auto resumed_events = unwrap_page(rpc.get_events(events)());
+    ASSERT_EQ(resumed_events.events.size(), 1);
+    EXPECT_EQ(resumed_events.events[0].block_height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_events.cursor.empty());
+    const auto resumed_txs = unwrap_page(rpc.get_transactions(transactions)());
+    ASSERT_EQ(resumed_txs.transactions.size(), 1);
+    EXPECT_EQ(resumed_txs.transactions[0].height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_txs.cursor.empty());
+    const auto resumed_refs =
+        unwrap_page(rpc.get_transactions_by_address(address)());
+    ASSERT_EQ(resumed_refs.refs.size(), 1);
+    EXPECT_EQ(resumed_refs.refs[0].height, ascending ? 11 : 10);
+    EXPECT_TRUE(resumed_refs.cursor.empty());
+  }
+}
+
 // Regression: a batch in which NO transaction emits any event (every
 // TxEventLog is present but has an empty events vector) must still write a
 // ROOT_TX row for every body.  Guards against the contract-index chunking
@@ -477,17 +764,14 @@ TEST_F(IndexerTest, EventlessBatchStillGetsRootTxEntries)
     std::ranges::fill(addr, static_cast<char>(0x60 + i));
     addrs.push_back(addr);
 
-    SHA256Hash h;
-    std::ranges::fill(h, static_cast<char>(0x90 + i));
-
     TxEventLog log{};
-    log.tx_hash = h;
-    logs.push_back(log); // present, but emits no events
 
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = i;
     body.signed_tx.tx.invocation.invoked_address = addr;
     bodies.push_back(body);
+    log.tx_hash = sha256(body.signed_tx.tx);
+    logs.push_back(log); // present, but emits no events
   }
 
   // Whole batch ingested in a single call: events.size() == 4, but the total
@@ -542,9 +826,9 @@ TEST_F(IndexerTest, RecentFailureExpiresAsWatermarkAdvances)
   // watermark. Give each block one distinct committed tx.
   for (BlockHeight h = 100; h <= 105; h++) {
     TxEventLog log{};
-    std::ranges::fill(log.tx_hash, static_cast<uint8_t>(h));
     ProposedTransaction body{};
     body.signed_tx.tx.uniquifier.nonce = h;
+    log.tx_hash = sha256(body.signed_tx.tx);
     ingest_legacy_events(h, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
     TxInfoResult result = block_explorer_->get_transaction_info(failed_hash)();
@@ -577,13 +861,8 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
   ContractAddress addr;
   std::ranges::fill(addr, 0xAA);
 
-  SHA256Hash tx10, tx12;
-  std::ranges::fill(tx10, 0x10);
-  std::ranges::fill(tx12, 0x12);
-
-  auto ingest_at = [&](BlockHeight height, SHA256Hash const &tx) {
+  auto ingest_at = [&](BlockHeight height) {
     TxEventLog log{};
-    log.tx_hash = tx;
     TxEmittedEvent ev;
     ev.contract_address = addr;
     ev.num_topics = 0;
@@ -592,15 +871,17 @@ TEST_F(IndexerTest, PendingTxHiddenFromPointLookupAndScans)
 
     ProposedTransaction body{};
     body.signed_tx.tx.invocation.invoked_address = addr;
-
+    body.signed_tx.tx.uniquifier.nonce = height;
+    log.tx_hash = sha256(body.signed_tx.tx);
     ingest_legacy_events(height, TxEventLogBatch{log},
                          ProposedTransactionBatch{body})();
+    return log.tx_hash;
   };
 
   // Block 10 is contiguous; block 12 arrives before block 11, so it is
   // ingested but held behind the watermark at 10.
-  ingest_at(10, tx10);
-  ingest_at(12, tx12);
+  const auto tx10 = ingest_at(10);
+  const auto tx12 = ingest_at(12);
   ASSERT_EQ(*db().latest_block(), 10);
 
   // Point lookup cannot expose a row above the durable serving boundary.
@@ -704,6 +985,66 @@ TEST_F(IndexerTest, ClosedDbReportsNotReadyInsteadOfEmptyPages)
   TransactionRefPageResult block_refs =
       block_explorer_->get_transactions_by_block(block_query)();
   EXPECT_EQ(block_refs.outcome(), IndexerQueryOutcome::IndexerQueryNotReady);
+}
+
+TEST_F(IndexerTest, EventRpcBoundsNonmatchingCandidatesAndResumes)
+{
+  ContractAddress address{};
+  std::ranges::fill(address, 0xAA);
+  ProposedTransactionBatch bodies;
+  TxEventLogBatch logs;
+  std::vector<SHA256Hash> hashes;
+  for (uint32_t i = 0; i <= IndexDB::kEventsMaxCandidates; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.uniquifier.nonce = i;
+    body.signed_tx.tx.invocation.invoked_address = address;
+    TxEventLog log{};
+    log.tx_hash = sha256(body.signed_tx.tx);
+    TxEmittedEvent event{};
+    event.contract_address = address;
+    log.events.push_back(event);
+    hashes.push_back(log.tx_hash);
+    bodies.push_back(body);
+    logs.push_back(log);
+  }
+  ingest_legacy_events(10, logs, bodies)();
+  std::ranges::sort(hashes);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    const bool ascending = order == IterationOrder::IterationOrderAscending;
+    EventQuery query{};
+    query.order = order;
+    query.anchor = BlockAnchor(ascending ? BlockAnchorKind::AnchorAtBeginning
+                                         : BlockAnchorKind::AnchorAtEnd);
+    EventFilter filter{};
+    filter.contract_addresses.push_back(address);
+    filter.topics.topic0.push_back(Topic{});
+    query.filters.push_back(filter);
+    const auto first = block_explorer().get_events(query)();
+    ASSERT_EQ(first.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+    EXPECT_TRUE(first.page().events.empty());
+    ASSERT_FALSE(first.page().cursor.empty());
+    const auto &opaque = first.page().cursor;
+    const auto cursor = cursor::decode(
+        std::string_view(reinterpret_cast<const char *>(opaque.data()),
+                         opaque.size()));
+    if (!cursor) {
+      ADD_FAILURE() << "Could not decode event cursor";
+      return;
+    }
+    EXPECT_EQ(cursor->tx_hash,
+              hashes[ascending ? IndexDB::kEventsMaxCandidates - 1 : 1]);
+    // Even an internal caller cannot enlarge the server's hard budget.
+    const auto oversized =
+        db().get_events(query, IndexDB::kEventsMaxCandidates + 1);
+    ASSERT_TRUE(oversized);
+    EXPECT_EQ(oversized->cursor, first.page().cursor);
+    query.cursor = first.page().cursor;
+    const auto last = block_explorer().get_events(query)();
+    ASSERT_EQ(last.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+    EXPECT_TRUE(last.page().events.empty());
+    EXPECT_TRUE(last.page().cursor.empty());
+  }
 }
 
 } // namespace hogd

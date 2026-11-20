@@ -14,7 +14,7 @@ creates a chain chooses its explicitly stated parameters:
 and `stock_network_config()` holds the values this repository's own dev and
 test chains use.
 
-Fresh `hog-devnode` chains (including those started by `groundhog node`) use
+Fresh `hog-devnode` chains (including those started by `thruput node`) use
 256 KiB for RV32 code and 512 KiB for the complete contract artifact, including
 its header and initial memory, without network-config overrides. These are
 also the protocol defaults for omitted parameters. Configurations that state

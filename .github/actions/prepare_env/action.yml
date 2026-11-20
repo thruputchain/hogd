@@ -3,6 +3,7 @@ description: "Prepare the environment for building hogd"
 runs:
   using: "composite"
   steps:
+    - uses: ./.github/actions/setup-sccache
     - name: gcc version check
       run: gcc --version
       shell: bash

@@ -9,6 +9,7 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -38,8 +39,7 @@ class BlockCancelTest : public ::testing::Test,
 public:
   BlockCancelTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   constexpr static ContractAddress kContractAddress = make_contract_address(0);
@@ -86,7 +86,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommit)
                                 Invocation{.invoked_address = kContractAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -149,7 +149,7 @@ TEST_F(BlockCancelTest, CancelBlockBeforeCommitDiscardedBody)
                                 Invocation{.invoked_address = kContractAddress,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
@@ -246,7 +246,7 @@ TEST_F(BlockCancelTest, CancelDuringTryCommit)
                                 Invocation{.invoked_address = addr_caller,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             // Non-expired: this test drives a cancellation
                             // abort, and a default (height-0) uniquifier is
