@@ -50,7 +50,6 @@ namespace {
 using default_wallet::WalletCall;
 using default_wallet::WalletError;
 using default_wallet::WalletTokenRef;
-using default_wallet::WalletTokenSource;
 
 // Result types (and the WalletError exception selector inside them) come
 // straight from the generated trait in built_contracts/default_wallet.h.
@@ -229,21 +228,19 @@ public:
   std::variant<uint32_t, WalletError> take(WalletTokenRef const &token)
   {
     std::optional<uint32_t> token_id;
-    switch (token.source) {
-    case WalletTokenSource::Minted:
-      if (token.call == 0 && token.index < minted_.size()) {
-        token_id = minted_[token.index];
+    if (token.kind() == kMinted) {
+      if (token.minted() < minted_.size()) {
+        token_id = minted_[token.minted()];
       }
-      break;
-    case WalletTokenSource::Returned:
+    }
+    else {
       // Only completed calls have an entry, so a reference to the current or
       // a later call finds nothing.
-      if (token.call < returned_.size() &&
-          token.index < returned_[token.call].count) {
+      auto const &[call, index] = token.returned();
+      if (call < returned_.size() && index < returned_[call].count) {
         // Cannot overflow: the runtime assigned the whole range.
-        token_id = returned_[token.call].start + token.index;
+        token_id = returned_[call].start + index;
       }
-      break;
     }
     if (!token_id) {
       return WalletError::InvalidTokenRef;
@@ -256,6 +253,9 @@ public:
   }
 
 private:
+  // WalletTokenRef's discriminants; decoding admits no others.
+  static constexpr int32_t kMinted = 0;
+
   std::vector<uint32_t> minted_;
   // Per completed call, the ids of the tokens it returned.
   std::vector<AuthTokenIdRange> returned_;

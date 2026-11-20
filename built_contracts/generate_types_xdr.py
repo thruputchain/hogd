@@ -84,12 +84,59 @@ def emit_struct(name: str, fields: list[dict[str, Any]]) -> str:
     return "\n".join(lines)
 
 
+def arm_name(case_name: str) -> str:
+    """The XDR arm name for a union case: its name in snake_case."""
+    out = ""
+    for i, ch in enumerate(case_name):
+        if ch.isupper() and i > 0:
+            out += "_"
+        out += ch.lower()
+    return out
+
+
+def emit_union(name: str, cases: list[dict[str, Any]]) -> str:
+    """Emit a data-carrying enum as an XDR union switched on its discriminant.
+
+    An XDR arm holds one declaration, so a case with several fields gets a
+    struct of its own, named for the union and the case and emitted ahead of
+    the union. A one-item tuple case holds that item directly.
+    """
+    structs: list[str] = []
+    arms: list[str] = []
+    for case in cases:
+        case_type = case["case_type"]
+        kind: str = case_type["kind"]
+        arms.append(f"case {case['discriminant']}:")
+        if kind == "void":
+            arms.append("\tvoid;")
+            continue
+        arm = arm_name(case["name"])
+        if kind == "tuple" and len(case_type["items"]) == 1:
+            xdr_type, suffix = map_xdr_type(case_type["items"][0])
+            arms.append(f"\t{xdr_type} {arm}{suffix};")
+            continue
+        if kind == "tuple":
+            fields = [{"name": f"item{i}", "type": item}
+                      for i, item in enumerate(case_type["items"])]
+        elif kind == "struct":
+            fields = case_type["fields"]
+        else:
+            raise ValueError(f"unmapped union case kind '{kind}'")
+        struct_name = f"{name}{case['name']}"
+        structs.append(emit_struct(struct_name, fields))
+        arms.append(f"\t{struct_name} {arm};")
+    union = "\n".join([f"union {name} switch (int kind) {{", *arms, "};"])
+    return "\n\n".join([*structs, union])
+
+
 def emit_type_def(td: dict[str, Any]) -> str | None:
     kind: str = td["kind"]
     if kind == "enum":
         return emit_enum(declared_name(td["name"]), td["variants"])
     elif kind == "struct":
         return emit_struct(declared_name(td["name"]), td["fields"])
+    elif kind == "union":
+        return emit_union(declared_name(td["name"]), td["cases"])
     else:
         print(f"warning: unsupported type_def kind '{kind}', skipping", file=sys.stderr)
         return None
@@ -109,6 +156,16 @@ def named_refs(ty: dict[str, Any]) -> list[str]:
     return refs
 
 
+def field_types(td: dict[str, Any]) -> list[dict[str, Any]]:
+    """The types of everything a struct or union type_def holds."""
+    types = [field["type"] for field in td.get("fields", [])]
+    for case in td.get("cases", []):
+        case_type = case["case_type"]
+        types += case_type.get("items", [])
+        types += [field["type"] for field in case_type.get("fields", [])]
+    return types
+
+
 def definition_order(type_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
     """Order type_defs so each follows the type_defs its fields name.
 
@@ -126,8 +183,8 @@ def definition_order(type_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
             return
         if name in pending:
             raise ValueError(f"type '{name}' contains itself; XDR cannot define it")
-        for field in td.get("fields", []):
-            for ref in named_refs(field["type"]):
+        for ty in field_types(td):
+            for ref in named_refs(ty):
                 if ref in by_name:
                     place(by_name[ref], pending + (name,))
         placed.add(name)

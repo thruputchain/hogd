@@ -153,6 +153,47 @@ class TestGenerateXdr(unittest.TestCase):
         positions = [result.index(f"struct {n} {{") for n in ("B", "A", "C")]
         self.assertEqual(positions, sorted(positions))
 
+    def test_union(self) -> None:
+        type_defs = [
+            {"kind": "struct", "name": spec_id("User"), "fields": [
+                {"name": "r", "type": {"kind": "named", "name": spec_id("Ref")}},
+            ]},
+            {"kind": "union", "name": spec_id("Ref"), "cases": [
+                {"name": "None", "discriminant": 0,
+                 "case_type": {"kind": "void"}},
+                {"name": "Minted", "discriminant": 1,
+                 "case_type": {"kind": "tuple", "items": [{"kind": "u32"}]}},
+                {"name": "FromCall", "discriminant": 2,
+                 "case_type": {"kind": "struct", "fields": [
+                     {"name": "call", "type": {"kind": "u32"}},
+                     {"name": "index", "type": {"kind": "u32"}}]}},
+                {"name": "Pair", "discriminant": 3,
+                 "case_type": {"kind": "tuple", "items": [
+                     {"kind": "u32"},
+                     {"kind": "named", "name": spec_id("Leaf")}]}},
+            ]},
+            {"kind": "struct", "name": spec_id("Leaf"), "fields": [
+                {"name": "x", "type": {"kind": "u32"}}
+            ]},
+        ]
+        result = generate_xdr(type_defs, "test_ns")
+        self.assertIn(
+            "struct RefFromCall {\n\tunsigned int call;\n\tunsigned int index;\n};",
+            result)
+        self.assertIn(
+            "struct RefPair {\n\tunsigned int item0;\n\tLeaf item1;\n};", result)
+        self.assertIn(
+            "union Ref switch (int kind) {\n"
+            "case 0:\n\tvoid;\n"
+            "case 1:\n\tunsigned int minted;\n"
+            "case 2:\n\tRefFromCall from_call;\n"
+            "case 3:\n\tRefPair pair;\n"
+            "};", result)
+        # A union follows what its cases name, and precedes what names it.
+        positions = [result.index(d) for d in (
+            "struct Leaf {", "union Ref ", "struct User {")]
+        self.assertEqual(positions, sorted(positions))
+
     def test_self_containing_type_raises(self) -> None:
         type_defs = [
             {"kind": "struct", "name": spec_id("Loop"), "fields": [

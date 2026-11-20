@@ -77,7 +77,6 @@ using default_wallet::WalletCall;
 using CapturedRecord = std::vector<uint8_t>;
 using wallet_calls_t = x23::Vec<WalletCall, 4294967295>;
 using default_wallet::WalletTokenRef;
-using default_wallet::WalletTokenSource;
 using permit_meta = ContractTraitMeta<itc_erc20_permit::ERC20Permit>;
 using wallet_mints_t =
     std::tuple_element_t<0, wallet_meta::args_t<u8"execute">>;
@@ -532,14 +531,18 @@ protected:
 
   static WalletTokenRef minted(uint32_t index)
   {
-    return {.source = WalletTokenSource::Minted, .call = 0, .index = index};
+    WalletTokenRef token;
+    token.kind(0);
+    token.minted() = index;
+    return token;
   }
 
   static WalletTokenRef returned(uint32_t call, uint32_t index)
   {
-    return {.source = WalletTokenSource::Returned,
-            .call = call,
-            .index = index};
+    WalletTokenRef token;
+    token.kind(1);
+    token.returned() = {.call = call, .index = index};
+    return token;
   }
 
   // An encoded AuthTokenNode, as execute takes its mints.
@@ -1893,12 +1896,8 @@ TEST_F(DefaultWalletParityTest, TokensMintedPermitGrantSpendsAtNativeToken)
 TEST_F(DefaultWalletParityTest, TokensReferenceNamingNoTokenRejected)
 {
   setup_wallets_and_desk();
-  WalletTokenRef minted_with_call = minted(0);
-  minted_with_call.call = 1;
   std::vector<std::pair<std::string, std::vector<WalletCall>>> cases{
       {"mint index past mints", {desk_redeem({minted(1)})}},
-      {"minted with a call",
-       {desk_issue(0x11), desk_redeem({minted_with_call})}},
       {"its own call", {desk_redeem({returned(0, 0)})}},
       {"a later call", {desk_redeem({returned(1, 0)}), desk_issue(0x11)}},
       {"index past returned",
