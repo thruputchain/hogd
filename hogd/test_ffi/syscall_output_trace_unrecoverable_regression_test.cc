@@ -162,7 +162,7 @@ TEST(TestBindingsTest, TracedGetCurrentAddressOutputRecordsTraceWithoutCrashing)
   });
 }
 
-// #2753: GetDeployAddress computes the address (null caller -> current frame),
+// #2753: GetDeployAddress computes the address (no caller -> current frame),
 // then records its trace output.
 TEST(TestBindingsTest, TracedGetDeployAddressOutputRecordsTraceWithoutCrashing)
 {
@@ -172,7 +172,8 @@ TEST(TestBindingsTest, TracedGetDeployAddressOutputRecordsTraceWithoutCrashing)
     ContractAddress to_be_deployed{};
     auto result = mock_syscall_entrypoint(
         std::to_underlying(SyscallNo::kGetDeployAddress),
-        /*optional caller_address=*/0, reinterpret_cast<uint64_t>(&nonce),
+        /*optional caller_address=*/UINT64_MAX,
+        reinterpret_cast<uint64_t>(&nonce),
         reinterpret_cast<uint64_t>(&contract_hash),
         reinterpret_cast<uint64_t>(&to_be_deployed), 0, 0, 0);
     expect_syscall_ok(result);
