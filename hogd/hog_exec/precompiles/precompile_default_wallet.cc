@@ -3,12 +3,12 @@
 #include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
 #include <tuple>
 #include <utility>
-#include <variant>
 #include <vector>
 
 #include "built_contracts/default_wallet.h"
@@ -224,7 +224,7 @@ public:
 
   // Resolves `token` to the id of a token the wallet still holds and marks it
   // forwarded, or returns the WalletError the reference throws.
-  std::variant<uint32_t, WalletError> take(WalletTokenRef const &token)
+  std::expected<uint32_t, WalletError> take(WalletTokenRef const &token)
   {
     std::optional<uint32_t> token_id;
     // Decoding admits no other kind.
@@ -247,10 +247,10 @@ public:
     }
     }
     if (!token_id) {
-      return WalletError::InvalidTokenRef;
+      return std::unexpected{WalletError::InvalidTokenRef};
     }
     if (std::ranges::contains(forwarded_, *token_id)) {
-      return WalletError::TokenAlreadyForwarded;
+      return std::unexpected{WalletError::TokenAlreadyForwarded};
     }
     forwarded_.push_back(*token_id);
     return *token_id;
@@ -267,19 +267,19 @@ private:
 
 // Mirrors thruput_sdk::block::get_block_height(): the height, or the syscall
 // exception the SDK throws in its place.
-x23::Async<InvokeStatus<std::variant<BlockHeight, LibraryException>>>
+x23::Async<InvokeStatus<std::expected<BlockHeight, LibraryException>>>
 get_block_height(NativeSyscallContext &ctx)
 {
-  using result_t = std::variant<BlockHeight, LibraryException>;
+  using result_t = std::expected<BlockHeight, LibraryException>;
   BlockHeight height{};
   auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
   if (!r.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    co_return result_t{
+    co_return result_t{std::unexpected{
         NativeContractBuilder::syscall_exception(SyscallNo::kGetBlockHeight,
-                                                 *r)};
+                                                 *r)}};
   }
   co_return result_t{height};
 }
@@ -343,15 +343,14 @@ make_native_default_wallet_contract()
         if (!expiry.has_value()) {
           co_return expiry.error();
         }
-        if (auto *exn = std::get_if<LibraryException>(&*expiry)) {
-          co_return execute_result_t::make_err(std::move(*exn));
+        if (!expiry->has_value()) {
+          co_return execute_result_t::make_err(std::move(expiry->error()));
         }
         BatchTokens tokens;
         for (auto const &node : mints) {
           uint32_t token_id = 0;
           auto r = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
-              std::get<BlockHeight>(*expiry), std::as_bytes(std::span(node)),
-              token_id);
+              **expiry, std::as_bytes(std::span(node)), token_id);
           if (!r.has_value()) {
             co_return NativeContractBuilder::host_fn_error_conversion(
                 r.error());
@@ -378,10 +377,11 @@ make_native_default_wallet_contract()
           auth_tokens.reserve(call.tokens.size());
           for (auto const &token : call.tokens) {
             auto taken = tokens.take(token);
-            if (auto *err = std::get_if<WalletError>(&taken)) {
-              co_return execute_result_t::make_err(WalletException{*err});
+            if (!taken.has_value()) {
+              co_return execute_result_t::make_err(
+                  WalletException{taken.error()});
             }
-            auth_tokens.push_back(std::get<uint32_t>(taken));
+            auth_tokens.push_back(*taken);
           }
 
           AuthTokenIdRange returned_tokens;
