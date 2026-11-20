@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "auth_claim.hh"
+#include "hogd/base/coropoll.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "parallel.hh"
@@ -164,6 +165,45 @@ TEST(ParallelBatchToTTest, AcceptsABatchAtTheObjectLimit)
   EXPECT_EQ(parsed.size(), 2UL);
 }
 
+TEST(ParallelBatchToTTest, AppendPreservesWireSegmentsAcrossParallelThreshold)
+{
+  for (size_t num_txs : {size_t{0}, kMinParallelBatchSize - 1,
+                         kMinParallelBatchSize, kMinParallelBatchSize + 1}) {
+    SCOPED_TRACE(num_txs);
+    SignedTransaction tx = make_minimal_signed_transaction();
+    SignedTransactionBatch txs;
+    for (size_t i = 0; i < num_txs; ++i) {
+      tx.tx.uniquifier.nonce = i + 1;
+      txs.push_back(tx);
+    }
+    const SignedTransactionBatch prefix{make_minimal_signed_transaction()};
+    auto actual = t_to_parallel_batch(prefix)();
+    auto expected = actual;
+    for (ChunkRange chunk : make_chunks(num_txs, kNumThreadsForParallelBatch)) {
+      const size_t start = expected.xdr.size();
+      for (size_t i = chunk.start; i < chunk.end; ++i) {
+        expected.xdr += x23::serialize(txs[i]);
+      }
+      expected.segment_tokens.push_back(chunk.end - chunk.start);
+      expected.segment_bytes.push_back(expected.xdr.size() - start);
+    }
+    // An unknown size keeps the pool dispatch; a known small size lets a
+    // batch under the object cutoff serialize inline. Both must match.
+    for (size_t hint : {kUnknownEncodedBytes, size_t{0}}) {
+      SCOPED_TRACE(hint);
+      auto appended = actual;
+      append_to_parallel_batch(x23::span<const SignedTransaction>(txs),
+                               appended, hint)();
+      EXPECT_EQ(appended, expected);
+      SignedTransactionBatch decoded;
+      ASSERT_TRUE(parallel_batch_to_t(appended, decoded, num_txs + 1)());
+      auto all = prefix;
+      all += txs;
+      EXPECT_EQ(decoded, all);
+    }
+  }
+}
+
 TEST(ParallelBatchToTTest, RejectsABatchOverTheObjectLimit)
 {
   ParallelSignedTransactionBatch batch = t_to_parallel_batch(
@@ -254,6 +294,43 @@ TEST(ParallelBatchToTTest, RejectsSegmentBytesLargerThanXdr)
 
   SignedTransactionBatch parsed;
   EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+// The cases above decode on the calling thread (fewer than
+// kMinParallelBatchSize objects). This one is large enough to take the pooled
+// path. A trailing byte in the first segment passes the aggregate token and
+// byte checks, so only that segment's pooled worker can reject it, and the
+// valid segments after it must not mask the failure.
+TEST(ParallelBatchToTTest, PooledPathRejectsTrailingByteInEarlySegment)
+{
+  SignedTransactionBatch txs(kMinParallelBatchSize,
+                             make_minimal_signed_transaction());
+  ParallelSignedTransactionBatch batch = t_to_parallel_batch(txs)();
+  ASSERT_GT(batch.segment_tokens.size(), 1UL);
+
+  SignedTransactionBatch parsed;
+  ASSERT_TRUE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+  EXPECT_EQ(parsed.size(), kMinParallelBatchSize);
+
+  const size_t first_end = batch.segment_bytes[0];
+  decltype(batch.xdr) xdr;
+  for (size_t i = 0; i < batch.xdr.size(); i++) {
+    if (i == first_end) {
+      xdr.push_back(0);
+    }
+    xdr.push_back(batch.xdr[i]);
+  }
+  batch.xdr = std::move(xdr);
+  batch.segment_bytes[0] += 1;
+  EXPECT_FALSE(parallel_batch_to_t(batch, parsed, kNoBatchSizeLimit)());
+}
+
+TEST(ParallelBatchToTTest, InlineChoiceRespectsByteBound)
+{
+  EXPECT_TRUE(run_batch_inline(kMinParallelBatchSize - 1, 0));
+  EXPECT_TRUE(run_batch_inline(1, kMaxInlineBatchBytes));
+  EXPECT_FALSE(run_batch_inline(kMinParallelBatchSize, 0));
+  EXPECT_FALSE(run_batch_inline(1, kMaxInlineBatchBytes + 1));
 }
 
 TEST(ParallelBatchToTTest, RandomByteCorruptionDoesNotCrash)
