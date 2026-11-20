@@ -395,8 +395,14 @@ struct SyscallArgParams<const T *> {
       return {.is_valid = true, .value = std::nullopt};
     }
 
-    return {.is_valid = true,
-            .value = check_user_argument_mock<const T>(guard, offset)};
+    // Only the sentinel means None. A null host pointer faults, as any other
+    // unreadable offset does on the rv32 path, where 0 is read as an address.
+    auto value = check_user_argument_mock<const T>(guard, offset);
+    if (!value.has_value()) {
+      return {.is_valid = false, .value = std::nullopt};
+    }
+
+    return {.is_valid = true, .value = std::move(value)};
   }
 
   constexpr static bool validate(OptionalInputParseResult const &arg)

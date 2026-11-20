@@ -200,6 +200,29 @@ TEST(SyscallParseTests, OptionalPointerUsesExplicitNullSentinel)
   ASSERT_FALSE(SyscallArgParams<const uint32_t *>::validate(bad_arg));
 }
 
+// On the mock path only the all-ones sentinel means None; a null host pointer
+// faults instead of passing for an omitted argument.
+TEST(SyscallParseTests, MockOptionalPointerUsesExplicitNullSentinel)
+{
+  using optional_u32 = SyscallArgParams<const uint32_t *>;
+  AliasGuard guard;
+
+  const uint32_t value = 0x01020304;
+  auto valid_arg =
+      optional_u32::parse_mock(guard, reinterpret_cast<uint64_t>(&value));
+  ASSERT_TRUE(optional_u32::validate(valid_arg));
+  ASSERT_NE(optional_u32::deref(valid_arg), nullptr);
+  EXPECT_EQ(*optional_u32::deref(valid_arg), value);
+
+  auto none_arg =
+      optional_u32::parse_mock(guard, std::numeric_limits<uint64_t>::max());
+  ASSERT_TRUE(optional_u32::validate(none_arg));
+  EXPECT_EQ(optional_u32::deref(none_arg), nullptr);
+
+  auto null_arg = optional_u32::parse_mock(guard, 0);
+  EXPECT_FALSE(optional_u32::validate(null_arg));
+}
+
 TEST(SyscallParseTests, WritableOutputBool)
 {
   std::array<uint8_t, 8> memory = {0, 1, 2, 3, 4, 5, 6, 7};
