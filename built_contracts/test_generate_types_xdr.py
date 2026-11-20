@@ -121,7 +121,9 @@ class TestGenerateXdr(unittest.TestCase):
 
     def test_types_are_defined_before_the_structs_that_use_them(self) -> None:
         # The spec lists these by name, which puts each user before its use.
-        named = lambda n: {"kind": "named", "name": spec_id(n)}
+        def named(n: str) -> dict[str, Any]:
+            return {"kind": "named", "name": spec_id(n)}
+
         type_defs = [
             {"kind": "struct", "name": spec_id("Call"), "fields": [
                 {"name": "tokens", "type": {

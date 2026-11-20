@@ -146,9 +146,8 @@ check_root_pubkey_auth(NativeSyscallContext &ctx)
 using child_result_t = Result<std::vector<uint8_t>, WalletException>;
 
 // Execute and deployment initialization share child-frame status handling.
-// `auth_tokens` are forwarded to the child. `returned_tokens`, when given,
-// receives the ids the child's returned tokens took in this frame; it is
-// written only when the child returns.
+// `auth_tokens` go to the child; `returned_tokens`, if given, gets the ids of
+// the tokens it returned (only when it returns).
 x23::Async<InvokeStatus<child_result_t>>
 invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
              ContractEntrypointID const &entrypoint, uint64_t gas_limit,
@@ -339,8 +338,7 @@ make_native_default_wallet_contract()
         }
 
         // Minted before any call runs, so no callee's behavior can change
-        // which token a Minted reference names. The tokens are forwarded
-        // within this transaction, so they need not outlive the block.
+        // which token a Minted reference names.
         auto expiry = co_await get_block_height(ctx);
         if (!expiry.has_value()) {
           co_return expiry.error();

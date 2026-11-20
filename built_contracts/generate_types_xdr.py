@@ -95,14 +95,8 @@ def arm_name(case_name: str) -> str:
 
 
 def emit_union(name: str, cases: list[dict[str, Any]]) -> str:
-    """Emit a data-carrying enum as an XDR union switched on its discriminant.
-
-    The discriminant gets an enum of its own, `<name>Kind`, carrying each
-    case's name and the value the spec states for it, so C++ names a case
-    instead of repeating its number. An XDR arm holds one declaration, so a
-    case with several fields gets a struct of its own, named for the union and
-    the case. Both are emitted ahead of the union. A one-item tuple case holds
-    that item directly.
+    """Emit a data-carrying enum as an XDR union: a `<name>Kind` discriminant
+    enum with the spec's values, a struct per multi-field case, then the union.
     """
     kind_name = f"{name}Kind"
     kinds = emit_enum(kind_name, [
@@ -174,11 +168,8 @@ def field_types(td: dict[str, Any]) -> list[dict[str, Any]]:
 
 
 def definition_order(type_defs: list[dict[str, Any]]) -> list[dict[str, Any]]:
-    """Order type_defs so each follows the type_defs its fields name.
-
-    XDR, like the C++ generated from it, needs a type defined before a struct
-    uses it, and the spec lists type_defs in no such order. Types that do not
-    depend on each other keep their spec order.
+    """Order type_defs so each follows the type_defs its fields name; spec
+    order is kept among independent types.
     """
     by_name = {declared_name(td["name"]): td for td in type_defs}
     ordered: list[dict[str, Any]] = []
