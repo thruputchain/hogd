@@ -53,6 +53,11 @@ public:
 
   NetworkHash const &network_hash() const { return network_hash_; }
 
+  // verify_transactions() splits a call into chunks of at least this many
+  // transactions, at most max_parallelism of them, and verifies a call that
+  // fits in one chunk on the calling coroutine, without a hop to the pool.
+  static constexpr size_t kMinTxsPerVerifyChunk = 256;
+
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.

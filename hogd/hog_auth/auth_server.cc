@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <span>
@@ -272,8 +273,15 @@ AuthServer::verify_transactions(BlockHeight height,
     }
   }
 
+  // Each chunk costs a hop to the pool and a wakeup. Splitting a small call
+  // max_parallelism ways, down to a transaction or two a chunk, spends more
+  // CPU on those than it saves in latency, and when many calls are in flight
+  // they keep the pool busy without splitting.
   const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), max_parallelism);
+      make_chunks(txs.size(),
+                  std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
+                                     max_parallelism));
+  const bool hop = chunks.size() > 1;
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
@@ -281,9 +289,11 @@ AuthServer::verify_transactions(BlockHeight height,
         [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
            const std::unordered_map<ContractAddress, AuthCacheEntry,
                                     SipHash24Hasher> &auth_data,
-           NetworkHash network_hash,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
+           NetworkHash network_hash, AuthErrorCodeBatch &results,
+           bool hop) noexcept -> x23::Async<void> {
+          if (hop) {
+            co_await default_coropoll().pool_.bg();
+          }
 
           x23::Buf signature_preimage;
           for (size_t i = chunk.start; i < chunk.end; i++) {
@@ -310,7 +320,7 @@ AuthServer::verify_transactions(BlockHeight height,
             // write this result to [results] again.
           }
           co_return;
-        }(chunk, txs, auth_data, network_hash_, results));
+        }(chunk, txs, auth_data, network_hash_, results, hop));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
