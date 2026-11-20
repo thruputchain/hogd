@@ -45,12 +45,10 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
     let signature_bytes = unsafe { &*signature };
     let message_bytes = message.to_slice();
 
-    let vk_bytes: VerificationKeyBytes = (*public_key_bytes).into();
-
-    // Parse public key
-    let verifying_key: VerificationKey = match vk_bytes.try_into() {
-        Ok(key) => key,
-        Err(_) => return Ed25519Result::InvalidPublicKey,
+    // Experiment: reuse this thread's parsed (decompressed) copy of the key.
+    let verifying_key: VerificationKey = match parsed_key(public_key_bytes) {
+        Some(key) => key,
+        None => return Ed25519Result::InvalidPublicKey,
     };
 
     // Parse signature
@@ -61,6 +59,32 @@ pub unsafe extern "C" fn ed25519_dalek_verify(
         Ok(_) => Ed25519Result::Success,
         Err(_) => Ed25519Result::VerificationFailed,
     }
+}
+
+/// Keys parsed per thread, at most this many before the cache is cleared.
+const PARSED_KEYS_PER_THREAD: usize = 1 << 16;
+
+thread_local! {
+    static PARSED_KEYS: std::cell::RefCell<std::collections::HashMap<[u8; 32], VerificationKey>> =
+        std::cell::RefCell::new(std::collections::HashMap::new());
+}
+
+/// `bytes` as a verification key, decompressing it only the first time this
+/// thread sees it. Invalid encodings are never cached, so they fail every
+/// time exactly as an uncached parse would.
+fn parsed_key(bytes: &[u8; 32]) -> Option<VerificationKey> {
+    PARSED_KEYS.with(|keys| {
+        if let Some(key) = keys.borrow().get(bytes) {
+            return Some(*key);
+        }
+        let key = VerificationKey::try_from(VerificationKeyBytes::from(*bytes)).ok()?;
+        let mut keys = keys.borrow_mut();
+        if keys.len() >= PARSED_KEYS_PER_THREAD {
+            keys.clear();
+        }
+        keys.insert(*bytes, key);
+        Some(key)
+    })
 }
 
 /// Verify a batch of ed25519 signatures

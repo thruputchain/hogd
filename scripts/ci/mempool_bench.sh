@@ -242,7 +242,7 @@ PY
 echo 'curve25519-dalek backend'
 # Which curve25519-dalek backends the Rust build compiled in (dalek 5 picks
 # AVX-512 IFMA at runtime when it is compiled in and the CPU supports it).
-find release -path '*build/curve25519-dalek-*/output' -exec grep -h curve25519_dalek_backend {} + \
+find "$BUILD_DIR" -path '*build/curve25519-dalek-*/output' -exec grep -h curve25519_dalek_backend {} + \
   2>/dev/null | sort -u || echo 'no curve25519-dalek build output found'
 grep -o -w -m1 'avx512ifma' /proc/cpuinfo || echo 'this CPU has no avx512ifma'
 
