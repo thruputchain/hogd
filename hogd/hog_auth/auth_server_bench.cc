@@ -22,13 +22,8 @@
 //                                          the saturated benchmarks
 //   --auth_bench_saturated_connections=1   connections those calls share
 //
-// The verify_warm and verify_saturated benchmarks also report CPU cost:
-// cpu_us_per_tx and txs_per_cpu_s count this process's CPU time across all
-// of its threads, and cpus_busy is that CPU time over wall time. They leave
-// out verify_rpc, whose client shares this process. verify_saturated runs its
-// client in a child process (this binary, rerun with --auth_bench_load_client)
-// and keeps enough calls in flight to leave no pool thread idle, so its CPU
-// cost is the auth server's alone at full load.
+// verify_warm and verify_saturated also report this process's CPU cost;
+// verify_saturated runs its client in a child process to keep it out.
 //
 // scripts/ci/auth_bench.sh runs the CI sweep.
 
@@ -291,9 +286,7 @@ read_line(FILE *file)
 }
 
 // An AuthMempool1 client in a child process: this binary, rerun with
-// --auth_bench_load_client. Building requests and reading replies then costs
-// the child CPU, not this process, so this process's CPU time is the auth
-// server's alone (plus the mock DB's, which a warm cache leaves idle).
+// --auth_bench_load_client.
 //
 // The child reads one command per line on its stdin and answers each with
 // one line on its stdout:
@@ -677,11 +670,8 @@ bm_verify_rpc(benchmark::State &state, size_t batch_size, size_t in_flight)
   state.counters["call_p99_us"] = percentile(all, 0.99);
 }
 
-// The AuthMempool1 verify call with [in_flight] calls outstanding from the
-// load client process, far more calls than pool threads, against a warm
-// cache. The auth server is the bottleneck here, so the figure that matters
-// is its CPU per transaction rather than call latency; cpus_busy near the
-// pool size confirms the run kept every thread busy.
+// Verify over RPC with [in_flight] calls outstanding from the load client,
+// against a warm cache; CPU per transaction is the figure of interest.
 void
 bm_verify_saturated(benchmark::State &state, size_t batch_size,
                     size_t in_flight)
