@@ -117,13 +117,20 @@ TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
   EXPECT_EQ(read.found.size(), accounts.size());
   EXPECT_TRUE(read.missing.empty());
 
+  // A distinct transfer to each account gives each a distinct age to write.
+  DeltaChunk deltas;
   for (size_t i = 0; i < accounts.size(); i++) {
-    {
-      auto [age, lock] = scheduler->get_cached_native_token_age(accounts[i]);
-      age->average_ages[kNativeTokenAgeGroupToSchedule] =
-          static_cast<BlockHeight>(100 + i);
-    }
-    scheduler->mark_native_token_age_dirty(accounts[i]);
+    deltas.push_back(Delta{.address = accounts[i],
+                           .native_token_delta =
+                               to_xdr(static_cast<int128_t>(i + 1) * 1000)});
+  }
+  scheduler->process_transfers(
+      one_chunk_transfer(/*block=*/7, std::move(deltas)))();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), accounts.size());
+  std::vector<NativeTokenAge> written;
+  for (const ContractAddress &account : accounts) {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    written.push_back(*age);
   }
   scheduler->write_dirty_native_token_ages_to_db()();
 
@@ -134,8 +141,7 @@ TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
   for (size_t i = 0; i < accounts.size(); i++) {
     const auto [age, lock] =
         scheduler->get_cached_native_token_age(accounts[i]);
-    EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule],
-              static_cast<BlockHeight>(100 + i));
+    EXPECT_EQ(*age, written[i]);
   }
 }
 

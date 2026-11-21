@@ -269,9 +269,6 @@ public:
     }
   }
 
-  // Marks [account]'s cached age for the next write. Takes the account lock.
-  void mark_native_token_age_dirty(const ContractAddress &account);
-
   size_t num_dirty_native_token_ages();
 
   // Bounds the native-token ages per DbSched1 record read or written;

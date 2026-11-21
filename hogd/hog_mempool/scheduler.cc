@@ -136,13 +136,6 @@ struct WriteNativeTokenAgeRecord {
 
 } // namespace
 
-void
-Scheduler::mark_native_token_age_dirty(const ContractAddress &account)
-{
-  auto [account_state, lock] = get_account_state(account);
-  account_state->native_token_age_dirty = true;
-}
-
 size_t
 Scheduler::num_dirty_native_token_ages()
 {
