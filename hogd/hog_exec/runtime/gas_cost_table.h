@@ -135,11 +135,9 @@ constexpr static uint64_t kGenericBadSyscallCost = 10;
 constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
 constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 
-// U256Sqrt, experimental. Not from a calibration run. The arithmetic alone
-// took 1.1 to 1.3 us on a development machine, depending on the value, which
-// at the 1.62 ns gas unit of the ML-DSA calibration above is 700 to 800 gas.
-// Priced with headroom until the calibration workflow measures it through the
-// entry path.
+// U256Sqrt, experimental. A placeholder, not from a calibration run, and far
+// above the work: the arithmetic alone takes tens of nanoseconds. It moves to
+// what the calibration workflow measures through the entry path.
 constexpr uint64_t kU256SqrtCost = 1'000;
 
 // Block geometry, fixed by the hash functions rather than chosen, so

@@ -2,7 +2,9 @@
 
 #pragma once
 
+#include <algorithm>
 #include <array>
+#include <bit>
 
 #include "hogd/base/types.h"
 
@@ -13,8 +15,9 @@
 // operations whose results the language defines.
 //
 // The syscalls built on this are priced flat, so the work a routine does is
-// set by the width of its operands. The values change only where a comparison
-// stops.
+// bounded by the width of its operands: a fixed number of steps, with the
+// values deciding only small things, such as where a comparison stops or
+// whether a last correction is taken.
 namespace hogd {
 
 // N limbs, least significant first.
@@ -54,23 +57,116 @@ limbs_mul(const Limbs<N> &a, const Limbs<N> &b)
   return product;
 }
 
-// floor(sqrt(value)): the largest root with root * root <= value. It always
-// fits half the limbs.
-//
-// Decides the root one bit at a time from the top, keeping a bit when the
-// square still fits. 64 * N squarings for any value.
+// value * 2^shift for a shift below 64 * N. Bits shifted past the top are
+// dropped.
 template<size_t N>
 constexpr Limbs<N>
-limbs_isqrt(const Limbs<2 * N> &value)
+limbs_shl(const Limbs<N> &value, size_t shift)
 {
-  Limbs<N> root{};
-  for (size_t bit = 64 * N; bit-- > 0;) {
-    Limbs<N> candidate = root;
-    candidate[bit / 64] |= uint64_t{1} << (bit % 64);
-    if (!limbs_less(value, limbs_mul(candidate, candidate)))
+  const size_t limbs = shift / 64;
+  const size_t bits = shift % 64;
+  Limbs<N> out{};
+  for (size_t i = N; i-- > limbs;) {
+    out[i] = value[i - limbs] << bits;
+    if (bits != 0 && i > limbs)
+      out[i] |= value[i - limbs - 1] >> (64 - bits);
+  }
+  return out;
+}
+
+// Square roots: floor(sqrt(value)), the largest root with root * root <= value.
+//
+// The root is built from the top of the value down. Each step doubles how
+// much of the value it is the root of, with one division (Zimmermann,
+// "Karatsuba Square Root", 1999):
+//
+//   Take an n whose top two bits are not both zero, and split it as
+//   high * b^2 + a1 * b + a0, where b is two to the quarter of n's width: high
+//   is the top half of n, and a1 and a0 a quarter each. Let
+//   top = floor(sqrt(high)), rest = high - top * top, and
+//   low = floor((rest * b + a1) / (2 * top)). Then floor(sqrt(n)) is
+//   top * b + low or one less than that. low can come out as b itself, and
+//   then the root is top * b + b - 1.
+//
+// rest is at most 2 * top, so rest * b + a1 needs one bit more than high has.
+// The division is done as floor(floor((rest * b + a1) / 2) / top), which is
+// the same number and fits.
+//
+// high has the top two bits of n, so its root comes from the same step, and
+// so on down to eight bits, whose root is one of eight numbers. To get such
+// an n, limbs_isqrt() shifts its value left by an even count, which multiplies
+// the root by a power of two, and shifts the root back.
+
+// floor(sqrt(n)) for an n whose top two bits are not both zero.
+constexpr uint64_t
+isqrt_normalized_u128(uint128_t n)
+{
+  // The top eight bits are 64 to 255, and their root 8 to 15. Its top bit is
+  // known, and each of the other three stays if the square still fits.
+  const auto top8 = static_cast<uint64_t>(n >> 120);
+  uint64_t root = 8;
+  for (uint64_t bit = 4; bit != 0; bit >>= 1) {
+    const uint64_t candidate = root | bit;
+    if (candidate * candidate <= top8)
       root = candidate;
   }
+  // Each pass takes root from the root of the top bits / 2 bits of n to the
+  // root of the top bits.
+  for (uint32_t bits = 16; bits <= 128; bits *= 2) {
+    const uint32_t quarter = bits / 4;
+    const uint64_t mask = (uint64_t{1} << quarter) - 1;
+    const uint128_t part = n >> (128 - bits);
+    const auto high = static_cast<uint64_t>(part >> (2 * quarter));
+    const uint64_t rest = high - (root * root);
+    const uint64_t a1 = static_cast<uint64_t>(part >> quarter) & mask;
+    // rest is below 2^(quarter + 1), so shifted it is below 2^(2 * quarter),
+    // which is at most 2^64, with its low quarter - 1 bits clear.
+    const uint64_t low =
+        std::min(((rest << (quarter - 1)) | (a1 >> 1)) / root, mask);
+    root = (root << quarter) | low;
+    // One too large if its square passes part. Whether it does follows no
+    // pattern, so it is taken off with arithmetic and not with a branch.
+    root -= static_cast<uint64_t>(uint128_t{root} * root > part);
+  }
   return root;
+}
+
+// The root of a 256-bit value is below 2^128, so it is two limbs.
+constexpr Limbs<2>
+limbs_isqrt(const Limbs<4> &value)
+{
+  int zeros = 0;
+  size_t limbs = value.size();
+  while (limbs > 0 && value[limbs - 1] == 0) {
+    --limbs;
+    zeros += 64;
+  }
+  if (limbs == 0)
+    return {};
+  zeros += std::countl_zero(value[limbs - 1]);
+  const int shift = zeros & ~1;
+  const Limbs<4> n = limbs_shl(value, static_cast<size_t>(shift));
+  // The last step, with b = 2^64.
+  const uint128_t high = (uint128_t{n[3]} << 64) | n[2];
+  const uint64_t top = isqrt_normalized_u128(high);
+  const uint128_t rest = high - (uint128_t{top} * top);
+  // rest is below 2^65, so shifted it is below 2^128 with its low 63 bits
+  // clear.
+  const uint128_t dividend = (rest << 63) | (n[1] >> 1);
+  // A quotient of 2^64 does not fit a limb. It means the low limb of the root
+  // is all ones.
+  const uint64_t low = static_cast<uint64_t>(dividend >> 64) >= top
+                           ? ~uint64_t{0}
+                           : static_cast<uint64_t>(dividend / top);
+  Limbs<2> root = {low, top};
+  // One too large if its square passes n. Its low limb is then above zero,
+  // since top * b squares to no more than n, so nothing is borrowed from top.
+  if (limbs_less(n, limbs_mul(root, root)))
+    --root[0];
+  const uint128_t unshifted =
+      ((uint128_t{root[1]} << 64) | root[0]) >> (shift / 2);
+  return {static_cast<uint64_t>(unshifted),
+          static_cast<uint64_t>(unshifted >> 64)};
 }
 
 // The value of Bytes bytes, least significant first.

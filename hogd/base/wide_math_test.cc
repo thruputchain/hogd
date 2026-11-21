@@ -10,10 +10,11 @@
 #include "hogd/base/types.h"
 #include "hogd/base/wide_math.h"
 
-// wide_math.h is checked three ways that share nothing with it or with each
+// wide_math.h is checked in ways that share nothing with it or with each
 // other: against a table whose expected values were computed with Python
-// integers, against Ref below, and for the smallest sizes against the
-// compiler's own 128-bit arithmetic.
+// integers, against Ref below, against the compiler's own 128-bit arithmetic
+// for the sizes it reaches, and, for the 256-bit square root, against a root
+// found one bit at a time.
 
 namespace hogd {
 namespace {
@@ -128,6 +129,22 @@ ref_mul(const Ref &a, const Ref &b)
   return product;
 }
 
+// The square root as wide_math.h first had it: one bit of the root at a time
+// from the top, keeping a bit when the square still fits. Slow, and short
+// enough to be right by inspection.
+Limbs<2>
+bit_by_bit_isqrt(const Limbs<4> &value)
+{
+  Limbs<2> root{};
+  for (size_t bit = 128; bit-- > 0;) {
+    Limbs<2> candidate = root;
+    candidate[bit / 64] |= uint64_t{1} << (bit % 64);
+    if (!limbs_less(value, limbs_mul(candidate, candidate)))
+      root = candidate;
+  }
+  return root;
+}
+
 template<size_t N>
 Limbs<N>
 from_u64(uint64_t value)
@@ -217,11 +234,16 @@ boundary_values()
 // an uninitialized limb on any path they take would not compile.
 static_assert(limbs_mul<2>({kMaxLimb, kMaxLimb}, {kMaxLimb, kMaxLimb}) ==
               Limbs<4>{1, 0, kMaxLimb - 1, kMaxLimb});
-static_assert(limbs_isqrt<2>({kMaxLimb, kMaxLimb, kMaxLimb, kMaxLimb}) ==
+static_assert(limbs_isqrt({kMaxLimb, kMaxLimb, kMaxLimb, kMaxLimb}) ==
               Limbs<2>{kMaxLimb, kMaxLimb});
-static_assert(limbs_isqrt<2>({0, 0, 1, 0}) == Limbs<2>{0, 1});
-static_assert(limbs_isqrt<2>({kMaxLimb, kMaxLimb, 0, 0}) ==
-              Limbs<2>{kMaxLimb, 0});
+static_assert(limbs_isqrt({0, 0, 1, 0}) == Limbs<2>{0, 1});
+static_assert(limbs_isqrt({kMaxLimb, kMaxLimb, 0, 0}) == Limbs<2>{kMaxLimb, 0});
+static_assert(limbs_isqrt({}) == Limbs<2>{});
+static_assert(limbs_isqrt({3, 0, 0, 0}) == Limbs<2>{1, 0});
+static_assert(limbs_shl<2>({1, 0}, 127) == Limbs<2>{0, kTopBit});
+static_assert(isqrt_normalized_u128(uint128_t{1} << 126) == kTopBit);
+static_assert(isqrt_normalized_u128(uint128_t{1} << 127) == 0xb504f333f9de6484);
+static_assert(isqrt_normalized_u128(~uint128_t{0}) == kMaxLimb);
 
 TEST(WideMathTest, ByteAndWordOrder)
 {
@@ -339,14 +361,14 @@ constexpr SqrtVector kSqrtVectors[] = {
 TEST(WideMathTest, IsqrtVectors)
 {
   for (const SqrtVector &v : kSqrtVectors)
-    EXPECT_EQ(limbs_isqrt<2>(v.value), v.root) << hex(v.value);
+    EXPECT_EQ(limbs_isqrt(v.value), v.root) << hex(v.value);
 }
 
 // root is floor(sqrt(value)) exactly when root^2 <= value < (root + 1)^2.
 void
 expect_isqrt(const Limbs<4> &value)
 {
-  const Limbs<2> root = limbs_isqrt<2>(value);
+  const Limbs<2> root = limbs_isqrt(value);
   const Ref square = ref_mul(Ref(root), Ref(root));
   EXPECT_FALSE(Ref(value) < square) << hex(value) << " root " << hex(root);
   // (root + 1)^2 == root^2 + 2 * root + 1.
@@ -365,6 +387,13 @@ TEST(WideMathTest, IsqrtPerfectSquaresAndNeighbours)
   roots.push_back({0x100000000, 0});
   roots.push_back({0, 0x100000000});
   roots.push_back({kMaxLimb - 1, kMaxLimb});
+  // A low limb of all ones is where the division's quotient does not fit.
+  roots.push_back({kMaxLimb, 1});
+  roots.push_back({kMaxLimb, kTopBit});
+  roots.push_back({kMaxLimb, kTopBit - 1});
+  roots.push_back({kMaxLimb, 0x123456789abcdef0});
+  roots.push_back({0, kMaxLimb});
+  roots.push_back({1, kMaxLimb});
   for (size_t bits = 1; bits <= 128; ++bits) {
     roots.push_back(random_bits<2>(rng, bits));
     roots.push_back(random_edge_limbs<2>(rng));
@@ -372,19 +401,19 @@ TEST(WideMathTest, IsqrtPerfectSquaresAndNeighbours)
   const Ref one(from_u64<2>(1));
   for (const Limbs<2> &root : roots) {
     const Ref square = ref_mul(Ref(root), Ref(root));
-    EXPECT_EQ(limbs_isqrt<2>(square.limbs<4>()), root) << hex(root);
+    EXPECT_EQ(limbs_isqrt(square.limbs<4>()), root) << hex(root);
 
     // The largest value with this root is (root + 1)^2 - 1.
     Ref last = square;
     last.add(Ref(root));
     last.add(Ref(root));
-    EXPECT_EQ(limbs_isqrt<2>(last.limbs<4>()), root) << hex(root);
+    EXPECT_EQ(limbs_isqrt(last.limbs<4>()), root) << hex(root);
 
     Ref next_root(root);
     next_root.add(one);
     if (next_root.fits(2)) {
       last.add(one);
-      EXPECT_EQ(limbs_isqrt<2>(last.limbs<4>()), next_root.limbs<2>())
+      EXPECT_EQ(limbs_isqrt(last.limbs<4>()), next_root.limbs<2>())
           << hex(root);
     }
     if (root != Limbs<2>{}) {
@@ -392,7 +421,7 @@ TEST(WideMathTest, IsqrtPerfectSquaresAndNeighbours)
       previous_root.sub(one);
       Ref below = square;
       below.sub(one);
-      EXPECT_EQ(limbs_isqrt<2>(below.limbs<4>()), previous_root.limbs<2>())
+      EXPECT_EQ(limbs_isqrt(below.limbs<4>()), previous_root.limbs<2>())
           << hex(root);
     }
   }
@@ -409,19 +438,131 @@ TEST(WideMathTest, IsqrtEveryBitWidth)
   }
 }
 
-TEST(WideMathTest, IsqrtOneLimbMatchesNativeArithmetic)
+// The whole 256-bit routine against the one-bit-at-a-time root, on values of
+// every length, on limbs at their edges, and around perfect squares, where
+// the last correction is or is not taken.
+TEST(WideMathTest, IsqrtMatchesBitByBit)
 {
-  std::mt19937_64 rng(9);
+  std::mt19937_64 rng(10);
+  const auto check = [](const Limbs<4> &value) {
+    ASSERT_EQ(limbs_isqrt(value), bit_by_bit_isqrt(value)) << hex(value);
+  };
+  for (size_t bits = 0; bits <= 256; ++bits) {
+    for (int i = 0; i < 20; ++i) {
+      check(random_bits<4>(rng, bits));
+      check(random_edge_limbs<4>(rng));
+      if (::testing::Test::HasFailure())
+        return;
+    }
+  }
+  const Ref one(from_u64<4>(1));
   for (int i = 0; i < 4000; ++i) {
-    const size_t bits = rng() % 129;
-    const Limbs<2> value =
-        i % 2 == 0 ? random_bits<2>(rng, bits) : random_edge_limbs<2>(rng);
-    const uint128_t v = limbs_to_u128(value);
-    const uint128_t root = limbs_isqrt<1>(value)[0];
-    ASSERT_TRUE(root * root <= v) << hex(value);
-    // (root + 1)^2 overflows 128 bits only for the largest root, whose
-    // square is then within 2 * root of any value.
-    ASSERT_TRUE(v - (root * root) <= 2 * root) << hex(value);
+    // A root of any length whose limbs are random or at an edge.
+    Limbs<2> root = i % 2 == 0 ? random_bits<2>(rng, rng() % 129)
+                               : random_edge_limbs<2>(rng);
+    if (i % 5 == 0)
+      root[0] = kMaxLimb;
+    const Ref square = ref_mul(Ref(root), Ref(root));
+    check(square.limbs<4>());
+    Ref last = square;
+    last.add(Ref(root));
+    last.add(Ref(root));
+    check(last.limbs<4>());
+    if (root != Limbs<2>{}) {
+      Ref below = square;
+      below.sub(one);
+      check(below.limbs<4>());
+    }
+    if (::testing::Test::HasFailure())
+      return;
+  }
+}
+
+TEST(WideMathTest, ShlMatchesReference)
+{
+  std::mt19937_64 rng(11);
+  for (size_t shift = 0; shift < 256; ++shift) {
+    const Limbs<4> value = random_edge_limbs<4>(rng);
+    Ref doubled(value);
+    for (size_t i = 0; i < shift; ++i)
+      doubled.twice();
+    ASSERT_EQ(limbs_shl(value, shift), doubled.limbs<4>())
+        << hex(value) << " << " << shift;
+  }
+}
+
+// Whether root is floor(sqrt(value)), in the compiler's 128-bit arithmetic.
+// (root + 1)^2 does not fit 128 bits for the largest root, so the upper bound
+// is taken as value - root^2 <= 2 * root.
+bool
+is_floor_sqrt(uint128_t value, uint64_t root)
+{
+  const uint128_t square = uint128_t{root} * root;
+  return square <= value && value - square <= 2 * uint128_t{root};
+}
+
+// The first steps of the root, at every value they can meet. The bits below
+// are all zero, all one and random: all zero under a square is a square,
+// which no step corrects, and all one under the value below a square has a
+// root that is all ones below the top, where the quotients are at their
+// largest.
+TEST(WideMathTest, IsqrtNormalizedEveryShortPrefix)
+{
+  std::mt19937_64 rng(12);
+  const auto check = [&rng](uint128_t prefix, uint32_t prefix_bits) {
+    const uint32_t below = 128 - prefix_bits;
+    const uint128_t ones = (uint128_t{1} << below) - 1;
+    const uint128_t random = ((uint128_t{rng()} << 64) | rng()) & ones;
+    for (const uint128_t low : {uint128_t{0}, ones, random}) {
+      const uint128_t value = (prefix << below) | low;
+      ASSERT_TRUE(is_floor_sqrt(value, isqrt_normalized_u128(value)))
+          << hex(Limbs<2>{static_cast<uint64_t>(value),
+                          static_cast<uint64_t>(value >> 64)});
+    }
+  };
+  // Every value of the top 16 bits.
+  for (uint32_t prefix = 0x4000; prefix <= 0xffff; ++prefix) {
+    check(prefix, 16);
+    if (::testing::Test::HasFailure())
+      return;
+  }
+  // Every root of the top 32 bits: at its square, at the largest value that
+  // still has it, and at the value below its square.
+  for (uint64_t root = 0x8000; root <= 0xffff; ++root) {
+    check(root * root, 32);
+    check((root * root) + (2 * root), 32);
+    if (root != 0x8000)
+      check((root * root) - 1, 32);
+    if (::testing::Test::HasFailure())
+      return;
+  }
+}
+
+TEST(WideMathTest, IsqrtNormalizedMatchesNativeArithmetic)
+{
+  std::mt19937_64 rng(13);
+  const auto check = [](uint128_t value) {
+    ASSERT_TRUE(is_floor_sqrt(value, isqrt_normalized_u128(value)))
+        << hex(Limbs<2>{static_cast<uint64_t>(value),
+                        static_cast<uint64_t>(value >> 64)});
+  };
+  for (int i = 0; i < 200000; ++i) {
+    // 127 or 128 bits, random or with limbs at their edges.
+    Limbs<2> limbs = i % 2 == 0 ? random_bits<2>(rng, 127 + (rng() % 2))
+                                : random_edge_limbs<2>(rng);
+    if ((limbs[1] >> 62) == 0)
+      limbs[1] |= uint64_t{1} << (62 + (rng() % 2));
+    check(limbs_to_u128(limbs));
+    // Around the square of a root with its top bit set, which is the root of
+    // such a value.
+    const uint128_t root =
+        (i % 3 == 0 ? random_edge_limbs<1>(rng)[0] : rng()) | kTopBit;
+    check(root * root);
+    check((root * root) + (2 * root));
+    if (root != kTopBit)
+      check((root * root) - 1);
+    if (::testing::Test::HasFailure())
+      return;
   }
 }
 

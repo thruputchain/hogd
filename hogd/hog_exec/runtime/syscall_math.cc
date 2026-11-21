@@ -23,13 +23,14 @@ syscall_U256Sqrt_inner(SystemCallHandler &syscall_handler,
                        WrappedGasAmount remaining_gas,
                        const U256Le &input_value, uint128_t &output_root)
 {
-  // One price for any value: the root takes the same 128 steps whatever it is.
+  // One price for any value: the work is bounded by the width of the value,
+  // not by what it holds.
   const WrappedGasAmount gas{kU256SqrtCost};
   // Reserve it before doing the arithmetic. Exact exhaustion faults here too.
   if (remaining_gas.get() <= gas.get()) {
     return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
   }
-  output_root = limbs_to_u128(limbs_isqrt<2>(limbs_from_le_bytes(input_value)));
+  output_root = limbs_to_u128(limbs_isqrt(limbs_from_le_bytes(input_value)));
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kU256Sqrt>()) {
     trace_data->outputs.emplace(

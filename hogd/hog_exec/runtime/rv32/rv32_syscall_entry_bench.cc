@@ -142,15 +142,16 @@ static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
                   kInputAddress,
               "bytestring arguments must not run into the payload buffer");
 
-// U256Sqrt operands, above the bytestring block. The routine's time moves a
-// little with the value, so three are measured: one whose root keeps none of
-// its bits, one whose root keeps all of them, and one in between. The price
-// has to cover the dearest.
+// U256Sqrt operands, above the bytestring block. The routine's time moves
+// with the value, so three are measured: a small one, which is shifted the
+// furthest before the root is taken, the largest, and one whose bits follow
+// no pattern. The price has to cover the dearest. Zero is left out: it returns
+// before doing any of the work.
 constexpr uint32_t kU256RegionAddress = kBytestringRegionAddress + 0x60;
 static_assert(kU256RegionAddress >=
                   kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength),
               "U256 operands must not overlap the bytestring block");
-constexpr uint32_t kU256ZeroAddress = kU256RegionAddress;
+constexpr uint32_t kU256SmallAddress = kU256RegionAddress;
 constexpr uint32_t kU256OnesAddress = kU256RegionAddress + 0x20;
 constexpr uint32_t kU256MixedAddress = kU256RegionAddress + 0x40;
 static_assert(sizeof(U256Le) == 32);
@@ -635,8 +636,8 @@ std::vector<SyscallCall>
 u256_sqrt_calls()
 {
   return {
-      make_call("U256SqrtZero", SyscallNo::kU256Sqrt,
-                {kU256ZeroAddress, kOutputAddressA}),
+      make_call("U256SqrtSmall", SyscallNo::kU256Sqrt,
+                {kU256SmallAddress, kOutputAddressA}),
       make_call("U256SqrtOnes", SyscallNo::kU256Sqrt,
                 {kU256OnesAddress, kOutputAddressA}),
       make_call("U256SqrtMixed", SyscallNo::kU256Sqrt,
@@ -901,8 +902,9 @@ make_guest_memory()
   std::memcpy(memory.data() + kNNIntAddValueAddress, &kNNIntAddValue,
               sizeof(kNNIntAddValue));
 
-  // The U256Sqrt operands. Zero is already there. The mixed one is a hash, so
-  // that the bits its root keeps follow no pattern.
+  // The U256Sqrt operands. The mixed one is a hash, so that its bits follow
+  // no pattern.
+  memory[kU256SmallAddress] = 3;
   std::fill_n(memory.begin() + kU256OnesAddress, sizeof(U256Le), 0xff);
   std::ranges::copy(sha256(std::string_view("U256Sqrt")),
                     memory.begin() + kU256MixedAddress);
