@@ -1322,6 +1322,9 @@ fused_load_handler(Op load_op, Op next_op, bool loaded_is_rs1)
   }
   switch (next_op) {
   // R-type tail: feed the loaded value into rs1 or rs2 per loaded_is_rs1.
+  case Op::kMul:
+    return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, mul_low>
+                         : &op_load_rr<Trace, 4, false, false, mul_low>;
   case Op::kAdd:
     return loaded_is_rs1 ? &op_load_rr<Trace, 4, false, true, add_op>
                          : &op_load_rr<Trace, 4, false, false, add_op>;
@@ -1505,6 +1508,9 @@ template<bool Trace>
 Handler
 alu_alu_handler(Op op1, Op op2)
 {
+  if (op1 == Op::kMul && op2 == Op::kAdd) {
+    return &op_alu_alu<Trace, mul_low, false, add_op, false>;
+  }
   if (op1 == Op::kSll && op2 == Op::kOr) { // shift-or combine
     return &op_alu_alu<Trace, sll_op, false, or_op, false>;
   }
@@ -1523,6 +1529,12 @@ alu_alu_handler(Op op1, Op op2)
 inline bool
 fuse_alu_alu(const FusionCtx &f, Slot &s)
 {
+  // Restrict multiply-add fusion to consumers of the product. In particular,
+  // independent MULs followed by calibration's ADD fillers must stay plain.
+  if (f.head.op == Op::kMul && (f.head.rd == 0 || (f.tail.rs1 != f.head.rd &&
+                                                   f.tail.rs2 != f.head.rd))) {
+    return false;
+  }
   const Handler h = f.trace ? alu_alu_handler<true>(f.head.op, f.tail.op)
                             : alu_alu_handler<false>(f.head.op, f.tail.op);
   if (h == nullptr) {
