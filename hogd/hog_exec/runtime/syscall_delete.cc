@@ -13,6 +13,7 @@ MaybeAsyncSyscallInnerResult
 syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key)
 {
+  const GasAmount commit_gas = syscall_handler.commit_key_gas(input_key);
   auto status = co_await syscall_handler.delete_object(input_key);
   if (!status) {
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -28,9 +29,8 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{
-                                   kStorageAccessCost +
-                                   syscall_handler.note_item_write(input_key)}};
+                               WrappedGasAmount{kStorageAccessCost +
+                                                commit_gas}};
 }
 
 } // namespace hogd

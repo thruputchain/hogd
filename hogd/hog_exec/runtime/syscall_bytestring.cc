@@ -116,6 +116,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
                                  remaining_gas};
   }
+  const GasAmount commit_gas = syscall_handler.commit_key_gas(input_key);
   auto status =
       co_await syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
@@ -129,9 +130,8 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{
-                                   required_gas.get() +
-                                   syscall_handler.note_item_write(input_key)}};
+                               WrappedGasAmount{required_gas.get() +
+                                                commit_gas}};
 }
 
 } // namespace hogd

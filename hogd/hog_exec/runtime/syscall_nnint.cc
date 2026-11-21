@@ -78,6 +78,7 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   if (optional_input_set_value) {
     set_value = *optional_input_set_value;
   }
+  const GasAmount commit_gas = syscall_handler.commit_key_gas(input_key);
   auto status =
       co_await syscall_handler.set_nnint(input_key, set_value, input_add_value);
   if (!status.has_value()) {
@@ -91,9 +92,8 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{
-                                   kStorageAccessCost +
-                                   syscall_handler.note_item_write(input_key)}};
+                               WrappedGasAmount{kStorageAccessCost +
+                                                commit_gas}};
 }
 
 } // namespace hogd

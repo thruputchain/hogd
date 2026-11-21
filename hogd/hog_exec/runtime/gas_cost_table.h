@@ -108,8 +108,9 @@ constexpr static uint64_t kStorageAccessCost = 150;
 // hosts pays a hop this does not.
 constexpr static uint64_t kDBRPCCost = 37300;
 
-// Admitting one written key to hog_db at root commit, charged the first time a
-// transaction writes a contract-data key (set, set-add or delete).
+// Admitting one written key to hog_db at root commit, charged by a
+// contract-data write (set, set-add or delete) to a key with no pending write
+// on the frame stack.
 //
 // A write reaches no database while the transaction runs, but every distinct
 // key it writes becomes one delta that root commit hands BlockTX::lock, which
