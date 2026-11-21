@@ -8,16 +8,10 @@
 
 #include "hogd/base/types.h"
 
-// Unsigned integers wider than a machine word, as arrays of 64-bit limbs with
-// the least significant limb first. Everything here is exact: nothing wraps,
-// saturates, or rounds other than toward zero. The results are consensus, so
-// validators must agree on every bit, and this file uses only integer
-// operations whose results the language defines.
-//
-// The syscalls built on this are priced flat, so the work a routine does is
-// bounded by the width of its operands: a fixed number of steps, with the
-// values deciding only small things, such as where a comparison stops or
-// whether a last correction is taken.
+// Unsigned integers wider than a machine word, as 64-bit limbs with the least
+// significant first. The results are consensus, so every operation is exact
+// and uses only integer arithmetic the language defines. The syscalls built on
+// this are priced flat: the work is bounded by the operands' width.
 namespace hogd {
 
 // N limbs, least significant first.
@@ -74,28 +68,15 @@ limbs_shl(const Limbs<N> &value, size_t shift)
   return out;
 }
 
-// Square roots: floor(sqrt(value)), the largest root with root * root <= value.
-//
-// The root is built from the top of the value down. Each step doubles how
-// much of the value it is the root of, with one division (Zimmermann,
-// "Karatsuba Square Root", 1999):
-//
-//   Take an n whose top two bits are not both zero, and split it as
-//   high * b^2 + a1 * b + a0, where b is two to the quarter of n's width: high
-//   is the top half of n, and a1 and a0 a quarter each. Let
-//   top = floor(sqrt(high)), rest = high - top * top, and
-//   low = floor((rest * b + a1) / (2 * top)). Then floor(sqrt(n)) is
-//   top * b + low or one less than that. low can come out as b itself, and
-//   then the root is top * b + b - 1.
-//
-// rest is at most 2 * top, so rest * b + a1 needs one bit more than high has.
-// The division is done as floor(floor((rest * b + a1) / 2) / top), which is
-// the same number and fits.
-//
-// high has the top two bits of n, so its root comes from the same step, and
-// so on down to eight bits, whose root is one of eight numbers. To get such
-// an n, limbs_isqrt() shifts its value left by an even count, which multiplies
-// the root by a power of two, and shifts the root back.
+// Square roots: floor(sqrt(value)), by Zimmermann's "Karatsuba Square Root"
+// (1999). Take an n whose top two bits are not both zero and split it as
+// high * b^2 + a1 * b + a0, with b two to the quarter of n's width. With
+// top = floor(sqrt(high)) and rest = high - top * top, floor(sqrt(n)) is
+// top * b + low or one less, where low = floor((rest * b + a1) / (2 * top)),
+// taken as b - 1 if it comes out as b. rest * b + a1 can need a bit more than
+// high has, so it is halved before the division, which gives the same low.
+// high has n's top two bits, so its root comes from the same step, down to
+// eight bits.
 
 // floor(sqrt(n)) for an n whose top two bits are not both zero.
 constexpr uint64_t

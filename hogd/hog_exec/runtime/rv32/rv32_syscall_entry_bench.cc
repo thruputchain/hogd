@@ -143,10 +143,8 @@ static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
               "bytestring arguments must not run into the payload buffer");
 
 // U256Sqrt operands, above the bytestring block. The routine's time moves
-// with the value, so three are measured: a small one, which is shifted the
-// furthest before the root is taken, the largest, and one whose bits follow
-// no pattern. The price has to cover the dearest. Zero is left out: it returns
-// before doing any of the work.
+// with the value, so three are measured and the price covers the dearest: a
+// small one, the largest, and a hash. Zero would return before any work.
 constexpr uint32_t kU256RegionAddress = kBytestringRegionAddress + 0x60;
 static_assert(kU256RegionAddress >=
                   kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength),

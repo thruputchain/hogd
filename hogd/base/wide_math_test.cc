@@ -10,11 +10,8 @@
 #include "hogd/base/types.h"
 #include "hogd/base/wide_math.h"
 
-// wide_math.h is checked in ways that share nothing with it or with each
-// other: against a table whose expected values were computed with Python
-// integers, against Ref below, against the compiler's own 128-bit arithmetic
-// for the sizes it reaches, and, for the 256-bit square root, against a root
-// found one bit at a time.
+// Checked four independent ways: a table computed with Python, Ref below, the
+// compiler's 128-bit arithmetic, and a root found one bit at a time.
 
 namespace hogd {
 namespace {
