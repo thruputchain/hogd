@@ -118,8 +118,13 @@ constexpr static uint64_t kDBRPCCost = 37300;
 // cover it. As with kDBRPCCost, whether an earlier transaction already touched
 // the key is scheduling-dependent, so every first write pays.
 //
-// TODO_VALUE
-constexpr static uint64_t kCommitKeyCost = 1000;
+// Measured through the production DatabaseProxy and in-process hog_db over
+// RAMDB (#4837's PoC, Release, 30 pairs): a root commit of 64 distinct empty
+// bytestring writes took a median 113 us longer than 64 writes to one key,
+// ~1.8 us per extra key, or ~1100 gas at 1.62 ns per gas. Rounded up to 1200.
+// That host was not the calibration host, so this is a first estimate rather
+// than a calibrated price.
+constexpr static uint64_t kCommitKeyCost = 1200;
 
 // What copying a bytestring costs, per block, on top of the storage access
 // every bytestring call already pays. A block rather than a per-byte rate
