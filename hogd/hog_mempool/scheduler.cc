@@ -1317,8 +1317,8 @@ Scheduler::account_is_ready(const ContractAddress &account,
 {
   auto [account_state, lock] = get_account_state(account);
   std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
-  const TxKey lower_bound{.expiry_block_height = current_block(),
-                          .tx_hash = {}};
+  // Txs that expire before the block being built are dead; see [next_block()].
+  const TxKey lower_bound{.expiry_block_height = next_block(), .tx_hash = {}};
   auto lower_it = txs.lower_bound(lower_bound);
   // We just check if there is a tx to run for this account. We do not check
   // if the account has enough gas units to run the tx.
@@ -1387,7 +1387,8 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
               ? pending_nomination_.accounts_excluded_from_block
               : local_accounts_excluded_from_block;
 
-  const TxKey lower_bound = {.expiry_block_height = current_block(),
+  // Txs that expire before the block being built are dead; see [next_block()].
+  const TxKey lower_bound = {.expiry_block_height = next_block(),
                              .tx_hash = {}};
   auto account_it = ready_accounts_.begin();
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {

@@ -1257,6 +1257,144 @@ TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
   EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 }
 
+// Regression tests for #1493: txs are nominated for [current_block() + 1].
+
+TEST(Scheduler, ScheduleDropsTxExpiringAtLastCommittedBlock)
+{
+  constexpr BlockHeight kCommittedHeight = 10;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  // Already expired before this block was committed.
+  txs[0].tx.uniquifier.block_expiry_height = kCommittedHeight - 1;
+  // Valid through the committed block only; invalid for the next block.
+  txs[1].tx.uniquifier.block_expiry_height = kCommittedHeight;
+  // The earliest expiry that is still valid for the next block.
+  txs[2].tx.uniquifier.block_expiry_height = kCommittedHeight + 1;
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(kCommittedHeight);
+
+  scheduler->add_txs(txs, hash_txs(txs))();
+  ASSERT_EQ(scheduler->size(), 3UL);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/3, scheduled_hashes, scheduled)();
+
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  ASSERT_EQ(scheduled_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled_hashes.front(), sha256(txs[2].tx));
+
+  // Both expired txs are pruned from the runqueue and from the tx cache.
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+}
+
+TEST(Scheduler, ScheduleDropsAccountWhoseOnlyTxExpiresAtLastCommittedBlock)
+{
+  constexpr BlockHeight kCommittedHeight = 10;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  txs[0].tx.uniquifier.block_expiry_height = kCommittedHeight;
+  txs[1].tx.uniquifier.block_expiry_height = kCommittedHeight + 1;
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(kCommittedHeight);
+
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(scheduler->size(), 1UL);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_TRUE(scheduled_hashes.empty());
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+
+  // The account is not stuck: a tx that is valid for the next block is
+  // scheduled as usual.
+  scheduler->add_txs({txs[1]}, hash_txs({txs[1]}))();
+  ASSERT_EQ(scheduler->size(), 1UL);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[1]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+}
+
+TEST(Scheduler, TxValidForNextBlockExpiresOnceThatBlockCommits)
+{
+  constexpr BlockHeight kCommittedHeight = 10;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 2);
+  txs[0].tx.uniquifier.block_expiry_height = kCommittedHeight + 1;
+  txs[1].tx.uniquifier.block_expiry_height = kCommittedHeight + 2;
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(kCommittedHeight);
+
+  // Both txs are valid for block [kCommittedHeight + 1] when submitted.
+  scheduler->add_txs(txs, hash_txs(txs))();
+  ASSERT_EQ(scheduler->size(), 2UL);
+
+  // Block [kCommittedHeight + 1] commits without either tx, so txs[0] is now
+  // expired.
+  scheduler->increment_current_block()();
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[1]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+}
+
+TEST(Scheduler, CommitPrunesLeftoverTxExpiringAtCommittedBlock)
+{
+  constexpr BlockHeight kCommittedHeight = 10;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  txs[0].tx.uniquifier.block_expiry_height = kCommittedHeight + 1; // committed
+  txs[1].tx.uniquifier.block_expiry_height = kCommittedHeight + 1; // left over
+  txs[2].tx.uniquifier.block_expiry_height = kCommittedHeight + 2;
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->set_current_block(kCommittedHeight);
+
+  scheduler->add_txs(txs, hash_txs(txs))();
+  ASSERT_EQ(scheduler->size(), 3UL);
+
+  // Commit block [kCommittedHeight + 1] with txs[0] only, as the coordinator
+  // does.
+  x23::Vec<TransactionHash> committed;
+  committed.push_back(sha256(txs[0].tx));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+  scheduler->increment_current_block()();
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+
+  // txs[1] shares txs[0]'s expiry and was not committed: it is invalid for
+  // block [kCommittedHeight + 2] and must be pruned, not nominated.
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+}
+
 // A validated-block commit empties an excluded account's runqueue while the
 // nomination is pending: remove_from_scheduler(), then abandon.
 TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)

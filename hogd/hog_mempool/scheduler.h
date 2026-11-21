@@ -279,6 +279,9 @@ public:
   {
     current_block_.store(height, std::memory_order_relaxed);
   }
+  // Height of the block being built, i.e. the block after the last committed
+  // one; tx expiry is judged against it (#1493).
+  BlockHeight next_block() const { return current_block() + 1; }
 
   // Returns whether this transaction body is cached, including transactions
   // scheduled by a pending nomination. Callers must authenticate the submitted
