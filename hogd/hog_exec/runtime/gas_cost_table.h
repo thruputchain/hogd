@@ -108,23 +108,9 @@ constexpr static uint64_t kStorageAccessCost = 150;
 // hosts pays a hop this does not.
 constexpr static uint64_t kDBRPCCost = 37300;
 
-// Admitting one written key to hog_db at root commit, charged by a
-// contract-data write (set, set-add or delete) to a key with no pending write
-// on the frame stack.
-//
-// A write reaches no database while the transaction runs, but every distinct
-// key it writes becomes one delta that root commit hands BlockTX::lock, which
-// on the key's first touch in the block reads the row to price its storage.
-// The frame calibration excludes root commit, so kStorageAccessCost does not
-// cover it. As with kDBRPCCost, whether an earlier transaction already touched
-// the key is scheduling-dependent, so every first write pays.
-//
-// Measured through the production DatabaseProxy and in-process hog_db over
-// RAMDB (#4837's PoC, Release, 30 pairs): a root commit of 64 distinct empty
-// bytestring writes took a median 113 us longer than 64 writes to one key,
-// ~1.8 us per extra key, or ~1100 gas at 1.62 ns per gas. Rounded up to 1200.
-// That host was not the calibration host, so this is a first estimate rather
-// than a calibrated price.
+// Root commit's hog_db admission of one written key, paid by a contract-data
+// write to a key with no pending write on the frame stack. See #4837 and
+// rv32/gas_calibration/MEASUREMENTS.md.
 constexpr static uint64_t kCommitKeyCost = 1200;
 
 // What copying a bytestring costs, per block, on top of the storage access
