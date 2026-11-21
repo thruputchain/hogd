@@ -2956,13 +2956,16 @@ TEST(Rv32Threaded, multiplyFusionsSelectDependentPairs)
             Handler expected =
                 pick_handler(loads ? Op::kLw : Op::kMul, trace, false);
             if (dependent) {
-              expected =
-                  loads ? (trace ? fused_load_handler<true>(Op::kLw, Op::kMul,
+              if (loads) {
+                expected = trace ? fused_load_handler<true>(Op::kLw, Op::kMul,
                                                             rs1 == rd)
                                  : fused_load_handler<false>(Op::kLw, Op::kMul,
-                                                             rs1 == rd))
-                        : (trace ? alu_alu_handler<true>(Op::kMul, Op::kAdd)
-                                 : alu_alu_handler<false>(Op::kMul, Op::kAdd));
+                                                             rs1 == rd);
+              }
+              else {
+                expected = trace ? alu_alu_handler<true>(Op::kMul, Op::kAdd)
+                                 : alu_alu_handler<false>(Op::kMul, Op::kAdd);
+              }
             }
             EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(
                           *program, 0),
