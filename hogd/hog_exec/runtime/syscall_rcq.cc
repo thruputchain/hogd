@@ -7,6 +7,7 @@
 #include <span>
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
@@ -29,14 +30,17 @@ syscall_RetrocausalQueueInsert_inner(
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
-  auto &rcq_syscall_status = *status;
-  if (!rcq_syscall_status) {
-    co_return SyscallInnerResult{rcq_syscall_status.error().code(),
-                                 WrappedGasAmount{0}};
+  // An insert is a storage operation: bill the storage access plus any
+  // first-touch load, like the bytestring and nnint reads.
+  auto const &[result, load_gas] = *status;
+  if (!result) {
+    co_return SyscallInnerResult{result.error().code(),
+                                 WrappedGasAmount{kStorageAccessCost +
+                                                  load_gas}};
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               WrappedGasAmount{kStorageAccessCost + load_gas}};
 };
 
 MaybeAsyncSyscallInnerResult

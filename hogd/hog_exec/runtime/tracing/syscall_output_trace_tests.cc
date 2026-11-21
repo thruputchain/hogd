@@ -1021,7 +1021,9 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     SyscallTraceBody body(SyscallNo::kRetrocausalQueueInsert);
     body.retrocausal_queue_insert().inputs.key = key;
     body.retrocausal_queue_insert().inputs.queue_entry = full_entry;
-    expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+    // A cold insert first-touches the key: storage access plus the load.
+    expected.push_back(step_entry(gas, kStorageAccessCost + kDBRPCCost,
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kRetrocausalQueuePeekLen);
