@@ -864,10 +864,8 @@ private:
                                  bool)>
       submission_auth_test_hook_;
   std::function<void(BlockHeight)> auth_data_wait_test_hook_;
-  // A batch goes to auth as many small calls, so that auth reads, decodes
-  // and verifies them in parallel. One call carrying a whole submission is
-  // read and decoded serially before any of it is verified, and its reply
-  // waits for the slowest part.
+  // Batches go to auth as many small calls, so its reads, decodes and
+  // verifies overlap.
   static constexpr size_t kAuthRpcTxs = 256;
   // Connections to auth, so that calls are read and answered in parallel.
   static constexpr size_t kAuthConnections = 16;
