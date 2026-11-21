@@ -351,9 +351,7 @@ public:
                              work_dir.work_dir().end());
     info("using work dir: {}", work_dir_str);
 
-    std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_ip = hog_ip(hostname);
+    std::string mempool_ip = hog_ip(hog_self_host());
 
     for (auto &control_server_handle : control_server_handles_) {
       if (control_server_handle.ci_client.clear_work_dir() !=
