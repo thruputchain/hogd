@@ -1529,12 +1529,6 @@ alu_alu_handler(Op op1, Op op2)
 inline bool
 fuse_alu_alu(const FusionCtx &f, Slot &s)
 {
-  // Restrict multiply-add fusion to consumers of the product. In particular,
-  // independent MULs followed by calibration's ADD fillers must stay plain.
-  if (f.head.op == Op::kMul && (f.head.rd == 0 || (f.tail.rs1 != f.head.rd &&
-                                                   f.tail.rs2 != f.head.rd))) {
-    return false;
-  }
   const Handler h = f.trace ? alu_alu_handler<true>(f.head.op, f.tail.op)
                             : alu_alu_handler<false>(f.head.op, f.tail.op);
   if (h == nullptr) {

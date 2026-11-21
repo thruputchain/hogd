@@ -161,11 +161,9 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
         continue;
       }
       seen_placements.push_back(kernel->target_slot_pcs);
-      auto program =
-          ThreadedMachinePreInstantiation::create(kernel->code,
-                                                  kernel->initial_memory, 0,
-                                                  kernel->memory_bytes,
-                                                  /*trace=*/false);
+      auto program = ThreadedMachinePreInstantiation::create(
+          kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+          /*trace=*/false, kMaxRunGas, spec.pair != PairKind::kNone);
       if (!program.has_value()) {
         return std::unexpected(KernelError::kUndecodable);
       }
@@ -181,7 +179,7 @@ build_sweep(const KernelSpec &base, std::span<const uint32_t> target_counts,
 
 // Target-slot counts for an opcode sweep. Capped at half the interior so no two
 // targets are ever adjacent, which is what keeps every target's neighbours
-// filler and therefore keeps fusion out of the body.
+// filler. Single-opcode sweeps explicitly disable fusion.
 std::vector<uint32_t>
 sweep_counts(uint32_t body_slots, bool quick, const KernelSpec &spec)
 {
@@ -243,7 +241,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   audited.trip_count = trip_count;
   for (size_t i = 0; i < sweep->kernels.size(); ++i) {
     audited.target_slots = sweep->target_counts[i];
-    const LoweringAudit audit = audit_kernel(sweep->kernels[i], audited);
+    const LoweringAudit audit =
+        audit_kernel(sweep->kernels[i], audited, base.pair != PairKind::kNone);
     if (i == sweep->kernels.size() - 1) {
       result.audit = audit;
     }
@@ -478,7 +477,8 @@ run_baseline(const Options &options)
         ThreadedMachinePreInstantiation::create(kernel->code,
                                                 kernel->initial_memory, 0,
                                                 kernel->memory_bytes,
-                                                /*trace=*/false);
+                                                /*trace=*/false, kMaxRunGas,
+                                                /*fuse=*/false);
     if (!program.has_value()) {
       return baseline;
     }
@@ -513,7 +513,8 @@ run_baseline(const Options &options)
         ThreadedMachinePreInstantiation::create(kernel->code,
                                                 kernel->initial_memory, 0,
                                                 kernel->memory_bytes,
-                                                /*trace=*/false);
+                                                /*trace=*/false, kMaxRunGas,
+                                                /*fuse=*/false);
     if (!program.has_value()) {
       return baseline;
     }
@@ -555,10 +556,12 @@ measure_noise_floor(const Options &options)
   if (!kernel.has_value()) {
     return 0.0;
   }
-  auto seed = ThreadedMachinePreInstantiation::create(kernel->code,
-                                                      kernel->initial_memory, 0,
-                                                      kernel->memory_bytes,
-                                                      /*trace=*/false);
+  auto seed =
+      ThreadedMachinePreInstantiation::create(kernel->code,
+                                              kernel->initial_memory, 0,
+                                              kernel->memory_bytes,
+                                              /*trace=*/false, kMaxRunGas,
+                                              /*fuse=*/false);
   if (!seed.has_value()) {
     return 0.0;
   }
@@ -576,7 +579,8 @@ measure_noise_floor(const Options &options)
         ThreadedMachinePreInstantiation::create(kernel->code,
                                                 kernel->initial_memory, 0,
                                                 kernel->memory_bytes,
-                                                /*trace=*/false);
+                                                /*trace=*/false, kMaxRunGas,
+                                                /*fuse=*/false);
     if (!program.has_value()) {
       return 0.0;
     }

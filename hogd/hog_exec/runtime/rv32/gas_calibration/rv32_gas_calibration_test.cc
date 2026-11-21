@@ -29,8 +29,8 @@
 // wrong thing reports a plausible number rather than failing, so the properties
 // the estimator depends on are asserted here rather than assumed: that the
 // kernels encode the instruction they claim, that they execute exactly the work
-// they claim, that the production lowering leaves their bodies alone, and that
-// the audit which checks that last point can actually fail.
+// they claim, that standalone measurements disable fusion, and that the
+// lowering audit detects production fusion when enabled.
 namespace hogd::rv32::gas_calibration {
 namespace {
 
@@ -537,7 +537,6 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
 {
   HaltHost host;
   size_t measured = 0;
-  size_t fused = 0;
   for (size_t index = 0; index < kOpCount; ++index) {
     const Op op = static_cast<Op>(index);
     if (!is_measurable_target(op)) {
@@ -556,13 +555,7 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
     EXPECT_EQ(kernel.value().target_slot_pcs.size(), spec.body_slots - 2)
         << op_name(op);
 
-    if (!audit_kernel(kernel.value(), spec).clean()) {
-      // Adjacent copies of this opcode fuse, so it cannot be saturated. The
-      // driver reports that rather than measuring the fused form; here just
-      // record that it is a minority case.
-      ++fused;
-      continue;
-    }
+    EXPECT_TRUE(audit_kernel(*kernel, spec, /*fuse=*/false).clean());
     ++measured;
 
     const auto program = ThreadedProgram::create(kernel.value().code);
@@ -578,7 +571,8 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
         ThreadedMachinePreInstantiation::create(kernel.value().code,
                                                 kernel.value().initial_memory,
                                                 0, kernel.value().memory_bytes,
-                                                /*trace=*/false);
+                                                /*trace=*/false, kMaxRunGas,
+                                                /*fuse=*/false);
     ASSERT_TRUE(pre.has_value()) << op_name(op);
     ThreadedMachine machine(*pre, kGasLimit);
     const RunOutcome outcome = run_once(machine, host);
@@ -586,11 +580,8 @@ TEST(Rv32GasCalibrationKernel, SaturatedBodiesAreAllTargetAndRunFully)
     EXPECT_EQ(outcome.gas_consumed, kernel.value().scheduled_gas)
         << op_name(op) << " did not run its whole saturated body";
   }
-  // Saturation has to work for most of the ISA or the primary estimator has no
-  // coverage. Only opcodes that pair with themselves under a fusion rule are
-  // expected to decline.
+  // Fusion must not prevent standalone saturation coverage.
   EXPECT_GT(measured, 35U);
-  EXPECT_LE(fused, 3U);
 }
 
 // Exercise bodies beyond a B-type branch's reach. A truncated back edge can
@@ -659,13 +650,14 @@ TEST(Rv32GasCalibrationKernel, RunsExactlyTheWorkItIsCreditedWith)
   }
 }
 
-// Check that substitution kernels do not trigger production fusion rules.
+// Single-opcode substitution sweeps explicitly disable production fusion.
 TEST(Rv32GasCalibrationKernel, SweepBodiesLowerWithoutFusion)
 {
   for (const KernelSpec &spec : representative_specs()) {
     const auto kernel = build_kernel(spec);
     ASSERT_TRUE(kernel.has_value()) << op_name(spec.target);
-    const LoweringAudit audit = audit_kernel(kernel.value(), spec);
+    const LoweringAudit audit =
+        audit_kernel(kernel.value(), spec, /*fuse=*/false);
     EXPECT_TRUE(audit.clean())
         << op_name(spec.target) << " (" << context_name(spec.context) << "/"
         << working_set_name(spec.working_set) << "): lowering rewrote "
@@ -701,6 +693,43 @@ TEST(Rv32GasCalibrationAudit, DetectsFusionWhenItHappens)
   EXPECT_GT(audit.rewritten_slots, 0U)
       << "the audit did not notice addi;addi fusion, so a clean audit on a "
          "calibration kernel means nothing";
+}
+
+TEST(Rv32GasCalibrationAudit, MultiplyCanFuseWithIndependentAddFillers)
+{
+  KernelSpec spec;
+  spec.target = Op::kMul;
+  spec.body_slots = kTestBodySlots;
+  spec.target_slots = kTestTargets;
+  spec.trip_count = kTestTripCount;
+  const auto kernel = build_kernel(spec);
+  ASSERT_TRUE(kernel.has_value());
+  // Production fusion includes independent MUL+ADD pairs. The isolated
+  // reference handler must not itself fuse with an ADD probe filler.
+  EXPECT_EQ(audit_kernel(*kernel, spec, /*fuse=*/true).rewritten_slots,
+            spec.target_slots);
+  EXPECT_TRUE(audit_kernel(*kernel, spec, /*fuse=*/false).clean());
+  HaltHost host;
+  for (const bool fuse : {false, true}) {
+    auto program = ThreadedMachinePreInstantiation::create(
+        kernel->code, kernel->initial_memory, 0, kernel->memory_bytes,
+        /*trace=*/false, kMaxRunGas, fuse);
+    ASSERT_TRUE(program.has_value());
+    ThreadedMachine machine(*program, kGasLimit);
+    const RunOutcome outcome = run_once(machine, host);
+    EXPECT_EQ(outcome.result, StepResult::kHalted);
+    EXPECT_EQ(outcome.gas_consumed, kernel->scheduled_gas);
+  }
+}
+
+TEST(Rv32GasCalibrationAudit, StandaloneMultiplyIsNotReportedAsFused)
+{
+  // MUL+XOR is not a fusion rule. Comparing it to a MUL+ADD probe with
+  // fusion enabled would incorrectly mark the standalone MUL as rewritten.
+  const auto code = test_program::code_from_words(
+      {test_program::op(5, 6, 7, 0, 1), test_program::op(8, 9, 10, 4, 0),
+       0x00000073U});
+  EXPECT_TRUE(audit_body(code, {}, 64, 0, 2).clean());
 }
 
 TEST(Rv32GasCalibrationAudit, CountsOneRunPerBarrier)

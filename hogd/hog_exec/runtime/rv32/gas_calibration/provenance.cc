@@ -62,22 +62,21 @@ fingerprint_corpus()
 
 // Lowers `[filler, head, tail, filler, ecall]` and reports whether the lowering
 // rewrote the head slot -- that is, whether head and tail fused. Compared
-// against the same head lowered next to a filler, so the answer is about the
-// pair and not about the head.
+// against the same code with fusion disabled: a filler can itself be a
+// fusible consumer (for example, MUL followed by the ADD filler).
 bool
 pair_fuses(uint32_t head, uint32_t tail)
 {
   const std::vector<uint8_t> paired =
       test_program::code_from_words({filler_instruction_word(0), head, tail,
                                      filler_instruction_word(1), 0x00000073U});
-  const std::vector<uint8_t> alone =
-      test_program::code_from_words({filler_instruction_word(0), head,
-                                     filler_instruction_word(1), 0x00000073U});
   auto paired_program =
       ThreadedMachinePreInstantiation::create(paired, {}, 0, 64,
                                               /*trace=*/false);
-  auto alone_program = ThreadedMachinePreInstantiation::create(alone, {}, 0, 64,
-                                                               /*trace=*/false);
+  auto alone_program =
+      ThreadedMachinePreInstantiation::create(paired, {}, 0, 64,
+                                              /*trace=*/false, kMaxRunGas,
+                                              /*fuse=*/false);
   if (!paired_program.has_value() || !alone_program.has_value()) {
     return false;
   }

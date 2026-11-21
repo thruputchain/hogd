@@ -12,7 +12,7 @@
 // Deterministic instruction kernels. Saturated bodies provide absolute costs;
 // substitution sweeps vary target count in a fixed body as a diagnostic.
 // The ADD filler uses private registers; lowering_audit.h checks for unintended
-// fusion. Saturated single-opcode bodies are lowered with fusion disabled.
+// fusion. Single-opcode sweeps and saturated bodies disable fusion.
 namespace hogd::rv32::gas_calibration {
 
 // Separate target, filler, and loop-control registers preserve the requested
@@ -204,7 +204,7 @@ enum class KernelError {
 [[nodiscard]] std::expected<uint64_t, KernelError>
 scheduled_gas_for_code(std::span<const uint8_t> code);
 
-// The non-fusing filler instruction for body slot `index`: an R-type ADD whose
+// The filler instruction for body slot `index`: an R-type ADD whose
 // destination rotates over the filler bank and whose sources the body never
 // writes.
 [[nodiscard]] uint32_t filler_instruction_word(uint32_t index);

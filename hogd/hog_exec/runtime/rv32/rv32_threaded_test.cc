@@ -2938,7 +2938,7 @@ expect_multiply_fusion_parity(std::span<const uint32_t> words)
   }
 }
 
-TEST(Rv32Threaded, multiplyFusionsSelectDependentPairs)
+TEST(Rv32Threaded, multiplyFusionsSelectLoadConsumersAndAllMultiplyAddPairs)
 {
   using test_program::load;
   using test_program::op;
@@ -2952,10 +2952,11 @@ TEST(Rv32Threaded, multiplyFusionsSelectDependentPairs)
                                                   loads ? 1 : 0)};
           for (const bool trace : {false, true}) {
             auto program = threaded_from_words(words, 256, trace);
-            const bool dependent = rd != 0 && (rs1 == rd || rs2 == rd);
+            const bool fusible =
+                !loads || (rd != 0 && (rs1 == rd || rs2 == rd));
             Handler expected =
                 pick_handler(loads ? Op::kLw : Op::kMul, trace, false);
-            if (dependent) {
+            if (fusible) {
               if (loads) {
                 expected = trace ? fused_load_handler<true>(Op::kLw, Op::kMul,
                                                             rs1 == rd)
