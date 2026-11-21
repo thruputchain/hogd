@@ -137,9 +137,8 @@ TEST_P(IOTestP, BufferedWriteRead)
 TEST_F(IOTest, BufferedWriterMixedSizes)
 {
   constexpr size_t kSmallBuffer = 16;
-  // each piece is filled with a distinct byte value. After each write, check
-  // how many bytes reached the file and whether bytes remain buffered, so the
-  // flush points are checked and not only the final contents.
+  // each piece has its own fill byte. After each write, check the file offset
+  // and buffer state, so flush points are tested, not only the final bytes.
   struct Step {
     size_t size;
     off_t on_disk;     // bytes in the file after the write

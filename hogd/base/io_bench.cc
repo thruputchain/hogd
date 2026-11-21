@@ -21,9 +21,8 @@ namespace {
 // the number of bytes written per iteration.
 constexpr size_t kTotalBytes = 64_MiB;
 
-// BM_BufferedWriterWrite writes kTotalBytes in pieces of the given size through
-// a default-size BufferedWriter. The file is on tmpfs and the final flush is
-// included so page cache and disk effects do not hide the copy cost.
+// writes kTotalBytes through a default-size BufferedWriter in pieces of the
+// given size. tmpfs file and timed flush, so the disk doesn't hide the copy.
 void
 BM_BufferedWriterWrite(benchmark::State &state)
 {
