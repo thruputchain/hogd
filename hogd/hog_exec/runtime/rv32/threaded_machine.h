@@ -1773,7 +1773,10 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     assert(run_gas <= max_run_gas);
     slot.gas_to_run = static_cast<uint16_t>(run_gas);
 
-    slot.handler = pick_handler(d.op, trace, is_break_here);
+    // li (addi rd, x0, imm) can write the decoded immediate directly, just
+    // like lui. Keep the decoded opcode for gas accounting and fusion below.
+    const Op handler_op = d.op == Op::kAddi && d.rs1 == 0 ? Op::kLui : d.op;
+    slot.handler = pick_handler(handler_op, trace, is_break_here);
 
     // x0 reads come from the always zero register at regs_[kRegisterCount].
     // writes go to trash at regs_[0].  This keeps the write-heavy actions
