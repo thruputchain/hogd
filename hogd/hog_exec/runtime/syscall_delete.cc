@@ -27,10 +27,10 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                                  WrappedGasAmount{kStorageAccessCost}};
   }
 
-  co_return SyscallInnerResult{
-      SyscallErrorCode::kSyscallErrorCodeNone,
-      WrappedGasAmount{kStorageAccessCost +
-                       syscall_handler.note_item_write(input_key)}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{
+                                   kStorageAccessCost +
+                                   syscall_handler.note_item_write(input_key)}};
 }
 
 } // namespace hogd
