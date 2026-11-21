@@ -49,6 +49,7 @@ add_library(base_test_objects OBJECT
   time_test.cc
   unique_function_test.cc
   wide_integral_test.cc
+  wide_math_test.cc
   worker_pool_test.cc
   xdr_util_test.cc
 )

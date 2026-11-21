@@ -36,6 +36,11 @@ directories.
   inside. Each method places its arguments with raw argument words and asserts
   on the results itself. Driven by
   `hogd/hog_exec/runtime/input_alias_test_rv32_test.cc`.
+- `math_syscall_test` — the math syscalls. U256Sqrt: the host-side test
+  chooses values and checks the roots, and the guest checks the syscall
+  against the SDK's software square root and against what a floor square root
+  is, and that the root may not be written over the value. Driven by
+  `hogd/hog_exec/runtime/math_syscall_test_rv32_test.cc`.
 - `tx_context_test` — transaction-context syscalls: GetSourceTransactionHash,
   GetBlockHeight, and the valid-statistic side of GetTransactionStatistics.
   Driven by `hogd/hog_exec/runtime/tx_context_tests.cc`.
