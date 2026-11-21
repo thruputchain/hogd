@@ -263,16 +263,18 @@ wrapper_over_cap(const SignedTransaction &tx)
 using AuthDataByAccount =
     std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
 
-// Verifies txs[chunk], each against its account's entry in [auth_data],
-// marking the ones that fail in [results]. Transactions already marked are
-// skipped.
+// Verifies each of [txs] against its account's entry in [auth_data], writing
+// kAuthFailed to the matching element of [results] for each that fails. Skips
+// transactions the lookup pass already failed (over the size cap, or no auth
+// data); they have no entry in [auth_data].
 void
-verify_chunk(ChunkRange chunk, std::span<const SignedTransaction> txs,
+verify_chunk(std::span<const SignedTransaction> txs,
+             std::span<AuthErrorCode> results,
              const AuthDataByAccount &auth_data,
-             const NetworkHash &network_hash, AuthErrorCodeBatch &results)
+             const NetworkHash &network_hash)
 {
   x23::Buf signature_preimage;
-  for (size_t i = chunk.start; i < chunk.end; i++) {
+  for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (results[i] != AuthErrorCode::kAuthSuccess) {
       continue;
@@ -291,6 +293,17 @@ verify_chunk(ChunkRange chunk, std::span<const SignedTransaction> txs,
     }
     // [results] starts as all kAuthSuccess, so a pass needs no write.
   }
+}
+
+// verify_chunk() on the pool, for one chunk of a call split over several.
+x23::Async<void>
+verify_chunk_on_pool(std::span<const SignedTransaction> txs,
+                     std::span<AuthErrorCode> results,
+                     const AuthDataByAccount &auth_data,
+                     NetworkHash network_hash)
+{
+  co_await default_coropoll().pool_.bg();
+  verify_chunk(txs, results, auth_data, network_hash);
 }
 
 } // namespace
@@ -338,20 +351,19 @@ AuthServer::verify_transactions(BlockHeight height,
       make_chunks(txs.size(),
                   std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
                                      max_parallelism));
+  const std::span<AuthErrorCode> result_span(results.data(), results.size());
   if (chunks.size() == 1) {
-    verify_chunk(chunks.front(), txs, auth_data, network_hash_, results);
+    verify_chunk(txs, result_span, auth_data, network_hash_);
     co_return results;
   }
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
+    const size_t count = chunk.end - chunk.start;
     handles.push_back(
-        [](ChunkRange chunk, std::span<const SignedTransaction> txs,
-           const AuthDataByAccount &auth_data, NetworkHash network_hash,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-          verify_chunk(chunk, txs, auth_data, network_hash, results);
-        }(chunk, txs, auth_data, network_hash_, results));
+        verify_chunk_on_pool(txs.subspan(chunk.start, count),
+                             result_span.subspan(chunk.start, count), auth_data,
+                             network_hash_));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
