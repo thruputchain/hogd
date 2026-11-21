@@ -6,6 +6,7 @@
 #include <array>
 #include <bit>
 
+#include "hogd/base/bits.h"
 #include "hogd/base/types.h"
 
 // Unsigned integers wider than a machine word, as 64-bit limbs with the least
@@ -164,14 +165,15 @@ limbs_isqrt(const Limbs<4> &value)
           static_cast<uint64_t>(unshifted >> 64)};
 }
 
-// The value of Bytes bytes, least significant first.
+// The value of Bytes bytes, least significant first. Each eight are a limb as
+// a little-endian host stores it, so there the bytes are the limbs.
 template<size_t Bytes> requires (Bytes % 8 == 0)
 constexpr Limbs<Bytes / 8>
 limbs_from_le_bytes(const std::array<uint8_t, Bytes> &bytes)
 {
-  Limbs<Bytes / 8> limbs{};
-  for (size_t i = 0; i < Bytes; ++i)
-    limbs[i / 8] |= uint64_t{bytes[i]} << (8 * (i % 8));
+  auto limbs = std::bit_cast<Limbs<Bytes / 8>>(bytes);
+  for (uint64_t &limb : limbs)
+    limb = le_to_cpu(limb);
   return limbs;
 }
 

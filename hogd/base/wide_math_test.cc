@@ -238,6 +238,9 @@ static_assert(limbs_isqrt({kMaxLimb, kMaxLimb, 0, 0}) == Limbs<2>{kMaxLimb, 0});
 static_assert(limbs_isqrt({}) == Limbs<2>{});
 static_assert(limbs_isqrt({3, 0, 0, 0}) == Limbs<2>{1, 0});
 static_assert(limbs_shl<2>({1, 0}, 127) == Limbs<2>{0, kTopBit});
+static_assert(limbs_from_le_bytes(std::array<uint8_t, 16>{1, 2, 3, 4, 5, 6, 7,
+                                                          8, 9}) ==
+              Limbs<2>{0x0807060504030201, 9});
 static_assert(isqrt_normalized_u128(uint128_t{1} << 126) == kTopBit);
 static_assert(isqrt_normalized_u128(uint128_t{1} << 127) == 0xb504f333f9de6484);
 static_assert(isqrt_normalized_u128(~uint128_t{0}) == kMaxLimb);
