@@ -3934,6 +3934,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   auto native_transfer = [](ContractAddress const &to, int128_t amount) {
     return wallet_meta::make_calldata<u8"execute">(
+        x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
         x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
             default_wallet::WalletCall{
                 .target = kNativeTokenContractAddress,
@@ -4190,6 +4191,7 @@ TEST(HogDevnode, RegisteredMlDsa65KeyAuthorizesSourceAddressClaim)
                   .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                   .gas_limit = GasAmount{10'000'000},
                   .calldata = wallet_meta::make_calldata<u8"execute">(
+                      x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
                       x23::Vec<default_wallet::WalletCall,
                                UINT32_MAX>{default_wallet::WalletCall{
                           .target = kNativeTokenContractAddress,

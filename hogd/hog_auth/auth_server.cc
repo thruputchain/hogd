@@ -32,6 +32,34 @@
 
 namespace hogd {
 
+AuthCacheEntry
+AuthServer::cached_entry_at(BlockHeight height, const ContractAddress &address)
+{
+  AuthCacheEntry auth_data = auth_data_cache_.get(address);
+  // Updates replace an account's cache entry before [current_height_futex_]
+  // advances. An entry no newer than the requested height is therefore still
+  // valid even when the auth server has since processed newer blocks.
+  if (auth_data != nullptr && auth_data->first <= height) {
+    return auth_data;
+  }
+  return nullptr;
+}
+
+AuthCacheEntry
+AuthServer::try_cached_auth_data(BlockHeight height,
+                                 const ContractAddress &address)
+{
+  CHECK_NE(height, kUninitializedHeight);
+  CHECK_NE(height, kInitializing);
+  // The checks lookup_auth_data() waits on, without waiting.
+  const BlockHeight current_height = current_height_futex_.load();
+  if (current_height == kUninitializedHeight ||
+      current_height == kInitializing || current_height < height) {
+    return nullptr;
+  }
+  return cached_entry_at(height, address);
+}
+
 x23::Async<AuthStatus<AuthCacheEntry>>
 AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
 {
@@ -55,14 +83,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
-  auto auth_data = auth_data_cache_.get(address);
-  if (auth_data != nullptr) {
-    // Updates replace an account's cache entry before [current_height_futex_]
-    // advances. An entry no newer than the requested height is therefore still
-    // valid even when the auth server has since processed newer blocks.
-    if (auth_data->first <= height) {
-      co_return auth_data;
-    }
+  if (AuthCacheEntry cached = cached_entry_at(height, address)) {
+    co_return cached;
   }
 
   if (current_height > height) {
@@ -221,23 +243,6 @@ AuthServer::subscribe_and_register(AuthCard card)
   co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
 }
 
-x23::Async<AuthStatus<AuthCacheEntry>>
-AuthServer::populate_auth_data(BlockHeight height,
-                               ContractAddress const &address)
-{
-  auto entry = co_await lookup_auth_data(height, address);
-  if (!entry.has_value()) {
-    co_return entry.error();
-  }
-
-  CHECK_PTR(entry->get());
-
-  // A missing auth entry (nullopt) is returned as-is: whether that is
-  // acceptable depends on the transaction's claim type (pubkey claims
-  // require it), so the policy lives in verify_auth.
-  co_return std::move(*entry);
-}
-
 namespace {
 
 // Auth is the one place the whole SignedTransaction is measured; the executor
@@ -275,17 +280,23 @@ AuthServer::verify_transactions(BlockHeight height,
       results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
-    if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
-      auto entry =
-          co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
-      if (!entry.has_value()) {
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
+    }
+    AuthCacheEntry entry = try_cached_auth_data(height, account);
+    if (entry == nullptr) {
+      auto looked_up = co_await lookup_auth_data(height, account);
+      if (!looked_up.has_value()) {
         trace("Populate auth data error: {}",
-              std::to_underlying(entry.error().code()));
-        results[i] = entry.error().code();
+              std::to_underlying(looked_up.error().code()));
+        results[i] = looked_up.error().code();
         continue;
       }
-      auth_data[tx.tx.invocation.invoked_address] = std::move(*entry);
+      entry = std::move(*looked_up);
     }
+    CHECK_PTR(entry.get());
+    auth_data.emplace(account, std::move(entry));
   }
 
   const std::vector<ChunkRange> chunks =
@@ -343,14 +354,19 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (wrapper_over_cap(tx)) {
       co_return AuthErrorCode::kAuthFailed;
     }
-    auto source_addr =
-        co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
-    if (!source_addr.has_value()) {
-      co_return source_addr.error().code();
+    AuthCacheEntry source_addr =
+        try_cached_auth_data(height, tx.tx.invocation.invoked_address);
+    if (source_addr == nullptr) {
+      auto looked_up =
+          co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
+      if (!looked_up.has_value()) {
+        co_return looked_up.error().code();
+      }
+      source_addr = std::move(*looked_up);
     }
-    CHECK_PTR(source_addr->get());
+    CHECK_PTR(source_addr.get());
     const std::optional<AddressAuthData> &source_auth_data =
-        (*source_addr)->second;
+        source_addr->second;
 
     auto verify_result =
         verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,

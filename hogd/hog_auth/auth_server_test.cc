@@ -233,6 +233,51 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_FALSE(result.value()->second.has_value());
 }
 
+// try_cached_auth_data() answers only where lookup_auth_data() would return a
+// cache hit without waiting, and returns nullptr everywhere else.
+TEST_F(AuthServerTest, TryCachedAuthDataMatchesLookupCacheHits)
+{
+  ContractAddress address = make_test_address(6);
+  AddressAuthData auth_data = make_test_auth_data(1);
+
+  // Before the first block the server has no height, so nothing is cached.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+
+  mock_db().increment_height(); // height 1
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  // Not cached until a lookup reads it from the db.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+  auto looked_up = auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(looked_up.has_value());
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), *looked_up);
+
+  // A height the server has not reached needs lookup_auth_data() to wait.
+  EXPECT_EQ(auth_server().try_cached_auth_data(2, address), nullptr);
+
+  mock_db().increment_height(); // height 2
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  // The height-2 key change replaced the entry, so height 1 is stale: no
+  // answer here, and lookup_auth_data() reports it.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+  auto stale = auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(stale.has_value());
+  EXPECT_EQ(stale.error(), AuthErrorCode::kAuthStaleBlockHeight);
+
+  AuthCacheEntry cached = auth_server().try_cached_auth_data(2, address);
+  ASSERT_NE(cached, nullptr);
+  EXPECT_EQ(cached->first, 2);
+  ASSERT_TRUE(cached->second.has_value());
+  EXPECT_EQ(*cached->second, auth_data);
+}
+
 TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
 {
   ContractAddress address = make_test_address(5);
