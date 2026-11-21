@@ -13,6 +13,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/container/synchronized_map.h"
@@ -29,6 +30,13 @@
 #include "x23/x23/vec.h"
 
 namespace hogd {
+
+// The signed transactions the mempool holds. Each is decoded once, when its
+// batch arrives, and then shared by the submission path, the scheduler's cache
+// and runqueue, and the pending block, rather than copied between them. A
+// batch of them has SignedTransactionBatch's wire format, so it is passed to
+// RPCs that take one as-is.
+using SharedSignedTransactionBatch = x23::XdrVec<Arc<SignedTransaction>>;
 
 class Scheduler {
 public:
@@ -82,7 +90,7 @@ public:
   // [txs] and [tx_hashes]. [on_variant] decides between a submission and a
   // different signed encoding of its body that is already cached.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
-  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+  add_txs(const SharedSignedTransactionBatch &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes,
           const SignedTransactionHashBatch &signed_tx_hashes,
           CachedVariant on_variant);
@@ -90,7 +98,7 @@ public:
   // [add_txs()] for callers that have not hashed the signed encodings, as an
   // unvetted submission.
   x23::Async<SchedGatewaySubmitOutcomeBatch>
-  add_txs(const x23::XdrVec<SignedTransaction> &txs,
+  add_txs(const SharedSignedTransactionBatch &txs,
           const x23::XdrVec<TransactionHash> &tx_hashes);
 
   x23::Async<void> process_transfers(const BlockTransfers &transfer);
@@ -106,21 +114,23 @@ public:
   x23::Async<void> schedule(size_t num_txs,
                             x23::XdrVec<TransactionHash> &tx_hashes,
                             SignedTransactionHashBatch &signed_tx_hashes,
-                            x23::XdrVec<SignedTransaction> &txs);
+                            SharedSignedTransactionBatch &txs);
 
   void start_pending_nomination(BlockID block_id);
   x23::Async<void> commit_pending_nomination(BlockID block_id);
   x23::Async<void> abandon_pending_nomination(BlockID block_id);
   x23::Async<void> apply_committed_block_native_token_ages(
-      const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height);
+      const SharedSignedTransactionBatch &txs, BlockHeight block_height);
 
+  // Lookups alias the cache entry rather than copy the tx: the result keeps
+  // the [TxValue], and with it the signed-hash set its body's encodings share,
+  // alive after the entry leaves the cache, for as long as it is held.
   std::shared_ptr<const SignedTransaction>
   find_tx(const TransactionHash &tx_hash)
   {
     auto [tx_value_ptr, _] = txs_by_body_.find(tx_hash);
     if (tx_value_ptr) {
-      return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
-                                                      &(*tx_value_ptr)->tx);
+      return alias_tx(*tx_value_ptr);
     }
     return {};
   }
@@ -138,8 +148,7 @@ public:
       if (tx_hash) {
         *tx_hash = (*tx_value_ptr)->tx_hash;
       }
-      return std::shared_ptr<const SignedTransaction>(*tx_value_ptr,
-                                                      &(*tx_value_ptr)->tx);
+      return alias_tx(*tx_value_ptr);
     }
     return {};
   }
@@ -165,7 +174,7 @@ public:
 
   void get_txs_for_account(const ContractAddress &address,
                            TransactionHashBatch &tx_hashes,
-                           SignedTransactionBatch &txs)
+                           SharedSignedTransactionBatch &txs)
   {
     // The method is called by [MempoolCoordinatorRpc], which may try to find
     // txs associated with an account that the scheduler does not know about. In
@@ -195,7 +204,7 @@ public:
         tx_value = *tx_value_ptr;
       }
 
-      const SignedTransaction &tx = tx_value->tx;
+      const SignedTransaction &tx = *tx_value->tx;
       const ContractAddress &account = tx.tx.invocation.invoked_address;
       const TxKey key{
           .expiry_block_height = tx.tx.uniquifier.block_expiry_height,
@@ -247,7 +256,7 @@ public:
   x23::Async<ReadAverageNativeTokenAgesResult>
   read_average_native_token_ages(const x23::XdrVec<ContractAddress> &accounts);
   x23::Async<ReadAverageNativeTokenAgesResult>
-  read_average_native_token_ages(const x23::XdrVec<SignedTransaction> &txs);
+  read_average_native_token_ages(const SharedSignedTransactionBatch &txs);
   x23::Async<ReadAverageNativeTokenAgesResult>
   read_average_native_token_ages(const BlockTransfers &transfers);
 
@@ -376,8 +385,9 @@ private:
   };
 
   struct TxValue {
-    // The tx itself.
-    SignedTransaction tx;
+    // The tx itself, shared with the batch that submitted it and with any
+    // pending block it is scheduled into rather than copied.
+    Arc<SignedTransaction> tx;
     // The hash of [tx]'s body, its key in [txs_by_body_].
     TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
@@ -389,6 +399,14 @@ private:
         signed_tx_hashes = std::make_shared<
             std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
   };
+
+  // The tx of a cache entry, owned through the entry (see [find_tx]).
+  static std::shared_ptr<const SignedTransaction>
+  alias_tx(const std::shared_ptr<TxValue> &tx_value)
+  {
+    return std::shared_ptr<const SignedTransaction>(
+        tx_value, std::as_const(tx_value->tx).get());
+  }
 
   struct AccountState {
     NativeTokenAge native_token_age{};
@@ -433,7 +451,7 @@ private:
   x23::Async<bool> account_is_ready(const ContractAddress &account,
                                     bool remove_expired_txs);
 
-  bool add_txs_helper(const SignedTransaction &tx,
+  bool add_txs_helper(const Arc<SignedTransaction> &tx,
                       const TransactionHash &tx_hash,
                       const SignedTransactionHash &signed_tx_hash,
                       CachedVariant on_variant);

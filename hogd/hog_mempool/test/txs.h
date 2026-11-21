@@ -8,6 +8,7 @@
 #include "address_auth.hh"
 #include "built_contracts/fibonacci.h"
 #include "hogd/auth_claim/signature_preimage.h"
+#include "hogd/base/arc.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -56,6 +57,18 @@ generate_unsigned_txs(fib_client_t &fib_client, size_t num_txs)
     future.get();
   }
   return txs;
+}
+
+// The batch as the scheduler takes it: each tx shared rather than owned.
+inline x23::XdrVec<Arc<SignedTransaction>>
+share_txs(const SignedTransactionBatch &txs)
+{
+  x23::XdrVec<Arc<SignedTransaction>> shared;
+  shared.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    shared.push_back(tx);
+  }
+  return shared;
 }
 
 inline Ed25519SecretKey

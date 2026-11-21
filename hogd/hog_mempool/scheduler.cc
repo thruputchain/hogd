@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/arc.h"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
@@ -227,7 +228,7 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
 
 x23::Async<void>
 Scheduler::apply_committed_block_native_token_ages(
-    const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height)
+    const SharedSignedTransactionBatch &txs, BlockHeight block_height)
 {
   ReadAverageNativeTokenAgesResult read_result =
       co_await read_average_native_token_ages(txs);
@@ -249,7 +250,8 @@ Scheduler::apply_committed_block_native_token_ages(
   skipped_accounts.reserve(txs.size());
   touched_accounts.reserve(txs.size());
 
-  for (const SignedTransaction &tx : txs) {
+  for (const Arc<SignedTransaction> &shared_tx : txs) {
+    const SignedTransaction &tx = *shared_tx;
     const ContractAddress &account = tx.tx.invocation.invoked_address;
     if (skipped_accounts.contains(account)) {
       continue;
@@ -347,11 +349,11 @@ Scheduler::read_average_native_token_ages(
 
 x23::Async<Scheduler::ReadAverageNativeTokenAgesResult>
 Scheduler::read_average_native_token_ages(
-    const x23::XdrVec<SignedTransaction> &txs)
+    const SharedSignedTransactionBatch &txs)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
-  for (const SignedTransaction &tx : txs) {
-    accounts.insert(tx.tx.invocation.invoked_address);
+  for (const Arc<SignedTransaction> &tx : txs) {
+    accounts.insert(tx->tx.invocation.invoked_address);
   }
   x23::XdrVec<ContractAddress> accounts_vec;
   accounts_vec.reserve(accounts.size());
@@ -716,16 +718,14 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
   };
 }
 
-// TODO(jhumphri): I think we are allocating a new decorated signature vec
-// below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx,
+Scheduler::add_txs_helper(const Arc<SignedTransaction> &tx,
                           const TransactionHash &tx_hash,
                           const SignedTransactionHash &signed_tx_hash,
                           CachedVariant on_variant)
 {
-  const ContractAddress &account = tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+  const ContractAddress &account = tx->tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx->tx.uniquifier.block_expiry_height,
                   .tx_hash = tx_hash};
   auto [account_state, account_lock] = get_account_state(account);
 
@@ -755,8 +755,9 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
       return false;
     }
     // Swap in the submitted encoding wherever the cached one is held. A
-    // pending nomination keeps its own copy of the tx, and [reenqueue_txs()]
-    // re-reads this cache, so an abandoned nomination restores this encoding.
+    // pending nomination holds the encoding it scheduled, and
+    // [reenqueue_txs()] re-reads this cache, so an abandoned nomination
+    // restores this encoding.
     //
     // The cached encoding stays findable by its signed hash. A proposal that
     // names two signings of this body would otherwise never resolve: each
@@ -818,20 +819,20 @@ Scheduler::is_pending(const SignedTransaction & /*tx*/,
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+Scheduler::add_txs(const SharedSignedTransactionBatch &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes)
 {
   SignedTransactionHashBatch signed_tx_hashes;
   signed_tx_hashes.reserve(txs.size());
-  for (const SignedTransaction &tx : txs) {
-    signed_tx_hashes.push_back(hash_signed_transaction(tx).signed_tx_hash);
+  for (const Arc<SignedTransaction> &tx : txs) {
+    signed_tx_hashes.push_back(hash_signed_transaction(*tx).signed_tx_hash);
   }
   co_return co_await add_txs(txs, tx_hashes, signed_tx_hashes,
                              CachedVariant::kSubmitUnvetted);
 }
 
 x23::Async<SchedGatewaySubmitOutcomeBatch>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+Scheduler::add_txs(const SharedSignedTransactionBatch &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes,
                    const SignedTransactionHashBatch &signed_tx_hashes,
                    CachedVariant on_variant)
@@ -853,7 +854,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
     handles.push_back([](const ChunkRange *chunk,
-                         const x23::XdrVec<hogd::SignedTransaction> &txs,
+                         const SharedSignedTransactionBatch &txs,
                          const x23::XdrVec<TransactionHash> &tx_hashes,
                          const SignedTransactionHashBatch &signed_tx_hashes,
                          CachedVariant on_variant,
@@ -865,7 +866,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
 
       size_t num_added = 0;
       for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+        if (missing.contains(txs[tx_idx]->tx.invocation.invoked_address)) {
           // The DB RPC currently cannot distinguish an unknown account
           // from a transient or internal read failure. Standalone-pubkey
           // claims can authenticate without an on-chain auth entry and
@@ -873,7 +874,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
           // scheduler-side failure as internal.
           info("scheduler: dropping tx after native-token-age lookup failed "
                "for {}",
-               show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+               show_byte_array(txs[tx_idx]->tx.invocation.invoked_address));
           outcomes[tx_idx] =
               SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
           co_await scheduler.record_transaction_outcome(
@@ -1359,7 +1360,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
       if (it == account_state->txs.end()) {
         continue;
       }
-      const SignedTransaction &tx = it->second->tx;
+      const SignedTransaction &tx = *it->second->tx;
       gas_limit = tx.tx.invocation.gas_limit;
     }
 
@@ -1373,7 +1374,7 @@ Scheduler::cycle_accounts_during_schedule_helper(
 x23::Async<void>
 Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
                     SignedTransactionHashBatch &signed_tx_hashes,
-                    x23::XdrVec<SignedTransaction> &txs)
+                    SharedSignedTransactionBatch &txs)
 {
   size_t num_scheduled = 0;
   static std::unordered_set<ContractAddress, SipHash24Hasher> removed_accounts;
@@ -1443,7 +1444,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         break;
       }
       const TransactionHash &tx_hash = it->first.tx_hash;
-      SignedTransaction &tx = it->second->tx;
+      const SignedTransaction &tx = *it->second->tx;
       const uint128_t native_tokens_available = from_xdr(
           native_token_ages->num_native_tokens[kNativeTokenAgeGroupToSchedule]);
       if (tx.tx.invocation.gas_limit <= native_tokens_available) {
@@ -1453,7 +1454,7 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
 
         tx_hashes.push_back(tx_hash);
         signed_tx_hashes.push_back(it->second->signed_tx_hash);
-        txs.push_back(tx);
+        txs.push_back(it->second->tx);
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
         // beyond this point!
@@ -1616,7 +1617,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_value = *tx_value_ptr;
             }
 
-            const SignedTransaction &tx = tx_value->tx;
+            const SignedTransaction &tx = *tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
