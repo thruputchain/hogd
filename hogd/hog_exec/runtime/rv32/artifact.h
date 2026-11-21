@@ -290,7 +290,7 @@ enum class ArtifactError {
   kUnsupportedFlags,
   kUnsupportedEntryAbi,
   kUnsupportedSyscallAbi,
-  // v7: the declared syscall API minor is later than the caller admits.
+  // v7: the declared syscall API minor is outside the range the caller admits.
   kUnsupportedSyscallApiMinor,
   kGasScheduleVersionMismatch,
   kGasScheduleDigestMismatch,

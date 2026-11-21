@@ -19,7 +19,6 @@
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
-#include "hogd/base/rpc_profile.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/metrics/shared.h"
 #include "hogd/version.h"
@@ -36,7 +35,6 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
 {
   register_resident_bytes(Metrics::ComponentName::kAuth);
   Metrics::instance().mark_done_with_init(Metrics::ComponentName::kAuth);
-  rpc_profile::start("auth");
 
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
@@ -111,9 +109,6 @@ auth_init(const std::string &mempool_address, const std::string &bind_ip,
   auth_mempool_rpc->impl()->set_auth_server(auth_server);
 
   auth_db_rpc.start_accepting(std::move(db_lfd));
-  // Experiment: each mempool connection's reader, requests and replies run
-  // in one LLC lane (as #4613 does for hog-exec).
-  auth_mempool_rpc.set_stream_placement(lane_stream_placement);
   auth_mempool_rpc.start_accepting(std::move(mempool_lfd));
 
   IntroAuthResult intro = auth_server.subscribe_and_register(auth_card)();

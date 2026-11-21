@@ -6,7 +6,6 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
-#include <functional>
 #include <map>
 #include <string>
 #include <string_view>
@@ -26,18 +25,6 @@
 #include "x23/x23/sockio.h"
 
 namespace hogd {
-
-// The next LLC lane's placement, round robin, for RpcServer's
-// set_stream_placement(): the lane's CoroPoll polls the connection and its
-// reader starts in the lane, so every request on it is read, run and answered
-// on one L3.  default_coropoll() if there are no lanes.
-inline x23::StreamPlacement
-lane_stream_placement()
-{
-  if (LlcLane *lane = LlcLanes::get().next())
-    return {.cp = lane->cp, .reader_cpu = lane->cpu};
-  return {.cp = default_coropoll()};
-}
 
 template<typename IMPL, typename VERSMETA = IMPL::rpc_service>
 requires x23::implements_async_rpc<IMPL *, VERSMETA>
@@ -67,8 +54,8 @@ public:
 
     {
       auto ptr = fdgen_.take();
-      for (auto [fd, cpgen] : *ptr)
-        cpgen.first->poison(fd, cpgen.second);
+      for (auto [fd, gen] : *ptr)
+        cp_.poison(fd, gen);
     }
 
     destroy_wait();
@@ -119,28 +106,19 @@ private:
   using ImplPtr = x23::RefPtr<RpcServer, ImplPtrOps>;
 
 public:
-  // Place each accepted connection with place() instead of on cp_, e.g. in
-  // an LLC lane (lane_stream_placement()).  Call before accepting.
-  void set_stream_placement(std::function<x23::StreamPlacement()> place)
-  {
-    place_ = std::move(place);
-  }
-
   void start_accepting(x23::UniqueFd lfd)
   {
     CHECK_EQ(listen_fd_.load(std::memory_order_relaxed), x23::kInvalidFd);
     listen_fd_ = lfd.get();
-    x23::start_listening(
-        cp_, lfd,
-        [self = x23::RefPtr(*this),
-         _d = x23::Defer([this] { eof(); })](auto c) {
-          c->max_message_size = self->max_message_size_;
-          x23::CoroPoll *cp = c->cp_.get();
-          self->fdgen_->insert_or_assign(
-              c->get_fd(), std::pair{cp, cp->generation(c->get_fd())});
-          c->template server<VersMeta>(ImplPtr(*self));
-        },
-        [this] { return place_ ? place_() : x23::StreamPlacement{.cp = cp_}; });
+    x23::start_listening(cp_, lfd,
+                         [self = x23::RefPtr(*this),
+                          _d = x23::Defer([this] { eof(); })](auto c) {
+                           c->max_message_size = self->max_message_size_;
+                           self->fdgen_->insert_or_assign(c->get_fd(),
+                                                          self->cp_.generation(
+                                                              c->get_fd()));
+                           c->template server<VersMeta>(ImplPtr(*self));
+                         });
   }
 
   uint16_t start_server(uint16_t port)
@@ -163,9 +141,7 @@ public:
 
 private:
   Impl impl_;
-  // Each accepted connection's CoroPoll and generation, to poison it with.
-  x23::MVar<std::map<int, std::pair<x23::CoroPoll *, uint64_t>>> fdgen_;
-  std::function<x23::StreamPlacement()> place_;
+  x23::MVar<std::map<int, uint64_t>> fdgen_;
   bool bound_{};
   std::atomic_int listen_fd_{x23::kInvalidFd};
   uint16_t port_{};

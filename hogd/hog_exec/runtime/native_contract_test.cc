@@ -105,7 +105,8 @@ protected:
     handler_txs_.push_back(std::move(tx));
     return SystemCallHandler(
         handler_txs_.back(), snapshot,
-        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id),
+        PerTransactionDatabaseProxy(*db_proxy_, block_id, tx_id,
+                                    snapshot.get_network_config_params()),
         PerTransactionEventServerProxy(*event_server_proxy_, block_id, tx_id),
         ProposalModeCtor{}, runtime_context);
   }
@@ -1194,6 +1195,116 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
+}
+
+// A native syscall output that overlaps another argument faults before the
+// body runs; inputs that overlap each other, and disjoint arguments, do not.
+TEST_F(NativeContractTest, SyscallArgumentsAreAliasChecked)
+{
+  NativeContractBuilder builder;
+  builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto is_code = [](HostFnStatus<SyscallErrorCode> const &res,
+                          SyscallErrorCode code) {
+          return res.has_value() && res.value() == code;
+        };
+
+        std::array<std::byte, 8> message{};
+        SHA256Hash digest{};
+
+        // Input span over the output it would be hashed into.
+        auto in_out = co_await ctx.syscall<SyscallNo::kSHA256>(
+            std::as_bytes(std::span(digest.data(), digest.size())), digest);
+        if (!is_code(in_out, SyscallErrorCode::kSyscallErrorCodeFault)) {
+          ADD_FAILURE() << "input aliasing an output did not fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Two outputs at the same address.
+        uint32_t calldata_len = 0;
+        auto out_out =
+            co_await ctx.syscall<SyscallNo::kGetCalldataLen>(calldata_len,
+                                                             calldata_len);
+        if (!is_code(out_out, SyscallErrorCode::kSyscallErrorCodeFault)) {
+          ADD_FAILURE() << "two outputs at one address did not fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Two inputs at the same address are fine, and read the same as two
+        // inputs holding the same bytes apart: neither is written.
+        const SHA256Hash salt = sha256(std::span<const std::byte>(message));
+        const SHA256Hash salt_copy = salt;
+        const ContractAddress *no_caller = nullptr;
+        ContractAddress shared{};
+        ContractAddress apart{};
+        auto in_in =
+            co_await ctx.syscall<SyscallNo::kGetDeployAddress>(no_caller, salt,
+                                                               salt, shared);
+        auto in_apart =
+            co_await ctx.syscall<SyscallNo::kGetDeployAddress>(no_caller, salt,
+                                                               salt_copy,
+                                                               apart);
+        if (!is_code(in_in, SyscallErrorCode::kSyscallErrorCodeNone) ||
+            !is_code(in_apart, SyscallErrorCode::kSyscallErrorCodeNone)) {
+          ADD_FAILURE() << "two inputs at one address were rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (shared != apart || shared == ContractAddress{}) {
+          ADD_FAILURE() << "a shared input was read differently";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        auto disjoint = co_await ctx.syscall<SyscallNo::kSHA256>(
+            std::span<const std::byte>(message), digest);
+        if (!is_code(disjoint, SyscallErrorCode::kSyscallErrorCodeNone)) {
+          ADD_FAILURE() << "disjoint arguments were rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (digest != sha256(std::span<const std::byte>(message))) {
+          ADD_FAILURE() << "SHA256 output is wrong";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto native_contract = builder.build();
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  StorageSnapshotCache snapshot(0, kTestBlockExecution, *db_proxy_);
+  ASSERT_TRUE(snapshot.load_db_tip()().has_value());
+  ContractAddress address{};
+  Contract contract(ContractType::kNative);
+  contract.native_contract_id() =
+      static_cast<HogexecPrecompiledNativeContracts>(0);
+  snapshot_server_->impl()->setup_create_contract(contract);
+  snapshot_server_->impl()->setup_create_deployment(
+      address, DeployedContractHash{.hash = sha256(contract),
+                                    .contract_size = 0,
+                                    .contract_type = contract.contract_type()});
+
+  SystemCallHandler handler = make_handler(
+      Transaction{
+          .invocation =
+              {
+                  .invoked_address = address,
+                  .entrypoint = entrypoint_from_method_id(0),
+                  .gas_limit = kDefaultMaxTxGas,
+                  .calldata = {},
+              },
+      },
+      snapshot, 0, 0, *runtime_context);
+  handler.enable_transaction_stats();
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  // Each alias fault counts as a syscall fault, as on the guest path.
+  auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 2);
 }
 
 // NOLINTEND(bugprone-exception-escape)

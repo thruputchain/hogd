@@ -94,6 +94,7 @@ add_library(runtime_test_objects OBJECT
   faucet_scenario_test.cc
   fibonacci_test.cc
   sha256_incremental_test.cc
+  input_alias_test_rv32_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
   validated_auth_tokens_test.cc

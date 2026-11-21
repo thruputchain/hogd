@@ -18,7 +18,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
-#include "hogd/base/rpc_profile.h"
 #include "hogd/hog_auth/auth_data_cache.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
@@ -54,6 +53,10 @@ public:
 
   NetworkHash const &network_hash() const { return network_hash_; }
 
+  // Fewest transactions in a verify_transactions() chunk; a call that fits in
+  // one chunk is verified on the calling coroutine, without a hop.
+  static constexpr size_t kMinTxsPerVerifyChunk = 256;
+
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.
@@ -66,6 +69,12 @@ public:
 
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
+
+  // lookup_auth_data()'s answer when it is a cache hit that needs no wait:
+  // [address]'s cached entry if this server has reached [height] and the entry
+  // is valid there, else nullptr. Callers fall back to lookup_auth_data(),
+  // which waits for [height], reads the db, or reports a stale height, so a
+  // batch of cache hits costs no coroutine per account.
   AuthCacheEntry try_cached_auth_data(BlockHeight height,
                                       const ContractAddress &address);
 
@@ -100,8 +109,10 @@ public:
   }
 
 private:
-  x23::Async<AuthStatus<AuthCacheEntry>>
-  populate_auth_data(BlockHeight height, ContractAddress const &address);
+  // [address]'s cached entry if it is valid at [height], else nullptr. The
+  // caller must have seen this server reach [height].
+  AuthCacheEntry cached_entry_at(BlockHeight height,
+                                 const ContractAddress &address);
 
   // Issues one chunk of [height]'s run to the mempool.
   struct ForwardKeyChangeChunk {
@@ -208,18 +219,9 @@ public:
     // The txs object is valid until the end of the coroutine.
     // Because auth_server_->verify_transactions does not hold onto the txs
     // input after verify_transactions returns, it is safe to pass a span to it.
-    auto results = co_await auth_server_->verify_transactions(
+    co_return co_await auth_server_->verify_transactions(
         height, std::span<const SignedTransaction>(txs.begin(), txs.end()),
         /*max_parallelism=*/available_parallelism());
-    // Measurement: free the decoded request here, timed, rather than when the
-    // coroutine frame goes away.
-    const auto free_started = std::chrono::steady_clock::now();
-    {
-      SignedTransactionBatch freed = std::move(txs);
-    }
-    rpc_profile::profile().request_free.add(rpc_profile::ns_between(
-        free_started, std::chrono::steady_clock::now()));
-    co_return results;
   }
 
   x23::Async<AuthErrorCode> authmempool_verify_batch(BlockHeight height,

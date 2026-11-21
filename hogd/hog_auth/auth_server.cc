@@ -1,7 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
 #include <algorithm>
-#include <chrono>
 #include <memory>
 #include <optional>
 #include <span>
@@ -14,7 +13,6 @@
 #include "auth_rpc.hh"
 #include "hogd/auth_claim/status.h"
 #include "hogd/auth_claim/verify.h"
-#include "hogd/base/rpc_profile.h"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
@@ -35,21 +33,32 @@
 
 namespace hogd {
 
-// Experiment: the cache-hit fast path of #4828, without a coroutine.
+AuthCacheEntry
+AuthServer::cached_entry_at(BlockHeight height, const ContractAddress &address)
+{
+  AuthCacheEntry auth_data = auth_data_cache_.get(address);
+  // Updates replace an account's cache entry before [current_height_futex_]
+  // advances. An entry no newer than the requested height is therefore still
+  // valid even when the auth server has since processed newer blocks.
+  if (auth_data != nullptr && auth_data->first <= height) {
+    return auth_data;
+  }
+  return nullptr;
+}
+
 AuthCacheEntry
 AuthServer::try_cached_auth_data(BlockHeight height,
                                  const ContractAddress &address)
 {
+  CHECK_NE(height, kUninitializedHeight);
+  CHECK_NE(height, kInitializing);
+  // The checks lookup_auth_data() waits on, without waiting.
   const BlockHeight current_height = current_height_futex_.load();
   if (current_height == kUninitializedHeight ||
       current_height == kInitializing || current_height < height) {
     return nullptr;
   }
-  AuthCacheEntry auth_data = auth_data_cache_.get(address);
-  if (auth_data != nullptr && auth_data->first <= height) {
-    return auth_data;
-  }
-  return nullptr;
+  return cached_entry_at(height, address);
 }
 
 x23::Async<AuthStatus<AuthCacheEntry>>
@@ -75,14 +84,8 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
 
-  auto auth_data = auth_data_cache_.get(address);
-  if (auth_data != nullptr) {
-    // Updates replace an account's cache entry before [current_height_futex_]
-    // advances. An entry no newer than the requested height is therefore still
-    // valid even when the auth server has since processed newer blocks.
-    if (auth_data->first <= height) {
-      co_return auth_data;
-    }
+  if (AuthCacheEntry cached = cached_entry_at(height, address)) {
+    co_return cached;
   }
 
   if (current_height > height) {
@@ -241,23 +244,6 @@ AuthServer::subscribe_and_register(AuthCard card)
   co_return co_await mempool_client.mempoolauth_intro_auth(std::move(card));
 }
 
-x23::Async<AuthStatus<AuthCacheEntry>>
-AuthServer::populate_auth_data(BlockHeight height,
-                               ContractAddress const &address)
-{
-  auto entry = co_await lookup_auth_data(height, address);
-  if (!entry.has_value()) {
-    co_return entry.error();
-  }
-
-  CHECK_PTR(entry->get());
-
-  // A missing auth entry (nullopt) is returned as-is: whether that is
-  // acceptable depends on the transaction's claim type (pubkey claims
-  // require it), so the policy lives in verify_auth.
-  co_return std::move(*entry);
-}
-
 namespace {
 
 // Auth is the one place the whole SignedTransaction is measured; the executor
@@ -274,6 +260,52 @@ wrapper_over_cap(const SignedTransaction &tx)
   return true;
 }
 
+using AuthDataByAccount =
+    std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
+
+// Verifies each of [txs] against its account's entry in [auth_data], writing
+// kAuthFailed to the matching element of [results] for each that fails. Skips
+// transactions the lookup pass already failed (over the size cap, or no auth
+// data); they have no entry in [auth_data].
+void
+verify_chunk(std::span<const SignedTransaction> txs,
+             std::span<AuthErrorCode> results,
+             const AuthDataByAccount &auth_data,
+             const NetworkHash &network_hash)
+{
+  x23::Buf signature_preimage;
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (results[i] != AuthErrorCode::kAuthSuccess) {
+      continue;
+    }
+
+    const auto account_it = auth_data.find(tx.tx.invocation.invoked_address);
+    CHECK(account_it != auth_data.end());
+    const std::optional<AddressAuthData> &source_auth_data =
+        account_it->second->second;
+
+    AuthVerifyStatus<void> verify_result =
+        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                    network_hash, signature_preimage);
+    if (!verify_result.has_value()) {
+      results[i] = AuthErrorCode::kAuthFailed;
+    }
+    // [results] starts as all kAuthSuccess, so a pass needs no write.
+  }
+}
+
+// verify_chunk() on the pool, for one chunk of a call split over several.
+x23::Async<void>
+verify_chunk_on_pool(std::span<const SignedTransaction> txs,
+                     std::span<AuthErrorCode> results,
+                     const AuthDataByAccount &auth_data,
+                     NetworkHash network_hash)
+{
+  co_await default_coropoll().pool_.bg();
+  verify_chunk(txs, results, auth_data, network_hash);
+}
+
 } // namespace
 
 x23::Async<AuthErrorCodeBatch>
@@ -282,125 +314,60 @@ AuthServer::verify_transactions(BlockHeight height,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
-  rpc_profile::InFlight in_flight;
-  const auto entered = std::chrono::steady_clock::now();
-  co_await current_threadpool().bg();
-  const auto started = std::chrono::steady_clock::now();
+  co_await default_coropoll().pool_.bg();
 
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>
-      auth_data;
+  AuthDataByAccount auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (wrapper_over_cap(tx)) {
       results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
-    if (!auth_data.contains(tx.tx.invocation.invoked_address)) {
-      if (AuthCacheEntry cached =
-              try_cached_auth_data(height, tx.tx.invocation.invoked_address)) {
-        auth_data.emplace(tx.tx.invocation.invoked_address, std::move(cached));
-        continue;
-      }
-      auto entry =
-          co_await populate_auth_data(height, tx.tx.invocation.invoked_address);
-      if (!entry.has_value()) {
-        trace("Populate auth data error: {}",
-              std::to_underlying(entry.error().code()));
-        results[i] = entry.error().code();
-        continue;
-      }
-      auth_data[tx.tx.invocation.invoked_address] = std::move(*entry);
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
     }
+    AuthCacheEntry entry = try_cached_auth_data(height, account);
+    if (entry == nullptr) {
+      auto looked_up = co_await lookup_auth_data(height, account);
+      if (!looked_up.has_value()) {
+        trace("Populate auth data error: {}",
+              std::to_underlying(looked_up.error().code()));
+        results[i] = looked_up.error().code();
+        continue;
+      }
+      entry = std::move(*looked_up);
+    }
+    CHECK_PTR(entry.get());
+    auth_data.emplace(account, std::move(entry));
   }
 
-  const auto looked_up = std::chrono::steady_clock::now();
-  // Experiment: give each chunk at least kMinChunkTxs transactions, so a call
-  // is split into at most txs.size() / kMinChunkTxs pieces and a small call
-  // runs whole on this thread, without a hop to the pool.
-  constexpr size_t kMinChunkTxs = 256;
-  const std::vector<ChunkRange> chunks = make_chunks(
-      txs.size(), std::clamp<size_t>(txs.size() / kMinChunkTxs, 1,
+  // Each chunk costs a hop to the pool and a wakeup, so only split calls big
+  // enough to pay for them; many calls in flight keep the pool busy anyway.
+  const std::vector<ChunkRange> chunks =
+      make_chunks(txs.size(),
+                  std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
                                      max_parallelism));
-  const bool inline_single_chunk = chunks.size() == 1;
+  const std::span<AuthErrorCode> result_span(results.data(), results.size());
+  if (chunks.size() == 1) {
+    verify_chunk(txs, result_span, auth_data, network_hash_);
+    co_return results;
+  }
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
-  rpc_profile::CpuSet cpus_used;
   for (const ChunkRange &chunk : chunks) {
+    const size_t count = chunk.end - chunk.start;
     handles.push_back(
-        [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AuthCacheEntry,
-                                    SipHash24Hasher> &auth_data,
-           NetworkHash network_hash, AuthErrorCodeBatch &results,
-           std::chrono::steady_clock::time_point spawned,
-           rpc_profile::CpuSet &cpus_used,
-           bool hop) noexcept -> x23::Async<void> {
-          if (hop) {
-            co_await current_threadpool().bg();
-          }
-          rpc_profile::ChunkTimer chunk_timer(spawned, cpus_used);
-
-          x23::Buf signature_preimage;
-          uint64_t lookup_ns = 0;
-          uint64_t verify_auth_ns = 0;
-          rpc_profile::tl_preimage_ns = 0;
-          rpc_profile::tl_sig_ns = 0;
-          for (size_t i = chunk.start; i < chunk.end; i++) {
-            const SignedTransaction &tx = txs[i];
-            if (results[i] != AuthErrorCode::kAuthSuccess) {
-              continue;
-            }
-
-            const auto lookup_started = std::chrono::steady_clock::now();
-            const ContractAddress &account = tx.tx.invocation.invoked_address;
-            const auto account_it = auth_data.find(account);
-            CHECK(account_it != auth_data.end());
-            const std::optional<AddressAuthData> &source_auth_data =
-                account_it->second->second;
-
-            const auto verify_started = std::chrono::steady_clock::now();
-            lookup_ns += rpc_profile::ns_between(lookup_started, verify_started);
-            AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash, signature_preimage);
-            verify_auth_ns += rpc_profile::ns_between(
-                verify_started, std::chrono::steady_clock::now());
-            if (!verify_result.has_value()) {
-              results[i] = AuthErrorCode::kAuthFailed;
-              continue;
-            }
-            // [results] is initialized with all of its members as
-            // [AuthErrorCode::kAuthSuccess], so there is no need for us to
-            // write this result to [results] again.
-          }
-          {
-            auto &prof = rpc_profile::profile();
-            prof.phase_lookup.add(lookup_ns);
-            prof.phase_verify_auth.add(verify_auth_ns);
-            prof.phase_preimage.add(rpc_profile::tl_preimage_ns);
-            prof.phase_sig.add(rpc_profile::tl_sig_ns);
-          }
-          co_return;
-        }(chunk, txs, auth_data, network_hash_, results, looked_up,
-          cpus_used, !inline_single_chunk));
+        verify_chunk_on_pool(txs.subspan(chunk.start, count),
+                             result_span.subspan(chunk.start, count), auth_data,
+                             network_hash_));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }
-  const auto verified = std::chrono::steady_clock::now();
-  auto &profile = rpc_profile::profile();
-  profile.handler_queue.add(rpc_profile::ns_between(entered, started));
-  profile.handler_lookup.add(rpc_profile::ns_between(started, looked_up));
-  profile.handler_verify.add(rpc_profile::ns_between(looked_up, verified));
-  profile.handler_total.add(rpc_profile::ns_between(entered, verified));
-  profile.handler_txs.fetch_add(txs.size(), std::memory_order_relaxed);
-  profile.chunks.fetch_add(chunks.size(), std::memory_order_relaxed);
-  profile.cpus_per_call_sum.fetch_add(cpus_used.count(),
-                                      std::memory_order_relaxed);
-  profile.llcs_per_call_sum.fetch_add(cpus_used.llc_count(),
-                                      std::memory_order_relaxed);
   co_return results;
 }
 
@@ -413,14 +380,19 @@ AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
     if (wrapper_over_cap(tx)) {
       co_return AuthErrorCode::kAuthFailed;
     }
-    auto source_addr =
-        co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
-    if (!source_addr.has_value()) {
-      co_return source_addr.error().code();
+    AuthCacheEntry source_addr =
+        try_cached_auth_data(height, tx.tx.invocation.invoked_address);
+    if (source_addr == nullptr) {
+      auto looked_up =
+          co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
+      if (!looked_up.has_value()) {
+        co_return looked_up.error().code();
+      }
+      source_addr = std::move(*looked_up);
     }
-    CHECK_PTR(source_addr->get());
+    CHECK_PTR(source_addr.get());
     const std::optional<AddressAuthData> &source_auth_data =
-        (*source_addr)->second;
+        source_addr->second;
 
     auto verify_result =
         verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,

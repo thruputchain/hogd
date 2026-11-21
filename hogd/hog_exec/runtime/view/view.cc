@@ -41,7 +41,8 @@ View::run_view_transaction(StorageSnapshotCache &snapshot_cache,
   ViewingModeCtor ctor{.proposal_data_segment_ = std::move(ndet)};
   SystemCallHandler syscall_handler(snapshot_cache, std::move(proxy),
                                     std::move(event_proxy), std::move(ctor),
-                                    context, query.auth_claim, SHA256Hash{});
+                                    context, query.auth_claim, SHA256Hash{},
+                                    query.block_timepoint);
 
   assert(!syscall_handler.is_running());
 

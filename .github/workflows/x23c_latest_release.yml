@@ -9,8 +9,14 @@ on:
         default: true
   push:
     branches: [main]
+    # x23c compiles against the x23 runtime headers, so changes there can change its output.
     paths:
       - 'x23/x23c/**'
+      - 'x23/x23/**'
+      - 'x23/cmake/**'
+      - 'x23/CMakeLists.txt'
+      - 'scripts/package_x23c_latest_release.sh'
+      - '.github/workflows/x23c_latest_release.yml'
 
 # Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
@@ -181,6 +187,14 @@ jobs:
       contents: write
       actions: read
     steps:
+      # latest-x23c must only ever point at main; fail rather than skip so a non-dry dispatch
+      # from a branch is visibly rejected.
+      - name: Require main
+        if: github.ref != 'refs/heads/main'
+        run: |
+          echo "::error::Publishing latest-x23c requires main; this run is on ${GITHUB_REF}. Use dry_run on branches."
+          exit 1
+
       - name: Download Linux x86_64 artifact
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
@@ -224,7 +238,7 @@ jobs:
           } > release_notes.md
 
       - name: Publish latest-x23c release
-        uses: softprops/action-gh-release@v3
+        uses: softprops/action-gh-release@3d0d9888cb7fd7b750713d6e236d1fcb99157228 # v3.0.2
         with:
           tag_name: latest-x23c
           target_commitish: ${{ github.sha }}
@@ -241,7 +255,7 @@ jobs:
           make_latest: false
 
       - name: Move latest-x23c tag to published commit
-        uses: actions/github-script@v8
+        uses: actions/github-script@ed597411d8f924073f98dfc5c65a23a2325f34cd # v8.0.0
         with:
           script: |
             const sha = process.env.X23C_RELEASE_SHA;

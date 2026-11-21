@@ -331,7 +331,8 @@ Rv32Context::verify_contract(Contract const &contract,
                        .max_memory_bytes = params.max_rv32_memory_bytes,
                        .min_artifact_version = params.min_rv32_artifact_version,
                        .max_artifact_version = params.max_rv32_artifact_version,
-                       .max_syscall_api_minor = kSyscallApiMinor});
+                       .min_syscall_api_minor = params.min_syscall_api_minor,
+                       .max_syscall_api_minor = params.max_syscall_api_minor});
   if (!translated.has_value()) {
     rejection = to_contract_reject_code(translated.error());
     return InvokeErrorCode::Deterministic;

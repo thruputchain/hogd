@@ -13,6 +13,7 @@
 #include "hog_exec_constants.hh"
 #include "hogd/base/io.h"
 #include "hogd/base/network_config_params.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -28,6 +29,7 @@
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -143,6 +145,21 @@ TEST_F(GenesisConfigValidationTest, RejectsBytestringLimitAboveCeiling)
 
 // A database loads genesis once, so each case below ends in at most one
 // successful load, after any it expects refused.
+
+// max_subtransaction_output_bytes may be as large as one executor->HogDb
+// message; one byte past that is refused.
+TEST_F(GenesisConfigValidationTest, BoundsSubtransactionOutputLimitByLink)
+{
+  const auto load_with_limit = [this](uint32_t limit) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(
+        config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes, limit);
+    return load(config, std::nullopt);
+  };
+  constexpr auto kLinkCap = static_cast<uint32_t>(kBulkRpcMaxMessageSize);
+  EXPECT_EQ(load_with_limit(kLinkCap + 1), DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_limit(kLinkCap), DbSchedResult::DbSchedResultOK);
+}
 
 // A contract at the ceiling loads with the stock attachment count; one byte
 // past it is refused.
@@ -269,6 +286,31 @@ TEST_F(GenesisConfigValidationTest, BoundsRv32ArtifactVersionsByVmFormats)
             DbSchedResult::DbSchedResultError);
   EXPECT_EQ(load_with_versions(kNewest, kNewest),
             DbSchedResult::DbSchedResultOK);
+}
+
+// The admitted syscall API minors must be a range within what this build
+// implements.
+TEST_F(GenesisConfigValidationTest, BoundsSyscallApiMinorsByTheBuild)
+{
+  // set_param states every lower id, so build the list by hand to state a
+  // value the named setters would refuse.
+  auto load_with_minors = [&](uint32_t min, uint32_t max) {
+    NetworkConfig config = stock_network_config();
+    auto &params = config.v0().params;
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMinSyscallApiMinor))
+        .min_syscall_api_minor() = min;
+    params.at(std::to_underlying(ConfigParamID::kConfigParamMaxSyscallApiMinor))
+        .max_syscall_api_minor() = max;
+    return load(config, std::nullopt);
+  };
+  constexpr uint32_t kNewest = kSyscallApiMinor;
+  ASSERT_GT(kNewest, 0U);
+
+  EXPECT_EQ(load_with_minors(0, kNewest + 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_minors(kNewest, kNewest - 1),
+            DbSchedResult::DbSchedResultError);
+  EXPECT_EQ(load_with_minors(kNewest, kNewest), DbSchedResult::DbSchedResultOK);
 }
 
 TEST_F(GenesisConfigValidationTest, AcceptsOnlyTheOldestRv32ArtifactVersion)

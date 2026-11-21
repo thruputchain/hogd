@@ -233,6 +233,51 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
   EXPECT_EQ(bad_result[0], AuthErrorCode::kAuthFailed);
 }
 
+// Results stay in transaction order whether verify_transactions() verifies a
+// call inline (one chunk) or splits it over the pool.
+TEST_F(AuthVerifyTest, VerifyTransactionsInlineAndSplit)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  Transaction tx{};
+  tx.invocation.invoked_address = *derived_address;
+  tx.auth_claim = make_pubkey_claim(preimage);
+
+  SignedTransaction good{};
+  good.tx = tx;
+  good.pubkey_claim_key = pk;
+  good.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+  SignedTransaction bad = good;
+  bad.signatures[0] = make_signature(sk2, tx, /*public_key_id=*/0);
+
+  // One call that fits in a chunk, and one split into three.
+  for (size_t count : {AuthServer::kMinTxsPerVerifyChunk - 1,
+                       (3 * AuthServer::kMinTxsPerVerifyChunk) + 5}) {
+    x23::Vec<SignedTransaction> stx_vec;
+    for (size_t i = 0; i < count; i++) {
+      stx_vec.push_back(i % 7 == 3 ? bad : good);
+    }
+    x23::span<SignedTransaction> stx_span(stx_vec);
+    auto result =
+        auth_server().verify_transactions(0, stx_span, /*max_parallelism=*/8)();
+    ASSERT_EQ(result.size(), count);
+    for (size_t i = 0; i < count; i++) {
+      EXPECT_EQ(result[i], i % 7 == 3 ? AuthErrorCode::kAuthFailed
+                                      : AuthErrorCode::kAuthSuccess)
+          << "count " << count << " index " << i;
+    }
+  }
+}
+
 TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
@@ -350,9 +395,12 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 {
   constexpr size_t kNumAddresses = 4;
-  constexpr size_t kTxsPerAddress = 16;
+  constexpr size_t kTxsPerAddress = AuthServer::kMinTxsPerVerifyChunk;
   constexpr size_t kTotalTxs = kNumAddresses * kTxsPerAddress;
   constexpr size_t kMaxParallelism = 4;
+  // Enough transactions that the call splits into kMaxParallelism chunks.
+  static_assert(kTotalTxs / AuthServer::kMinTxsPerVerifyChunk >=
+                kMaxParallelism);
 
   ContractAddress addresses[kNumAddresses];
   std::pair<PublicKey, SecretKey> keys[kNumAddresses];

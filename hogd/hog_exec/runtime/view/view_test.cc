@@ -105,6 +105,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -118,6 +119,7 @@ protected:
         .auth_claim = std::move(auth_claim),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -355,6 +357,54 @@ TEST_F(ViewTest, ViewNativeContractGetMsgSenderIsRoot)
 
   auto result = run_view(make_query(invocation), *setup.context);
   EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+}
+
+// A view runs at the timepoint its caller states, not the one the shared
+// snapshot cache was opened with: two views off one cache see their own.
+TEST_F(ViewTest, ViewObservesItsOwnBlockTimepoint)
+{
+  static constexpr ContractAddress kNativeAddr =
+      NativeContractTestFramework::make_contract_address(10);
+
+  static TimePoint observed = 0;
+  NativeViewSetup setup(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        TimePoint block_timepoint = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kGetBlockTimepoint>(
+            block_timepoint);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+          ADD_FAILURE() << "get_block_timepoint syscall failed";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        observed = block_timepoint;
+        co_return InvokeStatus<void>{};
+      });
+
+  deploy_native(kNativeAddr);
+
+  Invocation invocation{
+      .invoked_address = kNativeAddr,
+      .entrypoint = entrypoint_from_method_id(0),
+      .gas_limit = UINT64_MAX,
+      .calldata = {},
+  };
+
+  const TimePoint cache_timepoint = framework_.get_storage_snapshot_cache()
+                                        ->block_execution_context()
+                                        .block_timepoint;
+  for (TimePoint stated : {cache_timepoint + 1'000, cache_timepoint + 2'000}) {
+    observed = 0;
+    auto query = make_query(invocation);
+    query.block_timepoint = stated;
+    auto result = run_view(query, *setup.context);
+    EXPECT_EQ(result.status(), TransactionViewStatus::Ok);
+    EXPECT_EQ(observed, stated);
+  }
+  EXPECT_EQ(framework_.get_storage_snapshot_cache()
+                ->block_execution_context()
+                .block_timepoint,
+            cache_timepoint);
 }
 
 TEST_F(ViewTest, ViewNativeContractGetMsgSenderWithParent)
@@ -1673,7 +1723,8 @@ TEST_F(ViewTest, GetBlockHeightSucceedsInViewingBlockTx)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();
@@ -1772,7 +1823,8 @@ TEST_F(ViewTest, ViewingSnapshotGoesStaleAfterBlockAdvance)
       snapshot_cache,
       PerTransactionDatabaseProxy(framework_.get_db_proxy(),
                                   snapshot.viewing_block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+                                  std::numeric_limits<TransactionID>::max(),
+                                  snapshot_cache.get_network_config_params()),
       framework_.make_new_per_tx_event_server_proxy(
           std::numeric_limits<TransactionID>::max()),
       make_query(invocation), *setup.context, {})();

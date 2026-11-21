@@ -150,31 +150,6 @@ $CONTROL_CLI hog8 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
-# The mempool's own timings are only on its metrics port, and `timeout` below
-# reaps it at 180 s, so take a snapshot shortly before then.
-rm -f mempool_metrics.txt auth_proc_30.txt auth_proc_170.txt
-# hog-auth's scheduling counters on hog8, summed over its threads: CPU time,
-# context switches and migrations between CPUs.
-AUTH_PROC_SNAPSHOT='pid=$(pgrep -x hog-auth | head -n 1); test -n "$pid" || exit 0
-echo "threads=$(ls /proc/$pid/task | wc -l)"
-read -r -a st < /proc/$pid/stat
-echo "utime_ticks=${st[13]} stime_ticks=${st[14]} clk_tck=$(getconf CLK_TCK)"
-cat /proc/$pid/task/*/status | awk "/^voluntary_ctxt_switches/ {v += \$2} /^nonvoluntary_ctxt_switches/ {n += \$2} END {print \"voluntary_ctxt=\" v, \"nonvoluntary_ctxt=\" n}"
-cat /proc/$pid/task/*/sched 2>/dev/null | awk "/nr_migrations/ {m += \$NF} END {print \"nr_migrations=\" m}"'
-(
-  sleep 30
-  ssh -n hog8 "$AUTH_PROC_SNAPSHOT" > auth_proc_30.txt 2>&1 || true
-  sleep 140
-  curl --silent --max-time 5 "http://$(hog_ip hog10):$MEMPOOL_HTTP_PORT/metrics" \
-    > mempool_metrics.txt || true
-  ssh -n hog8 "$AUTH_PROC_SNAPSHOT" > auth_proc_170.txt 2>&1 || true
-) &
-
-# hog-mempool writes each submission's DAG, with per-node timings, here.
-export MEMPOOL_DAG_DOT_DIR="$WORK_ROOT/submit_dags"
-rm -rf "$MEMPOOL_DAG_DOT_DIR"
-mkdir -p "$MEMPOOL_DAG_DOT_DIR"
-
 echo "launch mempool ($MEMPOOL_BINARY)"
 set +e
 timeout 180s "$MEMPOOL_BINARY" \
@@ -218,54 +193,6 @@ fi
 
 echo 'coordinator benchmark results'
 cat coordinator_output.txt
-
-echo 'mempool metrics snapshot'
-# Counters, sums and gauges, plus the buckets of the per-call timings whose
-# means mix full and empty blocks.
-grep -v -E '^#|_bucket\{' mempool_metrics.txt || echo 'no mempool metrics snapshot'
-grep -E '^mempool_(nomination_duration|commit_duration|ingestion_auth_rpc|submit_unvetted_duration)_seconds_bucket' \
-  mempool_metrics.txt || true
-
-echo 'submit dag timings'
-# Median wait and run per node over every submission, from hog-mempool's
-# DOT dumps (the coordinator pumps only batches of a million).
-python3 - "$MEMPOOL_DAG_DOT_DIR" <<'PY' || echo 'no submit dag timings'
-import glob, re, statistics, sys
-def secs(v):
-    m = re.match(r'([\d.]+)(us|ms|s)$', v)
-    return float(m.group(1)) * {'us': 1e-6, 'ms': 1e-3, 's': 1.0}[m.group(2)]
-rows = {}
-files = sorted(glob.glob(sys.argv[1] + '/mempool_submit_unvetted_*.dot'))
-for path in files:
-    text = open(path).read()
-    for name, body in re.findall(r'label="\d+: ([^\\"]+)((?:\\n[^"]*)?)"', text):
-        fields = dict(re.findall(r'\\n(wait|run|total): ([\d.]+(?:us|ms|s))', body))
-        if 'run' in fields:
-            rows.setdefault(name, []).append((secs(fields['wait']), secs(fields['run'])))
-print(f'{len(files)} submit dags')
-for name, v in rows.items():
-    waits = [w for w, _ in v]
-    runs = [r for _, r in v]
-    print(f'{name:28s} n={len(v):4d} wait_med={statistics.median(waits)*1e3:8.1f}ms '
-          f'run_med={statistics.median(runs)*1e3:8.1f}ms run_max={max(runs)*1e3:8.1f}ms')
-PY
-
-echo 'curve25519-dalek backend'
-# Which curve25519-dalek backends the Rust build compiled in (dalek 5 picks
-# AVX-512 IFMA at runtime when it is compiled in and the CPU supports it).
-find "$BUILD_DIR" -path '*build/curve25519-dalek-*/output' -exec grep -h curve25519_dalek_backend {} + \
-  2>/dev/null | sort -u || echo 'no curve25519-dalek build output found'
-grep -o -w -m1 'avx512ifma' /proc/cpuinfo || echo 'this CPU has no avx512ifma'
-
-echo 'auth process snapshot at 30 s'
-cat auth_proc_30.txt 2>/dev/null || echo 'none'
-echo 'auth process snapshot at 170 s'
-cat auth_proc_170.txt 2>/dev/null || echo 'none'
-
-echo 'auth rpc profile'
-# hog-auth logs to its control server's newest stderr file on hog8.
-ssh -n hog8 'grep -h RPCPROF "$(ls -1t /tmp/hogd_stderr_* | head -n 1)" "$(ls -1t /tmp/hogd_stdout_* | head -n 1)" | tail -n 16' \
-  || echo 'no auth rpc profile'
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

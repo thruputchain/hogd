@@ -17,12 +17,12 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "genesis.hh"
-#include "hog_exec_constants.hh"
 #include "storage_item.hh"
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/perthread_arc.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
@@ -419,16 +419,12 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
           stated, rv32::kMemoryCeilingBytes);
     co_return DbSchedResult::DbSchedResultError;
   }
-  // Admitting a format this build cannot read would let a node on a build
-  // that can attach a contract this one refuses.
-  if (const uint32_t oldest = config_params.min_rv32_artifact_version,
-      newest = config_params.max_rv32_artifact_version;
-      oldest > newest || oldest < kMinRv32ArtifactVersion ||
-      newest > kMaxRv32ArtifactVersion) {
-    error("genesis rv32 artifact versions [{}, {}] are not a range within "
-          "the [{}, {}] this build's VM reads",
-          oldest, newest, static_cast<uint32_t>(kMinRv32ArtifactVersion),
-          static_cast<uint32_t>(kMaxRv32ArtifactVersion));
+  // Admitting a format this build cannot read, or a syscall API minor it
+  // does not implement, would let a node on a build that can attach a
+  // contract this one refuses or cannot run.
+  if (const auto unsupported = unsupported_admission_range(config_params)) {
+    error("genesis network config is not one this build can serve: {}",
+          *unsupported);
     co_return DbSchedResult::DbSchedResultError;
   }
   // Every root commit pushes a savepoint, even without child TryInvokes.
@@ -449,6 +445,15 @@ HogDbSchedRpc::dbsched_load_genesis_configuration(
       stated > static_cast<uint32_t>(kBytestringCeilingLen)) {
     error("genesis max_bytestring_len {} exceeds the protocol ceiling of {}",
           stated, kBytestringCeilingLen);
+    co_return DbSchedResult::DbSchedResultError;
+  }
+  // A subtransaction push is one message on the executor->HogDb link, so a
+  // genesis naming more than the link carries could never be honored.
+  if (const uint32_t stated = config_params.max_subtransaction_output_bytes;
+      stated > kBulkRpcMaxMessageSize) {
+    error("genesis max_subtransaction_output_bytes {} exceeds the {} one "
+          "executor->HogDb message carries",
+          stated, kBulkRpcMaxMessageSize);
     co_return DbSchedResult::DbSchedResultError;
   }
   ctx_.set_default_wallet(genesis_configuration.default_wallet);

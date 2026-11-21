@@ -234,7 +234,9 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(
         account_address(preimage));
     return run_account_invocation_no_advance(
-        preimage, client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls));
+        preimage, client.make_invocation<u8"execute">(
+                      kDefaultMaxTxGas,
+                      x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls));
   }
 
   TxOutcome run_execute_tx(PubkeyAccountPreimage const &preimage,

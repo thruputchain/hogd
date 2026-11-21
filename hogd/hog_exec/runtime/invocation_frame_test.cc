@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
-#include <format>
 #include <memory>
 #include <span>
 #include <string>
@@ -39,7 +38,8 @@ protected:
         LocalMockDB{.read_port_number_ = server_.port()});
     per_tx_db_proxy_ =
         std::make_unique<PerTransactionDatabaseProxy>(*db_proxy_, kBlockId,
-                                                      kTxId);
+                                                      kTxId,
+                                                      NetworkConfigParams{});
   }
 
   static constexpr BlockID kBlockId = 1;
@@ -280,13 +280,34 @@ TEST_F(InvocationFrameTest, ManualRevertReclaims)
   ASSERT_NE(stack.lookup_auth_token(token_id.value()), nullptr);
 }
 
+// The ExecutionModeData arms the depth-cap test is parameterized over.
+namespace {
+
+enum class ModeDataArm : uint8_t { kProposal, kValidation, kViewing };
+
+constexpr const char *
+mode_data_arm_name(ModeDataArm arm)
+{
+  switch (arm) {
+  case ModeDataArm::kProposal:
+    return "Proposal";
+  case ModeDataArm::kValidation:
+    return "Validation";
+  case ModeDataArm::kViewing:
+    return "Viewing";
+  }
+  return "Unknown";
+}
+
+} // namespace
+
 // The child TryInvoke depth cap is a deterministic rule of the frame stack, so
 // it must hold identically in every execution mode. Each mode takes its own
 // arm in finish_frame to decide whether a child succeeded, and a bump missed
 // in one arm lets that mode run past the cap (viewing did, #3943 audit).
 class InvocationFrameDepthCapTest
   : public InvocationFrameTest,
-    public ::testing::WithParamInterface<ExecutionMode> {
+    public ::testing::WithParamInterface<ModeDataArm> {
 protected:
   // One slot is reserved for root commit, so the child cap is
   // kMaxSavepointDepth - 1.
@@ -306,13 +327,13 @@ protected:
   // succeeds: proposal probes locks nothing contends for, validation replays
   // a true bit per child, and viewing is left to its default of true. Only
   // the depth cap can then fail a child.
-  static ExecutionModeData make_mode_data(ExecutionMode mode)
+  static ExecutionModeData make_mode_data(ModeDataArm arm)
   {
-    if (mode == ExecutionMode::kValidating) {
+    if (arm == ModeDataArm::kValidation) {
       return ExecutionModeData{std::in_place_type<ValidationModeData>,
                                all_true_bits(kChildCap + 1)};
     }
-    if (mode == ExecutionMode::kViewing) {
+    if (arm == ModeDataArm::kViewing) {
       ViewingModeCtor ctor{.proposal_data_segment_ = {}};
       return ExecutionModeData{std::in_place_type<ViewingModeData>, ctor};
     }
@@ -347,23 +368,15 @@ TEST_P(InvocationFrameDepthCapTest, TryInvokeHitsSavepointDepthLimit)
   ASSERT_TRUE(result.has_value());
   ASSERT_FALSE(result.value().first.result_.has_value())
       << "child TryInvoke past the cap must fail deterministically in "
-      << std::format("{}", GetParam());
+      << mode_data_arm_name(GetParam());
 }
 
 INSTANTIATE_TEST_SUITE_P(
     ExecutionModes, InvocationFrameDepthCapTest,
-    ::testing::Values(ExecutionMode::kProposing, ExecutionMode::kValidating,
-                      ExecutionMode::kViewing),
-    [](::testing::TestParamInfo<ExecutionMode> const &info) -> std::string {
-      switch (info.param) {
-      case ExecutionMode::kProposing:
-        return "Proposing";
-      case ExecutionMode::kValidating:
-        return "Validating";
-      case ExecutionMode::kViewing:
-        return "Viewing";
-      }
-      return "Unknown";
+    ::testing::Values(ModeDataArm::kProposal, ModeDataArm::kValidation,
+                      ModeDataArm::kViewing),
+    [](::testing::TestParamInfo<ModeDataArm> const &info) -> std::string {
+      return mode_data_arm_name(info.param);
     });
 
 TEST_F(InvocationFrameTest, StartFrameReportsSuccess)

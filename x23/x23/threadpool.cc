@@ -9,12 +9,10 @@
 #include <format>
 #include <functional>
 #include <memory>
-#include <optional>
 #include <string>
 #include <sys/signal.h>
 #include <thread>
 #include <unistd.h>
-#include <utility>
 #include <vector>
 
 #include "x23/cleanup.h"
@@ -29,16 +27,9 @@
 
 namespace x23 {
 
-ThreadPool::ThreadPool(size_t nthreads) : ThreadPool(nthreads, std::nullopt)
-{}
-
-ThreadPool::ThreadPool(size_t nthreads, const CpuSet &cpus)
-  : ThreadPool(nthreads, std::optional<CpuSet>{cpus})
-{}
-
-ThreadPool::ThreadPool(size_t nthreads, std::optional<CpuSet> pin)
+ThreadPool::ThreadPool(size_t nthreads)
   : nthreads_(nthreads), nqueues_((init_cpumaps(), llc_map->nbuckets())),
-    pin_(std::move(pin)), queue_nthreads_(new std::atomic_uint[nqueues_]{}),
+    queue_nthreads_(new std::atomic_uint[nqueues_]{}),
     runqueues_(std::make_unique<RunQueue[]>(nqueues_)),
     tstate_(std::make_unique<ThreadState[]>(nthreads)),
     qcbq_service_thread_(&ThreadPool::qcbq_service, this)
@@ -405,8 +396,6 @@ ThreadPool::Worker::work()
 {
   my_thread_pool = pool_;
   my_thread_no = threadno_;
-  if (pool_->pin_)
-    pool_->pin_->set_affinity();
   cpu_ = cpuid();
   bucket_ = llc_map->bucket(cpu_);
   pool_->queue_nthreads_[bucket_]++;

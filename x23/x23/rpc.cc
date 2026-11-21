@@ -2,7 +2,6 @@
 #include <x23/rpc.h>
 
 #include <cerrno>
-#include <chrono>
 #include <cstddef>
 #include <cstdint>
 #include <expected>
@@ -19,7 +18,6 @@
 #include <x23/rpc_msg.hh>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
-#include <x23/threadpool.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
 
@@ -72,17 +70,12 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
 {
   bp->clear();
   bool done = false;
-  bool first = true;
   while (!done) {
     std::uint32_t len;
     if (auto res = co_await read_uint(); !res)
       co_return res.error();
     else
       len = *res;
-    if (first) {
-      record_start_ = std::chrono::steady_clock::now();
-      first = false;
-    }
     done = ((len & 0x80000000) != 0U);
     len &= 0x7fffffff;
     if (bp->size() + len > max_message_size) {
@@ -127,8 +120,6 @@ RpcStreamImpl::reader(SLOC_ARG0)
   // bounds checks in deserialization.
   constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
-  if (reader_cpu_)
-    co_await cp_->pool_.bg(*reader_cpu_);
   Buf b;
   if constexpr (kMinBuf != 0U)
     b.reserve(kMinBuf);
@@ -166,22 +157,7 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        const auto serve_start = std::chrono::steady_clock::now();
-        const std::size_t record_bytes = b.size();
         auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
-        if (auto *hook = rpc_serve_hook.load(std::memory_order_relaxed)) {
-          const auto serve_end = std::chrono::steady_clock::now();
-          hook(RpcServeSample{
-              .body_read_ns = static_cast<std::uint64_t>(
-                  std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      serve_start - record_start_)
-                      .count()),
-              .serve_ns = static_cast<std::uint64_t>(
-                  std::chrono::duration_cast<std::chrono::nanoseconds>(
-                      serve_end - serve_start)
-                      .count()),
-              .bytes = record_bytes});
-        }
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())
