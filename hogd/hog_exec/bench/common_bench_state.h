@@ -1,7 +1,12 @@
 #pragma once
 
+#include <arpa/inet.h>
+#include <netdb.h>
+#include <netinet/in.h>
+
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <regex>
@@ -49,6 +54,32 @@
 
 namespace hogd {
 
+// True inside the isolated hog cluster CI container (thruputchain/benchmarks
+// sets HOGD_CI_CONTAINER=1). There each hog host is a container on a run-local
+// network, not the machine on the 10.100.0.0/24 fabric.
+inline bool
+in_hog_ci_container()
+{
+  const char *flag = getenv("HOGD_CI_CONTAINER");
+  return flag != nullptr && std::string_view(flag) == "1";
+}
+
+// The hog host this bench runs on. Inside the CI container the hostname is
+// the container ID, so take the HOG_HOST that hog_sched exports instead.
+inline std::string
+local_hog_host()
+{
+  if (in_hog_ci_container()) {
+    if (const char *host = getenv("HOG_HOST"); host != nullptr && *host) {
+      return host;
+    }
+  }
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return hostname;
+}
+
+// Mirrors hog_ip in scripts/hog-ip.sh.
 inline std::string
 hog_ip(std::string_view host)
 {
@@ -56,6 +87,27 @@ hog_ip(std::string_view host)
   std::match_results<std::string_view::const_iterator> match;
   if (!std::regex_match(host.begin(), host.end(), match, kHogHostPattern)) {
     panic("invalid hog host: {}", host);
+  }
+
+  if (in_hog_ci_container()) {
+    // Docker's run-local DNS resolves only peers on this run's network.
+    addrinfo hints{};
+    hints.ai_family = AF_INET;
+    hints.ai_socktype = SOCK_STREAM;
+    addrinfo *res = nullptr;
+    const std::string name(host);
+    if (int rc = getaddrinfo(name.c_str(), nullptr, &hints, &res); rc != 0) {
+      panic("cannot resolve hog host {}: {}", host, gai_strerror(rc));
+    }
+    char address[INET_ADDRSTRLEN];
+    const auto *sin = reinterpret_cast<const sockaddr_in *>(res->ai_addr);
+    const char *ok =
+        inet_ntop(AF_INET, &sin->sin_addr, address, sizeof(address));
+    freeaddrinfo(res);
+    if (ok == nullptr) {
+      panic("cannot format the address of hog host {}", host);
+    }
+    return address;
   }
 
   unsigned int hog_num = std::stoul(match[1].str());
@@ -229,9 +281,7 @@ private:
 
   EventCard start_event_server(uint16_t event_server_port)
   {
-    std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_ip = hog_ip(hostname);
+    std::string mempool_ip = hog_ip(local_hog_host());
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
