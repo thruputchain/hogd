@@ -1435,8 +1435,9 @@ TEST(Scheduler, ProcessTransfersCreatesNativeTokenAgeForFirstTimeRecipient)
 
 TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
 {
-  // 2^126 * 4 is 2^128, which would wrap a uint128_t token-times-age sum.
-  constexpr uint128_t kHalfSupply = static_cast<uint128_t>(1) << 126;
+  // Total supply stays below INT128_MAX, but token-times-age sums such as
+  // 2^125 * 4 + 2^125 * 7 = 11 * 2^125 would wrap uint128_t.
+  constexpr uint128_t kAmount = static_cast<uint128_t>(1) << 125;
   const ContractAddress account = make_account_address(99);
 
   MempoolTestInfra server;
@@ -1446,7 +1447,7 @@ TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
     scheduler->process_transfers(one_chunk_transfer(
         block, {Delta{.address = account,
                       .native_token_delta =
-                          to_xdr(static_cast<int128_t>(kHalfSupply))}}))();
+                          to_xdr(static_cast<int128_t>(kAmount))}}))();
     const auto [age, lock] = scheduler->get_cached_native_token_age(account);
     return age->average_ages[kNativeTokenAgeGroupReceived];
   };
@@ -1454,6 +1455,10 @@ TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
   EXPECT_EQ(transfer_at(4), 4UL);
   // Equal halves at ages 4 and 7 average to 5.5, which rounds up to 6.
   EXPECT_EQ(transfer_at(7), 6UL);
+  // 2^126 tokens at age 6 plus 2^125 at age 6 + 2^62 weight the newer tokens
+  // 1:3, so the average is 6 + 2^62 / 3, which rounds up.
+  constexpr BlockHeight kFar = static_cast<BlockHeight>(1) << 62;
+  EXPECT_EQ(transfer_at(6 + kFar), 6 + ((kFar + 2) / 3));
 }
 
 TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesUpdatesLiveState)
