@@ -1,5 +1,6 @@
 #include "hogd/hog_auth/auth_server.h"
 
+#include <algorithm>
 #include <memory>
 #include <optional>
 #include <span>
@@ -259,6 +260,52 @@ wrapper_over_cap(const SignedTransaction &tx)
   return true;
 }
 
+using AuthDataByAccount =
+    std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
+
+// Verifies each of [txs] against its account's entry in [auth_data], writing
+// kAuthFailed to the matching element of [results] for each that fails. Skips
+// transactions the lookup pass already failed (over the size cap, or no auth
+// data); they have no entry in [auth_data].
+void
+verify_chunk(std::span<const SignedTransaction> txs,
+             std::span<AuthErrorCode> results,
+             const AuthDataByAccount &auth_data,
+             const NetworkHash &network_hash)
+{
+  x23::Buf signature_preimage;
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (results[i] != AuthErrorCode::kAuthSuccess) {
+      continue;
+    }
+
+    const auto account_it = auth_data.find(tx.tx.invocation.invoked_address);
+    CHECK(account_it != auth_data.end());
+    const std::optional<AddressAuthData> &source_auth_data =
+        account_it->second->second;
+
+    AuthVerifyStatus<void> verify_result =
+        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                    network_hash, signature_preimage);
+    if (!verify_result.has_value()) {
+      results[i] = AuthErrorCode::kAuthFailed;
+    }
+    // [results] starts as all kAuthSuccess, so a pass needs no write.
+  }
+}
+
+// verify_chunk() on the pool, for one chunk of a call split over several.
+x23::Async<void>
+verify_chunk_on_pool(std::span<const SignedTransaction> txs,
+                     std::span<AuthErrorCode> results,
+                     const AuthDataByAccount &auth_data,
+                     NetworkHash network_hash)
+{
+  co_await default_coropoll().pool_.bg();
+  verify_chunk(txs, results, auth_data, network_hash);
+}
+
 } // namespace
 
 x23::Async<AuthErrorCodeBatch>
@@ -272,8 +319,7 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>
-      auth_data;
+  AuthDataByAccount auth_data;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (wrapper_over_cap(tx)) {
@@ -299,45 +345,25 @@ AuthServer::verify_transactions(BlockHeight height,
     auth_data.emplace(account, std::move(entry));
   }
 
+  // Each chunk costs a hop to the pool and a wakeup, so only split calls big
+  // enough to pay for them; many calls in flight keep the pool busy anyway.
   const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), max_parallelism);
+      make_chunks(txs.size(),
+                  std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
+                                     max_parallelism));
+  const std::span<AuthErrorCode> result_span(results.data(), results.size());
+  if (chunks.size() == 1) {
+    verify_chunk(txs, result_span, auth_data, network_hash_);
+    co_return results;
+  }
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
+    const size_t count = chunk.end - chunk.start;
     handles.push_back(
-        [](ChunkRange chunk, x23::span<const SignedTransaction> txs,
-           const std::unordered_map<ContractAddress, AuthCacheEntry,
-                                    SipHash24Hasher> &auth_data,
-           NetworkHash network_hash,
-           AuthErrorCodeBatch &results) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-
-          x23::Buf signature_preimage;
-          for (size_t i = chunk.start; i < chunk.end; i++) {
-            const SignedTransaction &tx = txs[i];
-            if (results[i] != AuthErrorCode::kAuthSuccess) {
-              continue;
-            }
-
-            const ContractAddress &account = tx.tx.invocation.invoked_address;
-            const auto account_it = auth_data.find(account);
-            CHECK(account_it != auth_data.end());
-            const std::optional<AddressAuthData> &source_auth_data =
-                account_it->second->second;
-
-            AuthVerifyStatus<void> verify_result =
-                verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                            network_hash, signature_preimage);
-            if (!verify_result.has_value()) {
-              results[i] = AuthErrorCode::kAuthFailed;
-              continue;
-            }
-            // [results] is initialized with all of its members as
-            // [AuthErrorCode::kAuthSuccess], so there is no need for us to
-            // write this result to [results] again.
-          }
-          co_return;
-        }(chunk, txs, auth_data, network_hash_, results));
+        verify_chunk_on_pool(txs.subspan(chunk.start, count),
+                             result_span.subspan(chunk.start, count), auth_data,
+                             network_hash_));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

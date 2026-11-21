@@ -53,6 +53,10 @@ public:
 
   NetworkHash const &network_hash() const { return network_hash_; }
 
+  // Fewest transactions in a verify_transactions() chunk; a call that fits in
+  // one chunk is verified on the calling coroutine, without a hop.
+  static constexpr size_t kMinTxsPerVerifyChunk = 256;
+
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
   // that have been committed.
