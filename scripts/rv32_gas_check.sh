@@ -75,9 +75,10 @@ fi
 
 if [[ "${FINGERPRINT_ONLY}" = "ON" ]]; then
   # Just the deterministic arm: useful by hand after touching the interpreter,
-  # when you want the answer now and do not want to wait for a full run.
-  ACTUAL="$("${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" "${BUILD_DIR}" \
-    -- --fingerprint 2>/dev/null)"
+  # when you want the answer now and do not want to wait for a full run. Nothing
+  # here is timed, so pinning cannot change the answer and is not required.
+  ACTUAL="$(RV32_ALLOW_UNPINNED=1 "${REPO_ROOT}/scripts/rv32_gas_calibrate.sh" \
+    "${BUILD_DIR}" -- --fingerprint 2>/dev/null)"
   EXPECTED="$(awk '$1 == "engine_fingerprint" { print $2 }' "${REFERENCE}")"
   if [[ -z "${ACTUAL}" ]]; then
     echo "FAIL  could not compute the engine fingerprint" >&2
