@@ -1787,9 +1787,10 @@ SystemCallHandler::note_item_load(FrameItemKey const &key)
 GasAmount
 SystemCallHandler::commit_key_gas(StorageKeyContractData const &storage_key)
 {
-  auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
-  assert(item_view);
-  return item_view->get<UnmodifiedItem>() ? kCommitKeyCost : 0;
+  return invocation_frame_stack_.has_pending_write(
+             invocation_frame_stack_.frame_item_key(storage_key))
+             ? 0
+             : kCommitKeyCost;
 }
 
 x23::Async<

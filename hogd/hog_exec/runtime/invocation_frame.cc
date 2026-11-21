@@ -556,6 +556,19 @@ InvocationFrameStack::get_item_view(FrameItemKey const &key)
   return frame_stack_.back().add_item_view(key, ItemView());
 }
 
+bool
+InvocationFrameStack::has_pending_write(FrameItemKey const &key)
+{
+  // The innermost view is the current one: a child copies its parent's view
+  // on first touch.
+  for (auto &frame : std::views::reverse(frame_stack_)) {
+    if (auto *view = frame.get_item_view(key)) {
+      return view->get<UnmodifiedItem>() == nullptr;
+    }
+  }
+  return false;
+}
+
 ItemView *
 InvocationFrameStack::get_item_view(AddressAndKey const &addrkey)
 {
