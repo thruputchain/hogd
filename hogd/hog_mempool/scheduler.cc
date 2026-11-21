@@ -48,19 +48,55 @@ namespace hogd {
 
 namespace {
 
+// Returns ceil(n * d / t) for 0 < t and n <= t. The product n * d can need
+// up to 192 bits, so this does binary long multiplication over the bits of d,
+// keeping the running product as q * t + r with r < t.
+BlockHeight
+mul_div_round_up(uint128_t n, BlockHeight d, uint128_t t)
+{
+  BlockHeight q = 0;
+  uint128_t r = 0;
+  // Adds x <= t to r, carrying into q. Never overflows since r < t.
+  auto add = [&](uint128_t x) {
+    if (r >= t - x) {
+      r -= t - x;
+      ++q;
+    }
+    else {
+      r += x;
+    }
+  };
+  for (int bit = std::numeric_limits<BlockHeight>::digits - 1; bit >= 0;
+       --bit) {
+    q *= 2;
+    add(r);
+    if ((d >> bit) & 1) {
+      add(n);
+    }
+  }
+  return q + (r != 0 ? 1 : 0);
+}
+
 BlockHeight
 compute_average_age(uint128_t num_native_tokens_a, BlockHeight age_a,
                     uint128_t num_native_tokens_b, BlockHeight age_b)
 {
-  uint128_t numerator =
-      (num_native_tokens_a * age_a) + (num_native_tokens_b * age_b);
   uint128_t denominator = num_native_tokens_a + num_native_tokens_b;
   CHECK_GT(denominator, 0UL);
+  if (age_a > age_b) {
+    std::swap(num_native_tokens_a, num_native_tokens_b);
+    std::swap(age_a, age_b);
+  }
+  // The weighted average is age_a + num_native_tokens_b * (age_b - age_a) /
+  // denominator, which stays between the two ages. Computing it this way,
+  // rather than summing token * age products, avoids overflowing uint128_t.
+  //
   // When doing division, we introduce imprecision into our calculations. Thus,
   // we always round the result up to avoid benefitting the account. This helps
   // to ensure that users are not incentivized to waste network storage or
   // compute, such as by spreading native tokens among multiple accounts.
-  return (numerator / denominator) + ((numerator % denominator) ? 1 : 0);
+  return age_a +
+         mul_div_round_up(num_native_tokens_b, age_b - age_a, denominator);
 }
 
 bool

@@ -1433,6 +1433,29 @@ TEST(Scheduler, ProcessTransfersCreatesNativeTokenAgeForFirstTimeRecipient)
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kBlock);
 }
 
+TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
+{
+  // 2^126 * 4 is 2^128, which would wrap a uint128_t token-times-age sum.
+  constexpr uint128_t kHalfSupply = static_cast<uint128_t>(1) << 126;
+  const ContractAddress account = make_account_address(99);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  const auto transfer_at = [&](BlockHeight block) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block, {Delta{.address = account,
+                      .native_token_delta =
+                          to_xdr(static_cast<int128_t>(kHalfSupply))}}))();
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return age->average_ages[kNativeTokenAgeGroupReceived];
+  };
+
+  EXPECT_EQ(transfer_at(4), 4UL);
+  // Equal halves at ages 4 and 7 average to 5.5, which rounds up to 6.
+  EXPECT_EQ(transfer_at(7), 6UL);
+}
+
 TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
