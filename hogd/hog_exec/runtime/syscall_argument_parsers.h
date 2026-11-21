@@ -129,7 +129,7 @@ WritableOutput<T>
 check_user_argument(AliasGuard &guard, std::span<std::byte> contract_memory,
                     uint64_t user_offset)
 {
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_output(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return WritableOutput<T>();
   }
@@ -145,7 +145,7 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
     // nullptr
     return WritableOutput<T>();
   }
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_output(user_offset, sizeof(T));
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   auto *ptr = reinterpret_cast<void *>(user_offset);
   return WritableOutput<T>(ptr);
@@ -158,7 +158,7 @@ check_user_argument(AliasGuard &guard,
                     std::span<const std::byte> contract_memory,
                     uint64_t user_offset)
 {
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_input(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return std::nullopt;
   }
@@ -176,19 +176,33 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
     std::optional<T> result = std::nullopt;
     return result;
   }
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_input(user_offset, sizeof(T));
   // NOLINTBEGIN(performance-no-int-to-ptr)
   return read_unaligned<std::remove_cvref_t<T>>(
       reinterpret_cast<void *>(user_offset));
   // NOLINTEND(performance-no-int-to-ptr)
 }
 
+// A span the syscall writes into.
 inline std::optional<std::span<std::byte>>
-check_user_span_argument(AliasGuard &guard,
-                         std::span<std::byte> contract_memory,
-                         uint64_t user_offset, uint64_t user_len)
+check_user_output_span_argument(AliasGuard &guard,
+                                std::span<std::byte> contract_memory,
+                                uint64_t user_offset, uint64_t user_len)
 {
-  guard.check_and_register(user_offset, user_len);
+  guard.check_and_register_output(user_offset, user_len);
+  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
+    return std::nullopt;
+  }
+  return contract_memory.subspan(user_offset, user_len);
+}
+
+// A span the syscall only reads.
+inline std::optional<std::span<const std::byte>>
+check_user_input_span_argument(AliasGuard &guard,
+                               std::span<const std::byte> contract_memory,
+                               uint64_t user_offset, uint64_t user_len)
+{
+  guard.check_and_register_input(user_offset, user_len);
   if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
     return std::nullopt;
   }

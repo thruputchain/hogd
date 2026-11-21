@@ -466,6 +466,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "b9e0384b61958566e926dc50660321d12159025e767c18e043daf26b70104c39"
 
 [[package]]
+name = "input_alias_test"
+version = "0.2.0"
+dependencies = [
+ "thruput-sdk",
+ "thruput-syscall",
+ "thruput-xdr",
+]
+
+[[package]]
 name = "invoke_malformed_tokens_test"
 version = "0.2.0"
 dependencies = [

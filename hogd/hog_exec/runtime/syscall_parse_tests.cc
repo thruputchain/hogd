@@ -86,9 +86,11 @@ TEST(SyscallParseTests, ParseMisalignedData)
                                  4,  3,  2,  1,  0,  0,  0, 0, 0, 0, 0,
                                  0,  0,  0,  0,  0,  0,  0, 0, 0, 0};
   auto contract_memory = std::as_writable_bytes(std::span(memory));
-  AliasGuard guard;
 
   auto check_int128 = [&](int128_t expect, size_t offset) {
+    // One guard per parse, as for one syscall: nine inputs are more memory
+    // arguments than a syscall can have.
+    AliasGuard guard;
     auto int128_inp =
         SyscallArgParams<const int128_t &>::parse(guard, contract_memory,
                                                   offset);
@@ -333,6 +335,132 @@ TEST(SyscallParseTests, MockSpansRejectNullWithNonZeroLength)
   EXPECT_EQ(output_span::deref(parsed).data(), buffer.data());
   EXPECT_EQ(output_span::deref(parsed).size(), buffer.size());
   EXPECT_TRUE(guard.check());
+}
+
+namespace {
+
+// Every way a syscall argument can name memory. Each entry registers sixteen
+// bytes at an address and reports whether the argument itself parsed, on the
+// rv32 path and on the mock one.
+struct MemoryParser {
+  const char *name;
+  bool is_output;
+  bool (*parse)(AliasGuard &guard, std::span<std::byte> memory,
+                uint32_t offset);
+  bool (*parse_mock)(AliasGuard &guard, uint64_t address);
+};
+
+constexpr uint32_t kParsedBytes = 16;
+static_assert(sizeof(int128_t) == kParsedBytes);
+
+template<typename Arg>
+bool
+parse_at(AliasGuard &guard, std::span<std::byte> memory, uint32_t offset)
+{
+  using params = SyscallArgParams<Arg>;
+  if constexpr (params::kNumInputs == 2) {
+    return params::validate(params::parse(guard, memory, offset, kParsedBytes));
+  }
+  else {
+    return params::validate(params::parse(guard, memory, offset));
+  }
+}
+
+template<typename Arg>
+bool
+parse_mock_at(AliasGuard &guard, uint64_t address)
+{
+  using params = SyscallArgParams<Arg>;
+  if constexpr (params::kNumInputs == 2) {
+    return params::validate(params::parse_mock(guard, address, kParsedBytes));
+  }
+  else {
+    return params::validate(params::parse_mock(guard, address));
+  }
+}
+
+template<typename Arg>
+constexpr MemoryParser
+memory_parser(const char *name, bool is_output)
+{
+  return {.name = name,
+          .is_output = is_output,
+          .parse = &parse_at<Arg>,
+          .parse_mock = &parse_mock_at<Arg>};
+}
+
+constexpr std::array kMemoryParsers = {
+    memory_parser<const int128_t &>("input reference", false),
+    memory_parser<const int128_t *>("optional input", false),
+    memory_parser<std::span<const std::byte>>("input span", false),
+    memory_parser<int128_t &>("output reference", true),
+    memory_parser<std::span<std::byte>>("output span", true),
+};
+
+// Where a second sixteen-byte argument goes relative to a first at 16: on
+// it, half over it from either side, and sharing only its last or first byte.
+constexpr std::array<uint32_t, 5> kOverlappingOffsets = {16, 24, 8, 31, 1};
+
+} // namespace
+
+// Which parsers register inputs and which register outputs. Two arguments
+// that overlap pass the guard only when both are inputs, whatever kinds of
+// input they are and whichever is parsed first.
+TEST(SyscallParseTests, OnlyInputsMayShareMemory)
+{
+  for (const MemoryParser &first : kMemoryParsers) {
+    for (const MemoryParser &second : kMemoryParsers) {
+      for (const uint32_t offset : kOverlappingOffsets) {
+        SCOPED_TRACE(testing::Message() << first.name << " at 16, then "
+                                        << second.name << " at " << offset);
+        std::array<std::byte, 64> memory{};
+        AliasGuard guard;
+        EXPECT_TRUE(first.parse(guard, memory, 16));
+        EXPECT_TRUE(second.parse(guard, memory, offset));
+        EXPECT_EQ(guard.check(), !first.is_output && !second.is_output);
+      }
+
+      // Touching without sharing a byte is never overlap.
+      SCOPED_TRACE(testing::Message()
+                   << first.name << " then " << second.name << ", adjacent");
+      std::array<std::byte, 64> memory{};
+      AliasGuard guard;
+      EXPECT_TRUE(first.parse(guard, memory, 16));
+      EXPECT_TRUE(second.parse(guard, memory, 32));
+      EXPECT_TRUE(second.parse(guard, memory, 0));
+      EXPECT_TRUE(guard.check());
+    }
+  }
+}
+
+// The mock harness parses host pointers through parse_mock, and applies the
+// same rule to them.
+TEST(SyscallParseTests, OnlyMockInputsMayShareMemory)
+{
+  for (const MemoryParser &first : kMemoryParsers) {
+    for (const MemoryParser &second : kMemoryParsers) {
+      for (const uint32_t offset : kOverlappingOffsets) {
+        SCOPED_TRACE(testing::Message() << first.name << " at 16, then "
+                                        << second.name << " at " << offset);
+        std::array<std::byte, 64> memory{};
+        const auto base = reinterpret_cast<uint64_t>(memory.data());
+        AliasGuard guard;
+        EXPECT_TRUE(first.parse_mock(guard, base + 16));
+        EXPECT_TRUE(second.parse_mock(guard, base + offset));
+        EXPECT_EQ(guard.check(), !first.is_output && !second.is_output);
+      }
+
+      SCOPED_TRACE(testing::Message()
+                   << first.name << " then " << second.name << ", adjacent");
+      std::array<std::byte, 64> memory{};
+      const auto base = reinterpret_cast<uint64_t>(memory.data());
+      AliasGuard guard;
+      EXPECT_TRUE(first.parse_mock(guard, base + 16));
+      EXPECT_TRUE(second.parse_mock(guard, base + 32));
+      EXPECT_TRUE(second.parse_mock(guard, base));
+      EXPECT_TRUE(guard.check());
+    }
+  }
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)

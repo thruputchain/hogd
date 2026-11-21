@@ -30,6 +30,12 @@ directories.
 
 ## Current contracts
 
+- `input_alias_test` — which memory arguments of a syscall may overlap:
+  inputs may share bytes with each other, an output may share bytes with
+  nothing, and a zero-length span overlaps only a range it lies strictly
+  inside. Each method places its arguments with raw argument words and asserts
+  on the results itself. Driven by
+  `hogd/hog_exec/runtime/input_alias_test_rv32_test.cc`.
 - `tx_context_test` — transaction-context syscalls: GetSourceTransactionHash,
   GetBlockHeight, and the valid-statistic side of GetTransactionStatistics.
   Driven by `hogd/hog_exec/runtime/tx_context_tests.cc`.
