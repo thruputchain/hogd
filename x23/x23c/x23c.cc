@@ -164,6 +164,7 @@ usage(bool error)
   --version    print version and exit
   --rust       generate rust code
   --ts         generate TypeScript code
+  --c          generate C code (types only; RPC programs are skipped)
   --recursive_type <typename>  generate (rust) code for a recursive type
   --rust-feature <feature>      force the generated code to enable a given feature (instead of cfg(feature = "<feature>"))
   --rust-no-feature <feature>   force the generated code to disable a given feature)",
@@ -187,6 +188,7 @@ main(int argc, char **argv)
 
   bool rust_module = false;
   bool ts_module = false;
+  bool c_module = false;
   std::set<std::string> recursive_types;
   std::set<std::string> rust_features;
   std::set<std::string> rust_no_features;
@@ -209,6 +211,9 @@ main(int argc, char **argv)
     }
     else if (opt == "--ts") {
       ts_module = true;
+    }
+    else if (opt == "--c") {
+      c_module = true;
     }
     else if (opt == "--strict")
       strict = true;
@@ -268,6 +273,8 @@ main(int argc, char **argv)
         outfile.replace_extension(".rs");
       else if (ts_module)
         outfile.replace_extension(".ts");
+      else if (c_module)
+        outfile.replace_extension(".h");
       else
         outfile.replace_extension(".hh");
     }
@@ -276,6 +283,9 @@ main(int argc, char **argv)
     }
     else if (ts_module) {
       outfile += ".ts";
+    }
+    else if (c_module) {
+      outfile += ".h";
     }
     else {
       outfile += ".hh";
@@ -304,6 +314,9 @@ main(int argc, char **argv)
   }
   else if (ts_module) {
     res = gen_ts(&ctx.defs, ctx.header);
+  }
+  else if (c_module) {
+    res = gen_c(&ctx.defs, ctx.header);
   }
   else {
     res = gen_hh(&ctx.defs, ctx.header);

@@ -21,6 +21,34 @@ add_x23_test(affinity)
 add_x23_test(callback)
 add_x23_test(cleanup)
 add_x23_test(compiler_roundtrip compiler.x)
+
+# x23c --c: the generated C, checked against the C++ codec, and compiled as
+# freestanding C11 with warnings as errors.
+add_custom_command(
+  OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/c_backend.h
+  COMMAND ${X23C_EXECUTABLE} --c -o ${CMAKE_CURRENT_BINARY_DIR}/c_backend.h
+          ${CMAKE_CURRENT_SOURCE_DIR}/c_backend.x
+  DEPENDS ${X23C_EXECUTABLE} c_backend.x
+  COMMENT "Generating C header from c_backend.x"
+)
+add_x23_test(c_backend c_backend.x ${CMAKE_CURRENT_BINARY_DIR}/c_backend.h)
+include(CheckLanguage)
+check_language(C)
+if(CMAKE_C_COMPILER)
+  enable_language(C)
+  add_library(c_backend_c OBJECT ${EXCLUDE_TOKEN} c_backend_check.c
+    ${CMAKE_CURRENT_BINARY_DIR}/c_backend.h)
+  set_target_properties(c_backend_c PROPERTIES
+    C_STANDARD 11 C_STANDARD_REQUIRED ON C_EXTENSIONS OFF)
+  # A parent project's C++-only options (hogd's -stdlib=libc++) reach C
+  # sources too, where Clang reports them as unused.
+  target_compile_options(c_backend_c PRIVATE
+    -ffreestanding -Wall -Wextra -Wpedantic -Werror
+    $<$<C_COMPILER_ID:Clang>:-Wno-unused-command-line-argument>)
+  target_include_directories(c_backend_c PRIVATE
+    ${X23_SOURCE_DIR} ${X23_BINARY_DIR})
+  list(APPEND TEST_EXECUTABLES c_backend_c)
+endif()
 add_x23_test(corosleep)
 add_x23_test(corowake)
 add_x23_test(event)
