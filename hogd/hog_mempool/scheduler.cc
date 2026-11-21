@@ -10,6 +10,7 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <optional>
 #include <set>
 #include <span>
 #include <unordered_map>
@@ -689,13 +690,19 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
   co_await cg(shard.lock);
   prune_transaction_outcomes_locked(shard, current_block());
 
+  std::optional<SchedulerTransactionOutcome> recorded;
   if (auto it = shard.outcomes.find(key); it != shard.outcomes.end()) {
-    co_return it->second->outcome;
+    recorded = it->second->outcome;
   }
   cg.reset();
 
-  // We checked above that there is no existing recorded outcome for [tx_hash],
-  // so now we check if [tx_hash] is for a tx pending in the scheduler.
+  if (recorded &&
+      recorded->status ==
+          SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+    co_return *recorded;
+  }
+  // A failure recorded for a cached tx is stale: a drop can be recorded after a
+  // resubmission clears failures but before it re-admits the tx.
   if (find_tx(tx_hash)) {
     co_return SchedulerTransactionOutcome{
         .status = SchedulerTransactionStatus::SchedulerTransactionPending,
@@ -704,6 +711,9 @@ Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
         .error_code = 0,
         .height = current_block(),
     };
+  }
+  if (recorded) {
+    co_return *recorded;
   }
   co_return SchedulerTransactionOutcome{
       .status = SchedulerTransactionStatus::SchedulerTransactionNotFound,

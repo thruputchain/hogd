@@ -668,6 +668,37 @@ TEST(Scheduler, LatestFailedTransactionOutcomeWins)
   EXPECT_EQ(outcome.height, 43);
 }
 
+// A drop can be recorded after a resubmission clears failures but before it
+// re-admits the tx. The stale failure must not mask the pending tx.
+TEST(Scheduler, StaleFailureDoesNotMaskPendingTx)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      scheduler->current_block(),
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(
+          SchedulerErrorCode::SchedulerErrorInsufficientNativeTokens))();
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+
+  const TransactionHashBatch tx_hashes{tx_hash};
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(tx_hashes))();
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionDropped);
+}
+
 TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
