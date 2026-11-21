@@ -128,8 +128,10 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                                  WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               required_gas};
+  co_return SyscallInnerResult{
+      SyscallErrorCode::kSyscallErrorCodeNone,
+      WrappedGasAmount{required_gas.get() +
+                       syscall_handler.note_item_write(input_key)}};
 }
 
 } // namespace hogd

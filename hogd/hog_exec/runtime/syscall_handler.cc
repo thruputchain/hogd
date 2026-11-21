@@ -1784,6 +1784,15 @@ SystemCallHandler::note_item_load(FrameItemKey const &key)
   return loaded_keys_.insert(key) ? kDBRPCCost : 0;
 }
 
+GasAmount
+SystemCallHandler::note_item_write(StorageKeyContractData const &storage_key)
+{
+  return written_keys_.insert(
+             invocation_frame_stack_.frame_item_key(storage_key))
+             ? kCommitKeyCost
+             : 0;
+}
+
 x23::Async<
     SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
 SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,

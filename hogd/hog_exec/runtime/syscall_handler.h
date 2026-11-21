@@ -431,6 +431,12 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
   delete_object(StorageKeyContractData const &storage_key);
 
+  // Record that this transaction writes [storage_key], and return what that
+  // costs: kCommitKeyCost the first time, nothing after. Called by the
+  // syscalls that write contract data, once the write is accepted.
+  [[nodiscard]] GasAmount
+  note_item_write(StorageKeyContractData const &storage_key);
+
   // === Storage flags syscalls ===
   // A key's flags belong to the transaction's pending write to it, not to any
   // single write: writes leave them alone, and every delta pushed for the key
@@ -577,6 +583,9 @@ private:
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().
   FlatKeySet<FrameItemKey> loaded_keys_;
+  // Keys this transaction has written, rolled-back frames included. See
+  // note_item_write().
+  FlatKeySet<FrameItemKey> written_keys_;
 
   inline static bool debug_force_commit_abort_{false};
 

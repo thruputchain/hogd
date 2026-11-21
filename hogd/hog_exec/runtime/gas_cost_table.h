@@ -108,6 +108,19 @@ constexpr static uint64_t kStorageAccessCost = 150;
 // hosts pays a hop this does not.
 constexpr static uint64_t kDBRPCCost = 37300;
 
+// Admitting one written key to hog_db at root commit, charged the first time a
+// transaction writes a contract-data key (set, set-add or delete).
+//
+// A write reaches no database while the transaction runs, but every distinct
+// key it writes becomes one delta that root commit hands BlockTX::lock, which
+// on the key's first touch in the block reads the row to price its storage.
+// The frame calibration excludes root commit, so kStorageAccessCost does not
+// cover it. As with kDBRPCCost, whether an earlier transaction already touched
+// the key is scheduling-dependent, so every first write pays.
+//
+// TODO_VALUE
+constexpr static uint64_t kCommitKeyCost = 1000;
+
 // What copying a bytestring costs, per block, on top of the storage access
 // every bytestring call already pays. A block rather than a per-byte rate
 // because the measured rate is a fraction of a gas unit, and a fraction needs
@@ -267,7 +280,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 19> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -289,6 +302,7 @@ constexpr std::array<SyscallGasCostEntry, 19> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
     {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
+    {.name = u8"CommitKey", .cost = kCommitKeyCost},
 }};
 
 } // namespace hogd
