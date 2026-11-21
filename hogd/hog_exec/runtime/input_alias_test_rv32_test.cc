@@ -4,8 +4,7 @@
 // driven through the input_alias_test contract (local_test_contracts): a real
 // guest makes each call with raw argument words and asserts on what it gets
 // back. Inputs may share bytes with each other; an output may share bytes
-// with nothing. ReadOnlyTest.AliasingBeforeReadOnlyCheck drives the same
-// contract for the ordering against the read-only check.
+// with nothing.
 
 #include <memory>
 #include <utility>

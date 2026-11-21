@@ -44,15 +44,4 @@ pub trait InputAliasTest {
 
     /// Arguments laid back to back share no byte.
     fn test_touching_ranges();
-
-    /// The argument checks come before the read-only check: in a read-only
-    /// frame a write whose output overlaps an input faults, where the same
-    /// write without the overlap is refused as a write. Runs the `_inner`
-    /// method read-only at `callee_addr`, a second deployment of this
-    /// contract (the reentrance guard rejects a self-invoke).
-    fn read_only_aliasing_before_read_only_check(callee_addr: &ContractAddress);
-
-    /// The body of `read_only_aliasing_before_read_only_check`, which must
-    /// run in a read-only frame.
-    fn read_only_aliasing_before_read_only_check_inner();
 }

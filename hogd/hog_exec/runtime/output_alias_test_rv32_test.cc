@@ -129,10 +129,8 @@ TEST_F(OutputAliasTestRv32Test, CalldataNoOverlap)
   ASSERT_TRUE(handler.root_invoke()().is_root_success());
 }
 
-// The fixture's test_log_event_input_input_alias and
-// test_log_event_zero_len_data_alias assert that overlapping inputs fault.
-// Inputs may overlap now, so they are not called here: the input_alias_test
-// contract covers overlapping inputs and zero-length spans
+// Inputs may overlap each other, and so may a zero-length input span and the
+// input it lies inside: the input_alias_test contract covers those
 // (input_alias_test_rv32_test.cc).
 
 // Overlapping input with output should fault

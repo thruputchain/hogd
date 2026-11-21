@@ -7,9 +7,6 @@ pub struct InputAliasTestContract;
 
 const NONE: i32 = SyscallErrorCode::kSyscallErrorCodeNone.0;
 const FAULT: i32 = SyscallErrorCode::kSyscallErrorCodeFault.0;
-/// What a write gets in a read-only frame.
-const INVALID_INPUT: i32 =
-    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput.0;
 
 /// The argument word that leaves an optional pointer input out.
 const ABSENT: SyscallWord = SyscallWord::MAX;
@@ -306,40 +303,5 @@ impl InputAliasTest for InputAliasTestContract {
             NONE
         );
         assert!(arena.get32(A + 64) == reference_address(None, 1, 33));
-    }
-
-    fn read_only_aliasing_before_read_only_check(
-        callee_addr: &ContractAddress,
-    ) {
-        // The inner method handles the syscall fault and returns normally.
-        crate::Client::new(callee_addr)
-            .with_read_only()
-            .read_only_aliasing_before_read_only_check_inner();
-    }
-
-    fn read_only_aliasing_before_read_only_check_inner() {
-        // DeployContract(nonce, contract_hash) -> deployed_address is a
-        // write. With the address written over the nonce, the overlap faults
-        // before anything asks whether the frame may write.
-        let mut arena = Arena::new();
-        let words = [arena.at(A), arena.at(B), arena.at(A)];
-        assert_eq!(syscall(SyscallNo::kDeployContract, words), FAULT);
-        assert!(arena.untouched(0, ARENA_LEN));
-
-        // The fault above only shows an ordering if this frame really is
-        // read-only: a BytestringSet that succeeds in any other frame is
-        // refused here.
-        assert_eq!(bytestring_set(&mut arena, A, B, 16), INVALID_INPUT);
-
-        // So is the same DeployContract without the overlap.
-        let words = [arena.at(A), arena.at(B), arena.at(OUT)];
-        assert_eq!(syscall(SyscallNo::kDeployContract, words), INVALID_INPUT);
-        assert!(arena.untouched(0, ARENA_LEN));
-
-        // Two inputs that overlap are not a fault, so for them too the
-        // read-only check is what answers.
-        let words = [arena.at(A), arena.at(A), arena.at(OUT)];
-        assert_eq!(syscall(SyscallNo::kDeployContract, words), INVALID_INPUT);
-        assert!(arena.untouched(0, ARENA_LEN));
     }
 }

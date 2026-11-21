@@ -10,7 +10,6 @@
 #include <utility>
 
 #include "built_contracts/contract_loader.h"
-#include "built_contracts/input_alias_test.h"
 #include "built_contracts/itc_erc20.h"
 #include "built_contracts/read_only_test.h"
 #include "contract.hh"
@@ -634,31 +633,19 @@ TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 }
 
 // Checks that aliasing guards (returning kFault) are performed before the read
-// only guard. Driven through the input_alias_test contract, which gets its
-// fault by aliasing an output with an input: two inputs may alias each other,
-// so the read_only_test fixture's method of this name no longer faults.
+// only guard. The contract gets its fault by aliasing an output with an input:
+// two inputs may alias each other.
 TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
-  // Two deployments: the entrypoint invokes the checks read-only at the
-  // second, since the reentrance guard rejects a contract invoking itself.
-  const ContractAddress alias_addr = make_contract_address(3);
-  const ContractAddress alias_callee_addr = make_contract_address(4);
-  auto alias_contract = hogd::load_rv32_contract("input_alias_test.rv32a");
-  write_contract(alias_contract);
-  for (const ContractAddress &addr : {alias_addr, alias_callee_addr}) {
-    write_deployment(addr, alias_contract);
-    setup_grant_storage_token(addr, 1'000'000'000);
-  }
-  ContractTraitClient<input_alias_test::InputAliasTest> alias_client(
-      alias_addr);
+  deploy_callee();
 
   auto context = make_hog_exec_context();
 
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
-          .invocation = alias_client.make_invocation<
+          .invocation = client_.make_invocation<
               u8"read_only_aliasing_before_read_only_check">(kDefaultMaxTxGas,
-                                                             alias_callee_addr),
+                                                             callee_addr_),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
@@ -667,8 +654,8 @@ TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  // The aliased call is the only one that faults; the calls the read-only
-  // guard refuses are not faults.
+  // The aliased call is the only one that faults; the write the read-only
+  // guard refuses is not a fault.
   const auto *stats = handler.get_transaction_stats();
   ASSERT_NE(stats, nullptr);
   EXPECT_EQ(stats->syscall_fault_count, 1);
