@@ -3,6 +3,7 @@
 #include <utility>
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "syscall.hh"
@@ -50,10 +51,18 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
     co_return SyscallInnerResult{status.error().to_host_fn_error(),
                                  WrappedGasAmount{0}};
   }
+  // A deploy that reaches the existence check on its address pays for it as a
+  // cold storage read: the address derives from a guest-chosen nonce, so each
+  // one can be a fresh database load (#4440). Only an already-deployed address
+  // fails after that check.
+  constexpr WrappedGasAmount kAddressLookupGas{kStorageAccessCost + kDBRPCCost};
   auto &deploy_status = *status;
   if (!deploy_status) {
-    co_return SyscallInnerResult{deploy_status.error().code(),
-                                 WrappedGasAmount{0}};
+    const auto code = deploy_status.error().code();
+    co_return SyscallInnerResult{
+        code, code == SyscallErrorCode::kSyscallErrorCodeContractAlreadyDeployed
+                  ? kAddressLookupGas
+                  : WrappedGasAmount{0}};
   }
   output_deployed_address = *deploy_status;
 
@@ -65,7 +74,7 @@ syscall_DeployContract_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+                               kAddressLookupGas};
 }
 
 } // namespace hogd
