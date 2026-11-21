@@ -70,6 +70,13 @@ public:
     return db_->get(key).transform_error(to_hog_db_error);
   }
 
+  HogDbStatus<SizedDBItem> get_with_size(std::span<const std::byte> key,
+                                         uint8_t metadata_only_type)
+  {
+    return db_->get_with_size(key, metadata_only_type)
+        .transform_error(to_hog_db_error);
+  }
+
   HogDbStatus<void> get_if_type(std::span<const std::byte> key, uint8_t type,
                                 std::span<std::byte> val_out)
   {

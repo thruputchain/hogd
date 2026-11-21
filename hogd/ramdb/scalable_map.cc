@@ -110,6 +110,26 @@ ScalableMap::get(std::span<const std::byte> key)
   return DBError(DBCode::kNotFound);
 }
 
+DBStatus<SizedDBItem>
+ScalableMap::get_with_size(std::span<const std::byte> key,
+                           uint8_t metadata_only_type)
+{
+  auto [ul, bu, ignore] = acquire_bucket(calculate_hash(key));
+  for (; *bu != nullptr; bu = &(*bu)->next) {
+    if ((*bu)->get_key() != key)
+      continue;
+    auto value = (*bu)->get_value();
+    if ((*bu)->type == metadata_only_type)
+      return SizedDBItem{.type = (*bu)->type,
+                         .size = value.size(),
+                         .value = {}};
+    return SizedDBItem{.type = (*bu)->type,
+                       .size = value.size(),
+                       .value = make_byte_buffer(value)};
+  }
+  return DBError(DBCode::kNotFound);
+}
+
 DBStatus<OwningSpan<const std::byte>>
 ScalableMap::get_if_type(std::span<const std::byte> key, uint8_t type)
 {
