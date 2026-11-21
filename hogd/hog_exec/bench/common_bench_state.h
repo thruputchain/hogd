@@ -54,7 +54,7 @@ inline bool
 uses_ci_container_network()
 {
   const char *container = std::getenv("HOGD_CI_CONTAINER");
-  return container && std::string_view(container) == "1";
+  return container != nullptr && std::string_view(container) == "1";
 }
 
 inline std::string
@@ -86,7 +86,7 @@ local_hog_ip()
   if (uses_ci_container_network()) {
     // The container's kernel hostname is independent of its network alias.
     const char *host = std::getenv("HOG_HOST");
-    if (!host || !*host) {
+    if (host == nullptr || *host == '\0') {
       panic("HOG_HOST is required in container benchmark mode");
     }
     return hog_ip(host);
