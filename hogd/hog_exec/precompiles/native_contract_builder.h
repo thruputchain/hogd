@@ -206,8 +206,8 @@ public:
 
   // Charged before decoding a frame's calldata, at or above what RV32 glue pays
   // to decode the same argument (#4236). add() rejects dense-vector arguments.
-  constexpr static GasAmount kDecodeBaseGas = 600;
-  constexpr static GasAmount kDecodeByteGas = 8;
+  constexpr static GasAmount kDecodeBaseGas = 750;
+  constexpr static GasAmount kDecodeByteGas = 10;
 
   static constexpr GasAmount decode_gas(size_t calldata_len)
   {

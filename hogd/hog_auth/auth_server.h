@@ -70,6 +70,14 @@ public:
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
+  // lookup_auth_data()'s answer when it is a cache hit that needs no wait:
+  // [address]'s cached entry if this server has reached [height] and the entry
+  // is valid there, else nullptr. Callers fall back to lookup_auth_data(),
+  // which waits for [height], reads the db, or reports a stale height, so a
+  // batch of cache hits costs no coroutine per account.
+  AuthCacheEntry try_cached_auth_data(BlockHeight height,
+                                      const ContractAddress &address);
+
   // Applies a committed block's key changes to the cache, then forwards them
   // to the mempool as a run of KeyChangeChunk records. Forwards of consecutive
   // heights may overlap; the mempool applies them in height order.
@@ -101,6 +109,11 @@ public:
   }
 
 private:
+  // [address]'s cached entry if it is valid at [height], else nullptr. The
+  // caller must have seen this server reach [height].
+  AuthCacheEntry cached_entry_at(BlockHeight height,
+                                 const ContractAddress &address);
+
   // Issues one chunk of [height]'s run to the mempool.
   struct ForwardKeyChangeChunk {
     sched_auth_client_t client;

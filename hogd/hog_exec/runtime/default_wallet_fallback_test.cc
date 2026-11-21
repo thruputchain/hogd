@@ -194,9 +194,12 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
-        claim_override ? *claim_override : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(client.make_invocation<u8"execute">(
+                                  kDefaultMaxTxGas,
+                                  x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
+                                  calls),
+                              claim_override ? *claim_override
+                                             : make_pubkey_claim(preimage_));
   }
 
   CapturedRecord run_deploy_tx(
@@ -705,9 +708,12 @@ protected:
                  std::optional<AuthClaim> claim_override = std::nullopt)
   {
     ContractTraitClient<default_wallet::DefaultWallet> client(wallet_);
-    return run_wallet_root_tx(
-        client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls),
-        claim_override ? *claim_override : make_pubkey_claim(preimage_));
+    return run_wallet_root_tx(client.make_invocation<u8"execute">(
+                                  kDefaultMaxTxGas,
+                                  x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
+                                  calls),
+                              claim_override ? *claim_override
+                                             : make_pubkey_claim(preimage_));
   }
 };
 
