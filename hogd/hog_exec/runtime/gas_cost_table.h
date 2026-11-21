@@ -135,10 +135,14 @@ constexpr static uint64_t kGenericBadSyscallCost = 10;
 constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
 constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 
-// U256Sqrt, experimental. A placeholder, not from a calibration run, and far
-// above the work: the arithmetic alone takes tens of nanoseconds. It moves to
-// what the calibration workflow measures through the entry path.
-constexpr uint64_t kU256SqrtCost = 1'000;
+// U256Sqrt, experimental, priced from RV32 Gas Calibration run 44941126397 on
+// hog10 (gas unit 1.6222 ns). Through the VM its three rows took 154.6, 157.5
+// and 167.5 ns a call: 95, 97 and 103 gas once the ecall is taken off, of
+// which kSyscallBaseCost is 50. That leaves 53 for the dearest. Each row
+// repeats one value, which the branch predictor learns: with values that vary
+// the arithmetic alone took 14 to 23 ns longer on a development machine, up to
+// 15 gas at this unit. 70 covers the dearest row and that.
+constexpr uint64_t kU256SqrtCost = 70;
 
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
