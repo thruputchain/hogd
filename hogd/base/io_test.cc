@@ -134,6 +134,79 @@ TEST_P(IOTestP, BufferedWriteRead)
   EXPECT_EQ(buf_, read_buf);
 }
 
+TEST_F(IOTest, BufferedWriterMixedSizes)
+{
+  constexpr size_t kSmallBuffer = 16;
+  // each piece is filled with a distinct byte value. After each write, check
+  // how many bytes reached the file and whether bytes remain buffered, so the
+  // flush points are checked and not only the final contents.
+  struct Step {
+    size_t size;
+    off_t on_disk;     // bytes in the file after the write
+    bool buffer_empty; // whether the buffer is empty after the write
+  };
+  const std::vector<Step> steps = {
+      {3, 0, false},   // fast path, 3 buffered
+      {5, 0, false},   // fast path, 8 buffered
+      {0, 0, false},   // empty write
+      {8, 16, true},   // exactly fills the free space, so it flushes
+      {20, 36, true},  // at least the buffer size, buffer empty: direct write
+      {4, 36, false},  // fast path, 4 buffered
+      {24, 52, false}, // fills 12 free bytes, flushes, buffers the other 12
+      {4, 68, true},   // exactly fills the free space, so it flushes
+      {0, 68, true},   // empty write on an empty buffer
+      {15, 68, false}, // fast path, 15 buffered
+      {1, 84, true},   // exactly fills the free space, so it flushes
+  };
+
+  std::vector<std::byte> expected;
+  {
+    BufferedWriter w(f_, kSmallBuffer);
+    unsigned char fill = 1;
+    for (const Step &step : steps) {
+      std::vector<std::byte> piece(step.size, std::byte{fill++});
+      expected.insert(expected.end(), piece.begin(), piece.end());
+
+      if (step.size == 0) {
+        // an empty write returns 0 and writes nothing.
+        ErrnoStatus<size_t> ret = w.write(std::span<const std::byte>(piece));
+        ASSERT_TRUE(ret);
+        EXPECT_EQ(*ret, 0U);
+      }
+      else {
+        // write may return fewer bytes than requested, so use write_full.
+        ErrnoStatus<void> ret =
+            write_full(w, std::span<const std::byte>(piece));
+        EXPECT_TRUE(ret);
+      }
+
+      // the file offset is the number of bytes written to the file so far.
+      // NOLINTNEXTLINE(misc-include-cleaner)
+      ErrnoStatus<off_t> pos = f_.lseek(0, SEEK_CUR);
+      ASSERT_TRUE(pos);
+      EXPECT_EQ(*pos, step.on_disk) << "after writing " << step.size;
+      EXPECT_EQ(w.empty(), step.buffer_empty) << "after writing " << step.size;
+    }
+    EXPECT_TRUE(w.flush());
+    EXPECT_TRUE(w.empty());
+  }
+
+  // read the file back and compare
+  // NOLINTNEXTLINE(misc-include-cleaner)
+  ErrnoStatus<off_t> off = f_.lseek(0, SEEK_SET);
+  ASSERT_TRUE(off);
+  std::vector<std::byte> read_buf(expected.size());
+  ErrnoStatus<void> ret = read_full(f_, std::span(read_buf));
+  EXPECT_TRUE(ret);
+  EXPECT_EQ(expected, read_buf);
+
+  // there must be no extra bytes
+  std::byte extra;
+  ErrnoStatus<size_t> eof = f_.read(std::span(&extra, 1));
+  ASSERT_TRUE(eof);
+  EXPECT_EQ(*eof, 0U);
+}
+
 INSTANTIATE_TEST_SUITE_P(IOTests, IOTestP,
                          ::testing::Values(3, 5, 7, 11, 4096, kDataSize));
 
