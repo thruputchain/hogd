@@ -109,14 +109,14 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             std::span<const std::byte> input_bytestring)
 {
   const WrappedGasAmount required_gas{
-      GasCost::bytestring_set(input_bytestring.size())};
+      GasCost::bytestring_set(input_bytestring.size()) +
+      syscall_handler.commit_key_gas(input_key)};
   // Reject before set_bytestring copies the value, as SHA256 does before
   // hashing; exact exhaustion also faults in the outer wrapper.
   if (remaining_gas.get() <= required_gas.get()) {
     co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
                                  remaining_gas};
   }
-  const GasAmount commit_gas = syscall_handler.commit_key_gas(input_key);
   auto status =
       co_await syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
@@ -130,8 +130,7 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   }
 
   co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{required_gas.get() +
-                                                commit_gas}};
+                               required_gas};
 }
 
 } // namespace hogd

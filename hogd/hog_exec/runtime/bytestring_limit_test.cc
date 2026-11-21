@@ -225,8 +225,9 @@ TEST_F(BytestringLimitTest, WriteChecksGasBeforeCopying)
                        ValidatedAuthTokens{})
           .has_value());
 
-  const GasAmount cost =
-      kSyscallBaseCost + GasCost::bytestring_set(kMaxBytestringLen);
+  const GasAmount cost = kSyscallBaseCost +
+                         GasCost::bytestring_set(kMaxBytestringLen) +
+                         kCommitKeyCost;
   // Ascending, so only the last budget leaves an item behind.
   for (GasAmount budget : {kSyscallBaseCost + 1, cost - 1, cost, cost + 1}) {
     SCOPED_TRACE(::testing::Message() << "budget=" << budget);

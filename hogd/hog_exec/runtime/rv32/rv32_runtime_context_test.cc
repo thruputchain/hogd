@@ -959,11 +959,13 @@ TEST_F(Rv32RuntimeContextTest, StorageWriteAndEventTraceIsExact)
   // Return 6 addi + ecall; syscall costs beyond base instruction gas come
   // from the gas cost table.
   //
-  // The write pays its own cost on top of the crossing -- the storage access
-  // plus one block for these bytes -- and every later entry starts that much
-  // lower. Named rather than folded into the literals so the next repricing
-  // moves these expectations with the schedule instead of through them.
-  const GasAmount write_cost = GasCost::bytestring_set(value.size());
+  // The write pays its own cost on top of the crossing -- the storage access,
+  // one block for these bytes and the fresh key's commit admission -- and
+  // every later entry starts that much lower. Named rather than folded into the
+  // literals so the next repricing moves these expectations with the schedule
+  // instead of through them.
+  const GasAmount write_cost =
+      GasCost::bytestring_set(value.size()) + kCommitKeyCost;
   SyscallTraceVec expected;
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
@@ -1083,7 +1085,8 @@ TEST_F(Rv32RuntimeContextTest, StorageFlagsTraceIsExact)
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    expect_call(4, GasCost::bytestring_set(value.size()), std::move(body));
+    expect_call(4, GasCost::bytestring_set(value.size()) + kCommitKeyCost,
+                std::move(body));
   }
   expect_call(3, kStorageAccessCost, set_flags_body());
   expect_call(3, kStorageAccessCost, get_flags_body(kExclusive));
@@ -1863,10 +1866,11 @@ TEST_F(Rv32RuntimeContextTest, DeleteObjectChargesStorageAccess)
     EXPECT_EQ(delete_trace.body.syscall_number(), SyscallNo::kDeleteObject);
     // The delete walks the frame stack, creates the first-touch item view, and
     // installs the delete delta, so it pays the storage access on top of the
-    // crossing, as the storage-flags and NNInt syscalls do.
+    // crossing, as the storage-flags and NNInt syscalls do, plus the fresh
+    // key's commit admission.
     EXPECT_EQ(delete_trace.gas_remaining_at_start -
                   delete_trace.gas_remaining_at_end,
-              kSyscallBaseCost + kStorageAccessCost)
+              kSyscallBaseCost + kStorageAccessCost + kCommitKeyCost)
         << "DeleteObject key " << i << " did not charge kStorageAccessCost";
   }
 
