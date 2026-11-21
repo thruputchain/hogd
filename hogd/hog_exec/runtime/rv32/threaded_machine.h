@@ -468,6 +468,18 @@ is_barrier(Op op)
   }
 }
 
+// Keep x86 dispatch addressed through the advanced slot pointer. Without this
+// zero-instruction constraint, GCC and Clang can retain the old pointer or
+// emit a separate handler load instead of folding it into the indirect jump.
+[[gnu::always_inline]] inline const Slot *
+slot_for_dispatch(const Slot *next)
+{
+#if defined(__x86_64__)
+  asm("" : "+r"(next));
+#endif
+  return next;
+}
+
 // Tail-dispatch to the next instruction in the *same* run (no gas work; the run
 // was pre-charged by enter_run). On the traced path, materialize pc_ and record
 // the retired step first. `Trace` is the enclosing handler's template
@@ -479,7 +491,9 @@ is_barrier(Op op)
       (c).m->pc_ = pc_of((c), (next));                                         \
       (c).m->obs_->on_retire(capture(c), StepResult::kContinue);               \
     }                                                                          \
-    HOGD_MUSTTAIL return (next)->handler((c), (next), mem, memsize, gas);      \
+    const Slot *dispatch_next = slot_for_dispatch(next);                       \
+    HOGD_MUSTTAIL return dispatch_next->handler((c), dispatch_next, mem,       \
+                                                memsize, gas);                 \
   } while (false)
 
 // Tail-dispatch that *starts a new run* at `next` (after a barrier): record the
