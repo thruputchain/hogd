@@ -58,6 +58,11 @@ static_assert('A' == 0x41 && '0' == 0x30 && '_' == 0x5F,
 constexpr std::string kGlobalTipKey = "<DBTIP";
 constexpr std::string kGlobalCostModelKey = "<COSTMODEL";
 
+// Admission allows at most kReplayCacheHeightsMaxLen heights of at most
+// kReplayCacheNoncesMaxLen nonces each, so no valid size exceeds this.
+constexpr int64_t kReplayCacheSizeHardCap =
+    static_cast<int64_t>(kReplayCacheHeightsMaxLen) * kReplayCacheNoncesMaxLen;
+
 // validate_rcq_metadata rejects metadata the RCQ lock could never have
 // written. Unchecked, it reaches fatal CHECKs, signed cost arithmetic, or
 // block-number arithmetic that wraps (#2936, #2979, #2986).
@@ -252,6 +257,13 @@ HogDbDAO::read_address_replay_cache_meta(Address const &addr)
     x23::deserialize(&meta, x23::BufViewEnd(*raw));
   } catch (x23::XdrException &e) {
     return HogDbError(HogDbCode::kInternal);
+  }
+  // size is signed on disk; a negative or over-cap value would overflow the
+  // storage-cost arithmetic it feeds.
+  if (meta.size < 0 || meta.size > kReplayCacheSizeHardCap) {
+    error("corrupt replay-cache metadata: size {} outside [0, {}]", meta.size,
+          kReplayCacheSizeHardCap);
+    return HogDbError(HogDbCode::kCorruption);
   }
   return meta;
 }
