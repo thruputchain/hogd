@@ -3,8 +3,8 @@
 #pragma once
 
 #include <array>
-#include <cstddef>
-#include <cstdint>
+
+#include "hogd/base/types.h"
 
 // Unsigned integers wider than a machine word, as arrays of 64-bit limbs with
 // the least significant limb first. Everything here is exact: nothing wraps,
@@ -12,29 +12,21 @@
 // validators must agree on every bit, and this file uses only integer
 // operations whose results the language defines.
 //
-// The syscalls built on this are priced flat, so no routine takes a shortcut
-// that depends on the values it is given.
-namespace hogd::wide_math {
-
-// This header includes nothing of hogd's, so that it can be built and tested
-// on its own.
-using std::size_t;
-using std::uint64_t;
-using std::uint8_t;
-// The compiler's 128-bit integer, as in base/types.h: wide enough for a limb
-// product plus two more limbs.
-using uint128_t = unsigned __int128;
+// The syscalls built on this are priced flat, so the work a routine does is
+// set by the width of its operands. The values change only where a comparison
+// stops.
+namespace hogd {
 
 // N limbs, least significant first.
 //
-// Compare values with less(): std::array's own operator< starts at limb 0,
-// which is not numeric order.
+// Compare values with limbs_less(): std::array's own operator< starts at limb
+// 0, which is not numeric order.
 template<size_t N> using Limbs = std::array<uint64_t, N>;
 
 // a < b.
 template<size_t N>
 constexpr bool
-less(const Limbs<N> &a, const Limbs<N> &b)
+limbs_less(const Limbs<N> &a, const Limbs<N> &b)
 {
   for (size_t i = N; i-- > 0;) {
     if (a[i] != b[i])
@@ -46,7 +38,7 @@ less(const Limbs<N> &a, const Limbs<N> &b)
 // The full product a * b. Schoolbook: N * N limb products for any operands.
 template<size_t N>
 constexpr Limbs<2 * N>
-mul(const Limbs<N> &a, const Limbs<N> &b)
+limbs_mul(const Limbs<N> &a, const Limbs<N> &b)
 {
   Limbs<2 * N> product{};
   for (size_t i = 0; i < N; ++i) {
@@ -69,13 +61,13 @@ mul(const Limbs<N> &a, const Limbs<N> &b)
 // square still fits. 64 * N squarings for any value.
 template<size_t N>
 constexpr Limbs<N>
-isqrt(const Limbs<2 * N> &value)
+limbs_isqrt(const Limbs<2 * N> &value)
 {
   Limbs<N> root{};
   for (size_t bit = 64 * N; bit-- > 0;) {
     Limbs<N> candidate = root;
     candidate[bit / 64] |= uint64_t{1} << (bit % 64);
-    if (!less(value, mul(candidate, candidate)))
+    if (!limbs_less(value, limbs_mul(candidate, candidate)))
       root = candidate;
   }
   return root;
@@ -84,7 +76,7 @@ isqrt(const Limbs<2 * N> &value)
 // The value of Bytes bytes, least significant first.
 template<size_t Bytes> requires (Bytes % 8 == 0)
 constexpr Limbs<Bytes / 8>
-from_le_bytes(const std::array<uint8_t, Bytes> &bytes)
+limbs_from_le_bytes(const std::array<uint8_t, Bytes> &bytes)
 {
   Limbs<Bytes / 8> limbs{};
   for (size_t i = 0; i < Bytes; ++i)
@@ -93,9 +85,9 @@ from_le_bytes(const std::array<uint8_t, Bytes> &bytes)
 }
 
 constexpr uint128_t
-to_u128(const Limbs<2> &limbs)
+limbs_to_u128(const Limbs<2> &limbs)
 {
   return (uint128_t{limbs[1]} << 64) | limbs[0];
 }
 
-} // namespace hogd::wide_math
+} // namespace hogd

@@ -29,8 +29,7 @@ syscall_U256Sqrt_inner(SystemCallHandler &syscall_handler,
   if (remaining_gas.get() <= gas.get()) {
     return {HostFnError{HostFnErrorCode::OutOfGas}, remaining_gas};
   }
-  output_root = wide_math::to_u128(
-      wide_math::isqrt<2>(wide_math::from_le_bytes(input_value)));
+  output_root = limbs_to_u128(limbs_isqrt<2>(limbs_from_le_bytes(input_value)));
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kU256Sqrt>()) {
     trace_data->outputs.emplace(

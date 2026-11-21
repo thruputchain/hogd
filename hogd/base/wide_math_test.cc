@@ -1,13 +1,13 @@
 #include <gtest/gtest.h>
 
 #include <array>
-#include <cstddef>
 #include <cstdint>
 #include <format>
 #include <random>
 #include <string>
 #include <vector>
 
+#include "hogd/base/types.h"
 #include "hogd/base/wide_math.h"
 
 // wide_math.h is checked three ways that share nothing with it or with each
@@ -17,9 +17,6 @@
 
 namespace hogd {
 namespace {
-
-using wide_math::Limbs;
-using wide_math::uint128_t;
 
 constexpr uint64_t kMaxLimb = UINT64_MAX;
 constexpr uint64_t kTopBit = uint64_t{1} << 63;
@@ -218,12 +215,12 @@ boundary_values()
 // The compiler evaluates these, and it rejects undefined behaviour in a
 // constant expression: an oversized shift, an index out of range or a read of
 // an uninitialized limb on any path they take would not compile.
-static_assert(wide_math::mul<2>({kMaxLimb, kMaxLimb}, {kMaxLimb, kMaxLimb}) ==
+static_assert(limbs_mul<2>({kMaxLimb, kMaxLimb}, {kMaxLimb, kMaxLimb}) ==
               Limbs<4>{1, 0, kMaxLimb - 1, kMaxLimb});
-static_assert(wide_math::isqrt<2>({kMaxLimb, kMaxLimb, kMaxLimb, kMaxLimb}) ==
+static_assert(limbs_isqrt<2>({kMaxLimb, kMaxLimb, kMaxLimb, kMaxLimb}) ==
               Limbs<2>{kMaxLimb, kMaxLimb});
-static_assert(wide_math::isqrt<2>({0, 0, 1, 0}) == Limbs<2>{0, 1});
-static_assert(wide_math::isqrt<2>({kMaxLimb, kMaxLimb, 0, 0}) ==
+static_assert(limbs_isqrt<2>({0, 0, 1, 0}) == Limbs<2>{0, 1});
+static_assert(limbs_isqrt<2>({kMaxLimb, kMaxLimb, 0, 0}) ==
               Limbs<2>{kMaxLimb, 0});
 
 TEST(WideMathTest, ByteAndWordOrder)
@@ -231,31 +228,30 @@ TEST(WideMathTest, ByteAndWordOrder)
   std::array<uint8_t, 32> bytes{};
   for (size_t i = 0; i < bytes.size(); ++i)
     bytes[i] = static_cast<uint8_t>(i + 1);
-  EXPECT_EQ(wide_math::from_le_bytes(bytes),
+  EXPECT_EQ(limbs_from_le_bytes(bytes),
             (Limbs<4>{0x0807060504030201, 0x100f0e0d0c0b0a09,
                       0x1817161514131211, 0x201f1e1d1c1b1a19}));
 
   // One is a single 1 in byte 0, and 2^255 a single 0x80 in byte 31.
   std::array<uint8_t, 32> one{};
   one[0] = 1;
-  EXPECT_EQ(wide_math::from_le_bytes(one), from_u64<4>(1));
+  EXPECT_EQ(limbs_from_le_bytes(one), from_u64<4>(1));
   std::array<uint8_t, 32> top{};
   top[31] = 0x80;
-  EXPECT_EQ(wide_math::from_le_bytes(top), (Limbs<4>{0, 0, 0, kTopBit}));
+  EXPECT_EQ(limbs_from_le_bytes(top), (Limbs<4>{0, 0, 0, kTopBit}));
 
   const uint128_t value =
       (uint128_t{0x0123456789abcdef} << 64) | 0xfedcba9876543210;
-  EXPECT_TRUE(wide_math::to_u128({0xfedcba9876543210, 0x0123456789abcdef}) ==
-              value);
+  EXPECT_TRUE(limbs_to_u128({0xfedcba9876543210, 0x0123456789abcdef}) == value);
 }
 
 TEST(WideMathTest, LessIsNumericOrder)
 {
   // Limb 0 is the least significant, so these differ from std::array's order.
-  EXPECT_TRUE(wide_math::less<2>({2, 1}, {1, 2}));
-  EXPECT_FALSE(wide_math::less<2>({1, 2}, {2, 1}));
-  EXPECT_FALSE(wide_math::less<2>({5, 5}, {5, 5}));
-  EXPECT_TRUE(wide_math::less<2>({kMaxLimb, 0}, {0, 1}));
+  EXPECT_TRUE(limbs_less<2>({2, 1}, {1, 2}));
+  EXPECT_FALSE(limbs_less<2>({1, 2}, {2, 1}));
+  EXPECT_FALSE(limbs_less<2>({5, 5}, {5, 5}));
+  EXPECT_TRUE(limbs_less<2>({kMaxLimb, 0}, {0, 1}));
 }
 
 TEST(WideMathTest, OneLimbMulMatchesNativeArithmetic)
@@ -265,7 +261,7 @@ TEST(WideMathTest, OneLimbMulMatchesNativeArithmetic)
     const uint64_t a = random_edge_limbs<1>(rng)[0];
     const uint64_t b = random_edge_limbs<1>(rng)[0];
     const uint128_t product = uint128_t{a} * b;
-    ASSERT_TRUE(wide_math::to_u128(wide_math::mul<1>({a}, {b})) == product);
+    ASSERT_TRUE(limbs_to_u128(limbs_mul<1>({a}, {b})) == product);
   }
 }
 
@@ -278,16 +274,16 @@ TEST(WideMathTest, MulMatchesReference)
     for (const Limbs<4> &b :
          {random_bits<4>(rng, other_bits), random_edge_limbs<4>(rng),
           Limbs<4>{kMaxLimb, kMaxLimb, kMaxLimb, kMaxLimb}}) {
-      const Limbs<8> product = wide_math::mul(a, b);
+      const Limbs<8> product = limbs_mul(a, b);
       ASSERT_EQ(Ref(product), ref_mul(Ref(a), Ref(b)))
           << hex(a) << " * " << hex(b);
-      ASSERT_EQ(wide_math::mul(b, a), product);
+      ASSERT_EQ(limbs_mul(b, a), product);
     }
   }
   for (size_t bits = 0; bits <= 128; ++bits) {
     const Limbs<2> a = random_bits<2>(rng, bits);
     const Limbs<2> b = random_edge_limbs<2>(rng);
-    ASSERT_EQ(Ref(wide_math::mul(a, b)), ref_mul(Ref(a), Ref(b)))
+    ASSERT_EQ(Ref(limbs_mul(a, b)), ref_mul(Ref(a), Ref(b)))
         << hex(a) << " * " << hex(b);
   }
 }
@@ -343,14 +339,14 @@ constexpr SqrtVector kSqrtVectors[] = {
 TEST(WideMathTest, IsqrtVectors)
 {
   for (const SqrtVector &v : kSqrtVectors)
-    EXPECT_EQ(wide_math::isqrt<2>(v.value), v.root) << hex(v.value);
+    EXPECT_EQ(limbs_isqrt<2>(v.value), v.root) << hex(v.value);
 }
 
 // root is floor(sqrt(value)) exactly when root^2 <= value < (root + 1)^2.
 void
 expect_isqrt(const Limbs<4> &value)
 {
-  const Limbs<2> root = wide_math::isqrt<2>(value);
+  const Limbs<2> root = limbs_isqrt<2>(value);
   const Ref square = ref_mul(Ref(root), Ref(root));
   EXPECT_FALSE(Ref(value) < square) << hex(value) << " root " << hex(root);
   // (root + 1)^2 == root^2 + 2 * root + 1.
@@ -376,19 +372,19 @@ TEST(WideMathTest, IsqrtPerfectSquaresAndNeighbours)
   const Ref one(from_u64<2>(1));
   for (const Limbs<2> &root : roots) {
     const Ref square = ref_mul(Ref(root), Ref(root));
-    EXPECT_EQ(wide_math::isqrt<2>(square.limbs<4>()), root) << hex(root);
+    EXPECT_EQ(limbs_isqrt<2>(square.limbs<4>()), root) << hex(root);
 
     // The largest value with this root is (root + 1)^2 - 1.
     Ref last = square;
     last.add(Ref(root));
     last.add(Ref(root));
-    EXPECT_EQ(wide_math::isqrt<2>(last.limbs<4>()), root) << hex(root);
+    EXPECT_EQ(limbs_isqrt<2>(last.limbs<4>()), root) << hex(root);
 
     Ref next_root(root);
     next_root.add(one);
     if (next_root.fits(2)) {
       last.add(one);
-      EXPECT_EQ(wide_math::isqrt<2>(last.limbs<4>()), next_root.limbs<2>())
+      EXPECT_EQ(limbs_isqrt<2>(last.limbs<4>()), next_root.limbs<2>())
           << hex(root);
     }
     if (root != Limbs<2>{}) {
@@ -396,7 +392,7 @@ TEST(WideMathTest, IsqrtPerfectSquaresAndNeighbours)
       previous_root.sub(one);
       Ref below = square;
       below.sub(one);
-      EXPECT_EQ(wide_math::isqrt<2>(below.limbs<4>()), previous_root.limbs<2>())
+      EXPECT_EQ(limbs_isqrt<2>(below.limbs<4>()), previous_root.limbs<2>())
           << hex(root);
     }
   }
@@ -420,8 +416,8 @@ TEST(WideMathTest, IsqrtOneLimbMatchesNativeArithmetic)
     const size_t bits = rng() % 129;
     const Limbs<2> value =
         i % 2 == 0 ? random_bits<2>(rng, bits) : random_edge_limbs<2>(rng);
-    const uint128_t v = wide_math::to_u128(value);
-    const uint128_t root = wide_math::isqrt<1>(value)[0];
+    const uint128_t v = limbs_to_u128(value);
+    const uint128_t root = limbs_isqrt<1>(value)[0];
     ASSERT_TRUE(root * root <= v) << hex(value);
     // (root + 1)^2 overflows 128 bits only for the largest root, whose
     // square is then within 2 * root of any value.
