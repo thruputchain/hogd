@@ -395,9 +395,12 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 {
   constexpr size_t kNumAddresses = 4;
-  constexpr size_t kTxsPerAddress = 16;
+  constexpr size_t kTxsPerAddress = AuthServer::kMinTxsPerVerifyChunk;
   constexpr size_t kTotalTxs = kNumAddresses * kTxsPerAddress;
   constexpr size_t kMaxParallelism = 4;
+  // Enough transactions that the call splits into kMaxParallelism chunks.
+  static_assert(kTotalTxs / AuthServer::kMinTxsPerVerifyChunk >=
+                kMaxParallelism);
 
   ContractAddress addresses[kNumAddresses];
   std::pair<PublicKey, SecretKey> keys[kNumAddresses];

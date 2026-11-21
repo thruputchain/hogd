@@ -53,9 +53,8 @@ public:
 
   NetworkHash const &network_hash() const { return network_hash_; }
 
-  // verify_transactions() splits a call into chunks of at least this many
-  // transactions, at most max_parallelism of them, and verifies a call that
-  // fits in one chunk on the calling coroutine, without a hop to the pool.
+  // Fewest transactions in a verify_transactions() chunk; a call that fits in
+  // one chunk is verified on the calling coroutine, without a hop.
   static constexpr size_t kMinTxsPerVerifyChunk = 256;
 
   // The height supplied here should be the height returned by

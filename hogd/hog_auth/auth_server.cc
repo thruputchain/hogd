@@ -273,10 +273,8 @@ AuthServer::verify_transactions(BlockHeight height,
     }
   }
 
-  // Each chunk costs a hop to the pool and a wakeup. Splitting a small call
-  // max_parallelism ways, down to a transaction or two a chunk, spends more
-  // CPU on those than it saves in latency, and when many calls are in flight
-  // they keep the pool busy without splitting.
+  // Each chunk costs a hop to the pool and a wakeup, so only split calls big
+  // enough to pay for them; many calls in flight keep the pool busy anyway.
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(),
                   std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
