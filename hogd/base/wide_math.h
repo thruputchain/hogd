@@ -68,15 +68,30 @@ limbs_shl(const Limbs<N> &value, size_t shift)
   return out;
 }
 
-// Square roots: floor(sqrt(value)), by Zimmermann's "Karatsuba Square Root"
-// (1999). Take an n whose top two bits are not both zero and split it as
-// high * b^2 + a1 * b + a0, with b two to the quarter of n's width. With
-// top = floor(sqrt(high)) and rest = high - top * top, floor(sqrt(n)) is
-// top * b + low or one less, where low = floor((rest * b + a1) / (2 * top)),
-// taken as b - 1 if it comes out as b. rest * b + a1 can need a bit more than
-// high has, so it is halved before the division, which gives the same low.
-// high has n's top two bits, so its root comes from the same step, down to
-// eight bits.
+// Square roots: floor(sqrt(value)).
+//
+// Each step is Zimmermann's SqrtRem ("Karatsuba Square Root", INRIA RR-3805).
+// For n = a3*b^3 + a2*b^2 + a1*b + a0 with a3 >= b/4, in the paper's names:
+//
+//   (s', r') = SqrtRem(a3*b + a2)
+//   (q, u)   = DivRem(r'*b + a1, 2*s')
+//   s = s'*b + q
+//   r = u*b + a0 - q^2
+//   if r < 0: s = s - 1
+//
+// r is n - s^2, so the last line takes one off s when its square passes n.
+// The code keeps the root and not the remainder, and differs in three ways,
+// none of which changes s:
+//
+//   - r' is recomputed as a3*b + a2 - s'^2, and r < 0 is tested as s^2 > n.
+//   - r'*b + a1 can need one bit more than a3*b + a2 has. q is taken as
+//     floor(floor((r'*b + a1) / 2) / s'), which is the same number.
+//   - q can come out as b. The paper leaves that to the last line, which then
+//     gives s'*b + b - 1. Here q has to fit below s', so it is cut to b - 1.
+//
+// a3 >= b/4 says the top two bits of n are not both zero. The same then holds
+// for a3*b + a2, so the steps run from the top eight bits of the value up,
+// each doubling how much of it s is the root of.
 
 // floor(sqrt(n)) for an n whose top two bits are not both zero.
 constexpr uint64_t
@@ -91,22 +106,23 @@ isqrt_normalized_u128(uint128_t n)
     if (candidate * candidate <= top8)
       root = candidate;
   }
-  // Each pass takes root from the root of the top bits / 2 bits of n to the
-  // root of the top bits.
+  // Each pass is one step. part, the top bits of n, is the step's n, b is
+  // 2^quarter, and root goes from s' to s.
   for (uint32_t bits = 16; bits <= 128; bits *= 2) {
     const uint32_t quarter = bits / 4;
     const uint64_t mask = (uint64_t{1} << quarter) - 1;
     const uint128_t part = n >> (128 - bits);
+    // a3*b + a2, r' and a1.
     const auto high = static_cast<uint64_t>(part >> (2 * quarter));
     const uint64_t rest = high - (root * root);
     const uint64_t a1 = static_cast<uint64_t>(part >> quarter) & mask;
-    // rest is below 2^(quarter + 1), so shifted it is below 2^(2 * quarter),
-    // which is at most 2^64, with its low quarter - 1 bits clear.
+    // q. Halved, r'*b + a1 is r' * (b / 2) + floor(a1 / 2). r' is below 2b, so
+    // that is below b^2, and its two parts share no bits.
     const uint64_t low =
         std::min(((rest << (quarter - 1)) | (a1 >> 1)) / root, mask);
     root = (root << quarter) | low;
-    // One too large if its square passes part. Whether it does follows no
-    // pattern, so it is taken off with arithmetic and not with a branch.
+    // if r < 0. Whether it holds follows no pattern, so the one comes off by
+    // arithmetic and not through a branch.
     root -= static_cast<uint64_t>(uint128_t{root} * root > part);
   }
   return root;
@@ -127,21 +143,19 @@ limbs_isqrt(const Limbs<4> &value)
   zeros += std::countl_zero(value[limbs - 1]);
   const int shift = zeros & ~1;
   const Limbs<4> n = limbs_shl(value, static_cast<size_t>(shift));
-  // The last step, with b = 2^64.
+  // The last step, with b = 2^64: top is s', rest r' and low q.
   const uint128_t high = (uint128_t{n[3]} << 64) | n[2];
   const uint64_t top = isqrt_normalized_u128(high);
   const uint128_t rest = high - (uint128_t{top} * top);
-  // rest is below 2^65, so shifted it is below 2^128 with its low 63 bits
-  // clear.
+  // (r'*b + a1) / 2, which is below b^2.
   const uint128_t dividend = (rest << 63) | (n[1] >> 1);
-  // A quotient of 2^64 does not fit a limb. It means the low limb of the root
-  // is all ones.
+  // q is b when the top half of the dividend reaches s'. It is cut to b - 1.
   const uint64_t low = static_cast<uint64_t>(dividend >> 64) >= top
                            ? ~uint64_t{0}
                            : static_cast<uint64_t>(dividend / top);
   Limbs<2> root = {low, top};
-  // One too large if its square passes n. Its low limb is then above zero,
-  // since top * b squares to no more than n, so nothing is borrowed from top.
+  // if r < 0. q is then above zero, since s'*b squares to no more than n, so
+  // nothing is borrowed from s'.
   if (limbs_less(n, limbs_mul(root, root)))
     --root[0];
   const uint128_t unshifted =
