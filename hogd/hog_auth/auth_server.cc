@@ -263,9 +263,62 @@ wrapper_over_cap(const SignedTransaction &tx)
 using AuthDataByAccount =
     std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
 
-// Verifies txs[chunk], each against its account's entry in [auth_data],
-// marking the ones that fail in [results]. Transactions already marked are
-// skipped.
+// Looks up the auth data of each account [txs] invoke, once per account.
+// Marks in [results] each transaction over the size cap (kAuthFailed) or whose
+// lookup fails (with the lookup's code); every other transaction's account has
+// an entry in the returned map.
+x23::Async<AuthDataByAccount>
+collect_auth_data(AuthServer &server, BlockHeight height,
+                  std::span<const SignedTransaction> txs,
+                  AuthErrorCodeBatch &results)
+{
+  AuthDataByAccount auth_data;
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (wrapper_over_cap(tx)) {
+      results[i] = AuthErrorCode::kAuthFailed;
+      continue;
+    }
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
+    }
+    AuthCacheEntry entry = server.try_cached_auth_data(height, account);
+    if (entry == nullptr) {
+      auto looked_up = co_await server.lookup_auth_data(height, account);
+      if (!looked_up.has_value()) {
+        trace("Populate auth data error: {}",
+              std::to_underlying(looked_up.error().code()));
+        results[i] = looked_up.error().code();
+        continue;
+      }
+      entry = std::move(*looked_up);
+    }
+    CHECK_PTR(entry.get());
+    auth_data.emplace(account, std::move(entry));
+  }
+  co_return auth_data;
+}
+
+// Verifies [tx] against its account's entry in [auth_data], which must have
+// one. With [signature_verifier], its signatures are collected there to check
+// together rather than one at a time.
+bool
+verify_against(const SignedTransaction &tx, const AuthDataByAccount &auth_data,
+               const NetworkHash &network_hash, x23::Buf &signature_preimage,
+               Ed25519SignatureVerifier *signature_verifier = nullptr)
+{
+  const auto account_it = auth_data.find(tx.tx.invocation.invoked_address);
+  CHECK(account_it != auth_data.end());
+  const std::optional<AddressAuthData> &source_auth_data =
+      account_it->second->second;
+  return verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                     network_hash, signature_preimage, signature_verifier)
+      .has_value();
+}
+
+// Verifies txs[chunk], marking the ones that fail in [results]. Transactions
+// already marked are skipped.
 void
 verify_chunk(ChunkRange chunk, std::span<const SignedTransaction> txs,
              const AuthDataByAccount &auth_data,
@@ -273,23 +326,11 @@ verify_chunk(ChunkRange chunk, std::span<const SignedTransaction> txs,
 {
   x23::Buf signature_preimage;
   for (size_t i = chunk.start; i < chunk.end; i++) {
-    const SignedTransaction &tx = txs[i];
-    if (results[i] != AuthErrorCode::kAuthSuccess) {
-      continue;
-    }
-
-    const auto account_it = auth_data.find(tx.tx.invocation.invoked_address);
-    CHECK(account_it != auth_data.end());
-    const std::optional<AddressAuthData> &source_auth_data =
-        account_it->second->second;
-
-    AuthVerifyStatus<void> verify_result =
-        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                    network_hash, signature_preimage);
-    if (!verify_result.has_value()) {
+    // [results] starts as all kAuthSuccess, so a pass needs no write.
+    if (results[i] == AuthErrorCode::kAuthSuccess &&
+        !verify_against(txs[i], auth_data, network_hash, signature_preimage)) {
       results[i] = AuthErrorCode::kAuthFailed;
     }
-    // [results] starts as all kAuthSuccess, so a pass needs no write.
   }
 }
 
@@ -306,31 +347,8 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
-  AuthDataByAccount auth_data;
-  for (size_t i = 0; i < txs.size(); i++) {
-    const SignedTransaction &tx = txs[i];
-    if (wrapper_over_cap(tx)) {
-      results[i] = AuthErrorCode::kAuthFailed;
-      continue;
-    }
-    const ContractAddress &account = tx.tx.invocation.invoked_address;
-    if (auth_data.contains(account)) {
-      continue;
-    }
-    AuthCacheEntry entry = try_cached_auth_data(height, account);
-    if (entry == nullptr) {
-      auto looked_up = co_await lookup_auth_data(height, account);
-      if (!looked_up.has_value()) {
-        trace("Populate auth data error: {}",
-              std::to_underlying(looked_up.error().code()));
-        results[i] = looked_up.error().code();
-        continue;
-      }
-      entry = std::move(*looked_up);
-    }
-    CHECK_PTR(entry.get());
-    auth_data.emplace(account, std::move(entry));
-  }
+  const AuthDataByAccount auth_data =
+      co_await collect_auth_data(*this, height, txs, results);
 
   // Each chunk costs a hop to the pool and a wakeup, so only split calls big
   // enough to pay for them; many calls in flight keep the pool busy anyway.
@@ -362,30 +380,23 @@ AuthServer::verify_transactions(BlockHeight height,
 x23::Async<AuthErrorCode>
 AuthServer::verify_batch(BlockHeight height, SignedTransactionBatch txs)
 {
+  // Off the RPC reader, as verify_transactions() is.
+  co_await default_coropoll().pool_.bg();
+
+  AuthErrorCodeBatch results;
+  results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
+  const std::span<const SignedTransaction> tx_span(txs.begin(), txs.end());
+  const AuthDataByAccount auth_data =
+      co_await collect_auth_data(*this, height, tx_span, results);
+
+  // In order, stopping at the first transaction that fails.
   Ed25519SignatureVerifier signature_verifier;
   x23::Buf signature_preimage;
-  for (const auto &tx : txs) {
-    if (wrapper_over_cap(tx)) {
-      co_return AuthErrorCode::kAuthFailed;
+  for (size_t i = 0; i < txs.size(); i++) {
+    if (results[i] != AuthErrorCode::kAuthSuccess) {
+      co_return results[i];
     }
-    AuthCacheEntry source_addr =
-        try_cached_auth_data(height, tx.tx.invocation.invoked_address);
-    if (source_addr == nullptr) {
-      auto looked_up =
-          co_await lookup_auth_data(height, tx.tx.invocation.invoked_address);
-      if (!looked_up.has_value()) {
-        co_return looked_up.error().code();
-      }
-      source_addr = std::move(*looked_up);
-    }
-    CHECK_PTR(source_addr.get());
-    const std::optional<AddressAuthData> &source_auth_data =
-        source_addr->second;
-
-    auto verify_result =
-        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
-                    network_hash_, signature_preimage);
-    if (!verify_result.has_value()) {
+    if (!verify_against(txs[i], auth_data, network_hash_, signature_preimage)) {
       co_return AuthErrorCode::kAuthFailed;
     }
   }

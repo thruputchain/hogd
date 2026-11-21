@@ -278,6 +278,52 @@ TEST_F(AuthVerifyTest, VerifyTransactionsInlineAndSplit)
   }
 }
 
+// verify_batch() answers with the code of the first transaction, in order, that
+// fails, though it looks up every account before verifying any signature.
+TEST_F(AuthVerifyTest, VerifyBatchReturnsFirstFailureInOrder)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto make_stx = [&](uint64_t nonce, const SecretKey &signer) {
+    PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, nonce);
+    Transaction tx{};
+    tx.invocation.invoked_address = pubkey_auth_address(preimage).value();
+    tx.auth_claim = make_pubkey_claim(preimage);
+    SignedTransaction stx{};
+    stx.tx = tx;
+    stx.pubkey_claim_key = pk;
+    stx.signatures.push_back(make_signature(signer, tx, /*public_key_id=*/0));
+    return stx;
+  };
+  // [cached]'s account is looked up at height 0; [uncached]'s is not.
+  SignedTransaction cached = make_stx(42, sk);
+  SignedTransaction cached_bad = make_stx(42, sk2);
+  SignedTransaction uncached = make_stx(43, sk);
+  EXPECT_EQ(auth_server().verify_batch(0, {cached})(),
+            AuthErrorCode::kAuthSuccess);
+
+  // Once the server is past height 0, [uncached]'s account cannot be looked
+  // up at height 0 any more.
+  mock_db().increment_height(); // height 1
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  EXPECT_EQ(auth_server().verify_batch(0, {cached, cached_bad, uncached})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {cached, uncached, cached_bad})(),
+            AuthErrorCode::kAuthStaleBlockHeight);
+  EXPECT_EQ(auth_server().verify_batch(0, {cached, cached, cached})(),
+            AuthErrorCode::kAuthSuccess);
+}
+
 TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
