@@ -2,6 +2,11 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  # Collect the scoped storage canary as an artifact only.
+  if [[ ${GIT_BRANCH:-} == codex/scoped-storage-canary &&
+        ${HOGD_CI_CONTAINER:-} == 1 ]]; then
+    exit 0
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested
