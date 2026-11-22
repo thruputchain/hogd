@@ -368,6 +368,77 @@ TEST_F(DatabaseTest, InsertionsAndRemovals)
   check_integrity();
 }
 
+// A small batch stays in the heads until sync() drains and writes it.
+TEST_F(DatabaseTest, SyncStats)
+{
+  size_t out = db_->disk_bytes_written();
+  insert_n(64);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  SyncStats st = db_->last_sync_stats();
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_GT(st.dirty_heads, 0U);
+  EXPECT_LE(st.dirty_heads, 64U);
+  EXPECT_EQ(st.loglets_synced, st.dirty_heads);
+  EXPECT_GT(st.bytes_drained, 0U);
+  EXPECT_EQ(st.bytes_synced, st.bytes_drained);
+  EXPECT_EQ(st.bytes_early, 0U);
+  EXPECT_EQ(db_->disk_bytes_written() - out, st.bytes_synced);
+  EXPECT_GT(st.crc.count(), 0);
+  EXPECT_GT(st.write.count(), 0);
+  EXPECT_GT(st.fdatasync.count(), 0);
+  EXPECT_LE(st.inflight + st.crc + st.write + st.flush + st.fdatasync,
+            st.total);
+  EXPECT_LE(st.drain, st.total);
+}
+
+// Full loglets the writer wrote before sync() count as early; sync() writes
+// only the partial loglet left in the head.
+TEST(DiskWriterTest, SyncStatsEarlyLoglets)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  std::unique_ptr<LogletAllocator> la =
+      LogletAllocator::create(16 * kLogletRegionSize, kCompactionThreads,
+                              [] {});
+  DiskWriter dw(*la, *dir, 0, [] {}); // one head
+  dw.init(0, "{}.log", std::numeric_limits<size_t>::max());
+
+  // ~1,000 of these tombstones fill a loglet, so this queues two full
+  // loglets and leaves a partial one in the head.
+  std::vector<std::byte> key(2048);
+  for (int i = 0; i < 2'500; ++i) {
+    std::ranges::copy(byte_view(static_cast<uint64_t>(i)), key.begin());
+    ASSERT_TRUE(static_cast<bool>(dw.write_record(0).remove(key)));
+  }
+  for (int i = 0; i < 10'000 && dw.bytes_buffered() > 0; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ASSERT_EQ(dw.bytes_buffered(), 0U);
+  size_t early = dw.get_bytes_out();
+  ASSERT_GE(early, (2 * kLogletRegionSize) - (2 * (sizeof(ItemHeader) + 2048)));
+
+  DBStatus<uint64_t> lsn = dw.sync();
+  ASSERT_TRUE(lsn);
+  SyncStats st = dw.last_sync_stats();
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_EQ(st.bytes_early, early);
+  EXPECT_EQ(st.dirty_heads, 1U);
+  EXPECT_EQ(st.loglets_synced, 1U);
+  EXPECT_GT(st.bytes_drained, 0U);
+  EXPECT_EQ(st.bytes_synced, st.bytes_drained);
+  EXPECT_EQ(st.bytes_early + st.bytes_synced, dw.get_bytes_out());
+  EXPECT_EQ(st.inflight.count(), 0);
+
+  // A sync with nothing written reports no bytes.
+  lsn = dw.sync();
+  ASSERT_TRUE(lsn);
+  st = dw.last_sync_stats();
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_EQ(st.dirty_heads, 0U);
+  EXPECT_EQ(st.bytes_early + st.bytes_synced, 0U);
+  EXPECT_EQ(st.loglets_synced, 0U);
+}
+
 TEST_F(DatabaseTest, SyncAndLoad)
 {
   // make changes to items.

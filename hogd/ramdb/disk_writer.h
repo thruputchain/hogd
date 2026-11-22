@@ -10,7 +10,9 @@
 
 #pragma once
 
+#include <atomic>
 #include <cassert>
+#include <chrono>
 #include <mutex>
 #include <thread>
 #include <vector>
@@ -26,6 +28,47 @@ namespace hogd {
 
 // forward declaration
 class ScopedDiskWrite;
+
+// SyncStats describes one completed sync(). Times are wall time. The
+// writer thread may also write full loglets before sync() starts; those bytes
+// are in bytes_early and are not on sync()'s critical path. A loglet counts by
+// when the writer started it: one it started before sync() is early even if it
+// finishes after. Work the writer does after sync() starts is split into the
+// fields below; the rest of total is lock handoff and wakeup latency. The
+// writer can work on queued loglets while sync() drains the heads, so drain
+// can overlap the writer fields.
+struct SyncStats {
+  using ns = std::chrono::nanoseconds;
+  // the LSN this sync() returned.
+  uint64_t lsn{0};
+  // heads that held a partial loglet when sync() drained them.
+  size_t dirty_heads{0};
+  // bytes drained from the heads by sync().
+  size_t bytes_drained{0};
+  // bytes of loglets the writer started since the previous sync, before this
+  // one started.
+  size_t bytes_early{0};
+  // bytes the writer wrote after this sync started: bytes_drained plus full
+  // loglets that were still queued.
+  size_t bytes_synced{0};
+  // loglets in bytes_synced.
+  size_t loglets_synced{0};
+  // sync(): lock the heads and queue their partial loglets.
+  ns drain{0};
+  // writer: rest of a loglet that it was writing when sync() started.
+  ns inflight{0};
+  // writer: CRC32C of the loglets in bytes_synced.
+  ns crc{0};
+  // writer: write_full() of the loglets in bytes_synced through the
+  // BufferedWriter: copies into its buffer and the write() calls.
+  ns write{0};
+  // writer: write the commit record and flush the buffer.
+  ns flush{0};
+  // writer: fdatasync().
+  ns fdatasync{0};
+  // sync(): call to return.
+  ns total{0};
+};
 
 // DiskWriter is the main class for writing records to the on-disk log.
 //
@@ -75,7 +118,8 @@ public:
   ScopedDiskWrite write_record(size_t hash);
 
   // sync synchronizes all pending writes to disk. It returns a LSN, which can
-  // be used to restore to this specific sync point after a failure.
+  // be used to restore to this specific sync point after a failure. Only one
+  // sync() may run at a time.
   DBStatus<uint64_t> sync();
 
   // bytes_buffered returns the number of bytes currently buffered to be
@@ -86,6 +130,13 @@ public:
     // dequeue them, so the written total cannot pass the queued total here.
     std::scoped_lock guard(to_disk_lock_);
     return bytes_in_ - bytes_out_.load(std::memory_order_acquire);
+  }
+
+  // last_sync_stats returns the stats of the last completed sync().
+  SyncStats last_sync_stats()
+  {
+    std::scoped_lock guard(to_disk_lock_);
+    return last_sync_stats_;
   }
 
   // print_stats prints disk usage statistics.
@@ -146,6 +197,16 @@ private:
   std::condition_variable_any worker_cv_;
   // used to wake commit().
   std::condition_variable commit_cv_;
+  // stats of the last completed sync().
+  SyncStats last_sync_stats_;
+  // write_worker()'s part of the stats of the sync it just committed. sync()
+  // adds its own fields and publishes the result as last_sync_stats_.
+  SyncStats writer_stats_;
+
+  // steady_clock time that the current sync() started, or 0 if none is
+  // running. Set by sync(); read and cleared by write_worker() to split its
+  // work into before and after the sync started.
+  std::atomic<std::chrono::steady_clock::rep> sync_begin_{0};
 
   // True while sync() runs; ScopedDiskWrite CHECKs it is clear after
   // acquiring its head lock, in release builds too, since an overlapping

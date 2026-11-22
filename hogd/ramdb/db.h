@@ -185,6 +185,10 @@ public:
   // the last database recovery.
   size_t disk_bytes_written() const { return disk_writer_.get_bytes_out(); }
 
+  // last_sync_stats returns the timing and byte counts of the last sync() that
+  // returned success. Call it after that sync() returns.
+  SyncStats last_sync_stats() { return disk_writer_.last_sync_stats(); }
+
   // snapshot_bytes_written returns the total bytes written to snapshot files
   // since the last database recovery.
   size_t snapshot_bytes_written() const
