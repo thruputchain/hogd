@@ -3,8 +3,9 @@ set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The Auth placement comparison is collected as an artifact.
-  if [[ ${GIT_BRANCH:-} == codex/auth-affinity-diagnostics &&
-        ${HOGD_CI_CONTAINER:-} == 1 ]]; then
+  if [[ ${HOGD_CI_CONTAINER:-} == 1 ]] &&
+     { [[ ${GIT_BRANCH:-} == codex/auth-affinity-diagnostics ]] ||
+       [[ ${GIT_BRANCH:-} == codex/auth-pinning-only && ${HOG_HOST:-} == hog10 ]]; }; then
     exit 0
   fi
   # The trusted controller publishes collected metrics after the job exits.

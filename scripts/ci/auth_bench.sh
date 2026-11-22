@@ -35,8 +35,9 @@ if [[ ! -x "$BENCH" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
-if [[ ${GIT_BRANCH:-} == codex/auth-affinity-diagnostics &&
-      ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog9 ]]; then
+if [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog9 ]] &&
+   { [[ ${GIT_BRANCH:-} == codex/auth-affinity-diagnostics ]] ||
+     [[ ${GIT_BRANCH:-} == codex/auth-pinning-only && ${HOGD_CI_OFFLINE:-} == 1 ]]; }; then
     exec python3 "$ROOT_DIR/scripts/ci/auth_affinity_diagnostics.py" \
         "$BENCH" "$OUT_DIR" "${HOG_DUMP_DIR:?}"
 fi
