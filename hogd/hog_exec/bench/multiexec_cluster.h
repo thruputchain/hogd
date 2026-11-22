@@ -14,6 +14,7 @@
 #include <cstdint>
 #include <format>
 #include <functional>
+#include <iterator>
 #include <memory>
 #include <mutex>
 #include <print>
@@ -250,7 +251,8 @@ close_block(bench_db_sched_client_t &db_sched_client,
             bench_event_sched_client_t &event_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number,
             ConsensusValue &prev_value, IndexerLatencyProbe *indexer_probe,
-            size_t executor_count = 0)
+            size_t executor_count = 0,
+            std::string *diagnostic_records = nullptr)
 {
   auto start_time = x23::fastclock::now();
   info("closing block {}", block_number);
@@ -351,16 +353,19 @@ close_block(bench_db_sched_client_t &db_sched_client,
                (done_time - commit_time).count(),
                (event_commit_time - done_time).count());
   if constexpr (RecordCloseCallbacks) {
-    std::println("multiexec_close: block_id={} height={} db_commit_done_ns={} "
-                 "event_close_callback_ns={} join_done_ns={}",
-                 block_number, static_cast<int64_t>(block_height),
-                 (commit_time - start_time).count(), event_close_callback_ns,
-                 (done_time - start_time).count());
+    std::format_to(
+        std::back_inserter(*diagnostic_records),
+        "multiexec_close: block_id={} height={} db_commit_done_ns={} "
+        "event_close_callback_ns={} join_done_ns={}\n",
+        block_number, static_cast<int64_t>(block_height),
+        (commit_time - start_time).count(), event_close_callback_ns,
+        (done_time - start_time).count());
     for (size_t i = 0; i < finish_callback_ns.size(); ++i) {
       // connect_exec_clients interleaves connections across executors.
-      std::println("multiexec_close_exec: block_id={} executor_slot={} "
-                   "connection_slot={} finish_callback_ns={}",
-                   block_number, i % executor_count, i, finish_callback_ns[i]);
+      std::format_to(std::back_inserter(*diagnostic_records),
+                     "multiexec_close_exec: block_id={} executor_slot={} "
+                     "connection_slot={} finish_callback_ns={}\n",
+                     block_number, i % executor_count, i, finish_callback_ns[i]);
     }
   }
 }

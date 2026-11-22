@@ -3,7 +3,9 @@
 #include <cassert>
 #include <cstdio>
 #include <cstdlib>
+#include <filesystem>
 #include <format>
+#include <memory>
 #include <optional>
 #include <print>
 #include <span>
@@ -104,6 +106,40 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
   co_return;
 };
 
+bool
+close_diagnostics_enabled()
+{
+  const char *diagnostics = std::getenv("HOGD_MULTIEXEC_CLOSE_DIAGNOSTICS");
+  const char *branch = std::getenv("GIT_BRANCH");
+  return (diagnostics && std::string_view(diagnostics) == "1") ||
+         (branch && std::string_view(branch) ==
+                        "codex/multiexec-close-diagnostics");
+}
+
+std::FILE *
+open_close_diagnostics(size_t executors, size_t batch_size)
+{
+  const char *dump_dir = std::getenv("HOG_DUMP_DIR");
+  if (!dump_dir || !*dump_dir) {
+    return nullptr;
+  }
+  std::error_code error;
+  std::filesystem::create_directories(dump_dir, error);
+  if (error) {
+    warn("Cannot create multiexec diagnostics directory {}: {}", dump_dir,
+         error.message());
+    return nullptr;
+  }
+  const auto path = std::filesystem::path(dump_dir) /
+                    std::format("multiexec-close-{}exec-batch{}.log", executors,
+                                batch_size);
+  auto *file = std::fopen(path.c_str(), "a");
+  if (!file) {
+    warn("Cannot open multiexec diagnostics file {}", path.string());
+  }
+  return file;
+}
+
 void
 run_block(x23::XdrVec<SignedTransaction> const *txs,
           bench_db_sched_client_t &db_sched_client,
@@ -112,7 +148,8 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number, ConsensusValue &prev_value,
-          IndexerLatencyProbe *indexer_probe, size_t diagnostic_executor_count)
+          IndexerLatencyProbe *indexer_probe, size_t diagnostic_executor_count,
+          std::string *diagnostic_records)
 {
   auto start_time = x23::fastclock::now();
 
@@ -144,7 +181,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   if (diagnostic_executor_count != 0) {
     close_block<true>(db_sched_client, event_sched_client, exec_clients,
                        current_block_number, prev_value, indexer_probe,
-                       diagnostic_executor_count);
+                       diagnostic_executor_count, diagnostic_records);
   }
   else {
     close_block(db_sched_client, event_sched_client, exec_clients,
@@ -169,11 +206,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
 
   IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr());
 
-  const char *diagnostics = std::getenv("HOGD_MULTIEXEC_CLOSE_DIAGNOSTICS");
   const size_t diagnostic_executor_count =
-      diagnostics && std::string_view(diagnostics) == "1"
-          ? cluster.num_executors()
-          : 0;
+      close_diagnostics_enabled() ? cluster.num_executors() : 0;
+  std::unique_ptr<std::FILE, decltype(&std::fclose)> diagnostic_file(
+      diagnostic_executor_count
+          ? open_close_diagnostics(diagnostic_executor_count, batch_size)
+          : nullptr,
+      &std::fclose);
+  std::string recorded_close_callbacks;
+  auto *diagnostic_records = &recorded_close_callbacks;
 
   auto &event_sched_client = cluster.event_sched_client();
   auto &db_sched_client = cluster.db_sched_client();
@@ -205,7 +246,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
             current_block_number, prev_value, &indexer_probe,
-            diagnostic_executor_count);
+            diagnostic_executor_count, diagnostic_records);
   parent_block_number = current_block_number;
   current_block_number++;
 
@@ -213,7 +254,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number, prev_value,
-              &indexer_probe, diagnostic_executor_count);
+              &indexer_probe, diagnostic_executor_count, diagnostic_records);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -259,7 +300,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
-              &indexer_probe, diagnostic_executor_count);
+              &indexer_probe, diagnostic_executor_count, diagnostic_records);
     auto end_time = x23::fastclock::now();
     double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;
@@ -276,6 +317,17 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
          n_connections, n_coros_per_connection, num_accounts, batch_size, tps);
     parent_block_number = current_block_number;
     current_block_number++;
+  }
+
+  if (!recorded_close_callbacks.empty()) {
+    auto *output = diagnostic_file ? diagnostic_file.get() : stdout;
+    if (std::fputs(recorded_close_callbacks.c_str(), output) == EOF ||
+        std::fflush(output) != 0) {
+      warn("Failed to write multiexec close diagnostics");
+      if (diagnostic_file) {
+        std::fputs(recorded_close_callbacks.c_str(), stdout);
+      }
+    }
   }
 
   // Every block of this run has committed; let the indexer finish draining
