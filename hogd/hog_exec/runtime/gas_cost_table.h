@@ -159,6 +159,19 @@ constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 // 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
 constexpr uint64_t kU256SqrtCost = 60;
 
+// U256MulDivRem and U128MulDivRem, experimental, priced from RV32 Gas
+// Calibration run 45028088333 on hog10 (gas unit 1.6228 ns). Each has a row
+// for every divisor length, some on operands found by search that take the
+// division's rare paths for most digits. Through the VM the dearest took 236.7
+// and 178.9 ns a call: 145 and 110 gas once the ecall is taken off, of which
+// the syscall base was then 50. That leaves 95 and 60. Each row repeats one
+// set of operands. With operands that vary, the 256-bit arithmetic alone took
+// up to 6 ns longer on a development machine, 4 gas at this unit, and the
+// 128-bit no longer. That is 99 and 60, and 110 and 70 leave 11 and 10 over
+// to be safe.
+constexpr uint64_t kU256MulDivRemCost = 110;
+constexpr uint64_t kU128MulDivRemCost = 70;
+
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
 // plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
@@ -291,7 +304,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 22> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -314,6 +327,8 @@ constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
     {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
     {.name = u8"U256Sqrt", .cost = kU256SqrtCost},
+    {.name = u8"U256MulDivRem", .cost = kU256MulDivRemCost},
+    {.name = u8"U128MulDivRem", .cost = kU128MulDivRemCost},
 }};
 
 } // namespace hogd

@@ -32,6 +32,10 @@ syscalls:
     needs_gas: true
   U256Sqrt:
     needs_gas: true
+  U256MulDivRem:
+    needs_gas: true
+  U128MulDivRem:
+    needs_gas: true
   Invoke:
     needs_gas: true
     # Invoke recurses into Runtime::invoke, so it suspends wherever the child

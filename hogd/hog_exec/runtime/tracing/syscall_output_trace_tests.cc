@@ -1089,6 +1089,162 @@ TEST_F(SyscallOutputTraceTest, U256SqrtTraceIsExact)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
+// U256MulDivRem records its operands and its three results and bills its flat
+// price on top of the crossing. With a zero divisor it records the operands
+// and no results, leaves the outputs alone and bills the crossing only. The
+// example has a quotient that needs both halves:
+//   (2^255 + 2^64 + 5) * (2^65 + 1) = (2^256 + 2^191 + 2^65 + 11) * 2^64 + 5
+TEST_F(SyscallOutputTraceTest, U256MulDivRemTracesAreExact)
+{
+  // Least significant byte first.
+  U256Le a{};
+  a[0] = 5;
+  a[8] = 1;
+  a[31] = 0x80;
+  U256Le b{};
+  b[0] = 1;
+  b[8] = 2;
+  U256Le divisor{};
+  divisor[8] = 1;
+  U256Le quotient_lo{};
+  quotient_lo[0] = 11;
+  quotient_lo[8] = 2;
+  quotient_lo[23] = 0x80;
+  U256Le quotient_hi{};
+  quotient_hi[0] = 1;
+  U256Le remainder{};
+  remainder[0] = 5;
+  const U256Le zero{};
+
+  auto context = make_single_contract_context(
+      [=](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        U256Le lo{};
+        U256Le hi{};
+        U256Le rem{};
+        auto r = co_await ctx.syscall<SyscallNo::kU256MulDivRem>(a, b, divisor,
+                                                                 lo, hi, rem);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        r = co_await ctx.syscall<SyscallNo::kU256MulDivRem>(a, b, zero, lo, hi,
+                                                            rem);
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU256MulDivRem);
+    body.u256_mul_div_rem().inputs.a = a;
+    body.u256_mul_div_rem().inputs.b = b;
+    body.u256_mul_div_rem().inputs.divisor = divisor;
+    body.u256_mul_div_rem().outputs =
+        SyscallU256MulDivRemOutputs{.quotient_lo = quotient_lo,
+                                    .quotient_hi = quotient_hi,
+                                    .remainder = remainder};
+    expected.push_back(
+        step_entry(gas, kU256MulDivRemCost, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kU256MulDivRem);
+    body.u256_mul_div_rem().inputs.a = a;
+    body.u256_mul_div_rem().inputs.b = b;
+    body.u256_mul_div_rem().inputs.divisor = zero;
+    expected.push_back(step_entry(
+        gas, 0, std::move(body),
+        error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// U128MulDivRem, the same at half the width:
+//   (2^127 + 2^64 + 5) * (2^65 + 1) = (2^128 + 2^65 + 2^63 + 11) * 2^64 + 5
+TEST_F(SyscallOutputTraceTest, U128MulDivRemTracesAreExact)
+{
+  const uint128_t a = (uint128_t{1} << 127) + (uint128_t{1} << 64) + 5;
+  const uint128_t b = (uint128_t{1} << 65) + 1;
+  const uint128_t divisor = uint128_t{1} << 64;
+  const uint128_t quotient_lo =
+      (uint128_t{1} << 65) + (uint128_t{1} << 63) + 11;
+  const uint128_t quotient_hi = 1;
+  const uint128_t remainder = 5;
+  const uint128_t zero = 0;
+
+  auto context = make_single_contract_context(
+      [=](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint128_t lo = 0;
+        uint128_t hi = 0;
+        uint128_t rem = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kU128MulDivRem>(a, b, divisor,
+                                                                 lo, hi, rem);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        r = co_await ctx.syscall<SyscallNo::kU128MulDivRem>(a, b, zero, lo, hi,
+                                                            rem);
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU128MulDivRem);
+    body.u128_mul_div_rem().inputs.a = to_xdr(a);
+    body.u128_mul_div_rem().inputs.b = to_xdr(b);
+    body.u128_mul_div_rem().inputs.divisor = to_xdr(divisor);
+    body.u128_mul_div_rem().outputs =
+        SyscallU128MulDivRemOutputs{.quotient_lo = to_xdr(quotient_lo),
+                                    .quotient_hi = to_xdr(quotient_hi),
+                                    .remainder = to_xdr(remainder)};
+    expected.push_back(
+        step_entry(gas, kU128MulDivRemCost, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kU128MulDivRem);
+    body.u128_mul_div_rem().inputs.a = to_xdr(a);
+    body.u128_mul_div_rem().inputs.b = to_xdr(b);
+    body.u128_mul_div_rem().inputs.divisor = to_xdr(zero);
+    expected.push_back(step_entry(
+        gas, 0, std::move(body),
+        error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
 TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 {
   Contract blob(ContractType::kRv32);

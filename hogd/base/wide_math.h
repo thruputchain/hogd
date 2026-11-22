@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <optional>
 
 #include "hogd/base/bits.h"
 #include "hogd/base/types.h"
@@ -67,6 +68,178 @@ limbs_shl(const Limbs<N> &value, size_t shift)
       out[i] |= value[i - limbs - 1] >> (64 - bits);
   }
   return out;
+}
+
+// floor((high * 2^64 + low) / divisor) for high < divisor, which is what makes
+// the quotient fit a limb.
+constexpr uint64_t
+limb_div(uint64_t high, uint64_t low, uint64_t divisor)
+{
+  return static_cast<uint64_t>(((uint128_t{high} << 64) | low) / divisor);
+}
+
+template<size_t N> struct LimbsDivRem {
+  Limbs<2 * N> quotient;
+  Limbs<N> remainder;
+
+  constexpr bool operator==(const LimbsDivRem &) const = default;
+};
+
+// floor(dividend / divisor) and dividend mod divisor, or nullopt for a zero
+// divisor.
+//
+// Knuth, The Art of Computer Programming, volume 2, section 4.3.1, Algorithm
+// D, with b = 2^64. The step names are Knuth's, and so are u, v, n, j, qhat
+// and rhat.
+template<size_t N>
+constexpr std::optional<LimbsDivRem<N>>
+limbs_div_rem(const Limbs<2 * N> &dividend, const Limbs<N> &divisor)
+{
+  // The limbs the divisor has. Algorithm D wants a nonzero top limb.
+  size_t n = N;
+  while (n > 0 && divisor[n - 1] == 0)
+    --n;
+  if (n == 0)
+    return std::nullopt;
+
+  LimbsDivRem<N> result{};
+  if (n == 1) {
+    // Algorithm D needs two divisor limbs. One is short division: the
+    // remainder goes down the dividend a limb at a time. It stays below the
+    // divisor, so each digit fits a limb.
+    uint64_t rem = 0;
+    for (size_t j = 2 * N; j-- > 0;) {
+      const uint64_t digit = limb_div(rem, dividend[j], divisor[0]);
+      result.quotient[j] = digit;
+      // Below 2^64, so the low limb of the subtraction is all of it.
+      rem = dividend[j] - (digit * divisor[0]);
+    }
+    result.remainder[0] = rem;
+    return result;
+  }
+
+  // D1. Normalize: shift both left until the divisor's top bit is set, which
+  // is what bounds the error of the estimate in D3. The quotient is unchanged,
+  // and the dividend can grow by a limb.
+  const int shift = std::countl_zero(divisor[n - 1]);
+  // What a limb passes to the one above: value >> (64 - shift), written so
+  // that no shift at all, where that count is 64, passes nothing.
+  const auto passed_up = [shift](uint64_t value) {
+    return (value >> 1) >> (63 - shift);
+  };
+  Limbs<N> v{};
+  v[0] = divisor[0] << shift;
+  for (size_t i = 1; i < n; ++i)
+    v[i] = (divisor[i] << shift) | passed_up(divisor[i - 1]);
+  Limbs<(2 * N) + 1> u{};
+  u[0] = dividend[0] << shift;
+  for (size_t i = 1; i < 2 * N; ++i)
+    u[i] = (dividend[i] << shift) | passed_up(dividend[i - 1]);
+  u[2 * N] = passed_up(dividend[(2 * N) - 1]);
+
+  // D2, D7. One quotient digit a pass, most significant first. A pass divides
+  // the n + 1 limbs u[j .. j + n] by v and leaves the remainder in them. That
+  // remainder is below v, so the next pass starts with u[j + n] <= v[n - 1].
+  // So does the first: u[2 * N] holds only the bits the shift moved into it.
+  const uint64_t v_top = v[n - 1];
+  const uint64_t v_next = v[n - 2];
+  for (size_t j = (2 * N) - n + 1; j-- > 0;) {
+    // D3. Estimate the digit as floor((u[j + n] * b + u[j + n - 1]) / v_top),
+    // with rhat what that leaves. Knuth's estimate is b or b + 1 when the two
+    // top limbs are equal, and his test then takes it down to b - 1, so start
+    // there. That keeps qhat in a limb. rhat is kept in one too: the test only
+    // runs while rhat is below b.
+    uint64_t qhat = ~uint64_t{0};
+    uint64_t rhat = u[j + n - 1] + v_top;
+    bool rhat_fits = rhat >= v_top;
+    if (u[j + n] != v_top) {
+      qhat = limb_div(u[j + n], u[j + n - 1], v_top);
+      rhat = u[j + n - 1] - (qhat * v_top);
+      rhat_fits = true;
+    }
+    // The test: while qhat * v_next > rhat * b + u[j + n - 2], qhat is too
+    // large. Each pass adds v_top, at least b / 2, to rhat, so there are at
+    // most two. After it qhat is the digit or one above it.
+    while (rhat_fits) {
+      const uint128_t product = uint128_t{qhat} * v_next;
+      const auto product_high = static_cast<uint64_t>(product >> 64);
+      const auto product_low = static_cast<uint64_t>(product);
+      if (product_high < rhat ||
+          (product_high == rhat && product_low <= u[j + n - 2]))
+        break;
+      --qhat;
+      rhat += v_top;
+      rhat_fits = rhat >= v_top;
+    }
+
+    // D4. Multiply and subtract: u[j .. j + n] -= qhat * v.
+    uint64_t carry = 0;
+    uint64_t borrow = 0;
+    for (size_t i = 0; i < n; ++i) {
+      // Fits 128 bits: (2^64 - 1)^2 + (2^64 - 1) < 2^128.
+      const uint128_t product = (uint128_t{qhat} * v[i]) + carry;
+      carry = static_cast<uint64_t>(product >> 64);
+      const auto low = static_cast<uint64_t>(product);
+      // u[j + i] - low - borrow. It borrows if either subtraction wraps.
+      const uint64_t difference = u[j + i] - low;
+      const auto wrapped = static_cast<uint64_t>(u[j + i] < low);
+      u[j + i] = difference - borrow;
+      borrow = wrapped | static_cast<uint64_t>(difference < borrow);
+    }
+    // The top limb, less what the products carried out.
+    const uint64_t difference = u[j + n] - carry;
+    const auto wrapped = static_cast<uint64_t>(u[j + n] < carry);
+    u[j + n] = difference - borrow;
+    borrow = wrapped | static_cast<uint64_t>(difference < borrow);
+
+    // D5, D6. A borrow says qhat was one above the digit, which happens for
+    // about 2 digits in b: add the divisor back. The carry out of that cancels
+    // the borrow.
+    if (borrow != 0) {
+      --qhat;
+      carry = 0;
+      for (size_t i = 0; i < n; ++i) {
+        const uint128_t sum = uint128_t{u[j + i]} + v[i] + carry;
+        u[j + i] = static_cast<uint64_t>(sum);
+        carry = static_cast<uint64_t>(sum >> 64);
+      }
+      u[j + n] += carry;
+    }
+    result.quotient[j] = qhat;
+  }
+
+  // D8. Unnormalize: the remainder is u[0 .. n), shifted back. u[n] is zero.
+  for (size_t i = 0; i < n; ++i)
+    result.remainder[i] = (u[i] >> shift) | ((u[i + 1] << 1) << (63 - shift));
+  return result;
+}
+
+template<size_t N> struct LimbsMulDivRem {
+  Limbs<N> quotient_lo;
+  Limbs<N> quotient_hi;
+  Limbs<N> remainder;
+
+  constexpr bool operator==(const LimbsMulDivRem &) const = default;
+};
+
+// floor(a * b / divisor) as its low and high N limbs, and a * b mod divisor,
+// or nullopt for a zero divisor. The product is not truncated, so
+//   a * b == (quotient_hi * 2^(64 * N) + quotient_lo) * divisor + remainder
+// with remainder < divisor.
+template<size_t N>
+constexpr std::optional<LimbsMulDivRem<N>>
+limbs_mul_div_rem(const Limbs<N> &a, const Limbs<N> &b, const Limbs<N> &divisor)
+{
+  const auto divided = limbs_div_rem<N>(limbs_mul(a, b), divisor);
+  if (!divided)
+    return std::nullopt;
+  LimbsMulDivRem<N> result{};
+  for (size_t i = 0; i < N; ++i) {
+    result.quotient_lo[i] = divided->quotient[i];
+    result.quotient_hi[i] = divided->quotient[i + N];
+  }
+  result.remainder = divided->remainder;
+  return result;
 }
 
 // Square roots: floor(sqrt(value)).
@@ -175,6 +348,22 @@ limbs_from_le_bytes(const std::array<uint8_t, Bytes> &bytes)
   for (uint64_t &limb : limbs)
     limb = le_to_cpu(limb);
   return limbs;
+}
+
+// The reverse: a value as 8 * N bytes, least significant first.
+template<size_t N>
+constexpr std::array<uint8_t, 8 * N>
+limbs_to_le_bytes(Limbs<N> limbs)
+{
+  for (uint64_t &limb : limbs)
+    limb = cpu_to_le(limb);
+  return std::bit_cast<std::array<uint8_t, 8 * N>>(limbs);
+}
+
+constexpr Limbs<2>
+limbs_from_u128(uint128_t value)
+{
+  return {static_cast<uint64_t>(value), static_cast<uint64_t>(value >> 64)};
 }
 
 constexpr uint128_t
