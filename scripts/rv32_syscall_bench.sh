@@ -157,4 +157,13 @@ else
   ARGS+=(--benchmark_format=json)
 fi
 
-exec "${RUNNER[@]}" "${BINARY}" "${ARGS[@]}" ${BENCH_ARGS[0]+"${BENCH_ARGS[@]}"}
+# DIAGNOSTIC BRANCH ONLY (geoph/practical-fermi-e4odcp), not for merge: run
+# the normal measurement exactly as before, then scripts/rv32_gbh_diag.sh with
+# the same binary and pinning. Its output goes to stderr only, so the JSON this
+# run files is the normal one.
+set +e
+"${RUNNER[@]}" "${BINARY}" "${ARGS[@]}" ${BENCH_ARGS[0]+"${BENCH_ARGS[@]}"}
+status=$?
+"${REPO_ROOT}/scripts/rv32_gbh_diag.sh" "${BUILD_DIR}" "${BINARY}" >&2 ||
+  echo "gbh-diag: exited $?" >&2
+exit "${status}"
