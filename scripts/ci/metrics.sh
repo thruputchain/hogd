@@ -26,7 +26,7 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
-if [[ ${GIT_BRANCH:-} == codex/payments-phase-diagnostics &&
+if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog10 ]]; then
   output="${HOG_DUMP_DIR:?}/payment-phases"
@@ -40,7 +40,7 @@ if [[ ${GIT_BRANCH:-} == codex/payments-phase-diagnostics &&
         -v accounts="$accounts" '
       /^payment_phase / {
         if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
-            $4 !~ /^[123]$/ || $5 != ($4 == 3 ? 1 : 391) ||
+            $4 !~ /^[1-6]$/ || $5 != ($4 == 3 ? 1 : 391) ||
             $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ || $7 < $6 ||
             seen[$3, $4]++) {
           invalid = 1
@@ -56,7 +56,7 @@ if [[ ${GIT_BRANCH:-} == codex/payments-phase-diagnostics &&
           matched++
         }
       }
-      END { if (invalid || rows != 30 || matched != 10 || elapsed_rows != 180) exit 1 }
+      END { if (invalid || rows != 60 || matched != 10 || elapsed_rows != 180) exit 1 }
     ' "$raw" || { echo "Incomplete payment phase results for $accounts accounts" >&2; exit 1; }
     rm -- "$raw"
   done

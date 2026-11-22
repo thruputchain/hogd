@@ -2,6 +2,7 @@
 
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
 #include <exception>
 #include <memory>
 #include <optional>
@@ -252,7 +253,14 @@ public:
   // Requirement: root_invoke() must be called first.
   // Calls abort_transaction if either the commit fails or
   // the root_invoke earlier had an error.
-  x23::Async<ExecResult> try_commit_transaction();
+  struct CommitPhaseTiming {
+    int64_t frame_lock_ns{};
+    int64_t db_commit_ns{};
+  };
+
+  // Optional caller timings are populated only on the successful body commit.
+  x23::Async<ExecResult>
+  try_commit_transaction(CommitPhaseTiming *timing = nullptr);
 
   // The two-phase-commit conflict diagnostic from the most recent failed commit
   // push (the root lock-acquire / 2pc push, or the commit_body_discarded RCQ /

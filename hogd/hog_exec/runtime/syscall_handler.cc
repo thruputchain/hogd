@@ -3,6 +3,7 @@
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 
 #include <cassert>
+#include <chrono>
 #include <cstddef>
 #include <cstring>
 #include <exception>
@@ -586,7 +587,7 @@ SystemCallHandler::abort_after_commit_failure(ExecResult failure_result,
 }
 
 x23::Async<ExecResult>
-SystemCallHandler::try_commit_transaction()
+SystemCallHandler::try_commit_transaction(CommitPhaseTiming *timing)
 {
   assert(!transaction_committed_or_aborted_);
 
@@ -670,7 +671,10 @@ SystemCallHandler::try_commit_transaction()
   // nonce makes try_acquire_frame_locks fail, rejecting the tx as a replay.
   add_replay_nonce_delta();
 
+  using Clock = std::chrono::steady_clock;
+  const auto lock_start = timing ? Clock::now() : Clock::time_point{};
   auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
+  const auto lock_end = timing ? Clock::now() : Clock::time_point{};
   if (!r.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(
                                                       r.error().code()),
@@ -692,10 +696,17 @@ SystemCallHandler::try_commit_transaction()
   // -- so both failure paths record the outcome and the shared abort runs just
   // below, still before anything else can observe the open transaction.
   std::optional<ExecResult> commit_failure;
+  int64_t db_commit_ns = 0;
   try {
     auto new_contract_hashes = last_frame.get_committed_contracts();
+    const auto db_start = timing ? Clock::now() : Clock::time_point{};
     auto res = co_await db_proxy_.commit_transaction(
         newly_created_contracts_.borrow_contracts(new_contract_hashes));
+    if (timing) {
+      db_commit_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         Clock::now() - db_start)
+                         .count();
+    }
     if (!res.has_value()) {
       commit_failure = to_exec_result(res.error().code());
     }
@@ -714,6 +725,14 @@ SystemCallHandler::try_commit_transaction()
   HogexecMetrics::mark_tx_success(root_invoke_result_,
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
+  if (timing) {
+    *timing = CommitPhaseTiming{
+        .frame_lock_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                             lock_end - lock_start)
+                             .count(),
+        .db_commit_ns = db_commit_ns,
+    };
+  }
   co_return ExecResult::ExecResultOK;
 }
 

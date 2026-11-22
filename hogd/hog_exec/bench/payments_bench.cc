@@ -191,7 +191,7 @@ payment_phase_diagnostic()
     const char *value = std::getenv(name);
     return value && value == expected;
   };
-  return matches("GIT_BRANCH", "codex/payments-phase-diagnostics") &&
+  return matches("GIT_BRANCH", "codex/payments-commit-diagnostics") &&
          matches("HOGD_CI_CONTAINER", "1") && matches("HOGD_CI_OFFLINE", "1") &&
          matches("HOG_HOST", "hog10");
 }
@@ -199,6 +199,9 @@ payment_phase_diagnostic()
 struct PaymentPhaseSample {
   int64_t invoke_ns{};
   int64_t commit_ns{};
+  int64_t frame_lock_ns{};
+  int64_t db_commit_ns{};
+  int64_t commit_remaining_ns{};
 };
 
 using PaymentClock = std::chrono::steady_clock;
@@ -307,12 +310,23 @@ run_bench_rep_coro(BenchmarkState &bs,
           if (sample) {
             phase_start = PaymentClock::now();
           }
-          const auto commit_result = co_await handler.try_commit_transaction();
+          SystemCallHandler::CommitPhaseTiming commit_timing;
+          const auto commit_result = co_await handler.try_commit_transaction(
+              sample ? &commit_timing : nullptr);
           if (sample) {
             sample->commit_ns = elapsed_ns(phase_start);
           }
           if (commit_result != ExecResult::ExecResultOK) {
             panic("failed to perform commit operation");
+          }
+          if (sample) {
+            sample->frame_lock_ns = commit_timing.frame_lock_ns;
+            sample->db_commit_ns = commit_timing.db_commit_ns;
+            // Subtract within each transaction before computing percentiles.
+            sample->commit_remaining_ns = sample->commit_ns -
+                                          sample->frame_lock_ns -
+                                          sample->db_commit_ns;
+            CHECK(sample->commit_remaining_ns >= 0);
           }
           handler.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = tx})(
@@ -361,7 +375,8 @@ run_bench_rep_coro(BenchmarkState &bs,
                     finish_time - *event_tail_start)
                     .count()
               : 0;
-      // Phase IDs: 1 = invocation, 2 = commit, 3 = post-worker event wait.
+      // Existing IDs 1–3 are invocation, commit and post-worker event wait.
+      // IDs 4–6 partition same-transaction commit caller time.
       std::println("payment_phase {} {} 1 {} {} {}", bs.num_accounts_, nrep,
                    phase_samples.size(),
                    phase_percentile(phase_samples,
@@ -376,6 +391,15 @@ run_bench_rep_coro(BenchmarkState &bs,
                                     &PaymentPhaseSample::commit_ns, 90));
       std::println("payment_phase {} {} 3 1 {} {}", bs.num_accounts_, nrep,
                    event_tail_ns, event_tail_ns);
+      int phase = 4;
+      for (const auto member : {&PaymentPhaseSample::frame_lock_ns,
+                                &PaymentPhaseSample::db_commit_ns,
+                                &PaymentPhaseSample::commit_remaining_ns}) {
+        std::println("payment_phase {} {} {} {} {} {}", bs.num_accounts_, nrep,
+                     phase++, phase_samples.size(),
+                     phase_percentile(phase_samples, member, 50),
+                     phase_percentile(phase_samples, member, 90));
+      }
     }
     bs.clear_uniquifiers(num_txs_per_rep);
   }
