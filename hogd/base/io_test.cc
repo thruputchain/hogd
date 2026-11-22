@@ -6,6 +6,7 @@
 #include <cerrno>
 #include <cstddef>
 #include <cstdio>
+#include <filesystem>
 #include <span>
 #include <string>
 #include <string_view>
@@ -236,6 +237,22 @@ TEST(DirectoryTest, BasicUsage)
   // unlink the file.
   EXPECT_TRUE(dir->unlink(list->at(0)));
   EXPECT_EQ(dir->access("test").error(), ENOENT);
+}
+
+TEST(DirectoryTest, TemporaryDirectoryUnderExplicitParent)
+{
+  auto parent = Directory::open_temporary();
+  ASSERT_TRUE(parent);
+  auto first = Directory::open_temporary(parent->get_path());
+  ASSERT_TRUE(first);
+  auto second = Directory::open_temporary(parent->get_path() + "/");
+  ASSERT_TRUE(second);
+  EXPECT_TRUE(first->get_path().starts_with(parent->get_path() + "/"));
+  EXPECT_TRUE(second->get_path().starts_with(parent->get_path() + "/"));
+  EXPECT_NE(first->get_path(), second->get_path());
+  EXPECT_TRUE(std::filesystem::remove(first->get_path()));
+  EXPECT_TRUE(std::filesystem::remove(second->get_path()));
+  EXPECT_TRUE(std::filesystem::remove(parent->get_path()));
 }
 
 } // namespace hogd

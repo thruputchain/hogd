@@ -100,7 +100,7 @@ local_hog_ip()
 class CommonBenchState {
 public:
   CommonBenchState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                   uint16_t coord_port)
+                   uint16_t coord_port, bool db_in_control_work_dir = false)
     : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
       coord_port_(coord_port)
   {
@@ -121,7 +121,7 @@ public:
 
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
-    start_db_server();
+    start_db_server(db_in_control_work_dir);
     event_card_ = start_event_server(event_server_port);
     connect_coord();
     connect_exec();
@@ -253,13 +253,23 @@ private:
         .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
   }
 
-  void start_db_server()
+  void start_db_server(bool db_in_control_work_dir)
   {
     CHECK_PTR(hog_db_handle_.get());
 
+    std::vector<std::string> args{"-e", std::to_string(exec_port_), "-c",
+                                  std::to_string(coord_port_)};
+    if (db_in_control_work_dir) {
+      auto work_dir = hog_db_handle_->ci_client.query_work_dir();
+      if (work_dir.error_code() != CIServerErrorCode::kCIServerErrorCodeOK ||
+          work_dir.work_dir().empty()) {
+        panic("Failed to query the database server's control work directory");
+      }
+      args.emplace_back("-w");
+      args.emplace_back(work_dir.work_dir().begin(), work_dir.work_dir().end());
+    }
     hog_db_handle_->ci_client.start_server("hogd/hog_exec/bench/bench_server",
-                                           {"-e", std::to_string(exec_port_),
-                                            "-c", std::to_string(coord_port_)});
+                                           args);
   }
 
   EventCard start_event_server(uint16_t event_server_port)

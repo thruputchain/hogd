@@ -163,8 +163,9 @@ public:
   // open checks if the directory exists and creates it if requested.
   static ErrnoStatus<Directory> open(std::string_view path, bool create = true,
                                      mode_t mode = S_IRWXU);
-  // open_temporary creates a temporary directory. Useful for testing.
-  static ErrnoStatus<Directory> open_temporary();
+  // open_temporary creates a temporary directory under parent, or TMPDIR
+  // (defaulting to /tmp) when parent is empty.
+  static ErrnoStatus<Directory> open_temporary(std::string_view parent = {});
 
   Directory() = default;
   explicit Directory(std::string_view path) : dir_path_(path) {}

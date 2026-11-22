@@ -363,9 +363,13 @@ Directory::open(std::string_view path, bool create, mode_t mode)
 }
 
 ErrnoStatus<Directory>
-Directory::open_temporary()
+Directory::open_temporary(std::string_view parent)
 {
-  std::string tmp = get_tmp_dir() + "ramdb_XXXXXX";
+  std::string tmp = parent.empty() ? get_tmp_dir() : std::string(parent);
+  if (!tmp.ends_with('/')) {
+    tmp += '/';
+  }
+  tmp += "ramdb_XXXXXX";
   std::vector<char> buf(tmp.begin(), tmp.end());
   buf.push_back('\0');
   char *path = mkdtemp(tmp.data()); // NOLINT(misc-include-cleaner)

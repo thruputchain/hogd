@@ -6,6 +6,7 @@
 #include <optional>
 #include <print>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 
@@ -25,10 +26,19 @@ namespace {
 
 // runs a db server to support an executor benchmark.
 void
-run_bench_server(uint32_t exec_port, uint32_t coord_port)
+run_bench_server(uint32_t exec_port, uint32_t coord_port,
+                 std::string_view tmp_root)
 {
   // Create a temporary directory for the database
-  Directory dir = Directory::open_temporary().value();
+  auto directory = Directory::open_temporary(tmp_root);
+  if (!directory) {
+    panic("Failed to create benchmark database directory: {}",
+          directory.error());
+  }
+  Directory dir = std::move(*directory);
+  if (!tmp_root.empty()) {
+    info("benchmark database directory: {}", dir.get_path());
+  }
   // Generously sized: the execution benches now commit a unique uniquifier per
   // tx (so a single block can hold millions of replay-cache entries for one
   // address at high thread counts), and ramdb fails closed if a snapshot copy
@@ -68,7 +78,8 @@ namespace {
 void
 usage(char *argv[])
 {
-  std::println("Usage: {} -e <exec_port> -c <sched_port>", argv[0]);
+  std::println("Usage: {} -e <exec_port> -c <sched_port> [-w <db_tmp_root>]",
+               argv[0]);
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -82,16 +93,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::optional<int> exec_port;
   std::optional<int> coord_port;
+  std::string_view tmp_root;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:w:")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);
       break;
     case 'c':
       coord_port = std::stoi(optarg);
+      break;
+    case 'w':
+      tmp_root = optarg;
       break;
     default:
       usage(argv);
@@ -102,7 +117,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  hogd::run_bench_server(*exec_port, *coord_port);
+  hogd::run_bench_server(*exec_port, *coord_port, tmp_root);
   std::println("bench_server finished with orderly shutdown");
   return 0;
 }

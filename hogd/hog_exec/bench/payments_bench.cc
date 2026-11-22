@@ -33,10 +33,20 @@ namespace hogd {
 
 namespace {
 
+// The remote control process chooses its own path. The environment only
+// opts this benchmark into using that path during Combined Metrics.
+bool
+use_combined_work_dir()
+{
+  const char *work_dir = std::getenv("HOGD_COMBINED_WORK_DIR");
+  return work_dir != nullptr && *work_dir != '\0';
+}
+
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port, uint32_t num_accounts)
-    : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
+    : CommonBenchState(std::move(server_addrs), exec_port, coord_port,
+                       use_combined_work_dir()),
       num_accounts_(num_accounts)
   {}
 
