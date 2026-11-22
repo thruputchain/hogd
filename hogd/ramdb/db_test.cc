@@ -11,6 +11,7 @@
 #include <cstring>
 #include <format>
 #include <future>
+#include <latch>
 #include <limits>
 #include <memory>
 #include <mutex>
@@ -406,6 +407,81 @@ TEST_F(DatabaseTest, SyncAndLoad)
   if (!ret) {
     EXPECT_EQ(ret.error(), DBCode::kCorruption);
   }
+}
+
+// get() and get_each() may run during sync(); only put() and remove() may not
+// (see sync() in db.h). Readers loop over the database while sync() writes
+// the pending log, and must see every item with its value. Each round counts
+// the get() calls that ran entirely inside sync(), so the test fails if the
+// reads never overlapped it.
+TEST_F(DatabaseTest, ReadsDuringSync)
+{
+  constexpr int kRounds = 4;
+  constexpr size_t kReaders = 4;
+  size_t overlapped = 0;
+
+  for (int round = 0; round < kRounds; ++round) {
+    // every put() returns before sync() starts.
+    insert_n(kInsertions / kRounds);
+
+    std::atomic<bool> syncing{false};
+    std::atomic<bool> done{false};
+    std::atomic<size_t> overlap{0};
+    std::atomic<size_t> errors{0};
+    std::latch ready(kReaders + 1);
+    {
+      std::vector<std::jthread> readers;
+      for (size_t r = 0; r < kReaders; ++r) {
+        readers.emplace_back([&, r] {
+          ready.arrive_and_wait();
+          while (!done.load()) {
+            if (r == 0) {
+              // one reader walks the whole map.
+              size_t n = 0;
+              db_->get_each([&](std::span<const std::byte> key, int,
+                                std::span<const std::byte> val) {
+                auto it = oracle_.find(to_string(key));
+                if (it == oracle_.end() || it->second != to_string(val))
+                  errors.fetch_add(1);
+                ++n;
+              });
+              if (n != oracle_.size())
+                errors.fetch_add(1);
+              continue;
+            }
+            for (const auto &[key, value] : oracle_) {
+              bool before = syncing.load();
+              DBStatus<DBItem> got = db_->get(std::as_bytes(std::span(key)));
+              if (before && syncing.load())
+                overlap.fetch_add(1);
+              if (!got || to_string(got->value) != value)
+                errors.fetch_add(1);
+              if (done.load())
+                break;
+            }
+          }
+        });
+      }
+      ready.arrive_and_wait();
+      syncing.store(true);
+      DBStatus<uint64_t> lsn = db_->sync();
+      syncing.store(false);
+      done.store(true);
+      readers.clear(); // joins
+      ASSERT_TRUE(lsn);
+      EXPECT_EQ(*lsn, static_cast<uint64_t>(round + 1));
+    }
+    EXPECT_EQ(errors.load(), 0u) << "round " << round;
+    overlapped += overlap.load();
+  }
+
+  EXPECT_GT(overlapped, 0u) << "no get() ran inside sync()";
+  info("ReadsDuringSync: {} get() calls inside sync()", overlapped);
+
+  // the synced state recovers.
+  db_.reset();
+  ASSERT_TRUE(static_cast<bool>(open_db()));
+  check_integrity();
 }
 
 // A crash mid-append can leave zeros past the last commit. Recovery treats a
