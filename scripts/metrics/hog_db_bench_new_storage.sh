@@ -1,31 +1,16 @@
+#!/usr/bin/env bash
+set -e
+
 if [ $# -ne 1 ]; then
   echo "Usage: $0 <build_dir>"
   exit 1
 fi
 
 BUILD_DIR=$1
+source "$(dirname "${BASH_SOURCE[0]}")/hog_db_bench_common.sh"
 
-#Within the CI runners: the CI working directory is on the local SSD
-CWD=$(pwd)
-
-rm -rf $CWD/tmp
-mkdir -p $CWD/tmp
-
-$BUILD_DIR/hogd/hog_db/hog_db_bench $CWD/tmp new_storage 1000000 24 | sed 's/^/Default: /'
-
-rm -rf $CWD/tmp
-mkdir -p $CWD/tmp
-
-$BUILD_DIR/hogd/hog_db/hog_db_bench $CWD/tmp new_storage -n 1000000 -w 24 -N | sed 's/^/ReplayCache: /'
-
-rm -rf $CWD/tmp
-mkdir -p $CWD/tmp
-
-$BUILD_DIR/hogd/hog_db/hog_db_bench $CWD/tmp new_storage -n 1000000 -w 24 -d | sed 's/^/DBHash: /'
-
-rm -rf $CWD/tmp
-mkdir -p $CWD/tmp
-
-$BUILD_DIR/hogd/hog_db/hog_db_bench $CWD/tmp new_storage -n 1000000 -w 24 -N -d | sed 's/^/ReplayCache+DBHash: /'
-
-rm -rf $CWD/tmp
+# The published Default series used the binary's default of 128 workers.
+run_hog_db_bench Default new_storage -n 1000000 -w 128
+run_hog_db_bench ReplayCache new_storage -n 1000000 -w 24 -N
+run_hog_db_bench DBHash new_storage -n 1000000 -w 24 -d
+run_hog_db_bench ReplayCache+DBHash new_storage -n 1000000 -w 24 -N -d
