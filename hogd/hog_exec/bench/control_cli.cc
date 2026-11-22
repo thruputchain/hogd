@@ -22,6 +22,7 @@ usage(char *argv[])
   std::println("  shutdown        - Shutdown the control server");
   std::println("  start [--cores <cpu-list>] <program> <args...>");
   std::println("  stop            - Stop a process");
+  std::println("  stop_checked    - Require confirmation that all processes stopped");
   std::println("  wait            - Wait for the most recent process to exit");
   std::println("  expect_running  - Check if a process is running");
   std::println("  clear_work_dir  - Clear the work directory");
@@ -145,11 +146,18 @@ handle_start_command(std::string const &host, std::string const &port,
 }
 
 int
-handle_stop_command(std::string const &host, std::string const &port)
+handle_stop_command(std::string const &host, std::string const &port,
+                    bool require_confirmation)
 {
   try {
     auto client = hogd::connect_to_control_server(host, port, false);
-    client.stop_server();
+    const auto status = client.stop_server();
+    if (require_confirmation &&
+        status != hogd::CIServerErrorCode::kCIServerErrorCodeOK) {
+      hogd::error("Control server on {}:{} rejected stop: {}", host, port,
+                  status);
+      return 1;
+    }
     return 0;
   } catch (std::exception const &e) {
     hogd::info("Error: {}", e.what());
@@ -231,7 +239,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
                                                          argv + argc));
   }
   if (command == "stop") {
-    return handle_stop_command(host, port);
+    return handle_stop_command(host, port, false);
+  }
+  if (command == "stop_checked") {
+    if (argc != 4) {
+      usage(argv);
+    }
+    return handle_stop_command(host, port, true);
   }
   if (command == "wait") {
     return handle_wait_command(host, port);
