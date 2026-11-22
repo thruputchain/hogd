@@ -530,24 +530,38 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
   MempoolTestInfra server;
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   auto scheduler = server.mempool_coord_rpc().scheduler();
+  const SignedTransaction c = with_signature(body, 3);
   scheduler->add_txs({a}, {tx_hash})();
-  std::weak_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
-      shared_hashes;
   {
+    // A body with a single encoding allocates no hash set.
     auto [entry, lock] = scheduler->txs_.find(sha256(a));
     ASSERT_NE(entry, nullptr);
-    shared_hashes = (*entry)->signed_tx_hashes;
+    EXPECT_EQ((*entry)->signed_tx_hashes, nullptr);
   }
   auto held_a = scheduler->find_signed_tx(sha256(a));
 
   scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
                      Scheduler::CachedVariant::kSubmitVetted)();
+  std::weak_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
+      shared_hashes;
   {
     auto [entry, lock] = scheduler->txs_.find(sha256(b));
     ASSERT_NE(entry, nullptr);
-    EXPECT_EQ((*entry)->signed_tx_hashes, shared_hashes.lock());
+    ASSERT_NE((*entry)->signed_tx_hashes, nullptr);
+    EXPECT_EQ(*(*entry)->signed_tx_hashes,
+              (std::unordered_set<SignedTransactionHash, SipHash24Hasher>{
+                  sha256(a), sha256(b)}));
+    shared_hashes = (*entry)->signed_tx_hashes;
   }
   auto held_b = scheduler->find_signed_tx(sha256(b));
+  scheduler->add_txs({c}, {tx_hash}, {sha256(c)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  {
+    auto [entry, lock] = scheduler->txs_.find(sha256(c));
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ((*entry)->signed_tx_hashes, shared_hashes.lock());
+    EXPECT_EQ(shared_hashes.lock()->size(), 3UL);
+  }
   TransactionHashBatch removed{tx_hash};
   scheduler->remove_from_scheduler(x23::span<const TransactionHash>(removed))();
   EXPECT_FALSE(shared_hashes.expired());
