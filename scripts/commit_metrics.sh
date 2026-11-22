@@ -3,7 +3,7 @@ set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   if [[ ${METRICS_COMMIT_REPO:-} == hogd-e2e-payment ]] && [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
-      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-profile &&
       ${HOG_XID:-} == hogd-e2e-payment-* &&
       ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
     # The trusted controller publishes only when this marker exists.

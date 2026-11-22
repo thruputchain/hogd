@@ -7,7 +7,7 @@ ci_enable_error_trace
 control_cli="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 jumbo_trial=0
 if [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
-      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-profile &&
       ${HOG_XID:-} == hogd-e2e-payment-* &&
       ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
   jumbo_trial=1
@@ -105,13 +105,67 @@ if (( jumbo_trial )) ||
     } >"$results/jumbo-path.txt"
   fi
 
+  run_event_arm() {
+    local arm=$1
+    shift
+    if (( ! jumbo_trial )); then
+      run_event_client "$@" >"$results/$arm.log" 2>"$results/$arm.stderr"
+      return
+    fi
+
+    local network_probe='set -e
+      printf "snapshot_epoch_s=%s\n" "$EPOCHREALTIME"
+      for file in /proc/net/snmp /proc/net/netstat /proc/net/dev; do
+        printf "=== %s ===\n" "$file"
+        cat "$file"
+      done
+      echo "=== Host-wide CPU and receive processing counters (coarse) ==="
+      for file in /proc/stat /proc/softirqs /proc/net/softnet_stat; do
+        printf "=== %s ===\n" "$file"
+        if [[ ! -r $file ]] || ! cat "$file" 2>/dev/null; then
+          echo "unavailable"
+        fi
+      done'
+    local server_probe="$network_probe"'
+      printf "clock_ticks_per_second=%s\n" "$(getconf CLK_TCK)"
+      found=0
+      for file in /proc/[0-9]*/stat; do
+        if IFS= read -r row 2>/dev/null < "$file" && [[ $row == *" (hog-event) "* ]]; then
+          read -r -a fields <<< "$row"
+          printf "pid=%s user_ticks=%s system_ticks=%s started_ticks=%s\n" \
+            "${fields[0]}" "${fields[13]}" "${fields[14]}" "${fields[21]}"
+          (( found += 1 ))
+        fi
+      done
+      [[ $found == 1 ]]'
+
+    capture_event_profile() {
+      local phase=$1
+      bash -c "$network_probe" >"$results/$arm-$phase-hog10.txt" 2>&1 || return "$?"
+      timeout 10 python3 /opt/hog-ci/peer.py hog11 "$server_probe" </dev/null \
+        >"$results/$arm-$phase-hog11.txt" 2>&1
+    }
+
+    capture_event_profile before
+    local status=0 profile_status=0 TIMEFORMAT
+    {
+      printf 'start_epoch_s=%s\n' "$EPOCHREALTIME"
+      TIMEFORMAT=$'wall_s=%3R\nclient_user_s=%3U\nclient_system_s=%3S'
+      time run_event_client "$@" >"$results/$arm.log" 2>"$results/$arm.stderr" || status=$?
+      printf 'end_epoch_s=%s\nexit_status=%s\n' "$EPOCHREALTIME" "$status"
+    } >"$results/$arm-timing.txt" 2>&1
+    capture_event_profile after || profile_status=$?
+    (( status == 0 )) || return "$status"
+    return "$profile_status"
+  }
+
   start_event_server
-  run_event_client >"$results/nodelay.log" 2>"$results/nodelay.stderr"
+  run_event_arm nodelay
   cp "$results/nodelay.log" event_server_bench_log
 
   "$control_cli" hog11 11111 stop
   start_event_server
-  run_event_client -N >"$results/nagle.log" 2>"$results/nagle.stderr"
+  run_event_arm nagle -N
 else
   ci_wait_control_server "$control_cli" hog11 11111
   start_event_server

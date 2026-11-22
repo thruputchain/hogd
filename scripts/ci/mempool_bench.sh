@@ -2,7 +2,7 @@
 set -Eeuo pipefail
 
 if [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
-      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-profile &&
       ${HOG_XID:-} == hogd-e2e-payment-* &&
       ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
   exec "$(dirname "$0")/event_bench.sh"
