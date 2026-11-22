@@ -8,6 +8,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -111,7 +112,7 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
           size_t n_coros_per_connection, size_t n_connections,
           size_t batch_size, uint64_t parent_block_number,
           uint64_t current_block_number, ConsensusValue &prev_value,
-          IndexerLatencyProbe *indexer_probe)
+          IndexerLatencyProbe *indexer_probe, size_t diagnostic_executor_count)
 {
   auto start_time = x23::fastclock::now();
 
@@ -140,8 +141,15 @@ run_block(x23::XdrVec<SignedTransaction> const *txs,
   auto end_coros_time = x23::fastclock::now();
   double elapsed_time = (end_coros_time - start_coros_time).count();
   auto inner_tps = txs->size() * 1'000'000'000.0 / elapsed_time;
-  close_block(db_sched_client, event_sched_client, exec_clients,
-              current_block_number, prev_value, indexer_probe);
+  if (diagnostic_executor_count != 0) {
+    close_block<true>(db_sched_client, event_sched_client, exec_clients,
+                       current_block_number, prev_value, indexer_probe,
+                       diagnostic_executor_count);
+  }
+  else {
+    close_block(db_sched_client, event_sched_client, exec_clients,
+                current_block_number, prev_value, indexer_probe);
+  }
 
   auto end_block_time = x23::fastclock::now();
   std::println("open_time {} middle_time {} close_time {} inner tps: {}",
@@ -160,6 +168,12 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   MultiexecCluster cluster(server_addrs);
 
   IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr());
+
+  const char *diagnostics = std::getenv("HOGD_MULTIEXEC_CLOSE_DIAGNOSTICS");
+  const size_t diagnostic_executor_count =
+      diagnostics && std::string_view(diagnostics) == "1"
+          ? cluster.num_executors()
+          : 0;
 
   auto &event_sched_client = cluster.event_sched_client();
   auto &db_sched_client = cluster.db_sched_client();
@@ -190,7 +204,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   run_block(&loadgen_result.success().genesis_ceremony_txs, db_sched_client,
             event_sched_client, coro_exec_clients, n_coros_per_connection,
             n_connections, batch_size, parent_block_number,
-            current_block_number, prev_value, &indexer_probe);
+            current_block_number, prev_value, &indexer_probe,
+            diagnostic_executor_count);
   parent_block_number = current_block_number;
   current_block_number++;
 
@@ -198,7 +213,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&init_block, db_sched_client, event_sched_client,
               coro_exec_clients, n_coros_per_connection, n_connections,
               batch_size, parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, diagnostic_executor_count);
     parent_block_number = current_block_number;
     current_block_number++;
   }
@@ -244,7 +259,7 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
     run_block(&work_txs, db_sched_client, event_sched_client, coro_exec_clients,
               n_coros_per_connection, n_connections, batch_size,
               parent_block_number, current_block_number, prev_value,
-              &indexer_probe);
+              &indexer_probe, diagnostic_executor_count);
     auto end_time = x23::fastclock::now();
     double elapsed_time = (end_time - ts).count();
     auto tps = num_txs_per_block * 1'000'000'000.0 / elapsed_time;

@@ -244,29 +244,62 @@ open_block(bench_db_sched_client_t &db_sched_client,
 // [prev_value] chains the committed ConsensusValues: it enters holding the
 // previous block's committed value (the mock scheduler's genesis tip before
 // the first block) and leaves holding this block's.
+template<bool RecordCloseCallbacks = false>
 inline void
 close_block(bench_db_sched_client_t &db_sched_client,
             bench_event_sched_client_t &event_sched_client,
             std::vector<exec_client_t> &exec_clients, uint64_t block_number,
-            ConsensusValue &prev_value, IndexerLatencyProbe *indexer_probe)
+            ConsensusValue &prev_value, IndexerLatencyProbe *indexer_probe,
+            size_t executor_count = 0)
 {
   auto start_time = x23::fastclock::now();
   info("closing block {}", block_number);
   auto [async, cb] = x23::make_async<void>();
   std::atomic<size_t> n_remaining_execs = exec_clients.size();
 
+  std::vector<int64_t> finish_callback_ns;
+  size_t connection = 0;
+  if constexpr (RecordCloseCallbacks) {
+    CHECK(executor_count > 0);
+    finish_callback_ns.resize(exec_clients.size());
+  }
   for (auto &exec_client : exec_clients) {
     [](auto &exec_client, uint64_t block_number,
-       std::atomic<size_t> &n_remaining_execs, auto &cb) -> x23::Detached {
+       std::atomic<size_t> &n_remaining_execs, auto &cb,
+       x23::fastclock::time_point start_time, int64_t *finish_ns) -> x23::Detached {
       co_await exec_client.executorsched_finish_block(block_number);
-      if (n_remaining_execs.fetch_sub(1, std::memory_order_relaxed) == 1) {
+      if constexpr (RecordCloseCallbacks)
+        *finish_ns = (x23::fastclock::now() - start_time).count();
+      // The recording build carries each slot's store to the last callback.
+      constexpr auto completion_order = RecordCloseCallbacks
+                                            ? std::memory_order_acq_rel
+                                            : std::memory_order_relaxed;
+      if (n_remaining_execs.fetch_sub(1, completion_order) == 1) {
         cb();
       }
-    }(exec_client, block_number, n_remaining_execs, cb);
+    }(exec_client, block_number, n_remaining_execs, cb, start_time,
+       RecordCloseCallbacks ? &finish_callback_ns[connection] : nullptr);
+    if constexpr (RecordCloseCallbacks)
+      ++connection;
   }
   const BlockHeight block_height = prev_value.proposal_header.block_height + 1;
-  auto event_async =
-      event_sched_client.eventsched_close_block(block_number, block_height);
+  int64_t event_close_callback_ns{};
+  auto event_async = [&] {
+    auto call = event_sched_client.eventsched_close_block(block_number,
+                                                            block_height);
+    if constexpr (RecordCloseCallbacks) {
+      return [](x23::Async<EventBlockResult> call,
+                x23::fastclock::time_point start_time,
+                int64_t &callback_ns) -> x23::Async<EventBlockResult> {
+        auto result = co_await call;
+        callback_ns = (x23::fastclock::now() - start_time).count();
+        co_return result;
+      }(std::move(call), start_time, event_close_callback_ns);
+    }
+    else {
+      return call;
+    }
+  }();
   auto issue_time = x23::fastclock::now();
   auto res = db_sched_client.dbsched_close_snapshot(block_number);
   if (res.result() != DbSchedResult::DbSchedResultOK) {
@@ -317,6 +350,19 @@ close_block(bench_db_sched_client_t &db_sched_client,
                (commit_time - close_time).count(),
                (done_time - commit_time).count(),
                (event_commit_time - done_time).count());
+  if constexpr (RecordCloseCallbacks) {
+    std::println("multiexec_close: block_id={} height={} db_commit_done_ns={} "
+                 "event_close_callback_ns={} join_done_ns={}",
+                 block_number, static_cast<int64_t>(block_height),
+                 (commit_time - start_time).count(), event_close_callback_ns,
+                 (done_time - start_time).count());
+    for (size_t i = 0; i < finish_callback_ns.size(); ++i) {
+      // connect_exec_clients interleaves connections across executors.
+      std::println("multiexec_close_exec: block_id={} executor_slot={} "
+                   "connection_slot={} finish_callback_ns={}",
+                   block_number, i % executor_count, i, finish_callback_ns[i]);
+    }
+  }
 }
 
 // Starts the topology on the control servers at [server_addrs]: hog-event on
