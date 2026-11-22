@@ -36,6 +36,14 @@ Use full, repeated runs for schedule proposals. Filtered runs are useful for
 investigating a case, but do not provide the common normalizer or full coverage.
 Syscall price proposals require a gas calibration from the same host and engine.
 
+The calibration, syscall benchmark and openssl cross-check run pinned to CPU 0
+(`taskset -c 0`) with ASLR off (`setarch "$(uname -m)" -R`), and exit with an
+error when either is unavailable rather than measuring without it. Docker's
+default seccomp profile refuses `setarch -R`; a container needs a profile that
+allows `personality(ADDR_NO_RANDOMIZE)`. `RV32_ALLOW_UNPINNED=1` measures anyway,
+with a warning, for exploration only: those numbers are not comparable with a
+reference or with history.
+
 ## Instruction measurements
 
 For each opcode and operand context, the primary estimate is the time of a
@@ -129,7 +137,8 @@ each occupancy, rather than assuming one linear fit across cache sizes.
 
 Hashing is priced per compression block; stream creation is measured separately.
 Bytestring reports examine adjacent length bands because copy cost per byte
-changes with size. Signature verification includes valid signatures for each
+changes with size. `GetCalldata` and `GetReturnedBuffer` are swept on length
+the same way and guarded per length (`copy/` keys). Signature verification includes valid signatures for each
 message length. See [MEASUREMENTS.md](MEASUREMENTS.md) for retained evidence
 behind the committed prices and the limits of those runs.
 
@@ -162,8 +171,9 @@ this is a coarse regression alarm. Ratios are host-class specific. Regenerate
 references only after reviewing the change and deciding whether prices need to
 follow it.
 
-The RV32 Gas Calibration workflow and `scripts/schedules/rv32_gas_calibration.toml`
-run the checks on a selected bench host. `mode=reference` skips comparison with
+The RV32 Gas Calibration workflow and schedule (`hogd-rv32-gas-calibration.yml`
+and `hogd/rv32-gas-calibration.toml` in `thruputchain/benchmarks`) run the
+checks on a selected bench host. `mode=reference` skips comparison with
 committed references; workload execution, coverage, and bound checks still
 apply. JSON is stored in `metrics_history` under `metrics/rv32-gas-calibration/`;
 repeated runs of one commit replace that commit's sample.
@@ -178,10 +188,10 @@ The local database fixture does not measure a remote database hop. Frame rows
 measure child merge/discard; they exclude the root transaction's database commit.
 
 `--schedule` prints a proposal. [`program.h`](../program.h) and [`gas_cost_table.h`](../../gas_cost_table.h) own
-the committed constants; [`artifact.h`](../artifact.h) defines accepted gas digests. A price change
-requires reviewing that compatibility policy, the pinned digest, the artifact
-fingerprint derived from it, and producer/fixture regeneration. An accepted old
-digest does not select historical execution prices.
+the committed constants. A price change is a consensus change and has to
+update the schedule `rv32_vm_test` pins, but it touches no artifact, lowerer
+or fixture: artifacts do not declare prices, and every artifact executes at
+the build's current ones.
 
 The main implementation files are `kernel.*` (instruction shapes),
 `lowering_audit.*` (lowered-body checks), `measure.*` (timing and fits),

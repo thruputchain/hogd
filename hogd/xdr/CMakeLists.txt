@@ -12,7 +12,6 @@ add_xdr(
   ../../protocol/coord_sched.x
   ../../protocol/db_sched.x
   ../../protocol/db_conflict.x
-  ../../protocol/discovery.x
   ../../protocol/event.x
   ../../protocol/event_rpc.x
   ../../protocol/executor_to_db_rpc.x
@@ -21,7 +20,6 @@ add_xdr(
   ../../protocol/ffi_enums.x
   ../../protocol/genesis.x
   ../../protocol/header.x
-  ../../protocol/hog_exec_constants.x
   ../../protocol/indexer.x
   ../../protocol/integration.x
   ../../protocol/invoke_flag.x
@@ -59,6 +57,7 @@ add_xdr(
   ci_server.x
   event_cursor_internal.x
   event_outbox_internal.x
+  hog_exec_constants.x
   syscall.x
 )
 target_include_directories(protocol INTERFACE "${CMAKE_SOURCE_DIR}")

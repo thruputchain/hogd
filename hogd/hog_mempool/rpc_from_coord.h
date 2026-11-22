@@ -19,7 +19,6 @@
 #include "auth_rpc.hh"
 #include "coord_sched.hh"
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "event_rpc.hh"
 #include "exec_result.hh"
 #include "genesis.hh"
@@ -369,8 +368,10 @@ public:
     co_return ret;
   }
 
+  // Takes [tx_hashes] by value: the loop below suspends on each lookup, and
+  // the RPC dispatcher frees its decoded arguments at the first suspension.
   x23::Async<SchedulerTransactionOutcomeBatch>
-  schedcoord_lookup_transaction_outcomes(const TransactionHashBatch &tx_hashes)
+  schedcoord_lookup_transaction_outcomes(TransactionHashBatch tx_hashes)
   {
     SchedulerTransactionOutcomeBatch ret;
     ret.reserve(tx_hashes.size());
@@ -414,8 +415,8 @@ public:
     int64_t current_height;
     // [last_committed_block_] is not an [x23::CoroFutex], so we cannot [wait()]
     // on it until a certain height is reached. However, [auth_data_height_] is
-    // a safe substitute for this, plus [schedulercoord_validate()], which calls
-    // this function, needs to wait for the latest auth data to arrive anyway.
+    // a safe substitute for this, plus [verify_submission()], which calls this
+    // function, needs to wait for the latest auth data to arrive anyway.
     while ((current_height = auth_data_height_.load()) <
            static_cast<int64_t>(expected_height)) {
       co_await auth_data_height_.wait(current_height);
@@ -487,6 +488,8 @@ public:
   }
 
 private:
+  friend class MempoolValidationExecutorResultTest;
+
   struct SubmissionAuth {
     std::unordered_map<ContractAddress, x23::Vec<size_t>, SipHash24Hasher>
         accounts;
@@ -553,7 +556,8 @@ private:
   struct PreparedAndValidatedChunk {
     x23::XdrVec<SignedTransaction> txs;
     SignedTransactionHashBatch missing_signed_tx_hashes;
-    bool validated = true;
+    SchedulerValidationOutcome outcome =
+        SchedulerValidationOutcome::SchedulerValidationOK;
   };
 
   x23::Async<void> finish_init()
@@ -723,7 +727,9 @@ private:
   schedulercoord_commit_block_impl(BlockID block_id,
                                    ConsensusValue expected_value);
 
-  x23::Async<bool>
+  // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
+  // [SchedulerValidationExecutorFailed] when an executor could not run a tx.
+  x23::Async<SchedulerValidationOutcome>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
                        size_t executor_idx);
@@ -741,11 +747,12 @@ private:
       x23::span<const NondeterministicProposalData> tx_nominations,
       x23::span<TransactionHash> tx_hashes);
 
-  x23::Async<bool> multiplex_large_validation_chunk_across_executors(
+  x23::Async<SchedulerValidationOutcome>
+  multiplex_large_validation_chunk_across_executors(
       BlockID block_id, x23::span<const ProposedTransaction> txs);
 
-  x23::Async<bool> validate_batch(BlockID block_id,
-                                  const x23::Vec<ProposedTransaction> &txs);
+  x23::Async<SchedulerValidationOutcome>
+  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs);
 
   x23::Async<ExecResult>
   open_validation_block(BlockID block_id, BlockExecutionContext block_execution,

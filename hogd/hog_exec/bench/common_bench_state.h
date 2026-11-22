@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <regex>
@@ -49,6 +50,13 @@
 
 namespace hogd {
 
+inline bool
+uses_ci_container_network()
+{
+  const char *container = std::getenv("HOGD_CI_CONTAINER");
+  return container != nullptr && std::string_view(container) == "1";
+}
+
 inline std::string
 hog_ip(std::string_view host)
 {
@@ -58,8 +66,35 @@ hog_ip(std::string_view host)
     panic("invalid hog host: {}", host);
   }
 
+  if (uses_ci_container_network()) {
+    // Container host aliases resolve to addresses in this run's network.
+    const x23::HostPort host_port{std::string(host), uint16_t{0}};
+    const auto addr = host_port.to_addr(/*dns=*/true);
+    if (!addr) {
+      exit_cannot_resolve(host_port, addr.error());
+    }
+    return std::string(x23::show_ipaddr(*addr));
+  }
+
   unsigned int hog_num = std::stoul(match[1].str());
   return std::format("10.100.0.{}", 100 + hog_num);
+}
+
+inline std::string
+local_hog_ip()
+{
+  if (uses_ci_container_network()) {
+    // The container's kernel hostname is independent of its network alias.
+    const char *host = std::getenv("HOG_HOST");
+    if (host == nullptr || *host == '\0') {
+      panic("HOG_HOST is required in container benchmark mode");
+    }
+    return hog_ip(host);
+  }
+
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return hog_ip(hostname);
 }
 
 class CommonBenchState {
@@ -103,7 +138,9 @@ public:
                                  TransactionID txid,
                                  RuntimeContext &runtime_context)
   {
-    auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
+    auto proxy = PerTransactionDatabaseProxy(
+        *db_proxy_, block_number_, txid,
+        snapshot_cache_->get_network_config_params());
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx.tx, *snapshot_cache_, std::move(proxy),
@@ -227,16 +264,15 @@ private:
 
   EventCard start_event_server(uint16_t event_server_port)
   {
-    std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_ip = hog_ip(hostname);
+    const std::string mempool_ip = local_hog_ip();
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
     event_server_handle_->ci_client.start_server(
         "hogd/hog_event/hog-event",
-        {"--mempool-addr", std::format("{}:{}", mempool_ip, event_server_port),
-         "--bind-ip", hog_ip(event_server_addr()), "--work-dir",
+        {"--mempool-addr",
+         format_advertised_address(mempool_ip, event_server_port), "--bind-ip",
+         hog_ip(event_server_addr()), "--work-dir",
          std::string(work_dir.work_dir().begin(), work_dir.work_dir().end())});
 
     return mock_sched_event_server_->impl()->await_event_card();

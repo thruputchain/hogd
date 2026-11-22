@@ -2,14 +2,17 @@
 
 #include <algorithm>
 #include <array>
+#include <chrono>
 #include <cstddef>
 #include <cstdint>
+#include <cstdlib>
 #include <format>
 #include <fstream>
 #include <optional>
 #include <stdexcept>
 #include <string>
 #include <system_error>
+#include <thread>
 // NOLINTNEXTLINE(modernize-deprecated-headers)
 #include <signal.h>
 #include <unistd.h>
@@ -118,6 +121,24 @@ connect_event_indexer(std::uint16_t port)
                                                kIndexerRpcMaxMessageSize)();
   CHECK(client.has_value());
   return std::move(*client);
+}
+
+// A commit replies before its record is durable, so retry until the record
+// appears.
+EventIndexerPullResult
+pull_committed_block(event_indexer_client &indexer,
+                     const EventIndexerPullRequest &request)
+{
+  const auto deadline =
+      std::chrono::steady_clock::now() + std::chrono::seconds(30);
+  while (true) {
+    EventIndexerPullResult pulled = indexer.event_indexer_pull_next(request)();
+    if (pulled.outcome() != EventIndexerPullOutcome::EventIndexerPullCaughtUp ||
+        std::chrono::steady_clock::now() >= deadline) {
+      return pulled;
+    }
+    std::this_thread::sleep_for(std::chrono::milliseconds(2));
+  }
 }
 
 ConsensusValue
@@ -319,7 +340,7 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
       block_one = commit_empty_block(sched, 11, 1, sha256(genesis));
       event_indexer_client indexer = connect_event_indexer(event_indexer_port);
       EventIndexerPullResult pulled =
-          indexer.event_indexer_pull_next(uninitialized_pull())();
+          pull_committed_block(indexer, uninitialized_pull());
       ASSERT_EQ(pulled.outcome(),
                 EventIndexerPullOutcome::EventIndexerPullBlock);
       EXPECT_EQ(pulled.pulled_block().block.payload.consensus_value, block_one);
@@ -362,12 +383,51 @@ TEST(HogEventProcess, RecoversCommittedOutboxAfterUncleanKill)
   EventIndexerPullRequest next_request{.protocol = version::kHogdProtocol(),
                                        .progress =
                                            progress_at(first.pulled_block())};
-  EventIndexerPullResult second =
-      indexer.event_indexer_pull_next(next_request)();
+  EventIndexerPullResult second = pull_committed_block(indexer, next_request);
   ASSERT_EQ(second.outcome(), EventIndexerPullOutcome::EventIndexerPullBlock);
   EXPECT_EQ(second.pulled_block().block.payload.consensus_value, block_two);
 
   EXPECT_EQ(restarted.kill_unclean(), SIGKILL);
+}
+
+// A port that is already taken must make hog-event say so and exit, not abort
+// on the bind error (issue #1202).
+TEST(HogEventProcess, ExitsCleanlyWhenAPortIsTaken)
+{
+  TmpDir work_dir;
+  auto taken_addr = x23::HostPort{"127.0.0.1", 0}.to_addr();
+  ASSERT_TRUE(taken_addr.has_value());
+  x23::UniqueFd taken = x23::stcplisten(*taken_addr);
+  const std::uint16_t taken_port = x23::get_port(x23::local_addr(taken));
+  const std::string expected =
+      std::format("cannot listen on 127.0.0.1:{}: Address already in use. Is "
+                  "another instance already running",
+                  taken_port);
+
+  // The metrics port is served by an HttpServer, the executor port by an
+  // RpcServer.
+  for (const bool metrics : {true, false}) {
+    SCOPED_TRACE(metrics ? "metrics port" : "executor port");
+    DaemonProcess event = DaemonProcess::start(
+        HOG_EVENT_BINARY,
+        event_args("127.0.0.1:1", work_dir.directory(),
+                   /*exec_port=*/metrics ? 0 : taken_port, 0, 0,
+                   /*metrics_port=*/metrics ? taken_port : 0));
+    event.wait_until_log_contains(expected);
+    EXPECT_EQ(event.wait_for_exit_code(), EXIT_FAILURE);
+  }
+}
+
+// Likewise a mempool address that does not resolve (issue #1202).
+TEST(HogEventProcess, ExitsCleanlyWhenTheMempoolAddressDoesNotResolve)
+{
+  TmpDir work_dir;
+  DaemonProcess event =
+      DaemonProcess::start(HOG_EVENT_BINARY,
+                           event_args("unresolvable.invalid:1",
+                                      work_dir.directory(), 0, 0, 0, 0));
+  event.wait_until_log_contains("cannot resolve unresolvable.invalid:1");
+  EXPECT_EQ(event.wait_for_exit_code(), EXIT_FAILURE);
 }
 
 } // namespace

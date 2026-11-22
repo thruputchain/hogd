@@ -1,10 +1,12 @@
 #pragma once
 
 #include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
 #include <tuple>
+#include <type_traits>
 #include <unordered_map>
 #include <utility>
 
@@ -15,17 +17,18 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/library_exception.hh"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
 #include "x23/x23.h"
@@ -112,6 +115,64 @@ assign_auth_handles(std::tuple<Args...> &args, uint32_t handle_count)
   return true;
 }
 
+// The fewest bytes an X can encode in. Vectors, optionals, unions and byte
+// strings can all be a single byte (an empty length, an absent pointer, a
+// void arm); fixed byte arrays are their length; structs sum their fields.
+template<typename X>
+consteval size_t
+min_encoded_bytes()
+{
+  using enum x23::XdrCategory;
+  if constexpr (x23::is_boxed_leaf<X>) {
+    return min_encoded_bytes<typename X::value_type>();
+  }
+  else if constexpr (x23::is_xdr_cat<X, kOpaqueArray>) {
+    return std::tuple_size_v<X>;
+  }
+  else if constexpr (x23::is_xdr_cat<X, kArray>) {
+    return std::tuple_size_v<X> * min_encoded_bytes<typename X::value_type>();
+  }
+  else if constexpr (x23::is_xdr_cat<X, kStruct>) {
+    return []<size_t... I>(std::index_sequence<I...>) {
+      return (size_t{0} + ... +
+              min_encoded_bytes<std::tuple_element_t<I, X>>());
+    }(std::make_index_sequence<std::tuple_size_v<X>>{});
+  }
+  else {
+    return 1;
+  }
+}
+
+// decode_gas bills per byte, but decoding costs per element, so long vectors of
+// one- or two-byte elements are refused. Byte strings decode as one copy.
+inline constexpr size_t kMaxDenseVectorLen = 64;
+inline constexpr size_t kMinVectorElementBytes = 16;
+
+template<typename X, typename... Stop>
+consteval bool
+has_dense_vector()
+{
+  if constexpr (x23::is_one_of<X, Stop...> || !x23::is_xdr_type<X>) {
+    return false;
+  }
+  else {
+    bool dense = false;
+    if constexpr (x23::is_xdr_cat<X, x23::XdrCategory::kVec>) {
+      dense =
+          X::max_size() > kMaxDenseVectorLen &&
+          min_encoded_bytes<typename X::value_type>() < kMinVectorElementBytes;
+    }
+    return dense || []<typename... T>(x23::detail::type_sequence<T...>) {
+      return (has_dense_vector<T, Stop..., X>() || ...);
+    }(x23::detail::get_field_types<X>());
+  }
+}
+
+template<typename Args> constexpr bool kArgsHaveDenseVector = false;
+template<typename... Args>
+constexpr bool kArgsHaveDenseVector<std::tuple<Args...>> =
+    (has_dense_vector<Args>() || ...);
+
 template<is_contract_trait ContractTrait, StringLiteral Name, GasAmount Gas>
 struct AlwaysErrorMethod {
   using meta_t = ContractTraitMeta<ContractTrait>;
@@ -124,7 +185,8 @@ struct AlwaysErrorMethod {
       return [](NativeSyscallContext &ctx,
                 std::tuple_element_t<Is, args_t>... /*unused*/)
                  -> x23::Async<InvokeStatus<return_t>> {
-        ctx.consume_gas(Gas);
+        // Fails either way; an unaffordable charge just exhausts the frame.
+        std::ignore = ctx.consume_gas(Gas);
         co_return InvokeError{InvokeErrorCode::Deterministic};
       };
     }(std::make_index_sequence<std::tuple_size_v<args_t>>());
@@ -141,6 +203,16 @@ class NativeContractBuilder {
 public:
   constexpr static SerializationFormat kDefaultSerializationFormat =
       SerializationFormat::kTxs;
+
+  // Charged before decoding a frame's calldata, at or above what RV32 glue pays
+  // to decode the same argument (#4236). add() rejects dense-vector arguments.
+  constexpr static GasAmount kDecodeBaseGas = 750;
+  constexpr static GasAmount kDecodeByteGas = 10;
+
+  static constexpr GasAmount decode_gas(size_t calldata_len)
+  {
+    return kDecodeBaseGas + (kDecodeByteGas * calldata_len);
+  }
 
   template<is_contract_trait ContractTrait, StringLiteral Name>
   void add(auto lambda)
@@ -197,9 +269,9 @@ public:
     using fn_t = decltype(lambda);
     using args_t = typename detail::NativeContractArgs<fn_t>::args_t;
     using return_t = typename detail::NativeContractArgs<fn_t>::return_t;
-
-    // TODO(geoff): figure out gas costs for native contracts like this
-    constexpr static GasAmount kErrorGas = 0;
+    static_assert(!detail::kArgsHaveDenseVector<args_t>,
+                  "native arguments may not contain a long vector of small "
+                  "elements: decode_gas would undercharge decoding it");
 
     // A coroutine, so not noexcept: NativeContract::invoke() re-establishes
     // that boundary around its frame allocation.
@@ -214,7 +286,6 @@ public:
         // contract's wrapper — not a plain frame fault. See
         // default_wallet_parity_test.cc's malformed-calldata cases.
         auto decoding_args_abort = [&ctx]() -> InvokeStatus<void> {
-          ctx.consume_gas(kErrorGas);
           LibraryExn exn(LibraryExn::kLibraryExnHandling);
           exn.handling() = HandlingError(HandlingError::kHandlingDecodingArgs);
           auto buf = x23::serialize_cxs(kLibraryExceptionSelector, exn);
@@ -227,7 +298,12 @@ public:
           return {};
         };
 
+        // Charge the decode before doing it, so a frame that cannot pay runs
+        // out of gas without materializing anything.
         auto const &calldata = ctx.handler().get_calldata();
+        if (!ctx.consume_gas(decode_gas(calldata.size()))) {
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
+        }
         auto args = Serializer<Format>::template deserialize<args_t>(
             std::as_bytes(std::span(calldata)));
         if (!args.has_value()) {

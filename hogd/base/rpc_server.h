@@ -15,6 +15,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/types.h"
 #include "x23/cleanup.h"
 #include "x23/mvar.h"
@@ -72,17 +73,30 @@ public:
     return {port_, std::move(lfd)};
   }
 
-  std::pair<uint16_t, x23::UniqueFd> bind_server(x23::HostPort bind_addr)
+  // Exits if it cannot listen on [bind_addr] (see exit_cannot_listen).
+  std::pair<uint16_t, x23::UniqueFd> bind_server(const x23::HostPort &bind_addr)
+  {
+    auto bound = try_bind_server(bind_addr);
+    if (!bound)
+      exit_cannot_listen(bind_addr, bound.error());
+    return std::move(*bound);
+  }
+
+  // Like bind_server, but returns a failure to listen instead of exiting.
+  std::expected<std::pair<uint16_t, x23::UniqueFd>, x23::Errno>
+  try_bind_server(const x23::HostPort &bind_addr)
   {
     CHECK(!bound_);
-    bound_ = true;
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
-    auto lfd = x23::tcplisten(*addr, backlog);
-    port_ = x23::get_port(x23::local_addr(lfd));
-    return {port_, std::move(lfd)};
+    auto lfd = x23::try_tcplisten(*addr, backlog);
+    if (!lfd)
+      return std::unexpected(lfd.error());
+    bound_ = true;
+    port_ = x23::get_port(x23::local_addr(*lfd));
+    return std::pair{port_, std::move(*lfd)};
   }
 
 private:
@@ -114,9 +128,9 @@ public:
     return p;
   }
 
-  uint16_t start_server(x23::HostPort bind_addr)
+  uint16_t start_server(const x23::HostPort &bind_addr)
   {
-    auto [p, lfd] = bind_server(std::move(bind_addr));
+    auto [p, lfd] = bind_server(bind_addr);
     start_accepting(std::move(lfd));
     return p;
   }
@@ -153,7 +167,8 @@ host_port_to_sockaddr(const std::string &host, uint16_t port)
   x23::HostPort helper(host, port);
   std::expected<sockaddr_storage, x23::GaiError> addr =
       helper.to_addr(/*dns=*/true);
-  CHECK(addr.has_value());
+  if (!addr)
+    exit_cannot_resolve(helper, addr.error());
   return *addr;
 }
 

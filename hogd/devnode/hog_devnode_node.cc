@@ -543,8 +543,15 @@ HogDevnodeNode::HogDevnodeNode(
         make_bind_host_port(bind_host_, /*port=*/0));
     sched_exec_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
-    mempool_coord_server_.start_server(
-        make_bind_host_port(bind_host_, requested_scheduler_port));
+    // The scheduler port is the one the user picks, so it is the one that can
+    // be taken. Throw instead of letting bind_server exit, so a busy port
+    // unwinds through hog-devnode's "failed before readiness" cleanup.
+    const auto scheduler_addr =
+        make_bind_host_port(bind_host_, requested_scheduler_port);
+    auto scheduler = mempool_coord_server_.try_bind_server(scheduler_addr);
+    if (!scheduler)
+      scheduler.error().raise("listen on {}", scheduler_addr);
+    mempool_coord_server_.start_accepting(std::move(scheduler->second));
     mempool_gateway_server_.start_server(
         make_bind_host_port(bind_host_, /*port=*/0));
     mempool_auth_server_->start_server(

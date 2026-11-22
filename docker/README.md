@@ -25,28 +25,6 @@ Supports both **podman** (preferred) and **docker**. The helper script auto-dete
 ./docker/local-ci.sh shell
 ```
 
-### SSH Agent Setup (for private submodules)
-
-The build requires access to private GitHub repositories. If you have SSH access:
-
-```bash
-# Start SSH agent (if not running)
-eval $(ssh-agent)
-
-# Add your key
-ssh-add ~/.ssh/id_ed25519  # or your key path
-
-# Verify it's loaded
-ssh-add -l
-
-# Now run tidy - SSH agent will be forwarded into container
-./docker/local-ci.sh tidy
-```
-
-The script auto-detects SSH agent availability:
-- **With SSH agent**: Initializes ALL submodules and fetches private Cargo dependencies
-- **Without SSH agent**: Only initializes public submodules (limited testing)
-
 ### Available Commands
 
 | Command | Description |
@@ -102,13 +80,6 @@ The `tidy` command runs these checks:
 ### Full Workflow
 
 The `full` command combines: Clang Debug build + all tidy checks
-
-### What Is Skipped Locally (without SSH agent)
-
-- Private submodules (protocol, integration_test_contracts)
-- `built_contracts/` - requires private Cargo dependencies
-
-With SSH agent configured, the full CI test suite runs locally.
 
 ### Resource Limits
 
@@ -177,7 +148,6 @@ Once the custom base image is active, the workflows skip these steps (already in
 - update-alternatives setup
 
 Only these remain:
-- SSH agent setup
 - Checkout
 - Submodule initialization
 - `conf.sh` creation

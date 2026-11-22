@@ -572,13 +572,23 @@ ViewGatewayRpc::run_view_attempt(TransactionViewQuery const &query,
 
   static thread_local auto context = make_hog_exec_context();
 
+  if (!view_block_timepoint_admissible(
+          tip.value.proposal_header.block_timepoint, query.block_timepoint)) {
+    ViewGatewayResult result(ViewGatewayOutcome::ViewGatewayInvalidInput);
+    result.error_code() =
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput;
+    co_return result;
+  }
+
   // WAI: empty nondeterministic data causes ViewingModeData to default
   // TryInvoke outcomes to success. This is deliberate — see the comment on
   // ViewingModeData::view_try_invoke_bit() in execution_mode.h.
   ExpectedViewResult raw = co_await View::run_view_transaction(
       view_state.snapshot_cache,
-      PerTransactionDatabaseProxy(db_proxy_, view_state.block_id,
-                                  std::numeric_limits<TransactionID>::max()),
+      PerTransactionDatabaseProxy(
+          db_proxy_, view_state.block_id,
+          std::numeric_limits<TransactionID>::max(),
+          view_state.snapshot_cache.get_network_config_params()),
       PerTransactionEventServerProxy(event_server_proxy_, view_state.block_id,
                                      std::numeric_limits<TransactionID>::max()),
       query, *context, {});

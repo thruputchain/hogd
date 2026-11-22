@@ -9,7 +9,6 @@
 #include <vector>
 
 #include "db_sched.hh"
-#include "discovery.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"

@@ -8,8 +8,10 @@
 #include <utility>
 #include <vector>
 
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/hog_exec/runtime/item/database_proxy.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -1830,6 +1832,41 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
         << "over-budget push must be a clean conflict, not a system error";
     EXPECT_FALSE(r.value())
         << "an over-cap delta batch must be rejected as a conflict";
+  }
+}
+
+// The gate uses the chain's max_subtransaction_output_bytes, not a build
+// constant: the same batch is rejected under a lowered limit and pushed under
+// the framework's stock one.
+TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
+{
+  auto contract_addr = make_contract_address(0);
+  setup_grant_storage_token(contract_addr, 1'000'000'000'000);
+  const std::string value(kDefaultMaxBytestringLen, 'x');
+  const auto stage = [&](auto &tx) {
+    for (int i = 0; i < 8; ++i) {
+      tx.add_delta(make_addrkey(contract_addr, "limit" + std::to_string(i)),
+                   make_bytestring_delta(value),
+                   std::to_underlying(StorageDeltaFlags::None));
+    }
+  };
+
+  {
+    NetworkConfigParams lowered;
+    lowered.max_subtransaction_output_bytes = 4096;
+    PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
+                                   TransactionID{900'000}, lowered);
+    stage(tx);
+    auto r = tx.try_push_current_subtransaction()();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_FALSE(r.value()) << "8 KiB of writes must not fit a 4 KiB limit";
+  }
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    stage(tx);
+    auto r = tx.try_push_current_subtransaction()();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value()) << "the same batch fits the stock limit";
   }
 }
 

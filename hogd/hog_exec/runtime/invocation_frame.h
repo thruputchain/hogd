@@ -27,9 +27,9 @@
 #include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/hash_buffers.h"
+#include "hogd/hog_exec/components/validated_auth_tokens.h"
 #include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
-#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "storage_item.hh"
 #include "transaction.hh"
@@ -512,6 +512,8 @@ public:
   consume_auth_token(uint32_t token_id);
 
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  // Whether the active frame's parent has ids left for count returned tokens.
+  bool check_parent_can_take_auth_tokens(size_t count) const;
 
   size_t size() const { return frame_stack_.size(); }
 

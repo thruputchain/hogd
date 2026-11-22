@@ -889,6 +889,97 @@ TEST_F(IndexerOutboxTest, ExactExistingCommittedRetryFsyncsDirectory)
   EXPECT_TRUE(store.publish_committed(committed)().has_value());
 }
 
+TEST_F(IndexerOutboxTest, DeferredCommittedPublicationIsReadableThenSynced)
+{
+  IndexerOutboxStore store = open_store(dir_);
+  const auto committed = make_committed(1, {}, {});
+  ASSERT_TRUE(store
+                  .initialize_current_epoch_origin(
+                      1, committed.consensus_value.prev_hash)()
+                  .has_value());
+  // A reference publication needs the events file in place.
+  ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  auto next = make_committed(2, {}, {});
+  next.consensus_value.prev_hash = sha256(committed.consensus_value);
+  const IndexerOutboxCommittedStoredPayload stored{
+      .format_version = committed.format_version,
+      .consensus_value = next.consensus_value,
+  };
+
+  // Readable as soon as it is published, before any fsync.
+  ASSERT_TRUE(store.publish_committed_reference(stored)().has_value());
+  ASSERT_TRUE(store.has_committed(2).value());
+  auto loaded = store.load_committed(2)();
+  ASSERT_TRUE(loaded.has_value()) << loaded.error();
+  EXPECT_EQ(loaded->consensus_value, next.consensus_value);
+
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(store.sync_committed(2).has_value());
+  EXPECT_TRUE(store.sync_committed(2).has_value());
+  EXPECT_FALSE(store.sync_committed(3).has_value());
+}
+
+// A process that dies between linking a record and syncing it leaves a record
+// that reads back complete from the page cache. Open has to sync it before it
+// is served or appended to.
+TEST_F(IndexerOutboxTest, OpenSyncsTheRetainedNewestCommittedRecord)
+{
+  const auto committed = make_committed(1, {}, {});
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, committed);
+    ASSERT_TRUE(store.publish_committed(committed)().has_value());
+  }
+  fail_next_indexer_outbox_operation_for_test(
+      IndexerOutboxFaultPoint::kSyncDeferredCommitted);
+  EXPECT_FALSE(IndexerOutboxStore::open(store_path(dir_)).has_value());
+  auto reopened = IndexerOutboxStore::open(store_path(dir_));
+  ASSERT_TRUE(reopened.has_value()) << reopened.error();
+  EXPECT_TRUE(reopened->has_committed(1).value());
+}
+
+TEST_F(IndexerOutboxTest, OpenDiscardsOnlyAnIncompleteNewestCommittedRecord)
+{
+  const auto first = make_committed(1, {}, {});
+  auto second = make_committed(2, {}, {});
+  second.consensus_value.prev_hash = sha256(first.consensus_value);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    initialize_test_origin(store, first);
+    ASSERT_TRUE(store.publish_committed(first)().has_value());
+    ASSERT_TRUE(store.publish_committed(second)().has_value());
+  }
+  const std::filesystem::path outbox = store_path(dir_);
+
+  // Intact records survive a reopen.
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+  }
+  // An incomplete record below the newest is left in place to fail closed.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(1),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_TRUE(store.has_committed(2).value());
+    EXPECT_FALSE(store.enumerate_committed_records_raw().has_value());
+  }
+  // An incomplete newest record is removed. Height 1 was not the newest at
+  // this open, so it stays.
+  std::filesystem::resize_file(outbox /
+                                   IndexerOutboxStore::committed_filename(2),
+                               0);
+  {
+    IndexerOutboxStore store = open_store(dir_);
+    EXPECT_TRUE(store.has_committed(1).value());
+    EXPECT_FALSE(store.has_committed(2).value());
+  }
+}
+
 TEST_F(IndexerOutboxTest, EpochOriginXdrMatchesCrossLanguageGolden)
 {
   IndexerOutboxOrigin origin{
@@ -1119,12 +1210,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
   // same length, when ProposalTxs began naming transactions by
   // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
   // Full-key leaves and then direct key/value commitments changed the roots.
+  // The proposal_txs_hash moved again when its parts began combining in order
+  // instead of by XOR (hogd#4508).
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0x87, 0xb2, 0x10, 0xf3, 0x52, 0x6d, 0x92,
-                                   0x71, 0x84, 0x47, 0x60, 0xe1, 0x80, 0xb9,
-                                   0x6f, 0xbb, 0x17, 0xa3, 0x91, 0xb6, 0x01,
-                                   0x49, 0xc3, 0x88, 0x3b, 0x81, 0x7b, 0xbe,
-                                   0x2d, 0x86, 0x6d, 0xaa};
+  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
+                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
+                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
+                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
+                                   0x21, 0x07, 0xcc, 0x31};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);

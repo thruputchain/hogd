@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  mkdir -p metrics_history/metrics
+  exit 0
+fi
+
 SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/metrics_history_git.sh
 

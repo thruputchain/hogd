@@ -105,6 +105,12 @@ BYTESTRING_ROW = re.compile(
     r"^(entry|vm)/(BytestringSet|BytestringGet|BytestringGetLen)/(\d+)$")
 BYTESTRING_FAMILIES = ("BytestringSet", "BytestringGet", "BytestringGetLen")
 
+# The frame-payload copies, swept on length: GetCalldata and GetReturnedBuffer
+# copy a frame's calldata or saved child output into the guest, charged
+# GasCost::guest_buffer_copy. Kept out of the syscall table for the bytestring
+# rows' reason, and gated per length like them.
+FRAME_COPY_ROW = re.compile(r"^(entry|vm)/(GetCalldata|GetReturnedBuffer)/(\d+)$")
+
 # ML-DSA-65 VerifySignature, swept on message length. Kept out of the syscall
 # table and out of every shared number -- the crossing group, the seam median
 # that prices the SHA256 sweep, the guard baseline -- for two reasons. It is a
@@ -293,8 +299,12 @@ def syscall_names(measured):
     for name in measured:
         if not name.startswith("entry/"):
             continue
+        # Experimental MSM sweeps are calibrated separately. In particular,
+        # their cheap structural rejects must not set the shared crossing price.
         if (SHA256_ROW.match(name) or BYTESTRING_ROW.match(name) or
-                MLDSA_VERIFY_ROW.match(name)):
+                FRAME_COPY_ROW.match(name) or
+                MLDSA_VERIFY_ROW.match(name) or
+                name.startswith("entry/Ristretto255Msm/")):
             continue
         names.append(name[len("entry/"):])
     return sorted(names)
@@ -1384,7 +1394,7 @@ def fit_sha256_blocks(points):
     Fitting the block is also what removes the need for a rate denominator: a
     per-byte price is a fraction no integer can express, and the divisor that
     would fix it is exactly the sort of billing-relevant constant that is easy
-    to leave out of the gas-schedule digest.
+    to leave out of the gas schedule.
     """
     if len(points) < MIN_SWEEP_POINTS:
         return None
@@ -1550,11 +1560,11 @@ def build_schedule(bench, calibration, resolution, margin=0.0):
         # The parent walk is measured and reported, never proposed. Since
         # #3771 it is a fraction of a nanosecond per frame, which rounds to
         # 1 gas -- below what this benchmark resolves, and a constant in this
-        # table is not free: every one is hashed into
-        # rv32::kGasScheduleDigest, so adding one buys a coordinated
-        # gas-schedule update for a term that is noise. What is left unpriced
-        # is bounded by what it costs to get deep in the first place: reaching
-        # depth D means D nested invokes, each dearer than the walk it adds.
+        # table is not free: every one is a consensus price that the schedule
+        # pins, so adding one buys a consensus change for a term that is
+        # noise. What is left unpriced is bounded by what it costs to get deep
+        # in the first place: reaching depth D means D nested invokes, each
+        # dearer than the walk it adds.
         # The number is printed so a regression -- or a chain setting
         # max_cross_invoke_depth far higher -- is visible in the sweep.
         walk = parent_walk_ns(storage)
@@ -1839,10 +1849,10 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
         print("  avoids a per-byte rate, which is a fraction no integer can")
         print("  express -- and the divisor that would fix that is exactly the")
         print("  kind of billing-relevant constant that is easy to leave out")
-        print("  of the digest. gas_schedule_digest() in artifact.h hashes")
-        print("  kSyscallGasCostSchedule's names and costs, not the formula,")
-        print("  so any constant the formula reads has to be an")
-        print("  entry in kSyscallGasCostSchedule to be hashed.")
+        print("  of the schedule. rv32_vm_test pins kSyscallGasCostSchedule's")
+        print("  names and costs, not the formula, so any constant the formula")
+        print("  reads has to be an entry in kSyscallGasCostSchedule to be")
+        print("  pinned.")
     blocks = proposal.get("bytestring_blocks")
     if blocks:
         print()
@@ -1887,7 +1897,7 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                   "frame rounds to 1 gas,")
             print("  which is under what this benchmark resolves, and every "
                   "constant here is")
-            print("  hashed into the gas-schedule digest. At the deepest "
+            print("  a consensus price in the gas schedule. At the deepest "
                   "depth swept that")
             print(f"  leaves ~"
                   f"{proposal['storage_parent_frame_unpriced_gas']:.0f} gas "
@@ -1904,11 +1914,9 @@ def print_schedule(bench, calibration, resolution, margin=0.0):
                             width=78, initial_indent="  ",
                             subsequent_indent="  "))
     print()
-    print("Changing any of these is a coordinated gas-schedule update: each")
-    print("is an entry in kSyscallGasCostSchedule, which is folded into")
-    print("rv32::kGasScheduleDigest -- so the pinned digest in artifact.h, the")
-    print("artifact format fingerprint derived from it, and any artifact")
-    print("stamped with the current schedule all move in the same change.")
+    print("Changing any of these is a consensus change: each is an entry in")
+    print("kSyscallGasCostSchedule, which rv32_vm_test pins. No artifact or")
+    print("lowerer changes: artifacts do not declare prices.")
     return 0
 
 
@@ -1949,7 +1957,7 @@ def guard_cv(name, measured, sd):
 def guardable(measured, sd):
     """Every quantity worth gating, as {key: ratio-to-baseline}.
 
-    Three families. `syscall/<name>` is an entry row: the production path for
+    Four families. `syscall/<name>` is an entry row: the production path for
     one call, which is what a contract pays. `storage/<family>/<depth>/<keys>`
     is a per-key cost from a sweep, which is what it pays per key it has not
     touched -- the term the syscall rows cannot see.
@@ -1957,6 +1965,8 @@ def guardable(measured, sd):
     every length because the per-byte cost is not constant across it: a
     regression confined to the long end is invisible in the short rows, and it
     is the long end the block term is priced from.
+    `copy/<family>/<bytes>` is the same for GetCalldata and GetReturnedBuffer,
+    whose copies are priced per block by GasCost::guest_buffer_copy.
 
     The bytestring rows are gated here rather than through syscall_names, which
     they stay out of -- that set also drives the syscall table's layout and
@@ -2001,6 +2011,15 @@ def guardable(measured, sd):
             if cv is None or cv > GUARD_MAX_CV:
                 continue
             guards[f"bytestring/{family}/{size}"] = ns / baseline
+    for name, row in measured.items():
+        match = FRAME_COPY_ROW.match(name)
+        if not match or match.group(1) != "entry":
+            continue
+        cv = guard_cv(name, measured, sd)
+        if cv is None or cv > GUARD_MAX_CV:
+            continue
+        guards[f"copy/{match.group(2)}/{match.group(3)}"] = (
+            row["real_time"] / baseline)
     # ML-DSA-65 verify, at every length. Unlike a cold read it IS priced: a
     # contract can call it and pays GasCost::verify_signature_mldsa65. An
     # engine regression would open a gap between that price and the cost with
@@ -2141,19 +2160,21 @@ def check_against_reference(data, reference_path):
     print(f"checked {data.get('_path', '<run>')} against {reference_path}")
     # The converse of "a guard not measured was not checked": a row measured
     # with no guard is not checked either, and that is not a failure -- the
-    # reference simply predates it. Said out loud for ML-DSA, whose rows are
-    # newer than the committed reference, so a green gate is not read as
-    # covering them. They are gated from the next mode=reference run on.
-    unguarded = sorted(
-        key for key in current
-        if key.startswith(f"syscall/{MLDSA_VERIFY_FAMILY}/")
-        and key not in reference["guards"])
-    if unguarded:
-        print(f"note: {len(unguarded)} ML-DSA-65 row(s) measured but absent "
-              "from the reference, so not gated:")
-        print("  " + ", ".join(unguarded))
-        print("  Regenerating the reference (mode=reference) adds their "
-              "guards.")
+    # reference simply predates it. Said out loud for the ML-DSA and
+    # frame-copy rows, which are newer than the committed reference, so a
+    # green gate is not read as covering them. They are gated from the next
+    # mode=reference run on.
+    for prefix, label in ((f"syscall/{MLDSA_VERIFY_FAMILY}/", "ML-DSA-65"),
+                          ("copy/", "frame-copy")):
+        unguarded = sorted(key for key in current
+                           if key.startswith(prefix)
+                           and key not in reference["guards"])
+        if unguarded:
+            print(f"note: {len(unguarded)} {label} row(s) measured but absent "
+                  "from the reference, so not gated:")
+            print("  " + ", ".join(unguarded))
+            print("  Regenerating the reference (mode=reference) adds their "
+                  "guards.")
     if not failures:
         print(f"{len(reference['guards'])} guard(s) hold.")
         return 0

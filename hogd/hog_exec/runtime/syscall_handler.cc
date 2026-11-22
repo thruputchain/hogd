@@ -33,9 +33,10 @@
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/auth_subtoken.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/validated_auth_tokens.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -48,7 +49,6 @@
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/stack_usage.h"
-#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
@@ -207,7 +207,8 @@ SystemCallHandler::SystemCallHandler(
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
     contracts_to_deploy_(tx.contracts_to_deploy),
-    snapshot_cache_(snapshot_cache)
+    snapshot_cache_(snapshot_cache),
+    block_timepoint_(snapshot_cache.block_execution_context().block_timepoint)
 {
   // Real transactions execute in proposal or validation mode only; viewing
   // mode goes through the tx-less constructor. CHECK, not assert: the old
@@ -220,7 +221,7 @@ SystemCallHandler::SystemCallHandler(
     StorageSnapshotCache &snapshot_cache, PerTransactionDatabaseProxy db_proxy,
     PerTransactionEventServerProxy event_server_proxy,
     ExecutionModeCtor execution_mode_ctor, RuntimeContext &runtime_context,
-    AuthClaim auth_claim, SHA256Hash source_tx_hash)
+    AuthClaim auth_claim, SHA256Hash source_tx_hash, TimePoint block_timepoint)
   : runtime_context_(runtime_context), db_proxy_(std::move(db_proxy)),
     event_server_proxy_(std::move(event_server_proxy)),
     invocation_frame_stack_(
@@ -231,7 +232,8 @@ SystemCallHandler::SystemCallHandler(
     source_tx_hash_(source_tx_hash), auth_claim_(std::move(auth_claim)),
     execution_mode_data_(
         make_execution_mode_data(std::move(execution_mode_ctor))),
-    contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache)
+    contracts_to_deploy_(kEmptyVec), snapshot_cache_(snapshot_cache),
+    block_timepoint_(block_timepoint)
 {}
 
 std::pair<InvokeStatus<void>, GasAmount>
@@ -1367,6 +1369,12 @@ SystemCallHandler::check_auth_tokens_owned(
     std::span<uint32_t const> token_ids) const
 {
   return invocation_frame_stack_.check_auth_tokens_owned(token_ids);
+}
+
+bool
+SystemCallHandler::check_parent_can_take_auth_tokens(size_t count) const
+{
+  return invocation_frame_stack_.check_parent_can_take_auth_tokens(count);
 }
 
 AuthTokenIdRange
@@ -2505,14 +2513,6 @@ SystemCallHandler::get_network_hash() const
   // Identical in every header, so the parent tip's copy is already this
   // block's value, no adjustment needed.
   return snapshot_cache_.get_db_tip().value.proposal_header.network_hash;
-}
-
-TimePoint
-SystemCallHandler::get_block_timepoint() const
-{
-  // Not derivable from the tip: for an open block that is the parent, whose
-  // timepoint is the previous block's.
-  return snapshot_cache_.block_execution_context().block_timepoint;
 }
 
 // == Auth token syscalls ==

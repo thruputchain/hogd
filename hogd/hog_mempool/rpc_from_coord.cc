@@ -136,6 +136,26 @@ tx_failed(const ExecResult &r)
   return !tx_succeeded(r);
 }
 
+// Folds the outcomes of two batches of one block's validation. An executor
+// failure outranks an invalid transaction: once this node could not complete
+// the block's execution, no result from that run shows the block is invalid.
+SchedulerValidationOutcome
+combine_batch_outcomes(SchedulerValidationOutcome a,
+                       SchedulerValidationOutcome b)
+{
+  if (a == SchedulerValidationOutcome::SchedulerValidationExecutorFailed ||
+      b == SchedulerValidationOutcome::SchedulerValidationExecutorFailed) {
+    return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  if (a == SchedulerValidationOutcome::SchedulerValidationInvalid ||
+      b == SchedulerValidationOutcome::SchedulerValidationInvalid) {
+    return SchedulerValidationOutcome::SchedulerValidationInvalid;
+  }
+  CHECK_EQ(a, SchedulerValidationOutcome::SchedulerValidationOK);
+  CHECK_EQ(b, SchedulerValidationOutcome::SchedulerValidationOK);
+  return SchedulerValidationOutcome::SchedulerValidationOK;
+}
+
 SchedulerTransactionStatus
 transaction_status_for_exec(const ExecResult result)
 {
@@ -1661,14 +1681,14 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   co_await cg(nominated_block_cache_lock_);
 
   if (last_committed_block_.id != parent_id) {
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
   if (last_committed_block_.value.proposal_header.block_height < 1) {
     // Heights 0 and 1 are reserved for genesis initialization and the genesis
     // ceremony. Ordinary nomination starts at height 2.
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1687,7 +1707,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
     // A block was nominated by this node and not yet committed or abandoned.
     // [schedulercoord_commit_block()] needs to be called before this node can
     // nominate another block.
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1845,7 +1865,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   const bool initialized_block = initialize_block_nodes.initialized.get();
   if (!initialized_block) {
-    info("schedulercoord_nominate ret");
+    debug("schedulercoord_nominate ret");
     co_return SchedulerProposalResult(
         SchedulerProposalOutcome::SchedulerProposalError);
   }
@@ -1880,7 +1900,7 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .value = std::move(value),
       .default_wallet = last_committed_block_.default_wallet,
       .network_config = last_committed_block_.network_config};
-  info("schedulercoord_nominate ret");
+  debug("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
 
@@ -2151,7 +2171,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   co_return committed;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch_chunk(
     BlockID block_id, x23::span<const ProposedTransaction> txs,
     size_t executor_idx)
@@ -2161,10 +2181,17 @@ MempoolCoordinatorRpc::validate_batch_chunk(
           block_id, txs);
   CHECK_EQ(res.size(), txs.size());
   CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
-  // Validation succeeds if every entry in the executor response is a
+  // A system error means the executor could not run a transaction (e.g. its
+  // block was cancelled mid-flight), which says nothing about the block, so it
+  // must never make the block invalid.
+  if (std::ranges::contains(res, ExecResult::ExecResultSystemError)) {
+    co_return SchedulerValidationOutcome::SchedulerValidationExecutorFailed;
+  }
+  // Otherwise validation succeeds if every entry in the executor response is a
   // deterministic outcome (OK, deterministic error, or root frame revert).
-  // System errors are nondeterministic and cause validation to fail.
-  co_return !(std::ranges::any_of(res, tx_failed));
+  co_return std::ranges::any_of(res, tx_failed)
+      ? SchedulerValidationOutcome::SchedulerValidationInvalid
+      : SchedulerValidationOutcome::SchedulerValidationOK;
 }
 
 x23::Async<MempoolCoordinatorRpc::PreparedValidationChunk>
@@ -2255,13 +2282,13 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
 
   PreparedAndValidatedChunk ret{
       .missing_signed_tx_hashes = std::move(prepared.missing_signed_tx_hashes),
-      .validated = true,
+      .outcome = SchedulerValidationOutcome::SchedulerValidationOK,
   };
   if (!ret.missing_signed_tx_hashes.empty()) {
     co_return ret;
   }
 
-  ret.validated = co_await validate_batch(block_id, prepared.proposed_txs);
+  ret.outcome = co_await validate_batch(block_id, prepared.proposed_txs);
   ret.txs.reserve(prepared.proposed_txs.size());
   for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
     ret.txs.push_back(std::move(proposed_tx.signed_tx));
@@ -2269,7 +2296,7 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
   co_return ret;
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
                                       const x23::Vec<ProposedTransaction> &txs)
 {
@@ -2280,7 +2307,7 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   const std::vector<ChunkRange> large_chunks =
       make_chunks(txs.size(), kNumBigChunks);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(large_chunks.size());
 
   for (const ChunkRange &chunk : large_chunks) {
@@ -2290,7 +2317,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
         multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
   }
 
-  x23::Vec<bool> results(large_chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      large_chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2304,10 +2332,12 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
-x23::Async<bool>
+x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
     BlockID block_id, x23::span<const ProposedTransaction> txs)
 {
@@ -2316,7 +2346,7 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   const std::vector<ChunkRange> chunks =
       make_chunks_for_max_size(txs.size(), kChunkSize);
 
-  x23::Vec<x23::Async<bool>> handles;
+  x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
 
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -2328,7 +2358,8 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
                              /*executor_idx=*/i % exec_clients_.size()));
   }
 
-  x23::Vec<bool> results(chunks.size(), false);
+  x23::Vec<SchedulerValidationOutcome> results(
+      chunks.size(), SchedulerValidationOutcome::SchedulerValidationOK);
   std::exception_ptr first_exception;
   for (size_t i = 0; i < handles.size(); ++i) {
     try {
@@ -2342,7 +2373,9 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   if (first_exception) {
     std::rethrow_exception(first_exception);
   }
-  co_return std::ranges::all_of(results, std::identity{});
+  co_return std::ranges::fold_left(
+      results, SchedulerValidationOutcome::SchedulerValidationOK,
+      combine_batch_outcomes);
 }
 
 x23::Async<ExecResult>
@@ -2374,55 +2407,44 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                 validation_tx_count);
     });
   });
+  // The open validation gate keeps commits, and so [last_committed_block_],
+  // still from here on.
+  while (!(co_await increment_num_validations_in_progress())) {
+    co_await wait_for_validation_gate_open();
+  }
+  const BlockHeight committed_height =
+      last_committed_block_.value.proposal_header.block_height;
+  if (proposal.header.block_height <= committed_height) {
+    // This block's height is committed: it is too late to validate it.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
+    debug("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
+  }
   if (proposal.header.block_height <= 1) {
     // Heights 0 and 1 are established outside ordinary validation.
+    co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
-  while (true) {
-    while (!(co_await increment_num_validations_in_progress())) {
-      co_await wait_for_validation_gate_open();
-    }
-
-    if (proposal.header.block_height <
-        last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is too old to validate.
-      co_await decrement_num_validations_in_progress();
-      validation_outcome =
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate;
-      info("schedulercoord_validate ret");
-      co_return SchedulerValidationResult(
-          SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
-    }
-    else if (proposal.header.block_height >
-             last_committed_block_.value.proposal_header.block_height + 1) {
-      // This block is ahead of the current block in the mempool. Thus, we need
-      // to wait for the mempool to catch up before verifying this block.
-      co_await decrement_num_validations_in_progress();
-      // If we want to validate a block at height [x], we need to wait for the
-      // block at height [x - 1] to commit.
-      co_await wait_for_block_commit(proposal.header.block_height - 1);
-      // Rather than break out of the loop here, we instead continue to the next
-      // iteration of the loop. This prevents a race where a different block at
-      // height [x] is committed before we are able to wake up, increment the
-      // [num_validations_in_progress_] futex, and exit the loop. If that race
-      // could occur, then we would fail the CHECK below. Instead, we go to the
-      // next iteration, increment the [num_validations_in_progress_] futex, and
-      // then either break out of the loop or we return
-      // [SchedulerValidationTooLateToValidate] if a different block at height x
-      // has already been committed.
-    }
-    else {
-      break;
-    }
+  if (proposal.header.block_height > committed_height + 1) {
+    // The parent is above the committed tip, so answer at once instead of
+    // waiting: a waiting call would pin a coordinator connection.
+    co_await decrement_num_validations_in_progress();
+    validation_outcome =
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
+    debug("schedulercoord_validate ret");
+    co_return SchedulerValidationResult(
+        SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
-  CHECK_EQ(proposal.header.block_height,
-           last_committed_block_.value.proposal_header.block_height + 1);
+  CHECK_EQ(proposal.header.block_height, committed_height + 1);
 
   if (last_committed_block_.id != parent_id) {
-    // Release the validation-gate increment taken at the top of this loop.
+    // Release the validation-gate increment taken above.
     // Without this, the increment leaks: [close_validation_gate()] then waits
     // forever for the count to reach zero, and every subsequent
     // [schedulercoord_commit_block()] wedges. (The bench harness maps a
@@ -2430,14 +2452,14 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     co_await decrement_num_validations_in_progress();
     validation_outcome =
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationUnknownParentBlock);
   }
   if (proposal.header.network_hash != network_hash_) {
     co_await decrement_num_validations_in_progress();
     validation_outcome = SchedulerValidationOutcome::SchedulerValidationInvalid;
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationInvalid);
   }
@@ -2461,7 +2483,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   x23::XdrVec<NondeterministicProposalData> tx_nominations;
   SignedTransactionHashBatch missing_signed_tx_hashes;
   PendingBlock cache{};
-  bool validated = true;
+  SchedulerValidationOutcome batch_outcome =
+      SchedulerValidationOutcome::SchedulerValidationOK;
   SchedulerValidationResult result(
       SchedulerValidationOutcome::SchedulerValidationInvalid);
   SchedulerValidationOutcome dag_outcome =
@@ -2724,7 +2747,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
             panic("validation result missing without a captured exception");
           }
           PreparedAndValidatedChunk &chunk_result = *settled;
-          validated = chunk_result.validated && validated;
+          batch_outcome =
+              combine_batch_outcomes(batch_outcome, chunk_result.outcome);
           missing_signed_tx_hashes += chunk_result.missing_signed_tx_hashes;
           cache.txs += chunk_result.txs;
         }
@@ -2746,10 +2770,9 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         }
         CHECK_EQ(cache.txs.size(), tx_nominations.size());
 
-        if (!validated) {
-          co_await cancel_with_result(
-              SchedulerValidationOutcome::SchedulerValidationInvalid,
-              "check validation chunks");
+        if (batch_outcome !=
+            SchedulerValidationOutcome::SchedulerValidationOK) {
+          co_await cancel_with_result(batch_outcome, "check validation chunks");
           co_return;
         }
         co_return;
@@ -2908,7 +2931,7 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
     graph_dot << validation_dag.dot();
   }
   if (log_validation_return) {
-    info("schedulercoord_validate ret");
+    debug("schedulercoord_validate ret");
   }
   co_return result;
 }
@@ -2988,6 +3011,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
     }
   });
 
+  // The tip committed again under the value it committed with is a retry of a
+  // commit whose answer the coordinator did not see: it is done. The closed
+  // gate keeps any other commit from moving [last_committed_block_].
+  if (block_id == last_committed_block_.id &&
+      expected_value == last_committed_block_.value) {
+    info("schedulercoord_commit_block ret: the tip, committed again");
+    co_return SchedulerCommitOutcome::SchedulerCommitOK;
+  }
+
   struct CommitPlan {
     const PendingBlock *committed_cache{nullptr};
     bool committed_nominated{false};
@@ -3057,7 +3089,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                             /*remove_from_scheduler_size=*/0);
           // A block with ID [block_id] was neither nominated nor validated, so
           // it cannot be committed.
-          info("schedulercoord_commit_block ret");
+          debug("schedulercoord_commit_block ret");
           // This is a failure caused by an external user, not an internal
           // commit failure.
           fatal_commit_cleanup.disarm();
@@ -3123,7 +3155,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         CHECK_PTR(commit_plan.committed_cache);
         if (commit_plan.committed_cache->db_tip.value != expected_value) {
-          info("schedulercoord_commit_block ret");
+          debug("schedulercoord_commit_block ret");
           invalid_consensus_value = true;
           commit_outcome =
               SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
@@ -3403,7 +3435,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                               .consensus_value = last_committed_block_.value});
         emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
                           remove_from_scheduler_size);
-        info("schedulercoord_commit_block ret");
+        debug("schedulercoord_commit_block ret");
         MempoolMetrics::instance().block_transactions.record(
             static_cast<double>(committed_tx_count));
         MempoolMetrics::instance().block_transaction_bytes.record(

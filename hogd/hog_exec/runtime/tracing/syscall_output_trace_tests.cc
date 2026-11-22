@@ -23,8 +23,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/ffi_types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
@@ -707,10 +707,10 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // Everything else here asks the schedule what a call costs, so a repricing
 // moves those fixtures and nothing objects -- right for a fixture, useless as
 // a guard. This one spells the prices out, and it guards something the
-// artifact digest cannot: gas_schedule_digest() hashes the schedule's names
-// and costs, not the cost *functions*, so GasCost::sha256_update could drop
-// its stream term, or SHA256Copy could go back to charging nothing, and every
-// digest and fingerprint in the tree would still match. Here it fails.
+// pinned schedule cannot: rv32_vm_test pins the schedule's names and costs,
+// not the cost *functions*, so GasCost::sha256_update could drop its stream
+// term, or SHA256Copy could go back to charging nothing, and that test would
+// still pass. Here it fails.
 //
 // Charges, crossing included, at kSyscallBaseCost = 50:
 //
@@ -805,13 +805,12 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-// What the artifact digest cannot check.
+// What the pinned schedule cannot check.
 //
-// gas_schedule_digest() hashes kSyscallGasCostSchedule's names and costs, not
-// the cost *functions* that read them. GasCost::sha256_update could drop its
-// stream term, or SHA256Copy could be set to charge nothing, and every digest
-// and fingerprint in the tree would still match -- verified by reverting each
-// and watching rv32_vm_test stay green. So the shapes are pinned here.
+// rv32_vm_test pins kSyscallGasCostSchedule's names and costs, not the cost
+// *functions* that read them. GasCost::sha256_update could drop its stream
+// term, or SHA256Copy could be set to charge nothing, and that test would
+// stay green -- verified by reverting each. So the shapes are pinned here.
 //
 // Written against the constants rather than as literals on purpose: this test
 // says what the formulas mean and survives a repricing, while
@@ -1039,6 +1038,48 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
     expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// U256Sqrt records the value it read and the root it returned, and bills its
+// flat price on top of the crossing.
+TEST_F(SyscallOutputTraceTest, U256SqrtTraceIsExact)
+{
+  // 2^128, least significant byte first. Its square root is 2^64.
+  U256Le value{};
+  value[16] = 1;
+  constexpr uint128_t kRoot = uint128_t{1} << 64;
+
+  auto context = make_single_contract_context(
+      [value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint128_t root = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kU256Sqrt>(value, root);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            root != kRoot) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU256Sqrt);
+    body.u256_sqrt().inputs.value = value;
+    body.u256_sqrt().outputs = SyscallU256SqrtOutputs{.root = to_xdr(kRoot)};
+    expected.push_back(
+        step_entry(gas, kU256SqrtCost, std::move(body), ok_status()));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);

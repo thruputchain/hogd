@@ -57,6 +57,7 @@ event_init(const std::string &mempool_address, const std::string &bind_ip,
   // Start the event servers.
   EventRPCContext ctx(work_directory);
   EventExecServer exec_server(ctx);
+  exec_server.max_message_size_ = kEventExecutorRpcMaxMessageSize;
   EventIndexerServer indexer_server(ctx);
   EventMempoolServer mempool_server(ctx);
   mempool_server.max_message_size_ = kEventSchedulerRpcMaxMessageSize;

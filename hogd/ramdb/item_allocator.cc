@@ -174,7 +174,7 @@ ItemAllocator::compact(float utilization_thresh)
   size_t total_bytes = allocator_.size();
   info("reclaimed {}/{} ({}% freed)", print_iec_bytes(free_bytes),
        print_iec_bytes(total_bytes), free_bytes * 100 / total_bytes);
-  allocator_.print_stats();
+  allocator_.print_stats(/*force=*/true);
   return free_bytes;
 }
 

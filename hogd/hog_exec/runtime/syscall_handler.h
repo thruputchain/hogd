@@ -27,6 +27,7 @@
 #include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
+#include "hogd/hog_exec/components/transaction_stats.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -35,7 +36,6 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
-#include "hogd/hog_exec/runtime/transaction_stats.h"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -113,13 +113,15 @@ public:
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context) = delete;
 
-  // Constructor for test harness, mock infrastructure
+  // Constructor for views, test harness, mock infrastructure.
+  // `block_timepoint` is what GetBlockTimepoint reports: there is no
+  // transaction's block to take it from, so the caller states it.
   SystemCallHandler(StorageSnapshotCache &snapshot_cache,
                     PerTransactionDatabaseProxy db_proxy,
                     PerTransactionEventServerProxy event_server_proxy,
                     ExecutionModeCtor execution_mode_ctor,
                     RuntimeContext &runtime_context, AuthClaim auth_claim,
-                    SHA256Hash source_tx_hash);
+                    SHA256Hash source_tx_hash, TimePoint block_timepoint);
 
   // Disable move and copy.
   SystemCallHandler(SystemCallHandler &&ll) = delete;
@@ -369,6 +371,7 @@ public:
   // The ids the most recent child's returned tokens took in this frame.
   AuthTokenIdRange get_returned_auth_tokens() const;
   bool check_auth_tokens_owned(std::span<uint32_t const> token_ids) const;
+  bool check_parent_can_take_auth_tokens(size_t count) const;
   // Called by the Return syscall.
   // Sets the buffer to be passed back to the parent call frame.
   // Can be called by root call frame, but in that case will be ignored.
@@ -482,9 +485,9 @@ public:
   BlockHeight get_block_height() const;
   NetworkHash const &get_network_hash() const;
 
-  // Served from the BlockExecutionContext the block was opened with: for an
-  // open block the tip is the parent, whose timepoint is the previous block's.
-  TimePoint get_block_timepoint() const;
+  // Fixed at construction: proposal and validation take it from the block's
+  // BlockExecutionContext, a view from its query.
+  TimePoint get_block_timepoint() const { return block_timepoint_; }
 
   // == General access methods ==
   //
@@ -572,6 +575,10 @@ private:
   bool two_phase_commit_failed_{false};
 
   StorageSnapshotCache &snapshot_cache_;
+
+  // What GetBlockTimepoint reports. Per handler rather than read through
+  // snapshot_cache_, so views sharing one snapshot can each run at their own.
+  const TimePoint block_timepoint_;
 
   // Keys this transaction has loaded, rolled-back frames included. See
   // note_item_load().

@@ -19,8 +19,9 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -1939,12 +1940,16 @@ TEST_F(BalanceCostTrackingTest, WarmBalanceReadsChargeStorageAccess)
           }
         }
 
-        // A warm read pays exactly the Invoke crossing, the method's one gas
-        // unit, and a single flat access charge (no load_gas once warm).
-        static constexpr GasAmount kWarmReadCost =
-            kSyscallBaseCost + 1 + kStorageAccessCost;
+        // A warm read pays exactly the Invoke crossing, the calldata decode,
+        // the method's one gas unit, and a single flat access charge (no
+        // load_gas once warm).
+        GasAmount const kWarmReadCost =
+            kSyscallBaseCost +
+            NativeContractBuilder::decode_gas(calldata.size()) + 1 +
+            kStorageAccessCost;
         EXPECT_EQ(read_costs[1], kWarmReadCost)
-            << "warm balance read is not priced at crossing + method + access";
+            << "warm balance read is not priced at crossing + decode + method "
+               "+ access";
         EXPECT_EQ(read_costs[2], kWarmReadCost);
         co_return InvokeStatus<void>{};
       });

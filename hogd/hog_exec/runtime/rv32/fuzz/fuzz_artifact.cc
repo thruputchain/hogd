@@ -6,6 +6,7 @@
 #include <span>
 #include <vector>
 
+#include "hogd/base/log.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
 #include "hogd/hog_exec/runtime/rv32/fuzz/fuzz_common.h"
@@ -34,7 +35,7 @@ public:
   size_t mutate(uint8_t *output)
   {
     const size_t strategy = random_inrange(kStrategyCount);
-    if (strategy == 0 || max_size_ < rv32::kArtifactHeaderBytes + 4) {
+    if (strategy == 0 || max_size_ < kEnvelopeBytes + rv32::kInstructionBytes) {
       return LLVMFuzzerMutate(output, input_.size(), max_size_);
     }
 
@@ -49,7 +50,7 @@ public:
       break;
     case 2:
       mutate_u32_field(rv32::kArtifactFormatVersionOffset,
-                       rv32::kArtifactFormatVersion);
+                       rv32::kArtifactVersion7);
       break;
     case 3:
       mutate_u32_field(rv32::kArtifactHeaderSizeOffset,
@@ -136,6 +137,8 @@ public:
 
 private:
   static constexpr size_t kStrategyCount = 26;
+  // Header plus the count of the empty extension list.
+  static constexpr size_t kEnvelopeBytes = rv32::kArtifactHeaderBytes + 4;
 
   uint64_t next_random()
   {
@@ -208,10 +211,10 @@ private:
     }
 
     // carve_artifact_fixup consumes a 12-byte control prefix. Bound its input
-    // so replacing that prefix with the 128-byte artifact header still fits
+    // so replacing that prefix with the artifact envelope still fits
     // libFuzzer's MaxSize.
     const size_t carve_size =
-        std::min(input_.size(), max_size_ - rv32::kArtifactHeaderBytes + 12);
+        std::min(input_.size(), max_size_ - kEnvelopeBytes + 12);
     const auto fixup = fuzz::carve_artifact_fixup(input_.first(carve_size));
     if (fixup.has_value()) {
       artifact_ =
@@ -236,22 +239,37 @@ private:
     if (input_.size() < rv32::kArtifactHeaderBytes) {
       return false;
     }
-    const size_t body_size = input_.size() - rv32::kArtifactHeaderBytes;
+    // A v5 or v6 input states the longer header, which declares a gas
+    // schedule, and has its later fields after the digest. rebuild() emits
+    // the v7 header either way.
+    const size_t header_bytes =
+        rv32::load_u32_le(input_, rv32::kArtifactHeaderSizeOffset) ==
+                    rv32::kArtifactV5V6HeaderBytes &&
+                input_.size() >= rv32::kArtifactV5V6HeaderBytes
+            ? rv32::kArtifactV5V6HeaderBytes
+            : rv32::kArtifactHeaderBytes;
+    const size_t shift = header_bytes - rv32::kArtifactHeaderBytes;
+    const size_t body_size = input_.size() - header_bytes;
+    const size_t body_capacity = max_size_ - kEnvelopeBytes;
     const uint32_t code_size =
-        rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset);
+        rv32::load_u32_le(input_, rv32::kArtifactCodeSizeOffset + shift);
     const uint32_t memory_size =
-        rv32::load_u32_le(input_, rv32::kArtifactInitialMemorySizeOffset);
+        rv32::load_u32_le(input_,
+                          rv32::kArtifactInitialMemorySizeOffset + shift);
+    // Bytes after initial memory are an extension list (none in v5);
+    // rebuild() replaces them with an empty one.
     if (code_size == 0 || code_size > body_size ||
-        memory_size != body_size - code_size ||
-        memory_size > rv32::kDefaultMaxMemoryBytes) {
+        memory_size > body_size - code_size ||
+        memory_size > rv32::kDefaultMaxMemoryBytes ||
+        code_size > body_capacity || memory_size > body_capacity - code_size) {
       return false;
     }
 
-    const auto code = input_.subspan(rv32::kArtifactHeaderBytes, code_size);
-    const auto memory =
-        input_.subspan(rv32::kArtifactHeaderBytes + code_size, memory_size);
+    const auto code = input_.subspan(header_bytes, code_size);
+    const auto memory = input_.subspan(header_bytes + code_size, memory_size);
     uint32_t start =
-        rv32::load_u32_le(input_, rv32::kArtifactInitialMemoryStartOffset);
+        rv32::load_u32_le(input_,
+                          rv32::kArtifactInitialMemoryStartOffset + shift);
     if (memory.empty()) {
       start = 0;
     }
@@ -260,22 +278,22 @@ private:
     }
     const uint32_t floor = start + memory_size;
     uint32_t total =
-        rv32::load_u32_le(input_, rv32::kArtifactMemoryBytesOffset);
+        rv32::load_u32_le(input_, rv32::kArtifactMemoryBytesOffset + shift);
     if (total < floor || total > rv32::kDefaultMaxMemoryBytes) {
       total = floor;
     }
     rebuild(code, memory, start, total);
-    return true;
+    return artifact_.size() <= max_size_;
   }
 
-  // Serialize a canonical v5 header and body with matching section digests.
+  // Serialize a canonical v7 header and body with matching section digests.
   void rebuild(std::span<const uint8_t> code, std::span<const uint8_t> memory,
                uint32_t memory_start, uint32_t memory_bytes)
   {
     artifact_.clear();
-    artifact_.reserve(rv32::kArtifactHeaderBytes + code.size() + memory.size());
+    artifact_.reserve(kEnvelopeBytes + code.size() + memory.size());
     rv32::test_artifact::append_bytes(artifact_, rv32::kArtifactMagic);
-    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactFormatVersion);
+    rv32::test_artifact::append_u32(artifact_, rv32::kArtifactVersion7);
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactHeaderBytes);
     rv32::test_artifact::append_u64(artifact_, rv32::kArtifactVmProfileDigest);
     rv32::test_artifact::append_u32(artifact_,
@@ -283,8 +301,8 @@ private:
     rv32::test_artifact::append_u32(artifact_, rv32::kArtifactEntryAbiVersion);
     rv32::test_artifact::append_u32(artifact_,
                                     rv32::kArtifactSyscallAbiVersion);
-    rv32::test_artifact::append_u32(artifact_, rv32::kGasTableVersion);
-    rv32::test_artifact::append_u64(artifact_, rv32::kGasScheduleDigest);
+    // Syscall API minor: the baseline.
+    rv32::test_artifact::append_u32(artifact_, 0);
     rv32::test_artifact::append_u32(artifact_, memory_bytes);
     rv32::test_artifact::append_u32(artifact_,
                                     static_cast<uint32_t>(code.size()));
@@ -296,6 +314,7 @@ private:
                                        rv32::artifact_digest(memory));
     rv32::test_artifact::append_bytes(artifact_, code);
     rv32::test_artifact::append_bytes(artifact_, memory);
+    rv32::test_artifact::append_u32(artifact_, 0); // Empty extension list.
   }
 
   std::span<uint8_t> code()
@@ -365,20 +384,27 @@ private:
     set_u64(offset, value);
   }
 
-  // Select a current or transitional gas pair; optionally corrupt only its
-  // digest to exercise pair-wise validation rather than independent fields.
+  // Mutate the v7 syscall API minor, or rewrite as v6 or v5 with a registered
+  // gas pair; keep_pair=false corrupts only its digest, to exercise pair-wise
+  // validation.
   void mutate_gas_schedule(bool keep_pair)
   {
-    const bool transitional = random_flip();
-    const uint32_t version = transitional ? rv32::kTransitionalGasTableVersion
-                                          : rv32::kGasTableVersion;
-    uint64_t digest = transitional ? rv32::kTransitionalGasScheduleDigest
-                                   : rv32::kGasScheduleDigest;
-    if (!keep_pair) {
-      digest ^= random_bit<uint64_t>();
+    if (artifact_.size() + rv32::kArtifactGasDigestBytes > max_size_ ||
+        random_inrange(4) == 0) {
+      mutate_u32_field(rv32::kArtifactSyscallApiMinorOffset, 0);
+      return;
     }
-    set_u32(rv32::kArtifactGasVersionOffset, version);
-    set_u64(rv32::kArtifactGasDigestOffset, digest);
+    const auto schedule = choose(rv32::kV5V6GasSchedules);
+    if (random_inrange(2) == 0) {
+      rv32::test_artifact::rewrite_as_v6(artifact_, schedule);
+    }
+    else {
+      rv32::test_artifact::rewrite_as_v5(artifact_, schedule);
+    }
+    if (!keep_pair) {
+      set_u64(rv32::kArtifactGasDigestOffset,
+              schedule.digest ^ random_bit<uint64_t>());
+    }
   }
 
   // Flip one code byte, optionally repairing SHA-256 so decoding is reached.
@@ -396,6 +422,9 @@ private:
   void mutate_memory(bool repair)
   {
     if (memory().empty()) {
+      if (artifact_.size() == max_size_) {
+        return;
+      }
       const std::array<uint8_t, 1> byte = {
           random_byte(),
       };
@@ -511,9 +540,9 @@ private:
 
   size_t write_output(uint8_t *output) const
   {
-    const size_t size = std::min(artifact_.size(), max_size_);
-    std::ranges::copy(std::span<const uint8_t>(artifact_).first(size), output);
-    return size;
+    CHECK(artifact_.size() <= max_size_);
+    std::ranges::copy(artifact_, output);
+    return artifact_.size();
   }
 
   std::span<const uint8_t> input_;
