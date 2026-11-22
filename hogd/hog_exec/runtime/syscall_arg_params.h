@@ -13,7 +13,7 @@
 
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/components/alias_guard.h"
-#include "hogd/hog_exec/components/syscall_argument_parsers.h"
+#include "hogd/hog_exec/runtime/syscall_argument_parsers.h"
 
 namespace hogd {
 

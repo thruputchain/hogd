@@ -30,8 +30,6 @@ add_library(components_test_objects OBJECT
   execution_mode_test.cc
   ffi_helpers_tests.cc
   hash_buffers_test.cc
-  syscall_buffer_test.cc
-  syscall_parse_tests.cc
   validated_auth_tokens_test.cc
 )
 target_link_libraries(

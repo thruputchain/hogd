@@ -5,9 +5,9 @@
 #include <utility>
 
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/components/syscall_meta_concept.h"
-#include "hogd/hog_exec/components/syscall_types.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
+#include "hogd/hog_exec/runtime/syscall_meta_concept.h"
+#include "hogd/hog_exec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 

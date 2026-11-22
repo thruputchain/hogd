@@ -14,10 +14,12 @@ add_library(syscall_test_objects OBJECT
   syscall_auth_config_test.cc
   syscall_auth_token_test.cc
   syscall_block_data_test.cc
+  syscall_buffer_test.cc
   syscall_entry_outer_tests.cc
   syscall_error_handling_tests.cc
   syscall_misc_tests.cc
   syscall_parse_hardening_rv32_test.cc
+  syscall_parse_tests.cc
   syscall_ristretto255_msm_test.cc
   syscall_verify_signature_test.cc
 )

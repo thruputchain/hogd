@@ -12,8 +12,8 @@
 #include "hogd/hog_exec/components/alias_guard.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
-#include "hogd/hog_exec/components/syscall_arg_params.h"
-#include "hogd/hog_exec/components/syscall_argument_parsers.h"
+#include "hogd/hog_exec/runtime/syscall_arg_params.h"
+#include "hogd/hog_exec/runtime/syscall_argument_parsers.h"
 #include "types.hh"
 
 namespace hogd {
