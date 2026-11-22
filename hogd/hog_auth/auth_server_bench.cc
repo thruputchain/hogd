@@ -536,9 +536,9 @@ report_cpu(benchmark::State &state, size_t txs, const CpuStopwatch &stopwatch)
   state.counters["cpus_busy"] = cpu_seconds / wall_seconds;
 }
 
+#ifdef __linux__
 bool pin_warm_batch64 = false;
 
-#ifdef __linux__
 std::vector<pid_t>
 auth_bench_threads()
 {
