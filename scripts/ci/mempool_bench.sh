@@ -13,6 +13,19 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+event_tmpfs_active=0
+
+event_tmpfs_peer() {
+  python3 /opt/hog-ci/peer.py hog9 "
+    set -euo pipefail
+    path=/bench-single-node-event/data
+    [[ -d \$path && ! -L \$path && -O \$path && -w \$path ]]
+    [[ \$(realpath -e -- "\$path") == \$path && \$(stat -c %a -- "\$path") == 700 ]]
+    [[ \$(findmnt -n -o FSTYPE -T "\$path") == tmpfs &&
+       \$(findmnt -n -o TARGET -T "\$path") == /bench-single-node-event ]]
+    $1
+  "
+}
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -22,6 +35,21 @@ cleanup() {
   local exit_code=$1
 
   ci_enter_cleanup
+  if [[ $event_tmpfs_active == 1 ]]; then
+    # Reclaim before later hog9 suites, after the Event child has been reaped.
+    if ! timeout 30 "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" stop_checked ||
+       ! event_tmpfs_peer '
+         df -Pk -- "$path"
+         rm -rf --one-file-system -- "$path"
+         [[ ! -e $path && ! -L $path ]]
+         df -Pk -- /bench-single-node-event
+       ' > "${HOG_DUMP_DIR:?}/storage-single-node-event-final.txt"; then
+      echo 'Could not reclaim the isolated Event scratch before later suites' >&2
+      if [[ $exit_code == 0 ]]; then
+        exit_code=1
+      fi
+    fi
+  fi
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
 
@@ -75,7 +103,19 @@ echo 'kill stale processes'
 kill_stale_processes
 
 echo 'create event and indexer work dirs'
-ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
+if [[ -n ${HOGD_CI_SINGLE_NODE_EVENT_DIR:-} ]]; then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+     ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
+     ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
+     $HOGD_CI_SINGLE_NODE_EVENT_DIR == /bench-single-node-event/data ]]
+  : "${HOG_DUMP_DIR:?}"
+  event_tmpfs_peer '[[ -z $(ls -A -- "$path") ]]'
+  EVENT_WORK_DIR=$HOGD_CI_SINGLE_NODE_EVENT_DIR
+  event_tmpfs_active=1
+  ci_remote_run hog9 "mkdir -p $(printf '%q' "$INDEXER_DB_DIR")"
+else
+  ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
+fi
 
 echo 'launch loadgen'
 $CONTROL_CLI hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
