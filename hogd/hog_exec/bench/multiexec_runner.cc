@@ -8,6 +8,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -155,9 +156,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts,
                     unsigned int n_connections_per_executor,
                     unsigned int n_coros_per_connection,
-                    unsigned int batch_size, unsigned int num_txs_per_block)
+                    unsigned int batch_size, unsigned int num_txs_per_block,
+                    const std::string &event_work_dir = {})
 {
-  MultiexecCluster cluster(server_addrs);
+  MultiexecCluster cluster(server_addrs, event_work_dir);
 
   IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr());
 
@@ -285,7 +287,8 @@ namespace {
 usage(char *argv[])
 {
   std::println("Usage: {} -s <server_addr, repeated> -a "
-               "<num_accounts>",
+               "<num_accounts> [-b <1|5|10> -E <absolute_event_work_dir>]\n"
+               "The Event work directory must already exist on the Event host.",
                argv[0]);
   exit(EXIT_FAILURE);
 }
@@ -299,10 +302,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::vector<std::string> server_addrs;
   std::optional<int> num_accounts;
+  std::optional<unsigned> batch_size;
+  std::string event_work_dir;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "s:a:")) != -1) {
+  while ((opt = getopt(argc, argv, "s:a:b:E:")) != -1) {
     switch (opt) {
     case 's':
       server_addrs.emplace_back(optarg);
@@ -310,20 +315,42 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'a':
       num_accounts = std::stoi(optarg);
       break;
+    case 'b': {
+      std::string_view value(optarg);
+      if (batch_size || (value != "1" && value != "5" && value != "10")) {
+        usage(argv);
+      }
+      batch_size = value == "10" ? 10 : static_cast<unsigned>(value.front() - '0');
+      break;
+    }
+    case 'E':
+      if (!event_work_dir.empty() || optarg[0] != '/' || optarg[1] == '\0') {
+        usage(argv);
+      }
+      event_work_dir = optarg;
+      break;
     default:
       usage(argv);
     }
   }
   // NOLINTEND(misc-include-cleaner)
-  if (server_addrs.empty() || !num_accounts) {
+  const bool has_event_work_dir = !event_work_dir.empty();
+  if (server_addrs.empty() || !num_accounts ||
+      batch_size.has_value() != has_event_work_dir) {
     usage(argv);
   }
 
   const int account_count = num_accounts.value();
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
-  hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
-                            1'000'000);
+  if (batch_size) {
+    hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, *batch_size,
+                              1'000'000, event_work_dir);
+  }
+  else {
+    for (unsigned size : {1u, 5u, 10u}) {
+      hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, size,
+                                1'000'000);
+    }
+  }
 
   std::fflush(stdout);
   return 0;
