@@ -77,7 +77,9 @@ def main():
     bootstrap = output / "bootstrap.json"
     subprocess.run([str(bench_bin), "--emit-bootstrap-manifest",
                     str(bootstrap), str(args.accounts)], env=env, check=True)
-    with tempfile.TemporaryDirectory(prefix="schedgateway-bench-") as data, \
+    # Combined Metrics can supply a separate filesystem for the backend state.
+    data_root = env.get("HOGD_COMBINED_WORK_DIR") or None
+    with tempfile.TemporaryDirectory(prefix="schedgateway-bench-", dir=data_root) as data, \
             (output / "node.log").open("w") as node_log, \
             (output / "readiness.json").open("w") as readiness, \
             (output / "client.log").open("w") as client_log:
