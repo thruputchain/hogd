@@ -144,6 +144,11 @@ constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 // 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
 constexpr uint64_t kU256SqrtCost = 60;
 
+// U256MulDivRem and U128MulDivRem, experimental. Provisional until the first
+// calibration run that has their rows.
+constexpr uint64_t kU256MulDivRemCost = 120;
+constexpr uint64_t kU128MulDivRemCost = 70;
+
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
 // plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
@@ -276,7 +281,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 22> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -299,6 +304,8 @@ constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
     {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
     {.name = u8"U256Sqrt", .cost = kU256SqrtCost},
+    {.name = u8"U256MulDivRem", .cost = kU256MulDivRemCost},
+    {.name = u8"U128MulDivRem", .cost = kU128MulDivRemCost},
 }};
 
 } // namespace hogd

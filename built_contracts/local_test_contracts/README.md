@@ -36,9 +36,10 @@ directories.
   inside. Each method places its arguments with raw argument words and asserts
   on the results itself. Driven by
   `hogd/hog_exec/runtime/input_alias_test_rv32_test.cc`.
-- `math_syscall_test`: U256Sqrt. The host test picks values and checks the
-  roots; the guest checks the syscall against the SDK's square root and that
-  the root may not overlap the value. Driven by
+- `math_syscall_test`: U256Sqrt, U256MulDivRem and U128MulDivRem. The host
+  test picks operands and checks the results; the guest checks each syscall
+  against the SDK's software arithmetic, a zero divisor, and which arguments
+  may overlap. Driven by
   `hogd/hog_exec/runtime/math_syscall_test_rv32_test.cc`.
 - `tx_context_test` — transaction-context syscalls: GetSourceTransactionHash,
   GetBlockHeight, and the valid-statistic side of GetTransactionStatistics.
