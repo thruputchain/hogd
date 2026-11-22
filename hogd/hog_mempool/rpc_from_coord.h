@@ -727,12 +727,16 @@ private:
   schedulercoord_commit_block_impl(BlockID block_id,
                                    ConsensusValue expected_value);
 
+  struct ValidationRpcSample;
+  struct ValidationRpcGroup;
+  struct ValidationChunkStats;
+
   // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
   // [SchedulerValidationExecutorFailed] when an executor could not run a tx.
   x23::Async<SchedulerValidationOutcome>
   validate_batch_chunk(BlockID block_id,
                        x23::span<const ProposedTransaction> txs,
-                       size_t executor_idx);
+                       size_t executor_idx, ValidationRpcSample *sample);
 
   // Looks up each of [signed_tx_hashes] in the mempool by its exact signed
   // encoding and, for each tx found, writes its [TransactionHash] to the same
@@ -745,14 +749,22 @@ private:
   x23::Async<PreparedAndValidatedChunk> prepare_and_validate_chunk(
       BlockID block_id, x23::span<const SignedTransactionHash> signed_tx_hashes,
       x23::span<const NondeterministicProposalData> tx_nominations,
-      x23::span<TransactionHash> tx_hashes);
+      x23::span<TransactionHash> tx_hashes, ValidationChunkStats *stats);
 
   x23::Async<SchedulerValidationOutcome>
   multiplex_large_validation_chunk_across_executors(
-      BlockID block_id, x23::span<const ProposedTransaction> txs);
+      BlockID block_id, x23::span<const ProposedTransaction> txs,
+      ValidationRpcGroup *stats);
 
   x23::Async<SchedulerValidationOutcome>
-  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs);
+  validate_batch(BlockID block_id, const x23::Vec<ProposedTransaction> &txs,
+                 ValidationChunkStats *stats);
+
+  static void write_validation_rpc_stats(
+      BlockHeight height, BlockID block_id, int outcome, size_t tx_count,
+      size_t missing_count, size_t executor_count,
+      const std::vector<ValidationChunkStats> &chunks, int64_t launch_ns,
+      int64_t drain_ns, int64_t merge_ns);
 
   x23::Async<ExecResult>
   open_validation_block(BlockID block_id, BlockExecutionContext block_execution,

@@ -3,6 +3,7 @@
 #include <algorithm>
 #include <atomic>
 #include <cassert>
+#include <charconv>
 #include <chrono>
 #include <cstddef>
 #include <cstdint>
@@ -106,8 +107,9 @@ nightly_stages_enabled()
     };
     return dash != std::string_view::npos && digits(run.substr(0, dash)) &&
            digits(run.substr(dash + 1)) &&
-           matches("GIT_BRANCH",
-                   "codex/nightly-two-cohort-stage-diagnostics") &&
+           (matches("GIT_BRANCH",
+                    "codex/nightly-two-cohort-stage-diagnostics") ||
+            matches("GIT_BRANCH", "codex/nightly-two-cohort-validation-rpc")) &&
            matches("HOGD_CI_CONTAINER", "1") &&
            matches("HOGD_CI_OFFLINE", "1") &&
            matches("HOG_E2E_PAYMENT_MULTI_NODE_ASAN", "0") &&
@@ -115,6 +117,26 @@ nightly_stages_enabled()
            (matches("HOG_HOST", "hog7") || matches("HOG_HOST", "hog11"));
   }();
   return enabled;
+}
+
+bool
+validation_rpc_diagnostics_enabled()
+{
+  static const bool enabled = [] {
+    const char *branch = std::getenv("GIT_BRANCH");
+    return nightly_stages_enabled() && branch &&
+           std::string_view(branch) ==
+               "codex/nightly-two-cohort-validation-rpc";
+  }();
+  return enabled;
+}
+
+int64_t
+validation_clock_ns()
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             std::chrono::steady_clock::now().time_since_epoch())
+      .count();
 }
 
 void
@@ -2340,14 +2362,147 @@ MempoolCoordinatorRpc::schedulercoord_commit_genesis_ceremony(
   co_return committed;
 }
 
+struct MempoolCoordinatorRpc::ValidationRpcSample {
+  int64_t start_ns{};
+  int64_t end_ns{};
+};
+
+struct MempoolCoordinatorRpc::ValidationRpcGroup {
+  struct ExecutorCalls {
+    size_t calls{};
+    size_t txs{};
+    ValidationRpcSample sample{};
+  };
+  std::vector<ExecutorCalls> executors;
+  size_t ordinal{};
+  bool sample{};
+};
+
+struct MempoolCoordinatorRpc::ValidationChunkStats {
+  std::vector<ValidationRpcGroup> rpc_groups;
+  size_t ordinal{};
+  int64_t prepare_ns{};
+  int64_t executor_fanout_ns{};
+  int64_t materialize_ns{};
+  bool body_missing{};
+};
+
+void
+MempoolCoordinatorRpc::write_validation_rpc_stats(
+    BlockHeight height, BlockID block_id, int outcome, size_t tx_count,
+    size_t missing_count, size_t executor_count,
+    const std::vector<ValidationChunkStats> &chunks, int64_t launch_ns,
+    int64_t drain_ns, int64_t merge_ns)
+{
+  const auto distribution = [](std::vector<int64_t> values) {
+    std::ranges::sort(values);
+    if (values.empty())
+      return std::string(R"({"samples":0})");
+    return std::format(
+        R"({{"samples":{},"p50_ns":{},"p95_ns":{},"max_ns":{}}})",
+        values.size(), values[(values.size() - 1) / 2],
+        values[(values.size() - 1) * 95 / 100], values.back());
+  };
+  struct ExecutorStats {
+    size_t issued{};
+    size_t transactions{};
+    size_t sampled_incomplete{};
+    std::vector<int64_t> await_ns;
+    std::vector<std::pair<int64_t, int>> endpoints;
+  };
+  std::vector<ExecutorStats> executors(executor_count);
+  std::vector<int64_t> prepare, fanout, materialize;
+  size_t missing_chunks = 0;
+  size_t rpc_groups = 0;
+  for (const auto &chunk : chunks) {
+    if (chunk.prepare_ns)
+      prepare.push_back(chunk.prepare_ns);
+    if (chunk.executor_fanout_ns)
+      fanout.push_back(chunk.executor_fanout_ns);
+    if (chunk.materialize_ns)
+      materialize.push_back(chunk.materialize_ns);
+    missing_chunks += chunk.body_missing;
+    rpc_groups += chunk.rpc_groups.size();
+    for (const auto &group : chunk.rpc_groups) {
+      for (size_t i = 0; i < group.executors.size(); ++i) {
+        const auto &source = group.executors[i];
+        auto &dest = executors[i];
+        dest.issued += source.calls;
+        dest.transactions += source.txs;
+        if (source.sample.start_ns && !source.sample.end_ns)
+          ++dest.sampled_incomplete;
+        if (source.sample.end_ns > source.sample.start_ns) {
+          dest.await_ns.push_back(source.sample.end_ns -
+                                  source.sample.start_ns);
+          dest.endpoints.emplace_back(source.sample.start_ns, 1);
+          dest.endpoints.emplace_back(source.sample.end_ns, -1);
+        }
+      }
+    }
+  }
+  auto report = std::format(
+      R"({{"height":{},"block_id":{},"outcome":{},"candidate_txs":{},"missing_txs":{},)"
+      R"("outer_chunks":{},"missing_outer_chunks":{},"executor_rpc_groups":{},"rpc_sample_group_stride":4,)"
+      R"("connections_per_executor":{},)"
+      R"("parent_launch_ns":{},"parent_handle_drain_ns":{},"parent_merge_ns":{},)"
+      R"("chunk_prepare":{},"chunk_executor_fanout":{},"chunk_materialize":{},"executors":[)",
+      height, block_id, outcome, tx_count, missing_count, chunks.size(),
+      missing_chunks, rpc_groups, kNumClientsPerExecutor, launch_ns, drain_ns,
+      merge_ns, distribution(std::move(prepare)),
+      distribution(std::move(fanout)), distribution(std::move(materialize)));
+  x23::Vec<ExecCard> cards;
+  CHECK_EQ(Registration::registration().executors_registered(&cards),
+           executor_count);
+  for (size_t i = 0; i < executors.size(); ++i) {
+    x23::HostPort address;
+    CHECK(address.parse(cards[i].address));
+    unsigned port = 0;
+    const auto *port_end = address.port.data() + address.port.size();
+    const auto parsed = std::from_chars(address.port.data(), port_end, port);
+    CHECK(parsed.ec == std::errc{} && parsed.ptr == port_end && port > 0 &&
+          port <= 65535);
+    auto &executor = executors[i];
+    std::ranges::sort(executor.endpoints);
+    int active = 0;
+    int peak = 0;
+    for (const auto &endpoint : executor.endpoints) {
+      active += endpoint.second;
+      peak = std::max(peak, active);
+    }
+    report += std::format(
+        R"({}{{"index":{},"registered_port":{},"issued_rpcs":{},"issued_txs":{},"sampled_incomplete":{},)"
+        R"("sampled_peak_overlap":{},"caller_await":{}}})",
+        i ? "," : "", i, port, executor.issued, executor.transactions,
+        executor.sampled_incomplete, peak,
+        distribution(std::move(executor.await_ns)));
+  }
+  report += "]}\n";
+  static const x23::UniqueFd file = [] {
+    const char *directory = std::getenv("HOG_DUMP_DIR");
+    CHECK(directory && *directory);
+    const auto path =
+        std::filesystem::path(directory) / "nightly-validation-rpc.jsonl";
+    x23::UniqueFd opened(
+        ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600));
+    CHECK(opened.get() >= 0);
+    return opened;
+  }();
+  CHECK_EQ(::write(file.get(), report.data(), report.size()),
+           static_cast<ssize_t>(report.size()));
+}
+
 x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch_chunk(
     BlockID block_id, x23::span<const ProposedTransaction> txs,
-    size_t executor_idx)
+    size_t executor_idx, ValidationRpcSample *sample)
 {
+  if (sample)
+    sample->start_ns = validation_clock_ns();
   ExecValidateBatchResult res =
       co_await exec_clients_[executor_idx].executorsched_validate_batch(
           block_id, txs);
+  if (sample)
+    sample->end_ns = validation_clock_ns();
   CHECK_EQ(res.size(), txs.size());
   CHECK(!std::ranges::contains(res, ExecResult::ExecResultUnrecoverable));
   // A system error means the executor could not run a transaction (e.g. its
@@ -2441,10 +2596,11 @@ x23::Async<MempoolCoordinatorRpc::PreparedAndValidatedChunk>
 MempoolCoordinatorRpc::prepare_and_validate_chunk(
     BlockID block_id, x23::span<const SignedTransactionHash> signed_tx_hashes,
     x23::span<const NondeterministicProposalData> tx_nominations,
-    x23::span<TransactionHash> tx_hashes)
+    x23::span<TransactionHash> tx_hashes, ValidationChunkStats *stats)
 {
   co_await default_coropoll().pool_.bg();
 
+  const int64_t prepare_start = stats ? validation_clock_ns() : 0;
   PreparedValidationChunk prepared =
       co_await prepare_validation_chunk(signed_tx_hashes, tx_nominations,
                                         tx_hashes);
@@ -2453,21 +2609,32 @@ MempoolCoordinatorRpc::prepare_and_validate_chunk(
       .missing_signed_tx_hashes = std::move(prepared.missing_signed_tx_hashes),
       .outcome = SchedulerValidationOutcome::SchedulerValidationOK,
   };
+  if (stats) {
+    stats->prepare_ns = validation_clock_ns() - prepare_start;
+    stats->body_missing = !ret.missing_signed_tx_hashes.empty();
+  }
   if (!ret.missing_signed_tx_hashes.empty()) {
     co_return ret;
   }
 
-  ret.outcome = co_await validate_batch(block_id, prepared.proposed_txs);
+  const int64_t executor_start = stats ? validation_clock_ns() : 0;
+  ret.outcome = co_await validate_batch(block_id, prepared.proposed_txs, stats);
+  const int64_t materialize_start = stats ? validation_clock_ns() : 0;
+  if (stats)
+    stats->executor_fanout_ns = materialize_start - executor_start;
   ret.txs.reserve(prepared.proposed_txs.size());
   for (ProposedTransaction &proposed_tx : prepared.proposed_txs) {
     ret.txs.push_back(std::move(proposed_tx.signed_tx));
   }
+  if (stats)
+    stats->materialize_ns = validation_clock_ns() - materialize_start;
   co_return ret;
 }
 
 x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::validate_batch(BlockID block_id,
-                                      const x23::Vec<ProposedTransaction> &txs)
+                                      const x23::Vec<ProposedTransaction> &txs,
+                                      ValidationChunkStats *stats)
 {
   // We split the [txs] into [kNumBigChunks] chunks and then send each chunk
   // from a different coroutine. Each coroutine then further splits the chunk
@@ -2478,12 +2645,22 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
 
   x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(large_chunks.size());
+  if (stats)
+    stats->rpc_groups.resize(large_chunks.size());
 
-  for (const ChunkRange &chunk : large_chunks) {
+  for (size_t i = 0; i < large_chunks.size(); ++i) {
+    const ChunkRange &chunk = large_chunks[i];
     x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                   txs.begin() + chunk.end);
+    ValidationRpcGroup *group = stats ? &stats->rpc_groups[i] : nullptr;
+    if (group) {
+      group->ordinal = i;
+      // Rotate groups and stripes so selection can cover both executors.
+      group->sample = (i + stats->ordinal) % 4 == 0;
+    }
     handles.push_back(
-        multiplex_large_validation_chunk_across_executors(block_id, tx_chunk));
+        multiplex_large_validation_chunk_across_executors(block_id, tx_chunk,
+                                                          group));
   }
 
   x23::Vec<SchedulerValidationOutcome> results(
@@ -2508,7 +2685,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
 
 x23::Async<SchedulerValidationOutcome>
 MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
-    BlockID block_id, x23::span<const ProposedTransaction> txs)
+    BlockID block_id, x23::span<const ProposedTransaction> txs,
+    ValidationRpcGroup *stats)
 {
   co_await default_coropoll().pool_.bg();
 
@@ -2518,13 +2696,34 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
 
+  const size_t connection_count = exec_clients_.size();
+  size_t sampled_stripe = 0;
+  if (stats) {
+    // Runtime init appends each registration-ordered set of clients ten
+    // times. Keep routing unchanged and aggregate counts by registration ID.
+    CHECK_EQ(connection_count, num_exec_shards_ * kNumClientsPerExecutor);
+    stats->executors.resize(num_exec_shards_);
+    if (stats->sample && !chunks.empty()) {
+      const size_t stripes =
+          (chunks.size() + num_exec_shards_ - 1) / num_exec_shards_;
+      sampled_stripe = stats->ordinal % stripes;
+    }
+  }
   for (size_t i = 0; i < chunks.size(); i++) {
     const ChunkRange &chunk = chunks[i];
     x23::span<const ProposedTransaction> tx_chunk(txs.begin() + chunk.start,
                                                   txs.begin() + chunk.end);
+    const size_t connection = i % connection_count;
+    ValidationRpcSample *sample = nullptr;
+    if (stats) {
+      auto &record = stats->executors[connection % num_exec_shards_];
+      ++record.calls;
+      record.txs += tx_chunk.size();
+      if (stats->sample && i / num_exec_shards_ == sampled_stripe)
+        sample = &record.sample;
+    }
     handles.push_back(
-        validate_batch_chunk(block_id, tx_chunk,
-                             /*executor_idx=*/i % exec_clients_.size()));
+        validate_batch_chunk(block_id, tx_chunk, connection, sample));
   }
 
   x23::Vec<SchedulerValidationOutcome> results(
@@ -2572,6 +2771,21 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   size_t validation_tx_count = 0;
   BlockID validation_block_id{};
   const BlockHeight diagnostic_height = proposal.header.block_height;
+  std::vector<ValidationChunkStats> validation_rpc_stats;
+  int64_t validation_launch_ns = 0;
+  int64_t validation_drain_ns = 0;
+  int64_t validation_merge_ns = 0;
+  size_t observed_missing_count = 0;
+  // This writer runs after the existing validation timer is recorded.
+  x23::Defer record_rpc_stats([&] {
+    if (!validation_rpc_stats.empty())
+      write_validation_rpc_stats(diagnostic_height, validation_block_id,
+                                 static_cast<int>(validation_outcome),
+                                 validation_tx_count, observed_missing_count,
+                                 num_exec_shards_, validation_rpc_stats,
+                                 validation_launch_ns, validation_drain_ns,
+                                 validation_merge_ns);
+  });
   x23::Defer record_validation_stats([&] {
     const double seconds = timer.elapsed();
     if (nightly_stages_enabled())
@@ -2883,8 +3097,22 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                      kNumTxsPerNominationChunk);
         x23::Vec<x23::Async<PreparedAndValidatedChunk>> chunk_handles;
         chunk_handles.reserve(validation_chunks.size());
+        if (validation_rpc_diagnostics_enabled()) {
+          static std::atomic<size_t> logged{0};
+          constexpr size_t limit = 256;
+          const size_t attempt = logged.fetch_add(1, std::memory_order_relaxed);
+          if (attempt < limit)
+            validation_rpc_stats.resize(validation_chunks.size());
+          else if (attempt == limit)
+            warn("two-cohort validation RPC capture reached its {}-attempt "
+                 "limit",
+                 limit);
+        }
+        const bool tracing = !validation_rpc_stats.empty();
+        const int64_t launch_start = tracing ? validation_clock_ns() : 0;
 
-        for (const ChunkRange &chunk : validation_chunks) {
+        for (size_t i = 0; i < validation_chunks.size(); ++i) {
+          const ChunkRange &chunk = validation_chunks[i];
           x23::span<const SignedTransactionHash> signed_tx_hashes_span(
               cache.signed_tx_hashes.begin() + chunk.start,
               cache.signed_tx_hashes.begin() + chunk.end);
@@ -2895,12 +3123,18 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                                         chunk.start,
                                                     cache.tx_hashes.begin() +
                                                         chunk.end);
-          chunk_handles.push_back(
-              prepare_and_validate_chunk(validation_block_id,
-                                         signed_tx_hashes_span,
-                                         tx_nominations_span, tx_hashes_span));
+          ValidationChunkStats *stats =
+              tracing ? &validation_rpc_stats[i] : nullptr;
+          if (stats)
+            stats->ordinal = i;
+          chunk_handles.push_back(prepare_and_validate_chunk(
+              validation_block_id, signed_tx_hashes_span, tx_nominations_span,
+              tx_hashes_span, stats));
         }
 
+        const int64_t drain_start = tracing ? validation_clock_ns() : 0;
+        if (tracing)
+          validation_launch_ns = drain_start - launch_start;
         x23::Vec<std::optional<PreparedAndValidatedChunk>> chunk_results(
             chunk_handles.size());
         std::exception_ptr first_exception;
@@ -2916,6 +3150,9 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
         if (first_exception) {
           std::rethrow_exception(first_exception);
         }
+        const int64_t merge_start = tracing ? validation_clock_ns() : 0;
+        if (tracing)
+          validation_drain_ns = merge_start - drain_start;
         for (std::optional<PreparedAndValidatedChunk> &settled :
              chunk_results) {
           if (!settled) {
@@ -2927,6 +3164,8 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
           missing_signed_tx_hashes += chunk_result.missing_signed_tx_hashes;
           cache.txs += chunk_result.txs;
         }
+        if (tracing)
+          validation_merge_ns = validation_clock_ns() - merge_start;
         co_return;
       });
 
@@ -3093,9 +3332,12 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   co_await decrement_num_validations_in_progress();
   validation_outcome = dag_outcome;
   if (nightly_stages_enabled())
-    write_validation_dag_stages(
-        validation_dag, diagnostic_height, validation_block_id,
-        static_cast<int>(validation_outcome), missing_signed_tx_hashes.size());
+    write_validation_dag_stages(validation_dag, diagnostic_height,
+                                validation_block_id,
+                                static_cast<int>(validation_outcome),
+                                missing_signed_tx_hashes.size());
+  if (!validation_rpc_stats.empty())
+    observed_missing_count = missing_signed_tx_hashes.size();
   if (!validation_dag.ok() && validation_dag.failure().exception) {
     std::rethrow_exception(validation_dag.failure().exception);
   }

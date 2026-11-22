@@ -40,7 +40,8 @@ MEMPOOL_HOSTS=(hog7 hog11)
 NODE_HOST_GROUPS=("hog4 hog5 hog6 hog7" "hog8 hog9 hog10 hog11")
 
 two_cohort_diagnostics=0
-if [[ ${GIT_BRANCH:-} == codex/nightly-two-cohort-stage-diagnostics &&
+if [[ ( ${GIT_BRANCH:-} == codex/nightly-two-cohort-stage-diagnostics ||
+        ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-rpc ) &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog10 && ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-} == 0 &&
       ${HOG_XID:-} =~ ^hogd-e2e-payment-multi-node-[0-9]+-[0-9]+$ &&
