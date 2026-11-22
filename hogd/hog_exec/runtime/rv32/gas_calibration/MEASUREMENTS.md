@@ -72,13 +72,15 @@ row set (run `45015245614`). 60 covers the usual layouts with about 20% to spare
 and does not cover that one.
 
 Those are the coroutine wrapper's numbers. Syscalls whose bodies return a plain
-result now run without a coroutine frame. Against run `45030683250` on main's
-code, run `45053887638` measured those rows a median 38 ns cheaper per call (51
-rows under 3 us, 34 to 42 ns each, two crossings' worth for the Update+Finalize
-pairs): the stateless rows take 23.9 to 27.2 ns on the entry path and 40.7 to
-43.4 ns through the VM, about 25 gas with the ECALL taken off. Rows whose bodies
-return a MaybeAsync, the bytestring, NNInt and frame rows, did not move (median
-+0.8 ns over 39 rows). The base was left at 60.
+result now run without a coroutine frame. Against run `45053917939`, main at
+`cfa6fe0` on the same evening, run `45053887638` measured those rows a median
+37.1 ns cheaper per call (51 rows under 3 us; 33 to 48 ns from the 10th to the
+90th percentile, about 48 ns for SHA256Update, and two crossings' worth for the
+Update+Finalize pairs): the stateless rows take 23.9 to 27.2 ns on the entry
+path and 40.7 to 43.4 ns through the VM, about 25 gas with the ECALL taken off.
+Rows whose bodies return a MaybeAsync, the bytestring, NNInt and frame rows, did
+not move: median -0.1 ns over 39 rows, the cheap ones within 2 ns on the entry
+path and vm/NNIntGet 5.6% dearer. The base was left at 60.
 
 `syscall_reference.txt` was regenerated from run `45053887638` for that change.
 Its guards are multiples of the crossing, which fell 2.4x, so against the old
