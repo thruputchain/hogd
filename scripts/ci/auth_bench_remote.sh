@@ -37,11 +37,11 @@ auth_command=(/bin/bash scripts/ci/auth_bench.sh "$BUILD_DIR" "$REMOTE_OUTPUT")
 pin_warm_batch64=${AUTH_BENCH_PIN_WARM_BATCH64:-}
 if [[ -n $pin_warm_batch64 ]]; then
   [[ $pin_warm_batch64 == 1 && ${HOGD_CI_CONTAINER:-} == 1 &&
-     ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]
+    ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]
 elif [[ $COMMAND == start && ${GIT_BRANCH:-} == main &&
-        ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
-        ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-        ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]; then
+  ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+  ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+  ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]; then
   # Use the qualified placement only for stock hosted Combined Metrics.
   pin_warm_batch64=1
 fi
