@@ -64,18 +64,25 @@ struct TestSchedEvent {
 static_assert(is_SchedEvent1<TestSchedEvent *, std::type_identity_t>);
 
 auto
-connect_to_event_exec_server(const std::string &address)
+connect_to_event_exec_server(const std::string &address, bool use_nagle)
 {
   x23::HostPort host_port;
   if (!host_port.parse(address)) {
     throw std::runtime_error(
         std::format("Failed to parse event exec server address: {}", address));
   }
-  auto client = make_rpc_client<EventExecutor1>(host_port, false)();
-  if (!client)
+  auto endpoint = host_port.to_addr(true);
+  if (!endpoint)
+    exit_cannot_resolve(host_port, endpoint.error());
+  auto &poll = default_coropoll();
+  auto connected = poll.tcpconnect(&*endpoint)();
+  if (!connected)
     panic("connect_to_event_exec_server failed: {}",
-          client.error().error_code().message());
-  return std::move(*client);
+          connected.error().error_code().message());
+  x23::UniqueFd fd{*connected};
+  if (use_nagle)
+    x23::set_nodelay(fd, false);
+  return x23::rpc_stream_logged(poll, fd.release())->client<EventExecutor1>();
 }
 
 auto
@@ -145,7 +152,7 @@ create_fake_event_log(size_t tx_id)
   return event_log;
 }
 
-using event_exec_client_t = decltype(connect_to_event_exec_server(""));
+using event_exec_client_t = decltype(connect_to_event_exec_server("", false));
 using event_sched_client_t = decltype(connect_to_event_sched_server(""));
 
 constexpr size_t kCoroBatchSize = 100;
@@ -186,7 +193,7 @@ void
 run_event_bench(const std::string &exec_server_addr,
                 const std::string &sched_server_addr, size_t num_events,
                 size_t n_connections, size_t n_coros_per_connection,
-                BlockID block_number)
+                BlockID block_number, bool use_nagle)
 {
   auto representative_event = create_fake_event_log(0);
   auto event_size = x23::serialize(representative_event).size();
@@ -201,7 +208,8 @@ run_event_bench(const std::string &exec_server_addr,
   std::vector<event_exec_client_t> exec_clients;
   exec_clients.reserve(n_connections);
   for (size_t i = 0; i < n_connections; i++) {
-    exec_clients.push_back(connect_to_event_exec_server(exec_server_addr));
+    exec_clients.push_back(
+        connect_to_event_exec_server(exec_server_addr, use_nagle));
   }
 
   auto total_start_time = x23::fastclock::now();
@@ -276,13 +284,14 @@ usage(char *argv[])
 {
   std::println("Usage: {} -e <event_exec_server_addr> -s "
                "<event_sched_server_addr> [-n num_events] [-c num_connections] "
-               "[-o coros_per_connection] [-b batch_size]",
+               "[-o coros_per_connection] [-N]",
                argv[0]);
   std::println("  -e: Event executor server address (e.g., hostname:8090)");
   std::println("  -s: Event scheduler server address (e.g., hostname:8091)");
   std::println("  -n: Number of events (default: 1000000)");
   std::println("  -c: Number of connections (default: 10)");
   std::println("  -o: Coroutines per connection (default: 100)");
+  std::println("  -N: Enable Nagle on event executor client sockets");
   exit(EXIT_FAILURE);
 }
 } // namespace
@@ -299,10 +308,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   size_t num_events = 1'000'000;
   size_t num_connections = 20;
   size_t coros_per_connection = 100;
+  bool use_nagle = false;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:s:n:c:o:b:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:s:n:c:o:b:N")) != -1) {
     switch (opt) {
     case 'e':
       exec_server_addr = optarg;
@@ -318,6 +328,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       break;
     case 'o':
       coros_per_connection = std::stoull(optarg);
+      break;
+    case 'N':
+      use_nagle = true;
       break;
     default:
       usage(argv);
@@ -339,7 +352,7 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   for (size_t i = 0; i < 20; i++) {
     hogd::run_event_bench(exec_server_addr, sched_server_addr, num_events,
                           num_connections, coros_per_connection,
-                          /*block_number=*/i);
+                          /*block_number=*/i, use_nagle);
   }
 
   std::fflush(stdout);
