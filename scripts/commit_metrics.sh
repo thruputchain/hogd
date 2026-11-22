@@ -3,8 +3,10 @@ set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # This diagnostic branch is collected as an artifact.
-  if [[ ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics &&
-        ${HOGD_CI_CONTAINER:-} == 1 ]]; then
+  if [[ ${HOGD_CI_CONTAINER:-} == 1 &&
+        ( ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics ||
+          ${GIT_BRANCH:-} == codex/nightly-event-storage-ram ||
+          ${GIT_BRANCH:-} == codex/nightly-event-storage-disk ) ]]; then
     exit 0
   fi
   # The trusted controller publishes collected metrics after the job exits.

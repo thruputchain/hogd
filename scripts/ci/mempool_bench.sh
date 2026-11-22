@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 . "$(dirname "$0")/bench_harness.sh"
+. "$(dirname "$0")/event_storage.sh"
 . "$(dirname "$0")/../hog-ip.sh"
 ci_enable_error_trace
 
@@ -13,6 +14,14 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+event_storage_arm=
+if event_storage_arm=$(ci_event_storage_arm); then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 &&
+     ${HOGD_PAYMENT_WORK_DIR:-} == /bench-ram/work_dir/ &&
+     $WORK_DIR == "$HOGD_PAYMENT_WORK_DIR" &&
+     ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool ]]
+  mkdir -p "${HOG_DUMP_DIR:?}"
+fi
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -75,7 +84,12 @@ echo 'kill stale processes'
 kill_stale_processes
 
 echo 'create event and indexer work dirs'
-ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
+if [[ -n $event_storage_arm ]]; then
+  EVENT_WORK_DIR=$(ci_event_storage_prepare "$event_storage_arm")
+  ci_event_storage_peer hog9 "mkdir -p -- $(printf '%q' "$INDEXER_DB_DIR")"
+else
+  ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
+fi
 
 echo 'launch loadgen'
 $CONTROL_CLI hog7 $CI_CONTROL_PORT start hogd/loadgen/loadgen_server --bind-ip "$(hog_ip hog7)" --port $LOADGEN_PORT --metrics-port $LOADGEN_HTTP_PORT
@@ -98,7 +112,19 @@ $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir "$EVENT_WORK_DIR" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
+event_command=(
+  "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" start hogd/hog_event/hog-event
+  --mempool-addr "$(hog_ip hog10):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip hog9)"
+  --work-dir "$EVENT_WORK_DIR" --executor-port "$EVENT_EXECUTOR_PORT"
+  --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT"
+  --metrics-port "$EVENT_HTTP_PORT"
+)
+if [[ -n $event_storage_arm ]]; then
+  event_launch=$("${event_command[@]}")
+  event_stderr=$(ci_event_storage_log_path stderr "$event_launch")
+else
+  "${event_command[@]}"
+fi
 
 echo 'launch indexer'
 $CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path "$INDEXER_DB_DIR" --bind-ip "$(hog_ip hog9)" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
@@ -110,29 +136,37 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
-  chuckd.dev \
-  -l info \
-  --stack \
-  --config ./scripts/config-chuckd.json \
-  --instance 970c9b \
-  --seed 1410441218572558875 \
-  --metrics :2223 \
-  bench coordinator_loadgen \
-  --skip 20 \
-  --in-addr "$(hog_ip hog4)":7888 \
-  --debug-port 5500 \
-  --num-accts 10000 \
-  --txs-per-block 1000000 \
-  --num-blocks 1000 \
-  --network-hash 11111111111111111111111111111112 \
-  --storage-dir $WORK_DIR/chuckd-storage \
-  --out-addr :50000 \
-  --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
-  --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
-  --scpd-path ./$BUILD_DIR/scpd.dev \
-  --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+coordinator_command=(
+  "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start
+    chuckd.dev
+    -l info
+    --stack
+    --config ./scripts/config-chuckd.json
+    --instance 970c9b
+    --seed 1410441218572558875
+    --metrics :2223
+    bench coordinator_loadgen
+    --skip 20
+    --in-addr "$(hog_ip hog4)":7888
+    --debug-port 5500
+    --num-accts 10000
+    --txs-per-block 1000000
+    --num-blocks 1000
+    --network-hash 11111111111111111111111111111112
+    --storage-dir $WORK_DIR/chuckd-storage
+    --out-addr :50000
+    --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT
+    --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT
+    --scpd-path ./$BUILD_DIR/scpd.dev
+    --scp-handle-addr 127.0.0.1:3300
+    --scp-control-addr 127.0.0.1:4400
+)
+if [[ -n $event_storage_arm ]]; then
+  coordinator_launch=$("${coordinator_command[@]}")
+  coordinator_stdout=$(ci_event_storage_log_path stdout "$coordinator_launch")
+else
+  "${coordinator_command[@]}"
+fi
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -145,7 +179,7 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 nightly_stage_env=()
-if [[ ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics &&
+if [[ ( ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics || -n $event_storage_arm ) &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
       ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool ]]; then
   mkdir -p "${HOG_DUMP_DIR:?}"
@@ -175,8 +209,12 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
 fi
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+if [[ -n $event_storage_arm ]]; then
+  ci_event_storage_read_log coordinator "$coordinator_stdout" > coordinator_output.txt
+else
+  # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
+  scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -199,6 +237,11 @@ if (( ${#nightly_stage_env[@]} )); then
     "$HOG_DUMP_DIR/nightly-stage.tsv" coordinator_output.txt \
     --coordinator-artifact "$HOG_DUMP_DIR/nightly-coordinator.tsv" \
     --summary-output "$HOG_DUMP_DIR/nightly-stage-summary.json"
+fi
+
+if [[ -n $event_storage_arm ]]; then
+  ci_event_storage_read_log event "$event_stderr" > "$HOG_DUMP_DIR/nightly-event-close.json"
+  exit 0
 fi
 
 echo 'clone metrics history # This is idempotent'
