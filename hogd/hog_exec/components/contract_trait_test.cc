@@ -9,6 +9,7 @@
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/method_id.h"
 
 namespace hogd {
 
