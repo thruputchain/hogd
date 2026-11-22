@@ -103,6 +103,11 @@ guard syscall/SHA256Update/32 1.286
 guard syscall/SHA256Update/32768 278.692
 guard syscall/SHA256Update/4096 35.914
 guard syscall/SHA256Update0+Finalize 3.128
+# U256Sqrt: added by hand from run 44953108898, the run its price is from
+# (crossing baseline 61.0 ns there). The rest of this file is one earlier run.
+guard syscall/U256SqrtMixed 1.981
+guard syscall/U256SqrtOnes 1.803
+guard syscall/U256SqrtSmall 1.945
 guard syscall/VerifySignature/0 446.883
 guard syscall/VerifySignature/1024 478.022
 guard syscall/VerifySignature/64 455.050

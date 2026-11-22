@@ -135,9 +135,10 @@ values that varied from call to call the arithmetic alone took 14 to 23 ns
 longer, which is up to 15 gas at this unit. That figure is from a development
 machine, not from hog10. The last 8 are margin on top of it, to be safe.
 
-The run proposed guards of 1.945, 1.803 and 1.981 times the crossing baseline
-for the three rows. They enter `syscall_reference.txt` the next time it is
-regenerated with mode=reference.
+`syscall_reference.txt` guards the three rows at 1.945, 1.803 and 1.981 times
+the crossing baseline, the ratios this run measured, so the check fails when
+one reaches twice that. The three lines were added to that file by hand; the
+rest of it is from the earlier run it was generated from.
 
 ## Storage
 
