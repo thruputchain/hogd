@@ -51,7 +51,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
