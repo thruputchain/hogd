@@ -3,6 +3,7 @@ set -Eeuo pipefail
 
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 . "$(dirname "$0")/bench_harness.sh"
+. "$(dirname "$0")/coordinator_storage.sh"
 . "$(dirname "$0")/../hog-ip.sh"
 ci_enable_error_trace
 
@@ -110,29 +111,48 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
-  chuckd.dev \
-  -l info \
-  --stack \
-  --config ./scripts/config-chuckd.json \
-  --instance 970c9b \
-  --seed 1410441218572558875 \
-  --metrics :2223 \
-  bench coordinator_loadgen \
-  --skip 20 \
-  --in-addr "$(hog_ip hog4)":7888 \
-  --debug-port 5500 \
-  --num-accts 10000 \
-  --txs-per-block 1000000 \
-  --num-blocks 1000 \
-  --network-hash 11111111111111111111111111111112 \
-  --storage-dir $WORK_DIR/chuckd-storage \
-  --out-addr :50000 \
-  --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
-  --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
-  --scpd-path ./$BUILD_DIR/scpd.dev \
-  --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+coordinator_storage="$WORK_DIR/chuckd-storage"
+coordinator_storage_arm=
+if coordinator_storage_arm=$(ci_coordinator_storage_arm); then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
+      ${HOGD_PAYMENT_WORK_DIR:-} == /bench-ram/work_dir/ &&
+      $WORK_DIR == "$HOGD_PAYMENT_WORK_DIR" &&
+      ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool ]]
+  mkdir -p "${HOG_DUMP_DIR:?}"
+  coordinator_storage=$(ci_coordinator_storage_prepare "$coordinator_storage_arm")
+fi
+coordinator_command=(
+  "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start
+    chuckd.dev
+    -l info
+    --stack
+    --config ./scripts/config-chuckd.json
+    --instance 970c9b
+    --seed 1410441218572558875
+    --metrics :2223
+    bench coordinator_loadgen
+    --skip 20
+    --in-addr "$(hog_ip hog4)":7888
+    --debug-port 5500
+    --num-accts 10000
+    --txs-per-block 1000000
+    --num-blocks 1000
+    --network-hash 11111111111111111111111111111112
+    --storage-dir "$coordinator_storage"
+    --out-addr :50000
+    --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT
+    --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT
+    --scpd-path ./$BUILD_DIR/scpd.dev
+    --scp-handle-addr 127.0.0.1:3300
+    --scp-control-addr 127.0.0.1:4400
+)
+if [[ -n $coordinator_storage_arm ]]; then
+  coordinator_launch=$("${coordinator_command[@]}")
+  coordinator_stdout=$(ci_coordinator_storage_log_path stdout "$coordinator_launch")
+  coordinator_stderr=$(ci_coordinator_storage_log_path stderr "$coordinator_launch")
+else
+  "${coordinator_command[@]}"
+fi
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -145,7 +165,8 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 nightly_stage_env=()
-if [[ ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics &&
+if [[ ( ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics ||
+        -n $coordinator_storage_arm ) &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
       ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool ]]; then
   mkdir -p "${HOG_DUMP_DIR:?}"
@@ -175,8 +196,14 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
 fi
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+if [[ -n $coordinator_storage_arm ]]; then
+  ci_coordinator_storage_parse_log stdout "$coordinator_stdout" > coordinator_output.txt
+  ci_coordinator_storage_parse_log stderr "$coordinator_stderr" \
+    > "$HOG_DUMP_DIR/nightly-coordinator-storage-stages.json"
+else
+  # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
+  scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the

@@ -88,8 +88,13 @@ bool
 nightly_stages_enabled()
 {
   static const bool enabled = [] {
+    const char *branch = std::getenv("GIT_BRANCH");
+    if (!branch ||
+        (std::string_view(branch) != "codex/nightly-single-stage-diagnostics" &&
+         std::string_view(branch) != "codex/nightly-coordinator-storage-ram" &&
+         std::string_view(branch) != "codex/nightly-coordinator-storage-disk"))
+      return false;
     for (const auto &[name, value] : {
-             std::pair{"GIT_BRANCH", "codex/nightly-single-stage-diagnostics"},
              std::pair{"HOGD_CI_CONTAINER", "1"},
              std::pair{"HOG_HOST", "hog10"},
              std::pair{"HOGD_NIGHTLY_SINGLE_STAGE", "1"},
