@@ -58,6 +58,22 @@ remaining spread included fused code charged at independent opcode worst cases.
 Those results support retaining a simple unit; they are not an absolute runtime
 budget or a demonstrated bound across all guest programs.
 
+## Shared syscall base
+
+The shared host base is 60 gas, raised from 50 on 2026-11-22 for headroom; it
+was not re-measured. The 50 came from run `33469060485`, below. On hog10 (gas
+unit ~1.623 ns) the syscalls that only cross the boundary have since taken 74
+to 79 ns per call through the VM, 45 to 48 gas with the ECALL taken off, and
+GetCalldataLen 84 to 86 ns, which is over 50. Single rows also move with the
+bench process's memory layout, which the bench pins with `setarch -R`:
+vm/GetBlockHeight measured 100 to 104 ns in every run that contains #4834, and
+74.4 to 76.9 ns in reruns of the same binary started with a different stack or
+row set (run `45015245614`). 60 covers the usual layouts with about 20% to spare
+and does not cover that one.
+
+The figures in the sections below are as recorded, at the base of their time:
+50 gas for every run listed here. Each bill they quote is 10 gas higher now.
+
 ## Hashing and signatures
 
 Run `33469060485` used a gas unit of 1.6241 ns. It informed the shared host base
@@ -161,8 +177,9 @@ repetitions and reported means after changes #3771 and #3814:
 
 The 150-gas storage access charge folds warm access, an allowance for first
 touch, and prepaid child commit into each call. Together with the 50-gas shared
-host base it bills 200 host gas. This overcharges repeated warm touches but does
-not cover the measured first-touch tail at large frame occupancies:
+host base of the time it billed 200 host gas, 210 at today's 60. This
+overcharges repeated warm touches but does not cover the measured first-touch
+tail at large frame occupancies:
 
 | Keys at depth 1 | Loaded first touch, ns | No-load first touch, ns |
 |---|---:|---:|
@@ -178,9 +195,10 @@ Whether a transaction can reach the expensive tail depends on its gas budget;
 these measurements do not establish that the tail is unreachable.
 
 The local database miss measured about 55.2 microseconds with a recorded spread
-of 5.4 microseconds. The 37300-gas database charge includes that margin and brings
-a loaded cold NNInt read to 37500 host gas. The fixture uses a local socket;
-a remote database adds work absent from this measurement. Billing follows the
+of 5.4 microseconds. The 37300-gas database charge includes that margin and
+brought a loaded cold NNInt read to 37500 host gas with the 50-gas base, 37510
+at 60. The fixture uses a local socket; a remote database adds work absent from
+this measurement. Billing follows the
 transaction's first load, independently of whether the shared snapshot cache
 happens to contain the key.
 
