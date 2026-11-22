@@ -37,12 +37,8 @@ public:
   template<StringLiteral Name, typename... Args>
   Invocation make_invocation(GasAmount gas_amount, Args &&...args)
   {
-    auto calldata =
-        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
-    return Invocation{.invoked_address = contract_address_,
-                      .entrypoint = trait_meta_t::template entrypoint<Name>(),
-                      .gas_limit = gas_amount,
-                      .calldata = calldata};
+    return trait_meta_t::template make_invocation<Name>(
+        contract_address_, gas_amount, std::forward<Args>(args)...);
   }
 
   template<StringLiteral Name,

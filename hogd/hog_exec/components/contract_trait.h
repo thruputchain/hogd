@@ -273,6 +273,19 @@ public:
     return make_encoding(args_t{args...});
   }
 
+  // An invocation of the named entrypoint of the contract at
+  // `contract_address`, as a transaction carries it.
+  template<StringLiteral Name, typename... Args>
+  static Invocation make_invocation(ContractAddress contract_address,
+                                    GasAmount gas_amount, Args &&...args)
+  {
+    auto calldata = make_calldata<Name>(std::forward<Args>(args)...);
+    return Invocation{.invoked_address = contract_address,
+                      .entrypoint = entrypoint<Name>(),
+                      .gas_limit = gas_amount,
+                      .calldata = calldata};
+  }
+
   template<StringLiteral Name, typename ReturnType>
   static Calldata make_return(ReturnType return_value) requires (
       std::same_as<ReturnType, typename detail::CalldataArgs<
