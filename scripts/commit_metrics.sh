@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [[ ${GIT_BRANCH:-} == codex/hog-db-storage ]]; then
+  echo 'Retaining Hog DB storage experiment artifacts only'
+  exit 0
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history

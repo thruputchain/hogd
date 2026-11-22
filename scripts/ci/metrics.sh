@@ -7,6 +7,14 @@ ci_enable_error_trace
 echo 'set port env vars'
 export CI_CONTROL_PORT=$(./${BUILD_DIR}/hogd/utils/get_port kCIControlServerPort)
 CONTROL_CLI="./${BUILD_DIR}/hogd/hog_exec/bench/control_cli"
+if [[ ${GIT_BRANCH:-} == codex/hog-db-storage ]]; then
+  [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
+     ${HOG_HOST:-} == hog10 && ${HOGD_EVENT_WORK_DIR:-} == /bench-event/ci_work_dir ]]
+  ci_wait_control_server "$CONTROL_CLI" hog11 "$CI_CONTROL_PORT"
+  timeout --kill-after=15s 1815s python3 /opt/hog-ci/peer.py hog11 \
+    'timeout --kill-after=20s 1770s bash ./scripts/ci/hog_db_storage_ab.sh' </dev/null
+  exit
+fi
 BENCH_HOSTS=(hog11 hog8)
 
 cleanup() {
