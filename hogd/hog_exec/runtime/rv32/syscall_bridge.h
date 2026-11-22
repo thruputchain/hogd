@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <optional>
 
 #include "hogd/hog_exec/runtime/runtime_exports.h"
@@ -18,7 +19,10 @@ namespace hogd::rv32 {
 // test bridge's commit rules.
 class SyscallBridgeHost final : public Host {
 public:
-  SyscallBridgeHost(ExternHostCallContext context, SyscallFunction entry);
+  // `syscall_api_minor` is the minor the guest was built against; see
+  // ExecutionContext.
+  SyscallBridgeHost(ExternHostCallContext context, SyscallFunction entry,
+                    uint32_t syscall_api_minor = 0);
 
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override;
 
@@ -30,6 +34,7 @@ public:
 private:
   ExternHostCallContext context_ = nullptr;
   SyscallFunction entry_ = nullptr;
+  uint32_t syscall_api_minor_ = 0;
   std::optional<SyscallResult> last_result_;
 };
 

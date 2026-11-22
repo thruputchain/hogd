@@ -77,6 +77,7 @@ struct ArtifactParseResults {
   std::span<const uint8_t> initial_memory;
   uint32_t initial_memory_start;
   uint32_t total_memory_bytes;
+  uint32_t syscall_api_minor;
 };
 
 [[nodiscard]]
@@ -150,12 +151,12 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
+  uint32_t syscall_api_minor = kArtifactV5V6SyscallApiMinor;
   if (!declares_gas_schedule) {
     // The major was checked above. A guest built against minor n may call
     // anything introduced up to n, so it is admitted only where all of that
     // exists. The floor is the caller's policy, not a compatibility rule.
-    const uint32_t syscall_api_minor =
-        load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
+    syscall_api_minor = load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
     if (syscall_api_minor < limits.min_syscall_api_minor ||
         syscall_api_minor > limits.max_syscall_api_minor) {
       return std::unexpected(ArtifactError::kUnsupportedSyscallApiMinor);
@@ -227,6 +228,7 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       .initial_memory = initial_memory,
       .initial_memory_start = initial_memory_start,
       .total_memory_bytes = memory_bytes,
+      .syscall_api_minor = syscall_api_minor,
   };
 }
 
@@ -277,6 +279,7 @@ parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits)
       .program = std::make_shared<Program>(std::move(*program)),
       .initial_memory = std::move(initial_memory),
       .memory_bytes = results->total_memory_bytes,
+      .syscall_api_minor = results->syscall_api_minor,
   };
 }
 
@@ -293,6 +296,7 @@ parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits)
       .initial_memory = results->initial_memory,
       .initial_memory_start = results->initial_memory_start,
       .memory_bytes = results->total_memory_bytes,
+      .syscall_api_minor = results->syscall_api_minor,
   };
 }
 

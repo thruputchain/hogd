@@ -368,6 +368,7 @@ private:
         ExecutionContext context = {
             .memory = std::as_writable_bytes(machine.memory()),
             .gas_remaining = machine.gas_remaining(),
+            .syscall_api_minor = image_.syscall_api_minor,
         };
         result = machine.complete_ecall(to_host_result(
             syscall_entry(host_fn_ctx, context, args.a0, args.a1, args.a2,

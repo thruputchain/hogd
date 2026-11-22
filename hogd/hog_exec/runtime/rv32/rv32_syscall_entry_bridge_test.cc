@@ -29,6 +29,7 @@
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/syscall_entry.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -168,12 +169,14 @@ protected:
     ASSERT_TRUE(status.has_value());
   }
 
-  static rv32::HostResult call_bridge(std::span<uint8_t> memory,
-                                      SystemCallHandler &handler,
-                                      uint64_t gas_remaining,
-                                      const rv32::EcallArgs &args)
+  // A guest built against this build's syscall API unless told otherwise.
+  static rv32::HostResult
+  call_bridge(std::span<uint8_t> memory, SystemCallHandler &handler,
+              uint64_t gas_remaining, const rv32::EcallArgs &args,
+              uint32_t syscall_api_minor = kSyscallApiMinor)
   {
-    rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
+    rv32::SyscallBridgeHost bridge(&handler, &syscall_entry,
+                                   syscall_api_minor);
     std::array<uint32_t, rv32::kRegisterCount> registers{};
     rv32::MachineView view(0, gas_remaining, registers, memory);
     return bridge.ecall(view, args);
@@ -276,7 +279,7 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
 
   auto handler = make_handler();
   auto stashed_trace = start_frame(handler);
-  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
+  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry, kSyscallApiMinor);
   for (uint64_t i = 0; i + 1 < kInstructions; ++i) {
     ASSERT_EQ(machine.step(), rv32::StepResult::kContinue);
   }
@@ -427,6 +430,73 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
                 SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
+}
+
+// A syscall introduced after the minor a guest was built against does not
+// exist for that guest: the call is indistinguishable from one to a number
+// this host does not implement, in status, gas, output and stats, and the
+// same call from a guest built against the introducing minor runs it.
+TEST_F(Rv32SyscallEntryBridgeTest, SyscallNewerThanGuestMinorIsNoSyscall)
+{
+  constexpr auto kSyscall = SyscallNo::kRistretto255Msm;
+  constexpr uint32_t kSince = SyscallMeta<kSyscall>::kSinceMinor;
+  static_assert(kSince > 0, "needs a syscall some minor predates");
+
+  struct Outcome {
+    rv32::HostResult result;
+    std::vector<uint8_t> memory;
+    int64_t invalid_syscalls;
+    int64_t syscall_count;
+  };
+  // Calls the empty Ristretto255 sum, which writes the identity, over output
+  // memory that is not the identity.
+  const auto call = [&](uint32_t syscall_no, uint32_t syscall_api_minor) {
+    std::vector<uint8_t> memory(256, 0xA5);
+    const std::array<uint32_t, 4> words = {syscall_no, kInputAddress, 0,
+                                           kOutputAddress};
+    auto handler = make_handler();
+    handler.enable_transaction_stats();
+    auto stashed_trace = start_frame(handler);
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(words),
+                    syscall_api_minor);
+    finish_frame(handler, std::move(stashed_trace));
+    const auto *stats = handler.get_transaction_stats();
+    EXPECT_NE(stats, nullptr);
+    return Outcome{
+        .result = result,
+        .memory = std::move(memory),
+        .invalid_syscalls = stats == nullptr ? -1 : stats->invalid_syscall_count,
+        .syscall_count =
+            stats == nullptr
+                ? -1
+                : stats->syscall_counts[static_cast<size_t>(kSyscall)],
+    };
+  };
+
+  const Outcome unknown = call(static_cast<uint32_t>(kSyscallCount), kSince);
+  const Outcome too_new = call(static_cast<uint32_t>(kSyscall), kSince - 1);
+  ASSERT_EQ(too_new.result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(too_new.result.continue_value(),
+            static_cast<uint32_t>(
+                SyscallErrorCode::kSyscallErrorCodeNoSyscall));
+  EXPECT_EQ(too_new.result.continue_value(), unknown.result.continue_value());
+  EXPECT_EQ(too_new.result.gas_consumed, unknown.result.gas_consumed);
+  EXPECT_EQ(too_new.memory, unknown.memory);
+  EXPECT_EQ(too_new.invalid_syscalls, 1);
+  EXPECT_EQ(too_new.syscall_count, 0);
+
+  const Outcome current = call(static_cast<uint32_t>(kSyscall), kSince);
+  ASSERT_EQ(current.result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(current.result.continue_value(),
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(current.result.gas_consumed,
+            kSyscallBaseCost + GasCost::ristretto255_msm(0));
+  EXPECT_TRUE(std::ranges::all_of(
+      std::span(current.memory).subspan(kOutputAddress, 32),
+      [](uint8_t b) { return b == 0; }));
+  EXPECT_EQ(current.invalid_syscalls, 0);
+  EXPECT_EQ(current.syscall_count, 1);
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)

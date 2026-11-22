@@ -15,8 +15,9 @@
 namespace hogd::rv32 {
 
 SyscallBridgeHost::SyscallBridgeHost(ExternHostCallContext context,
-                                     SyscallFunction entry)
-  : context_(context), entry_(entry)
+                                     SyscallFunction entry,
+                                     uint32_t syscall_api_minor)
+  : context_(context), entry_(entry), syscall_api_minor_(syscall_api_minor)
 {}
 
 HostResult
@@ -42,6 +43,7 @@ SyscallBridgeHost::ecall(MachineView view, const EcallArgs &args) noexcept
   ExecutionContext context{
       .memory = std::as_writable_bytes(memory),
       .gas_remaining = view.gas_remaining(),
+      .syscall_api_minor = syscall_api_minor_,
   };
 
   // This bridge drives the non-suspending Machine, whose run loop has no way

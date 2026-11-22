@@ -27,13 +27,22 @@ using SyscallFunc = MaybeAsyncSyscallResult (*)(SystemCallHandler &,
                                                 uint32_t, uint32_t, uint32_t,
                                                 uint32_t) noexcept;
 
+struct SyscallTableEntry {
+  SyscallNo syscall_no;
+  SyscallFunc func;
+  // The syscall API minor that introduced the syscall (since_minor in
+  // syscalls.yaml).
+  uint32_t since_minor;
+};
+
 template<size_t... Is>
-constexpr std::array<std::pair<SyscallNo, SyscallFunc>, sizeof...(Is)>
+constexpr std::array<SyscallTableEntry, sizeof...(Is)>
 make_syscall_array(std::index_sequence<Is...> /*unused*/)
 {
-  return {std::pair<SyscallNo, SyscallFunc>{
-      static_cast<SyscallNo>(Is),
-      &wrap_outer<SyscallMeta<static_cast<SyscallNo>(Is)>>}...};
+  return {SyscallTableEntry{
+      .syscall_no = static_cast<SyscallNo>(Is),
+      .func = &wrap_outer<SyscallMeta<static_cast<SyscallNo>(Is)>>,
+      .since_minor = SyscallMeta<static_cast<SyscallNo>(Is)>::kSinceMinor}...};
 }
 
 static_assert(
@@ -52,7 +61,13 @@ syscall_entry_inner(SystemCallHandler *syscall_handler,
 {
   SyscallFunc syscall_fn = nullptr;
   assert(syscall_handler);
-  bool valid_syscall_no = syscall_no < kSyscallTable.size();
+  // A syscall introduced after the minor the guest was built against does not
+  // exist for it: it gets exactly what a number this host does not implement
+  // gets, so whether a call succeeds depends on the guest's declared API and
+  // not on which build runs it.
+  bool valid_syscall_no =
+      syscall_no < kSyscallTable.size() &&
+      kSyscallTable[syscall_no].since_minor <= context.syscall_api_minor;
   if (!valid_syscall_no) {
     // invalid syscall
     if (auto *stats = syscall_handler->get_transaction_stats()) {
@@ -61,9 +76,9 @@ syscall_entry_inner(SystemCallHandler *syscall_handler,
     syscall_fn = &wrap_outer<NoSyscallFuncMeta>;
   }
   else {
-    auto [syscall_expect, syscall_fn_outer] = kSyscallTable[syscall_no];
-    assert(syscall_expect == static_cast<SyscallNo>(syscall_no));
-    syscall_fn = syscall_fn_outer;
+    const SyscallTableEntry &entry = kSyscallTable[syscall_no];
+    assert(entry.syscall_no == static_cast<SyscallNo>(syscall_no));
+    syscall_fn = entry.func;
   }
   assert(syscall_fn);
 

@@ -54,7 +54,9 @@ public:
     EXPECT_TRUE(frame.has_value());
     auto result =
         syscall_entry(&handler,
-                      ExecutionContext{.memory = memory, .gas_remaining = gas},
+                      ExecutionContext{.memory = memory,
+                                       .gas_remaining = gas,
+                                       .syscall_api_minor = kSyscallApiMinor},
                       static_cast<uint32_t>(SyscallNo::kRistretto255Msm), input,
                       length, output, 0, 0, 0, 0)();
     const auto *stats = handler.get_transaction_stats();

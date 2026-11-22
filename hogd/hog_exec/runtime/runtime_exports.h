@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <span>
 #include <utility>
 
@@ -13,6 +14,11 @@ class SystemCallHandler;
 struct ExecutionContext {
   std::span<std::byte> memory;
   uint64_t gas_remaining;
+  // The syscall API minor the calling guest was built against. syscall_entry
+  // answers a syscall introduced after it as it does an unknown number, so a
+  // guest reaches only the syscalls of the API it declared. Unstated, it is
+  // 0: the syscalls every guest of this major may call.
+  uint32_t syscall_api_minor = 0;
 };
 
 using ExternHostCallContext = void *;

@@ -113,9 +113,10 @@ private:
     }
     machine.seed_method_id(method_id);
 
-    SyscallBridgeHost host(syscall_handler_, image_.entry == nullptr
-                                                 ? &syscall_entry
-                                                 : image_.entry);
+    SyscallBridgeHost host(syscall_handler_,
+                           image_.entry == nullptr ? &syscall_entry
+                                                   : image_.entry,
+                           image_.syscall_api_minor);
     const StepResult step_result = machine.run(host);
     const GasAmount gas_consumed = gas_limit - machine.gas_remaining();
 

@@ -889,6 +889,7 @@ invoke_syscall_entry(SystemCallHandler &handler, std::span<uint8_t> memory,
   ExecutionContext context = {
       .memory = std::as_writable_bytes(memory),
       .gas_remaining = kPlentyOfGas,
+      .syscall_api_minor = kSyscallApiMinor,
   };
   auto [host_result, gas_consumed] =
       syscall_entry(&handler, context, call.words[0], call.words[1],
@@ -1307,6 +1308,7 @@ bm_syscall_vm(benchmark::State &state, SyscallCall call)
       ExecutionContext context = {
           .memory = std::as_writable_bytes(machine.memory()),
           .gas_remaining = machine.gas_remaining(),
+          .syscall_api_minor = kSyscallApiMinor,
       };
       auto [host_result, gas_consumed] =
           syscall_entry(&fixture.handler(), context, pending->a0, pending->a1,

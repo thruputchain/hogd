@@ -119,6 +119,7 @@ make_artifact_image(std::span<const uint32_t> words,
       .program = std::move(parsed->program),
       .initial_memory = std::move(parsed->initial_memory),
       .memory_bytes = parsed->memory_bytes,
+      .syscall_api_minor = parsed->syscall_api_minor,
   };
 }
 

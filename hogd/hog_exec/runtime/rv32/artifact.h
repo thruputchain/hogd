@@ -55,6 +55,10 @@ inline constexpr size_t kArtifactSyscallAbiOffset = 32;
 // requires it to be one the chain implements; what a syscall costs is the
 // chain's, not the artifact's.
 inline constexpr size_t kArtifactSyscallApiMinorOffset = 36;
+// v5 and v6 declare no minor. They predate the syscall API's versioning and
+// execute as guests built against minor 0 of kArtifactSyscallAbiVersion: a
+// syscall introduced since is not theirs to call.
+inline constexpr uint32_t kArtifactV5V6SyscallApiMinor = 0;
 // v5 and v6: a gas schedule version where the minor is, then its digest. The
 // offsets below are for v7, and kArtifactGasDigestBytes higher in v5 and v6.
 inline constexpr size_t kArtifactGasVersionOffset = 36;
@@ -310,6 +314,10 @@ struct ArtifactImage {
   // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
   uint32_t memory_bytes = kDefaultMaxMemoryBytes;
+  // The syscall API minor the guest was built against: declared by v7,
+  // kArtifactV5V6SyscallApiMinor for v5 and v6. It bounds which syscalls the
+  // guest may call.
+  uint32_t syscall_api_minor = 0;
 };
 
 // The ThreadedArtifactImage output from parse_threaded_artifact must not
@@ -320,6 +328,8 @@ struct ThreadedArtifactImage {
   // Data-space VA where initial_memory is placed; [0, start) zero-fills.
   uint32_t initial_memory_start = 0;
   uint32_t memory_bytes = kDefaultMaxMemoryBytes;
+  // As in ArtifactImage.
+  uint32_t syscall_api_minor = 0;
 };
 
 // Canonical SHA-256 over one artifact section. Infallible by construction:

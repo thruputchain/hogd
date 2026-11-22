@@ -60,6 +60,12 @@ Like the format range, this is checked only at attachment, and genesis load
 rejects a range that inverts or reaches past the newest minor the build
 implements. v5 and v6 artifacts declare no minor and are not subject to it.
 
+Execution enforces the declared minor on every call: a syscall introduced
+after it (its `since_minor` in `syscalls.yaml`) answers
+`kSyscallErrorCodeNoSyscall` and charges what a syscall number the build does
+not implement charges. v5 and v6 artifacts execute as API 1.0, so they reach
+only the syscalls with `since_minor: 0`.
+
 ## Release order
 
 1. Merge and publish the compatible generated protocol bindings.

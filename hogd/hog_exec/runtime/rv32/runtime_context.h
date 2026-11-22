@@ -22,6 +22,8 @@ struct RuntimeContractImage {
   std::vector<uint8_t> initial_memory;
   uint32_t memory_bytes = kDefaultMaxMemoryBytes;
   SyscallFunction entry = nullptr;
+  // The syscall API minor the guest was built against; see ExecutionContext.
+  uint32_t syscall_api_minor = 0;
 };
 
 // Canonical test runtime using kMockTest contracts. Production RV32 contracts

@@ -64,12 +64,15 @@ Rv32Contract::create(ContractBlob const &contract_blob, rv32::Rv32Limits limits)
     return std::unexpected(rv32::ArtifactError::kInvalidProgram);
   }
 
-  return Rv32Contract(std::move(*pre_instantiation));
+  return Rv32Contract(std::move(*pre_instantiation),
+                      artifact->syscall_api_minor);
 }
 
 Rv32Contract::Rv32Contract(
-    rv32::ThreadedMachinePreInstantiation pre_instantiation)
-  : pre_instantiation_(std::move(pre_instantiation))
+    rv32::ThreadedMachinePreInstantiation pre_instantiation,
+    uint32_t syscall_api_minor)
+  : pre_instantiation_(std::move(pre_instantiation)),
+    syscall_api_minor_(syscall_api_minor)
 {}
 
 rv32::ThreadedMachine
@@ -184,6 +187,7 @@ Rv32Runtime::run_ecall_loop(rv32::ThreadedMachine machine,
     ExecutionContext context = {
         .memory = std::as_writable_bytes(machine.memory()),
         .gas_remaining = machine.gas_remaining(),
+        .syscall_api_minor = contract_->syscall_api_minor(),
     };
 
     auto [host_result, gas_consumed] =

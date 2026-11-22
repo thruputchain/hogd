@@ -130,9 +130,14 @@ A v7 artifact instead declares the syscall API version it was built against
 (`syscall_api_version` in the protocol's `syscalls.yaml`, which states the
 versioning rules). It is admitted when its major matches and its minor is no
 later than `kSyscallApiMinor`, so adding a syscall is a minor bump in
-`syscalls.yaml` and nothing here. v5 and v6 artifacts carry a gas schedule
-version and digest instead; `kV5V6GasSchedules` is the frozen list of pairs
-they may carry.
+`syscalls.yaml` and nothing here. It executes with only the syscalls of the
+minor it declares: `syscall_entry` answers one introduced later (its
+`since_minor`) with `kSyscallErrorCodeNoSyscall`, exactly as it answers a
+number the build does not implement, so a build that adds syscalls does not
+change what an older guest's calls do. v5 and v6 artifacts carry a gas
+schedule version and digest instead; `kV5V6GasSchedules` is the frozen list
+of pairs they may carry. They declare no minor and execute as minor 0
+(`kArtifactV5V6SyscallApiMinor`).
 
 `Machine` charges each instruction before executing it. `ThreadedMachine`
 charges a run at entry, including its terminating control-flow or host-boundary

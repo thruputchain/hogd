@@ -40,6 +40,18 @@ append_digest(std::vector<uint8_t> &out, ArtifactDigest const &digest)
   out.insert(out.end(), digest.begin(), digest.end());
 }
 
+// Stamp the syscall API minor a v7 artifact declares. The minor is outside the
+// section digests, so the artifact stays well formed.
+template<typename Bytes>
+inline void
+stamp_syscall_api_minor(Bytes &artifact, uint32_t minor)
+{
+  for (size_t i = 0; i < sizeof(uint32_t); ++i) {
+    artifact[kArtifactSyscallApiMinorOffset + i] =
+        static_cast<uint8_t>(minor >> (i * 8));
+  }
+}
+
 // Rewrite a v7 artifact as the v6 artifact with the same image and extensions:
 // v6 declares `schedule`, in a header that is longer by its digest.
 template<typename Bytes>

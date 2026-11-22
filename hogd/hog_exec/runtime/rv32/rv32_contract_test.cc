@@ -31,6 +31,7 @@
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/serialize_calldata.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "rpc_types.hh"
@@ -302,9 +303,15 @@ protected:
   deploy_words(std::vector<uint32_t> const &words, uint64_t addr_seed,
                std::vector<uint8_t> initial_memory = std::vector<uint8_t>(256))
   {
+    return deploy_artifact(
+        rv32::test_artifact::build_artifact(words, initial_memory), addr_seed);
+  }
+
+  ContractAddress deploy_artifact(std::vector<uint8_t> const &artifact,
+                                  uint64_t addr_seed)
+  {
     auto contract = std::make_shared<Contract>(ContractType::kRv32);
-    contract->rv32_contract().data.append_range(
-        rv32::test_artifact::build_artifact(words, initial_memory));
+    contract->rv32_contract().data.append_range(artifact);
     auto addr = make_contract_address(addr_seed);
     write_contract(contract);
     write_deployment(addr, contract);
@@ -411,6 +418,78 @@ TEST_F(Rv32ProductionMappingTest, EmptyReturnSyscallIsSuccess)
   auto result = invoke_deployed(addr, 10'000);
 
   ASSERT_TRUE(result.is_root_success());
+}
+
+// A guest reaches only the syscalls of the API it was built against: a v7
+// artifact those of the minor it declares, a v5 or v6 one those of minor 0.
+TEST_F(Rv32ProductionMappingTest, SyscallsAreBoundedByDeclaredApiMinor)
+{
+  constexpr auto kSyscall = SyscallNo::kRistretto255Msm;
+  constexpr uint32_t kSince = SyscallMeta<kSyscall>::kSinceMinor;
+  static_assert(kSince > 0, "needs a syscall some minor predates");
+  constexpr auto kNone = SyscallErrorCode::kSyscallErrorCodeNone;
+  constexpr auto kNoSyscall = SyscallErrorCode::kSyscallErrorCodeNoSyscall;
+  constexpr GasAmount kGas = 100'000;
+
+  // The guest calls the empty Ristretto255 sum and returns successfully only
+  // if the call answered `expected`; any other answer exits, a fault.
+  const auto expecting = [](SyscallErrorCode expected) {
+    constexpr uint8_t kA0 = 10;
+    constexpr uint8_t kT0 = 5;
+    constexpr uint8_t kBne = 1;
+    std::vector<uint32_t> program;
+    append_syscall(program, {static_cast<int32_t>(kSyscall), 0, 0, 64});
+    program.push_back(
+        rv32::test_program::addi(kT0, 0, std::to_underlying(expected)));
+    std::vector<uint32_t> success;
+    append_syscall(success, {kReturnSyscallNo, 0, 0, 0, 0, 0});
+    program.push_back(rv32::test_program::branch(
+        kBne, kA0, kT0,
+        static_cast<int32_t>((1 + success.size()) * rv32::kInstructionBytes)));
+    program.insert(program.end(), success.begin(), success.end());
+    append_syscall(program, {kExitSyscallNo});
+    // Declares minor 0.
+    return rv32::test_artifact::build_artifact(program,
+                                               std::vector<uint8_t>(256));
+  };
+  const auto declaring = [](uint32_t minor, std::vector<uint8_t> artifact) {
+    rv32::test_artifact::stamp_syscall_api_minor(artifact, minor);
+    return artifact;
+  };
+  const auto as_v6 = [](std::vector<uint8_t> artifact) {
+    rv32::test_artifact::rewrite_as_v6(artifact);
+    return artifact;
+  };
+  const auto as_v5 = [](std::vector<uint8_t> artifact) {
+    rv32::test_artifact::rewrite_as_v5(artifact);
+    return artifact;
+  };
+
+  struct Case {
+    std::string_view name;
+    std::vector<uint8_t> artifact;
+    bool succeeds;
+  };
+  const std::vector<Case> cases = {
+      {"v7 at 0", expecting(kNoSyscall), true},
+      {"v7 at since", declaring(kSince, expecting(kNone)), true},
+      // The guest's check discriminates: the other answer faults.
+      {"v7 at 0, wrong", expecting(kNone), false},
+      {"v7 at since, wrong", declaring(kSince, expecting(kNoSyscall)), false},
+      // Where v7 declares the minor, v5 and v6 declare a gas schedule.
+      {"v6", as_v6(declaring(kSince, expecting(kNoSyscall))), true},
+      {"v5", as_v5(declaring(kSince, expecting(kNoSyscall))), true},
+      {"v6, wrong", as_v6(declaring(kSince, expecting(kNone))), false},
+  };
+  uint64_t seed = 0;
+  for (const auto &[name, artifact, succeeds] : cases) {
+    SCOPED_TRACE(name);
+    const auto result = invoke_deployed(deploy_artifact(artifact, seed++), kGas);
+    EXPECT_EQ(result.is_root_success(), succeeds);
+    if (!succeeds && !result.is_root_success()) {
+      EXPECT_EQ(result.result_.error().code(), InvokeErrorCode::Deterministic);
+    }
+  }
 }
 
 TEST_F(Rv32ProductionMappingTest, HostSyscallOutOfGasConsumesWholeLimit)

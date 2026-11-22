@@ -26,12 +26,22 @@ public:
   // cleanly but does not translate is kInvalidProgram.
   static std::expected<Rv32Contract, rv32::ArtifactError>
   create(ContractBlob const &contract_blob, rv32::Rv32Limits limits);
-  Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation);
+  Rv32Contract(rv32::ThreadedMachinePreInstantiation pre_instantiation,
+               uint32_t syscall_api_minor);
 
   rv32::ThreadedMachine instantiate(uint64_t gas) const;
 
+  // The syscall API minor the guest was built against (see
+  // rv32::ArtifactImage). syscall_entry refuses it any syscall introduced
+  // later.
+  [[nodiscard]] uint32_t syscall_api_minor() const
+  {
+    return syscall_api_minor_;
+  }
+
 private:
   rv32::ThreadedMachinePreInstantiation pre_instantiation_;
+  uint32_t syscall_api_minor_;
 };
 
 // Production invocation. Borrows its prepared contract from
