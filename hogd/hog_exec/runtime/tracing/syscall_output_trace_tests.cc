@@ -1047,6 +1047,48 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
+// U256Sqrt records the value it read and the root it returned, and bills its
+// flat price on top of the crossing.
+TEST_F(SyscallOutputTraceTest, U256SqrtTraceIsExact)
+{
+  // 2^128, least significant byte first. Its square root is 2^64.
+  U256Le value{};
+  value[16] = 1;
+  constexpr uint128_t kRoot = uint128_t{1} << 64;
+
+  auto context = make_single_contract_context(
+      [value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint128_t root = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kU256Sqrt>(value, root);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            root != kRoot) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU256Sqrt);
+    body.u256_sqrt().inputs.value = value;
+    body.u256_sqrt().outputs = SyscallU256SqrtOutputs{.root = to_xdr(kRoot)};
+    expected.push_back(
+        step_entry(gas, kU256SqrtCost, std::move(body), ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
 TEST_F(SyscallOutputTraceTest, DeployAddressTracesAreExact)
 {
   Contract blob(ContractType::kRv32);

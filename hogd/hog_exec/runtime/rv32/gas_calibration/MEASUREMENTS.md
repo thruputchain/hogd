@@ -110,6 +110,35 @@ proposes the two ML-DSA constants from each run. Their guards enter
 `syscall_reference.txt` the next time it is regenerated with mode=reference;
 until then `--check` notes them as ungated.
 
+## Wide arithmetic
+
+U256Sqrt costs 60 gas on top of the shared syscall base. Run `44953108898`
+(hog10, AMD EPYC 9554, gas unit 1.6234 ns, hogd `e36ed56`, mode=reference)
+measured its three rows, here as the medians of nine repetitions:
+
+| Case | Entry ns | VM ns per call | Measured gas | Billed gas |
+|---|---:|---:|---:|---:|
+| U256SqrtSmall, the value 3 | 118.5 | 139.5 | 85 | 110 |
+| U256SqrtOnes, the largest value | 109.9 | 130.1 | 80 | 110 |
+| U256SqrtMixed, a SHA-256 digest | 120.7 | 142.8 | 87 | 110 |
+
+Measured and billed gas include the 50-gas shared base and exclude the ECALL
+instruction. Measured gas is the VM row, which has the crossing in it, rounded
+up. In the same run the syscalls that only cross the boundary took 56.2 to
+67.8 ns on the entry path. Through the VM three of them took 74.6 to 79.4 ns
+per call, and GetBlockHeight and GetCalldataLen 100.4 and 114.6.
+
+The dearest row leaves 37 above the base. Of the other 23, 15 are for what
+these rows cannot show. Each repeats one value, and the routine has a few
+branches that follow the value, which the branch predictor then learns. With
+values that varied from call to call the arithmetic alone took 14 to 23 ns
+longer, which is up to 15 gas at this unit. That figure is from a development
+machine, not from hog10. The last 8 are margin on top of it, to be safe.
+
+The run proposed guards of 1.945, 1.803 and 1.981 times the crossing baseline
+for the three rows. They enter `syscall_reference.txt` the next time it is
+regenerated with mode=reference.
+
 ## Storage
 
 Run `33725560215`, engine `d4697729c27d6dbd`, gas unit 1.6217 ns, recorded five

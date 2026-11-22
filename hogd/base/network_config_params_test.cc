@@ -222,8 +222,8 @@ TEST(NetworkConfigParamsTest, ReportsAdmissionRangesTheBuildCannotServe)
   EXPECT_EQ(reason([&](NetworkConfigParams &p) {
               p.max_syscall_api_minor = newest_minor + 1;
             }),
-            "max_syscall_api_minor 2 admits syscall API 1.2, newer than the "
-            "1.1 this build implements; run a build that implements it");
+            "max_syscall_api_minor 3 admits syscall API 1.3, newer than the "
+            "1.2 this build implements; run a build that implements it");
   EXPECT_EQ(reason([](NetworkConfigParams &p) {
               p.min_syscall_api_minor = 1;
               p.max_syscall_api_minor = 0;
