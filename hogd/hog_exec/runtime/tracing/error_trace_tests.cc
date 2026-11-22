@@ -7,7 +7,7 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -55,7 +55,10 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
   SyscallGetCalldataOutputs outputs{.auth_token_count = 0};
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
-  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
+  return make_entry(gas,
+                    gas - kSyscallBaseCost -
+                        GasCost::guest_buffer_copy(calldata.size()),
+                    std::move(body),
                     status_with(SyscallErrorCode::kSyscallErrorCodeNone));
 }
 

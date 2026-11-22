@@ -99,8 +99,9 @@ public:
 
   PerTransactionDatabaseProxy get_new_db_proxy(EphemeralTxIdentifier identifier)
   {
-    return PerTransactionDatabaseProxy(*db_proxy_, identifier.block_id,
-                                       identifier.tx_id);
+    return PerTransactionDatabaseProxy(
+        *db_proxy_, identifier.block_id, identifier.tx_id,
+        get_snapshot().get_network_config_params());
   }
 
   PerTransactionEventServerProxy

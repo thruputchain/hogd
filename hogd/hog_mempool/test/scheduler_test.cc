@@ -102,6 +102,8 @@ TEST(Scheduler, ReadAge)
 TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
 {
   MempoolTestInfra server;
+  // Genesis transfer processing updates and persists the same cached ages.
+  server.mempool_coord_rpc().wait_for_transfer_data(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
   scheduler->set_max_native_token_ages_per_record(3);
 

@@ -80,7 +80,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -100,6 +100,8 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_gateway.hh"
+// view.hh and view_gateway.hh use SyscallErrorCode without including it.
+#include "syscall_error.hh" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
@@ -114,6 +116,17 @@
 namespace hogd {
 
 namespace {
+
+// A view timepoint the devnode's tip cannot be ahead of: its blocks are
+// stamped from this same clock.
+TimePoint
+view_timepoint_now()
+{
+  return static_cast<TimePoint>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::system_clock::now().time_since_epoch())
+          .count());
+}
 
 constexpr auto kDefaultStartupTimeout = std::chrono::seconds(30);
 constexpr auto kDefaultExitTimeout = std::chrono::seconds(10);
@@ -2097,6 +2110,10 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
                                     "max_contract_size_bytes=1048576");
   add_local_network_config_override(config.network_config_overrides,
                                     "max_bytestring_len=32768");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "min_rv32_artifact_version=6");
+  add_local_network_config_override(config.network_config_overrides,
+                                    "max_syscall_api_minor=0");
   auto artifact = build_local_bootstrap_account_artifact(config);
   auto const &network = artifact.genesis_configuration.network_config;
   EXPECT_TRUE(NetworkConfigParams::is_canonical(network.v0()));
@@ -2105,6 +2122,10 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(params.max_rv32_code_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_contract_size_bytes, 1024 * 1024U);
   EXPECT_EQ(params.max_bytestring_len, 32768U);
+  EXPECT_EQ(params.min_rv32_artifact_version, 6U);
+  EXPECT_EQ(params.max_rv32_artifact_version, 7U);
+  EXPECT_EQ(params.min_syscall_api_minor, 0U);
+  EXPECT_EQ(params.max_syscall_api_minor, 0U);
   EXPECT_EQ(params.max_new_contracts_per_tx, 4U);
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
@@ -2120,9 +2141,10 @@ TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)
 {
   LocalNetworkConfigOverrides overrides;
   for (const auto *bad :
-       {"unknown=2", "max_bytestring_len",
-        "max_bytestring_len=", "max_bytestring_len=-1",
-        "max_bytestring_len=4294967296", "max_bytestring_len=1x"}) {
+       {"unknown=2", "max_bytestring_len", "max_bytestring_len=",
+        "max_bytestring_len=-1", "max_bytestring_len=4294967296",
+        "max_bytestring_len=1x", "min_rv32_artifact_version=4",
+        "max_rv32_artifact_version=8", "max_syscall_api_minor=4294967295"}) {
     EXPECT_THROW(add_local_network_config_override(overrides, bad),
                  std::runtime_error);
     EXPECT_TRUE(overrides.empty());
@@ -2538,6 +2560,7 @@ TEST(HogDevnode, ViewGatewayViewsCommittedBootstrapWallet)
         .auth_claim = native_account_auth_claim(),
         .forwarded_tokens = {},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+        .block_timepoint = view_timepoint_now(),
     };
 
     ViewGatewayResult result = client.viewgateway_view(query)();
@@ -3782,7 +3805,8 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
     Contract large_contract(ContractType::kRv32);
     large_contract.rv32_contract().data.append_range(bytes);
     ASSERT_EQ(large_contract.rv32_contract().data.size(),
-              (320 * 1024U) + rv32::kArtifactHeaderBytes);
+              (320 * 1024U) + rv32::kArtifactHeaderBytes +
+                  4); // empty extension list
 
     auto keypair =
         derive_bootstrap_account_keypair("thruput-dev-accounts", /*index=*/1);
@@ -3868,6 +3892,7 @@ TEST(HogDevnode, BootstrapAccountCanDeployCliShapedTransactionAtStockCodeLimit)
         .invocation = Invocation{.invoked_address = deployed_address,
                                  .gas_limit = GasAmount{10'000'000}},
         .invoke_flags = std::to_underlying(InvokeFlag::ReadOnly),
+        .block_timepoint = view_timepoint_now(),
     })();
     ASSERT_EQ(output.outcome(), ViewGatewayOutcome::ViewGatewayOk);
     EXPECT_EQ(output.payload().output.status_code(),
@@ -3911,6 +3936,7 @@ TEST(HogDevnode, MlDsa65PubkeyAccountTransactionIsCommittedAndIndexed)
   using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
   auto native_transfer = [](ContractAddress const &to, int128_t amount) {
     return wallet_meta::make_calldata<u8"execute">(
+        x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
         x23::Vec<default_wallet::WalletCall, UINT32_MAX>{
             default_wallet::WalletCall{
                 .target = kNativeTokenContractAddress,
@@ -4167,6 +4193,7 @@ TEST(HogDevnode, RegisteredMlDsa65KeyAuthorizesSourceAddressClaim)
                   .entrypoint = wallet_meta::entrypoint<u8"execute">(),
                   .gas_limit = GasAmount{10'000'000},
                   .calldata = wallet_meta::make_calldata<u8"execute">(
+                      x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{},
                       x23::Vec<default_wallet::WalletCall,
                                UINT32_MAX>{default_wallet::WalletCall{
                           .target = kNativeTokenContractAddress,

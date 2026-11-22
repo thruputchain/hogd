@@ -136,18 +136,15 @@ fi
 # Pin to one core. The syscall path is a single thread of work and migrating
 # between cores mid-run adds cache-cold samples no amount of repetitions
 # removes.
-RUNNER=()
-if command -v taskset >/dev/null 2>&1; then
-  RUNNER=(taskset -c 0)
-fi
-
+#
 # Pin the code layout. ASLR moves indirect-branch aliasing, which the
 # calibration harness measured as worth up to 2x on a direct-threaded dispatch;
 # the syscall path is less sensitive but there is no reason to leave it in.
-if command -v setarch >/dev/null 2>&1 &&
-  setarch "$(uname -m)" -R true >/dev/null 2>&1; then
-  RUNNER+=(setarch "$(uname -m)" -R)
-fi
+#
+# Either one missing is an error rather than a quieter run; see
+# rv32_pin_runner.sh.
+source "${REPO_ROOT}/scripts/rv32_pin_runner.sh"
+rv32_pin_runner
 
 # Aggregates only: the report reads medians, and the per-repetition rows are
 # noise in a file meant to be committed to a metrics history.

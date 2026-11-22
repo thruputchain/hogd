@@ -18,7 +18,6 @@ namespace hogd {
 enum class ExecutionMode : uint8_t {
   kProposing = 0,
   kValidating = 1,
-  kViewing = 2
 };
 
 } // namespace hogd
@@ -32,8 +31,6 @@ template<> struct std::formatter<hogd::ExecutionMode> {
       return format_to(ctx.out(), "ExecutionMode::kProposing");
     case hogd::ExecutionMode::kValidating:
       return format_to(ctx.out(), "ExecutionMode::kValidating");
-    case hogd::ExecutionMode::kViewing:
-      return format_to(ctx.out(), "ExecutionMode::kViewing");
     }
     return format_to(ctx.out(), "ExecutionMode::Unknown");
   }

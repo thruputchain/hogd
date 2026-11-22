@@ -20,9 +20,9 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -633,7 +633,8 @@ TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 }
 
 // Checks that aliasing guards (returning kFault) are performed before the read
-// only guard
+// only guard. The contract gets its fault by aliasing an output with an input:
+// two inputs may alias each other.
 TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
   deploy_callee();
@@ -648,9 +649,16 @@ TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
+  handler.enable_transaction_stats();
 
   auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
+
+  // The aliased call is the only one that faults; the write the read-only
+  // guard refuses is not a fault.
+  const auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 1);
 }
 
 // NOLINTEND(bugprone-exception-escape)

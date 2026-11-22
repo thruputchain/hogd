@@ -28,7 +28,7 @@
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/ramdb/constants.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -3798,6 +3798,113 @@ TEST(TestBindingsTest, SetupCreateContractHonorsLoweredRv32MemoryCap)
   x23::Defer d3([db] { free_db(db); });
   EXPECT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
             kTestFFIErrorCodeContractVerificationFailed);
+}
+
+// The same holds for the artifact format versions the chain admits: a chain
+// whose minimum is past an artifact's format refuses to attach it.
+TEST(TestBindingsTest, SetupCreateContractHonorsRv32ArtifactVersionRange)
+{
+  Contract v5_contract = rv32_contract_declaring(64 * 1024);
+  auto &data = v5_contract.rv32_contract().data;
+  ASSERT_EQ(data[rv32::kArtifactFormatVersionOffset], rv32::kArtifactVersion7);
+  rv32::test_artifact::rewrite_as_v5(data);
+  auto bytes = x23::serialize(v5_contract);
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  // Precondition: the default range admits the older format.
+  auto *stock_db = make_db();
+  ASSERT_NE(stock_db, nullptr);
+  x23::Defer d2([stock_db] { free_db(stock_db); });
+  ASSERT_EQ(setup_create_contract(rc, stock_db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeNone);
+
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+      rv32::kArtifactVersion6);
+  auto serialized_config = x23::serialize(config);
+  auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+  auto created =
+      create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                genesis_root.size(), serialized_config.data(),
+                static_cast<uint32_t>(serialized_config.size()));
+  ASSERT_EQ(created.ffi_error_code, kTestFFIErrorCodeNone);
+  auto *db = created.db;
+  x23::Defer d3([db] { free_db(db); });
+  EXPECT_EQ(setup_create_contract(rc, db, bytes.data(), bytes.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+}
+
+// And for the syscall API minors the chain admits: an artifact declaring a
+// minor outside the range does not attach.
+TEST(TestBindingsTest, SetupCreateContractHonorsSyscallApiMinorRange)
+{
+  ASSERT_GT(kSyscallApiMinor, 0);
+  const auto contract_declaring_minor = [](uint32_t minor) {
+    Contract contract = rv32_contract_declaring(64 * 1024);
+    auto &data = contract.rv32_contract().data;
+    EXPECT_EQ(data[rv32::kArtifactFormatVersionOffset],
+              rv32::kArtifactVersion7);
+    for (size_t i = 0; i < 4; ++i) {
+      data[rv32::kArtifactSyscallApiMinorOffset + i] =
+          static_cast<uint8_t>(minor >> (8 * i));
+    }
+    return x23::serialize(contract);
+  };
+  const auto baseline = contract_declaring_minor(0);
+  const auto newest =
+      contract_declaring_minor(static_cast<uint32_t>(kSyscallApiMinor));
+
+  auto *rc = make_runtime_context();
+  ASSERT_NE(rc, nullptr);
+  x23::Defer d([rc] { close_runtime_context(rc); });
+
+  const auto db_with = [](ConfigParamID id, uint32_t value) {
+    NetworkConfig config = stock_network_config();
+    NetworkConfigParams::set_param(config, id, value);
+    auto serialized_config = x23::serialize(config);
+    auto genesis_root = x23::serialize(make_test_genesis_root_contract());
+    auto created =
+        create_db(nullptr, 0, kTestNetworkHash.data(), genesis_root.data(),
+                  genesis_root.size(), serialized_config.data(),
+                  static_cast<uint32_t>(serialized_config.size()));
+    EXPECT_EQ(created.ffi_error_code, kTestFFIErrorCodeNone);
+    return created.db;
+  };
+
+  // Precondition: the stock range admits both.
+  auto *stock_db = make_db();
+  ASSERT_NE(stock_db, nullptr);
+  x23::Defer d2([stock_db] { free_db(stock_db); });
+  ASSERT_EQ(setup_create_contract(rc, stock_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeNone);
+  ASSERT_EQ(setup_create_contract(rc, stock_db, newest.data(), newest.size()),
+            kTestFFIErrorCodeNone);
+
+  // A maximum below the newest minor refuses an artifact declaring it.
+  auto *capped_db = db_with(ConfigParamID::kConfigParamMaxSyscallApiMinor, 0);
+  ASSERT_NE(capped_db, nullptr);
+  x23::Defer d3([capped_db] { free_db(capped_db); });
+  EXPECT_EQ(setup_create_contract(rc, capped_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeNone);
+  EXPECT_EQ(setup_create_contract(rc, capped_db, newest.data(), newest.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+
+  // A minimum above the baseline refuses an artifact declaring the baseline.
+  auto *floored_db = db_with(ConfigParamID::kConfigParamMinSyscallApiMinor,
+                             static_cast<uint32_t>(kSyscallApiMinor));
+  ASSERT_NE(floored_db, nullptr);
+  x23::Defer d4([floored_db] { free_db(floored_db); });
+  EXPECT_EQ(setup_create_contract(rc, floored_db, baseline.data(),
+                                  baseline.size()),
+            kTestFFIErrorCodeContractVerificationFailed);
+  EXPECT_EQ(setup_create_contract(rc, floored_db, newest.data(), newest.size()),
+            kTestFFIErrorCodeNone);
 }
 
 // Regression test for #3592: a native precompile (here the default wallet)
