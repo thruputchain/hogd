@@ -39,6 +39,16 @@ HOG_DB_HOSTS=(hog7 hog11)
 MEMPOOL_HOSTS=(hog7 hog11)
 NODE_HOST_GROUPS=("hog4 hog5 hog6 hog7" "hog8 hog9 hog10 hog11")
 
+two_cohort_diagnostics=0
+if [[ ${GIT_BRANCH:-} == codex/nightly-two-cohort-stage-diagnostics &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog10 && ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-} == 0 &&
+      ${HOG_XID:-} =~ ^hogd-e2e-payment-multi-node-[0-9]+-[0-9]+$ &&
+      ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-} == 0 &&
+      $WORK_DIR == ci_work_dir/ ]]; then
+  two_cohort_diagnostics=1
+fi
+
 LOADGEN_BINARY="$BUILD_ROOT/hogd/loadgen/loadgen_server"
 CHUCKD_BINARY="$BUILD_ROOT/chuckd.dev"
 SCPD_BINARY="$BUILD_ROOT/scpd.dev"
@@ -264,9 +274,52 @@ write_coordinator_output() {
   COORDINATOR_OUTPUT_WRITTEN=1
 }
 
+capture_two_cohort_coordinators() {
+  local node stream host path output status=0
+  local directory="${HOG_DUMP_DIR:?}/two-cohort"
+  mkdir -p -- "$directory" || return
+  for node in "${NODE_IDS[@]}"; do
+    host=${CHUCKD_HOSTS[$node]}
+    for stream in stdout stderr; do
+      if path=$("get_record_${stream}_path" "node${node}_chuckd") &&
+         [[ $path =~ ^/tmp/hogd_${stream}_[0-9]+_[0-9]+_[[:alnum:]]{6}$ ]]; then
+        output="$directory/node$node-$host-coordinator-$stream"
+        if timeout 30 python3 /opt/hog-ci/peer.py "$host" "
+          set -euo pipefail
+          file=$path
+          [[ -f \$file && ! -L \$file && -O \$file ]]
+          [[ \$(realpath -e -- \$file) == \$file ]]
+          if [[ $stream == stderr ]]; then
+            LC_ALL=C grep -aE 'NOMINATING:|NOMINATED:|pre-persisting of catchup block|waiting for catchup to pre-persist|need not wait for pre-persist|received externalization for slot|VALIDATING:|VALIDATED:|scheduler (validating:|invalidated:|is missing transactions:|is too late to validate:)|committing: height|waiting for persisting of catchup block|COMMITTED:' "\$file" |
+              python3 /workspace/scripts/ci/two_cohort_coordinator.py stderr
+          else
+            python3 /workspace/scripts/ci/two_cohort_coordinator.py stdout < "\$file"
+          fi
+        " > "$output.tmp"; then
+          mv -- "$output.tmp" "$output.json" || status=1
+        else
+          rm -f -- "$output.tmp"
+          echo "Could not collect coordinator $stream from node $node ($host)" >&2
+          status=1
+        fi
+      else
+        echo "Missing coordinator $stream path for node $node ($host)" >&2
+        status=1
+      fi
+    done
+  done
+  return "$status"
+}
+
 publish_results() {
   if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
     return 0
+  fi
+
+  if [[ $two_cohort_diagnostics == 1 ]]; then
+    PUBLISHED_RESULTS=1
+    capture_two_cohort_coordinators
+    return
   fi
 
   if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
@@ -380,6 +433,19 @@ node1_mempool_cmd=(
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
+
+if [[ $two_cohort_diagnostics == 1 ]]; then
+  node0_mempool_cmd=(
+    env HOGD_NIGHTLY_TWO_COHORT=1 HOG_DUMP_DIR=/workspace/.ci/dumps/two-cohort/node0-hog7-mempool
+    /usr/bin/bash -ec 'mkdir -m 700 -p -- "$HOG_DUMP_DIR"; exec "$@"' bash
+    "${node0_mempool_cmd[@]}"
+  )
+  node1_mempool_cmd=(
+    env HOGD_NIGHTLY_TWO_COHORT=1 HOG_DUMP_DIR=/workspace/.ci/dumps/two-cohort/node1-hog11-mempool
+    /usr/bin/bash -ec 'mkdir -m 700 -p -- "$HOG_DUMP_DIR"; exec "$@"' bash
+    "${node1_mempool_cmd[@]}"
+  )
+fi
 
 node0_mempool_script=$(
   cat <<EOF
