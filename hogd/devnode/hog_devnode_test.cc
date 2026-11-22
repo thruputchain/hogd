@@ -100,6 +100,7 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_gateway.hh"
+#include "syscall_error.hh" // view.hh uses SyscallErrorCode without including it
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
