@@ -109,6 +109,24 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR
 echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
+coordinator_data_dir="$WORK_DIR/chuckd-storage"
+if [[ -n ${HOGD_CI_COORDINATOR_DATA_DIR:-} ]]; then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+     ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
+     ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
+     $HOGD_CI_COORDINATOR_DATA_DIR == /bench-coordinator/single-node ]]
+  python3 /opt/hog-ci/peer.py hog4 '
+    set -euo pipefail
+    path=/bench-coordinator/single-node
+    [[ -d $path && ! -L $path && -O $path && -w $path ]]
+    [[ $(realpath -e -- "$path") == "$path" && $(stat -c %a -- "$path") == 700 ]]
+    [[ $(findmnt -n -o FSTYPE -T "$path") == tmpfs &&
+       $(findmnt -n -o TARGET -T "$path") == /bench-coordinator ]]
+    [[ -z $(ls -A -- "$path") ]]
+  '
+  coordinator_data_dir=$HOGD_CI_COORDINATOR_DATA_DIR
+fi
+
 echo 'launch coordinator and scp'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
@@ -126,7 +144,7 @@ $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   --txs-per-block 1000000 \
   --num-blocks 1000 \
   --network-hash 11111111111111111111111111111112 \
-  --storage-dir $WORK_DIR/chuckd-storage \
+  --storage-dir "$coordinator_data_dir" \
   --out-addr :50000 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
   --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
@@ -165,6 +183,13 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
   $CONTROL_CLI hog4 "$CI_CONTROL_PORT" wait
   coordinator_status=$?
   set -e
+fi
+
+# Record final usage after the timer with the coordinator mount still present.
+if [[ -n ${HOGD_CI_COORDINATOR_DATA_DIR:-} ]]; then
+  python3 /opt/hog-ci/peer.py hog4 'df -Pk -- /bench-coordinator/single-node' \
+    > "${HOG_DUMP_DIR:?}/storage-single-node-final.txt" ||
+    echo 'Could not sample final coordinator tmpfs usage' >&2
 fi
 
 echo 'copy coordinator output from hog4'
