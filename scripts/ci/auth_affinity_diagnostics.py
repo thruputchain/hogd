@@ -145,7 +145,7 @@ def boundary_proof(path, allowed, selected):
     return dict(threads)
 
 
-def run_arm(binary, output, allowed, selected):
+def run_arm(binary, output, allowed, selected, *, startup_mask=None):
     command = [
         str(binary),
         "--auth_bench_batch_sizes=64,512",
@@ -157,6 +157,8 @@ def run_arm(binary, output, allowed, selected):
         f"--benchmark_out={output.with_suffix('.json')}",
         "--benchmark_out_format=json",
     ]
+    if startup_mask:
+        command[:0] = ["taskset", "-c", cpu_list(startup_mask)]
     mask = cpu_list(selected) if selected else "inherit"
     env = dict(os.environ, HOGD_AUTH_BENCH_POST_INIT_CPUS=mask)
     proof = {"command": command, "inherited": sorted(allowed),
@@ -236,16 +238,23 @@ def main(binary, collection_output, dump_dir):
                 "placement": "existing threads in TID order cycle through the sorted CPU IDs"}
     (output / "topology.json").write_text(json.dumps(metadata, indent=2) + "\n")
     results = {}
-    plan = (("untuned", None), ("b-full", allowed), ("b2-full", allowed),
-            ("a2-full", None), ("a-local", None), ("b-local", local),
-            ("b2-local", local), ("a2-local", None))
-    for name, selected in plan:
-        threads, medians = run_arm(binary, output / name, allowed, selected)
-        results[name] = {"stable_threads": threads, "warm_medians": medians}
-        print(f"Auth affinity {name}: {threads} threads, {medians}", flush=True)
-        (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
-    if len({result["stable_threads"] for result in results.values()}) != 1:
-        raise RuntimeError("Auth placement arms had different post-init thread counts")
+    blocks = (
+        (allowed, None, (("untuned", None), ("b-full", allowed),
+                         ("b2-full", allowed), ("a2-full", None))),
+        (local, local, (("a-local", None), ("b-local", local),
+                        ("b2-local", local), ("a2-local", None))),
+    )
+    for inherited, startup_mask, arms in blocks:
+        thread_counts = set()
+        for name, selected in arms:
+            threads, medians = run_arm(binary, output / name, inherited, selected,
+                                       startup_mask=startup_mask)
+            thread_counts.add(threads)
+            results[name] = {"stable_threads": threads, "warm_medians": medians}
+            print(f"Auth affinity {name}: {threads} threads, {medians}", flush=True)
+            (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
+        if len(thread_counts) != 1:
+            raise RuntimeError("Auth placement arms in the block had different post-init thread counts")
     # The existing remote collector expects this file at its original path.
     shutil.copyfile(output / "untuned.json", collection_output / "auth_bench.json")
 
