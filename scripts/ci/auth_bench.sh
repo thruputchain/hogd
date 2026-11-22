@@ -95,10 +95,13 @@ lines = [
     "",
     f"{context.get('auth_bench_cores', '?')} cores, "
     f"{context.get('library_build_type', '?')} benchmark library. "
-    "Mean of repetitions; spread is the coefficient of variation of txs/s.",
+    "Mean of repetitions; spread is the coefficient of variation of txs/s. "
+    "CPU/tx and CPUs busy count the auth server process's CPU time "
+    "(verify_warm and verify_saturated only).",
     "",
-    "| Benchmark | Time / iter (ms) | txs/s | spread | call p50 (ms) | call p99 (ms) |",
-    "|---|---:|---:|---:|---:|---:|",
+    "| Benchmark | Time / iter (ms) | txs/s | spread | CPU/tx (us) | CPUs busy "
+    "| call p50 (ms) | call p99 (ms) |",
+    "|---|---:|---:|---:|---:|---:|---:|---:|",
 ]
 for name, bench in means.items():
     cv = cvs.get(name, {}).get("txs_per_s")
@@ -108,6 +111,8 @@ for name, bench in means.items():
         f"| `{name}` | {fmt(bench.get('real_time'), 2)} | "
         f"{fmt(bench.get('txs_per_s'), 0)} | "
         f"{'-' if cv is None else f'{cv * 100:.1f}%'} | "
+        f"{fmt(bench.get('cpu_us_per_tx'), 2)} | "
+        f"{fmt(bench.get('cpus_busy'), 1)} | "
         f"{'-' if p50 is None else fmt(p50 / 1000, 2)} | "
         f"{'-' if p99 is None else fmt(p99 / 1000, 2)} |"
     )

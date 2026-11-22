@@ -40,7 +40,7 @@ directories.
   test picks operands and checks the results; the guest checks each syscall
   against the SDK's software arithmetic, a zero divisor, and which arguments
   may overlap. Driven by
-  `hogd/hog_exec/runtime/math_syscall_test_rv32_test.cc`.
+  `hogd/hog_exec/runtime/syscall_tests/math_syscall_test_rv32_test.cc`.
 - `tx_context_test` — transaction-context syscalls: GetSourceTransactionHash,
   GetBlockHeight, and the valid-statistic side of GetTransactionStatistics.
   Driven by `hogd/hog_exec/runtime/tx_context_tests.cc`.
