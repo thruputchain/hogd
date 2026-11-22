@@ -31,7 +31,16 @@ namespace hogd {
 // parsing, alias guard, coroutine frame -- which is what the cheapest syscalls
 // almost entirely consist of. The ecall instruction already charges 1 gas, so
 // this is the remainder.
-constexpr static uint64_t kSyscallBaseCost = 50;
+//
+// 60 is a margin, not a measurement. 50 was measured (run 33469060485), but on
+// hog10 (gas unit ~1.623 ns) the crossing through the VM has since measured
+// 74-79 ns for the cheapest rows, 45-48 gas with the ecall taken off, and
+// GetCalldataLen's 84-86 ns already exceeds 50. Single rows also move with
+// the bench process's memory layout: vm/GetBlockHeight measured 100-104 ns,
+// ~62 gas, in every run since #4834, and 74.4-76.9 ns in reruns of the same
+// binary started slightly differently. 60 covers the crossing at its usual
+// layouts with ~20% to spare; it does not cover that worst layout.
+constexpr static uint64_t kSyscallBaseCost = 60;
 
 // Per compression block, which is the unit SHA-256 works in. Charged across
 // the whole sweep the billed-to-measured ratio stays within 1.02x, which is
@@ -63,12 +72,13 @@ constexpr static uint64_t kVerifySignatureBlockCost = 131;
 // ML-DSA-65 (pure, empty context), priced from RV32 Gas Calibration run
 // 39809791818 on hog10 (gas unit 1.6219 ns, no margin). The entry-row sweep fit
 // 75644.9 ns + 258.0 ns per 136-byte SHAKE256 block: 46640 gas at zero blocks
-// once the ecall is taken off, of which kSyscallBaseCost is 50, and 160 per
-// block. The base is then raised to 46592 so no measured length is
-// undercharged: with the syscall base, 0 and 64 bytes (1 block) bill 46802
-// against a measured 46802 and 46734, and 1024 bytes (9 blocks) bills 48082
-// against 48071. The block term covers hashing the message into mu, which the
-// syscall does not bound; the lattice arithmetic is the rest.
+// once the ecall is taken off, of which the syscall base was then 50, and 160
+// per block. The base is then raised to 46592 so no measured length is
+// undercharged: with that 50-gas syscall base, 0 and 64 bytes (1 block) billed
+// 46802 against a measured 46802 and 46734, and 1024 bytes (9 blocks) billed
+// 48082 against 48071. The syscall base is now 60, which adds 10 to each. The
+// block term covers hashing the message into mu, which the syscall does not
+// bound; the lattice arithmetic is the rest.
 constexpr static uint64_t kVerifySignatureMlDsa65BaseCost = 46592;
 constexpr static uint64_t kVerifySignatureMlDsa65BlockCost = 160;
 
@@ -99,9 +109,10 @@ constexpr static uint64_t kStorageAccessCost = 150;
 //
 // 55.2 us measured on hog10, +/- 5.4. This is the dear end of that rather than
 // the mean, because the spread is ~10% where a warm row's is 0.2% -- a wall
-// clock RPC varies in a way more repetitions do not remove. It lands a cold
-// NNInt read at a round 37500 with the base and the access, the way
-// kStorageAccessCost lands a warm one at 200.
+// clock RPC varies in a way more repetitions do not remove. With the 50-gas
+// syscall base it was set against, it landed a cold NNInt read at a round
+// 37500 with the access, the way kStorageAccessCost landed a warm one at 200;
+// the base is now 60, so they bill 37510 and 210.
 //
 // It is a floor in one respect: the measurement's hog_db is in-process over a
 // local socket, so a chain running its executor and database on different
@@ -143,11 +154,24 @@ constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 // U256Sqrt, experimental, priced from RV32 Gas Calibration run 44953108898 on
 // hog10 (gas unit 1.6234 ns). Through the VM its three rows took 139.5, 130.1
 // and 142.8 ns a call: 85, 80 and 87 gas once the ecall is taken off, of
-// which kSyscallBaseCost is 50. That leaves 37 for the dearest. Each row
+// which the syscall base was then 50. That leaves 37 for the dearest. Each row
 // repeats one value, which the branch predictor learns: with values that vary
 // the arithmetic alone took 14 to 23 ns longer on a development machine, up to
 // 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
 constexpr uint64_t kU256SqrtCost = 60;
+
+// U256MulDivRem and U128MulDivRem, experimental, priced from RV32 Gas
+// Calibration run 45028088333 on hog10 (gas unit 1.6228 ns). Each has a row
+// for every divisor length, some on operands found by search that take the
+// division's rare paths for most digits. Through the VM the dearest took 236.7
+// and 178.9 ns a call: 145 and 110 gas once the ecall is taken off, of which
+// the syscall base was then 50. That leaves 95 and 60. Each row repeats one
+// set of operands. With operands that vary, the 256-bit arithmetic alone took
+// up to 6 ns longer on a development machine, 4 gas at this unit, and the
+// 128-bit no longer. That is 99 and 60, and 110 and 70 leave 11 and 10 over
+// to be safe.
+constexpr uint64_t kU256MulDivRemCost = 110;
+constexpr uint64_t kU128MulDivRemCost = 70;
 
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
@@ -281,7 +305,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 21> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 23> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -304,6 +328,8 @@ constexpr std::array<SyscallGasCostEntry, 21> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
     {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
     {.name = u8"U256Sqrt", .cost = kU256SqrtCost},
+    {.name = u8"U256MulDivRem", .cost = kU256MulDivRemCost},
+    {.name = u8"U128MulDivRem", .cost = kU128MulDivRemCost},
     {.name = u8"CommitKey", .cost = kCommitKeyCost},
 }};
 

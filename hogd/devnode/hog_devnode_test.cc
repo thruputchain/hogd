@@ -100,8 +100,6 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_gateway.hh"
-// view.hh and view_gateway.hh use SyscallErrorCode without including it.
-#include "syscall_error.hh" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"
