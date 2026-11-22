@@ -35,17 +35,28 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
   "${BENCH_HOSTS[@]}"
 
+MULTIEXEC_RUNNER=("./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner")
+if [[ ${HOGD_MULTIEXEC_EVENT_ROOT+x} ]]; then
+  if [[ ${HOGD_CI_CONTAINER:-} != 1 ||
+        $HOGD_MULTIEXEC_EVENT_ROOT != /bench-multiexec-event/trials ||
+        ! -r /opt/hog-ci/multiexec-event-tmpfs.sh ]]; then
+    echo 'Invalid multiexec Event tmpfs configuration' >&2
+    exit 1
+  fi
+  MULTIEXEC_RUNNER=(bash /opt/hog-ci/multiexec-event-tmpfs.sh "$BUILD_DIR" "$CI_CONTROL_PORT")
+fi
+
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
 
 echo 'launch multiexec runner one exec'
-./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog5 -a 100 >multiexec_runner_log
+"${MULTIEXEC_RUNNER[@]}" -s hog7 -s hog8 -s hog4 -s hog5 -a 100 >multiexec_runner_log
 
 echo 'launch multiexec runner two exec'
-./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog5 -s hog11 -a 100 >>multiexec_runner_log
+"${MULTIEXEC_RUNNER[@]}" -s hog7 -s hog8 -s hog4 -s hog5 -s hog11 -a 100 >>multiexec_runner_log
 
 echo 'launch multiexec runner three exec'
-./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner -s hog7 -s hog8 -s hog4 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
+"${MULTIEXEC_RUNNER[@]}" -s hog7 -s hog8 -s hog4 -s hog5 -s hog11 -s hog6 -a 100 >>multiexec_runner_log
 
 echo 'log multiexec runner logs'
 ./scripts/log_metric.sh multiexec_interface multiexec_runner_log
