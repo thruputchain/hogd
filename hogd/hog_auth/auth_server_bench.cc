@@ -41,6 +41,7 @@
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <limits>
@@ -49,6 +50,9 @@
 #include <optional>
 #include <print>
 #include <ratio>
+#ifdef __linux__
+#include <sched.h>
+#endif
 #include <span>
 #include <spawn.h>
 #include <string>
@@ -957,6 +961,119 @@ register_benchmarks(const Params &params)
   }
 }
 
+#ifdef __linux__
+std::vector<pid_t>
+auth_bench_threads()
+{
+  std::vector<pid_t> threads;
+  for (const auto &task : std::filesystem::directory_iterator("/proc/self/task")) {
+    threads.push_back(static_cast<pid_t>(std::stoi(task.path().filename().string())));
+  }
+  std::ranges::sort(threads);
+  return threads;
+}
+#endif
+
+bool
+auth_bench_post_init_affinity(std::string_view requested, const Params &params)
+{
+#ifdef __linux__
+  const auto matches_env = [](const char *key, std::string_view value) {
+    const char *actual = std::getenv(key);
+    return actual && actual == value;
+  };
+  if (!matches_env("GIT_BRANCH", "codex/auth-affinity-diagnostics") ||
+      !matches_env("HOGD_CI_CONTAINER", "1") ||
+      !matches_env("HOG_HOST", "hog9")) {
+    std::println(stderr, "Auth affinity requires the isolated hog9 diagnostic");
+    return false;
+  }
+  if (benchmark::GetBenchmarkFilter() !=
+          "^verify_warm/batch:(64|512)/parallelism:(1|2)/real_time$" ||
+      params.batch_sizes != std::vector<int64_t>{64, 512} ||
+      params.parallelism != std::vector<int64_t>{1, 2}) {
+    std::println(stderr, "Auth affinity requires the four diagnostic warm cases");
+    return false;
+  }
+  cpu_set_t inherited;
+  if (sched_getaffinity(0, sizeof(inherited), &inherited) != 0) {
+    std::println(stderr, "Auth affinity could not read inherited CPUs: {}", strerror(errno));
+    return false;
+  }
+  const auto threads = auth_bench_threads();
+  const bool pin = requested != "inherit";
+  std::vector<int> cpus;
+  if (pin) {
+    while (!requested.empty()) {
+      const auto separator = requested.find(',');
+      const auto part = requested.substr(0, separator);
+      int cpu = -1;
+      const auto [end, error] = std::from_chars(part.data(), part.data() + part.size(), cpu);
+      if (error != std::errc{} || end != part.end() || cpu < 0 ||
+          cpu >= CPU_SETSIZE || !CPU_ISSET(cpu, &inherited) ||
+          (!cpus.empty() && cpu <= cpus.back())) {
+        std::println(stderr, "Auth affinity requires unique, ordered inherited CPUs");
+        return false;
+      }
+      cpus.push_back(cpu);
+      if (separator == std::string_view::npos) {
+        break;
+      }
+      requested.remove_prefix(separator + 1);
+      if (requested.empty()) {
+        return false;
+      }
+    }
+    if (cpus.empty() || threads.size() < cpus.size()) {
+      std::println(stderr, "Auth affinity cannot cover every selected CPU");
+      return false;
+    }
+  }
+  // The benchmark process owns all these threads. Warm setup starts no child.
+  // Snapshot all existing threads before altering even the main thread.
+  for (auto tid : threads) {
+    cpu_set_t mask;
+    if (sched_getaffinity(tid, sizeof(mask), &mask) != 0 ||
+        !CPU_EQUAL(&inherited, &mask)) {
+      std::println(stderr, "Auth affinity thread {} differs from inherited CPUs", tid);
+      return false;
+    }
+  }
+  // Order by TID within a process and cycle through the selected CPU IDs.
+  // This uses the full selection but makes no assumptions about worker roles.
+  for (size_t i = 0; i < threads.size(); ++i) {
+    auto expected = inherited;
+    int cpu = -1;
+    if (pin) {
+      cpu = cpus[i % cpus.size()];
+      CPU_ZERO(&expected);
+      CPU_SET(cpu, &expected);
+      if (sched_setaffinity(threads[i], sizeof(expected), &expected) != 0) {
+        std::println(stderr, "Auth affinity failed to pin {}: {}", threads[i], strerror(errno));
+        return false;
+      }
+    }
+    cpu_set_t actual;
+    if (sched_getaffinity(threads[i], sizeof(actual), &actual) != 0 ||
+        !CPU_EQUAL(&expected, &actual)) {
+      std::println(stderr, "Auth affinity readback failed for thread {}", threads[i]);
+      return false;
+    }
+    std::println(stderr, "auth_affinity_thread tid={} cpu={}", threads[i], cpu);
+  }
+  if (auth_bench_threads() != threads) {
+    std::println(stderr, "Auth affinity thread set changed during post-init placement");
+    return false;
+  }
+  std::println(stderr, "auth_affinity_ready mode={} inherited_cpus={} threads={} cache_buckets={}",
+               pin ? "pin" : "inherit", CPU_COUNT(&inherited), threads.size(), params.cache_buckets);
+  return std::fflush(stderr) == 0;
+#else
+  std::println(stderr, "Auth affinity diagnostics require Linux");
+  return false;
+#endif
+}
+
 } // namespace
 
 } // namespace hogd
@@ -992,6 +1109,10 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::register_benchmarks(params);
   benchmark::AddCustomContext("auth_bench_cores",
                               std::to_string(hogd::available_parallelism()));
+  if (const char *placement = std::getenv("HOGD_AUTH_BENCH_POST_INIT_CPUS");
+      placement && !hogd::auth_bench_post_init_affinity(placement, params)) {
+    return EXIT_FAILURE;
+  }
   benchmark::RunSpecifiedBenchmarks();
   benchmark::Shutdown();
   hogd::g_env = nullptr;

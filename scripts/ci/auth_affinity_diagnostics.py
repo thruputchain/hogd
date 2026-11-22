@@ -83,7 +83,8 @@ def pressure_snapshot(cpus):
         "cgroup": read_optional("/proc/self/cgroup"),
         "process_status": [
             line for line in Path("/proc/self/status").read_text().splitlines()
-            if line.startswith(("Cpus_allowed_list:", "Mems_allowed_list:"))
+            if line.startswith(("Cpus_allowed_list:", "Mems_allowed_list:",
+                                "CapEff:", "CapBnd:", "NoNewPrivs:", "Seccomp:"))
         ],
     }
     # The qualified container normally sees its own cgroup as the mount root.
@@ -121,7 +122,30 @@ def validate_benchmark(output, expected_workers):
     return medians
 
 
-def run_arm(binary, output, cpus, *, pin):
+def boundary_proof(path, allowed, selected):
+    text = path.read_text(errors="replace")
+    ready = re.search(
+        r"^auth_affinity_ready mode=(\w+) inherited_cpus=(\d+) threads=(\d+)"
+        r" cache_buckets=(\d+)$", text, re.M,
+    )
+    if not ready:
+        return None
+    threads = [(int(tid), int(cpu)) for tid, cpu in re.findall(
+        r"^auth_affinity_thread tid=(\d+) cpu=(-?\d+)$", text, re.M
+    )]
+    mode = "pin" if selected else "inherit"
+    order = sorted(selected or [])
+    expected = [(tid, order[i % len(order)] if order else -1)
+                for i, (tid, _) in enumerate(threads)]
+    if (ready[1] != mode or int(ready[2]) != len(allowed)
+            or int(ready[3]) != len(threads) or int(ready[4]) != 65536
+            or sorted({tid for tid, _ in threads}) != [tid for tid, _ in threads]
+            or threads != expected or (selected and {cpu for _, cpu in threads} != selected)):
+        raise RuntimeError(f"{path.name}: invalid post-init affinity proof")
+    return dict(threads)
+
+
+def run_arm(binary, output, allowed, selected):
     command = [
         str(binary),
         "--auth_bench_batch_sizes=64,512",
@@ -133,64 +157,68 @@ def run_arm(binary, output, cpus, *, pin):
         f"--benchmark_out={output.with_suffix('.json')}",
         "--benchmark_out_format=json",
     ]
-    if pin:
-        command[:0] = ["taskset", "-c", cpu_list(cpus)]
-    # The unpinned run inherits the normal CPU set and worker defaults.
-    # Validate the worker count reported by the binary for every arm.
-    proof = {"command": command, "allowed": sorted(cpus),
-             "before": pressure_snapshot(cpus)}
+    mask = cpu_list(selected) if selected else "inherit"
+    env = dict(os.environ, HOGD_AUTH_BENCH_POST_INIT_CPUS=mask)
+    proof = {"command": command, "inherited": sorted(allowed),
+             "selected": sorted(selected) if selected else None,
+             "before": pressure_snapshot(allowed)}
     deadline = time.monotonic() + 150
     snapshots = Counter()
+    placement = None
+    observed_teardown = False
+    log_path = output.with_suffix(".log")
     try:
-        with output.with_suffix(".log").open("w") as log:
-            with subprocess.Popen(command, stdout=log,
+        with log_path.open("w") as log:
+            with subprocess.Popen(command, env=env, stdout=log,
                                   stderr=subprocess.STDOUT) as child:
                 try:
-                    # taskset execs the benchmark in place. Ignore its brief
-                    # startup mask before exec and check every live bench thread.
                     while child.poll() is None:
                         if time.monotonic() >= deadline:
                             raise RuntimeError(f"{output.name}: benchmark timed out")
-                        tasks = Path(f"/proc/{child.pid}/task")
-                        masks = Counter()
-                        try:
-                            if Path(f"/proc/{child.pid}/exe").resolve(strict=True) == binary:
-                                for task in tasks.iterdir():
-                                    try:
-                                        mask = os.sched_getaffinity(int(task.name))
-                                    except ProcessLookupError:
-                                        continue
-                                    masks[cpu_list(mask)] += 1
-                                    if not mask <= cpus:
-                                        proof["escaped_mask"] = cpu_list(mask)
-                                        raise RuntimeError(f"{output.name}: thread escaped its CPU mask")
-                        except FileNotFoundError:
-                            pass  # The process was exiting between procfs reads.
-                        if masks:
-                            signature = tuple(sorted(masks.items()))
-                            snapshots[signature] += 1
+                        if placement is None:
+                            placement = boundary_proof(log_path, allowed, selected)
+                        if placement:
+                            tasks = Path(f"/proc/{child.pid}/task")
+                            masks = Counter()
+                            try:
+                                current = list(tasks.iterdir())
+                            except FileNotFoundError:
+                                break
+                            for task in current:
+                                tid = int(task.name)
+                                try:
+                                    task_mask = os.sched_getaffinity(tid)
+                                except ProcessLookupError:
+                                    continue
+                                if tid not in placement:
+                                    raise RuntimeError(f"{output.name}: unexpected thread {tid} after pinning")
+                                cpu = placement[tid]
+                                if task_mask != (allowed if cpu < 0 else {cpu}):
+                                    raise RuntimeError(f"{output.name}: changed CPU mask for thread {tid}")
+                                masks[cpu_list(task_mask)] += 1
+                            if sum(masks.values()) == len(placement):
+                                if observed_teardown:
+                                    raise RuntimeError(f"{output.name}: thread group changed during measurement")
+                                snapshots[tuple(sorted(masks.items()))] += 1
+                            else:
+                                observed_teardown = True
                         time.sleep(0.1)
-                    if child.returncode:
+                    if child.wait():
                         raise RuntimeError(f"{output.name}: benchmark exited {child.returncode}")
                 finally:
                     if child.poll() is None:
                         child.kill()
     finally:
-        proof["after"] = pressure_snapshot(cpus)
+        proof["after"] = pressure_snapshot(allowed)
+        proof["post_init_tid_to_cpu"] = placement
         proof["thread_mask_samples"] = [
             {"masks": dict(signature), "observations": count}
             for signature, count in snapshots.items()
         ]
         output.with_suffix(".proof.json").write_text(json.dumps(proof, indent=2) + "\n")
-    if sum(snapshots.values()) < 10:
-        raise RuntimeError(f"{output.name}: insufficient live affinity samples")
-    # The recurring highest count rejects worker-count changes while allowing
-    # a single transient initialization or teardown sample.
-    stable_counts = [sum(count for _, count in signature)
-                     for signature, observations in snapshots.items() if observations >= 3]
-    if not stable_counts:
-        raise RuntimeError(f"{output.name}: thread count did not stabilize")
-    return max(stable_counts), validate_benchmark(output.with_suffix(".json"), len(cpus))
+    if not placement or sum(snapshots.values()) < 10:
+        raise RuntimeError(f"{output.name}: insufficient complete post-init affinity samples")
+    return len(placement), validate_benchmark(output.with_suffix(".json"), len(allowed))
 
 
 def main(binary, collection_output, dump_dir):
@@ -199,23 +227,25 @@ def main(binary, collection_output, dump_dir):
     output.mkdir(mode=0o700, parents=True, exist_ok=True)
     allowed = os.sched_getaffinity(0)
     cpus = topology(allowed)
+    node, local, _ = choose_masks(cpus)
     with binary.open("rb") as source:
         digest = hashlib.file_digest(source, "sha256").hexdigest()
-    metadata = {"sha256": digest, "host": os.getenv("HOG_HOST"), "topology": cpus}
-    metadata_path = output / "topology.json"
-    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
-    node, local, spread = choose_masks(cpus)
-    metadata.update(node=node, local=sorted(local), spread=sorted(spread))
-    metadata_path.write_text(json.dumps(metadata, indent=2) + "\n")
+    metadata = {"sha256": digest, "host": os.getenv("HOG_HOST"),
+                "source_sha": os.getenv("GIT_COMMIT"), "topology": cpus,
+                "positive_control_node": node, "positive_control_cpus": sorted(local),
+                "placement": "existing threads in TID order cycle through the sorted CPU IDs"}
+    (output / "topology.json").write_text(json.dumps(metadata, indent=2) + "\n")
     results = {}
-    for name, mask in (("untuned", allowed), ("a-local", local),
-                       ("b-spread", spread), ("b2-spread", spread), ("a2-local", local)):
-        threads, medians = run_arm(binary, output / name, mask, pin=name != "untuned")
+    plan = (("untuned", None), ("b-full", allowed), ("b2-full", allowed),
+            ("a2-full", None), ("a-local", None), ("b-local", local),
+            ("b2-local", local), ("a2-local", None))
+    for name, selected in plan:
+        threads, medians = run_arm(binary, output / name, allowed, selected)
         results[name] = {"stable_threads": threads, "warm_medians": medians}
         print(f"Auth affinity {name}: {threads} threads, {medians}", flush=True)
-    if len({results[name]["stable_threads"] for name in results if name != "untuned"}) != 1:
-        raise RuntimeError("Auth placement arms had different recurring thread counts")
-    (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
+        (output / "summary.json").write_text(json.dumps(results, indent=2) + "\n")
+    if len({result["stable_threads"] for result in results.values()}) != 1:
+        raise RuntimeError("Auth placement arms had different post-init thread counts")
     # The existing remote collector expects this file at its original path.
     shutil.copyfile(output / "untuned.json", collection_output / "auth_bench.json")
 
