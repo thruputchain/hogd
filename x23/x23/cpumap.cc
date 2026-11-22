@@ -128,9 +128,12 @@ void
 CpuMap::compute_cpusets()
 {
   cpusets_.resize(nbuckets_);
-  // Cover every CPU, not just those in map_, because bucket() maps
-  // CPUs past the end of map_ too (e.g., all CPUs for a single bucket).
-  for (unsigned i = 0; i < CpuSet::kNCPUs; ++i)
+  if (map_.empty()) {
+    // Single bucket holding every CPU we may run on.
+    cpusets_[0] = *allowed_cpus;
+    return;
+  }
+  for (size_t i = 0; i < map_.size(); ++i)
     cpusets_[bucket(i)].set(i);
 }
 #endif // HAVE_SCHED_SETAFFINITY
@@ -195,13 +198,13 @@ try {
       // "efficiency cores" missing an L3 cache.  That's not the kind
       // of high-core-count or multi-socket machine where L3-cache
       // affinity really helps, so just return a single bucket.
-      return CpuMap{Vec{0}};
+      return CpuMap{Vec<int>{}};
     }
     ret[cpu] = bucket(std::move(*idstr));
   }
   return CpuMap{ret};
 } catch (...) {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 
 CpuMap
@@ -224,32 +227,32 @@ try {
 
   if (last >= 0)
     return make_cpu_map(std::format("cache/index{}/shared_cpu_map", last));
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 } catch (...) {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 
 CpuMap
 make_single_bucket_map()
 {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 
 #else  // !HAVE_SCHED_GETCPU
 CpuMap
 make_cpu_map(std::string_view /*path*/)
 {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 CpuMap
 make_llc_map()
 {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 CpuMap
 make_single_bucket_map()
 {
-  return CpuMap{Vec{0}};
+  return CpuMap{Vec<int>{}};
 }
 #endif // !HAVE_SCHED_GETCPU
 

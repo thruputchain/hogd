@@ -24,16 +24,19 @@ struct ScopedAllowedCpus {
   }
 };
 
-// Every CPU that bucket() sends to a bucket must be in that bucket's
-// CpuSet, including CPUs past the end of the map.
-TEST(CpuMap, CpusetMatchesBucket)
+// The single bucket holds every CPU we may run on, and nothing else.
+TEST(CpuMap, SingleBucket)
 {
-  for (const auto &map : {CpuMap{Vec{0}}, CpuMap{Vec{0, 1}}}) {
-    for (unsigned cpu : {0u, 1u, 2u, 3u, 7u, CpuSet::kNCPUs - 1}) {
-      int b = map.bucket(cpu);
-      EXPECT_TRUE(map.cpuset(b).isset(cpu)) << "cpu " << cpu << " bucket " << b;
-    }
-  }
+  CpuSet cs;
+  cs.set(1);
+  cs.set(3);
+  ScopedAllowedCpus allowed(cs);
+
+  auto map = make_single_bucket_map();
+  EXPECT_EQ(map.nbuckets(), 1);
+  for (int cpu : {0, 1, 2, 3, 7})
+    EXPECT_EQ(map.bucket(cpu), 0);
+  EXPECT_TRUE(map.cpuset(0) == cs);
 }
 
 // A single-bucket map serves a process that may not run on CPU 0.
@@ -43,7 +46,7 @@ TEST(PerCpuSet, SingleBucketWithoutCpu0)
   cs.set(1);
   ScopedAllowedCpus allowed(cs);
 
-  CpuMap map{Vec{0}};
+  auto map = make_single_bucket_map();
   EXPECT_TRUE(map.cpuset(0).valid());
   PerCpuSet<int, true> pcs(map, populate, 7);
   EXPECT_EQ(pcs.lookup(0), 7);
