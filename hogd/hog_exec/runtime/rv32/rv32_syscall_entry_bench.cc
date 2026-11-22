@@ -142,6 +142,20 @@ static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
                   kInputAddress,
               "bytestring arguments must not run into the payload buffer");
 
+// U256Sqrt operands, above the bytestring block. The routine's time moves
+// with the value, so three are measured and the price covers the dearest: a
+// small one, the largest, and a hash. Zero would return before any work.
+constexpr uint32_t kU256RegionAddress = kBytestringRegionAddress + 0x60;
+static_assert(kU256RegionAddress >=
+                  kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength),
+              "U256 operands must not overlap the bytestring block");
+constexpr uint32_t kU256SmallAddress = kU256RegionAddress;
+constexpr uint32_t kU256OnesAddress = kU256RegionAddress + 0x20;
+constexpr uint32_t kU256MixedAddress = kU256RegionAddress + 0x40;
+static_assert(sizeof(U256Le) == 32);
+static_assert(kU256MixedAddress + sizeof(U256Le) <= kInputAddress,
+              "U256 operands must not run into the hashing input");
+
 // The value a Set writes and the buffer a Get fills, both at the hashing
 // input's address: no row issues a hash and a bytestring call, and the region
 // is already seeded with a nonzero pattern.
@@ -614,6 +628,21 @@ stateless_calls()
   };
 }
 
+// U256Sqrt at the three values make_guest_memory places. No storage and no
+// frame state: what these cost beyond the crossing is the arithmetic.
+std::vector<SyscallCall>
+u256_sqrt_calls()
+{
+  return {
+      make_call("U256SqrtSmall", SyscallNo::kU256Sqrt,
+                {kU256SmallAddress, kOutputAddressA}),
+      make_call("U256SqrtOnes", SyscallNo::kU256Sqrt,
+                {kU256OnesAddress, kOutputAddressA}),
+      make_call("U256SqrtMixed", SyscallNo::kU256Sqrt,
+                {kU256MixedAddress, kOutputAddressA}),
+  };
+}
+
 // Sweep SHA256 input size to check the compression-block cost model.
 SyscallCall
 sha256_call(uint32_t bytes)
@@ -870,6 +899,13 @@ make_guest_memory()
               sizeof(kNNIntSetValue));
   std::memcpy(memory.data() + kNNIntAddValueAddress, &kNNIntAddValue,
               sizeof(kNNIntAddValue));
+
+  // The U256Sqrt operands. The mixed one is a hash, so that its bits follow
+  // no pattern.
+  memory[kU256SmallAddress] = 3;
+  std::fill_n(memory.begin() + kU256OnesAddress, sizeof(U256Le), 0xff);
+  std::ranges::copy(sha256(std::string_view("U256Sqrt")),
+                    memory.begin() + kU256MixedAddress);
   return memory;
 }
 
@@ -1659,6 +1695,12 @@ register_benchmarks()
                                bm_ristretto255_msm, 257U, uint8_t{0},
                                MsmInvalid::OverLimit);
   for (const SyscallCall &call : stateless_calls()) {
+    benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
+                                 bm_syscall_entry, call);
+    benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,
+                                 call);
+  }
+  for (const SyscallCall &call : u256_sqrt_calls()) {
     benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
                                  bm_syscall_entry, call);
     benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,
