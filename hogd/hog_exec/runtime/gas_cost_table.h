@@ -144,9 +144,17 @@ constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 // 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
 constexpr uint64_t kU256SqrtCost = 60;
 
-// U256MulDivRem and U128MulDivRem, experimental. Provisional until the first
-// calibration run that has their rows.
-constexpr uint64_t kU256MulDivRemCost = 120;
+// U256MulDivRem and U128MulDivRem, experimental, priced from RV32 Gas
+// Calibration run 45028088333 on hog10 (gas unit 1.6228 ns). Each has a row
+// for every divisor length, some on operands found by search that take the
+// division's rare paths for most digits. Through the VM the dearest took 236.7
+// and 178.9 ns a call: 145 and 110 gas once the ecall is taken off, of which
+// kSyscallBaseCost is 50. That leaves 95 and 60. Each row repeats one set of
+// operands. With operands that vary, the 256-bit arithmetic alone took up to
+// 6 ns longer on a development machine, 4 gas at this unit, and the 128-bit
+// no longer. That is 99 and 60, and 110 and 70 leave 11 and 10 over to be
+// safe.
+constexpr uint64_t kU256MulDivRemCost = 110;
 constexpr uint64_t kU128MulDivRemCost = 70;
 
 // Block geometry, fixed by the hash functions rather than chosen, so
