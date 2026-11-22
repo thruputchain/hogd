@@ -185,11 +185,12 @@ five. The Limbs1 and Mixed operands are SHA-256 output. In the same run the
 syscalls that only cross the boundary took 58.2 to 68.1 ns on the entry path
 and 74.3 to 86.2 through the VM.
 
-The dearest rows leave 95 and 60 above the base. Each row repeats one set of
-operands. With operands that varied from call to call the 256-bit arithmetic
-alone took up to 6 ns longer, which is 4 gas at this unit, and the 128-bit
-arithmetic no longer. That figure is from a development machine, not from
-hog10. The last 11 and 10 are margin, to be safe.
+The dearest rows leave 95 and 60 above the base, which was 50 for this run.
+Each row repeats one set of operands. With operands that varied from call to
+call the 256-bit arithmetic alone took up to 6 ns longer, which is 4 gas at
+this unit, and the 128-bit arithmetic no longer. That figure is from a
+development machine, not from hog10. The last 11 and 10 are margin, to be
+safe.
 
 `syscall_reference.txt` guards the nine rows at the ratios this run measured,
 1.973 to 3.202 times its crossing baseline of 64.8 ns. Like U256Sqrt's, the

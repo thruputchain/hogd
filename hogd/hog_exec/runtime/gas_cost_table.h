@@ -160,11 +160,11 @@ constexpr uint64_t kU256SqrtCost = 60;
 // for every divisor length, some on operands found by search that take the
 // division's rare paths for most digits. Through the VM the dearest took 236.7
 // and 178.9 ns a call: 145 and 110 gas once the ecall is taken off, of which
-// kSyscallBaseCost is 50. That leaves 95 and 60. Each row repeats one set of
-// operands. With operands that vary, the 256-bit arithmetic alone took up to
-// 6 ns longer on a development machine, 4 gas at this unit, and the 128-bit
-// no longer. That is 99 and 60, and 110 and 70 leave 11 and 10 over to be
-// safe.
+// the syscall base was then 50. That leaves 95 and 60. Each row repeats one
+// set of operands. With operands that vary, the 256-bit arithmetic alone took
+// up to 6 ns longer on a development machine, 4 gas at this unit, and the
+// 128-bit no longer. That is 99 and 60, and 110 and 70 leave 11 and 10 over
+// to be safe.
 constexpr uint64_t kU256MulDivRemCost = 110;
 constexpr uint64_t kU128MulDivRemCost = 70;
 
