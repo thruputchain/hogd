@@ -712,12 +712,12 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // term, or SHA256Copy could go back to charging nothing, and that test would
 // still pass. Here it fails.
 //
-// Charges, crossing included, at kSyscallBaseCost = 50:
+// Charges, crossing included, at kSyscallBaseCost = 60:
 //
-//   SHA256("")                22 + 50   one padding block, no per-call base
-//   SHA256Update(0, "", reset) 26 + 50  creates a stream, compresses nothing
-//   SHA256Copy(0 -> 1)        26 + 50   clones a stream, compresses nothing
-//   SHA256Finalize(1)         22 + 50   the padding block; erases, so no
+//   SHA256("")                22 + 60   one padding block, no per-call base
+//   SHA256Update(0, "", reset) 26 + 60  creates a stream, compresses nothing
+//   SHA256Copy(0 -> 1)        26 + 60   clones a stream, compresses nothing
+//   SHA256Finalize(1)         22 + 60   the padding block; erases, so no
 //                                       stream cost
 TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
 {
@@ -772,21 +772,21 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   {
     SyscallTraceBody body(SyscallNo::kSHA256);
     body.sha256().outputs = SyscallSHA256Outputs{.hash = hash_empty};
-    const auto [start, end] = charge(72);
+    const auto [start, end] = charge(82);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.reset = true;
-    const auto [start, end] = charge(76);
+    const auto [start, end] = charge(86);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = 0;
     body.sha256_copy().inputs.dst_index = 1;
-    const auto [start, end] = charge(76);
+    const auto [start, end] = charge(86);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
@@ -794,7 +794,7 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
     body.sha256_finalize().inputs.index = 1;
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = hash_empty};
-    const auto [start, end] = charge(72);
+    const auto [start, end] = charge(82);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
 
