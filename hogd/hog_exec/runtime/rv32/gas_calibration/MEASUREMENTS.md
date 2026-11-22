@@ -156,6 +156,46 @@ the crossing baseline, the ratios this run measured, so the check fails when
 one reaches twice that. The three lines were added to that file by hand; the
 rest of it is from the earlier run it was generated from.
 
+U256MulDivRem costs 110 gas and U128MulDivRem 70 on top of the shared syscall
+base. Run `45028088333` (hog10, AMD EPYC 9554, gas unit 1.6228 ns, hogd
+`8264316`, mode=reference) measured their rows, here as the medians of nine
+repetitions:
+
+| Case | Entry ns | VM ns per call | Measured gas | Billed gas |
+|---|---:|---:|---:|---:|
+| U256MulDivRemLimbs1, a one-limb divisor | 165.5 | 193.0 | 118 | 160 |
+| U256MulDivRemLimbs2, two limbs | 198.0 | 227.9 | 140 | 160 |
+| U256MulDivRemLimbs3, three limbs | 204.2 | 233.2 | 143 | 160 |
+| U256MulDivRemLimbs4, four limbs | 203.6 | 234.1 | 144 | 160 |
+| U256MulDivRemAddBack, four limbs | 207.6 | 236.7 | 145 | 160 |
+| U256MulDivRemMixed, four limbs | 197.1 | 227.9 | 140 | 160 |
+| U128MulDivRemLimbs1, a one-limb divisor | 128.0 | 170.8 | 105 | 120 |
+| U128MulDivRemLimbs2, two limbs | 139.7 | 178.9 | 110 | 120 |
+| U128MulDivRemMixed, two limbs | 136.1 | 177.0 | 109 | 120 |
+
+Measured and billed gas are counted as for U256Sqrt above. A limb is 64 bits.
+The division works out the quotient a limb at a time, and both how many of
+those digits there are and what each costs follow the divisor's length, so the
+rows cover every length. Two branches in it follow the operands: a test that
+takes one off a digit's estimate, up to twice, and an add-back when the
+estimate was still one too large. From two limbs up the Limbs rows use
+operands, found by search, that take one off the estimate twice for every
+digit or all but one, and AddBack's add the divisor back for four digits of
+five. The Limbs1 and Mixed operands are SHA-256 output. In the same run the
+syscalls that only cross the boundary took 58.2 to 68.1 ns on the entry path
+and 74.3 to 86.2 through the VM.
+
+The dearest rows leave 95 and 60 above the base, which was 50 for this run.
+Each row repeats one set of operands. With operands that varied from call to
+call the 256-bit arithmetic alone took up to 6 ns longer, which is 4 gas at
+this unit, and the 128-bit arithmetic no longer. That figure is from a
+development machine, not from hog10. The last 11 and 10 are margin, to be
+safe.
+
+`syscall_reference.txt` guards the nine rows at the ratios this run measured,
+1.973 to 3.202 times its crossing baseline of 64.8 ns. Like U256Sqrt's, the
+lines were added to that file by hand.
+
 ## Storage
 
 Run `33725560215`, engine `d4697729c27d6dbd`, gas unit 1.6217 ns, recorded five
