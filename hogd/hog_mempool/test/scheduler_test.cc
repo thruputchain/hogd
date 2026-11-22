@@ -1519,6 +1519,47 @@ TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesMarksAccountDirty)
   EXPECT_EQ(*row, *cached);
 }
 
+// An age that changes after a write has copied it is marked again, and the
+// next write stores the newer age rather than leaving the older one in hog_db.
+// The copy and the flag clear happen under the account's bucket lock, which
+// every age change also takes, so "after the copy" is the only interleaving
+// besides "before the copy".
+TEST(Scheduler, NativeTokenAgeChangedAfterWriteGoesOutInNextWrite)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  auto transfer_at = [&](BlockHeight block, int128_t amount) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block,
+        {Delta{.address = account, .native_token_delta = to_xdr(amount)}}))();
+  };
+  auto cached_age = [&] {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return *age;
+  };
+
+  transfer_at(/*block=*/5, 1'000);
+  const NativeTokenAge first = cached_age();
+  scheduler->write_dirty_native_token_ages_to_db()();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  transfer_at(/*block=*/9, 2'000);
+  const NativeTokenAge second = cached_age();
+  ASSERT_NE(second, first);
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  EXPECT_EQ(*row, second);
+}
+
 // The background writer sends a changed age to hog_db on its own, without
 // any caller asking for a write.
 TEST(Scheduler, BackgroundWriterWritesChangedNativeTokenAges)
