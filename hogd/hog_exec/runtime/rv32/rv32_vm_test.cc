@@ -1516,7 +1516,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
           // Literals, not the constants the schedule is built from: this is
           // the independent statement of each price, so a changed constant
           // fails here until it is restated.
-          {u8"SyscallBase", 50},
+          {u8"SyscallBase", 60},
           {u8"SHA256HashBlock", 22},
           {u8"SHA256Stream", 26},
           {u8"VerifySignatureBase", 17'750},
@@ -1536,6 +1536,8 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
           {u8"Ristretto255MsmMaxTerms", 256},
           {u8"GuestBufferCopyBlock", 7},
           {u8"U256Sqrt", 60},
+          {u8"U256MulDivRem", 110},
+          {u8"U128MulDivRem", 70},
       }};
 
   EXPECT_EQ(kOpCount, 49U);

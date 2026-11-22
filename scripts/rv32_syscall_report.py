@@ -1360,7 +1360,7 @@ def print_table(data):
 # is why they are named once rather than spelled inline at each use.
 SHA256_BLOCK_BYTES = 64
 SHA256_PAD_BYTES = 9          # 0x80 plus an 8-byte big-endian bit length
-COMMITTED_SYSCALL_BASE_GAS = 50
+COMMITTED_SYSCALL_BASE_GAS = 60
 COMMITTED_SHA256_BLOCK_GAS = 22
 COMMITTED_SHA256_STREAM_GAS = 26
 COMMITTED_MLDSA_VERIFY_BASE_GAS = 46592

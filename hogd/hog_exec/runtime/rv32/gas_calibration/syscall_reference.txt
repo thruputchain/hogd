@@ -103,6 +103,17 @@ guard syscall/SHA256Update/32 1.286
 guard syscall/SHA256Update/32768 278.692
 guard syscall/SHA256Update/4096 35.914
 guard syscall/SHA256Update0+Finalize 3.128
+# U128MulDivRem and U256MulDivRem: added by hand from run 45028088333, the run
+# their prices are from (crossing baseline 64.8 ns there).
+guard syscall/U128MulDivRemLimbs1 1.973
+guard syscall/U128MulDivRemLimbs2 2.154
+guard syscall/U128MulDivRemMixed 2.099
+guard syscall/U256MulDivRemAddBack 3.202
+guard syscall/U256MulDivRemLimbs1 2.552
+guard syscall/U256MulDivRemLimbs2 3.054
+guard syscall/U256MulDivRemLimbs3 3.148
+guard syscall/U256MulDivRemLimbs4 3.139
+guard syscall/U256MulDivRemMixed 3.039
 # U256Sqrt: added by hand from run 44953108898, the run its price is from
 # (crossing baseline 61.0 ns there). The rest of this file is one earlier run.
 guard syscall/U256SqrtMixed 1.981

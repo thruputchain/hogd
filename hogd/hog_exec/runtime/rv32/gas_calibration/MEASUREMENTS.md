@@ -58,6 +58,22 @@ remaining spread included fused code charged at independent opcode worst cases.
 Those results support retaining a simple unit; they are not an absolute runtime
 budget or a demonstrated bound across all guest programs.
 
+## Shared syscall base
+
+The shared host base is 60 gas, raised from 50 on 2026-11-22 for headroom; it
+was not re-measured. The 50 came from run `33469060485`, below. On hog10 (gas
+unit ~1.623 ns) the syscalls that only cross the boundary have since taken 74
+to 79 ns per call through the VM, 45 to 48 gas with the ECALL taken off, and
+GetCalldataLen 84 to 86 ns, which is over 50. Single rows also move with the
+bench process's memory layout, which the bench pins with `setarch -R`:
+vm/GetBlockHeight measured 100 to 104 ns in every run that contains #4834, and
+74.4 to 76.9 ns in reruns of the same binary started with a different stack or
+row set (run `45015245614`). 60 covers the usual layouts with about 20% to spare
+and does not cover that one.
+
+The figures in the sections below are as recorded, at the base of their time:
+50 gas for every run listed here. Each bill they quote is 10 gas higher now.
+
 ## Hashing and signatures
 
 Run `33469060485` used a gas unit of 1.6241 ns. It informed the shared host base
@@ -140,6 +156,46 @@ the crossing baseline, the ratios this run measured, so the check fails when
 one reaches twice that. The three lines were added to that file by hand; the
 rest of it is from the earlier run it was generated from.
 
+U256MulDivRem costs 110 gas and U128MulDivRem 70 on top of the shared syscall
+base. Run `45028088333` (hog10, AMD EPYC 9554, gas unit 1.6228 ns, hogd
+`8264316`, mode=reference) measured their rows, here as the medians of nine
+repetitions:
+
+| Case | Entry ns | VM ns per call | Measured gas | Billed gas |
+|---|---:|---:|---:|---:|
+| U256MulDivRemLimbs1, a one-limb divisor | 165.5 | 193.0 | 118 | 160 |
+| U256MulDivRemLimbs2, two limbs | 198.0 | 227.9 | 140 | 160 |
+| U256MulDivRemLimbs3, three limbs | 204.2 | 233.2 | 143 | 160 |
+| U256MulDivRemLimbs4, four limbs | 203.6 | 234.1 | 144 | 160 |
+| U256MulDivRemAddBack, four limbs | 207.6 | 236.7 | 145 | 160 |
+| U256MulDivRemMixed, four limbs | 197.1 | 227.9 | 140 | 160 |
+| U128MulDivRemLimbs1, a one-limb divisor | 128.0 | 170.8 | 105 | 120 |
+| U128MulDivRemLimbs2, two limbs | 139.7 | 178.9 | 110 | 120 |
+| U128MulDivRemMixed, two limbs | 136.1 | 177.0 | 109 | 120 |
+
+Measured and billed gas are counted as for U256Sqrt above. A limb is 64 bits.
+The division works out the quotient a limb at a time, and both how many of
+those digits there are and what each costs follow the divisor's length, so the
+rows cover every length. Two branches in it follow the operands: a test that
+takes one off a digit's estimate, up to twice, and an add-back when the
+estimate was still one too large. From two limbs up the Limbs rows use
+operands, found by search, that take one off the estimate twice for every
+digit or all but one, and AddBack's add the divisor back for four digits of
+five. The Limbs1 and Mixed operands are SHA-256 output. In the same run the
+syscalls that only cross the boundary took 58.2 to 68.1 ns on the entry path
+and 74.3 to 86.2 through the VM.
+
+The dearest rows leave 95 and 60 above the base, which was 50 for this run.
+Each row repeats one set of operands. With operands that varied from call to
+call the 256-bit arithmetic alone took up to 6 ns longer, which is 4 gas at
+this unit, and the 128-bit arithmetic no longer. That figure is from a
+development machine, not from hog10. The last 11 and 10 are margin, to be
+safe.
+
+`syscall_reference.txt` guards the nine rows at the ratios this run measured,
+1.973 to 3.202 times its crossing baseline of 64.8 ns. Like U256Sqrt's, the
+lines were added to that file by hand.
+
 ## Storage
 
 Run `33725560215`, engine `d4697729c27d6dbd`, gas unit 1.6217 ns, recorded five
@@ -161,8 +217,9 @@ repetitions and reported means after changes #3771 and #3814:
 
 The 150-gas storage access charge folds warm access, an allowance for first
 touch, and prepaid child commit into each call. Together with the 50-gas shared
-host base it bills 200 host gas. This overcharges repeated warm touches but does
-not cover the measured first-touch tail at large frame occupancies:
+host base of the time it billed 200 host gas, 210 at today's 60. This
+overcharges repeated warm touches but does not cover the measured first-touch
+tail at large frame occupancies:
 
 | Keys at depth 1 | Loaded first touch, ns | No-load first touch, ns |
 |---|---:|---:|
@@ -178,9 +235,10 @@ Whether a transaction can reach the expensive tail depends on its gas budget;
 these measurements do not establish that the tail is unreachable.
 
 The local database miss measured about 55.2 microseconds with a recorded spread
-of 5.4 microseconds. The 37300-gas database charge includes that margin and brings
-a loaded cold NNInt read to 37500 host gas. The fixture uses a local socket;
-a remote database adds work absent from this measurement. Billing follows the
+of 5.4 microseconds. The 37300-gas database charge includes that margin and
+brought a loaded cold NNInt read to 37500 host gas with the 50-gas base, 37510
+at 60. The fixture uses a local socket; a remote database adds work absent from
+this measurement. Billing follows the
 transaction's first load, independently of whether the shared snapshot cache
 happens to contain the key.
 
