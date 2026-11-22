@@ -2564,7 +2564,8 @@ TEST(Mempool, ValidateOversizedProposalIsRejected)
 TEST(Mempool, ValidateBatch)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
-  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+  const SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client, /*num_txs=*/128);
 
   MempoolTestInfra server;
 
@@ -2596,8 +2597,28 @@ TEST(Mempool, ValidateBatch)
   auto res_validate =
       server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
                                                                proposal)();
-  EXPECT_EQ(res_validate.outcome(),
+  ASSERT_EQ(res_validate.outcome(),
             SchedulerValidationResult::SchedulerValidationOK);
+  SignedTransactionHashBatch proposed_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                  proposed_hashes, kNoBatchSizeLimit)());
+  SignedTransactionBatch validated_txs;
+  ASSERT_TRUE(parallel_batch_to_t(res_validate.block().signed_transactions,
+                                  validated_txs, kNoBatchSizeLimit)());
+  ASSERT_EQ(validated_txs.size(), txs.size());
+  ASSERT_EQ(validated_txs.size(), proposed_hashes.size());
+  for (size_t i = 0; i < validated_txs.size(); ++i) {
+    EXPECT_EQ(sha256(validated_txs[i]), proposed_hashes[i]);
+  }
+
+  const BlockID validated_block = res_validate.block().block_id;
+  ASSERT_EQ(commit_block(server, validated_block, db_tip, proposal),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, validated_block);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header.block_height,
+            proposal.header.block_height);
 }
 
 TEST(Mempool, ValidateRejectsBlockWithFailedTx)

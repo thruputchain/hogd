@@ -109,7 +109,11 @@ nightly_stages_enabled()
            digits(run.substr(dash + 1)) &&
            (matches("GIT_BRANCH",
                     "codex/nightly-two-cohort-stage-diagnostics") ||
-            matches("GIT_BRANCH", "codex/nightly-two-cohort-validation-rpc")) &&
+            matches("GIT_BRANCH", "codex/nightly-two-cohort-validation-rpc") ||
+            matches("GIT_BRANCH",
+                    "codex/nightly-two-cohort-validation-batch10") ||
+            matches("GIT_BRANCH",
+                    "codex/nightly-two-cohort-validation-batch64")) &&
            matches("HOGD_CI_CONTAINER", "1") &&
            matches("HOGD_CI_OFFLINE", "1") &&
            matches("HOG_E2E_PAYMENT_MULTI_NODE_ASAN", "0") &&
@@ -124,11 +128,31 @@ validation_rpc_diagnostics_enabled()
 {
   static const bool enabled = [] {
     const char *branch = std::getenv("GIT_BRANCH");
-    return nightly_stages_enabled() && branch &&
-           std::string_view(branch) ==
-               "codex/nightly-two-cohort-validation-rpc";
+    const std::string_view name = branch ? branch : "";
+    return nightly_stages_enabled() &&
+           (name == "codex/nightly-two-cohort-validation-rpc" ||
+            name == "codex/nightly-two-cohort-validation-batch10" ||
+            name == "codex/nightly-two-cohort-validation-batch64");
   }();
   return enabled;
+}
+
+// Zero means the normal validation packing and diagnostic schema.
+size_t
+validation_rpc_batch_override()
+{
+  static const size_t width = [] {
+    const char *branch = std::getenv("GIT_BRANCH");
+    const std::string_view name = branch ? branch : "";
+    if (!nightly_stages_enabled())
+      return 0;
+    if (name == "codex/nightly-two-cohort-validation-batch10")
+      return 10;
+    if (name == "codex/nightly-two-cohort-validation-batch64")
+      return 64;
+    return 0;
+  }();
+  return width;
 }
 
 int64_t
@@ -2371,11 +2395,15 @@ struct MempoolCoordinatorRpc::ValidationRpcGroup {
   struct ExecutorCalls {
     size_t calls{};
     size_t txs{};
+    size_t max_batch_txs{};
     ValidationRpcSample sample{};
   };
   std::vector<ExecutorCalls> executors;
   size_t ordinal{};
+  size_t sized_rpc_txs{};
+  size_t sized_rpc_xdr_body_bytes{};
   bool sample{};
+  bool measure_body_size{};
 };
 
 struct MempoolCoordinatorRpc::ValidationChunkStats {
@@ -2406,6 +2434,7 @@ MempoolCoordinatorRpc::write_validation_rpc_stats(
   struct ExecutorStats {
     size_t issued{};
     size_t transactions{};
+    size_t max_batch_txs{};
     size_t sampled_incomplete{};
     std::vector<int64_t> await_ns;
     std::vector<std::pair<int64_t, int>> endpoints;
@@ -2414,6 +2443,8 @@ MempoolCoordinatorRpc::write_validation_rpc_stats(
   std::vector<int64_t> prepare, fanout, materialize;
   size_t missing_chunks = 0;
   size_t rpc_groups = 0;
+  size_t sized_rpc_txs = 0;
+  size_t sized_rpc_xdr_body_bytes = 0;
   for (const auto &chunk : chunks) {
     if (chunk.prepare_ns)
       prepare.push_back(chunk.prepare_ns);
@@ -2424,11 +2455,16 @@ MempoolCoordinatorRpc::write_validation_rpc_stats(
     missing_chunks += chunk.body_missing;
     rpc_groups += chunk.rpc_groups.size();
     for (const auto &group : chunk.rpc_groups) {
+      if (group.sized_rpc_txs) {
+        sized_rpc_txs = group.sized_rpc_txs;
+        sized_rpc_xdr_body_bytes = group.sized_rpc_xdr_body_bytes;
+      }
       for (size_t i = 0; i < group.executors.size(); ++i) {
         const auto &source = group.executors[i];
         auto &dest = executors[i];
         dest.issued += source.calls;
         dest.transactions += source.txs;
+        dest.max_batch_txs = std::max(dest.max_batch_txs, source.max_batch_txs);
         if (source.sample.start_ns && !source.sample.end_ns)
           ++dest.sampled_incomplete;
         if (source.sample.end_ns > source.sample.start_ns) {
@@ -2445,11 +2481,17 @@ MempoolCoordinatorRpc::write_validation_rpc_stats(
       R"("outer_chunks":{},"missing_outer_chunks":{},"executor_rpc_groups":{},"rpc_sample_group_stride":4,)"
       R"("connections_per_executor":{},)"
       R"("parent_launch_ns":{},"parent_handle_drain_ns":{},"parent_merge_ns":{},)"
-      R"("chunk_prepare":{},"chunk_executor_fanout":{},"chunk_materialize":{},"executors":[)",
+      R"("chunk_prepare":{},"chunk_executor_fanout":{},"chunk_materialize":{},)",
       height, block_id, outcome, tx_count, missing_count, chunks.size(),
       missing_chunks, rpc_groups, kNumClientsPerExecutor, launch_ns, drain_ns,
       merge_ns, distribution(std::move(prepare)),
       distribution(std::move(fanout)), distribution(std::move(materialize)));
+  const size_t width = validation_rpc_batch_override();
+  if (width)
+    report += std::format(
+        R"("validation_rpc_batch_width":{},"sized_first_rpc_txs":{},"sized_first_rpc_xdr_body_bytes":{},)",
+        width, sized_rpc_txs, sized_rpc_xdr_body_bytes);
+  report += R"("executors":[)";
   x23::Vec<ExecCard> cards;
   CHECK_EQ(Registration::registration().executors_registered(&cards),
            executor_count);
@@ -2471,10 +2513,14 @@ MempoolCoordinatorRpc::write_validation_rpc_stats(
     }
     report += std::format(
         R"({}{{"index":{},"registered_port":{},"issued_rpcs":{},"issued_txs":{},"sampled_incomplete":{},)"
-        R"("sampled_peak_overlap":{},"caller_await":{}}})",
+        R"("sampled_peak_overlap":{},"caller_await":{})",
         i ? "," : "", i, port, executor.issued, executor.transactions,
         executor.sampled_incomplete, peak,
         distribution(std::move(executor.await_ns)));
+    if (width)
+      report +=
+          std::format(R"(,"max_issued_batch_txs":{})", executor.max_batch_txs);
+    report += "}";
   }
   report += "]}\n";
   static const x23::UniqueFd file = [] {
@@ -2657,6 +2703,8 @@ MempoolCoordinatorRpc::validate_batch(BlockID block_id,
       group->ordinal = i;
       // Rotate groups and stripes so selection can cover both executors.
       group->sample = (i + stats->ordinal) % 4 == 0;
+      group->measure_body_size =
+          i == 0 && stats->ordinal == 0 && validation_rpc_batch_override();
     }
     handles.push_back(
         multiplex_large_validation_chunk_across_executors(block_id, tx_chunk,
@@ -2690,8 +2738,9 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
 {
   co_await default_coropoll().pool_.bg();
 
+  const size_t width = validation_rpc_batch_override();
   const std::vector<ChunkRange> chunks =
-      make_chunks_for_max_size(txs.size(), kChunkSize);
+      make_chunks_for_max_size(txs.size(), width ? width : kChunkSize);
 
   x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
@@ -2719,6 +2768,22 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
       auto &record = stats->executors[connection % num_exec_shards_];
       ++record.calls;
       record.txs += tx_chunk.size();
+      if (width)
+        record.max_batch_txs = std::max(record.max_batch_txs, tx_chunk.size());
+      if (stats->measure_body_size && i == 0 && tx_chunk.size() >= width / 2) {
+        // Size one representative request body per process. Chunks are
+        // balanced, so a full group need not reach the configured maximum.
+        // The stream still enforces its configured limit on every request.
+        static std::atomic_bool sized{false};
+        if (!sized.exchange(true, std::memory_order_relaxed)) {
+          size_t bytes = x23::xdr_size(block_id) + sizeof(uint32_t);
+          for (const auto &tx : tx_chunk)
+            bytes += x23::xdr_size(tx);
+          CHECK_LT(bytes, Executor::kMessageSize);
+          stats->sized_rpc_txs = tx_chunk.size();
+          stats->sized_rpc_xdr_body_bytes = bytes;
+        }
+      }
       if (stats->sample && i / num_exec_shards_ == sampled_stripe)
         sample = &record.sample;
     }
