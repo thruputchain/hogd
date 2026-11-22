@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include "x23/cpumap.h"
-#include "x23/vec.h"
 
 namespace x23 {
 
@@ -51,23 +50,6 @@ TEST(PerCpuSet, SingleBucketWithoutCpu0)
   PerCpuSet<int, true> pcs(map, populate, 7);
   EXPECT_EQ(pcs.lookup(0), 7);
   EXPECT_EQ(pcs.lookup(), 7);
-}
-
-// With no bucket valid, lookup() must still find a value.
-TEST(PerCpuSet, NoValidBucket)
-{
-  ScopedAllowedCpus allowed(CpuSet{});
-
-  CpuMap map{Vec{0, 1}};
-  PerCpuSet<int, true> pcs(map, populate, 7);
-  EXPECT_EQ(pcs.lookup(0), 7);
-  EXPECT_EQ(pcs.lookup(1), 7);
-  int n = 0;
-  for (int v : pcs) {
-    EXPECT_EQ(v, 7);
-    ++n;
-  }
-  EXPECT_EQ(n, 1);
 }
 
 #endif // HAVE_SCHED_SETAFFINITY

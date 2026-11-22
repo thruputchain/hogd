@@ -275,8 +275,7 @@ constexpr populate_t populate;
 
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
 // ValidOnly is true, then it will only construct a T for CpuSets on
-// which we can actually be scheduled (or for the first CpuSet, if
-// there are none).
+// which we can actually be scheduled.
 template<typename T, bool ValidOnly = false> class PerCpuSet {
 public:
   using value_type = T;
@@ -329,11 +328,6 @@ public:
       if (!ValidOnly || s.valid())
         construct(i, std::forward<Args>(args)...);
     }
-    // If no bucket intersects the CPUs we may run on, construct one
-    // anyway so lookup() has something to fall back to.
-    if constexpr (ValidOnly)
-      if (!valid_indices_.size() && map_.nbuckets() > 0)
-        construct(0, std::forward<Args>(args)...);
   }
 
   value_type &lookup() { return lookup(map_.bucket()); }
