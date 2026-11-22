@@ -984,8 +984,11 @@ auth_bench_post_init_affinity(std::string_view requested, const Params &params)
     const char *actual = std::getenv(key);
     return actual && actual == value;
   };
-  if (!matches_env("GIT_BRANCH", "codex/auth-affinity-diagnostics") ||
-      !matches_env("HOGD_CI_CONTAINER", "1") ||
+  const bool diagnostic_branch =
+      matches_env("GIT_BRANCH", "codex/auth-affinity-diagnostics") ||
+      (matches_env("GIT_BRANCH", "codex/auth-pinning-only") &&
+       matches_env("HOGD_CI_OFFLINE", "1"));
+  if (!diagnostic_branch || !matches_env("HOGD_CI_CONTAINER", "1") ||
       !matches_env("HOG_HOST", "hog9")) {
     std::println(stderr, "Auth affinity requires the isolated hog9 diagnostic");
     return false;
