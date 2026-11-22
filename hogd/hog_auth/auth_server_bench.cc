@@ -41,6 +41,7 @@
 #include <cstring>
 #include <ctime>
 #include <fcntl.h>
+#include <filesystem>
 #include <format>
 #include <functional>
 #include <limits>
@@ -60,6 +61,10 @@
 #include <unistd.h>
 #include <utility>
 #include <vector>
+
+#ifdef __linux__
+#include <sched.h>
+#endif
 
 #include "address_auth.hh"
 #include "auth_claim.hh"
@@ -531,11 +536,144 @@ report_cpu(benchmark::State &state, size_t txs, const CpuStopwatch &stopwatch)
   state.counters["cpus_busy"] = cpu_seconds / wall_seconds;
 }
 
+bool pin_warm_batch64 = false;
+
+#ifdef __linux__
+std::vector<pid_t>
+auth_bench_threads()
+{
+  std::vector<pid_t> threads;
+  for (const auto &task :
+       std::filesystem::directory_iterator("/proc/self/task")) {
+    threads.push_back(
+        static_cast<pid_t>(std::stoi(task.path().filename().string())));
+  }
+  std::ranges::sort(threads);
+  return threads;
+}
+
+// All workers already exist at this point. Set and restore their affinity
+// outside the timed loop, leaving the worker count and later cases alone.
+class WarmBatchAffinity {
+public:
+  WarmBatchAffinity() : threads_(auth_bench_threads())
+  {
+    if (sched_getaffinity(0, sizeof(inherited_), &inherited_) != 0 ||
+        CPU_COUNT(&inherited_) < 3) {
+      fail("could not determine the inherited CPUs");
+    }
+
+    std::vector<int> cpus;
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+      if (CPU_ISSET(cpu, &inherited_)) {
+        cpus.push_back(cpu);
+      }
+    }
+    if (threads_.size() < cpus.size()) {
+      fail("the initialized workers cannot cover the inherited CPUs");
+    }
+    for (pid_t tid : threads_) {
+      if (!has_mask(tid, inherited_)) {
+        fail("a thread already has a different mask");
+      }
+    }
+    for (size_t i = 0; i < threads_.size(); ++i) {
+      cpu_set_t pinned;
+      CPU_ZERO(&pinned);
+      CPU_SET(cpus[i % cpus.size()], &pinned);
+      if (sched_setaffinity(threads_[i], sizeof(pinned), &pinned) != 0 ||
+          !has_mask(threads_[i], pinned)) {
+        const bool restored = restore();
+        fail(restored ? "could not pin all workers"
+                      : "could not pin or restore all workers");
+      }
+    }
+    if (auth_bench_threads() != threads_) {
+      const bool restored = restore();
+      fail(restored ? "the thread set changed during pinning"
+                    : "could not restore the changed thread set");
+    }
+  }
+
+  ~WarmBatchAffinity()
+  {
+    if (!restore()) {
+      fail("could not restore every worker to its inherited mask");
+    }
+  }
+
+  WarmBatchAffinity(const WarmBatchAffinity &) = delete;
+  WarmBatchAffinity &operator=(const WarmBatchAffinity &) = delete;
+
+private:
+  [[noreturn]] static void fail(const char *reason)
+  {
+    std::println(stderr, "Auth warm batch-64 affinity: {}", reason);
+    std::exit(EXIT_FAILURE);
+  }
+
+  static bool has_mask(pid_t tid, const cpu_set_t &mask)
+  {
+    cpu_set_t current;
+    return sched_getaffinity(tid, sizeof(current), &current) == 0 &&
+           CPU_EQUAL(&mask, &current);
+  }
+
+  bool restore() const
+  {
+    bool ok = true;
+    for (pid_t tid : threads_) {
+      if (!has_mask(tid, inherited_) &&
+          (sched_setaffinity(tid, sizeof(inherited_), &inherited_) != 0 ||
+           !has_mask(tid, inherited_))) {
+        ok = false;
+      }
+    }
+    return auth_bench_threads() == threads_ && ok;
+  }
+
+  std::vector<pid_t> threads_;
+  cpu_set_t inherited_;
+};
+#endif
+
+bool
+configure_warm_batch_affinity()
+{
+  const char *option = std::getenv("AUTH_BENCH_PIN_WARM_BATCH64");
+  if (!option || !*option) {
+    return true;
+  }
+#ifdef __linux__
+  const auto matches = [](const char *key, std::string_view expected) {
+    const char *actual = std::getenv(key);
+    return actual && actual == expected;
+  };
+  if (option == std::string_view("1") && matches("HOGD_CI_CONTAINER", "1") &&
+      matches("HOGD_CI_OFFLINE", "1") && matches("HOG_HOST", "hog9")) {
+    pin_warm_batch64 = true;
+    return true;
+  }
+#endif
+  std::println(
+      stderr,
+      "Auth warm batch-64 affinity requires the offline hog9 benchmark");
+  return false;
+}
+
 // AuthServer::verify_transactions called directly, every account cached:
 // signature checks plus cache lookups, no RPC.
 void
 bm_verify_warm(benchmark::State &state, size_t batch_size, size_t parallelism)
 {
+#ifdef __linux__
+  std::optional<WarmBatchAffinity> affinity;
+  if (pin_warm_batch64 && batch_size == 64 &&
+      (parallelism == 1 || parallelism == 2)) {
+    affinity.emplace();
+    state.SetLabel("affinity=round-robin");
+  }
+#endif
   const SignedTransactionBatch batch =
       make_batch(g_env->corpus(), batch_size, /*txs_per_account=*/1);
   const std::span<const SignedTransaction> txs(batch.data(), batch.size());
@@ -971,7 +1109,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   hogd::Params params;
-  if (!hogd::parse_params(argc, argv, params)) {
+  if (!hogd::parse_params(argc, argv, params) ||
+      !hogd::configure_warm_batch_affinity()) {
     return EXIT_FAILURE;
   }
   int ret = hogd::hogd_init(argc, argv, /*do_print_version=*/false,
