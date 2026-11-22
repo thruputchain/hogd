@@ -325,7 +325,8 @@ close_block(bench_db_sched_client_t &db_sched_client,
 // stops the servers.
 class MultiexecCluster {
 public:
-  explicit MultiexecCluster(const std::vector<std::string> &server_addrs)
+  explicit MultiexecCluster(const std::vector<std::string> &server_addrs,
+                            const std::string &event_work_dir = {})
   {
     if (server_addrs.size() < 4) {
       // 1 event server, 1 db, 1 indexer, and the rest executors
@@ -365,7 +366,8 @@ public:
         "hogd/hog_event/hog-event",
         {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
          format_advertised_address(mempool_ip, sched_event_port), "--work-dir",
-         work_dir_str, "--indexer-port",
+         event_work_dir.empty() ? work_dir_str : event_work_dir,
+         "--indexer-port",
          std::to_string(kBenchEventIndexerPort)});
     const std::string event_ip = hog_ip(server_addrs[server_idx]);
     server_idx++;
