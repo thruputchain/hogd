@@ -27,7 +27,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "precompiles.hh"
@@ -155,8 +155,7 @@ std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
 GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     StorageCostModel const &cost_model) const
 {
-  using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
-  root_client_t client(kGenesisRootContractAddress);
+  using root_meta_t = ContractTraitMeta<genesis_root::GenesisRoot>;
   // Ample for a distribution chunk, and within the default max_tx_gas: a
   // chain whose cap refused its own ceremony could not reach height 1.
   constexpr static GasAmount kDistributionGas = 1'000'000'000;
@@ -253,8 +252,9 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 
     transactions.push_back(SignedTransaction{
         .tx = Transaction{
-            .invocation = client.make_invocation<u8"distribute">(
-                kDistributionGas, distributions, account_allocations,
+            .invocation = root_meta_t::make_invocation<u8"distribute">(
+                kGenesisRootContractAddress, kDistributionGas, distributions,
+                account_allocations,
                 make_contract_i128(static_cast<int128_t>(root_funding)),
                 make_contract_i128(static_cast<int128_t>(token_funding))),
             .uniquifier =

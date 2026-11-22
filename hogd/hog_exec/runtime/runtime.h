@@ -10,6 +10,7 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/method_id.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "x23/async.h"
 
@@ -93,8 +94,7 @@ public:
   // opaque context the sandbox bakes in and hands back to syscall_entry.
   explicit Runtime(SystemCallHandler *syscall_handler);
 
-  using MethodID =
-      uint64_t; // from ContractEntryPointID, interpreted in big-endian
+  using MethodID = ::hogd::MethodID;
 
   // Disable copy and move
   Runtime(Runtime const &) = delete;
