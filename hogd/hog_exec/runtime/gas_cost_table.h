@@ -141,8 +141,8 @@ constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 // which kSyscallBaseCost is 50. That leaves 37 for the dearest. Each row
 // repeats one value, which the branch predictor learns: with values that vary
 // the arithmetic alone took 14 to 23 ns longer on a development machine, up to
-// 15 gas at this unit. 55 covers the dearest row and that.
-constexpr uint64_t kU256SqrtCost = 55;
+// 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
+constexpr uint64_t kU256SqrtCost = 60;
 
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
