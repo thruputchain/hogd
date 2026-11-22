@@ -135,6 +135,15 @@ constexpr static uint64_t kGenericBadSyscallCost = 10;
 constexpr uint64_t kRistretto255MsmBaseCost = 30'000;
 constexpr uint64_t kRistretto255MsmTermCost = 13'000;
 
+// U256Sqrt, experimental, priced from RV32 Gas Calibration run 44953108898 on
+// hog10 (gas unit 1.6234 ns). Through the VM its three rows took 139.5, 130.1
+// and 142.8 ns a call: 85, 80 and 87 gas once the ecall is taken off, of
+// which kSyscallBaseCost is 50. That leaves 37 for the dearest. Each row
+// repeats one value, which the branch predictor learns: with values that vary
+// the arithmetic alone took 14 to 23 ns longer on a development machine, up to
+// 15 gas at this unit. That is 52, and 60 leaves 8 over to be safe.
+constexpr uint64_t kU256SqrtCost = 60;
+
 // Block geometry, fixed by the hash functions rather than chosen, so
 // static_asserted rather than hashed into the schedule. Padding is a 0x80 byte
 // plus a length field: 9 bytes for SHA-256, 17 for SHA-512.
@@ -267,7 +276,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 19> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 20> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -289,6 +298,7 @@ constexpr std::array<SyscallGasCostEntry, 19> kSyscallGasCostSchedule = {{
     {.name = u8"Ristretto255MsmTermBytes", .cost = RISTRETTO255_MSM_TERM_BYTES},
     {.name = u8"Ristretto255MsmMaxTerms", .cost = RISTRETTO255_MSM_MAX_TERMS},
     {.name = u8"GuestBufferCopyBlock", .cost = kGuestBufferCopyBlockCost},
+    {.name = u8"U256Sqrt", .cost = kU256SqrtCost},
 }};
 
 } // namespace hogd

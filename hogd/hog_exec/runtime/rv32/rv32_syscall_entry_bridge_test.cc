@@ -319,6 +319,67 @@ TEST_F(Rv32SyscallEntryBridgeTest, Ristretto255ExactBudgetFaults)
   EXPECT_EQ(result.gas_consumed, cost);
 }
 
+// U256Sqrt reads its value as 32 bytes, least significant first, writes the
+// root's 16 the same way, and charges its flat price on top of the crossing.
+TEST_F(Rv32SyscallEntryBridgeTest, U256SqrtChargesItsPrice)
+{
+  std::vector<uint8_t> memory(256, 0xA5);
+  // 2^128, whose square root is 2^64.
+  std::fill_n(memory.begin() + kInputAddress, 32, 0);
+  memory[kInputAddress + 16] = 1;
+  std::vector<uint8_t> expected = memory;
+  std::fill_n(expected.begin() + kOutputAddress, 16, 0);
+  expected[kOutputAddress + 8] = 1;
+  const std::array<uint32_t, 3> words = {static_cast<uint32_t>(
+                                             SyscallNo::kU256Sqrt),
+                                         kInputAddress, kOutputAddress};
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  const auto result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(words));
+  finish_frame(handler, std::move(stashed_trace));
+
+  ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(result.gas_consumed, kSyscallBaseCost + kU256SqrtCost);
+  EXPECT_EQ(memory, expected);
+}
+
+// A budget that only just covers the price is out of gas, as for every priced
+// syscall, and nothing is written. One more unit of gas is enough.
+TEST_F(Rv32SyscallEntryBridgeTest, U256SqrtExactBudgetFaults)
+{
+  const GasAmount cost = kSyscallBaseCost + kU256SqrtCost;
+  const std::array<uint32_t, 3> words = {static_cast<uint32_t>(
+                                             SyscallNo::kU256Sqrt),
+                                         kInputAddress, kOutputAddress};
+  const std::vector<uint8_t> untouched(256, 0xA5);
+  {
+    std::vector<uint8_t> memory = untouched;
+    auto handler = make_handler();
+    auto stashed_trace = start_frame(handler);
+    const auto result =
+        call_bridge(memory, handler, cost, make_ecall_args(words));
+    finish_frame(handler, std::move(stashed_trace));
+    EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
+    EXPECT_EQ(result.gas_consumed, cost);
+    EXPECT_EQ(memory, untouched);
+  }
+  {
+    std::vector<uint8_t> memory = untouched;
+    auto handler = make_handler();
+    auto stashed_trace = start_frame(handler);
+    const auto result =
+        call_bridge(memory, handler, cost + 1, make_ecall_args(words));
+    finish_frame(handler, std::move(stashed_trace));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    EXPECT_EQ(result.gas_consumed, cost);
+    EXPECT_NE(memory, untouched);
+  }
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(256, 0xAA);

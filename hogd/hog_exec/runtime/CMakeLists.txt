@@ -32,6 +32,7 @@ add_library(runtime_objects OBJECT
   syscall_handler.cc
   syscall_invoke.cc
   syscall_log.cc
+  syscall_math.cc
   syscall_nnint.cc
   syscall_rcq.cc
   syscall_stats.cc
@@ -101,6 +102,7 @@ add_library(runtime_test_objects OBJECT
   invoke_error_handling_test.cc
   invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
+  math_syscall_test_rv32_test.cc
   manual_revert_comprehensive_test.cc
   payload_limit_test.cc
   manual_revert_rv32_test.cc
