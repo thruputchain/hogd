@@ -8,8 +8,8 @@
 #include "event.hh"
 #include "hogd/base/log.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/syscall_types.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_types.h"
 #include "syscall_error.hh"
 
 namespace hogd {

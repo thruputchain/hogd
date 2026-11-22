@@ -20,8 +20,8 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/components/contract_result.h"
-#include "hogd/hog_exec/runtime/runtime.h"
-#include "serialize_calldata.h"
+#include "hogd/hog_exec/components/method_id.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "transaction.hh"
 #include "x23/debug.h"
 #include "x23/vec.h"
@@ -39,7 +39,7 @@ ContractEntrypointID
 sdk_entrypoint_derivation(std::u8string_view identifier_name,
                           std::u8string_view identifier_version,
                           std::u8string_view method_name);
-Runtime::MethodID sdk_method_id(ContractEntrypointID entry_point_id);
+MethodID sdk_method_id(ContractEntrypointID entry_point_id);
 
 // An SDK interface id: what ERC-165's supports_interface is asked about.
 using InterfaceId = std::array<uint8_t, 8>;
@@ -90,7 +90,7 @@ namespace hogd {
 
 // Get the method ID for a given method,
 // at which contracts using the SDK will expect to find it.
-inline Runtime::MethodID
+inline MethodID
 sdk_method_id(std::u8string_view identifier_name,
               std::u8string_view identifier_version,
               std::u8string_view method_name)
@@ -99,7 +99,7 @@ sdk_method_id(std::u8string_view identifier_name,
                                                  identifier_version,
                                                  method_name));
 }
-ContractEntrypointID entrypoint_from_method_id(Runtime::MethodID method_id);
+ContractEntrypointID entrypoint_from_method_id(MethodID method_id);
 
 namespace detail {
 
@@ -224,7 +224,7 @@ public:
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
       // The generated kEntrypoints constants are the source of truth: the SDK
       // derives them from the UTF-8 method-name preimages. Convert the
-      // canonical Runtime::MethodID back to a ContractEntrypointID and return
+      // canonical MethodID back to a ContractEntrypointID and return
       // that; the re-derivation below is retained only as a debug cross-check.
       // See hogd issue #2678.
       auto canonical = entrypoint_from_method_id(
@@ -246,13 +246,13 @@ public:
     }
   }
 
-  // Canonical Runtime::MethodID for the named entrypoint.
+  // Canonical MethodID for the named entrypoint.
   //
   // When the generated trait exposes numeric `kEntrypoints` constants, those
   // are the source of truth: the SDK derives them from the UTF-8 method-name
   // preimages. Returning the constant directly avoids re-hashing at every call.
   // See hogd issue #2579.
-  template<StringLiteral Name> static Runtime::MethodID method_id()
+  template<StringLiteral Name> static MethodID method_id()
   {
     if constexpr (requires { ContractTrait::kEntrypoints; }) {
       return ContractTrait::kEntrypoints[kLookupIndex<Name>];

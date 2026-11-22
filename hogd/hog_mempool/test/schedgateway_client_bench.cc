@@ -42,7 +42,7 @@
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/genesis/genesis_constants.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "indexer.hh"

@@ -5,7 +5,7 @@
 #include <cstdint>
 #include <span>
 
-#include "hogd/hog_exec/runtime/syscall_buffer.h"
+#include "hogd/hog_exec/components/syscall_buffer.h"
 #include "types.hh"
 
 namespace hogd {

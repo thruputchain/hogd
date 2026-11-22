@@ -1,4 +1,4 @@
-#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
+#include "hogd/hog_exec/components/validated_auth_tokens.h"
 
 #include <gtest/gtest.h>
 

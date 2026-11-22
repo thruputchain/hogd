@@ -8,8 +8,7 @@
 #include "built_contracts/fibonacci.h"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
-#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 
 namespace hogd {
 
@@ -30,7 +29,7 @@ TEST(ContractTraitTest, MethodIDDerivation)
   // For ("hogd", "0.1.0", "abc") the preimage is "hogd::0.1::abc". This must
   // byte-match the SDK's derivation; do not update it to match a code change
   // without confirming the SDK derives the same value.
-  ASSERT_EQ(id, Runtime::MethodID{0x9432b95f6309d52bULL});
+  ASSERT_EQ(id, MethodID{0x9432b95f6309d52bULL});
 
   // 0.0.0 versions use the full original version string (prerelease and build
   // included) as the major-version component, matching the SDK and
@@ -42,26 +41,26 @@ TEST(ContractTraitTest, MethodIDDerivation)
   ASSERT_NE(z_alpha, z_beta);
   ASSERT_NE(z_alpha, z_plain);
   // Golden vector: preimage "hogd::0.0.0-alpha::abc".
-  ASSERT_EQ(z_alpha, Runtime::MethodID{0x99b536b207ea02cfULL});
+  ASSERT_EQ(z_alpha, MethodID{0x99b536b207ea02cfULL});
 
   // major > 0: fold keeps only the major component (ignores minor/patch), so
   // preimage is "hogd::2::abc".
   auto maj = sdk_method_id(u8"hogd", u8"2.5.7", u8"abc");
   ASSERT_EQ(maj, sdk_method_id(u8"hogd", u8"2.9.9", u8"abc"));
   ASSERT_NE(maj, sdk_method_id(u8"hogd", u8"3.0.0", u8"abc"));
-  ASSERT_EQ(maj, Runtime::MethodID{0x69e35d2fdb6e7e55ULL});
+  ASSERT_EQ(maj, MethodID{0x69e35d2fdb6e7e55ULL});
 
   // major == minor == 0, patch > 0: fold keeps "0.0.PATCH" and drops any
   // -prerelease/+build, so preimage is "hogd::0.0.7::abc".
   auto pat = sdk_method_id(u8"hogd", u8"0.0.7", u8"abc");
   ASSERT_EQ(pat, sdk_method_id(u8"hogd", u8"0.0.7-rc.1", u8"abc"));
   ASSERT_NE(pat, sdk_method_id(u8"hogd", u8"0.0.8", u8"abc"));
-  ASSERT_EQ(pat, Runtime::MethodID{0xa6e0c6d93a7f2c46ULL});
+  ASSERT_EQ(pat, MethodID{0xa6e0c6d93a7f2c46ULL});
 }
 
 TEST(ContractTraitTest, EntrypointFromMethodID)
 {
-  Runtime::MethodID method_id = 0x1234567890ABCDEF;
+  MethodID method_id = 0x1234567890ABCDEF;
   auto entrypoint = entrypoint_from_method_id(method_id);
   ASSERT_EQ(method_id, sdk_method_id(entrypoint));
 }

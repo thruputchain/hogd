@@ -5,10 +5,11 @@ add_xdr(
 add_dependencies(build_components_library_exception protocol)
 
 add_library(components_objects OBJECT
+  contract_trait.cc
   execution_mode.cc
   hash_buffers.cc
   new_contract_set.cc
-  ${CMAKE_SOURCE_DIR}/hogd/hog_exec/runtime/contract_trait.cc
+  transaction_stats.cc
 )
 target_link_libraries(
   components_objects
@@ -25,9 +26,13 @@ add_library(components_test_objects OBJECT
   auth_subtoken_test.cc
   borrowed_contract_batch_test.cc
   contract_result_test.cc
+  contract_trait_test.cc
   execution_mode_test.cc
   ffi_helpers_tests.cc
   hash_buffers_test.cc
+  syscall_buffer_test.cc
+  syscall_parse_tests.cc
+  validated_auth_tokens_test.cc
 )
 target_link_libraries(
   components_test_objects
@@ -36,6 +41,8 @@ target_link_libraries(
   components_library_exception
 )
 target_include_directories(components_test_objects PRIVATE ${CMAKE_BINARY_DIR})
+# contract_trait_test.cc includes the generated built_contracts/fibonacci.h.
+add_dependencies(components_test_objects all_contract_headers)
 
 add_executable(components_test
   components_test_main.cc

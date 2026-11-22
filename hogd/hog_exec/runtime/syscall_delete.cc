@@ -1,9 +1,9 @@
 #include "hogd/hog_exec/runtime/syscall_inner.h"
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/syscall_types.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_types.h"
 #include "syscall_error.hh"
 #include "types.hh"
 

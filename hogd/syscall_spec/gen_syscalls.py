@@ -352,8 +352,8 @@ def gen_syscall_meta_h(spec_full: dict) -> str:
 #include <cstdint>
 #include <string_view>
 
+#include "hogd/hog_exec/components/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
-#include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 
@@ -390,8 +390,8 @@ def gen_syscall_inner_h(spec_full: dict) -> str:
 #include "event.hh"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/syscall_types.h"
 #include "hogd/hog_exec/components/ffi_types.h"
+#include "hogd/hog_exec/components/syscall_types.h"
 #include "invoke_flag.hh"
 #include "invoke_args.hh"
 #include "storage_item.hh"

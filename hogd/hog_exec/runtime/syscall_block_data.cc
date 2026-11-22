@@ -5,8 +5,8 @@
 #include <utility>
 
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/syscall_types.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_types.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction_trace.hh"

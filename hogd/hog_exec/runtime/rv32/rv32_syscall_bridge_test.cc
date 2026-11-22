@@ -15,12 +15,12 @@
 #include "ffi_enums.hh"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/alias_guard.h"
+#include "hogd/hog_exec/components/syscall_arg_params.h"
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/syscall_bridge.h"
-#include "hogd/hog_exec/runtime/syscall_arg_params.h"
 #include "syscall_error.hh"
 #include "types.hh"
 
