@@ -26,9 +26,6 @@ export EVENT_EXECUTOR_PORT=8090
 export EVENT_MEMPOOL_PORT=8091
 export EVENT_INDEXER_PORT=8092
 
-echo 'make sure bench server is running'
-ci_wait_control_server "$control_cli" hog11 11111
-
 start_event_server() {
   echo 'clear work dirs'
   "$control_cli" hog11 11111 clear_work_dir
@@ -54,6 +51,9 @@ run_event_client() {
 }
 
 if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOG_XID:-} == hogd-event-bench-* ]]; then
+  CI_WAIT_CONTROL_TIMEOUT_SEC="${CI_WAIT_CONTROL_TIMEOUT_SEC:-900}" \
+    ci_wait_control_server "$control_cli" hog11 11111
+
   results=.ci/dumps/event-nagle
   mkdir -p "$results"
   {
@@ -76,6 +76,7 @@ if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOG_XID:-} == hogd-event-bench-* ]]; the
   start_event_server
   run_event_client -N >"$results/nagle.log" 2>"$results/nagle.stderr"
 else
+  ci_wait_control_server "$control_cli" hog11 11111
   start_event_server
   run_event_client >event_server_bench_log
 fi
