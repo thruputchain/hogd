@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cstdlib>
 #include <future>
 #include <limits>
 #include <random>
 #include <span>
+#include <string_view>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -203,6 +205,12 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     batch_size++;
   }
 
+  const char *branch = std::getenv("GIT_BRANCH");
+  const char *container = std::getenv("HOGD_CI_CONTAINER");
+  const bool matched_storage_arm =
+      branch && std::string_view(branch) == "codex/multiexec-event-storage" &&
+      container && std::string_view(container) == "1" &&
+      std::getenv("HOGD_MULTIEXEC_EVENT_ARM_DIR");
   std::vector<std::future<void>> futures;
   futures.reserve(nthread);
   // Wait for every submitted job before work_txs (captured by reference in the
@@ -223,9 +231,15 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     }
 
     futures.emplace_back(WorkerPool::get_default_pool().submit(
-        [this, &work_txs, start, end, expiry_height]() {
-          std::random_device rd;
-          std::mt19937 gen(rd());
+        [this, &work_txs, start, end, expiry_height, matched_storage_arm]() {
+          std::mt19937 gen;
+          if (matched_storage_arm) {
+            std::seed_seq seed{0x6d756c74u, static_cast<unsigned>(start)};
+            gen.seed(seed);
+          }
+          else {
+            gen.seed(std::random_device{}());
+          }
 
           std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
 

@@ -107,11 +107,21 @@ connection_coro(exec_client_t &exec_client, BlockValidationQueue *queue,
 };
 
 bool
+event_storage_experiment_branch()
+{
+  const char *branch = std::getenv("GIT_BRANCH");
+  const char *container = std::getenv("HOGD_CI_CONTAINER");
+  return branch && std::string_view(branch) == "codex/multiexec-event-storage" &&
+         container && std::string_view(container) == "1";
+}
+
+bool
 close_diagnostics_enabled()
 {
   const char *diagnostics = std::getenv("HOGD_MULTIEXEC_CLOSE_DIAGNOSTICS");
   const char *branch = std::getenv("GIT_BRANCH");
-  return (diagnostics && std::string_view(diagnostics) == "1") ||
+  return event_storage_experiment_branch() ||
+         (diagnostics && std::string_view(diagnostics) == "1") ||
          (branch && std::string_view(branch) ==
                         "codex/multiexec-close-diagnostics");
 }
@@ -200,9 +210,10 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts,
                     unsigned int n_connections_per_executor,
                     unsigned int n_coros_per_connection,
-                    unsigned int batch_size, unsigned int num_txs_per_block)
+                    unsigned int batch_size, unsigned int num_txs_per_block,
+                    const std::string &event_work_dir = {})
 {
-  MultiexecCluster cluster(server_addrs);
+  MultiexecCluster cluster(server_addrs, event_work_dir);
 
   IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr());
 
@@ -271,6 +282,15 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs,
                       kNoBatchSizeLimit)();
   CHECK_EQ(work_txs.size(), num_txs_per_block);
+  if (!event_work_dir.empty()) {
+    SHA256Hasher hasher;
+    for (const auto &tx : work_txs) {
+      hasher.update(x23::serialize(tx));
+    }
+    auto hash = hasher.finalize();
+    std::println("multiexec_storage_workload_sha256={}",
+                 encode_hex(std::as_bytes(std::span(hash))));
+  }
 
   // The same work txs are replayed across every trial, so each must carry a
   // fresh uniquifier (HogDb now rejects a re-consumed one). The signature
@@ -387,6 +407,27 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const int account_count = num_accounts.value();
+  if (hogd::event_storage_experiment_branch()) {
+    const char *directory = std::getenv("HOGD_MULTIEXEC_EVENT_ARM_DIR");
+    const std::vector<std::string> expected_hosts{
+        "hog11", "hog8", "hog4", "hog5", "hog7", "hog6"};
+    CHECK(directory && server_addrs == expected_hosts && account_count == 100);
+    auto suffix = std::string_view(directory);
+    CHECK(suffix.starts_with("/bench-event/multiexec-event-storage.") ||
+          suffix.starts_with("/workspace/multiexec-event-storage."));
+    suffix.remove_prefix(suffix.starts_with("/bench-event/") ?
+                             std::string_view("/bench-event/").size() :
+                             std::string_view("/workspace/").size());
+    suffix.remove_prefix(std::string_view("multiexec-event-storage.").size());
+    CHECK(suffix.size() == 12 &&
+          suffix.find_first_not_of("0123456789ABCDEFGHIJKLMNOPQRSTUVWXYZ"
+                                   "abcdefghijklmnopqrstuvwxyz") ==
+              std::string_view::npos);
+    hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
+                              1'000'000, directory);
+    std::fflush(stdout);
+    return 0;
+  }
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,

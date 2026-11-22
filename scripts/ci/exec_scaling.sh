@@ -35,6 +35,11 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
   "${BENCH_HOSTS[@]}"
 
+if [[ ${GIT_BRANCH:-} == codex/multiexec-event-storage ]]; then
+  ./scripts/ci/multiexec_event_storage.sh
+  exit 0
+fi
+
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
 
