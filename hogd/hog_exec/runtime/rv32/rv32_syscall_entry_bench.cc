@@ -742,6 +742,7 @@ std::vector<SyscallCall>
 mul_div_rem_calls()
 {
   std::vector<SyscallCall> calls;
+  calls.reserve(kMulDivRemRows.size());
   for (size_t row = 0; row < kMulDivRemRows.size(); ++row) {
     calls.push_back(make_call(
         std::string(kMulDivRemRows[row].name), kMulDivRemRows[row].syscall,
