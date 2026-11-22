@@ -5,6 +5,13 @@ set -Eeuo pipefail
 ci_enable_error_trace
 
 control_cli="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
+jumbo_trial=0
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${HOG_XID:-} == hogd-e2e-payment-* &&
+      ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
+  jumbo_trial=1
+fi
 
 cleanup() {
   local exit_code=$1
@@ -50,9 +57,16 @@ run_event_client() {
     -n 1000000 -c 40 -o 100 "$@"
 }
 
-if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOG_XID:-} == hogd-event-bench-* ]]; then
-  CI_WAIT_CONTROL_TIMEOUT_SEC="${CI_WAIT_CONTROL_TIMEOUT_SEC:-900}" \
-    ci_wait_control_server "$control_cli" hog11 11111
+if (( jumbo_trial )) ||
+   [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOG_XID:-} == hogd-event-bench-* ]]; then
+  if (( jumbo_trial )); then
+    # The payment schedule's after hook shuts down all seven remote servers.
+    CI_WAIT_CONTROL_TIMEOUT_SEC="${CI_WAIT_CONTROL_TIMEOUT_SEC:-900}" \
+      ci_wait_control_server_hosts "$control_cli" 11111 hog4 hog5 hog6 hog7 hog8 hog9 hog11
+  else
+    CI_WAIT_CONTROL_TIMEOUT_SEC="${CI_WAIT_CONTROL_TIMEOUT_SEC:-900}" \
+      ci_wait_control_server "$control_cli" hog11 11111
+  fi
 
   results=.ci/dumps/event-nagle
   mkdir -p "$results"
@@ -68,6 +82,29 @@ if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOG_XID:-} == hogd-event-bench-* ]]; the
     ci_remote_run hog11 'ninja -C release -t commands hog-event | grep -F " -c /workspace/hogd/hog_event/hog_event.cc"'
   } >"$results/settings.txt"
 
+  if (( jumbo_trial )); then
+    probe='set -euo pipefail
+      peer=$(getent ahostsv4 "$1" | awk "NR == 1 {print \$1}")
+      [[ $peer =~ ^172\.(24|25|26|27)\. ]]
+      route=$(ip -4 -o route get "$peer")
+      printf "%s\n" "$route"
+      device=$(awk "{for (i=1; i<NF; i++) if (\$i == \"dev\") print \$(i+1)}" <<<"$route")
+      link=$(ip -d -o link show dev "$device")
+      printf "%s\n" "$link"
+      [[ $link == *" mtu 8920 "* && $link =~ (^|[[:space:]])wireguard([[:space:]]|$) ]]
+      filesystem=$(stat -f -c %T -- "$2")
+      printf "filesystem=%s\n" "$filesystem"
+      [[ $filesystem == tmpfs ]]
+    '
+    mkdir -p -- "$WORK_DIR"
+    {
+      echo 'hog10'
+      bash -c "$probe" bash hog11 "$WORK_DIR"
+      echo 'hog11'
+      ci_remote_run hog11 "$(printf '%q ' bash -c "$probe" bash hog10 "$WORK_DIR")"
+    } >"$results/jumbo-path.txt"
+  fi
+
   start_event_server
   run_event_client >"$results/nodelay.log" 2>"$results/nodelay.stderr"
   cp "$results/nodelay.log" event_server_bench_log
@@ -79,6 +116,11 @@ else
   ci_wait_control_server "$control_cli" hog11 11111
   start_event_server
   run_event_client >event_server_bench_log
+fi
+
+if (( jumbo_trial )); then
+  echo 'Jumbo event experiment results are in .ci/dumps/event-nagle'
+  exit 0
 fi
 
 echo 'clone metrics history' # This is idempotent

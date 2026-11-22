@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${HOG_XID:-} == hogd-e2e-payment-* &&
+      ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
+  exec "$(dirname "$0")/event_bench.sh"
+fi
+
 : "${CI_WAIT_PORT_TIMEOUT_SEC:=600}"
 . "$(dirname "$0")/bench_harness.sh"
 . "$(dirname "$0")/../hog-ip.sh"

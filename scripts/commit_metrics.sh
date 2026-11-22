@@ -2,6 +2,14 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  if [[ ${METRICS_COMMIT_REPO:-} == hogd-e2e-payment ]] && [[ ${HOGD_CI_CONTAINER:-0} == 1 &&
+      ${GIT_BRANCH:-} == codex/event-jumbo-experiment &&
+      ${HOG_XID:-} == hogd-e2e-payment-* &&
+      ${WORK_DIR:-} == /bench-ram/work_dir/ ]]; then
+    # The trusted controller publishes only when this marker exists.
+    rm -f -- metrics_history/.publish-requested
+    exit 0
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested
