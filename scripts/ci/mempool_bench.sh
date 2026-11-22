@@ -144,8 +144,15 @@ $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
+nightly_stage_env=()
+if [[ ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
+      ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool ]]; then
+  mkdir -p "${HOG_DUMP_DIR:?}"
+  nightly_stage_env=(env HOGD_NIGHTLY_SINGLE_STAGE=1)
+fi
 set +e
-timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
+timeout 180s "${nightly_stage_env[@]}" ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 11111111111111111111111111111112 \
@@ -186,6 +193,13 @@ fi
 
 echo 'coordinator benchmark results'
 cat coordinator_output.txt
+
+if (( ${#nightly_stage_env[@]} )); then
+  python3 "$(dirname "$0")/nightly_single_stage.py" \
+    "$HOG_DUMP_DIR/nightly-stage.tsv" coordinator_output.txt \
+    --coordinator-artifact "$HOG_DUMP_DIR/nightly-coordinator.tsv" \
+    --summary-output "$HOG_DUMP_DIR/nightly-stage-summary.json"
+fi
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh

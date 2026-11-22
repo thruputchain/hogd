@@ -2,6 +2,11 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  # This diagnostic branch is collected as an artifact.
+  if [[ ${GIT_BRANCH:-} == codex/nightly-single-stage-diagnostics &&
+        ${HOGD_CI_CONTAINER:-} == 1 ]]; then
+    exit 0
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested

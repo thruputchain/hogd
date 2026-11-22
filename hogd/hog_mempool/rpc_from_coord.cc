@@ -5,8 +5,11 @@
 #include <cassert>
 #include <chrono>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <exception>
+#include <fcntl.h>
 #include <filesystem>
 #include <fstream>
 #include <functional>
@@ -17,6 +20,8 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
+#include <unistd.h>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -69,6 +74,65 @@
 namespace hogd {
 
 namespace {
+
+enum class NightlyStage : uint8_t {
+  kNomination = 1,
+  kValidation = 2,
+  kCommit = 3,
+  kDbCommitRpc = 4,
+  kEventCommitRpc = 5,
+  kAuthRpcSample = 6,
+};
+
+bool
+nightly_stages_enabled()
+{
+  static const bool enabled = [] {
+    for (const auto &[name, value] : {
+             std::pair{"GIT_BRANCH", "codex/nightly-single-stage-diagnostics"},
+             std::pair{"HOGD_CI_CONTAINER", "1"},
+             std::pair{"HOG_HOST", "hog10"},
+             std::pair{"HOGD_NIGHTLY_SINGLE_STAGE", "1"},
+         }) {
+      const char *actual = std::getenv(name);
+      if (!actual || value != std::string_view(actual))
+        return false;
+    }
+    return true;
+  }();
+  return enabled;
+}
+
+void
+write_nightly_stage(NightlyStage stage, BlockHeight height, BlockID block,
+                    size_t count, int outcome, double seconds)
+{
+  const auto elapsed = static_cast<unsigned long long>(seconds * 1e9);
+  const auto end = static_cast<unsigned long long>(
+      std::chrono::duration_cast<std::chrono::nanoseconds>(
+          std::chrono::steady_clock::now().time_since_epoch())
+          .count());
+  // One process owns the artifact. O_APPEND keeps the records from parallel
+  // coroutine completions separate and preserves them when CI times out.
+  static const x23::UniqueFd file = [] {
+    const char *directory = std::getenv("HOG_DUMP_DIR");
+    CHECK(directory && *directory);
+    const auto path = std::filesystem::path(directory) / "nightly-stage.tsv";
+    x23::UniqueFd opened(
+        ::open(path.c_str(), O_WRONLY | O_CREAT | O_APPEND | O_CLOEXEC, 0600));
+    CHECK(opened.get() >= 0);
+    return opened;
+  }();
+  char line[192];
+  const int size =
+      std::snprintf(line, sizeof(line), "%u\t%lld\t%llu\t%zu\t%d\t%llu\t%llu\n",
+                    static_cast<unsigned>(stage),
+                    static_cast<long long>(height),
+                    static_cast<unsigned long long>(block), count, outcome,
+                    elapsed, end);
+  CHECK(size > 0 && static_cast<size_t>(size) < sizeof(line));
+  CHECK_EQ(::write(file.get(), line, size), size);
+}
 
 enum class CommitMetricsOutcome { kOk, kBlockNotFound, kConcurrent };
 
@@ -412,8 +476,16 @@ MempoolCoordinatorRpc::verify_submission(const SignedTransactionBatch &txs,
     const AuthErrorCodeBatch verified =
         co_await auth_client_->authmempool_verify_transactions(verify_height,
                                                                retry_txs);
-    MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(
-        auth_timer.elapsed());
+    const double auth_seconds = auth_timer.elapsed();
+    MempoolMetrics::instance().ingestion_auth_rpc_seconds.record(auth_seconds);
+    if (nightly_stages_enabled()) {
+      static std::atomic<uint64_t> completed{0};
+      // One completion in 64, across successful RPC returns. The verify height
+      // refers to Auth's snapshot and is not the eventual inclusion height.
+      if (completed.fetch_add(1, std::memory_order_relaxed) % 64 == 0)
+        write_nightly_stage(NightlyStage::kAuthRpcSample, verify_height, 0,
+                            retry_txs.size(), 0, auth_seconds);
+    }
     if (submission_auth_test_hook_) {
       co_await submission_auth_test_hook_(verify_height, retry_txs,
                                           /*after_auth=*/true);
@@ -859,8 +931,16 @@ x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
                                                const ConsensusValue &value)
 {
-  co_return co_await event_sched_client_->eventsched_commit_block(block_id,
-                                                                  value);
+  if (!nightly_stages_enabled())
+    co_return co_await event_sched_client_->eventsched_commit_block(block_id,
+                                                                    value);
+  ElapsedTimer timer;
+  const auto result =
+      co_await event_sched_client_->eventsched_commit_block(block_id, value);
+  write_nightly_stage(NightlyStage::kEventCommitRpc,
+                      value.proposal_header.block_height, block_id, 0,
+                      static_cast<int>(result), timer.elapsed());
+  co_return result;
 }
 
 x23::Async<EventBlockResult>
@@ -874,7 +954,16 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 x23::Async<DbBlockResult>
 MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  if (!nightly_stages_enabled())
+    co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id,
+                                                                 value);
+  ElapsedTimer timer;
+  auto result =
+      co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  write_nightly_stage(NightlyStage::kDbCommitRpc,
+                      value.proposal_header.block_height, block_id, 0,
+                      static_cast<int>(result.result()), timer.elapsed());
+  co_return result;
 }
 
 x23::Async<void>
@@ -1672,8 +1761,15 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
 
   ElapsedTimer timer;
   NominationTelemetry nomination_telemetry;
+  BlockHeight diagnostic_height{};
+  BlockID diagnostic_block{};
   x23::Defer record_nomination_stats([&] {
     nomination_telemetry.duration = timer.elapsed();
+    if (diagnostic_block)
+      write_nightly_stage(NightlyStage::kNomination, diagnostic_height,
+                          diagnostic_block,
+                          nomination_telemetry.nominated_tx_count, 0,
+                          nomination_telemetry.duration);
     record_metric_cleanup(
         [&] { record_nomination_attempt(nomination_telemetry); });
   });
@@ -1900,6 +1996,10 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .value = std::move(value),
       .default_wallet = last_committed_block_.default_wallet,
       .network_config = last_committed_block_.network_config};
+  if (nightly_stages_enabled()) {
+    diagnostic_block = nominated_block_cache_.block_id;
+    diagnostic_height = proposal.header.block_height;
+  }
   debug("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -2401,9 +2501,16 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   SchedulerValidationOutcome validation_outcome =
       SchedulerValidationOutcome::SchedulerValidationInvalid;
   size_t validation_tx_count = 0;
+  BlockID validation_block_id{};
+  const BlockHeight diagnostic_height = proposal.header.block_height;
   x23::Defer record_validation_stats([&] {
+    const double seconds = timer.elapsed();
+    if (nightly_stages_enabled())
+      write_nightly_stage(NightlyStage::kValidation, diagnostic_height,
+                          validation_block_id, validation_tx_count,
+                          static_cast<int>(validation_outcome), seconds);
     record_metric_cleanup([&] {
-      record_validation_attempt(validation_outcome, timer.elapsed(),
+      record_validation_attempt(validation_outcome, seconds,
                                 validation_tx_count);
     });
   });
@@ -2490,7 +2597,6 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   SchedulerValidationOutcome dag_outcome =
       SchedulerValidationOutcome::SchedulerValidationInvalid;
   bool log_validation_return = true;
-  BlockID validation_block_id{};
   std::atomic_bool validation_block_transferred{false};
   x23::Dag validation_dag("schedulercoord_validate", default_threadpool());
 
@@ -2992,6 +3098,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         reenqueue_size);
     MempoolMetrics::instance().commit_removed_tx_count.increment(
         remove_from_scheduler_size);
+    return elapsed;
   };
 
   if (!(co_await close_validation_gate())) {
@@ -3433,8 +3540,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         Registration::registration().publish_event_canonical_tip(
             EventCanonicalTip{.block_id = last_committed_block_.id,
                               .consensus_value = last_committed_block_.value});
-        emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
-                          remove_from_scheduler_size);
+        const double seconds =
+            emit_commit_stats(CommitMetricsOutcome::kOk, reenqueue_size,
+                              remove_from_scheduler_size);
+        if (nightly_stages_enabled())
+          write_nightly_stage(
+              NightlyStage::kCommit,
+              last_committed_block_.value.proposal_header.block_height,
+              last_committed_block_.id, committed_tx_count, 0, seconds);
         debug("schedulercoord_commit_block ret");
         MempoolMetrics::instance().block_transactions.record(
             static_cast<double>(committed_tx_count));
