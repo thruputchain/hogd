@@ -409,11 +409,8 @@ TEST_F(DatabaseTest, SyncAndLoad)
   }
 }
 
-// get() and get_each() may run during sync(); only put() and remove() may not
-// (see sync() in db.h). Readers loop over the database while sync() writes
-// the pending log, and must see every item with its value. Each round counts
-// the get() calls that ran entirely inside sync(), so the test fails if the
-// reads never overlapped it.
+// Readers check every item while sync() writes. Counts get() calls that ran
+// inside sync(), so a run with no overlap fails.
 TEST_F(DatabaseTest, ReadsDuringSync)
 {
   constexpr int kRounds = 4;
