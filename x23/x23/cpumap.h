@@ -324,6 +324,11 @@ public:
       if (!ValidOnly || s.valid())
         construct(i, std::forward<Args>(args)...);
     }
+    // If no bucket intersects the CPUs we may run on, construct one
+    // anyway so lookup() has something to fall back to.
+    if constexpr (ValidOnly)
+      if (!valid_indices_.size() && map_.nbuckets() > 0)
+        construct(0, std::forward<Args>(args)...);
   }
 
   value_type &lookup() { return lookup(map_.bucket()); }

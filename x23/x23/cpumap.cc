@@ -128,7 +128,9 @@ void
 CpuMap::compute_cpusets()
 {
   cpusets_.resize(nbuckets_);
-  for (size_t i = 0; i < map_.size(); ++i)
+  // Cover every CPU, not just those in map_, because bucket() maps
+  // CPUs past the end of map_ too (e.g., all CPUs for a single bucket).
+  for (unsigned i = 0; i < CpuSet::kNCPUs; ++i)
     cpusets_[bucket(i)].set(i);
 }
 #endif // HAVE_SCHED_SETAFFINITY
