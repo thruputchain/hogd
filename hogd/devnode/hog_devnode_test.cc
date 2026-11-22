@@ -80,7 +80,7 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/hog_event/indexer_outbox.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/rv32/artifact.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
@@ -100,6 +100,8 @@
 #include "rpc_types.hh"
 #include "sched_coord.hh"
 #include "sched_gateway.hh"
+// view.hh and view_gateway.hh use SyscallErrorCode without including it.
+#include "syscall_error.hh" // IWYU pragma: keep
 #include "transaction.hh"
 #include "types.hh"
 #include "view.hh"

@@ -31,7 +31,7 @@
 
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h" // entrypoint_from_method_id
+#include "hogd/hog_exec/components/contract_trait.h" // entrypoint_from_method_id
 #include "hogd/test_ffi/syscall_handler_wrapper.h"
 #include "hogd/test_ffi/test_bindings.h"
 #include "hogd/test_ffi/test_ffi_test_helpers.h"

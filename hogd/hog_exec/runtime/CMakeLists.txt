@@ -11,6 +11,7 @@ add_subdirectory(view)
 add_subdirectory(item)
 add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
+add_subdirectory(syscall_tests)
 add_subdirectory(rv32)
 add_subdirectory(tracing)
 
@@ -37,7 +38,6 @@ add_library(runtime_objects OBJECT
   syscall_rcq.cc
   syscall_stats.cc
   syscall_storage_flags.cc
-  transaction_stats.cc
 )
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -76,9 +76,7 @@ add_library(runtime_test_objects OBJECT
   authclaim_test.cc
   balance_cost_tracking_test.cc
   block_cancel_tests.cc
-  bytestring_limit_test.cc
   contract_result_preset_handling_test.cc
-  contract_trait_test.cc
   cross_call_tests.cc
   execution_limits_test.cc
   cross_contract_revert_test.cc
@@ -94,28 +92,19 @@ add_library(runtime_test_objects OBJECT
   event_test.cc
   faucet_scenario_test.cc
   fibonacci_test.cc
-  sha256_incremental_test.cc
-  input_alias_test_rv32_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
-  validated_auth_tokens_test.cc
   invoke_error_handling_test.cc
   invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
-  math_syscall_test_rv32_test.cc
   manual_revert_comprehensive_test.cc
   payload_limit_test.cc
   manual_revert_rv32_test.cc
   manual_revert_caller_rv32_test.cc
-  return_fault_test_rv32_test.cc
-  nnint_output_fault_test_rv32_test.cc
-  output_alias_test_rv32_test.cc
   native_contract_test.cc
   native_token_allowance_test.cc
-  nnint_add_test.cc
   tx_failure_report_test.cc
   propose_validate_roundtrip_test.cc
-  nnint_get_test.cc
   rcq_delete_test.cc
   rcq_doctored_proposal_data_test.cc
   rcq_interleaving_tests.cc
@@ -129,18 +118,6 @@ add_library(runtime_test_objects OBJECT
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
-  storage_flags_test.cc
-  syscall_auth_config_test.cc
-  syscall_auth_token_test.cc
-  syscall_block_data_test.cc
-  syscall_buffer_test.cc
-  syscall_entry_outer_tests.cc
-  syscall_error_handling_tests.cc
-  syscall_misc_tests.cc
-  syscall_parse_hardening_rv32_test.cc
-  syscall_parse_tests.cc
-  syscall_ristretto255_msm_test.cc
-  syscall_verify_signature_test.cc
   tracing_tests.cc
   try_invoke_test.cc
   tx_context_tests.cc
@@ -190,8 +167,6 @@ target_include_directories(
 
 target_link_libraries(
   runtime_test
-  # Test-only: makes the ML-DSA signatures syscall_verify_signature_test checks.
-  mldsa_signer
   precompiles
   runtime
   runtime_test_lib

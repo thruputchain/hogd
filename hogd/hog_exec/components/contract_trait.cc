@@ -1,4 +1,4 @@
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 
 #include <bit>
 #include <cstring>
@@ -9,7 +9,7 @@
 #include "contract.hh"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_exec/runtime/runtime.h"
+#include "hogd/hog_exec/components/method_id.h"
 #include "x23/debug.h"
 
 namespace hogd {
@@ -140,10 +140,10 @@ sdk_interface_id_derivation(std::u8string_view identifier_name,
   return out;
 }
 
-Runtime::MethodID
+MethodID
 sdk_method_id(ContractEntrypointID entry_point_id)
 {
-  Runtime::MethodID out{};
+  MethodID out{};
   std::memcpy(reinterpret_cast<uint8_t *>(&out), entry_point_id.data(),
               sizeof(entry_point_id));
   static_assert(sizeof(out) == sizeof(entry_point_id));
@@ -152,7 +152,7 @@ sdk_method_id(ContractEntrypointID entry_point_id)
 
 // inverse of sdk_method_id
 ContractEntrypointID
-entrypoint_from_method_id(Runtime::MethodID method_id)
+entrypoint_from_method_id(MethodID method_id)
 {
   ContractEntrypointID out{};
   uint64_t byteswapped = std::byteswap(method_id);

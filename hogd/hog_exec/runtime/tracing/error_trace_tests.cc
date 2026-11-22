@@ -7,7 +7,7 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
