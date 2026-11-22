@@ -270,8 +270,9 @@ constexpr populate_t populate;
 // NOLINTEND(readability-identifier-naming)
 
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
-// ValidOnly is false, then it will only construct a T for CpuSets on
-// which we can actually be scheduled.
+// ValidOnly is true, then it will only construct a T for CpuSets on
+// which we can actually be scheduled (or for the first CpuSet, if
+// there are none).
 template<typename T, bool ValidOnly = false> class PerCpuSet {
 public:
   using value_type = T;
