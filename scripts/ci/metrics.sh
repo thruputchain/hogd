@@ -26,6 +26,43 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
+if [[ ${GIT_BRANCH:-} == codex/payments-phase-diagnostics &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog10 ]]; then
+  output="${HOG_DUMP_DIR:?}/payment-phases"
+  mkdir -p "$output"
+  for accounts in 10 2; do
+    raw="$output/payments-$accounts.raw"
+    ./scripts/metrics/payments_bench.sh "$BUILD_DIR" "$accounts" >"$raw"
+    # TSV columns: accounts, repetition, phase, sample count, p50 ns, p90 ns.
+    awk -v phases="$output/payments-$accounts.tsv" \
+        -v elapsed="$output/payments-$accounts.elapsed" \
+        -v accounts="$accounts" '
+      /^payment_phase / {
+        if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
+            $4 !~ /^[123]$/ || $5 != ($4 == 3 ? 1 : 391) ||
+            $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ || $7 < $6 ||
+            seen[$3, $4]++) {
+          invalid = 1
+        }
+        print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 > phases
+        rows++
+        next
+      }
+      /^time taken: / {
+        print > elapsed
+        elapsed_rows++
+        if ($0 ~ ("^time taken: [0-9]+ us for 100000 txs [(]accts " accounts "[)] on 512 coros$")) {
+          matched++
+        }
+      }
+      END { if (invalid || rows != 30 || matched != 10 || elapsed_rows != 180) exit 1 }
+    ' "$raw" || { echo "Incomplete payment phase results for $accounts accounts" >&2; exit 1; }
+    rm -- "$raw"
+  done
+  exit 0
+fi
+
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
 

@@ -9,6 +9,7 @@
 #include <print>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -181,6 +182,48 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   }
 }
 
+constexpr uint32_t kPaymentPhaseSampleStride = 256;
+
+bool
+payment_phase_diagnostic()
+{
+  const auto matches = [](const char *name, std::string_view expected) {
+    const char *value = std::getenv(name);
+    return value && value == expected;
+  };
+  return matches("GIT_BRANCH", "codex/payments-phase-diagnostics") &&
+         matches("HOGD_CI_CONTAINER", "1") && matches("HOGD_CI_OFFLINE", "1") &&
+         matches("HOG_HOST", "hog10");
+}
+
+struct PaymentPhaseSample {
+  int64_t invoke_ns{};
+  int64_t commit_ns{};
+};
+
+using PaymentClock = std::chrono::steady_clock;
+
+int64_t
+elapsed_ns(PaymentClock::time_point start)
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             PaymentClock::now() - start)
+      .count();
+}
+
+int64_t
+phase_percentile(std::vector<PaymentPhaseSample> const &samples,
+                 int64_t PaymentPhaseSample::*member, size_t percentile)
+{
+  std::vector<int64_t> values;
+  values.reserve(samples.size());
+  for (const auto &sample : samples) {
+    values.push_back(sample.*member);
+  }
+  std::sort(values.begin(), values.end());
+  return values[(values.size() * percentile + 99) / 100 - 1];
+}
+
 // Coroutine-driven variant of run_bench_rep.
 //
 // run_bench_rep sizes a WorkerPool and blocks one OS thread per in-flight
@@ -203,12 +246,21 @@ run_bench_rep_coro(BenchmarkState &bs,
     panic("not enough transactions to run the benchmark");
   }
 
+  const bool record_phases =
+      concurrency == 512 && num_txs_per_rep == 100'000 &&
+      (bs.num_accounts_ == 2 || bs.num_accounts_ == 10) &&
+      payment_phase_diagnostic();
   for (size_t nrep = 0U; nrep < num_reps; nrep++) {
     info("bench rep {} for {} txs (accts {}) on {} coros", nrep,
          num_txs_per_rep, bs.num_accounts_, concurrency);
     auto work_txs =
         total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
 
+    // Only the coroutine claiming a transaction index can write its sample.
+    std::vector<PaymentPhaseSample> phase_samples(
+        record_phases ? (num_txs_per_rep + kPaymentPhaseSampleStride - 1) /
+                            kPaymentPhaseSampleStride
+                      : 0);
     const auto base_height = bs.block_height();
     auto start_time = std::chrono::steady_clock::now();
 
@@ -223,7 +275,8 @@ run_bench_rep_coro(BenchmarkState &bs,
          uint32_t num_txs_per_rep, BlockHeight base_height,
          std::atomic<uint32_t> &next_tx, std::atomic<int> &live,
          std::atomic<bool> &all_done, std::atomic<uint64_t> &pending_events,
-         std::atomic<bool> &events_done) -> x23::Detached {
+         std::atomic<bool> &events_done,
+         std::span<PaymentPhaseSample> phase_samples) -> x23::Detached {
         co_await default_threadpool().bg();
         auto runtime_context = make_hog_exec_context();
         for (;;) {
@@ -237,11 +290,28 @@ run_bench_rep_coro(BenchmarkState &bs,
 
           auto handler =
               bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-          if (!(co_await handler.root_invoke()).is_root_success()) {
+          PaymentPhaseSample *sample = nullptr;
+          PaymentClock::time_point phase_start;
+          if (!phase_samples.empty() && k % kPaymentPhaseSampleStride == 0) {
+            sample = &phase_samples[k / kPaymentPhaseSampleStride];
+            phase_start = PaymentClock::now();
+          }
+          const bool invoke_ok =
+              (co_await handler.root_invoke()).is_root_success();
+          if (sample) {
+            sample->invoke_ns = elapsed_ns(phase_start);
+          }
+          if (!invoke_ok) {
             panic("Failed to invoke transaction");
           }
-          if ((co_await handler.try_commit_transaction()) !=
-              ExecResult::ExecResultOK) {
+          if (sample) {
+            phase_start = PaymentClock::now();
+          }
+          const auto commit_result = co_await handler.try_commit_transaction();
+          if (sample) {
+            sample->commit_ns = elapsed_ns(phase_start);
+          }
+          if (commit_result != ExecResult::ExecResultOK) {
             panic("failed to perform commit operation");
           }
           handler.emit_events(ExecResult::ExecResultOK,
@@ -261,21 +331,52 @@ run_bench_rep_coro(BenchmarkState &bs,
               });
         }
         if (live.fetch_sub(1, std::memory_order_acq_rel) == 1) {
-          all_done.store(true, std::memory_order_relaxed);
+          all_done.store(true, std::memory_order_release);
           all_done.notify_one();
         }
       }(bs, work_txs, num_txs_per_rep, base_height, next_tx, live, all_done,
-                                         pending_events, events_done);
+                                                      pending_events,
+                                                      events_done,
+                                                      phase_samples);
     }
 
-    all_done.wait(false);
+    all_done.wait(false, std::memory_order_acquire);
+    // Time the remaining wait as seen by this observer after waking.
+    // Callbacks that have already drained contribute zero.
+    std::optional<PaymentClock::time_point> event_tail_start;
+    if (record_phases && !events_done.load(std::memory_order_relaxed)) {
+      event_tail_start = PaymentClock::now();
+    }
     events_done.wait(false);
-    auto finish_time = std::chrono::steady_clock::now();
+    auto finish_time = PaymentClock::now();
     std::println("time taken: {} us for {} txs (accts {}) on {} coros",
                  std::chrono::duration_cast<std::chrono::microseconds>(
                      finish_time - start_time)
                      .count(),
                  num_txs_per_rep, bs.num_accounts_, concurrency);
+    if (record_phases) {
+      const auto event_tail_ns =
+          event_tail_start
+              ? std::chrono::duration_cast<std::chrono::nanoseconds>(
+                    finish_time - *event_tail_start)
+                    .count()
+              : 0;
+      // Phase IDs: 1 = invocation, 2 = commit, 3 = post-worker event wait.
+      std::println("payment_phase {} {} 1 {} {} {}", bs.num_accounts_, nrep,
+                   phase_samples.size(),
+                   phase_percentile(phase_samples,
+                                    &PaymentPhaseSample::invoke_ns, 50),
+                   phase_percentile(phase_samples,
+                                    &PaymentPhaseSample::invoke_ns, 90));
+      std::println("payment_phase {} {} 2 {} {} {}", bs.num_accounts_, nrep,
+                   phase_samples.size(),
+                   phase_percentile(phase_samples,
+                                    &PaymentPhaseSample::commit_ns, 50),
+                   phase_percentile(phase_samples,
+                                    &PaymentPhaseSample::commit_ns, 90));
+      std::println("payment_phase {} {} 3 1 {} {}", bs.num_accounts_, nrep,
+                   event_tail_ns, event_tail_ns);
+    }
     bs.clear_uniquifiers(num_txs_per_rep);
   }
 }
