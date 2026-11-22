@@ -26,10 +26,12 @@ private:
 using SyscallInnerResult =
     std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>;
 
-// What wrap_after_parse() awaits.  A body that can answer immediately -- every
-// one of them today -- just returns its SyscallInnerResult, which lands in the
-// value arm and costs nothing to await.  A body that has to wait, e.g. on a
-// database RPC, declares this as its return type and returns an Async instead.
+// What a body that might have to wait returns, e.g. one whose lookup can miss
+// into a database RPC: wrap_after_parse() awaits it from a coroutine, and when
+// it answers immediately its result lands in the value arm. A body that always
+// answers immediately should return a plain SyscallInnerResult instead, which
+// wrap_after_parse() runs without a coroutine: declaring this type costs a
+// coroutine frame on every call, whether or not the body ever waits.
 using MaybeAsyncSyscallInnerResult = x23::MaybeAsync<SyscallInnerResult>;
 
 // Report a syscall-trace diagnostic straight to stderr without allocating (same

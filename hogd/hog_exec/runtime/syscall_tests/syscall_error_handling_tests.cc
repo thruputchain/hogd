@@ -24,6 +24,7 @@
 #include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_inner.h"
+#include "hogd/hog_exec/runtime/syscall_meta.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "invoke_flag.hh"
@@ -812,7 +813,7 @@ TEST_F(SyscallErrorHandlingTest, ZeroCostReturnAtZeroGasIsOutOfGas)
 // frame can actually afford, or every zero-cost syscall becomes unusable.
 //
 // "Zero-cost" is now about the body: it bills nothing, but the call still pays
-// kSyscallBaseCost for the crossing, which wrap_after_parse_async adds
+// kSyscallBaseCost for the crossing, which wrap_after_parse adds
 // centrally. So the affordable case is one gas above what the call costs, not
 // one gas above zero.
 TEST_F(SyscallErrorHandlingTest, ZeroCostSyscallSucceedsWithGasRemaining)
@@ -986,10 +987,11 @@ TEST_F(SyscallErrorHandlingTest, ReturnAtZeroGasIsOutOfGas)
 
 namespace {
 
-// A syscall body that has to wait before it can answer.  Nothing in production
-// suspends yet, so these are what pin wrap_after_parse()'s coroutine path:
-// yielding to the thread pool means the wrapper's epilogue runs on a different
-// thread than the one that entered the syscall.
+// A syscall body that has to wait before it can answer.  The production bodies
+// that return a MaybeAsync take wrap_after_parse()'s coroutine path too, but
+// none of them suspends yet, so these are what pin it: yielding to the thread
+// pool means the wrapper's epilogue runs on a different thread than the one
+// that entered the syscall.
 x23::Async<SyscallInnerResult>
 suspending_syscall_func()
 {
@@ -1075,6 +1077,53 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
   ASSERT_FALSE(syscall_res.has_value());
   ASSERT_EQ(syscall_res.error().code(), HostFnErrorCode::Unrecoverable);
   ASSERT_EQ(gas_consumed, kSyscallBaseCost);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+}
+
+// Which way wrap_after_parse() runs a syscall is decided by its body's return
+// type. A body that returns a plain SyscallInnerResult runs with no coroutine
+// around it, so no frame is allocated for it; one that returns a MaybeAsync or
+// an Async might wait, and is awaited from a coroutine.
+static_assert(kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kGetBlockHeight>>);
+static_assert(kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kSHA256>>);
+static_assert(
+    !kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kNonnegativeIntGet>>);
+static_assert(!kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kInvoke>>);
+static_assert(kSyscallBodyIsDirect<FixedCostSyscallMeta>);
+static_assert(!kSyscallBodyIsDirect<FuncSyscallMeta<&suspending_syscall_func>>);
+
+// The direct path hands back MaybeAsync's value arm: the call has already
+// happened by the time wrap_outer() returns. A body that might wait still
+// comes back as the Async arm and is driven to the same accounting.
+TEST_F(SyscallErrorHandlingTest, DirectBodyReturnsInTheValueArm)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               ValidatedAuthTokens{})
+                  .has_value());
+
+  auto direct =
+      wrap_outer<FixedCostSyscallMeta>(handler, make_null_context(10000),
+                                       kNoTracingSyscall, 0, 0, 0, 0, 0, 0, 0);
+  ASSERT_TRUE(direct.has_value());
+  auto [direct_res, direct_gas] = direct();
+  ASSERT_TRUE(direct_res.has_value());
+  ASSERT_EQ(*direct_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  ASSERT_EQ(direct_gas, kFixedSyscallCost + kSyscallBaseCost);
+
+  auto awaited = wrap_outer<FuncSyscallMeta<&suspending_syscall_func>>(
+      handler, make_null_context(10000), kNoTracingSyscall, 0, 0, 0, 0, 0, 0,
+      0);
+  ASSERT_FALSE(awaited.has_value());
+  auto [awaited_res, awaited_gas] = awaited();
+  ASSERT_TRUE(awaited_res.has_value());
+  ASSERT_EQ(*awaited_res, SyscallErrorCode::kSyscallErrorCodeNone);
+  ASSERT_EQ(awaited_gas, 1000 + kSyscallBaseCost);
 
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
