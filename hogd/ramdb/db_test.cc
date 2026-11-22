@@ -431,6 +431,7 @@ TEST_F(DatabaseTest, ReadsDuringSync)
     std::latch ready(kReaders + 1);
     {
       std::vector<std::jthread> readers;
+      readers.reserve(kReaders);
       for (size_t r = 0; r < kReaders; ++r) {
         readers.emplace_back([&, r] {
           ready.arrive_and_wait();
@@ -471,11 +472,11 @@ TEST_F(DatabaseTest, ReadsDuringSync)
       ASSERT_TRUE(lsn);
       EXPECT_EQ(*lsn, static_cast<uint64_t>(round + 1));
     }
-    EXPECT_EQ(errors.load(), 0u) << "round " << round;
+    EXPECT_EQ(errors.load(), 0U) << "round " << round;
     overlapped += overlap.load();
   }
 
-  EXPECT_GT(overlapped, 0u) << "no get() ran inside sync()";
+  EXPECT_GT(overlapped, 0U) << "no get() ran inside sync()";
   info("ReadsDuringSync: {} get() calls inside sync()", overlapped);
 
   // the synced state recovers.
