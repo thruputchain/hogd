@@ -14,8 +14,10 @@
 #include <x23/debug.h>
 #include <x23/err.h>
 #include <x23/event.h>
+#include <x23/fastclock.h>
 #include <x23/refcnt.h>
 #include <x23/rpc_msg.hh>
+#include <x23/rpc_sync_timing.h>
 #include <x23/serialize.h>
 #include <x23/sockio.h>
 #include <x23/vec.h>
@@ -128,6 +130,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
       fail();
       co_return;
     }
+    const auto *observer = rpc_sync_timing_observer.load();
+    const uint64_t received_ns = observer ? fastclock::get_ns() : 0;
     rpc_msg msg;
     size_t hdrbytes;
     try {
@@ -157,11 +161,28 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
+        const auto &call = msg.body.cbody();
+        const bool observe = observer && call.prog == observer->program &&
+                             call.vers == observer->version &&
+                             call.proc == observer->procedure;
+        RpcSyncTiming timing{.received_ns = received_ns};
+        auto awaitable = [&] {
+          if (!observe)
+            return s->serve(msg, {b.subspan(hdrbytes), b});
+          auto *previous = std::exchange(rpc_sync_timing, &timing);
+          Defer restore{[&] { rpc_sync_timing = previous; }};
+          return s->serve(msg, {b.subspan(hdrbytes), b});
+        }();
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
-        if (awaiter.await_ready())
-          cp_->dwrite(fd_, awaiter.await_resume());
+        if (awaiter.await_ready()) {
+          auto reply = awaiter.await_resume();
+          if (timing.handler_end_ns)
+            timing.reply_attempt_ns = fastclock::get_ns();
+          const auto write_error = cp_->dwrite(fd_, std::move(reply));
+          if (timing.reply_attempt_ns && !write_error)
+            observer->record(timing);
+        }
         else
           [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
             self->cp_->dwrite(self->fd_, co_await awaitable);

@@ -171,6 +171,7 @@ hog_db_init(std::string_view path, size_t ram_bytes,
 
   // start the executor server.
   info("starting executor server.");
+  enable_makespan_read_server_diagnostics();
   HogDbExecutorServer exec_server(ctx);
   const uint16_t actual_exec_port =
       exec_server.start_server(make_bind_host_port(bind_ip, exec_port));

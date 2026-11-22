@@ -186,6 +186,8 @@ private:
 static_assert(
     is_DatabaseToExecutorInterfaceV1<HogDbExecutorRpc *, x23::MaybeAsync>);
 
+void enable_makespan_read_server_diagnostics();
+
 class HogDbExecutorServer : public RpcServer<HogDbExecutorRpc> {
 public:
   explicit HogDbExecutorServer(RPCContext &ctx) : RpcServer(ctx)

@@ -38,6 +38,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <format>
 #include <memory>
 #include <numeric>
@@ -65,6 +66,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
+#include "hogd/hog_exec/bench/makespan_read_diagnostics.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
 #include "hogd/hog_exec/runtime/contract_trait.h"
@@ -212,6 +214,11 @@ dispatch_coro(exec_client_t &exec_client, Dispatch *d)
 using db_probe_client_t = DatabaseToExecutorInterfaceV1::client<
     x23::RpcMulticlient<x23::RpcLogger>::ClientRef>;
 
+struct ProbeSample {
+  uint64_t read;
+  uint64_t rtt_ns;
+};
+
 // Shared by every coroutine of one probe level.
 struct Probe {
   BlockID block;
@@ -222,6 +229,7 @@ struct Probe {
   // One per coroutine, which alone appends to it.
   std::vector<std::vector<uint64_t>> latency_ns;
   x23::CoroCB<void> *done;
+  std::vector<std::vector<ProbeSample>> samples;
 };
 
 // Reads keys nobody wrote, one at a time, until the probe's budget is spent:
@@ -243,7 +251,10 @@ probe_coro(db_probe_client_t &client, Probe *p, size_t index)
     const AddressAndKey addrkey{.address = p->address, .key = std::move(key)};
     const uint64_t start_ns = x23::fastclock::get_ns();
     auto res = co_await client.get_snapshot_item(p->block, addrkey);
-    latency.push_back(x23::fastclock::get_ns() - start_ns);
+    const uint64_t rtt_ns = x23::fastclock::get_ns() - start_ns;
+    latency.push_back(rtt_ns);
+    if (!p->samples.empty() && makespan_read_diagnostics_sample(n, index))
+      p->samples[index].push_back({static_cast<uint64_t>(n), rtt_ns});
     if (res.error() != RPCError::kRPCNone &&
         res.error() != RPCError::kRPCNotFound) {
       p->unexpected_errors.fetch_add(1, std::memory_order_relaxed);
@@ -574,6 +585,19 @@ private:
     open_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
                exec_clients_, parent_block_number_, current_block_number_,
                next_block_height());
+    auto close_diagnostics = [](std::FILE *file) { std::fclose(file); };
+    std::unique_ptr<std::FILE, decltype(close_diagnostics)> diagnostics;
+    if (makespan_read_diagnostics_enabled()) {
+      const char *dump_dir = std::getenv("HOG_DUMP_DIR");
+      CHECK(dump_dir && *dump_dir);
+      std::filesystem::create_directories(dump_dir);
+      const auto path =
+          std::filesystem::path(dump_dir) / "makespan-read-client.txt";
+      diagnostics.reset(std::fopen(path.c_str(), "w"));
+      CHECK(static_cast<bool>(diagnostics));
+    }
+
+    size_t level = 0;
     for (const auto [inflight, connections] : levels) {
       int64_t n_reads = 1'000'000;
       if (inflight == 1) {
@@ -588,7 +612,9 @@ private:
               .remaining = n_reads,
               .live_coros = inflight,
               .latency_ns = std::vector<std::vector<uint64_t>>(inflight),
-              .done = &cb};
+              .done = &cb,
+              .samples = std::vector<std::vector<ProbeSample>>(
+                  diagnostics ? inflight : 0)};
       const uint64_t start_ns = x23::fastclock::get_ns();
       for (size_t i = 0; i < inflight; i++) {
         probe_coro(clients[i % connections], &p, i);
@@ -622,6 +648,16 @@ private:
                        : sum_ns / 1000.0 / static_cast<double>(latency.size()),
                    pct_us(0.5), pct_us(0.99), p.unexpected_errors.load());
       std::fflush(stdout);
+      if (diagnostics) {
+        for (size_t index = 0; index < p.samples.size(); ++index) {
+          for (const ProbeSample &sample : p.samples[index])
+            std::println(diagnostics.get(), "{} {} {} {} {} {} {}", level,
+                         inflight, connections, p.block, sample.read, index,
+                         sample.rtt_ns);
+        }
+        CHECK_EQ(std::fflush(diagnostics.get()), 0);
+      }
+      ++level;
     }
     close_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
                 exec_clients_, current_block_number_, prev_value_,

@@ -1,10 +1,20 @@
 #include "hogd/hog_db/rpc_from_exec.h"
 
+#include <algorithm>
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <cstddef>
+#include <cstdint>
+#include <cstdio>
+#include <cstring>
+#include <fcntl.h>
+#include <filesystem>
+#include <ranges>
 #include <set>
 #include <span>
 #include <string>
+#include <unistd.h>
 #include <utility>
 #include <vector>
 
@@ -36,15 +46,76 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_db/storage_item_reply.h"
+#include "hogd/hog_exec/bench/makespan_read_diagnostics.h"
 #include "hogd/ramdb/db_status.h"
 #include "x23/async.h"
+#include "x23/cleanup.h"
+#include "x23/fastclock.h"
 #include "x23/format.h"
+#include "x23/rpc_sync_timing.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
 
 namespace {
+
+x23::UniqueFd makespan_read_dump;
+std::atomic<size_t> makespan_read_records{};
+
+void
+record_makespan_read(const x23::detail::RpcSyncTiming &timing) noexcept
+{
+  constexpr size_t max_records = 32'768;
+  if (makespan_read_records.fetch_add(1, std::memory_order_relaxed) >=
+      max_records)
+    return;
+  auto [block, read, index] = timing.sample;
+  char line[192];
+  const int size =
+      std::snprintf(line, sizeof(line), "%llu %llu %llu %llu %llu %llu %llu\n",
+                    static_cast<unsigned long long>(block),
+                    static_cast<unsigned long long>(read),
+                    static_cast<unsigned long long>(index),
+                    static_cast<unsigned long long>(timing.received_ns),
+                    static_cast<unsigned long long>(timing.handler_begin_ns -
+                                                    timing.received_ns),
+                    static_cast<unsigned long long>(timing.handler_end_ns -
+                                                    timing.handler_begin_ns),
+                    static_cast<unsigned long long>(timing.reply_attempt_ns -
+                                                    timing.received_ns));
+  if (size > 0 && static_cast<size_t>(size) < sizeof(line))
+    CHECK_EQ(::write(makespan_read_dump.get(), line, size), size);
+}
+
+auto
+trace_makespan_read(BlockID block, const AddressAndKey &addrkey)
+{
+  auto *timing = x23::detail::rpc_sync_timing;
+  if (timing) {
+    const auto begin = x23::fastclock::get_ns();
+    if (addrkey.key.key_type() != StorageKeyType::ContractData)
+      timing = nullptr;
+    else {
+      const auto &bytes = addrkey.key.contract_data_key();
+      std::array<uint64_t, 2> words{};
+      std::memcpy(words.data(), bytes.data(), sizeof(words));
+      const auto [read, index] = words;
+      if (!makespan_read_diagnostics_sample(read, index) ||
+          !std::ranges::all_of(bytes | std::views::drop(sizeof(words)),
+                               [](auto byte) { return byte == 0; }))
+        timing = nullptr;
+      else {
+        timing->sample = {block, read, index};
+        timing->handler_begin_ns = begin;
+      }
+    }
+  }
+  return x23::Defer{[timing] {
+    if (timing)
+      timing->handler_end_ns = x23::fastclock::get_ns();
+  }};
+}
 
 constexpr RPCError
 to_rpc_error(HogDbStatus<void> ret)
@@ -370,9 +441,34 @@ HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
   return RPCError::kRPCNone;
 }
 
+void
+enable_makespan_read_server_diagnostics()
+{
+  if (!makespan_read_diagnostics_enabled())
+    return;
+  const char *dump_dir = std::getenv("HOG_DUMP_DIR");
+  CHECK(dump_dir && *dump_dir);
+  std::filesystem::create_directories(dump_dir);
+  const auto path =
+      std::filesystem::path(dump_dir) / "makespan-read-server.txt";
+  makespan_read_dump.reset(
+      ::open(path.c_str(), O_WRONLY | O_CREAT | O_TRUNC | O_APPEND | O_CLOEXEC,
+             0600));
+  CHECK(makespan_read_dump.get() >= 0);
+  static constexpr x23::detail::RpcSyncTimingObserver observer{
+      DatabaseToExecutorInterfaceV1::program,
+      DatabaseToExecutorInterfaceV1::version,
+      static_cast<uint32_t>(
+          DatabaseToExecutorInterfaceV1::procs::get_snapshot_item),
+      record_makespan_read,
+  };
+  x23::detail::rpc_sync_timing_observer.store(&observer);
+}
+
 StorageItemReply<ExpectedStorageItem>
 HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
+  auto timing = trace_makespan_read(block, addrkey);
   // TODO(abelay): BlockID is ignored because we can only read the latest
   // snapshot state. In theory we could instead support different snapshot
   // heads for each BlockID, but the database is not currently designed to do
