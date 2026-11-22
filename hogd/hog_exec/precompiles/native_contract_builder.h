@@ -206,7 +206,10 @@ public:
 
   // Charged before decoding a frame's calldata, at or above what RV32 glue pays
   // to decode the same argument (#4236). add() rejects dense-vector arguments.
-  constexpr static GasAmount kDecodeBaseGas = 750;
+  // The base was 750 while the syscall base was 50. At 60 the RV32 wallet
+  // spends 1230 gas to reject a 46-byte call, which takes a base of 770. 800
+  // leaves 30 over.
+  constexpr static GasAmount kDecodeBaseGas = 800;
   constexpr static GasAmount kDecodeByteGas = 10;
 
   static constexpr GasAmount decode_gas(size_t calldata_len)
