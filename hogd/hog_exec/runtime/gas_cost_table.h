@@ -40,6 +40,10 @@ namespace hogd {
 // ~62 gas, in every run since #4834, and 74.4-76.9 ns in reruns of the same
 // binary started slightly differently. 60 covers the crossing at its usual
 // layouts with ~20% to spare; it does not cover that worst layout.
+//
+// Those are the coroutine wrapper's numbers. Since syscalls whose bodies cannot
+// wait run without one (run 45053887638), the stateless rows take 41-43 ns
+// through the VM, ~25 gas with the ecall taken off; the price was left at 60.
 constexpr static uint64_t kSyscallBaseCost = 60;
 
 // Per compression block, which is the unit SHA-256 works in. Charged across
