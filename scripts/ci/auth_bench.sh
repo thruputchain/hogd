@@ -55,8 +55,19 @@ if [[ -n "${AUTH_BENCH_FILTER:-}" ]]; then
 fi
 args+=("${extra_args[@]}")
 
-echo "auth_bench: $BENCH ${args[*]}"
-timeout --signal=KILL "${AUTH_BENCH_TIMEOUT:-600}" "$BENCH" "${args[@]}"
+if [[ ${AUTH_BENCH_PLACE_COLD_CASES:-} == 1 &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog9 && ${GIT_BRANCH:-} == main &&
+      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+      -z ${AUTH_BENCH_ARGS:-}${AUTH_BENCH_FILTER:-}${AUTH_BENCH_MIN_TIME:-} &&
+      -z ${AUTH_BENCH_REPETITIONS:-}${DEFAULT_THREADPOOL_SIZE:-} ]]; then
+  timeout --signal=KILL "${AUTH_BENCH_TIMEOUT:-600}" \
+    python3 "$ROOT_DIR/scripts/ci/auth_bench_placement.py" "$BENCH" "$JSON" \
+    "${args[@]}"
+else
+  echo "auth_bench: $BENCH ${args[*]}"
+  timeout --signal=KILL "${AUTH_BENCH_TIMEOUT:-600}" "$BENCH" "${args[@]}"
+fi
 
 status=0
 python3 - "$JSON" "$SUMMARY" <<'EOF' || status=$?
@@ -93,7 +104,8 @@ context = data.get("context", {})
 lines = [
     "### Auth server bench",
     "",
-    f"{context.get('auth_bench_cores', '?')} cores, "
+    f"{context.get('auth_bench_cores', '?')} "
+    f"{'default ' if data.get('auth_bench_placement') else ''}cores, "
     f"{context.get('library_build_type', '?')} benchmark library. "
     "Mean of repetitions; spread is the coefficient of variation of txs/s. "
     "CPU/tx and CPUs busy count the auth server process's CPU time "
@@ -103,12 +115,17 @@ lines = [
     "| call p50 (ms) | call p99 (ms) |",
     "|---|---:|---:|---:|---:|---:|---:|---:|",
 ]
+placements = data.get("auth_bench_placement", {})
+if placements:
+    lines[4:4] = [
+        "Cold cases marked † use eight workers on CPUs 0–7.", "",
+    ]
 for name, bench in means.items():
     cv = cvs.get(name, {}).get("txs_per_s")
     p50 = bench.get("call_p50_us")
     p99 = bench.get("call_p99_us")
     lines.append(
-        f"| `{name}` | {fmt(bench.get('real_time'), 2)} | "
+        f"| `{name}`{' †' if name in placements else ''} | {fmt(bench.get('real_time'), 2)} | "
         f"{fmt(bench.get('txs_per_s'), 0)} | "
         f"{'-' if cv is None else f'{cv * 100:.1f}%'} | "
         f"{fmt(bench.get('cpu_us_per_tx'), 2)} | "
