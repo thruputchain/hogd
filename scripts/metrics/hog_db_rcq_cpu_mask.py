@@ -35,11 +35,18 @@ def compact_mask(root, allowed):
         groups[shared].update(siblings)
         sibling_sets.add(siblings)
 
-    if len(nodes) != 1 or len(groups) != 3 or len(sibling_sets) != 24 or any(
-        used != shared or sum(core <= shared for core in sibling_sets) != 8
+    single_numa_node = len(nodes) == 1
+    three_llcs = len(groups) == 3
+    one_cpu_per_core = len(sibling_sets) == 24
+    if not (single_numa_node and three_llcs and one_cpu_per_core):
+        raise ValueError("expected 24 cores across three LLCs in one NUMA node")
+
+    full_eight_core_llcs = all(
+        used == shared and sum(core <= shared for core in sibling_sets) == 8
         for shared, used in groups.items()
-    ):
-        raise ValueError("compact CPUs must cover eight physical cores in each of three LLCs in one NUMA node")
+    )
+    if not full_eight_core_llcs:
+        raise ValueError("expected eight physical cores per LLC")
     return "0-23"
 
 
