@@ -1,6 +1,20 @@
 #!/bin/bash
 set -e
 
+SCRIPT_DIR=$(dirname "$(readlink -f "$0")")
+. "$SCRIPT_DIR/ci/combined_native_replay.sh"
+if combined_native_replay_selected; then
+  combined_native_replay_check
+  [[ ! -L metrics_history ]]
+  # The focused replay has no publisher. Clear an old intent in this private
+  # offline run before collecting, including if a prior attempt left one.
+  rm -f -- metrics_history/.publish-requested
+  . "$SCRIPT_DIR/git_info.sh"
+  [[ ${GIT_COMMIT:-} == "$GIT_commit" ]]
+  exec python3 -I "$SCRIPT_DIR/ci/collect_combined_native_replay.py" \
+    "$GIT_commit" "$GIT_commit_time" "$HOG_XID"
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
@@ -8,7 +22,6 @@ if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   exit 0
 fi
 
-SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/git_info.sh
 source ${SCRIPT_DIR}/metrics_history_git.sh
 METRICS_HISTORY_BRANCH=${METRICS_HISTORY_BRANCH:-main}

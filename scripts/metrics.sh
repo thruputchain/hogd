@@ -11,19 +11,26 @@ SCRIPT_DIR=$(dirname $(readlink -f "$0"))
 source ${SCRIPT_DIR}/git_info.sh
 
 BUILD_DIR=$1
+. "$SCRIPT_DIR/ci/combined_native_replay.sh"
+if combined_native_replay_selected; then
+  combined_native_replay_check
+fi
 
 # Put metrics to run here
 
-# Codesize metrics: size of the on-chain .rv32a artifact image.
-## fibonacci.rv32a
-./scripts/make_metric_file.sh fibonacci-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR fibonacci >metrics_history/metrics/fibonacci-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
+if ! combined_native_replay_selected; then
+  # Codesize metrics: size of the on-chain .rv32a artifact image.
+  ## fibonacci.rv32a
+  ./scripts/make_metric_file.sh fibonacci-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
+  ./scripts/metrics/codesize.sh $BUILD_DIR fibonacci >metrics_history/metrics/fibonacci-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-## itc_erc20.rv32a
-./scripts/make_metric_file.sh erc20-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
+  ## itc_erc20.rv32a
+  ./scripts/make_metric_file.sh erc20-codesize-rv32 $GIT_branch $GIT_commit $GIT_commit_time
+  ./scripts/metrics/codesize.sh $BUILD_DIR itc_erc20 >metrics_history/metrics/erc20-codesize-rv32/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
-# Performance metrics
+  # Performance metrics
+fi
+
 ## hog_db_bench (roundrobin_payments)
 ./scripts/make_metric_file.sh hog-db-bench $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/hog_db_bench.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
@@ -47,6 +54,12 @@ BUILD_DIR=$1
 ## hog_db_bench_rcq_sweep (queue-count sweep)
 ./scripts/make_metric_file.sh hog-db-bench-rcq-sweep $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/hog_db_bench_rcq_sweep.sh $BUILD_DIR >metrics_history/metrics/hog-db-bench-rcq-sweep/$GIT_branch/${GIT_commit_time}_$GIT_commit
+
+# The diagnostic keeps the original DB commands above and does not start
+# legacy RPC launchers with physical-LAN addresses.
+if combined_native_replay_selected; then
+  exit 0
+fi
 
 ## mass fibonacci.rv32a calls
 ./scripts/make_metric_file.sh fibonacci-rv32only $GIT_branch $GIT_commit $GIT_commit_time

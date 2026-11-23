@@ -4,6 +4,7 @@
 
 CI_BENCH_HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CI_BENCH_REPO_ROOT=$(cd "$CI_BENCH_HARNESS_DIR/../.." && pwd)
+. "$CI_BENCH_HARNESS_DIR/combined_native_replay.sh"
 
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-60}
 CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
@@ -56,6 +57,16 @@ ci_describe_exit_status() {
 # left is "one or more benchmark steps failed" with no crash in sight.
 ci_run_bench_step() {
   local name=$1
+  if combined_native_replay_selected; then
+    combined_native_replay_check || return
+    case "$name" in
+      metrics | auth_bench_start | auth_bench) ;;
+      *)
+        printf 'Combined native-source replay: skipped suite %s\n' "$name"
+        return 0
+        ;;
+    esac
+  fi
   shift
   local status=0
   local restore_errexit=""
