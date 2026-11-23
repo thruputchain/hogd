@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <optional>
 #include <sys/socket.h>
 #include <utility>
 
@@ -157,11 +158,29 @@ RpcStreamImpl::reader(SLOC_ARG0)
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
       if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
+        std::optional<RpcQueueTiming> queue_timing;
+        auto awaitable = [&] {
+          const auto *probe =
+              rpc_queue_server_probe.load(std::memory_order_acquire);
+          const auto &call = msg.body.cbody();
+          if (probe && call.prog == probe->program &&
+              call.vers == probe->version &&
+              (call.proc == probe->push || call.proc == probe->commit))
+              [[unlikely]] {
+            queue_timing.emplace().received = rpc_queue_now();
+            auto *previous =
+                std::exchange(rpc_queue_server_timing, &*queue_timing);
+            Defer restore([&] { rpc_queue_server_timing = previous; });
+            return s->serve(msg, {b.subspan(hdrbytes), b});
+          }
+          return s->serve(msg, {b.subspan(hdrbytes), b});
+        }();
         // Only spawn another coroutine if result not already available
         decltype(auto) awaiter = detail::get_awaiter(awaitable);
         if (awaiter.await_ready())
-          cp_->dwrite(fd_, awaiter.await_resume());
+          cp_->dwrite(fd_, awaiter.await_resume(),
+                      queue_timing && queue_timing->report ? &*queue_timing
+                                                           : nullptr);
         else
           [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
             self->cp_->dwrite(self->fd_, co_await awaitable);

@@ -31,10 +31,18 @@ namespace x23 {
 namespace detail {
 
 Errno
-WriteBuffer::Service::write(BufVec &work)
+WriteBuffer::Service::write(PendingWrites &work)
 {
   tok_ = cp_->write_clear(fd_);
-  auto res = work.write(fd_);
+  if (!work.traces.empty()) [[unlikely]] {
+    const auto now = rpc_queue_now();
+    for (auto &sample : work.traces)
+      sample.write_attempt = now;
+  }
+  auto res = work.data.write(fd_);
+  for (const auto &sample : work.traces)
+    sample.report(sample);
+  work.traces.clear();
   if (res) {
     if (*res != IoResult::kAgain)
       tok_.reset();
@@ -52,26 +60,26 @@ WriteBuffer::Service::go()
   wb_->want_write_ = true;
   if (!lk_.try_lock())
     return 0;
-  BufVec work = get_work();
+  auto work = get_work();
   // Try writing once before allocating coroutine
-  if (work.empty() && !work_needed())
+  if (work.data.empty() && !work_needed())
     return 0;
   if (auto err = write(work))
     return err;
-  if (!work.empty() || work_needed())
+  if (!work.data.empty() || work_needed())
     worker(std::move(*this), std::move(work));
   return 0;
 }
 
 Detached
-WriteBuffer::Service::worker(Service self, BufVec work)
+WriteBuffer::Service::worker(Service self, PendingWrites work)
 {
   RefPtr<WriteBuffer> wbref(*self.wb_);
   // We need to release the mutex before destroying wbref, since wb_
   // could be destroyed as soon as wbref goes out of scope.
   Defer _unlock([&lk = self.lk_] { lk = {}; });
   for (;;) {
-    while (!work.empty()) {
+    while (!work.data.empty()) {
       if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
         co_return;
       if (self.write(work))
@@ -186,21 +194,21 @@ CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 }
 
 Errno
-CoroPoll::awrite(BorrowedFd fd, Buf data)
+CoroPoll::awrite(BorrowedFd fd, Buf data, const RpcQueueTiming *trace)
 {
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
-  return w->write(*this, fd, std::move(data));
+  return w->write(*this, fd, std::move(data), trace);
 }
 
 Errno
-CoroPoll::dwrite(BorrowedFd fd, Buf data)
+CoroPoll::dwrite(BorrowedFd fd, Buf data, const RpcQueueTiming *trace)
 {
   auto w = get_writer(fd);
   if (!w)
     return EBADF;
-  if (Errno err = w->buffer(*this, fd, std::move(data)))
+  if (Errno err = w->buffer(*this, fd, std::move(data), trace))
     return err;
   if (w->waiting_for_read_)
     return w->flush(*this, fd);

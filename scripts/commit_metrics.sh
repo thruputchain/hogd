@@ -3,9 +3,17 @@ set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
-        ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
+    ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
     exit 0
   fi
+  case ${GIT_BRANCH:-} in
+  codex/payment-srpc-queue-phases | codex/payment-srpc-queue-control)
+    [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
+      ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+      ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]]
+    exit 0
+    ;;
+  esac
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested

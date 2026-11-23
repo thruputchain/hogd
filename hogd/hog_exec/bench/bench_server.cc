@@ -22,6 +22,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_exec/bench/payment_db_queue_trace.h"
 #include "hogd/hog_exec/bench/payment_db_timing.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -97,10 +98,13 @@ public:
       return HogDbExecutorRpc::try_push_new_subtransaction(block, tx,
                                                            std::move(batch));
     }
+    auto *queue = start_queue_sample(block, tx, 1);
     const auto start = DbClock::now();
     auto reply =
         HogDbExecutorRpc::try_push_new_subtransaction(block, tx,
                                                       std::move(batch));
+    if (queue)
+      queue->handler_end = x23::rpc_queue_now();
     samples_.add(block, tx, 1, start, reply.error());
     return reply;
   }
@@ -112,14 +116,31 @@ public:
       return HogDbExecutorRpc::commit_transaction(block, tx,
                                                   std::move(contracts));
     }
+    auto *queue = start_queue_sample(block, tx, 2);
     const auto start = DbClock::now();
     auto reply =
         HogDbExecutorRpc::commit_transaction(block, tx, std::move(contracts));
+    if (queue)
+      queue->handler_end = x23::rpc_queue_now();
     samples_.add(block, tx, 2, start, reply);
     return reply;
   }
 
 private:
+  static x23::RpcQueueTiming *
+  start_queue_sample(BlockID block, TransactionID tx, uint64_t phase)
+  {
+    auto *sample = x23::rpc_queue_server_timing;
+    if (sample) {
+      sample->block = block;
+      sample->transaction = tx;
+      sample->phase = phase;
+      sample->report = payment_db_queue::report;
+      sample->handler_begin = x23::rpc_queue_now();
+    }
+    return sample;
+  }
+
   PaymentDbHandlerSamples &samples_;
 };
 
@@ -163,6 +184,14 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts)
   std::println("Starting executor server on port {}", exec_port);
   if (accounts != 0) {
     PaymentDbHandlerSamples samples(accounts);
+    if (payment_db_queue_enabled("hog11")) {
+      payment_db_queue::start(accounts, "server");
+      using DbRpc = DatabaseToExecutorInterfaceV1;
+      static constexpr x23::RpcQueueServerProbe kProbe{
+          DbRpc::program, DbRpc::version, DbRpc::proc_meta<0>::proc,
+          DbRpc::proc_meta<1>::proc};
+      x23::rpc_queue_server_probe.store(&kProbe, std::memory_order_release);
+    }
     RpcServer<ProfiledPaymentDbRpc> server(ctx, samples);
     server.max_message_size_ = kBulkRpcMaxMessageSize;
     serve_executor(server, exec_port);

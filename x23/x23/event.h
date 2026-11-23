@@ -29,6 +29,7 @@
 #include <x23/err.h>
 #include <x23/mvar.h>
 #include <x23/refcnt.h>
+#include <x23/rpc_queue_timing.h>
 #include <x23/signal.h>
 #include <x23/sockio.h>
 #include <x23/testlock.h>
@@ -171,26 +172,50 @@ struct WriteBuffer : RefCount {
   // buffer writes.
   std::atomic_bool waiting_for_read_{false};
 
-  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  Errno write(CoroPoll &cp, BorrowedFd fd, Buf buf, const RpcQueueTiming *trace)
   {
-    writer_->append(std::move(buf));
+    {
+      auto pending = writer_.take();
+      append(*pending, std::move(buf), trace);
+    }
     return flush(cp, fd);
   }
-  Errno buffer(CoroPoll &cp, BorrowedFd fd, Buf buf)
+  Errno buffer(CoroPoll &cp, BorrowedFd fd, Buf buf,
+               const RpcQueueTiming *trace)
   {
     if (auto bufsz = buf.size(); bufsz < kFlushThreshold)
-      if (auto ptr = writer_.take(); ptr->nbytes() < kFlushThreshold - bufsz) {
-        ptr->append(std::move(buf));
+      if (auto ptr = writer_.take();
+          ptr->data.nbytes() < kFlushThreshold - bufsz) {
+        append(*ptr, std::move(buf), trace);
         return 0;
       }
-    return write(cp, fd, std::move(buf));
+    return write(cp, fd, std::move(buf), trace);
   }
   inline Errno flush(CoroPoll &cp, BorrowedFd fd);
 
 private:
+  struct PendingWrites {
+    BufVec data;
+    Vec<RpcQueueTiming> traces;
+  };
+
+  static void append(PendingWrites &pending, Buf buf,
+                     const RpcQueueTiming *trace)
+  {
+    pending.data.append(std::move(buf));
+    if (trace) [[unlikely]] {
+      try {
+        auto &sample = pending.traces.emplace_back(*trace);
+        sample.enqueued = rpc_queue_now();
+      } catch (const std::bad_alloc &) {
+        // The diagnostic reducer rejects incomplete coverage.
+      }
+    }
+  }
+
   std::atomic_bool want_write_{false};
   TestLock service_lock_;
-  MVar<BufVec> writer_;
+  MVar<PendingWrites> writer_;
 
   class Service;
 };
@@ -513,12 +538,12 @@ public:
   // fails, as the write could happen after it returns.  Unlike write,
   // it is safe to call this function concurrently; the writes will be
   // sequenced one after the other.
-  Errno awrite(BorrowedFd fd, Buf data);
+  Errno awrite(BorrowedFd fd, Buf data, const RpcQueueTiming *trace = nullptr);
 
   // Delayed write will enqueue data but not flush it until the next
   // write or unbuffered sread.  Like dwrite, multiple threads can
   // call this function simultaneously.
-  Errno dwrite(BorrowedFd fd, Buf data);
+  Errno dwrite(BorrowedFd fd, Buf data, const RpcQueueTiming *trace = nullptr);
 
   // Accept a new connection on a listening file descriptor lfd,
   // suspending the coroutine if no incoming connection is available.
@@ -621,13 +646,19 @@ private:
     lk_.unlock();
     return wb_->want_write_ && lk_.try_lock();
   }
-  BufVec get_work()
+  PendingWrites get_work()
   {
     wb_->want_write_ = false;
-    return wb_->writer_.exchange({});
+    auto pending = wb_->writer_.exchange({});
+    if (!pending.traces.empty()) [[unlikely]] {
+      const auto now = rpc_queue_now();
+      for (auto &sample : pending.traces)
+        sample.dequeued = now;
+    }
+    return pending;
   }
-  Errno write(BufVec &work);
-  static Detached worker(Service self, BufVec work);
+  Errno write(PendingWrites &work);
+  static Detached worker(Service self, PendingWrites work);
 };
 
 inline Errno

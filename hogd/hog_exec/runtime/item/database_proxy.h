@@ -51,6 +51,7 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 struct DbRpcAwaitTiming {
   int64_t client_await_ns{};
   int64_t threadpool_hop_ns{};
+  void (*queue_report)(const x23::RpcQueueTiming &) noexcept {};
 };
 
 class DatabaseProxy {

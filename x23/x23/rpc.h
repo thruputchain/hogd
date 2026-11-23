@@ -441,6 +441,14 @@ struct RpcStream : public detail::RpcStreamImpl {
   Async<typename ProcMeta::return_type>
   send_call(const is_xdr_serializable auto &...args)
   {
+    return send_call<ProcMeta>(nullptr, args...);
+  }
+
+  template<typename ProcMeta>
+  Async<typename ProcMeta::return_type>
+  send_call(const RpcQueueTiming *timing,
+            const is_xdr_serializable auto &...args)
+  {
     auto msg = call_msg<ProcMeta>();
     Buf record = make_record(msg, args...);
 
@@ -457,7 +465,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     putbe(record.data() + 4, msg.xid = gen_call_xid(a));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
-    cp_->awrite(fd_, std::move(record));
+    cp_->awrite(fd_, std::move(record), timing);
 
     Buf rbuf;
     BufView rv;
@@ -544,6 +552,14 @@ struct RpcMulticlient : RefCount,
   send_call(const is_xdr_type auto &...args)
   {
     return this->lookup()->template send_call<ProcMeta>(args...);
+  }
+
+  template<typename ProcMeta>
+  Async<typename ProcMeta::return_type>
+  send_call(const RpcQueueTiming *timing,
+            const is_xdr_serializable auto &...args)
+  {
+    return this->lookup()->template send_call<ProcMeta>(timing, args...);
   }
 
   static ClientRef make(CoroPoll &cp, const struct sockaddr_storage &ss,

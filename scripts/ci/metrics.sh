@@ -26,19 +26,37 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
-if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
-      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-      ${HOG_HOST:-} == hog10 ]]; then
+queue_pair=0
+case ${GIT_BRANCH:-} in
+codex/payment-srpc-queue-phases | codex/payment-srpc-queue-control)
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+    ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+    ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]]
+  queue_pair=1
+  ;;
+esac
+
+if [[ (${GIT_BRANCH:-} == codex/payments-db-service-diagnostics || $queue_pair == 1) &&
+  ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+  ${HOG_HOST:-} == hog10 ]]; then
   output="${HOG_DUMP_DIR:?}/payment-phases"
   mkdir -p "$output"
+  if [[ $queue_pair == 1 ]]; then
+    printf '%s\t%s\t%s\n' "$GIT_COMMIT" "$GIT_BRANCH" "$HOG_XID" >"$output/queue-provenance.tsv"
+  fi
   for accounts in 10 2; do
     raw="$output/payments-$accounts.raw"
     ./scripts/metrics/payments_bench.sh "$BUILD_DIR" "$accounts" >"$raw"
+    if [[ $queue_pair == 1 ]]; then
+      grep -Ex 'payment_db_workload 56013 [1-9][0-9]* 2048000 [0-9a-f]{64}' \
+        "$raw" >"$output/payments-$accounts.workload"
+      [[ $(wc -l <"$output/payments-$accounts.workload") == 1 ]]
+    fi
     # TSV columns: accounts, repetition, phase, sample count, p50 ns, p90 ns.
     awk -v phases="$output/payments-$accounts.tsv" \
-        -v elapsed="$output/payments-$accounts.elapsed" \
-        -v callers="$output/payments-$accounts.db-caller.tsv" \
-        -v accounts="$accounts" '
+      -v elapsed="$output/payments-$accounts.elapsed" \
+      -v callers="$output/payments-$accounts.db-caller.tsv" \
+      -v accounts="$accounts" '
       /^payment_phase / {
         if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
             $4 !~ /^[1-6]$/ || $5 != ($4 == 3 ? 1 : 391) ||
@@ -76,7 +94,10 @@ if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
           if (caller_reps[i] != 390 && caller_reps[i] != 391) exit 1
         }
       }
-    ' "$raw" || { echo "Incomplete payment phase results for $accounts accounts" >&2; exit 1; }
+    ' "$raw" || {
+      echo "Incomplete payment phase results for $accounts accounts" >&2
+      exit 1
+    }
     rm -- "$raw"
   done
   exit 0

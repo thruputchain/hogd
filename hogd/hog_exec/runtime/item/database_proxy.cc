@@ -317,8 +317,25 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
   try {
     using Clock = std::chrono::steady_clock;
     const auto start = timing ? Clock::now() : Clock::time_point{};
-    auto res =
-        co_await client_.commit_transaction(block_id, tx_id, new_contracts);
+    std::optional<x23::RpcQueueTiming> queue;
+    if (timing && timing->queue_report) {
+      queue = x23::RpcQueueTiming{.block = block_id,
+                                  .transaction = tx_id,
+                                  .phase = 2,
+                                  .report = timing->queue_report};
+    }
+    auto call = [&] {
+      if (queue) {
+        using Client =
+            DatabaseToExecutorInterfaceV1::client<base_client_t,
+                                                  const x23::RpcQueueTiming *>;
+        return Client{client_.__send_call}.commit_transaction(block_id, tx_id,
+                                                              new_contracts,
+                                                              &*queue);
+      }
+      return client_.commit_transaction(block_id, tx_id, new_contracts);
+    }();
+    auto res = co_await call;
     const auto resumed = timing ? Clock::now() : Clock::time_point{};
     co_await default_threadpool().bg();
     if (timing && res == RPCError::kRPCNone) {
@@ -328,6 +345,7 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
           std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
                                                                resumed)
               .count(),
+          timing->queue_report,
       };
     }
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
@@ -540,8 +558,24 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
   try {
     using Clock = std::chrono::steady_clock;
     const auto start = timing ? Clock::now() : Clock::time_point{};
-    auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
-                                                            delta_batch);
+    std::optional<x23::RpcQueueTiming> queue;
+    if (timing && timing->queue_report) {
+      queue = x23::RpcQueueTiming{.block = block_id,
+                                  .transaction = tx_id,
+                                  .phase = 1,
+                                  .report = timing->queue_report};
+    }
+    auto call = [&] {
+      if (queue) {
+        using Client =
+            DatabaseToExecutorInterfaceV1::client<base_client_t,
+                                                  const x23::RpcQueueTiming *>;
+        return Client{client_.__send_call}.try_push_new_subtransaction(
+            block_id, tx_id, delta_batch, &*queue);
+      }
+      return client_.try_push_new_subtransaction(block_id, tx_id, delta_batch);
+    }();
+    auto res = co_await call;
     const auto resumed = timing ? Clock::now() : Clock::time_point{};
     co_await default_threadpool().bg();
     if (timing && res.error() == RPCError::kRPCNone) {
@@ -551,6 +585,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
           std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
                                                                resumed)
               .count(),
+          timing->queue_report,
       };
     }
     switch (res.error()) {
