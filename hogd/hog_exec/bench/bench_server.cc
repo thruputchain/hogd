@@ -1,13 +1,16 @@
+#include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <exception>
 #include <fcntl.h>
 #include <memory>
 #include <optional>
 #include <print>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <sys/mman.h>
@@ -15,6 +18,7 @@
 #include <unistd.h>
 #include <utility>
 
+#include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -22,6 +26,7 @@
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_exec.h"
 #include "hogd/hog_db/rpc_from_sched.h"
+#include "hogd/hog_exec/bench/payment_db_affinity.h"
 #include "hogd/hog_exec/bench/payment_db_timing.h"
 #include "hogd/init.h"
 #include "hogd/ramdb/db.h"
@@ -42,12 +47,14 @@ class PaymentDbHandlerSamples {
   static constexpr size_t kBytes = (kPaymentDbSampleLimit + 1) * sizeof(Record);
 
 public:
-  explicit PaymentDbHandlerSamples(uint32_t accounts)
+  explicit PaymentDbHandlerSamples(uint32_t accounts, std::string_view arm)
   {
     const char *dump_dir = std::getenv("HOG_DUMP_DIR");
     CHECK(dump_dir && *dump_dir);
     const auto path =
-        std::format("{}/payment-db-server-{}.bin", dump_dir, accounts);
+        arm.empty() ? std::format("{}/payment-db-server-{}.bin", dump_dir, accounts)
+                    : std::format("{}/payment-db-server-{}-{}.bin", dump_dir,
+                                  accounts, arm);
     const int fd =
         open(path.c_str(), O_CREAT | O_EXCL | O_CLOEXEC | O_RDWR, 0600);
     CHECK(fd >= 0);
@@ -123,11 +130,52 @@ private:
   PaymentDbHandlerSamples &samples_;
 };
 
+#ifdef __linux__
+void
+report_affinity(FILE *file, const cpu_set_t &expected)
+{
+  std::print(file, "workers={} ticks={}:\n", default_threadpool().nthreads_,
+             std::chrono::duration_cast<std::chrono::milliseconds>(
+                 DbClock::now().time_since_epoch()).count());
+  for (const auto &task : std::filesystem::directory_iterator("/proc/self/task")) {
+    const auto tid = std::stoi(task.path().filename().string());
+    const auto actual = payment_db_affinity::current_mask(tid);
+    CHECK(CPU_EQUAL(&expected, &actual));
+    std::print(file, "{}:", tid);
+    for (int cpu = 0; cpu < CPU_SETSIZE; ++cpu) {
+      if (CPU_ISSET(cpu, &actual))
+        std::print(file, " {}", cpu);
+    }
+    std::println(file, "");
+  }
+  CHECK(std::fflush(file) == 0);
+}
+#endif
+
 [[noreturn]] void
-serve_executor(auto &server, uint32_t port)
+serve_executor(auto &server, uint32_t port, uint32_t accounts = 0,
+               std::string_view arm = {})
 {
   server.start_server(port);
   std::fflush(stdout);
+#ifdef __linux__
+  if (!arm.empty()) {
+    const char *dump_dir = std::getenv("HOG_DUMP_DIR");
+    CHECK(dump_dir && *dump_dir);
+    const auto path = std::format("{}/payment-db-affinity-{}-{}.txt",
+                                  dump_dir, accounts, arm);
+    const auto expected = payment_db_affinity::current_mask();
+    CHECK(default_threadpool().nthreads_ ==
+          static_cast<size_t>(CPU_COUNT(&expected)));
+    FILE *report = std::fopen(path.c_str(), "wx");
+    CHECK_PTR(report);
+    std::println(report, "arm={} pid={} accounts={}", arm, getpid(), accounts);
+    while (true) {
+      report_affinity(report, expected);
+      std::this_thread::sleep_for(std::chrono::seconds(30));
+    }
+  }
+#endif
   while (true) {
     std::this_thread::sleep_for(std::chrono::seconds(100));
   }
@@ -135,7 +183,8 @@ serve_executor(auto &server, uint32_t port)
 
 // runs a db server to support an executor benchmark.
 void
-run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts)
+run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts,
+                 std::string_view arm)
 {
   // Create a temporary directory for the database
   Directory dir = Directory::open_temporary().value();
@@ -162,10 +211,10 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts)
   // Start the executor server
   std::println("Starting executor server on port {}", exec_port);
   if (accounts != 0) {
-    PaymentDbHandlerSamples samples(accounts);
+    PaymentDbHandlerSamples samples(accounts, arm);
     RpcServer<ProfiledPaymentDbRpc> server(ctx, samples);
     server.max_message_size_ = kBulkRpcMaxMessageSize;
-    serve_executor(server, exec_port);
+    serve_executor(server, exec_port, accounts, arm);
   }
   HogDbExecutorServer db_executor_server(ctx);
   serve_executor(db_executor_server, exec_port);
@@ -186,17 +235,20 @@ usage(char *argv[])
 int
 main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 {
-  auto ret = hogd::hogd_init(argc, argv);
-  if (ret)
-    return ret;
-
+  const bool affinity_requested = std::any_of(argv + 1, argv + argc,
+      [](const char *arg) { return std::string_view(arg).starts_with("-A"); });
+  if (!affinity_requested) {
+    if (const auto ret = hogd::hogd_init(argc, argv))
+      return ret;
+  }
   std::optional<int> exec_port;
   std::optional<int> coord_port;
   uint32_t diagnostic_accounts = 0;
+  std::string_view arm;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:D:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:D:A:")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);
@@ -216,6 +268,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       diagnostic_accounts = accounts == "2" ? 2 : 10;
       break;
     }
+    case 'A':
+      if (!arm.empty() || !hogd::payment_db_affinity_arm(optarg))
+        usage(argv);
+      arm = optarg;
+      break;
     default:
       usage(argv);
     }
@@ -224,6 +281,32 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   if (!exec_port || !coord_port) {
     usage(argv);
   }
+  if (!arm.empty()) {
+#ifdef __linux__
+    if (!diagnostic_accounts)
+      return 1;
+    try {
+      using namespace hogd::payment_db_affinity;
+      const auto allowed = current_mask();
+      const auto selected = select(arm, allowed);
+      if (arm != "stock" && sched_setaffinity(0, sizeof(selected), &selected))
+        throw std::runtime_error("sched_setaffinity failed");
+      const auto actual = current_mask();
+      if (!CPU_EQUAL(&selected, &actual) ||
+          hogd::available_parallelism() != static_cast<size_t>(CPU_COUNT(&actual)))
+        throw std::runtime_error("effective affinity or worker size differs");
+    } catch (const std::exception &e) {
+      std::println(stderr, "Payment DB affinity {} failed: {}", arm, e.what());
+      return 1;
+    }
+#else
+    return 1;
+#endif
+  }
+  if (affinity_requested) {
+    if (const auto ret = hogd::hogd_init(argc, argv))
+      return ret;
+  }
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  hogd::run_bench_server(*exec_port, *coord_port, diagnostic_accounts);
+  hogd::run_bench_server(*exec_port, *coord_port, diagnostic_accounts, arm);
 }

@@ -100,9 +100,11 @@ local_hog_ip()
 class CommonBenchState {
 public:
   CommonBenchState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                   uint16_t coord_port, uint32_t payment_db_accounts = 0)
+                   uint16_t coord_port, uint32_t payment_db_accounts = 0,
+                   std::string_view payment_db_arm = {})
     : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
-      coord_port_(coord_port)
+      coord_port_(coord_port),
+      payment_db_affinity_(!payment_db_arm.empty())
   {
     CHECK_EQ(server_addrs_.size(), 2U);
 
@@ -121,7 +123,7 @@ public:
 
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
-    start_db_server(payment_db_accounts);
+    start_db_server(payment_db_accounts, payment_db_arm);
     event_card_ = start_event_server(event_server_port);
     connect_coord();
     connect_exec();
@@ -131,7 +133,16 @@ public:
   }
 
   // NOLINTBEGIN(bugprone-exception-escape)
-  ~CommonBenchState() { close_event_block(block_number_); }
+  ~CommonBenchState()
+  {
+    close_event_block(block_number_);
+    if (payment_db_affinity_) {
+      CHECK(hog_db_handle_->ci_client.stop_server_checked() ==
+            CIServerErrorCode::kCIServerErrorCodeOK);
+      CHECK(event_server_handle_->ci_client.stop_server_checked() ==
+            CIServerErrorCode::kCIServerErrorCodeOK);
+    }
+  }
   // NOLINTEND(bugprone-exception-escape)
 
   SystemCallHandler make_handler(SignedTransaction const &signed_tx,
@@ -253,7 +264,7 @@ private:
         .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
   }
 
-  void start_db_server(uint32_t payment_db_accounts)
+  void start_db_server(uint32_t payment_db_accounts, std::string_view arm)
   {
     CHECK_PTR(hog_db_handle_.get());
     std::vector<std::string> args{"-e", std::to_string(exec_port_), "-c",
@@ -261,6 +272,10 @@ private:
     if (payment_db_accounts != 0) {
       args.emplace_back("-D");
       args.push_back(std::to_string(payment_db_accounts));
+      if (!arm.empty()) {
+        args.emplace_back("-A");
+        args.emplace_back(arm);
+      }
     }
     hog_db_handle_->ci_client.start_server("hogd/hog_exec/bench/bench_server",
                                            args);
@@ -321,6 +336,7 @@ private:
 
   uint16_t exec_port_;
   uint16_t coord_port_;
+  const bool payment_db_affinity_;
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;

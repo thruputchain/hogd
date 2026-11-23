@@ -224,8 +224,16 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
 
     futures.emplace_back(WorkerPool::get_default_pool().submit(
         [this, &work_txs, start, end, expiry_height]() {
-          std::random_device rd;
-          std::mt19937 gen(rd());
+          std::mt19937 gen;
+          if (work_seed_) {
+            std::seed_seq seed{*work_seed_, static_cast<uint32_t>(start),
+                               static_cast<uint32_t>(uint64_t{start} >> 32)};
+            gen.seed(seed);
+          }
+          else {
+            std::random_device rd;
+            gen.seed(rd());
+          }
 
           std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
 

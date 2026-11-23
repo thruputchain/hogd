@@ -19,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/payment_db_timing.h"
 #include "hogd/hog_exec/common/status.h"
@@ -37,18 +38,19 @@ namespace {
 
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                 uint16_t coord_port, uint32_t num_accounts)
+                 uint16_t coord_port, uint32_t num_accounts, std::string_view arm)
     : CommonBenchState(server_addrs, exec_port, coord_port,
                        server_addrs.size() == 2 && server_addrs[0] == "hog11" &&
                                server_addrs[1] == "hog8" &&
                                (num_accounts == 2 || num_accounts == 10) &&
                                payment_db_timing_enabled("hog10")
                            ? num_accounts
-                           : 0),
-      num_accounts_(num_accounts)
+                           : 0, arm),
+      num_accounts_(num_accounts), affinity_diagnostic_(!arm.empty())
   {}
 
   const uint32_t num_accounts_;
+  const bool affinity_diagnostic_;
 
   // TODO(geoff): This benchmark will break down when we start tracking
   // uniquifiers within hog_db.  We need to somehow clean up the benchmark state
@@ -61,9 +63,10 @@ struct BenchmarkState : public CommonBenchState {
   {
     HogexecMetrics::launch_log_worker();
 
-    auto exp = ERC20ExperimentState(ERC20PaymentsConfig{
-        .num_addresses = num_accounts_,
-    });
+    constexpr uint32_t affinity_work_seed = 56013;
+    auto exp = ERC20ExperimentState(
+        ERC20PaymentsConfig{.num_addresses = num_accounts_},
+        affinity_diagnostic_ ? std::optional{affinity_work_seed} : std::nullopt);
     auto result = exp.generate_experiment()();
     if (!result.has_value()) {
       panic("Failed to generate erc20 payments experiment");
@@ -82,6 +85,17 @@ struct BenchmarkState : public CommonBenchState {
     x23::XdrVec<SignedTransaction> work_txs;
     parallel_batch_to_t(work_txs_raw.value().work_txs, work_txs,
                         kNoBatchSizeLimit)();
+    if (affinity_diagnostic_) {
+      SHA256Hasher hasher;
+      for (const auto &tx : work_txs)
+        hasher.update(x23::serialize(tx));
+      const auto digest = hasher.finalize();
+      std::print("payment_db_workload {} {} {} ", affinity_work_seed,
+                 WorkerPool::get_default_pool().worker_count(), work_txs.size());
+      for (const auto byte : digest)
+        std::print("{:02x}", byte);
+      std::println("");
+    }
     return work_txs;
   }
 };
@@ -440,14 +454,14 @@ run_bench_rep_coro(BenchmarkState &bs,
 void
 run_payments_bench(std::vector<std::string> const &server_addrs,
                    uint32_t exec_port, uint32_t coord_port,
-                   uint32_t num_accounts)
+                   uint32_t num_accounts, std::string_view arm)
 {
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
   size_t num_reps = 10;
   uint32_t num_total_txs =
       std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
-  BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts);
+  BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts, arm);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
 
@@ -507,10 +521,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::optional<int> coord_port;
   std::vector<std::string> server_addrs;
   std::optional<int> num_accounts;
+  std::string_view arm;
 
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "e:c:s:a:")) != -1) {
+  while ((opt = getopt(argc, argv, "e:c:s:a:A:")) != -1) {
     switch (opt) {
     case 'e':
       exec_port = std::stoi(optarg);
@@ -524,6 +539,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'a':
       num_accounts = std::stoi(optarg);
       break;
+    case 'A':
+      if (!arm.empty() || !hogd::payment_db_affinity_arm(optarg))
+        usage(argv);
+      arm = optarg;
+      break;
     default:
       usage(argv);
     }
@@ -533,9 +553,15 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
+  if (!arm.empty() &&
+      (!hogd::payment_db_timing_enabled("hog10") ||
+       server_addrs != std::vector<std::string>{"hog11", "hog8"} ||
+       (*num_accounts != 2 && *num_accounts != 10)))
+    return 1;
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
   hogd::run_payments_bench(server_addrs, *exec_port, *coord_port,
-                           *num_accounts);
+                           *num_accounts, arm);
   // NOLINTEND(bugprone-unchecked-optional-access)
 
   std::fflush(stdout);
