@@ -26,6 +26,31 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
+if [[ ${GIT_BRANCH:-} == codex/fibonacci-db-phase-diagnostics &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog10 ]]; then
+  output="${HOG_DUMP_DIR:?}/fibonacci-db-phases.txt"
+  ./scripts/metrics/fibonacci_rv32only_bench.sh "$BUILD_DIR" >"$output"
+  awk '
+    /^time taken: [0-9]+ us for 10000 txs [(]fib 15, commit (true|false)[)] on 64 threads$/ {
+      elapsed[$11]++
+    }
+    /^fibonacci_phase / {
+      if (NF != 12 || $2 !~ /^[01]$/ || $3 !~ /^[0-4]$/ ||
+          $4 !~ /^[0-9]+$/ || $4 >= 10000 || $4 % 128 || seen[$2, $3, $4]++) invalid = 1
+      for (i = 5; i <= NF; i++) if ($i !~ /^[0-9]+$/) invalid = 1
+      rows[$2, $3]++
+    }
+    END {
+      if (invalid || elapsed["true)"] != 5 || elapsed["false)"] != 5) exit 1
+      for (arm = 0; arm < 2; arm++)
+        for (rep = 0; rep < 5; rep++)
+          if (rows[arm, rep] != 79) exit 1
+    }
+  ' "$output" || { echo "Incomplete Fibonacci phase results" >&2; exit 1; }
+  exit 0
+fi
+
 if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog10 ]]; then

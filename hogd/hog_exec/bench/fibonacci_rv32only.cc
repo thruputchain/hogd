@@ -8,7 +8,9 @@
 #include <memory>
 #include <optional>
 #include <print>
+#include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -126,9 +128,42 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
   }
 }
 
+constexpr int kFibPhaseStride = 128;
+
+struct FibPhaseSample {
+  int64_t invoke_ns{};
+  int64_t commit_ns{};
+  SystemCallHandler::CommitPhaseTiming commit_timing{};
+  DbRpcAwaitTiming frame_rpc{};
+  DbRpcAwaitTiming commit_rpc{};
+};
+
+using FibPhaseClock = std::chrono::steady_clock;
+
+int64_t
+fib_phase_elapsed(FibPhaseClock::time_point start)
+{
+  return std::chrono::duration_cast<std::chrono::nanoseconds>(
+             FibPhaseClock::now() - start)
+      .count();
+}
+
+bool
+fib_phase_diagnostic(const std::vector<std::string> &server_addrs)
+{
+  const auto matches = [](const char *name, std::string_view expected) {
+    const char *value = std::getenv(name);
+    return value && value == expected;
+  };
+  return matches("GIT_BRANCH", "codex/fibonacci-db-phase-diagnostics") &&
+         matches("HOGD_CI_CONTAINER", "1") && matches("HOGD_CI_OFFLINE", "1") &&
+         matches("HOG_HOST", "hog10") && server_addrs.size() == 2 &&
+         server_addrs[0] == "hog11" && server_addrs[1] == "hog8";
+}
+
 void
 run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
-              int num_exec_threads, bool do_commit)
+              int num_exec_threads, bool do_commit, bool record_phases = false)
 {
 
   WorkerPool exec_pool(num_exec_threads);
@@ -143,6 +178,8 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     // Capture the height these txs commit against so their uniquifier expiry
     // heights are not yet expired; cleared after the rep (see below).
     const auto base_height = bs.block_height();
+    std::vector<FibPhaseSample> samples(
+        record_phases ? (num_txs + kFibPhaseStride - 1) / kFibPhaseStride : 0);
     auto start_time = std::chrono::steady_clock::now();
 
     int ntx_per_thread = num_txs / num_exec_threads;
@@ -162,8 +199,9 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
       int offset = i * ntx_per_thread;
       int cur_count = std::min(ntx_per_thread, num_txs - offset);
 
-      futures.emplace_back(exec_pool.submit(
-          [&bs, &tx, do_commit, offset, cur_count, base_height]() -> void {
+      futures.emplace_back(
+          exec_pool.submit([&bs, &tx, do_commit, offset, cur_count, base_height,
+                            samples = std::span(samples)]() -> void {
             auto runtime_context = make_hog_exec_context();
             // Copy the invocation once per thread; only the uniquifier varies,
             // so we don't re-encode calldata inside the timed loop.
@@ -174,13 +212,33 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
                   CommonBenchState::bench_uniquifier(base_height,
                                                      static_cast<uint64_t>(k));
               auto handler = bs.make_handler(local_tx, k, *runtime_context);
-              if (!handler.root_invoke()().is_root_success()) {
+              FibPhaseSample *sample = nullptr;
+              FibPhaseClock::time_point start;
+              if (!samples.empty() && k % kFibPhaseStride == 0) {
+                sample = &samples[k / kFibPhaseStride];
+                start = FibPhaseClock::now();
+              }
+              const bool invoke_ok = handler.root_invoke()().is_root_success();
+              if (sample) {
+                sample->invoke_ns = fib_phase_elapsed(start);
+              }
+              if (!invoke_ok) {
                 error("Failed to invoke transaction");
                 panic("Failed to invoke transaction");
               }
               if (do_commit) {
-                if (handler.try_commit_transaction()() !=
-                    ExecResult::ExecResultOK) {
+                SystemCallHandler::CommitPhaseTiming *timing = nullptr;
+                if (sample) {
+                  timing = &sample->commit_timing;
+                  timing->frame_rpc = &sample->frame_rpc;
+                  timing->commit_rpc = &sample->commit_rpc;
+                  start = FibPhaseClock::now();
+                }
+                const auto result = handler.try_commit_transaction(timing)();
+                if (sample) {
+                  sample->commit_ns = fib_phase_elapsed(start);
+                }
+                if (result != ExecResult::ExecResultOK) {
                   panic("failed to perform commit operation");
                 }
               }
@@ -202,6 +260,19 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
              std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
                                                                    start_time)
                  .count());
+    for (size_t sample_index = 0; sample_index < samples.size();
+         ++sample_index) {
+      const auto &sample = samples[sample_index];
+      std::println("fibonacci_phase {} {} {} {} {} {} {} {} {} {} {}",
+                   do_commit ? 1 : 0, nrep, sample_index * kFibPhaseStride,
+                   sample.invoke_ns, sample.commit_ns,
+                   sample.commit_timing.frame_lock_ns,
+                   sample.commit_timing.db_commit_ns,
+                   sample.frame_rpc.client_await_ns,
+                   sample.frame_rpc.threadpool_hop_ns,
+                   sample.commit_rpc.client_await_ns,
+                   sample.commit_rpc.threadpool_hop_ns);
+    }
     // Only commits consume uniquifiers; expire this rep's so the next rep (and
     // the next call) starts from an empty replay cache. Outside the timed
     // region.
@@ -217,6 +288,16 @@ run_fibonacci_client(std::vector<std::string> const &server_addrs,
 {
   BenchmarkState bs(server_addrs, exec_port, coord_port);
   bs.initialize();
+
+  if (fib_phase_diagnostic(server_addrs)) {
+    // Keep the first stock strong-scaling cases in order so the diagnosed
+    // fib15 cases see the same predecessor work as the ordinary sweep.
+    run_bench_rep(bs, 10000, 20, 64, true);
+    run_bench_rep(bs, 10000, 20, 64, false);
+    run_bench_rep(bs, 10000, 15, 64, true, true);
+    run_bench_rep(bs, 10000, 15, 64, false, true);
+    return;
+  }
 
   // strong scaling
   for (auto nthread : {64, 256, 512, 1024, 2048}) {
