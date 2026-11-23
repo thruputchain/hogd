@@ -3,6 +3,7 @@
 
 from calendar import timegm
 from collections import Counter, defaultdict
+from ipaddress import IPv4Address
 import json
 from math import ceil
 import re
@@ -41,6 +42,60 @@ TIMING = re.compile(
     r"tx_count=1000000 value=([a-f0-9]{12}) rpc_ns=([1-9][0-9]{0,11}) "
     r"local_ns=([1-9][0-9]{0,11})(?=\s|$)"
 )
+PROPOSAL_REPLY_MARKER = "schedulercoord_propose_block;"
+PROPOSAL_REPLY = re.compile(
+    r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d) "
+    r"\?\?\? \d{1,12}\.\d{9}, CLIENT, REPLY, ([1-9][0-9]{0,9}), "
+    r"([0-9.]{7,15}:[1-9][0-9]{0,4}), ([0-9.]{7,15}:[1-9][0-9]{0,4}), "
+    r"schedulercoord_propose_block; io=([^ ,]+), queue=([^ ,]+), serde=([^ ,]+)\n"
+)
+DURATION_PART = re.compile(r"([0-9]{1,12})(?:\.([0-9]{1,9}))?(ns|µs|ms|s|m|h)")
+NANOSECONDS = {"ns": 1, "µs": 1000, "ms": 10**6, "s": 10**9, "m": 60 * 10**9, "h": 3600 * 10**9}
+
+
+def go_duration_ns(value):
+    total = 0
+    start = 0
+    largest = 10**15
+    for part in DURATION_PART.finditer(value):
+        whole, fraction, unit = part.groups()
+        ns = NANOSECONDS[unit]
+        if part.start() != start or ns >= largest or (fraction and part.end() != len(value)):
+            raise ValueError("invalid Go RPC duration")
+        total += int(whole) * ns
+        if fraction:
+            fractional, remainder = divmod(int(fraction) * ns, 10 ** len(fraction))
+            if remainder:
+                raise ValueError("invalid fractional nanoseconds")
+            total += fractional
+        start = part.end()
+        largest = ns
+    if start == 0 or start != len(value) or total > 240 * 10**9:
+        raise ValueError("Go RPC duration is outside bounds")
+    return total
+
+
+def proposal_reply_stats(line):
+    match = PROPOSAL_REPLY.fullmatch(line)
+    if not match:
+        raise ValueError("malformed or truncated Go proposal reply stats")
+    xid, server, client, receive, queue, decode = match.groups()
+    server_ip, server_port = server.rsplit(":", 1)
+    client_ip, client_port = client.rsplit(":", 1)
+    if not (int(xid) < 2**32 and 0 < int(server_port) < 2**16 and 0 < int(client_port) < 2**16):
+        raise ValueError("Go proposal reply identity is outside bounds")
+    return {
+        "xid": int(xid),
+        "server_ip": str(IPv4Address(server_ip)),
+        "server_port": int(server_port),
+        "client_ip": str(IPv4Address(client_ip)),
+        "client_port": int(client_port),
+        "record_receive_ns": go_duration_ns(receive),
+        "receive_queue_ns": go_duration_ns(queue),
+        "decode_ns": go_duration_ns(decode),
+    }
+
+
 MARKERS = (
     "CHUCKD_PROPOSE_TIMING",
     "NOMINATING:", "NOMINATED:", "waiting for pre-persisting of catchup block:",
@@ -104,7 +159,15 @@ def reduce_stderr(lines):
     matched = Counter()
     proposal_timings = {}
     block_ids = set()
+    reply_stats = {}
     for raw in lines:
+        if PROPOSAL_REPLY_MARKER in raw and ", CLIENT, REPLY, " in raw:
+            receipt = proposal_reply_stats(ANSI.sub("", raw))
+            key = receipt["xid"], receipt["client_port"], receipt["server_port"]
+            if key in reply_stats or len(reply_stats) >= 1_000:
+                raise ValueError("duplicate or excessive Go proposal reply identities")
+            reply_stats[key] = receipt
+            continue
         if not any(marker in raw for marker in MARKERS):
             continue
         line = ANSI.sub("", raw)
@@ -233,6 +296,8 @@ def reduce_stderr(lines):
                 if (height, value) not in joined_timings
             ],
         )
+    if reply_stats:
+        result["proposal_reply_stats"] = list(reply_stats.values())
     return result
 
 
@@ -248,18 +313,35 @@ def snapshot_lines(stream, size):
         yield line.decode("utf-8", errors="replace")
 
 
+def check_reply_scope(result, client, server, port):
+    expected = str(IPv4Address(client)), str(IPv4Address(server)), int(port)
+    rows = result.get("proposal_reply_stats")
+    if not rows or any(
+        (row["client_ip"], row["server_ip"], row["server_port"]) != expected
+        for row in rows
+    ):
+        raise ValueError("proposal reply stats are missing or outside the hog4-to-hog10 scheduler connection scope")
+
+
+def main(args):
+    if len(args) == 4 and args[0] == "check-reply-stats":
+        check_reply_scope(json.load(sys.stdin), *args[1:])
+        return
+    if len(args) != 2 or args[0] not in ("stdout", "stderr"):
+        raise ValueError("expected stdout or stderr and snapshot size")
+    stream, size = args[0], int(args[1])
+    limit = (1 if stream == "stdout" else 256) << 20
+    if not 0 < size <= limit:
+        raise ValueError("typed log snapshot size is outside bounds")
+    lines = snapshot_lines(sys.stdin.buffer, size)
+    if stream == "stdout":
+        print(normalize_stdout(lines), end="")
+    else:
+        print(json.dumps(reduce_stderr(lines), indent=2))
+
+
 if __name__ == "__main__":
     try:
-        if len(sys.argv) != 3 or sys.argv[1] not in ("stdout", "stderr"):
-            raise ValueError("expected stdout or stderr and snapshot size")
-        stream, size = sys.argv[1], int(sys.argv[2])
-        limit = (1 if stream == "stdout" else 256) << 20
-        if not 0 < size <= limit:
-            raise ValueError("typed log snapshot size is outside bounds")
-        lines = snapshot_lines(sys.stdin.buffer, size)
-        if stream == "stdout":
-            print(normalize_stdout(lines), end="")
-        else:
-            print(json.dumps(reduce_stderr(lines), indent=2))
+        main(sys.argv[1:])
     except ValueError as error:
         sys.exit(f"ASAN coordinator diagnostic: {error}")

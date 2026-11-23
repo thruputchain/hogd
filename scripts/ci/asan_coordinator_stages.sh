@@ -3,7 +3,7 @@
 
 ci_asan_coordinator_branch() {
   case ${GIT_BRANCH:-} in
-  codex/asan-mempool-coordinator-stages | codex/asan-chuckd-propose-timing) return 0 ;;
+  codex/asan-mempool-coordinator-stages | codex/asan-chuckd-propose-timing | codex/asan-chuckd-rpc-breakdown) return 0 ;;
   *) return 1 ;;
   esac
 }

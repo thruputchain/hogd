@@ -133,9 +133,28 @@ template<typename VersMeta, typename Impl, typename Logger = RpcNoLogger,
          typename... ExtraArgs>
 struct RpcDispatcher : RpcService {
   using version_meta = VersMeta;
+
+private:
+  struct NoReplyConnection {};
+  static auto reply_connection(Impl &impl, int fd)
+  {
+    if constexpr (requires { async_rpc_reply_connection(*impl, fd); })
+      return async_rpc_reply_connection(*impl, fd);
+    else
+      return NoReplyConnection{};
+  }
+
+public:
   Impl impl_;
   [[no_unique_address]] Logger logger_;
   [[no_unique_address]] std::tuple<ExtraArgs...> ea_;
+  [[no_unique_address]]
+  decltype(reply_connection(std::declval<Impl &>(), 0)) reply_connection_{};
+
+  void set_reply_connection(int fd)
+  {
+    reply_connection_ = reply_connection(impl_, fd);
+  }
 
   RpcDispatcher(Impl impl, Logger log, ExtraArgs... ea)
     : impl_(std::move(impl)), logger_(log), ea_(std::move(ea)...)
@@ -218,7 +237,7 @@ private:
           else {
             serializes_like<return_type> auto res = awaiter.await_resume();
             d_.logger_.template log_server<ProcMeta>(rmsg, res);
-            return make_record(rmsg, res);
+            return encode_async_reply(rmsg, res);
           }
         }
 
@@ -237,7 +256,7 @@ private:
             else {
               serializes_like<return_type> auto res = co_await awaitable;
               self.d_.logger_.template log_server<ProcMeta>(rmsg, res);
-              co_return make_record(rmsg, res);
+              co_return self.encode_async_reply(rmsg, res);
             }
           } catch (const std::exception &e) {
             co_return self.error(e);
@@ -246,6 +265,21 @@ private:
       }
     } catch (std::exception &e) {
       return error(e);
+    }
+
+    // A service may specialize async reply encoding for one typed procedure.
+    // Keep the result owner alive in the caller through this call.
+    template<typename Result>
+    Buf encode_async_reply(const rpc_msg &msg, const Result &result)
+    {
+      if constexpr (requires {
+                      encode_async_rpc_reply(*d_.impl_, ProcMeta{}, msg, result,
+                                             d_.reply_connection_);
+                    })
+        return encode_async_rpc_reply(*d_.impl_, ProcMeta{}, msg, result,
+                                      d_.reply_connection_);
+      else
+        return make_record(msg, result);
     }
 
     decltype(auto) dispatch(BufViewEnd argbytes)
@@ -402,6 +436,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     auto dispatch =
         new RpcDispatcher<VersMeta, Server, Logger, std::decay_t<ExtraArgs>...>(
             std::move(srvr), logger_, std::forward<ExtraArgs>(extra_args)...);
+    dispatch->set_reply_connection(get_fd());
     srvmap_.emplace(dispatch->getpv(), dispatch);
     logger_.log_message("serving {}", VersMeta::version_name);
     return this;

@@ -7,7 +7,8 @@ fail() {
 }
 trap 'fail "failed at line $LINENO"' ERR
 [[ $# == 0 && $(pwd -P) == /workspace &&
-${GIT_BRANCH:-} == codex/asan-chuckd-propose-timing &&
+(${GIT_BRANCH:-} == codex/asan-chuckd-propose-timing ||
+${GIT_BRANCH:-} == codex/asan-chuckd-rpc-breakdown) &&
 ${HOG_HOST:-} == hog4 && ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
 ${HOG_XID:-} =~ ^hogd-mempool-bench-[1-9][0-9]*-[1-9][0-9]*$ &&
 ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]] ||

@@ -1667,6 +1667,51 @@ asan_mempool_block_timings_enabled()
   return enabled;
 }
 
+SchedulerReplyPorts
+async_rpc_reply_connection(const MempoolCoordinatorRpc &, int fd) noexcept
+{
+  const char *enabled = std::getenv("HOGD_ASAN_PROPOSAL_ENCODE_TIMING");
+  if (!enabled || std::string_view(enabled) != "1")
+    return {};
+  sockaddr_storage peer{}, local{};
+  socklen_t peer_len = sizeof(peer), local_len = sizeof(local);
+  if (getpeername(fd, reinterpret_cast<sockaddr *>(&peer), &peer_len) != 0 ||
+      getsockname(fd, reinterpret_cast<sockaddr *>(&local), &local_len) != 0)
+    return {};
+  if ((peer.ss_family != AF_INET && peer.ss_family != AF_INET6) ||
+      (local.ss_family != AF_INET && local.ss_family != AF_INET6))
+    return {};
+  return {.peer = x23::get_port(peer), .local = x23::get_port(local)};
+}
+
+x23::Buf
+encode_async_rpc_reply(const MempoolCoordinatorRpc &, SchedulerProposeProcedure,
+                       const x23::rpc_msg &msg,
+                       const SchedulerProposalResult &result,
+                       SchedulerReplyPorts ports)
+{
+  if (ports.peer == 0 || ports.local == 0 ||
+      result.outcome() != SchedulerProposalOutcome::SchedulerProposalOK)
+    return x23::make_record(msg, result);
+
+  const auto &block = result.proposed_block();
+  uint64_t tx_count = 0;
+  for (uint32_t count : block.proposal.transactions.signed_hash.segment_tokens)
+    tx_count += count;
+  if (tx_count != 1'000'000)
+    return x23::make_record(msg, result);
+
+  const auto start = std::chrono::steady_clock::now();
+  auto record = x23::make_record(msg, result);
+  const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
+      std::chrono::steady_clock::now() - start);
+  info("MEMPOOL_PROPOSAL_ENCODE xid={} peer_port={} local_port={} height={} "
+       "block_id={} tx_count={} record_bytes={} encode_ns={}",
+       msg.xid, ports.peer, ports.local, block.proposal.header.block_height,
+       block.block_id, tx_count, record.size(), elapsed.count());
+  return record;
+}
+
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)

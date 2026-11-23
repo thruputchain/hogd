@@ -7,6 +7,8 @@ set -Eeuo pipefail
 ci_enable_error_trace
 
 asan_coordinator_diagnostic=
+asan_proposal_timings=
+coordinator_stats=()
 source "$(dirname "$0")/asan_coordinator_stages.sh"
 if ci_asan_coordinator_branch; then
   if ! ci_asan_coordinator_selected ||
@@ -15,6 +17,13 @@ if ci_asan_coordinator_branch; then
     exit 1
   fi
   asan_coordinator_diagnostic="$HOG_DUMP_DIR/asan-coordinator-stages"
+  case $GIT_BRANCH in
+  codex/asan-chuckd-propose-timing) asan_proposal_timings=1 ;;
+  codex/asan-chuckd-rpc-breakdown)
+    asan_proposal_timings=1
+    coordinator_stats=(--rpc-log-stats)
+    ;;
+  esac
 fi
 
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
@@ -125,7 +134,7 @@ start_coordinator() {
   $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
     chuckd.dev \
     -l info \
-    --stack \
+    --stack "${coordinator_stats[@]}" \
     --config ./scripts/config-chuckd.json \
     --instance 970c9b \
     --seed 1410441218572558875 \
@@ -149,7 +158,7 @@ start_coordinator() {
 
 if [[ -n $asan_coordinator_diagnostic ]]; then
   mkdir -m 700 "$asan_coordinator_diagnostic"
-  if [[ $GIT_BRANCH == codex/asan-chuckd-propose-timing ]]; then
+  if [[ -n $asan_proposal_timings ]]; then
     timeout -k 5 240 python3 /opt/hog-ci/peer.py hog4 \
       'bash /workspace/scripts/ci/asan_chuckd_propose.sh' </dev/null >"$asan_coordinator_diagnostic/chuckd-build.txt"
   fi
@@ -172,8 +181,11 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 mempool_env=()
-if [[ ${GIT_BRANCH:-} == codex/asan-chuckd-propose-timing ]]; then
+if [[ -n $asan_proposal_timings ]]; then
   mempool_env=(env HOGD_ASAN_MEMPOOL_BLOCK_TIMINGS=1)
+  if [[ ${#coordinator_stats[@]} != 0 ]]; then
+    mempool_env+=(HOGD_ASAN_PROPOSAL_ENCODE_TIMING=1)
+  fi
 fi
 set +e
 "${mempool_env[@]}" timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
@@ -230,12 +242,17 @@ cat coordinator_output.txt
 if [[ -n $asan_coordinator_diagnostic ]]; then
   ci_asan_coordinator_collect stderr "$coordinator_stderr" "$asan_coordinator_diagnostic/info.json" \
     "$asan_coordinator_diagnostic/capture-failure.txt"
-  if [[ $GIT_BRANCH == codex/asan-chuckd-propose-timing ]]; then
+  if [[ -n $asan_proposal_timings ]]; then
     python3 -c 'import json,sys; sys.exit(not json.load(sys.stdin).get("matched_committed_proposal_timings"))' \
       <"$asan_coordinator_diagnostic/info.json" || {
       echo 'No proposal caller timing matched a committed one-million-transaction block.' >&2
       exit 1
     }
+  fi
+  if [[ ${#coordinator_stats[@]} != 0 ]]; then
+    python3 "$(dirname "$0")/asan_coordinator_stages.py" check-reply-stats \
+      "$(hog_ip hog4)" "$(hog_ip hog10)" "$MEMPOOL_COORDINATOR_PORT" \
+      <"$asan_coordinator_diagnostic/info.json"
   fi
   full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
     <"$asan_coordinator_diagnostic/info.json")
