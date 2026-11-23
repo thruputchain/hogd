@@ -48,6 +48,21 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // Abstract away database sharding from the rest of the executor.
 // Handles the RPC Error codes, changing them into restricted forms
 // that the executor can handle (or abort on).
+// One aggregate per already-sampled validation batch. All durations are
+// local and the two stages are consecutive on the successful reply path.
+struct ValidationDbResumeSample {
+  struct Rpc {
+    uint64_t await_ns = 0;
+    uint64_t hop_ns = 0;
+    uint64_t replies = 0;
+    uint64_t same_llc = 0;
+  };
+  Rpc push, commit;
+  uint64_t root_ns = 0;
+  uint64_t commit_total_ns = 0;
+  uint64_t event_launch_ns = 0;
+};
+
 class DatabaseProxy {
 public:
   // Caps the client streams only; tests lower it rather than the process-wide
@@ -111,12 +126,16 @@ public:
       BlockID block_id, TransactionID tx_id,
       StorageDeltaBatch const &delta_batch,
       DbConflictResult *conflict_out = nullptr,
-      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes);
+      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes,
+      bool preserve_hint = false,
+      ValidationDbResumeSample::Rpc *sample = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
   [[nodiscard]] x23::Async<SystemStatus<void>>
   commit_transaction(BlockID block_id, TransactionID tx_id,
-                     BorrowedContractBatch const &new_contracts);
+                     BorrowedContractBatch const &new_contracts,
+                     bool preserve_hint = false,
+                     ValidationDbResumeSample::Rpc *sample = nullptr);
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   abort_transaction(BlockID block_id, TransactionID tx_id);
@@ -154,10 +173,13 @@ public:
   // max_subtransaction_output_bytes bounds each push.
   PerTransactionDatabaseProxy(DatabaseProxy &db_proxy, BlockID block_id,
                               TransactionID tx_id,
-                              NetworkConfigParams const &config_params)
+                              NetworkConfigParams const &config_params,
+                              bool preserve_hint = false,
+                              ValidationDbResumeSample *sample = nullptr)
     : db_proxy_(db_proxy), block_id_(block_id), tx_id_(tx_id),
       max_subtransaction_output_bytes_(
-          config_params.max_subtransaction_output_bytes)
+          config_params.max_subtransaction_output_bytes),
+      preserve_hint_(preserve_hint), sample_(sample)
   {}
 
   // A copy would fork the staged delta batch below, which used to be a shared
@@ -208,7 +230,9 @@ public:
     static const BorrowedContractBatch::contract_map_t kEmptyContracts;
     static const BorrowedContractBatch kEmptyBatch(kEmptyHashes,
                                                    kEmptyContracts);
-    return db_proxy_.commit_transaction(block_id_, tx_id_, kEmptyBatch);
+    return db_proxy_.commit_transaction(block_id_, tx_id_, kEmptyBatch,
+                                        preserve_hint_,
+                                        sample_ ? &sample_->commit : nullptr);
   }
 
   // [new_contracts] is borrowed for the duration of the call; the caller owns
@@ -216,7 +240,9 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<void>>
   commit_transaction(BorrowedContractBatch const &new_contracts)
   {
-    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
+    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts,
+                                        preserve_hint_,
+                                        sample_ ? &sample_->commit : nullptr);
   }
 
   [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction()
@@ -249,5 +275,7 @@ private:
   // The largest request a push may send; larger batches are rejected as a
   // conflict.
   uint32_t max_subtransaction_output_bytes_;
+  bool preserve_hint_;
+  ValidationDbResumeSample *sample_;
 };
 } // namespace hogd

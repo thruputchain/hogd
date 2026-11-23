@@ -109,6 +109,7 @@ public:
 
 private:
   uint16_t validation_timing_port_ = 0;
+  bool preserve_validation_db_hint_ = false;
 
   // Allocates a contiguous block of transaction IDs.
   // Returns the first transaction ID in the block

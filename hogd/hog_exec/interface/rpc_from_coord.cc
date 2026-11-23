@@ -29,7 +29,10 @@ namespace hogd {
 namespace {
 
 using ValidationClock = std::chrono::steady_clock;
-using ValidationTimes = std::array<int64_t, 5>;
+struct ValidationTimes {
+  std::array<int64_t, 5> phases;
+  ValidationDbResumeSample db;
+};
 using ValidationKey = std::pair<uint16_t, BlockID>;
 
 struct ValidationBlockSamples {
@@ -55,6 +58,7 @@ struct ValidationSample {
   ValidationClock::time_point worker_resume{};
   ValidationClock::time_point batch_done{};
   ValidationClock::time_point released{};
+  ValidationDbResumeSample db;
 
   ~ValidationSample()
   {
@@ -74,13 +78,14 @@ struct ValidationSample {
       return std::chrono::duration_cast<std::chrono::microseconds>(end - start)
           .count();
     };
-    samples.complete.push_back({
-        us(entry, released),
-        us(entry, context_ready),
-        us(context_ready, worker_resume),
-        us(worker_resume, batch_done),
-        us(batch_done, released),
-    });
+    samples.complete.push_back({{
+                                    us(entry, released),
+                                    us(entry, context_ready),
+                                    us(context_ready, worker_resume),
+                                    us(worker_resume, batch_done),
+                                    us(batch_done, released),
+                                },
+                                db});
     samples.first = std::min(samples.first, entry);
     samples.last = std::max(samples.last, released);
   }
@@ -117,7 +122,7 @@ start_validation_sample(ValidationKey key)
 }
 
 void
-write_validation_samples(ValidationKey key)
+write_validation_samples(ValidationKey key, bool caller_hint)
 {
   ValidationBlockSamples samples;
   {
@@ -136,6 +141,27 @@ write_validation_samples(ValidationKey key)
     return;
   }
   const auto n = samples.complete.size();
+  // Each line is one bounded handler sample. The loop retains v1 microseconds;
+  // the nested phases are nanoseconds.
+  std::ofstream db_out(std::string(std::getenv("HOGD_EXEC_VALIDATION_TIMING")) +
+                           ".db.tsv",
+                       std::ios::app);
+  if (db_out) {
+    for (const auto &row : samples.complete) {
+      db_out << "executor_validation_db_v1\t" << key.first << '\t' << key.second
+             << '\t' << (caller_hint ? "caller" : "reader") << '\t'
+             << row.phases[3] << '\t' << row.db.root_ns << '\t'
+             << row.db.commit_total_ns << '\t' << row.db.event_launch_ns;
+      for (const auto &rpc : {row.db.push, row.db.commit}) {
+        db_out << '\t' << rpc.await_ns << '\t' << rpc.hop_ns << '\t'
+               << rpc.replies << '\t' << rpc.same_llc;
+      }
+      db_out << '\n';
+    }
+    db_out.flush();
+  }
+  if (!db_out)
+    warn("Cannot write executor DB resume timing output");
   const auto envelope_us =
       n == 0 ? 0
              : std::chrono::duration_cast<std::chrono::microseconds>(
@@ -145,14 +171,14 @@ write_validation_samples(ValidationKey key)
                           "transaction_loop", "release"};
   for (size_t phase = 0; phase < phases.size(); ++phase) {
     std::ranges::sort(samples.complete, {},
-                      [phase](auto const &row) { return row[phase]; });
+                      [phase](auto const &row) { return row.phases[phase]; });
     out << "executor_validation_v1\t" << key.first << '\t' << key.second << '\t'
         << kValidationSamplePeriod << '\t' << n << '\t' << samples.incomplete
         << '\t' << samples.pending << '\t' << samples.omitted << '\t'
         << envelope_us << '\t' << phases[phase] << '\t'
-        << (n == 0 ? 0 : samples.complete[(n - 1) / 2][phase]) << '\t'
-        << (n == 0 ? 0 : samples.complete[(n * 9 + 9) / 10 - 1][phase]) << '\t'
-        << (n == 0 ? 0 : samples.complete.back()[phase]) << '\n';
+        << (n == 0 ? 0 : samples.complete[(n - 1) / 2].phases[phase]) << '\t'
+        << (n == 0 ? 0 : samples.complete[(n * 9 + 9) / 10 - 1].phases[phase])
+        << '\t' << (n == 0 ? 0 : samples.complete.back().phases[phase]) << '\n';
   }
   out.flush();
   if (!out)
@@ -167,6 +193,17 @@ ExecutorMempoolRpc::enable_validation_timing(uint16_t bound_port)
   if (const char *path = std::getenv("HOGD_EXEC_VALIDATION_TIMING");
       path != nullptr && *path != '\0') {
     validation_timing_port_ = bound_port;
+    const auto matches = [](const char *name, std::string_view expected) {
+      const char *value = std::getenv(name);
+      return value && value == expected;
+    };
+    preserve_validation_db_hint_ =
+        (bound_port == 8040 || bound_port == 8041) &&
+        matches("GIT_BRANCH",
+                "codex/nightly-two-cohort-validation-batch64-caller-hint") &&
+        matches("HOGD_CI_CONTAINER", "1") && matches("HOGD_CI_OFFLINE", "1") &&
+        (matches("HOG_HOST", "hog5") || matches("HOG_HOST", "hog9")) &&
+        matches("HOGD_VALIDATION_DB_RESUME_HINT", "caller");
   }
 }
 
@@ -302,7 +339,8 @@ ExecutorMempoolRpc::executorsched_validate_batch(
     sample->context_ready = ValidationClock::now();
   auto r = co_await ctx->get().validate_transaction_batch(
       std::move(proposed_txs), first_tx_id,
-      sample ? &sample->worker_resume : nullptr);
+      sample ? &sample->worker_resume : nullptr, preserve_validation_db_hint_,
+      sample ? &sample->db : nullptr);
   if (sample)
     sample->batch_done = ValidationClock::now();
   if (auto rel = co_await release_context(block_id, ctx); !rel.has_value())
@@ -343,7 +381,8 @@ ExecutorMempoolRpc::executorsched_finish_block(BlockID id)
   }
   auto result = co_await executor_states_->remove_block(id);
   if (validation_timing_port_ != 0) [[unlikely]] {
-    write_validation_samples({validation_timing_port_, id});
+    write_validation_samples({validation_timing_port_, id},
+                             preserve_validation_db_hint_);
   }
   co_return result;
 }

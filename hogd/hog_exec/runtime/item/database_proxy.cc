@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <concepts>
 #include <exception>
 #include <format>
@@ -76,6 +77,27 @@ report_rpc_failure(const char *method, std::exception const &e) noexcept
   } catch (...) {
     report_dropped_log("DatabaseProxy RPC failure diagnostic");
   }
+}
+
+using DbClock = std::chrono::steady_clock;
+
+void
+record_validation_reply(ValidationDbResumeSample::Rpc *sample, unsigned caller,
+                        DbClock::time_point start, DbClock::time_point reply)
+{
+  if (!sample)
+    return;
+  const auto resumed = DbClock::now();
+  sample->await_ns +=
+      std::chrono::duration_cast<std::chrono::nanoseconds>(reply - start)
+          .count();
+  sample->hop_ns +=
+      std::chrono::duration_cast<std::chrono::nanoseconds>(resumed - reply)
+          .count();
+  ++sample->replies;
+  if (caller != unsigned(-1) &&
+      x23::llc_map->bucket(caller) == x23::llc_map->bucket())
+    ++sample->same_llc;
 }
 
 struct VoidMarker {};
@@ -310,12 +332,19 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
 
 x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
-                                  BorrowedContractBatch const &new_contracts)
+                                  BorrowedContractBatch const &new_contracts,
+                                  bool preserve_hint,
+                                  ValidationDbResumeSample::Rpc *sample)
 {
   try {
+    const unsigned caller =
+        (preserve_hint || sample) ? x23::cpuid() : unsigned(-1);
+    const auto start = sample ? DbClock::now() : DbClock::time_point{};
     auto res =
         co_await client_.commit_transaction(block_id, tx_id, new_contracts);
-    co_await default_threadpool().bg();
+    const auto reply = sample ? DbClock::now() : DbClock::time_point{};
+    co_await default_threadpool().bg(preserve_hint ? caller : unsigned(-1));
+    record_validation_reply(sample, caller, start, reply);
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
@@ -487,11 +516,10 @@ static_assert(kXdrMax<FlaggedStorageDelta> <= kMaxSubtransactionPushFootprint,
 } // namespace
 
 x23::Async<SystemStatus<bool>>
-DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
-                                           TransactionID tx_id,
-                                           StorageDeltaBatch const &delta_batch,
-                                           DbConflictResult *conflict_out,
-                                           size_t max_message_bytes)
+DatabaseProxy::try_push_new_subtransaction(
+    BlockID block_id, TransactionID tx_id, StorageDeltaBatch const &delta_batch,
+    DbConflictResult *conflict_out, size_t max_message_bytes,
+    bool preserve_hint, ValidationDbResumeSample::Rpc *sample)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
@@ -523,9 +551,14 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
+    const unsigned caller =
+        (preserve_hint || sample) ? x23::cpuid() : unsigned(-1);
+    const auto start = sample ? DbClock::now() : DbClock::time_point{};
     auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
                                                             delta_batch);
-    co_await default_threadpool().bg();
+    const auto reply = sample ? DbClock::now() : DbClock::time_point{};
+    co_await default_threadpool().bg(preserve_hint ? caller : unsigned(-1));
+    record_validation_reply(sample, caller, start, reply);
     switch (res.error()) {
     case RPCError::kRPCNone:
       co_return true;
@@ -647,7 +680,8 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
       block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_,
-      max_subtransaction_output_bytes_);
+      max_subtransaction_output_bytes_, preserve_hint_,
+      sample_ ? &sample_->push : nullptr);
   current_subtransaction_batch_.clear();
   co_return r;
 }

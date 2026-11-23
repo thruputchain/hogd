@@ -231,15 +231,24 @@ public:
 private:
   struct [[nodiscard]] AwaitBackground {
     ThreadPool &pool;
+    unsigned hint;
     bool await_ready() const noexcept { return false; }
-    void await_suspend(auto h) const noexcept { pool.go({h, cpuid()}); }
+    void await_suspend(auto h) const noexcept
+    {
+      const unsigned cpu = hint == unsigned(-1) ? cpuid() : hint;
+      pool.go({h, cpu});
+    }
     void await_resume() const noexcept {}
   };
 
 public:
   // co_await pool.bg() suspends the current coroutine and resumes it
   // as soon as possible in a different thread.
-  [[nodiscard]] auto bg() { return AwaitBackground{*this}; }
+  [[nodiscard]] auto bg() { return AwaitBackground{*this, unsigned(-1)}; }
+
+  // Preserve a pre-suspension CPU as a hint. Busy or unstaffed LLC queues
+  // still use the normal pool fallback.
+  [[nodiscard]] auto bg(unsigned hint) { return AwaitBackground{*this, hint}; }
 
   // Queue a callback to run in a thread of the ThreadPool.  Returns
   // immediately.  Since the task will consume one of the tasks in the

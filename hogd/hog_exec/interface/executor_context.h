@@ -54,7 +54,9 @@ public:
                             TransactionID first_tx_id);
   x23::Async<ExecValidateBatchResult> validate_transaction_batch(
       ProposedTransactionBatch proposed_txs, TransactionID first_tx_id,
-      std::chrono::steady_clock::time_point *worker_resume = nullptr);
+      std::chrono::steady_clock::time_point *worker_resume = nullptr,
+      bool preserve_db_hint = false,
+      ValidationDbResumeSample *sample = nullptr);
 
   x23::Async<ExecProposeResult> propose_transaction(SignedTransaction signed_tx,
                                                     TransactionID tx_id);
@@ -72,14 +74,18 @@ public:
   x23::Async<std::optional<SystemErrorCode>> await_event_return();
 
 private:
-  PerTransactionDatabaseProxy make_per_tx_db_proxy(TransactionID tx_id);
+  PerTransactionDatabaseProxy
+  make_per_tx_db_proxy(TransactionID tx_id, bool preserve_db_hint = false,
+                       ValidationDbResumeSample *sample = nullptr);
   PerTransactionEventServerProxy
   make_per_tx_event_server_proxy(TransactionID tx_id);
 
   x23::Async<ExecProposeResult>
   run_propose_transaction(SignedTransaction signed_tx, TransactionID tx_id);
-  x23::Async<ExecResult> run_validate_transaction(ProposedTransaction tx,
-                                                  TransactionID tx_id);
+  x23::Async<ExecResult>
+  run_validate_transaction(ProposedTransaction tx, TransactionID tx_id,
+                           bool preserve_db_hint = false,
+                           ValidationDbResumeSample *sample = nullptr);
 
   // Bump pending_event_calls_ and spawn emit_and_release; on spawn-allocation
   // failure, record a block-level event error and release the counter.

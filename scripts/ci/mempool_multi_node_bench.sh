@@ -43,13 +43,17 @@ two_cohort_diagnostics=0
 if [[ (${GIT_BRANCH:-} == codex/nightly-two-cohort-stage-diagnostics ||
   ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-rpc ||
   ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-batch10 ||
-  ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-batch64) &&
+  ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-batch64 ||
+  ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-batch64-caller-hint) &&
   ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
   ${HOG_HOST:-} == hog10 && ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-} == 0 &&
   ${HOG_XID:-} =~ ^hogd-e2e-payment-multi-node-[0-9]+-[0-9]+$ &&
   ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-} == 0 &&
   $WORK_DIR == ci_work_dir/ ]]; then
   two_cohort_diagnostics=1
+elif [[ ${GIT_BRANCH:-} == codex/nightly-two-cohort-validation-batch64-caller-hint ]]; then
+  echo 'Validation caller-hint experiment requires the isolated artifact-only schedule' >&2
+  exit 1
 fi
 
 LOADGEN_BINARY="$BUILD_ROOT/hogd/loadgen/loadgen_server"
@@ -577,9 +581,15 @@ start_executor() {
     --mempool-port "$port" --metrics-port "$http_port")
   if [[ $two_cohort_diagnostics == 1 &&
     ($GIT_BRANCH == codex/nightly-two-cohort-validation-batch10 ||
-    $GIT_BRANCH == codex/nightly-two-cohort-validation-batch64) ]]; then
+    $GIT_BRANCH == codex/nightly-two-cohort-validation-batch64 ||
+    $GIT_BRANCH == codex/nightly-two-cohort-validation-batch64-caller-hint) ]]; then
     local dump_dir="/workspace/.ci/dumps/two-cohort/node${node}-${host}-executor"
+    local db_resume_hint=reader
+    if [[ $GIT_BRANCH == codex/nightly-two-cohort-validation-batch64-caller-hint ]]; then
+      db_resume_hint=caller
+    fi
     cmd=(env "HOGD_EXEC_VALIDATION_TIMING=$dump_dir/validation-port-${port}.tsv"
+      "HOGD_VALIDATION_DB_RESUME_HINT=$db_resume_hint"
       /usr/bin/bash -ec 'mkdir -m 700 -p -- "${HOGD_EXEC_VALIDATION_TIMING%/*}"; exec "$@"' bash
       "${cmd[@]}")
   fi

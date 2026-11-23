@@ -29,11 +29,13 @@
 namespace hogd {
 
 PerTransactionDatabaseProxy
-ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id)
+ExecutorContext::make_per_tx_db_proxy(TransactionID tx_id,
+                                      bool preserve_db_hint,
+                                      ValidationDbResumeSample *sample)
 {
   return PerTransactionDatabaseProxy(
-      db_proxy_, block_id_, tx_id,
-      snapshot_cache_->get_network_config_params());
+      db_proxy_, block_id_, tx_id, snapshot_cache_->get_network_config_params(),
+      preserve_db_hint, sample);
 }
 
 PerTransactionEventServerProxy
@@ -83,7 +85,8 @@ ExecutorContext::propose_transaction_batch(SignedTransactionBatch signed_txs,
 x23::Async<ExecValidateBatchResult>
 ExecutorContext::validate_transaction_batch(
     ProposedTransactionBatch proposed_txs, TransactionID first_tx_id,
-    std::chrono::steady_clock::time_point *worker_resume)
+    std::chrono::steady_clock::time_point *worker_resume, bool preserve_db_hint,
+    ValidationDbResumeSample *sample)
 {
   assert(mode_ == ExecutionMode::kValidating);
   // Get off the RPC reader before executing.  x23's reader coroutine calls
@@ -99,9 +102,8 @@ ExecutorContext::validate_transaction_batch(
   ExecValidateBatchResult batch_res;
   batch_res.reserve(proposed_txs.size());
   for (size_t i = 0; i < proposed_txs.size(); i++) {
-    batch_res.push_back(
-        co_await run_validate_transaction(std::move(proposed_txs[i]),
-                                          first_tx_id + i));
+    batch_res.push_back(co_await run_validate_transaction(
+        std::move(proposed_txs[i]), first_tx_id + i, preserve_db_hint, sample));
   }
   assert(batch_res.size() == proposed_txs.size());
   co_return std::move(batch_res);
@@ -224,7 +226,9 @@ ExecutorContext::run_propose_transaction(SignedTransaction signed_tx,
 
 x23::Async<ExecResult>
 ExecutorContext::run_validate_transaction(ProposedTransaction tx,
-                                          TransactionID tx_id)
+                                          TransactionID tx_id,
+                                          bool preserve_db_hint,
+                                          ValidationDbResumeSample *sample)
 {
   static thread_local auto context = make_hog_exec_context();
   assert(mode_ == ExecutionMode::kValidating);
@@ -232,7 +236,7 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
   if (x23::xdr_size(tx.signed_tx.tx) > kMaxBytesTransaction) {
     co_return ExecResult::ExecResultTxValidationFailure;
   }
-  auto proxy = make_per_tx_db_proxy(tx_id);
+  auto proxy = make_per_tx_db_proxy(tx_id, preserve_db_hint, sample);
   // SystemCallHandler's ctor re-serializes the tx for sha256 (#1905), which
   // allocates proportional to attacker-influenced input. An exception
   // escaping an x23 coroutine body is fatal (trace_unhandled_exception is
@@ -265,8 +269,12 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
     }
     co_return ExecResult::ExecResultUnrecoverable;
   }
+  using Clock = std::chrono::steady_clock;
+  const auto begin = sample ? Clock::now() : Clock::time_point{};
   co_await syscall_handler->root_invoke();
+  const auto invoked = sample ? Clock::now() : Clock::time_point{};
   auto exec_res = co_await syscall_handler->try_commit_transaction();
+  const auto committed = sample ? Clock::now() : Clock::time_point{};
 
   if (exec_res == ExecResult::ExecResultOK ||
       exec_res == ExecResult::ExecResultTxDeterministicError ||
@@ -274,6 +282,15 @@ ExecutorContext::run_validate_transaction(ProposedTransaction tx,
     // [tx] is unused after this; move it so the attacker-influenced proposal
     // body is never deep-copied into the event coroutine.
     spawn_event_emission(*syscall_handler, exec_res, std::move(tx));
+  }
+  if (sample) {
+    const auto ns = [](auto start, auto end) {
+      return std::chrono::duration_cast<std::chrono::nanoseconds>(end - start)
+          .count();
+    };
+    sample->root_ns += ns(begin, invoked);
+    sample->commit_total_ns += ns(invoked, committed);
+    sample->event_launch_ns += ns(committed, Clock::now());
   }
   co_return exec_res;
 }
