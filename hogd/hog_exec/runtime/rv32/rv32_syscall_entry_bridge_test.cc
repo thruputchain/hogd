@@ -252,6 +252,301 @@ TEST_F(Rv32SyscallEntryBridgeTest, MachineDebitsRealSha256SyscallGas)
                 host_result.gas_consumed);
 }
 
+TEST_F(Rv32SyscallEntryBridgeTest, MachineExercisesRistretto255Msm)
+{
+  const auto program = make_syscall_program({
+      static_cast<int32_t>(SyscallNo::kRistretto255Msm),
+      static_cast<int32_t>(kInputAddress),
+      64,
+      static_cast<int32_t>(kOutputAddress),
+  });
+  ASSERT_NE(program, nullptr);
+  constexpr uint64_t kInstructions = 5;
+  constexpr std::array<uint8_t, 32> kPoint = {
+      0xe2, 0xf2, 0xae, 0x0a, 0x6a, 0xbc, 0x4e, 0x71, 0xa8, 0x84, 0xa9,
+      0x61, 0xc5, 0x00, 0x51, 0x5f, 0x58, 0xe3, 0x0b, 0x6a, 0xa5, 0x82,
+      0xdd, 0x8d, 0xb6, 0xa6, 0x59, 0x45, 0xe0, 0x8d, 0x2d, 0x76,
+  };
+  rv32::Machine machine(program, 256, kPlentyOfGas);
+  std::vector<uint8_t> memory(256);
+  memory[kInputAddress] = 1;
+  std::ranges::copy(kPoint, memory.begin() + kInputAddress + 32);
+  std::fill_n(memory.begin() + kOutputAddress, 32, 0xA5);
+  ASSERT_TRUE(machine.view().write_memory(0, memory));
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  rv32::SyscallBridgeHost bridge(&handler, &syscall_entry);
+  for (uint64_t i = 0; i + 1 < kInstructions; ++i) {
+    ASSERT_EQ(machine.step(), rv32::StepResult::kContinue);
+  }
+  ASSERT_EQ(machine.step(), rv32::StepResult::kEcall);
+  const auto pending = machine.pending_ecall();
+  ASSERT_TRUE(pending.has_value());
+  const auto result =
+      bridge.ecall(machine.view(), pending.value_or(rv32::EcallArgs{}));
+  ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(machine.complete_ecall(result), rv32::StepResult::kContinue);
+  finish_frame(handler, std::move(stashed_trace));
+
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(result.gas_consumed,
+            kSyscallBaseCost + GasCost::ristretto255_msm(1));
+  std::ranges::copy(kPoint, memory.begin() + kOutputAddress);
+  EXPECT_TRUE(std::ranges::equal(machine.view().memory(), memory));
+  EXPECT_EQ(machine.gas_remaining(),
+            kPlentyOfGas - (kInstructions * rv32::kBaseInstructionGas) -
+                result.gas_consumed);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, Ristretto255ExactBudgetFaults)
+{
+  std::vector<uint8_t> memory(256);
+  const GasAmount cost = kSyscallBaseCost + GasCost::ristretto255_msm(1);
+  const std::array<uint32_t, 4> words = {static_cast<uint32_t>(
+                                             SyscallNo::kRistretto255Msm),
+                                         kInputAddress, 64, kOutputAddress};
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  const auto result =
+      call_bridge(memory, handler, cost, make_ecall_args(words));
+  finish_frame(handler, std::move(stashed_trace));
+  EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
+  EXPECT_EQ(result.gas_consumed, cost);
+}
+
+// U256Sqrt reads its value as 32 bytes, least significant first, writes the
+// root's 16 the same way, and charges its flat price on top of the crossing.
+TEST_F(Rv32SyscallEntryBridgeTest, U256SqrtChargesItsPrice)
+{
+  std::vector<uint8_t> memory(256, 0xA5);
+  // 2^128, whose square root is 2^64.
+  std::fill_n(memory.begin() + kInputAddress, 32, 0);
+  memory[kInputAddress + 16] = 1;
+  std::vector<uint8_t> expected = memory;
+  std::fill_n(expected.begin() + kOutputAddress, 16, 0);
+  expected[kOutputAddress + 8] = 1;
+  const std::array<uint32_t, 3> words = {static_cast<uint32_t>(
+                                             SyscallNo::kU256Sqrt),
+                                         kInputAddress, kOutputAddress};
+
+  auto handler = make_handler();
+  auto stashed_trace = start_frame(handler);
+  const auto result =
+      call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(words));
+  finish_frame(handler, std::move(stashed_trace));
+
+  ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+  EXPECT_EQ(result.continue_value(),
+            static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+  EXPECT_EQ(result.gas_consumed, kSyscallBaseCost + kU256SqrtCost);
+  EXPECT_EQ(memory, expected);
+}
+
+// A budget that only just covers the price is out of gas, as for every priced
+// syscall, and nothing is written. One more unit of gas is enough.
+TEST_F(Rv32SyscallEntryBridgeTest, U256SqrtExactBudgetFaults)
+{
+  const GasAmount cost = kSyscallBaseCost + kU256SqrtCost;
+  const std::array<uint32_t, 3> words = {static_cast<uint32_t>(
+                                             SyscallNo::kU256Sqrt),
+                                         kInputAddress, kOutputAddress};
+  const std::vector<uint8_t> untouched(256, 0xA5);
+  {
+    std::vector<uint8_t> memory = untouched;
+    auto handler = make_handler();
+    auto stashed_trace = start_frame(handler);
+    const auto result =
+        call_bridge(memory, handler, cost, make_ecall_args(words));
+    finish_frame(handler, std::move(stashed_trace));
+    EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
+    EXPECT_EQ(result.gas_consumed, cost);
+    EXPECT_EQ(memory, untouched);
+  }
+  {
+    std::vector<uint8_t> memory = untouched;
+    auto handler = make_handler();
+    auto stashed_trace = start_frame(handler);
+    const auto result =
+        call_bridge(memory, handler, cost + 1, make_ecall_args(words));
+    finish_frame(handler, std::move(stashed_trace));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    EXPECT_EQ(result.gas_consumed, cost);
+    EXPECT_NE(memory, untouched);
+  }
+}
+
+// The two MulDivRem calls, on one example at each width, W bits in `width`
+// bytes:
+//   a = 2^(W-1) + 2^64 + 5, b = 2^65 + 1, divisor = 2^64
+// Dividing by 2^64 moves the product down a limb and leaves its low limb, so
+//   a * b = (2^W + 2^(W-65) + 2^65 + 11) * 2^64 + 5
+// The quotient does not fit W bits: quotient_hi is 1.
+namespace {
+
+struct MulDivRemCase {
+  const char *name;
+  SyscallNo syscall;
+  uint32_t width;
+  GasAmount price;
+};
+
+constexpr std::array<MulDivRemCase, 2> kMulDivRemCases = {{
+    {.name = "U256MulDivRem",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .width = 32,
+     .price = kU256MulDivRemCost},
+    {.name = "U128MulDivRem",
+     .syscall = SyscallNo::kU128MulDivRem,
+     .width = 16,
+     .price = kU128MulDivRemCost},
+}};
+
+// Where the operands are: a, b and the divisor, then quotient_lo, quotient_hi
+// and the remainder. 32 bytes apart, so either width fits.
+constexpr uint32_t kMulDivRemA = 0;
+constexpr uint32_t kMulDivRemB = 32;
+constexpr uint32_t kMulDivRemDivisor = 64;
+constexpr uint32_t kMulDivRemQuotientLo = 96;
+constexpr uint32_t kMulDivRemQuotientHi = 128;
+constexpr uint32_t kMulDivRemRemainder = 160;
+
+std::array<uint32_t, 7>
+mul_div_rem_words(SyscallNo syscall)
+{
+  return {static_cast<uint32_t>(syscall),
+          kMulDivRemA,
+          kMulDivRemB,
+          kMulDivRemDivisor,
+          kMulDivRemQuotientLo,
+          kMulDivRemQuotientHi,
+          kMulDivRemRemainder};
+}
+
+// `width` bytes at `address`, least significant first: zero but for the bytes
+// named by their index.
+void
+put_value(std::vector<uint8_t> &memory, uint32_t address, uint32_t width,
+          std::initializer_list<std::pair<uint32_t, uint8_t>> bytes)
+{
+  std::fill_n(memory.begin() + address, width, 0);
+  for (const auto &[index, value] : bytes) {
+    memory[address + index] = value;
+  }
+}
+
+// Guest memory holding the example's operands.
+std::vector<uint8_t>
+mul_div_rem_operands(uint32_t width)
+{
+  std::vector<uint8_t> memory(256, 0xA5);
+  put_value(memory, kMulDivRemA, width, {{0, 5}, {8, 1}, {width - 1, 0x80}});
+  put_value(memory, kMulDivRemB, width, {{0, 1}, {8, 2}});
+  put_value(memory, kMulDivRemDivisor, width, {{8, 1}});
+  return memory;
+}
+
+// That memory once the call has written its three results. Bit W-65 is the
+// top bit of byte width - 9.
+std::vector<uint8_t>
+mul_div_rem_results(std::vector<uint8_t> memory, uint32_t width)
+{
+  put_value(memory, kMulDivRemQuotientLo, width,
+            {{0, 11}, {8, 2}, {width - 9, 0x80}});
+  put_value(memory, kMulDivRemQuotientHi, width, {{0, 1}});
+  put_value(memory, kMulDivRemRemainder, width, {{0, 5}});
+  return memory;
+}
+
+} // namespace
+
+// Each reads its operands least significant byte first, writes its results
+// the same way, and charges its flat price on top of the crossing.
+TEST_F(Rv32SyscallEntryBridgeTest, MulDivRemChargesItsPrice)
+{
+  for (const MulDivRemCase &c : kMulDivRemCases) {
+    SCOPED_TRACE(c.name);
+    std::vector<uint8_t> memory = mul_div_rem_operands(c.width);
+    const std::vector<uint8_t> expected = mul_div_rem_results(memory, c.width);
+
+    auto handler = make_handler();
+    auto stashed_trace = start_frame(handler);
+    const auto result =
+        call_bridge(memory, handler, kPlentyOfGas,
+                    make_ecall_args(mul_div_rem_words(c.syscall)));
+    finish_frame(handler, std::move(stashed_trace));
+
+    ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+    EXPECT_EQ(result.continue_value(),
+              static_cast<uint32_t>(SyscallErrorCode::kSyscallErrorCodeNone));
+    EXPECT_EQ(result.gas_consumed, kSyscallBaseCost + c.price);
+    EXPECT_EQ(memory, expected);
+  }
+}
+
+// A budget that only just covers the price is out of gas and writes nothing.
+// One more unit of gas is enough.
+TEST_F(Rv32SyscallEntryBridgeTest, MulDivRemExactBudgetFaults)
+{
+  for (const MulDivRemCase &c : kMulDivRemCases) {
+    SCOPED_TRACE(c.name);
+    const GasAmount cost = kSyscallBaseCost + c.price;
+    const std::vector<uint8_t> operands = mul_div_rem_operands(c.width);
+    {
+      std::vector<uint8_t> memory = operands;
+      auto handler = make_handler();
+      auto stashed_trace = start_frame(handler);
+      const auto result =
+          call_bridge(memory, handler, cost,
+                      make_ecall_args(mul_div_rem_words(c.syscall)));
+      finish_frame(handler, std::move(stashed_trace));
+      EXPECT_EQ(result.status, rv32::HostStatus::kOutOfGas);
+      EXPECT_EQ(result.gas_consumed, cost);
+      EXPECT_EQ(memory, operands);
+    }
+    {
+      std::vector<uint8_t> memory = operands;
+      auto handler = make_handler();
+      auto stashed_trace = start_frame(handler);
+      const auto result =
+          call_bridge(memory, handler, cost + 1,
+                      make_ecall_args(mul_div_rem_words(c.syscall)));
+      finish_frame(handler, std::move(stashed_trace));
+      EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+      EXPECT_EQ(result.gas_consumed, cost);
+      EXPECT_EQ(memory, mul_div_rem_results(operands, c.width));
+    }
+  }
+}
+
+// A zero divisor is an invalid input. It writes nothing and pays for the
+// crossing alone, and so does not need the price in hand.
+TEST_F(Rv32SyscallEntryBridgeTest, MulDivRemZeroDivisorWritesNothing)
+{
+  for (const MulDivRemCase &c : kMulDivRemCases) {
+    SCOPED_TRACE(c.name);
+    std::vector<uint8_t> operands = mul_div_rem_operands(c.width);
+    put_value(operands, kMulDivRemDivisor, c.width, {});
+    for (const GasAmount budget : {kPlentyOfGas, kSyscallBaseCost + 1}) {
+      std::vector<uint8_t> memory = operands;
+      auto handler = make_handler();
+      auto stashed_trace = start_frame(handler);
+      const auto result =
+          call_bridge(memory, handler, budget,
+                      make_ecall_args(mul_div_rem_words(c.syscall)));
+      finish_frame(handler, std::move(stashed_trace));
+
+      ASSERT_EQ(result.status, rv32::HostStatus::kContinue);
+      EXPECT_EQ(result.continue_value(),
+                static_cast<uint32_t>(
+                    SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput));
+      EXPECT_EQ(result.gas_consumed, kSyscallBaseCost);
+      EXPECT_EQ(memory, operands);
+    }
+  }
+}
+
 TEST_F(Rv32SyscallEntryBridgeTest, ParserFaultLeavesGuestMemoryUnchanged)
 {
   std::vector<uint8_t> memory(256, 0xAA);
@@ -363,6 +658,95 @@ TEST_F(Rv32SyscallEntryBridgeTest, InvalidSyscallUsesNoSyscallFallback)
                 SyscallErrorCode::kSyscallErrorCodeNoSyscall));
   ASSERT_NE(handler.get_transaction_stats(), nullptr);
   EXPECT_EQ(handler.get_transaction_stats()->invalid_syscall_count, 1);
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, GetReturnedBufferChargesForBytesCopied)
+{
+  // The saved child output can be read any number of times, so each read pays
+  // for the bytes it copies into guest memory, not just the crossing (#4798).
+  constexpr size_t kReturnedLen = 1024;
+  auto handler = make_handler();
+  auto parent_trace = start_frame(handler);
+  auto child_trace = start_frame(handler);
+  ReturnBuffer returned;
+  returned.resize_uninitialized(kReturnedLen);
+  std::ranges::fill(std::span(returned.data(), returned.size()), uint8_t{0x5A});
+  handler.set_return_buffer(std::move(returned), false, {});
+  finish_frame(handler, std::move(child_trace));
+
+  // A guest buffer larger than the saved output, then the three length/range
+  // outputs written past it.
+  constexpr uint32_t kGuestLen = 1536;
+  std::vector<uint8_t> memory(kGuestLen + (3 * sizeof(uint32_t)), 0);
+  auto get_returned_buffer = [&](uint32_t buffer_len) {
+    const std::array<uint32_t, 6> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetReturnedBuffer),
+        0, // buffer ptr
+        buffer_len,
+        kGuestLen,                          // written_len ptr
+        kGuestLen + sizeof(uint32_t),       // auth token start ptr
+        kGuestLen + (2 * sizeof(uint32_t)), // auth token count ptr
+    };
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    return result.gas_consumed;
+  };
+
+  // Nothing copied, truncated to one 512-byte block, then an oversized guest
+  // buffer, which pays for the two blocks copied rather than the space offered.
+  EXPECT_EQ(get_returned_buffer(0), kSyscallBaseCost);
+  EXPECT_EQ(get_returned_buffer(500),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(get_returned_buffer(kGuestLen),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(kReturnedLen));
+
+  finish_frame(handler, std::move(parent_trace));
+}
+
+TEST_F(Rv32SyscallEntryBridgeTest, GetCalldataChargesForBytesCopied)
+{
+  // Like GetReturnedBuffer: the frame's calldata can be read any number of
+  // times, so each read pays for the bytes it copies.
+  constexpr size_t kCalldataLen = 1024;
+  auto handler = make_handler();
+  Calldata calldata;
+  calldata.resize_uninitialized(kCalldataLen);
+  std::ranges::fill(std::span(calldata.data(), calldata.size()), uint8_t{0x5A});
+  auto trace =
+      handler.start_frame(Invocation{.invoked_address =
+                                         make_contract_address(0),
+                                     .entrypoint = ContractEntrypointID{},
+                                     .gas_limit = kPlentyOfGas,
+                                     .calldata = std::move(calldata)},
+                          std::to_underlying(InvokeFlag::None),
+                          ValidatedAuthTokens{});
+  ASSERT_TRUE(trace.has_value());
+
+  // A guest buffer larger than the calldata, then the two outputs past it.
+  constexpr uint32_t kGuestLen = 1536;
+  std::vector<uint8_t> memory(kGuestLen + (2 * sizeof(uint32_t)), 0);
+  auto get_calldata = [&](uint32_t buffer_len) {
+    const std::array<uint32_t, 5> arg_words = {
+        static_cast<uint32_t>(SyscallNo::kGetCalldata),
+        0, // buffer ptr
+        buffer_len,
+        kGuestLen,                    // written_len ptr
+        kGuestLen + sizeof(uint32_t), // auth token count ptr
+    };
+    const rv32::HostResult result =
+        call_bridge(memory, handler, kPlentyOfGas, make_ecall_args(arg_words));
+    EXPECT_EQ(result.status, rv32::HostStatus::kContinue);
+    return result.gas_consumed;
+  };
+
+  EXPECT_EQ(get_calldata(0), kSyscallBaseCost);
+  EXPECT_EQ(get_calldata(500),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(500));
+  EXPECT_EQ(get_calldata(kGuestLen),
+            kSyscallBaseCost + GasCost::guest_buffer_copy(kCalldataLen));
+
+  finish_frame(handler, std::move(trace).value());
 }
 
 TEST_F(Rv32SyscallEntryBridgeTest, OutOfGasDoesNotWriteBackGuestMemory)

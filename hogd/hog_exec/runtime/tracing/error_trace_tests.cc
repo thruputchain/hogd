@@ -7,7 +7,7 @@
 #include "built_contracts/syscall_misc_tests.h"
 #include "ffi_enums.hh"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -55,7 +55,10 @@ get_calldata_entry(GasAmount gas, Calldata const &calldata)
   SyscallGetCalldataOutputs outputs{.auth_token_count = 0};
   outputs.calldata.append_range(calldata);
   body.get_calldata().outputs = std::move(outputs);
-  return make_entry(gas, gas - kSyscallBaseCost, std::move(body),
+  return make_entry(gas,
+                    gas - kSyscallBaseCost -
+                        GasCost::guest_buffer_copy(calldata.size()),
+                    std::move(body),
                     status_with(SyscallErrorCode::kSyscallErrorCodeNone));
 }
 
@@ -121,11 +124,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
     // written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        98'781, 98'781 - kSyscallBaseCost, std::move(body),
+        98'771, 98'771 - kSyscallBaseCost, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(98'684));
+  expected.push_back(empty_return_entry(98'664));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -163,7 +166,7 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
     body.get_current_address().outputs =
         SyscallGetCurrentAddressOutputs{.address = addr};
     expected.push_back(
-        make_entry(98'907, 98'907 - kSyscallBaseCost, std::move(body),
+        make_entry(98'897, 98'897 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeNone)));
   }
   {
@@ -180,10 +183,10 @@ TEST_F(ErrorTraceTest, UnownedTokenLosesToReentranceTraceIsExact)
         .flags = 0,
     };
     expected.push_back(
-        make_entry(98'806, 98'806 - kSyscallBaseCost, std::move(body),
+        make_entry(98'786, 98'786 - kSyscallBaseCost, std::move(body),
                    status_with(SyscallErrorCode::kSyscallErrorCodeReentrance)));
   }
-  expected.push_back(empty_return_entry(98'696));
+  expected.push_back(empty_return_entry(98'666));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

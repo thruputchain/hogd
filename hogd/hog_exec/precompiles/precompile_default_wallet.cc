@@ -1,7 +1,9 @@
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
@@ -20,11 +22,12 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -45,6 +48,8 @@ namespace {
 
 using default_wallet::WalletCall;
 using default_wallet::WalletError;
+using default_wallet::WalletTokenRef;
+using default_wallet::WalletTokenRefKind;
 
 // Result types (and the WalletError exception selector inside them) come
 // straight from the generated trait in built_contracts/default_wallet.h.
@@ -60,6 +65,9 @@ using WalletException = result_exception<execute_result_t>::type;
 
 using wallet_bytes_vec_t = execute_result_t::ok_type;
 using wallet_bytes_t = wallet_bytes_vec_t::value_type;
+
+using wallet_mints_t =
+    std::tuple_element_t<0, wallet_meta::args_t<u8"execute">>;
 
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
@@ -138,10 +146,14 @@ check_root_pubkey_auth(NativeSyscallContext &ctx)
 using child_result_t = Result<std::vector<uint8_t>, WalletException>;
 
 // Execute and deployment initialization share child-frame status handling.
+// `auth_tokens` go to the child; `returned_tokens`, if given, gets the ids of
+// the tokens it returned (only when it returns).
 x23::Async<InvokeStatus<child_result_t>>
 invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
              ContractEntrypointID const &entrypoint, uint64_t gas_limit,
-             wallet_bytes_t const &calldata)
+             wallet_bytes_t const &calldata,
+             std::span<uint32_t> auth_tokens = {},
+             AuthTokenIdRange *returned_tokens = nullptr)
 {
   CopyableInvokeInputs inputs{
       .entrypoint_id = sdk_method_id(entrypoint),
@@ -150,8 +162,7 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   };
   CopyableInvokeOutputs outputs{};
   auto inv = co_await ctx.syscall<SyscallNo::kInvoke>(
-      target, std::as_bytes(std::span(calldata)),
-      /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
+      target, std::as_bytes(std::span(calldata)), auth_tokens, inputs, outputs);
   if (!inv.has_value()) {
     co_return NativeContractBuilder::host_fn_error_conversion(inv.error());
   }
@@ -168,7 +179,6 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
   }
 
   // Fetch the child's return or abort payload as the SDK does.
-  // No auth tokens are forwarded; returned tokens are ignored.
   std::vector<uint8_t> return_buf(outputs.return_buffer_len);
   RuntimeMemoryLength return_written = 0;
   uint32_t returned_auth_token_start = 0;
@@ -198,7 +208,80 @@ invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
         ReturnBuffer(return_buf.begin(), return_buf.end())));
   }
 
+  if (returned_tokens != nullptr) {
+    *returned_tokens = {.start = returned_auth_token_start,
+                        .count = returned_auth_token_count};
+  }
   co_return child_result_t::make_ok(std::move(return_buf));
+}
+
+// Mirrors BatchTokens: the auth tokens a batch holds, by where each came
+// from.
+class BatchTokens {
+public:
+  void add_minted(uint32_t token_id) { minted_.push_back(token_id); }
+  void add_returned(AuthTokenIdRange tokens) { returned_.push_back(tokens); }
+
+  // Resolves `token` to the id of a token the wallet still holds and marks it
+  // forwarded, or returns the WalletError the reference throws.
+  std::expected<uint32_t, WalletError> take(WalletTokenRef const &token)
+  {
+    std::optional<uint32_t> token_id;
+    // Decoding admits no other kind.
+    switch (token.kind()) {
+    case WalletTokenRefKind::Minted:
+      if (token.minted() < minted_.size()) {
+        token_id = minted_[token.minted()];
+      }
+      break;
+    case WalletTokenRefKind::Returned:
+    {
+      // Only completed calls have an entry, so a reference to the current or
+      // a later call finds nothing.
+      auto const &[call, index] = token.returned();
+      if (call < returned_.size() && index < returned_[call].count) {
+        // Cannot overflow: the runtime assigned the whole range.
+        token_id = returned_[call].start + index;
+      }
+      break;
+    }
+    }
+    if (!token_id) {
+      return std::unexpected{WalletError::InvalidTokenRef};
+    }
+    if (std::ranges::contains(forwarded_, *token_id)) {
+      return std::unexpected{WalletError::TokenAlreadyForwarded};
+    }
+    forwarded_.push_back(*token_id);
+    return *token_id;
+  }
+
+private:
+  std::vector<uint32_t> minted_;
+  // Per completed call, the ids of the tokens it returned.
+  std::vector<AuthTokenIdRange> returned_;
+  // Every id forwarded so far. A successful call takes the tokens it was
+  // forwarded and a failed one ends the batch, so none can go out twice.
+  std::vector<uint32_t> forwarded_;
+};
+
+// Mirrors thruput_sdk::block::get_block_height(): the height, or the syscall
+// exception the SDK throws in its place.
+x23::Async<InvokeStatus<std::expected<BlockHeight, LibraryException>>>
+get_block_height(NativeSyscallContext &ctx)
+{
+  using result_t = std::expected<BlockHeight, LibraryException>;
+  BlockHeight height{};
+  auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+  if (!r.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return result_t{std::unexpected{
+        NativeContractBuilder::syscall_exception(SyscallNo::kGetBlockHeight,
+                                                 *r)}};
+  }
+  co_return result_t{height};
 }
 
 x23::Async<InvokeStatus<deploy_result_t>>
@@ -229,11 +312,14 @@ make_native_default_wallet_contract()
 
   builder.add<default_wallet::DefaultWallet, u8"execute">(
       // The builder decays this lambda to a function pointer and deduces the
-      // deserialized argument tuple from its parameter types, so `calls` must
-      // be taken by value (a reference would not satisfy serializes_like).
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      [](NativeSyscallContext &ctx, x23::Vec<WalletCall, 4294967295> calls)
+      // deserialized argument tuple from its parameter types, so the arguments
+      // must be taken by value (a reference would not satisfy
+      // serializes_like).
+      // NOLINTBEGIN(performance-unnecessary-value-param)
+      [](NativeSyscallContext &ctx, wallet_mints_t mints,
+         x23::Vec<WalletCall, 4294967295> calls)
           -> x23::Async<InvokeStatus<execute_result_t>> {
+        // NOLINTEND(performance-unnecessary-value-param)
         auto auth_err = co_await check_root_pubkey_auth(ctx);
         if (!auth_err.has_value()) {
           co_return auth_err.error();
@@ -251,6 +337,32 @@ make_native_default_wallet_contract()
               WalletException{WalletError::TooManyCalls});
         }
 
+        // Minted before any call runs, so no callee's behavior can change
+        // which token a Minted reference names.
+        auto expiry = co_await get_block_height(ctx);
+        if (!expiry.has_value()) {
+          co_return expiry.error();
+        }
+        if (!expiry->has_value()) {
+          co_return execute_result_t::make_err(std::move(expiry->error()));
+        }
+        BatchTokens tokens;
+        for (auto const &node : mints) {
+          uint32_t token_id = 0;
+          auto r = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              **expiry, std::as_bytes(std::span(node)), token_id);
+          if (!r.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                r.error());
+          }
+          if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return execute_result_t::make_err(
+                NativeContractBuilder::syscall_exception(
+                    SyscallNo::kMintAuthToken, *r));
+          }
+          tokens.add_minted(token_id);
+        }
+
         // Running CXS size of the eventual Vec<WalletBytes> return: the
         // outer length prefix now, each item's prefix + bytes as it lands.
         // All operands are bounded (<= 16 calls, <= 1024-byte returns), so
@@ -261,14 +373,28 @@ make_native_default_wallet_contract()
             x23::cxs_size(static_cast<uint32_t>(calls.size()));
 
         for (auto const &call : calls) {
+          std::vector<uint32_t> auth_tokens;
+          auth_tokens.reserve(call.tokens.size());
+          for (auto const &token : call.tokens) {
+            auto taken = tokens.take(token);
+            if (!taken.has_value()) {
+              co_return execute_result_t::make_err(
+                  WalletException{taken.error()});
+            }
+            auth_tokens.push_back(*taken);
+          }
+
+          AuthTokenIdRange returned_tokens;
           auto child = co_await invoke_child(ctx, call.target, call.entrypoint,
-                                             call.gas_limit, call.calldata);
+                                             call.gas_limit, call.calldata,
+                                             auth_tokens, &returned_tokens);
           if (!child.has_value()) {
             co_return child.error();
           }
           if (!child->is_ok()) {
             co_return execute_result_t::make_err(child->err());
           }
+          tokens.add_returned(returned_tokens);
           auto const &return_buf = child->ok();
 
           encoded_return_data_len +=

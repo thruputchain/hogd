@@ -24,6 +24,7 @@
 #include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
@@ -501,7 +502,8 @@ public:
     if (tx_id == std::numeric_limits<TransactionID>::max()) {
       tx_id = allocate_txid();
     }
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id,
+                                       network_config_params_);
   }
 
   // Only for use in tests if precise control over rpcs is needed
@@ -658,6 +660,8 @@ private:
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.config_hash =
           compute_config_hash(genesis_configuration);
+      network_config_params_ =
+          NetworkConfigParams(genesis_configuration.network_config.v0());
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {
@@ -674,6 +678,8 @@ private:
   uint64_t next_uniquifier_nonce_ = 0;
   BlockID block_number_ = 0;
   BlockID dbtip_block_id_ = 0;
+  // The genesis configuration, for the proxies this framework makes.
+  NetworkConfigParams network_config_params_;
   // Genesis commits at 0. Only try_advance_block() commits, so discard_block()
   // and reject_block() move block_number_ on without moving this.
   BlockHeight committed_height_ = 0;

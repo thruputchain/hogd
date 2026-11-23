@@ -15,6 +15,7 @@
 #include "network_config.hh"
 #include "storage_cost.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -27,9 +28,9 @@ TEST(ConfigHashTest, CommitsToXdrPreimage)
   // Moves whenever the stock configuration changes, which is the point: it
   // pins the preimage so a change to it is deliberate.
   const ConfigHash expected{
-      0x12, 0x46, 0xed, 0x11, 0xfa, 0x52, 0x9d, 0xe7, 0x3b, 0xf6, 0xa1,
-      0x2b, 0x5f, 0x72, 0x9a, 0xac, 0xd9, 0xa6, 0x8f, 0xcc, 0x4a, 0xc0,
-      0x62, 0xb5, 0x14, 0xf5, 0xa8, 0xc8, 0xfc, 0x28, 0xd4, 0xb2,
+      0x30, 0x37, 0x4a, 0x74, 0x28, 0xb3, 0xd2, 0xa2, 0xc8, 0x2b, 0x9a,
+      0xde, 0x27, 0x5e, 0x70, 0xf3, 0xbc, 0x79, 0x27, 0xa3, 0x6e, 0xbe,
+      0x86, 0xf7, 0xfc, 0xa1, 0x06, 0x81, 0x0a, 0x00, 0xc9, 0x83,
   };
   EXPECT_EQ(compute_config_hash(
                 make_config_hash_preimage(model, network_config, wallet)),
@@ -65,7 +66,7 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
       make_config_hash_preimage(model, stock_network_config(),
                                 native_default_wallet_hash()));
 
-  std::array<NetworkConfig, 11> variants;
+  std::array<NetworkConfig, 16> variants;
   variants.fill(stock_network_config());
   const NetworkConfigParams stock(stock_network_config().v0());
   NetworkConfigParams::set_param(variants[0],
@@ -102,6 +103,21 @@ TEST(ConfigHashTest, CommitsToEveryConfigParam)
   NetworkConfigParams::set_param(variants[10],
                                  ConfigParamID::kConfigParamMaxTxGas,
                                  stock.max_tx_gas - 1);
+  NetworkConfigParams::set_param(
+      variants[11], ConfigParamID::kConfigParamMinRv32ArtifactVersion,
+      stock.min_rv32_artifact_version + 1);
+  NetworkConfigParams::set_param(
+      variants[12], ConfigParamID::kConfigParamMaxRv32ArtifactVersion,
+      stock.max_rv32_artifact_version - 1);
+  NetworkConfigParams::set_param(
+      variants[13], ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      stock.max_subtransaction_output_bytes + 1);
+  NetworkConfigParams::set_param(variants[14],
+                                 ConfigParamID::kConfigParamMinSyscallApiMinor,
+                                 stock.min_syscall_api_minor + 1);
+  NetworkConfigParams::set_param(variants[15],
+                                 ConfigParamID::kConfigParamMaxSyscallApiMinor,
+                                 stock.max_syscall_api_minor - 1);
   for (auto const &variant : variants) {
     EXPECT_NE(compute_config_hash(
                   make_config_hash_preimage(model, variant,
@@ -153,7 +169,7 @@ TEST(ConfigHashTest, StockConfigIsCanonical)
                                  ConfigParamID::kConfigParamMaxSHA256Buffers,
                                  4);
   EXPECT_TRUE(NetworkConfigParams::is_canonical(config.v0()));
-  EXPECT_EQ(config.v0().params.size(), 14U);
+  EXPECT_EQ(config.v0().params.size(), 19U);
   const NetworkConfigParams params(config.v0());
   EXPECT_EQ(params.max_new_contracts_per_tx, 8U);
   EXPECT_EQ(params.max_sha256_buffers, 4U);
@@ -260,6 +276,11 @@ TEST(ConfigHashTest, ShortListYieldsExecutionLimitDefaults)
   EXPECT_EQ(defaults.max_rv32_code_bytes, 256_KiB);
   EXPECT_EQ(defaults.max_rv32_memory_bytes,
             static_cast<uint32_t>(kDefaultMaxRv32MemoryBytes));
+  EXPECT_EQ(defaults.max_subtransaction_output_bytes,
+            kDefaultMaxSubtransactionOutputBytes);
+  EXPECT_EQ(defaults.min_syscall_api_minor, 0U);
+  EXPECT_EQ(defaults.max_syscall_api_minor,
+            static_cast<uint32_t>(kSyscallApiMinor));
 
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxRv32MemoryBytes,

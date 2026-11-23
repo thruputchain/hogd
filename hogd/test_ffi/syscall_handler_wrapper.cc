@@ -6,8 +6,8 @@
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/execution_mode.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/test_ffi/db_context_wrapper.h"
@@ -56,7 +56,8 @@ SyscallHandlerContext::SyscallHandlerContext(
     runtime_context_owner_(std::move(context)),
     handler_(*this, db.get_snapshot(), db.get_new_db_proxy(identifier_),
              db.get_new_event_server_proxy(identifier_), ProposalModeCtor{},
-             *runtime_context_owner_, auth_claim, source_tx_hash),
+             *runtime_context_owner_, auth_claim, source_tx_hash,
+             db.block_execution_context().block_timepoint),
     is_mocked_handler_(true)
 {}
 

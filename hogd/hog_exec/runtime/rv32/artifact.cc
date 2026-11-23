@@ -27,6 +27,51 @@ load_artifact_digest(std::span<const uint8_t> bytes, size_t offset)
   return digest;
 }
 
+uint32_t
+load_u32_be(std::span<const uint8_t> bytes, size_t offset)
+{
+  return (uint32_t{bytes[offset]} << 24) | (uint32_t{bytes[offset + 1]} << 16) |
+         (uint32_t{bytes[offset + 2]} << 8) | uint32_t{bytes[offset + 3]};
+}
+
+// Whether `bytes` is exactly one XDR Rv32ArtifactExtensions (contract.x) with
+// nonzero, strictly ascending kinds and zero padding. Bodies are not read.
+[[nodiscard]]
+bool
+canonical_extension_list(std::span<const uint8_t> bytes)
+{
+  if (bytes.size() < 4) {
+    return false;
+  }
+  const uint32_t count = load_u32_be(bytes, 0);
+  size_t offset = 4;
+  uint32_t previous_kind = 0;
+  for (uint32_t i = 0; i < count; ++i) {
+    if (bytes.size() - offset < 8) {
+      return false;
+    }
+    const uint32_t kind = load_u32_be(bytes, offset);
+    const uint32_t body_size = load_u32_be(bytes, offset + 4);
+    offset += 8;
+    if (kind <= previous_kind) {
+      return false;
+    }
+    previous_kind = kind;
+    // Widen before padding so a crafted size cannot wrap on 32-bit hosts.
+    const uint64_t padded = (uint64_t{body_size} + 3) & ~uint64_t{3};
+    if (bytes.size() - offset < padded) {
+      return false;
+    }
+    const auto padding = bytes.subspan(offset + body_size,
+                                       static_cast<size_t>(padded) - body_size);
+    if (std::ranges::any_of(padding, [](uint8_t b) { return b != 0; })) {
+      return false;
+    }
+    offset += static_cast<size_t>(padded);
+  }
+  return offset == bytes.size();
+}
+
 struct ArtifactParseResults {
   std::span<const uint8_t> code;
   std::span<const uint8_t> initial_memory;
@@ -49,6 +94,30 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   const uint32_t format_version =
       load_u32_le(bytes, kArtifactFormatVersionOffset);
   const uint32_t header_size = load_u32_le(bytes, kArtifactHeaderSizeOffset);
+  if (format_version != kArtifactVersion5 &&
+      format_version != kArtifactVersion6 &&
+      format_version != kArtifactVersion7) {
+    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
+  }
+  // A format this VM reads is still refused outside the caller's range, which
+  // is how a chain stops admitting an old format or holds back a new one.
+  if (format_version < limits.min_artifact_version ||
+      format_version > limits.max_artifact_version) {
+    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
+  }
+  // v5 has no extension list. v5 and v6 declare a gas schedule, in a header
+  // that is longer by its digest; v7 declares a syscall API minor.
+  const bool has_extensions = format_version != kArtifactVersion5;
+  const bool declares_gas_schedule = format_version != kArtifactVersion7;
+  if (header_size != (declares_gas_schedule ? kArtifactV5V6HeaderBytes
+                                            : kArtifactHeaderBytes)) {
+    return std::unexpected(ArtifactError::kBadHeaderSize);
+  }
+  if (bytes.size() < header_size) {
+    return std::unexpected(ArtifactError::kTooSmall);
+  }
+  // Fields after the gas digest sit that much further on.
+  const size_t shift = header_size - kArtifactHeaderBytes;
   const uint64_t vm_profile_digest =
       load_u64_le(bytes, kArtifactVmProfileOffset);
   const uint32_t flags = load_u32_le(bytes, kArtifactFlagsOffset);
@@ -56,26 +125,19 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
       load_u32_le(bytes, kArtifactEntryAbiOffset);
   const uint32_t syscall_abi_version =
       load_u32_le(bytes, kArtifactSyscallAbiOffset);
-  const uint32_t gas_schedule_version =
-      load_u32_le(bytes, kArtifactGasVersionOffset);
-  const uint64_t gas_digest = load_u64_le(bytes, kArtifactGasDigestOffset);
-  const uint32_t memory_bytes = load_u32_le(bytes, kArtifactMemoryBytesOffset);
-  const uint32_t code_size = load_u32_le(bytes, kArtifactCodeSizeOffset);
+  const uint32_t memory_bytes =
+      load_u32_le(bytes, kArtifactMemoryBytesOffset + shift);
+  const uint32_t code_size =
+      load_u32_le(bytes, kArtifactCodeSizeOffset + shift);
   const uint32_t initial_memory_size =
-      load_u32_le(bytes, kArtifactInitialMemorySizeOffset);
+      load_u32_le(bytes, kArtifactInitialMemorySizeOffset + shift);
   const uint32_t initial_memory_start =
-      load_u32_le(bytes, kArtifactInitialMemoryStartOffset);
+      load_u32_le(bytes, kArtifactInitialMemoryStartOffset + shift);
   const ArtifactDigest code_digest =
-      load_artifact_digest(bytes, kArtifactCodeDigestOffset);
+      load_artifact_digest(bytes, kArtifactCodeDigestOffset + shift);
   const ArtifactDigest initial_memory_digest =
-      load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset);
+      load_artifact_digest(bytes, kArtifactInitialMemoryDigestOffset + shift);
 
-  if (format_version != kArtifactFormatVersion) {
-    return std::unexpected(ArtifactError::kUnsupportedFormatVersion);
-  }
-  if (header_size != kArtifactHeaderBytes) {
-    return std::unexpected(ArtifactError::kBadHeaderSize);
-  }
   if (vm_profile_digest != kArtifactVmProfileDigest) {
     return std::unexpected(ArtifactError::kUnsupportedVmProfile);
   }
@@ -88,16 +150,29 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (syscall_abi_version != kArtifactSyscallAbiVersion) {
     return std::unexpected(ArtifactError::kUnsupportedSyscallAbi);
   }
-  // Accepted as a (version, digest) pair; see kAcceptedGasSchedules for why the
-  // list can hold more than the current schedule and when to shrink it.
-  const auto *accepted =
-      std::ranges::find(kAcceptedGasSchedules, gas_schedule_version,
-                        &AcceptedGasSchedule::version);
-  if (accepted == kAcceptedGasSchedules.end()) {
-    return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
+  if (!declares_gas_schedule) {
+    // The major was checked above. A guest built against minor n may call
+    // anything introduced up to n, so it is admitted only where all of that
+    // exists. The floor is the caller's policy, not a compatibility rule.
+    const uint32_t syscall_api_minor =
+        load_u32_le(bytes, kArtifactSyscallApiMinorOffset);
+    if (syscall_api_minor < limits.min_syscall_api_minor ||
+        syscall_api_minor > limits.max_syscall_api_minor) {
+      return std::unexpected(ArtifactError::kUnsupportedSyscallApiMinor);
+    }
   }
-  if (gas_digest != accepted->digest) {
-    return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
+  else {
+    // Matched as a (version, digest) pair; see kV5V6GasSchedules.
+    const auto *accepted =
+        std::ranges::find(kV5V6GasSchedules,
+                          load_u32_le(bytes, kArtifactGasVersionOffset),
+                          &AcceptedGasSchedule::version);
+    if (accepted == kV5V6GasSchedules.end()) {
+      return std::unexpected(ArtifactError::kGasScheduleVersionMismatch);
+    }
+    if (load_u64_le(bytes, kArtifactGasDigestOffset) != accepted->digest) {
+      return std::unexpected(ArtifactError::kGasScheduleDigestMismatch);
+    }
   }
   // memory_bytes == 0 is a valid degenerate: a zero-memory contract whose
   // data accesses all fault. Only the upper bound is enforced, and it is the
@@ -122,18 +197,24 @@ artifact_image_checks(std::span<const uint8_t> bytes, Rv32Limits limits)
   if (initial_memory_size == 0 && initial_memory_start != 0) {
     return std::unexpected(ArtifactError::kInitialMemoryTooLarge);
   }
-  // Canonical v5 layout: header || code || initial_memory, exactly. Section
-  // positions are derived, so the only structural degree of freedom left is
-  // total size.
-  if (bytes.size() !=
-      size_t{kArtifactHeaderBytes} + code_size + initial_memory_size) {
+  // header || code || initial_memory, then (v6 and v7) the extension list to
+  // the end. Extension bodies are opaque to execution and bounded only by the
+  // total contract size. Widen before adding so crafted u32 lengths cannot
+  // wrap on 32-bit hosts.
+  const uint64_t sections_end =
+      uint64_t{header_size} + code_size + initial_memory_size;
+  if (bytes.size() < sections_end) {
+    return std::unexpected(ArtifactError::kInvalidSectionLayout);
+  }
+  const auto extensions = bytes.subspan(static_cast<size_t>(sections_end));
+  if (has_extensions ? !canonical_extension_list(extensions)
+                     : !extensions.empty()) {
     return std::unexpected(ArtifactError::kInvalidSectionLayout);
   }
 
-  const auto code = bytes.subspan(kArtifactHeaderBytes, code_size);
+  const auto code = bytes.subspan(header_size, code_size);
   const auto initial_memory =
-      bytes.subspan(size_t{kArtifactHeaderBytes} + code_size,
-                    initial_memory_size);
+      bytes.subspan(size_t{header_size} + code_size, initial_memory_size);
   if (artifact_digest(code) != code_digest) {
     return std::unexpected(ArtifactError::kCodeDigestMismatch);
   }

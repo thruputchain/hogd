@@ -11,11 +11,12 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/validated_auth_tokens.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
-#include "hogd/hog_exec/runtime/validated_auth_tokens.h"
 #include "invoke_args.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
@@ -110,7 +111,10 @@ syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
         SyscallGetCalldataOutputs{.calldata = calldata,
                                   .auth_token_count = output_auth_token_count});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered, as for GetReturnedBuffer.
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), calldata.size()))}};
 }
 
 MaybeAsyncSyscallInnerResult
@@ -327,7 +331,11 @@ syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
         .returned_auth_token_count = returned_auth_tokens.count});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered: the saved output can be read
+  // again and again, and max_return_buffer_len is configurable (#4798).
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), return_buffer.size()))}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

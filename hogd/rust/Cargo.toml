@@ -8,7 +8,7 @@ resolver = "2"
 
 [workspace.dependencies]
 # Common dependencies that crates can inherit
-ed25519-zebra = { version = "4.1" }
+ed25519-zebra = { version = "5.0" }
 lru = "0.14.0"
 bindgen = "0.71"
 siphasher = { version = "1.0.1", default-features = false }

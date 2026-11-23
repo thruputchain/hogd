@@ -12,7 +12,8 @@ set -eu
 SCRIPT_DIR="$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)"
 
 # Version gate
-EXPECTED_VERSION="thruput 0.42.0"
+THRUPUT_CLI_VERSION="$(cat "${SCRIPT_DIR}/../scripts/thruput-tools-version")"
+EXPECTED_VERSION="thruput ${THRUPUT_CLI_VERSION}"
 ACTUAL_VERSION="$(thruput --version 2>/dev/null || true)"
 ACTUAL_RELEASE_VERSION="${ACTUAL_VERSION%% (*}"
 if [ "${ACTUAL_RELEASE_VERSION}" != "${EXPECTED_VERSION}" ]; then

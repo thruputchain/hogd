@@ -51,7 +51,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
@@ -180,13 +180,74 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   txs.nondeterministic_data.segment_bytes = {4};
   txs.nondeterministic_data.xdr = {0xde, 0xad, 0xbe, 0xef};
 
+  // Shared with chuckd's TestHashProposalTxsFastCompatibilityVector and the
+  // coordinator's proposal_txs_hash_golden_vector.
   const ProposalTxsHash expected = {
-      0x3a, 0x3c, 0xe7, 0x82, 0x83, 0x94, 0x38, 0x26, 0xac, 0x43, 0x29,
-      0x1f, 0xab, 0x79, 0xbd, 0x17, 0xc4, 0xad, 0x1d, 0x1e, 0xf9, 0xe2,
-      0x2d, 0x8c, 0x72, 0x31, 0xa9, 0x7c, 0xb6, 0x68, 0xdc, 0xd9,
+      0xac, 0x7e, 0x6e, 0x65, 0xe3, 0xf3, 0x6e, 0xc7, 0x88, 0x45, 0xdd,
+      0xf3, 0xf3, 0xd9, 0x5a, 0xcf, 0x99, 0xea, 0xdb, 0xbd, 0xbc, 0xfd,
+      0x39, 0x1e, 0x44, 0x23, 0x9a, 0x7d, 0xc4, 0xb5, 0x2c, 0x03,
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+// Swapping two segments reverses the transaction order and changes the hash.
+TEST(Mempool, ProposalTxsCompatibilityHashBindsTransactionOrder)
+{
+  const SignedTransactionHash first_hash = sha256(uint64_t{1});
+  const SignedTransactionHash second_hash = sha256(uint64_t{2});
+  const ParallelBatch first_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{first_hash})();
+  const ParallelBatch second_segment =
+      t_to_parallel_batch(SignedTransactionHashBatch{second_hash})();
+
+  ProposalTxs first_order{};
+  first_order.signed_hash.segment_tokens = {1, 1};
+  first_order.signed_hash.segment_bytes = {first_segment.segment_bytes[0],
+                                           second_segment.segment_bytes[0]};
+  first_order.signed_hash.xdr = first_segment.xdr;
+  first_order.signed_hash.xdr += second_segment.xdr;
+  first_order.nondeterministic_data =
+      t_to_parallel_batch(x23::XdrVec<NondeterministicProposalData>{
+          NondeterministicProposalData{}, NondeterministicProposalData{}})();
+
+  ProposalTxs swapped_order = first_order;
+  swapped_order.signed_hash.xdr = second_segment.xdr;
+  swapped_order.signed_hash.xdr += first_segment.xdr;
+
+  SignedTransactionHashBatch decoded_first_order;
+  ASSERT_TRUE(parallel_batch_to_t(first_order.signed_hash, decoded_first_order,
+                                  kNoBatchSizeLimit)());
+  SignedTransactionHashBatch decoded_swapped_order;
+  ASSERT_TRUE(parallel_batch_to_t(swapped_order.signed_hash,
+                                  decoded_swapped_order, kNoBatchSizeLimit)());
+  EXPECT_EQ(decoded_first_order,
+            (SignedTransactionHashBatch{first_hash, second_hash}));
+  EXPECT_EQ(decoded_swapped_order,
+            (SignedTransactionHashBatch{second_hash, first_hash}));
+
+  EXPECT_NE(proposal_txs_compatibility_hash(first_order),
+            proposal_txs_compatibility_hash(swapped_order));
+}
+
+// Combined by XOR, the two batch hashes kept the commitment when batches of
+// the same shape traded places.
+TEST(Mempool, ProposalTxsCompatibilityHashBindsBatchPositions)
+{
+  const ParallelBatch first =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{1})})();
+  const ParallelBatch second =
+      t_to_parallel_batch(SignedTransactionHashBatch{sha256(uint64_t{2})})();
+
+  ProposalTxs txs{};
+  txs.signed_hash = first;
+  txs.nondeterministic_data = second;
+  ProposalTxs swapped{};
+  swapped.signed_hash = second;
+  swapped.nondeterministic_data = first;
+
+  EXPECT_NE(proposal_txs_compatibility_hash(txs),
+            proposal_txs_compatibility_hash(swapped));
 }
 
 TEST(Mempool, LookupBeforeReadyPreservesRequestCardinality)
@@ -2310,7 +2371,9 @@ TEST(Mempool, RetriedCommitDoesNotRecordCommitInterval)
   committed.store(true, std::memory_order_relaxed);
   retry_thread.join();
 
-  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitBlockNotFound);
+  // The retry commits the tip again under its value, which answers OK (see
+  // CommittingTheTipAgainSucceeds) and is no commit of its own.
+  EXPECT_EQ(retry, SchedulerCommitOutcome::SchedulerCommitOK);
   EXPECT_EQ(MempoolMetrics::instance().last_commit_interval_ms.value(), -1);
 }
 
@@ -2779,6 +2842,135 @@ TEST_F(MempoolValidationExecutorResultTest,
   EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
 }
 
+namespace {
+
+// How [forge_nondeterministic_data] corrupts one transaction's
+// nondeterministic data. A peer controls this field outright, and either way
+// the executor's replay fails the transaction with
+// [ExecResultTxValidationFailure].
+enum class NondeterministicForgery {
+  // Claims more bits than it supplies, so the replay rejects the data before
+  // the transaction runs.
+  kMalformedBitCount,
+  // Supplies a bit the transaction never consumes, so the replay runs the
+  // transaction to completion and only then rejects it.
+  kUnconsumedBit,
+};
+
+// [proposal] with the nondeterministic data of its transaction at [index]
+// forged as [forgery].
+Proposal
+forge_nondeterministic_data(Proposal proposal, size_t index,
+                            NondeterministicForgery forgery)
+{
+  x23::XdrVec<NondeterministicProposalData> data;
+  CHECK(parallel_batch_to_t(proposal.transactions.nondeterministic_data, data,
+                            kNoBatchSizeLimit)());
+  CHECK_LT(index, data.size());
+  NondeterministicProposalData &forged = data[index];
+  switch (forgery) {
+  case NondeterministicForgery::kMalformedBitCount:
+    forged.nondeterministic_bit_count += 8;
+    break;
+  case NondeterministicForgery::kUnconsumedBit:
+    if (forged.nondeterministic_bit_count % 8 == 0) {
+      forged.nondeterministic_bits.push_back(0);
+    }
+    forged.nondeterministic_bit_count++;
+    break;
+  }
+  proposal.transactions.nondeterministic_data = t_to_parallel_batch(data)();
+  return proposal;
+}
+
+size_t
+proposal_tx_count(const Proposal &proposal)
+{
+  SignedTransactionHashBatch signed_tx_hashes;
+  CHECK(parallel_batch_to_t(proposal.transactions.signed_hash, signed_tx_hashes,
+                            kNoBatchSizeLimit)());
+  return signed_tx_hashes.size();
+}
+
+// Nominates [txs] on top of [db_tip] and returns the proposal, with [txs]
+// submitted again so that validating it finds every transaction, as a
+// validator sees a block that a peer nominated.
+Proposal
+nominate_for_validation(MempoolTestInfra &server, const DbTip &db_tip,
+                        const SignedTransactionBatch &txs)
+{
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  CHECK_EQ(res_nominate.outcome(),
+           SchedulerProposalOutcome::SchedulerProposalOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  return res_nominate.proposed_block().proposal;
+}
+
+DbTip
+current_tip(MempoolTestInfra &server)
+{
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  return get_tip.db_tip();
+}
+
+// A peer forges one transaction's nondeterministic data in an otherwise
+// honest block. The executor fails that transaction while the rest of the
+// block executes and emits events, so the validation is cancelled with those
+// emissions in flight. The validator must vote the block down, release the
+// executor, event and snapshot handles the attempt took, and still validate
+// and commit the honest block at the same height.
+void
+expect_forged_block_rejected_then_honest_block_commits(
+    NondeterministicForgery forgery)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  const DbTip db_tip = current_tip(server);
+  const Proposal honest = nominate_for_validation(server, db_tip, txs);
+  // The forged transaction sits mid-block, past several executor chunks.
+  ASSERT_EQ(proposal_tx_count(honest), kNumTxs);
+  const Proposal forged =
+      forge_nondeterministic_data(honest, kNumTxs / 2, forgery);
+
+  SchedulerValidationResult res_forged =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               forged)();
+  EXPECT_EQ(res_forged.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+
+  SchedulerValidationResult res_honest =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               honest)();
+  ASSERT_EQ(res_honest.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  EXPECT_EQ(commit_block(server, res_honest.block().block_id, db_tip, honest),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+} // namespace
+
+TEST(Mempool, ValidateRejectsMalformedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kMalformedBitCount);
+}
+
+TEST(Mempool, ValidateRejectsUnconsumedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kUnconsumedBit);
+}
+
 TEST(Mempool, ValidateEmpty)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
@@ -3045,6 +3237,94 @@ TEST(Mempool, UnknownParentBlockReleasesValidationGate)
   auto res_commit = commit_block(server, res_nominate.proposed_block().block_id,
                                  db_tip, proposal);
   EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// A block two heights above the tip answers UnknownParentBlock at once,
+// rather than wait for its parent.
+TEST(Mempool, ValidationAboveTheTipIsUnknownParentWithoutWaiting)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  Proposal above = res_nominate.proposed_block().proposal;
+  above.header.block_height = db_tip.value.proposal_header.block_height + 2;
+
+  auto res_validate = server.mempool_coord_rpc().schedulercoord_validate_block(
+      res_nominate.proposed_block().block_id, std::move(above))();
+  EXPECT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationUnknownParentBlock);
+
+  // The validation released its gate increment.
+  auto res_commit = commit_block(server, db_tip, res_nominate.proposed_block());
+  EXPECT_EQ(res_commit, SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+// Once committed, heights 0 and 1 are too late to validate, like any other
+// committed height.
+TEST(Mempool, ValidationAtACommittedGenesisHeightIsTooLate)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip db_tip = get_tip.db_tip();
+  ASSERT_GE(db_tip.value.proposal_header.block_height, 1);
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  for (const BlockHeight height : {BlockHeight{0}, BlockHeight{1}}) {
+    Proposal committed = res_nominate.proposed_block().proposal;
+    committed.header.block_height = height;
+    auto res_validate =
+        server.mempool_coord_rpc().schedulercoord_validate_block(
+            db_tip.id, std::move(committed))();
+    EXPECT_EQ(res_validate.outcome(),
+              SchedulerValidationResult::SchedulerValidationTooLateToValidate)
+        << "height " << height;
+  }
+}
+
+// A commit whose answer the coordinator did not see may be retried: the tip
+// committed again under the value it committed with succeeds, and changes
+// nothing. The tip's id under another value is still refused.
+TEST(Mempool, CommittingTheTipAgainSucceeds)
+{
+  MempoolTestInfra server;
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip parent = get_tip.db_tip();
+  auto res_nominate = propose_block(server, parent);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+  const SchedulerProposedBlock &proposed = res_nominate.proposed_block();
+  ASSERT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  const DbTip tip = get_tip.db_tip();
+
+  EXPECT_EQ(commit_block(server, parent, proposed),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, tip.id);
+  EXPECT_EQ(get_tip.db_tip().value, tip.value);
+
+  ConsensusValue other = consensus_value(parent, proposed.proposal);
+  other.proposal_header.storage_hash[0] ^= 1;
+  EXPECT_NE(server.mempool_coord_rpc().schedulercoord_commit_block(
+                proposed.block_id, std::move(other))(),
+            SchedulerCommitOutcome::SchedulerCommitOK);
 }
 
 TEST(Mempool, ProposalUsesTransactionRoot)
@@ -5046,11 +5326,16 @@ TEST(Mempool, RejectsOrdinaryBlocksAtGenesisHeights)
     Proposal proposal{};
     proposal.header.network_hash = MempoolTestInfra::kNetworkHash;
     proposal.header.block_height = height;
-    EXPECT_EQ(server.mempool_coord_rpc()
-                  .schedulercoord_validate_block(parent.db_tip().id,
-                                                 std::move(proposal))()
-                  .outcome(),
-              SchedulerValidationOutcome::SchedulerValidationInvalid);
+    // Height 0 is committed, so a block at it is too late to validate, as at
+    // any committed height; height 1 is the ceremony's.
+    EXPECT_EQ(
+        server.mempool_coord_rpc()
+            .schedulercoord_validate_block(parent.db_tip().id,
+                                           std::move(proposal))()
+            .outcome(),
+        height == 0
+            ? SchedulerValidationOutcome::SchedulerValidationTooLateToValidate
+            : SchedulerValidationOutcome::SchedulerValidationInvalid);
 
     ConsensusValue value{};
     value.proposal_header.block_height = height;

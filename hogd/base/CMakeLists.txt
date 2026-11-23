@@ -49,6 +49,7 @@ add_library(base_test_objects OBJECT
   time_test.cc
   unique_function_test.cc
   wide_integral_test.cc
+  wide_math_test.cc
   worker_pool_test.cc
   xdr_util_test.cc
 )
@@ -71,3 +72,19 @@ target_link_libraries(
   GTest::gtest
 )
 hogd_discover_tests(base_test)
+
+if(BUILD_BENCHMARKS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(
+    io_bench
+    io_bench.cc
+  )
+  target_link_libraries(
+    io_bench
+    hogd
+    benchmark::benchmark
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET io_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

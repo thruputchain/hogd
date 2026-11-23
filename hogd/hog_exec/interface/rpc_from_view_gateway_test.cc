@@ -32,7 +32,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -75,6 +75,7 @@ make_query()
       .auth_claim = std::move(claim),
       .forwarded_tokens = {},
       .invoke_flags = {},
+      .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
   };
 }
 
@@ -241,6 +242,7 @@ public:
         .auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData),
         .forwarded_tokens = {},
         .invoke_flags = {},
+        .block_timepoint = NativeContractTestFramework::kTestBlockTimepoint,
     };
   }
 
@@ -674,6 +676,11 @@ public:
 
 class ViewGatewayBatchTest : public ViewGatewayRefreshTest {
 public:
+  static BlockExecutionContext view_context(DbTip const &tip)
+  {
+    return ViewGatewayRpc::view_block_execution_context(tip);
+  }
+
   static void stop_refresh_worker(ViewGatewayRpc &gateway)
   {
     gateway.refresh_thread_.request_stop();
@@ -692,6 +699,25 @@ public:
                                  .min_height = {},
                                  .budget_millis = 30'000,
                                  .max_response_bytes = 1'048'576};
+  }
+
+  // One view attempt on the current snapshot, judged against a tip whose
+  // timepoint is `tip_timepoint` rather than whatever the framework committed.
+  static ViewGatewayResult
+  attempt_against_tip_at(ViewGatewayRpc &gateway,
+                         TransactionViewQuery const &query,
+                         TimePoint tip_timepoint)
+  {
+    auto *state = gateway.get_current_view_state()();
+    CHECK(static_cast<bool>(state));
+    const auto id = state->get().block_id;
+    DbTip tip = state->get().tip;
+    tip.value.proposal_header.block_timepoint = tip_timepoint;
+    auto result = gateway.run_view_attempt(query, tip, state->get())();
+    if (state->release_reference()) {
+      gateway.gc_view_state(id)();
+    }
+    return result;
   }
 
   ViewGatewayBatchResult pinned_attempt(ViewGatewayRpc &gateway,
@@ -715,6 +741,51 @@ public:
     return result;
   }
 };
+
+TEST(ViewGatewayRpc, ViewTimepointNeverPrecedesTheTip)
+{
+  EXPECT_FALSE(view_block_timepoint_admissible(20, 19));
+  EXPECT_TRUE(view_block_timepoint_admissible(20, 20));
+  EXPECT_TRUE(view_block_timepoint_admissible(20, 21));
+}
+
+// The cache's context is the tip's own timepoint: the gateway reads no clock.
+TEST_F(ViewGatewayBatchTest, ViewContextTakesTheTipsTimepoint)
+{
+  DbTip tip{};
+  tip.value.proposal_header.block_height = 7;
+  tip.value.proposal_header.block_timepoint = 1'234;
+
+  const BlockExecutionContext context = view_context(tip);
+  EXPECT_EQ(context.block_height, 8);
+  EXPECT_EQ(context.block_timepoint, 1'234U);
+}
+
+TEST_F(ViewGatewayBatchTest, RejectsAViewStatedBeforeTheTip)
+{
+  commit_bytestring("value");
+  framework_.advance_block();
+  ViewGatewayRpc gateway(std::format("localhost:{}",
+                                     framework_.get_db_exec_port()),
+                         "localhost", framework_.get_event_exec_port());
+  x23::Defer cleanup([&] { gateway.shut_down(); });
+
+  constexpr TimePoint kTip = 5'000;
+  auto query = make_read_query();
+
+  query.block_timepoint = kTip - 1;
+  auto early = attempt_against_tip_at(gateway, query, kTip);
+  ASSERT_EQ(early.outcome(), ViewGatewayOutcome::ViewGatewayInvalidInput);
+  EXPECT_EQ(early.error_code(),
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+  for (TimePoint stated : {kTip, kTip + 1}) {
+    query.block_timepoint = stated;
+    EXPECT_EQ(attempt_against_tip_at(gateway, query, kTip).outcome(),
+              ViewGatewayOutcome::ViewGatewayOk)
+        << "stated " << stated;
+  }
+}
 
 TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
 {
@@ -760,8 +831,8 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
        .entrypoint = inner.entrypoint,
        .gas_limit = 1'000'000,
        .calldata = inner.calldata}};
-  wallet_query.invocation =
-      wallet.make_invocation<u8"execute">(10'000'000, calls);
+  wallet_query.invocation = wallet.make_invocation<u8"execute">(
+      10'000'000, x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls);
   EXPECT_EQ(
       gateway.viewgateway_view(wallet_query)().payload().output.status_code(),
       InvocationFrameStatusCode::Return);
@@ -781,7 +852,8 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
   calls[0].target = address;
   calls[0].entrypoint = default_claim.invocation.entrypoint;
   calls[0].calldata = default_claim.invocation.calldata;
-  nested.invocation = wallet.make_invocation<u8"execute">(10'000'000, calls);
+  nested.invocation = wallet.make_invocation<u8"execute">(
+      10'000'000, x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls);
   const auto nested_result = gateway.viewgateway_view(nested)();
   ASSERT_EQ(nested_result.payload().output.status_code(),
             InvocationFrameStatusCode::Abort);
