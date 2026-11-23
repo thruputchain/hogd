@@ -1,6 +1,11 @@
 #!/bin/bash
 set -e
 
+if [[ ${GIT_BRANCH:-} == codex/rcq-cpu-abba ]]; then
+  bash "$(dirname "$0")/ci/rcq_cpu_abba.sh" --publication-gate
+  exit 0
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history

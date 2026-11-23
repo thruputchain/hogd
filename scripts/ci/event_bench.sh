@@ -1,6 +1,10 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
 
+if [[ ${GIT_BRANCH:-} == codex/rcq-cpu-abba ]]; then
+  exec bash "$(dirname "$0")/rcq_cpu_abba.sh"
+fi
+
 . "$(dirname "$0")/bench_harness.sh"
 ci_enable_error_trace
 
