@@ -1136,10 +1136,12 @@ TEST_F(HogDbTest,
 }
 
 TEST_F(HogDbTest,
-       StartupNativeTokenAgeReconciliationTakesTipAgeWhenReceivedBlendOverflows)
+       StartupNativeTokenAgeReconciliationBlendsHugeReceivedGroupExactly)
 {
-  // 2^125 received tokens at age 2^10 weigh 2^135, past uint128_t.
+  // 2^125 received tokens at age 1024 weigh 2^135, past uint128_t, yet the
+  // blend with 2^125 missing tokens at the recovered height stays exact.
   constexpr uint128_t kReceived = uint128_t{1} << 125;
+  constexpr BlockHeight kTip = kRecoveredHeight + 2000;
   Address account = make_address(kAddress);
   ASSERT_TRUE(
       db_.write_address_balance(account, static_cast<int128_t>(2 * kReceived)));
@@ -1151,18 +1153,15 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/0,
                             /*received_age=*/1024)));
 
-  ASSERT_TRUE(
-      reconcile_startup_native_token_ages(db_, kRecoveredHeight + 2000));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kTip));
 
-  // Every received token counts as received at the recovered height, which is
-  // never earlier than an honest received age.
+  // Equal halves at 1024 and 2051 average to 1537.5, rounded up.
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             2 * kReceived);
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived],
-            kRecoveredHeight + 2000);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 1538);
 }
 
 TEST_F(HogDbTest,

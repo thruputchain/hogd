@@ -10,7 +10,7 @@
 #include <utility>
 
 #include "db_sched.hh"
-#include "hogd/base/compiler.h"
+#include "hogd/base/average_age.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -77,30 +77,6 @@ sum_native_tokens(const NativeTokenAge &age)
     return std::nullopt;
   }
   return partial + received;
-}
-
-// Token-weighted mean of two average ages, rounded up like the scheduler's
-// compute_average_age(). std::nullopt on uint128_t overflow.
-std::optional<BlockHeight>
-weighted_average_age(uint128_t tokens_a, BlockHeight age_a, uint128_t tokens_b,
-                     BlockHeight age_b)
-{
-  CHECK_GE(age_a, 0);
-  CHECK_GE(age_b, 0);
-  const auto [weighted_a, a_overflowed] =
-      overflowing_mul(tokens_a, static_cast<uint128_t>(age_a));
-  const auto [weighted_b, b_overflowed] =
-      overflowing_mul(tokens_b, static_cast<uint128_t>(age_b));
-  const auto [numerator, sum_overflowed] =
-      overflowing_add(weighted_a, weighted_b);
-  if (a_overflowed || b_overflowed || sum_overflowed) {
-    return std::nullopt;
-  }
-  const uint128_t denominator = tokens_a + tokens_b;
-  CHECK_GT(denominator, 0UL);
-  // The mean is at most the larger age, so it fits in a BlockHeight.
-  return static_cast<BlockHeight>((numerator / denominator) +
-                                  ((numerator % denominator) != 0 ? 1 : 0));
 }
 
 // [address] is the address the row was keyed and read under. Diagnostics must
@@ -173,12 +149,10 @@ reconcile_address_native_token_age_helper(const Address &address,
     // Cannot overflow: received_before + deficit <= balance.
     new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
         to_xdr(received_before + deficit);
-    // On overflow, every received token counts as received at the tip.
     new_age.average_ages[kNativeTokenAgeGroupReceived] =
-        weighted_average_age(received_before,
-                             age.average_ages[kNativeTokenAgeGroupReceived],
-                             deficit, recovered_height)
-            .value_or(recovered_height);
+        compute_average_age(received_before,
+                            age.average_ages[kNativeTokenAgeGroupReceived],
+                            deficit, recovered_height);
   }
   else {
     uint128_t excess = existing_total - balance;
