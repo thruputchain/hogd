@@ -300,12 +300,45 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
+capture_combined_coordinator_summary() {
+  local node host path command pid status=0
+  local -a pids=()
+  combined_provenance_check || return
+  for node in 0 1; do
+    host=${CHUCKD_HOSTS[$node]}
+    if [[ $node:$host != 0:hog4 && $node:$host != 1:hog8 ]] ||
+      ! path=$(get_record_stderr_path "node${node}_chuckd") ||
+      [[ ! $path =~ ^/tmp/hogd_stderr_[0-9]{1,24}_[0-9]{1,12}_[a-zA-Z0-9]{6}$ ]]; then
+      echo "Missing Combined coordinator control stderr for node $node" >&2
+      status=1
+      continue
+    fi
+    printf -v command 'python3 -I /workspace/scripts/ci/combined_multi_coordinator.py %q %q' "$node" "$path"
+    (
+      combined_provenance_peer "$host" "$command" || {
+        echo "Could not capture Combined coordinator summary for node $node on $host" >&2
+        exit 1
+      }
+    ) &
+    pids+=("$!")
+  done
+  for pid in "${pids[@]}"; do
+    wait "$pid" || status=1
+  done
+  return "$status"
+}
+
 cleanup() {
   local exit_code=$1
   ci_enter_cleanup
   stop_live_log_streams
   publish_results
   kill_stale_processes
+  # Stock publication truncates copies only. Read the original stderr files
+  # locally on the coordinators, after the existing process reap.
+  if combined_provenance_selected && [[ $exit_code == 0 ]]; then
+    capture_combined_coordinator_summary || exit_code=1
+  fi
   exit "$exit_code"
 }
 
