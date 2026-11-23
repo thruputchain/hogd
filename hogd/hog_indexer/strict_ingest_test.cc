@@ -20,6 +20,7 @@
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -117,13 +118,14 @@ make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 
 IndexerCommittedBlock
 make_block(BlockHeight height, ConsensusValueHash prev_hash,
-           ProposedTransactionBatch bodies = {})
+           ProposedTransactionBatch bodies = {}, TxEventLogBatch logs = {})
 {
   const ProposedTransactionBatch canonical_bodies = bodies;
-  TxEventLogBatch logs;
-  for (size_t i = 0; i < bodies.size(); ++i) {
-    logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
-                                              : std::nullopt));
+  if (logs.empty()) {
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
+                                                : std::nullopt));
+    }
   }
   ProposalTxs proposal = make_proposal_txs(canonical_bodies);
   ConsensusValue value{};
@@ -803,11 +805,27 @@ TEST_F(StrictIndexerTest,
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
-  ProposedTransaction first = make_body(900, 0x90);
-  ProposedTransaction second = make_body(901, 0x91);
-  IndexerCommittedBlock block =
-      make_block(1, origin.first_prev_hash,
-                 ProposedTransactionBatch{first, second});
+  constexpr size_t kTransactionCount = 256;
+  constexpr std::array<uint8_t, 4> kEmitterFills{0xA0, 0xA1, 0xA0, 0xB0};
+  ProposedTransactionBatch bodies;
+  TxEventLogBatch logs;
+  // Exercise ordered puts past the 128-transaction threshold. Every
+  // transaction emits twice from the first address and once from each other
+  // address, and the last emitting address is never a root invocation.
+  for (size_t i = 0; i < kTransactionCount; ++i) {
+    bodies.push_back(make_body(900 + i, static_cast<uint8_t>(0xA0 + (i % 8))));
+    auto log = make_log(bodies.back(), std::nullopt);
+    for (size_t seq = 0; seq < kEmitterFills.size(); ++seq) {
+      TxEmittedEvent event{};
+      std::ranges::fill(event.contract_address, kEmitterFills[seq]);
+      event.serialized_event.push_back(static_cast<uint8_t>(i));
+      event.serialized_event.push_back(static_cast<uint8_t>(seq));
+      log.events.push_back(std::move(event));
+    }
+    logs.push_back(std::move(log));
+  }
+  const IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, std::move(bodies), std::move(logs));
   ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
@@ -815,13 +833,113 @@ TEST_F(StrictIndexerTest,
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(first.signed_tx.tx)).has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(second.signed_tx.tx)).has_value());
+  std::vector<TransactionHash> hashes;
+  for (size_t i = 0; i < block.payload.tx_bodies.size(); ++i) {
+    const auto &body = block.payload.tx_bodies[i];
+    const auto &event_log = block.payload.event_logs[i];
+    hashes.push_back(event_log.tx_hash);
+    auto stored = reopened->get_tx_record(event_log.tx_hash);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->height, 1);
+    EXPECT_EQ(stored->tx, body);
+    EXPECT_EQ(stored->events, event_log);
+  }
+  std::ranges::sort(hashes);
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  std::vector<TransactionHash> page_hashes;
+  do {
+    auto page = reopened->get_transactions_by_block(query);
+    ASSERT_TRUE(page);
+    ASSERT_FALSE(page->refs.empty());
+    for (const auto &ref : page->refs) {
+      page_hashes.push_back(ref.tx_hash);
+    }
+    query.cursor = page->cursor;
+    ASSERT_LE(page_hashes.size(), hashes.size());
+  } while (!query.cursor.empty());
+  EXPECT_EQ(page_hashes, hashes);
+
+  const auto emitting_address = [](uint8_t fill) {
+    ContractAddress address{};
+    std::ranges::fill(address, fill);
+    return address;
+  };
+  const std::array addresses{emitting_address(0xA0), emitting_address(0xA1),
+                             emitting_address(0xB0)};
+  for (const auto &address : addresses) {
+    std::vector<IdentifiedEvent> expected_events;
+    for (const auto &log : block.payload.event_logs) {
+      for (uint32_t seq = 0; seq < log.events.size(); ++seq) {
+        if (const auto &event = log.events[seq];
+            event.contract_address == address) {
+          expected_events.push_back(IdentifiedEvent{
+              .tx_hash = log.tx_hash,
+              .block_height = 1,
+              .sequence_number = seq,
+              .emitted_event = event,
+          });
+        }
+      }
+    }
+    std::ranges::sort(expected_events, {}, [](const auto &event) {
+      return std::tie(event.tx_hash, event.sequence_number);
+    });
+    ASSERT_EQ(expected_events.size(),
+              kTransactionCount * (address == addresses.front() ? 2 : 1));
+
+    EventQuery event_query{};
+    event_query.order = IterationOrder::IterationOrderAscending;
+    event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    event_query.limit = 67;
+    event_query.filters.push_back(
+        EventFilter{.contract_addresses = {address}, .topics = {}});
+    size_t event_index = 0;
+    do {
+      const auto page = reopened->get_events(event_query);
+      ASSERT_TRUE(page);
+      ASSERT_FALSE(page->events.empty());
+      for (const auto &event : page->events) {
+        ASSERT_LT(event_index, expected_events.size());
+        EXPECT_EQ(event, expected_events[event_index++]);
+      }
+      event_query.cursor = page->cursor;
+    } while (!event_query.cursor.empty());
+    EXPECT_EQ(event_index, expected_events.size());
+
+    std::vector<TransactionHash> root_hashes;
+    for (size_t i = 0; i < block.payload.tx_bodies.size(); ++i) {
+      const auto &tx = block.payload.tx_bodies[i].signed_tx.tx;
+      if (tx.invocation.invoked_address == address) {
+        root_hashes.push_back(block.payload.event_logs[i].tx_hash);
+      }
+    }
+    EXPECT_EQ(root_hashes.size(),
+              address == addresses.back() ? 0 : kTransactionCount / 8);
+    std::ranges::sort(root_hashes);
+    AddressTransactionQuery address_query{};
+    address_query.address = address;
+    address_query.order = IterationOrder::IterationOrderAscending;
+    address_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    address_query.limit = 11;
+    std::vector<TransactionHash> address_hashes;
+    do {
+      const auto page = reopened->get_transactions_by_address(address_query);
+      ASSERT_TRUE(page);
+      for (const auto &ref : page->refs) {
+        EXPECT_EQ(ref.height, 1);
+        address_hashes.push_back(ref.tx_hash);
+      }
+      ASSERT_LE(address_hashes.size(), root_hashes.size());
+      ASSERT_TRUE(page->cursor.empty() || !page->refs.empty());
+      address_query.cursor = page->cursor;
+    } while (!address_query.cursor.empty());
+    EXPECT_EQ(address_hashes, root_hashes);
+  }
   IndexerProgress progress = reopened->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().contiguous_height, 1);
-  EXPECT_EQ(progress.initialized().last_consensus_hash,
-            block.identity.consensus_hash);
   EXPECT_EQ(progress.initialized().last_consensus_hash,
             block.identity.consensus_hash);
 }
@@ -1751,18 +1869,24 @@ TEST_F(StrictIndexerTest, DuplicateHashesCannotCommitPartialBlockProjection)
   const auto origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
-  const auto body = make_body(1, 1);
-  auto block =
-      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
-  // The production source validates payloads, but duplicate rows must not
-  // collapse silently if an internal caller violates that contract.
-  block.payload.tx_bodies.push_back(body);
-  block.payload.event_logs.push_back(block.payload.event_logs.front());
-  EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
-            IndexerBlockApplyOutcome::IndexerBlockContentConflict);
-  EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
-  EXPECT_FALSE(db_->get_tx_record(sha256(body.signed_tx.tx)));
-  EXPECT_FALSE(db_->get_block_by_height(1));
+  for (const size_t count : {size_t{1}, size_t{256}}) {
+    ProposedTransactionBatch bodies;
+    for (size_t i = 0; i < count; ++i) {
+      bodies.push_back(make_body(i + 1, 1));
+    }
+    auto block = make_block(1, origin.first_prev_hash, std::move(bodies));
+    // Both small and ordered batches must reject duplicate hashes before
+    // publishing rows or a new watermark.
+    const auto body = block.payload.tx_bodies.front();
+    const auto event = block.payload.event_logs.front();
+    block.payload.tx_bodies.push_back(body);
+    block.payload.event_logs.push_back(event);
+    EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+    EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
+    EXPECT_FALSE(db_->get_tx_record(event.tx_hash));
+    EXPECT_FALSE(db_->get_block_by_height(1));
+  }
 }
 
 } // namespace
