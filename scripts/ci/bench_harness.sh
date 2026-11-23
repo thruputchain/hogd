@@ -4,6 +4,7 @@
 
 CI_BENCH_HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CI_BENCH_REPO_ROOT=$(cd "$CI_BENCH_HARNESS_DIR/../.." && pwd)
+. "$CI_BENCH_HARNESS_DIR/combined_native_replay.sh"
 
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-60}
 CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
@@ -57,6 +58,14 @@ ci_describe_exit_status() {
 ci_run_bench_step() {
   local name=$1
   shift
+  if combined_native_replay_selected; then
+    combined_native_replay_check || return
+    if [[ $name != metrics ]]; then
+      printf 'Historical RPC replay: skipped suite %s\n' "$name"
+      return 0
+    fi
+    set -- timeout --kill-after=30s 1200s "$@"
+  fi
   local status=0
   local restore_errexit=""
 
@@ -423,7 +432,40 @@ ci_control_shutdown_hosts() {
   local host
   shift 2
 
+  # These five peers do no work after the skipped suites. Wait for the
+  # current build and record only acknowledged shutdowns.
+  if combined_native_replay_selected &&
+    [[ $# == 3 && $1 == hog4 && $2 == hog5 && $3 == hog6 ]]; then
+    combined_native_replay_check || return
+    local i status=0
+    local -a hosts=() pids=()
+    for host in hog4 hog5 hog6 hog7 hog9; do
+      combined_native_replay_released "$host" && continue
+      hosts+=("$host")
+      (
+        CI_WAIT_CONTROL_TIMEOUT_SEC=600 \
+          ci_wait_control_server "$control_cli" "$host" "$control_port" || exit 1
+        timeout --kill-after=2s 10s "$control_cli" "$host" "$control_port" shutdown
+      ) &
+      pids+=("$!")
+    done
+    for i in "${!pids[@]}"; do
+      host=${hosts[$i]}
+      if wait "${pids[$i]}"; then
+        combined_native_replay_released_hosts=${combined_native_replay_released_hosts:-}:$host:
+        printf 'Historical RPC replay: checked shutdown acknowledged for %s\n' "$host"
+      else
+        printf 'Historical RPC replay: early shutdown failed for %s\n' "$host" >&2
+        status=1
+      fi
+    done
+    return "$status"
+  fi
+
   for host in "$@"; do
+    if combined_native_replay_selected && combined_native_replay_released "$host"; then
+      continue
+    fi
     "$control_cli" "$host" "$control_port" shutdown || true
   done
 }
@@ -568,6 +610,9 @@ ci_remote_killall_hosts() {
   # A reap now waits out a grace period, so the hosts go concurrently: eight of
   # them serialised behind one would add minutes to every benchmark step.
   for host in "$@"; do
+    if combined_native_replay_selected && combined_native_replay_released "$host"; then
+      continue
+    fi
     ci_remote_reap "$host" "$processes" &
     reap_pids+=("$!")
   done

@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <regex>
@@ -49,6 +50,18 @@
 
 namespace hogd {
 
+inline bool
+uses_native_rpc_replay_network()
+{
+  const char *container = std::getenv("HOGD_CI_CONTAINER");
+  const char *offline = std::getenv("HOGD_CI_OFFLINE");
+  const char *branch = std::getenv("GIT_BRANCH");
+  return container != nullptr && std::string_view(container) == "1" &&
+         offline != nullptr && std::string_view(offline) == "1" &&
+         branch != nullptr &&
+         std::string_view(branch) == "codex/combined-native-rpc-replay";
+}
+
 inline std::string
 hog_ip(std::string_view host)
 {
@@ -56,6 +69,15 @@ hog_ip(std::string_view host)
   std::match_results<std::string_view::const_iterator> match;
   if (!std::regex_match(host.begin(), host.end(), match, kHogHostPattern)) {
     panic("invalid hog host: {}", host);
+  }
+
+  if (uses_native_rpc_replay_network()) {
+    const x23::HostPort host_port{std::string(host), uint16_t{0}};
+    const auto addr = host_port.to_addr(/*dns=*/true);
+    if (!addr) {
+      exit_cannot_resolve(host_port, addr.error());
+    }
+    return std::string(x23::show_ipaddr(*addr));
   }
 
   unsigned int hog_num = std::stoul(match[1].str());
@@ -230,7 +252,15 @@ private:
   EventCard start_event_server(uint16_t event_server_port)
   {
     std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
+    if (uses_native_rpc_replay_network()) {
+      const char *host = std::getenv("HOG_HOST");
+      if (host == nullptr || std::string_view(host) != "hog10") {
+        panic("historical RPC replay requires controller alias hog10");
+      }
+      hostname = host;
+    } else {
+      CHECK_EQ(get_hostname(hostname), 0);
+    }
     std::string mempool_ip = hog_ip(hostname);
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
