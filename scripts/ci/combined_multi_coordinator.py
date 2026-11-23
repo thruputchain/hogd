@@ -244,6 +244,19 @@ def capture(path, single=False):
     return result
 
 
+def multi_validation_observed(receipt):
+    # A validator independently qualifies when it observed a complete
+    # million-transaction validation. An immediate success is valid.
+    full_starts = {
+        (event["height"], event["value"], event["trace"])
+        for event in receipt["events"]
+        if event["kind"] == "validation_start" and event["tx_count"] == 1_000_000
+    }
+    return any(
+        (join["height"], join["value"], join["trace"]) in full_starts
+        and join["result"] == "ended_without_logged_failure"
+        for join in receipt["validation_joins"]
+    )
 def main():
     args = sys.argv[1:]
     single = args[:1] == ["single"]
@@ -256,7 +269,8 @@ def main():
     sha = os.environ["GIT_COMMIT"]
     if ((single and node != "0") or expected.get(node) != host or os.environ.get("HOGD_CI_CONTAINER") != "1"
             or os.environ.get("HOGD_CI_OFFLINE") != "1"
-            or os.environ.get("GIT_BRANCH") != "codex/combined-native-single-replay"
+            or os.environ.get("GIT_BRANCH") != ("codex/combined-native-single-replay" if single
+                                               else "codex/combined-native-multi-replay")
             or not re.fullmatch(r"hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*", run)
             or not re.fullmatch(r"[a-f0-9]{40}", sha)):
         raise ValueError("unexpected Combined coordinator role or mode")
@@ -266,14 +280,15 @@ def main():
                            and not receipt["prior_tail_truncation"] and receipt["full_committed_values"]
                            and not receipt["omitted"].get("unrecognized_selected_lines")
                            and not receipt["omitted"].get("partial_final_line")) else "incomplete"
+    if not single and (receipt["omitted"] or not multi_validation_observed(receipt)):
+        status = "incomplete"
     receipt.update(schema=1, status=status, node=int(node), host=host, run=run, source_sha=sha)
     if single:
         receipt.update(single_info_joins=joins, interval_scope=(
             "One coordinator's ordered INFO boundaries; no RPC-return timestamp, "
             "disk-completion timestamp, or cross-process timing inferred."))
-    if not single:
-        raise ValueError("expected single-node coordinator input")
-    dest = Path("/workspace/.ci/dumps/native-single-coordinator.json")
+    mode = "single" if single else "multi"
+    dest = Path(f"/workspace/.ci/dumps/native-{mode}-coordinator.json")
     if dest.parent.resolve(strict=True) != dest.parent or dest.parent.stat().st_uid != os.getuid():
         raise ValueError("unexpected coordinator output directory")
     pending = dest.with_suffix(".pending")

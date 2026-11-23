@@ -59,6 +59,16 @@ ci_describe_exit_status() {
 ci_run_bench_step() {
   local name=$1
   shift
+  if native_multi_selected; then
+    native_multi_check || exit 2
+    if [[ $name != mempool_multi_node_bench ]]; then
+      printf 'Historical multi replay: skipped suite %s\n' "$name"
+      return 0
+    fi
+    local replay_status=0
+    native_multi_execute "$@" || replay_status=$?
+    exit "$replay_status"
+  fi
   if native_single_selected; then
     native_single_check || exit 2
     if [[ $name != mempool_bench ]]; then
@@ -434,7 +444,7 @@ ci_control_shutdown_hosts() {
   local control_port=$2
   local host
   shift 2
-  if native_single_selected && native_single_check; then
+  if native_single_check || native_multi_check; then
     native_single_shutdown_hosts "$@"
     return
   fi

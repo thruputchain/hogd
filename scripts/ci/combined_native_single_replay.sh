@@ -3,8 +3,12 @@ native_single_selected() {
   [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ]]
 }
 
-native_single_check_host() {
-  native_single_selected &&
+native_multi_selected() {
+  [[ ${GIT_BRANCH:-} == codex/combined-native-multi-replay ]]
+}
+
+native_replay_check_host() {
+  { native_single_selected || native_multi_selected; } &&
     [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
       ${HOG_HOST:-} =~ ^hog([4-9]|10|11)$ &&
       ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
@@ -13,7 +17,7 @@ native_single_check_host() {
 }
 
 native_single_check() {
-  native_single_check_host && [[ $HOG_HOST == hog10 ]]
+  native_single_selected && native_replay_check_host && [[ $HOG_HOST == hog10 ]]
 }
 
 native_single_peer() {
@@ -29,7 +33,7 @@ native_single_binary_receipt() (
   local chuckd=714ff40dcbbcbcb2cb851ce0de1440c37204d595
   local binary sha image
   local -a binaries=(hogd/hog_exec/bench/control_server)
-  native_single_check_host
+  native_replay_check_host
   [[ $(git -C protocol rev-parse HEAD) == "$protocol" &&
   $(git -C protocol rev-parse 'HEAD^{tree}') == "$protocol_tree" &&
   $(git -C thruput-go rev-parse HEAD) == "$go_commit" &&
@@ -45,6 +49,19 @@ image=doc["image"]
 assert re.fullmatch(r"[^\s]+@sha256:[a-f0-9]{64}", image)
 print(image)
 ')
+  local receipt=native-single-binaries
+  if native_multi_selected; then
+    receipt=native-multi-binaries
+    case $HOG_HOST in
+      hog4|hog8) binaries+=(chuckd.dev scpd.dev hogd/loadgen/loadgen_server hogd/hog_auth/hog-auth) ;;
+      hog5|hog9) binaries+=(hogd/hog_exec/hog-exec) ;;
+      hog6|hog10) binaries+=(hogd/hog_event/hog-event hogd/hog_indexer/hog-indexer) ;;
+      hog7|hog11) binaries+=(hogd/hog_db/hog-db hogd/hog_mempool/hog-mempool) ;;
+    esac
+    if [[ $HOG_HOST == hog10 ]]; then
+      binaries+=(hogd/hog_exec/bench/control_cli hogd/utils/get_port)
+    fi
+  else
   case $HOG_HOST in
   hog4) binaries+=(chuckd.dev scpd.dev) ;;
   hog5 | hog6) binaries+=(hogd/hog_exec/hog-exec) ;;
@@ -54,6 +71,7 @@ print(image)
   hog10) binaries+=(hogd/hog_mempool/hog-mempool hogd/hog_exec/bench/control_cli) ;;
   hog11) binaries+=(hogd/hog_db/hog-db) ;;
   esac
+  fi
   (
     set -o noclobber
     for binary in "${binaries[@]}"; do
@@ -69,7 +87,7 @@ print(image)
       printf 'host=%s run=%s path=release/%s source=%s protocol=%s protocol_tree=%s thruput_go=%s chuckd=%s image=%s workspace=ext4 sha256=%s\n' \
         "$HOG_HOST" "$HOG_XID" "$binary" "$GIT_COMMIT" "$protocol" "$protocol_tree" "$go_commit" "$chuckd" "$image" "${sha%% *}"
     done
-  ) >"$HOG_DUMP_DIR/native-single-binaries.txt"
+  ) >"$HOG_DUMP_DIR/$receipt.txt"
 )
 
 native_single_observe_roles() {
@@ -86,6 +104,8 @@ native_single_observe_roles() {
 native_single_released_hosts=
 native_single_shutdown_hosts() {
   local host i status=0
+  local mode=single
+  if native_multi_selected; then mode=multi; fi
   local -a pids=() hosts=()
   for host in "$@"; do
     [[ $native_single_released_hosts == *":$host:"* ]] && continue
@@ -97,9 +117,9 @@ native_single_shutdown_hosts() {
     host=${hosts[$i]}
     if wait "${pids[$i]}"; then
       native_single_released_hosts="$native_single_released_hosts:$host:"
-      printf 'Historical single replay: checked shutdown acknowledged for %s\n' "$host"
+      printf 'Historical %s replay: checked shutdown acknowledged for %s\n' "$mode" "$host"
     else
-      printf 'Historical single replay: shutdown failed for %s\n' "$host" >&2
+      printf 'Historical %s replay: shutdown failed for %s\n' "$mode" "$host" >&2
       status=1
     fi
   done
@@ -113,6 +133,28 @@ native_single_execute() {
   if [[ ${BUILD_DIR:-} != release || ${WORK_DIR:-} != ci_work_dir/ ||
     $# != 1 || $1 != ./scripts/ci/mempool_bench.sh ]]; then
     echo 'Historical single replay needs the stock Combined argv and workspace' >&2
+    return 2
+  fi
+  CI_WAIT_CONTROL_TIMEOUT_SEC=600 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${hosts[@]}" &&
+    native_single_observe_roles "${hosts[@]}" &&
+    timeout --kill-after=30s 1200s "$@" || status=$?
+  native_single_shutdown_hosts "${hosts[@]}" || { [[ $status != 0 ]] || status=1; }
+  return "$status"
+}
+
+
+native_multi_check() {
+  native_multi_selected && native_replay_check_host && [[ $HOG_HOST == hog10 ]]
+}
+
+native_multi_execute() {
+  local status=0
+  local -a hosts=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
+  native_multi_check || return
+  if [[ ${BUILD_DIR:-} != release || ${WORK_DIR:-} != ci_work_dir/ ||
+    $# != 3 || $1 != env || $2 != MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS=1 ||
+    $3 != ./scripts/ci/mempool_multi_node_bench.sh ]]; then
+    echo 'Historical multi replay needs the stock Combined argv and workspace' >&2
     return 2
   fi
   CI_WAIT_CONTROL_TIMEOUT_SEC=600 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${hosts[@]}" &&

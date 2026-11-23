@@ -1,9 +1,10 @@
 #!/bin/bash
 set -e
 
-if [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ]]; then
+if [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ||
+      ${GIT_BRANCH:-} == codex/combined-native-multi-replay ]]; then
   . "$(dirname "$0")/ci/combined_native_single_replay.sh"
-  native_single_check
+  native_single_check || native_multi_check
   exit 0
 fi
 

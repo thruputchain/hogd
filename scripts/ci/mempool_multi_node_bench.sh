@@ -107,6 +107,10 @@ declare -a CONTROL_LOG_RECORDS=()
 declare -a LIVE_TAIL_PIDS=()
 PUBLISHED_RESULTS=0
 COORDINATOR_OUTPUT_WRITTEN=0
+if native_multi_selected; then
+  native_multi_check
+  [[ ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} == 1 ]]
+fi
 
 record_control_logs() {
   local host=$1
@@ -306,6 +310,20 @@ cleanup() {
   stop_live_log_streams
   publish_results
   kill_stale_processes
+  if native_multi_selected && [[ $exit_code == 0 ]]; then
+    local node stderr_path command
+    for node in "${NODE_IDS[@]}"; do
+      if ! stderr_path=$(get_record_stderr_path "node${node}_chuckd"); then
+        exit_code=1
+        continue
+      fi
+      printf -v command 'if ps -eo comm= | grep -qxE "chuckd(\.dev)?|scpd(\.dev)?"; then exit 1; fi; python3 -I /workspace/scripts/ci/combined_multi_coordinator.py %d %q' "$node" "$stderr_path"
+      if ! native_single_peer "${CHUCKD_HOSTS[$node]}" "$command"; then
+        echo "Could not capture stopped multi-node coordinator node $node" >&2
+        exit_code=1
+      fi
+    done
+  fi
   exit "$exit_code"
 }
 
