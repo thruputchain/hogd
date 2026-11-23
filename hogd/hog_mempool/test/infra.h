@@ -29,6 +29,7 @@
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -234,6 +235,24 @@ public:
   HogDbStatus<int128_t> read_address_balance(const ContractAddress &address)
   {
     return get_db().read_address_balance(address);
+  }
+
+  HogDbStatus<NativeTokenAge>
+  read_address_average_native_token_age(const ContractAddress &address)
+  {
+    return get_db().read_address_average_native_token_age(address);
+  }
+
+  // Reconciles native-token age rows against balances at the recovered tip, as
+  // hog-db's main and hog-devnode do at startup. The stack does not do this on
+  // its own when reopened over a database: its seeded accounts hold more
+  // native tokens for scheduling than balance, and reconciling would drain
+  // them.
+  HogDbStatus<void> reconcile_native_token_ages_at_recovered_tip()
+  {
+    CHECK(ctx_->has_committed_tip());
+    return reconcile_startup_native_token_ages(
+        get_db(), ctx_->get_tip().value.proposal_header.block_height);
   }
 
   HogDbStatus<DeployedContractHash>

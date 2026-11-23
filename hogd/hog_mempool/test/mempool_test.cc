@@ -49,7 +49,6 @@
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/genesis/genesis_constants.h"
-#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
 #include "hogd/hog_exec/components/contract_trait.h"
@@ -2375,8 +2374,7 @@ TEST(Mempool, RestartReconcilesUnwrittenNativeTokenAgeAsReceivedAtTip)
   ASSERT_TRUE(balance.has_value());
   EXPECT_GT(*balance, 0);
   HogDbStatus<NativeTokenAge> recovered_age =
-      restarted.get_db().read_address_average_native_token_age(
-          deployed_address);
+      restarted.read_address_average_native_token_age(deployed_address);
   ASSERT_TRUE(recovered_age.has_value());
   for (size_t group = 0; group < kNativeTokenAgeNumGroups; ++group) {
     ASSERT_EQ(from_xdr(recovered_age->num_native_tokens[group]), 0UL)
@@ -2385,11 +2383,10 @@ TEST(Mempool, RestartReconcilesUnwrittenNativeTokenAgeAsReceivedAtTip)
   }
 
   // What hog-db's main and hog-devnode run before the scheduler reads a row.
-  ASSERT_TRUE(
-      reconcile_startup_native_token_ages(restarted.get_db(), funded_height));
+  ASSERT_TRUE(restarted.reconcile_native_token_ages_at_recovered_tip());
 
-  recovered_age = restarted.get_db().read_address_average_native_token_age(
-      deployed_address);
+  recovered_age =
+      restarted.read_address_average_native_token_age(deployed_address);
   ASSERT_TRUE(recovered_age.has_value());
   EXPECT_EQ(from_xdr(
                 recovered_age->num_native_tokens[kNativeTokenAgeGroupReceived]),
