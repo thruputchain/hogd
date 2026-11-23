@@ -36,7 +36,7 @@ network_and_storage() {
   wg_device="hw$(printf '%s' "$HOG_XID" | sha256sum | cut -c1-12)"
   case "$device:$mtu" in
   "$wg_device:1420") transport=wireguard ;;
-  eth0:1450 | eth0:1500) transport=overlay ;;
+  eth0:1424 | eth0:1450 | eth0:1500) transport=overlay ;;
   *) fail "Unsupported experiment route device or MTU: $device/$mtu" ;;
   esac
   mount=$(findmnt -T "$path" -no TARGET,FSTYPE)
