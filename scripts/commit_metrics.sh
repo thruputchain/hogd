@@ -2,7 +2,8 @@
 set -e
 
 if [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ||
-  ${GIT_BRANCH:-} == codex/combined-native-single-proposal-dag ]]; then
+  ${GIT_BRANCH:-} == codex/combined-native-single-proposal-dag ||
+  ${GIT_BRANCH:-} == codex/combined-native-single-post-proposal ]]; then
   . "$(dirname "$0")/ci/combined_native_single_replay.sh"
   native_single_check
   exit 0

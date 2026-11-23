@@ -1,7 +1,8 @@
 # Activated only by the protected Combined driver selecting this exact source branch.
 native_single_selected() {
   [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ||
-    ${GIT_BRANCH:-} == codex/combined-native-single-proposal-dag ]]
+    ${GIT_BRANCH:-} == codex/combined-native-single-proposal-dag ||
+    ${GIT_BRANCH:-} == codex/combined-native-single-post-proposal ]]
 }
 
 native_single_check_host() {
@@ -107,6 +108,13 @@ native_single_shutdown_hosts() {
   return "$status"
 }
 
+native_single_prepare_post_proposal() {
+  [[ $GIT_BRANCH == codex/combined-native-single-post-proposal ]] || return 0
+  local command='mkdir -p /workspace/.ci/tmp; set -o noclobber; bash /workspace/scripts/ci/historical_chuckd_post_proposal.sh > /workspace/.ci/dumps/historical-chuckd-build.txt'
+  ci_wait_port hog4 18443 &&
+    timeout --kill-after=5s 200s python3 /opt/hog-ci/peer.py hog4 "$command" </dev/null
+}
+
 native_single_execute() {
   local status=0
   local -a hosts=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
@@ -117,6 +125,7 @@ native_single_execute() {
     return 2
   fi
   CI_WAIT_CONTROL_TIMEOUT_SEC=600 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${hosts[@]}" &&
+    native_single_prepare_post_proposal &&
     native_single_observe_roles "${hosts[@]}" &&
     timeout --kill-after=30s 1200s "$@" || status=$?
   native_single_shutdown_hosts "${hosts[@]}" || { [[ $status != 0 ]] || status=1; }

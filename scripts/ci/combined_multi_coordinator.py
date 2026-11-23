@@ -3,6 +3,7 @@
 
 from collections import Counter, defaultdict
 from datetime import datetime, timezone
+from ipaddress import IPv4Address
 import json
 import os
 from pathlib import Path
@@ -62,11 +63,101 @@ VALIDATION = {"validation_start", "validation_rpc", "missing_transactions", "val
 FAILURES = {"invalid", "too_late", "missing_parent", "rpc_error"}
 
 
-def reduce_log(stream, size, single=False):
+PROPOSAL_REPLY_MARKER = "schedulercoord_propose_block;"
+PROPOSAL_REPLY = re.compile(
+    r"\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d(?:\.\d{1,9})?(?:Z|[+-]\d\d:\d\d) "
+    r"\?\?\? \d{1,12}\.\d{9}, CLIENT, REPLY, ([1-9][0-9]{0,9}), "
+    r"([0-9.]{7,15}:[1-9][0-9]{0,4}), ([0-9.]{7,15}:[1-9][0-9]{0,4}), "
+    r"schedulercoord_propose_block; io=([^ ,]+), queue=([^ ,]+), serde=([^ ,]+)\n"
+)
+DURATION_PART = re.compile(r"([0-9]{1,12})(?:\.([0-9]{1,9}))?(ns|µs|ms|s|m|h)")
+NANOSECONDS = {"ns": 1, "µs": 1000, "ms": 10**6, "s": 10**9, "m": 60 * 10**9, "h": 3600 * 10**9}
+
+
+def go_duration_ns(value):
+    total = 0
+    start = 0
+    largest = 10**15
+    for part in DURATION_PART.finditer(value):
+        whole, fraction, unit = part.groups()
+        ns = NANOSECONDS[unit]
+        if part.start() != start or ns >= largest or (fraction and part.end() != len(value)):
+            raise ValueError("invalid Go RPC duration")
+        total += int(whole) * ns
+        if fraction:
+            fractional, remainder = divmod(int(fraction) * ns, 10 ** len(fraction))
+            if remainder:
+                raise ValueError("invalid fractional nanoseconds")
+            total += fractional
+        start = part.end()
+        largest = ns
+    if start == 0 or start != len(value) or total > 240 * 10**9:
+        raise ValueError("Go RPC duration is outside bounds")
+    return total
+
+
+def proposal_reply_stats(line):
+    match = PROPOSAL_REPLY.fullmatch(line)
+    if not match:
+        raise ValueError("malformed or truncated Go proposal reply stats")
+    xid, server, client, receive, queue, decode = match.groups()
+    server_ip, server_port = server.rsplit(":", 1)
+    client_ip, client_port = client.rsplit(":", 1)
+    if not (int(xid) < 2**32 and 0 < int(server_port) < 2**16 and 0 < int(client_port) < 2**16):
+        raise ValueError("Go proposal reply identity is outside bounds")
+    IPv4Address(server_ip)
+    IPv4Address(client_ip)
+    return {
+        "xid": int(xid),
+        "server_port": int(server_port),
+        "client_port": int(client_port),
+        "record_receive_ns": go_duration_ns(receive),
+        "receive_queue_ns": go_duration_ns(queue),
+        "decode_ns": go_duration_ns(decode),
+    }
+
+
+
+PROPOSAL_TIMING = re.compile(
+    r"CHUCKD_PROPOSE_TIMING height=([1-9][0-9]{0,14}) block_id=([1-9][0-9]{0,19}) "
+    r"tx_count=1000000 value=([a-f0-9]{12}) rpc_ns=([1-9][0-9]{0,11}) "
+    r"local_ns=([1-9][0-9]{0,11}) reply_end_ns=([1-9][0-9]{0,12})"
+)
+COMMIT_REQUEST_TIMING = re.compile(
+    r"CHUCKD_COMMIT_REQUEST_TIMING height=([1-9][0-9]{0,14}) block_id=([1-9][0-9]{0,19}) "
+    r"value=([a-f0-9]{12}) request_ns=([1-9][0-9]{0,12})"
+)
+
+
+def keyed_timing(body):
+    if match := PROPOSAL_TIMING.fullmatch(body):
+        height, block, value, rpc, local, reply_end = match.groups()
+        row = {"rpc_ns": int(rpc), "local_ns": int(local), "reply_end_ns": int(reply_end)}
+        kind = "proposal"
+    elif match := COMMIT_REQUEST_TIMING.fullmatch(body):
+        height, block, value, request = match.groups()
+        row = {"request_ns": int(request)}
+        kind = "commit_request"
+    else:
+        raise ValueError("malformed historical proposal timing")
+    if not 0 < int(block) < 2**64:
+        raise ValueError("invalid historical proposal timing block id")
+    return kind, (int(height), int(block), value), row | {
+        "height": int(height), "block_id": int(block), "value": value}
+
+
+def unique_row(records, key, row, cap):
+    if key in records or len(records) >= cap:
+        raise ValueError("duplicate or excessive historical timing records")
+    records[key] = row
+
+
+def reduce_log(stream, size, single=False, post_proposal=False):
     events, omitted = [], Counter()
     consumed = 0
     origin = None
     truncated = False
+    timings = {"proposal": {}, "commit_request": {}, "reply_stats": {}}
     while consumed < size:
         raw = stream.readline(min(MAX_LINE + 1, size - consumed))
         if not raw:
@@ -85,11 +176,23 @@ def reduce_log(stream, size, single=False):
         if not raw.endswith(b"\n"):
             omitted["partial_final_line"] += 1
             continue
+        if post_proposal and b", CLIENT, REPLY, " in raw and PROPOSAL_REPLY_MARKER.encode() in raw:
+            row = proposal_reply_stats(ANSI.sub(b"", raw).decode("utf-8"))
+            key = row["xid"], row["client_port"], row["server_port"]
+            unique_row(timings["reply_stats"], key, row, 2048)
+            continue
         if b"/sub/baton/baton/" not in raw and (not single or b"/sub/catchup/cbpool.go:" not in raw):
             continue
         line = ANSI.sub(b"", raw).decode("ascii", errors="replace").rstrip("\r\n")
         match = HEADER.fullmatch(line)
         if not match:
+            continue
+        body = match["body"]
+        if post_proposal and body.startswith(("CHUCKD_PROPOSE_TIMING", "CHUCKD_COMMIT_REQUEST_TIMING")):
+            kind, key, row = keyed_timing(body)
+            if match["file"] != {"proposal": "propose", "commit_request": "commit"}[kind]:
+                raise ValueError("historical timing emitted by unexpected source file")
+            unique_row(timings[kind], key, row, 256)
             continue
         cbpool = match["file"] == "cbpool"
         if (cbpool and not single) or cbpool != (match["directory"] == "catchup/"):
@@ -122,9 +225,13 @@ def reduce_log(stream, size, single=False):
                 "finished waiting for catchup to pre-persist", "catchup need not wait for pre-persist",
             )):
                 omitted["unrecognized_selected_lines"] += 1
-    return {"source_bytes": size, "prior_tail_truncation": truncated, "omitted": dict(omitted),
+    result = {"source_bytes": size, "prior_tail_truncation": truncated, "omitted": dict(omitted),
             "clock": "coordinator-local UTC log", "origin_unix_ns": origin, "events": events,
             **validate_joins(events)}
+    if post_proposal:
+        result["post_proposal"] = {key: list(records.values()) for key, records in timings.items()}
+        result["post_proposal"]["clock"] = "Go process-local monotonic elapsed; reply stats are separate durations."
+    return result
 
 
 def validate_joins(events):
@@ -227,7 +334,75 @@ def summarize_single(events):
     return joins
 
 
-def capture(path, single=False):
+EVENT_COMMIT = re.compile(
+    r"^I\[[0-9]{4} [0-9:]{8} rpc_context\.cc:[0-9]{1,4}\] "
+    r"block committed height=([1-9][0-9]{0,18}) block_id=([1-9][0-9]{0,19}) "
+    r"((?:[a-z_]+=[0-9]+(?:\.[0-9]{6})? )*)outcome=ok\n$"
+)
+EVENT_SLOW = re.compile(
+    r"^W\[[0-9]{4} [0-9:]{8} event_block_context\.cc:[0-9]{1,4}\] "
+    r"slow block phase phase=([a-z_]{1,48}) block_id=([1-9][0-9]{0,19}) "
+    r"elapsed_ns=([0-9]{1,19})\n$"
+)
+EVENT_FIELDS = (
+    "sync_ns", "pending_writes_ns", "publish_ns", "close_total_ns",
+    "wait_executors_closed_s", "wait_lock_s", "prepare_context_and_async_s",
+)
+
+
+def reduce_event_log(stream, size):
+    consumed = 0
+    commits = {}
+    slow = []
+    omitted = Counter()
+    while consumed < size:
+        raw = stream.readline(min(MAX_LINE + 1, size - consumed))
+        if not raw:
+            raise ValueError("Event log shrank during capture")
+        consumed += len(raw)
+        if len(raw) > MAX_LINE:
+            omitted["oversize_lines"] += 1
+            while not raw.endswith(b"\n") and consumed < size:
+                raw = stream.readline(min(MAX_LINE + 1, size - consumed))
+                if not raw:
+                    raise ValueError("Event log shrank during capture")
+                consumed += len(raw)
+            continue
+        if not raw.endswith(b"\n"):
+            omitted["partial_final_line"] += 1
+        if raw.startswith(b"[truncated by ci_truncate_log_to_tail:"):
+            omitted["prior_tail_truncation"] += 1
+        if b"block committed height=" not in raw and b"slow block phase phase=" not in raw:
+            continue
+        line = ANSI.sub(b"", raw).decode("ascii", errors="replace")
+        if match := EVENT_COMMIT.fullmatch(line):
+            height, block, text = match.groups()
+            words = text.split()
+            fields = dict(word.split("=", 1) for word in words)
+            if len(fields) != len(words) or int(block) >= 2**64:
+                raise ValueError("ambiguous Event commit record")
+            row = {"height": int(height), "block_id": int(block)}
+            for field in EVENT_FIELDS:
+                if field not in fields:
+                    omitted[f"missing_{field}"] += 1
+                elif field.endswith("_ns"):
+                    row[field] = int(fields[field])
+                else:
+                    row[field] = float(fields[field])
+            unique_row(commits, (row["height"], row["block_id"]), row, 4096)
+        elif match := EVENT_SLOW.fullmatch(line):
+            phase, block, elapsed = match.groups()
+            if int(block) >= 2**64 or int(elapsed) <= 1_000_000_000 or len(slow) >= 4096:
+                raise ValueError("invalid Event slow-phase receipt")
+            slow.append({"phase": phase, "block_id": int(block), "elapsed_ns": int(elapsed)})
+        else:
+            raise ValueError("malformed Event timing record")
+    return {"source_bytes": size, "commit_records": list(commits.values()), "slow_warnings": slow,
+            "omitted": dict(omitted),
+            "scope": "Stock Event commit summaries and >1s warnings. Recovery without a live context can omit timings."}
+
+
+def capture(path, single=False, post_proposal=False, event=False):
     if not TMP_LOG.fullmatch(path) or os.path.realpath(path) != path:
         raise ValueError("unexpected control stderr path")
     fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
@@ -236,7 +411,8 @@ def capture(path, single=False):
         if (not stat.S_ISREG(before.st_mode) or before.st_uid != os.getuid()
                 or before.st_nlink != 1 or not 0 < before.st_size <= MAX_BYTES):
             raise ValueError("control stderr must be a bounded owned regular file")
-        result = reduce_log(stream, before.st_size, single)
+        result = (reduce_event_log(stream, before.st_size) if event
+                  else reduce_log(stream, before.st_size, single, post_proposal))
         after = os.fstat(stream.fileno())
         if (before.st_size, before.st_mtime_ns, before.st_ctime_ns) != (
                 after.st_size, after.st_mtime_ns, after.st_ctime_ns):
@@ -246,6 +422,22 @@ def capture(path, single=False):
 
 def main():
     args = sys.argv[1:]
+    if args[:1] == ["event"]:
+        _, path = args
+        host, run, sha = (os.environ[key] for key in ("HOG_HOST", "HOG_XID", "GIT_COMMIT"))
+        if (host != "hog9" or os.environ.get("HOGD_CI_CONTAINER") != "1"
+                or os.environ.get("HOGD_CI_OFFLINE") != "1"
+                or os.environ.get("GIT_BRANCH") != "codex/combined-native-single-post-proposal"
+                or not re.fullmatch(r"hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*", run)
+                or not re.fullmatch(r"[a-f0-9]{40}", sha)):
+            raise ValueError("unexpected Event diagnostic role or mode")
+        receipt = capture(path, event=True)
+        clean = receipt["commit_records"] and not any(receipt["omitted"].get(key)
+            for key in ("oversize_lines", "partial_final_line", "prior_tail_truncation"))
+        receipt.update(schema=1, host=host, run=run, source_sha=sha,
+                       status="observed" if clean else "incomplete")
+        write_receipt(Path("/workspace/.ci/dumps/native-single-event.json"), receipt)
+        return clean
     single = args[:1] == ["single"]
     if single:
         args = args[1:]
@@ -254,19 +446,24 @@ def main():
     host = os.environ["HOG_HOST"]
     run = os.environ["HOG_XID"]
     sha = os.environ["GIT_COMMIT"]
+    post_proposal = os.environ.get("GIT_BRANCH") == "codex/combined-native-single-post-proposal"
     if ((single and node != "0") or expected.get(node) != host or os.environ.get("HOGD_CI_CONTAINER") != "1"
             or os.environ.get("HOGD_CI_OFFLINE") != "1"
             or os.environ.get("GIT_BRANCH") not in (
-                "codex/combined-native-single-replay", "codex/combined-native-single-proposal-dag")
+                "codex/combined-native-single-replay", "codex/combined-native-single-proposal-dag",
+                "codex/combined-native-single-post-proposal")
             or not re.fullmatch(r"hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*", run)
             or not re.fullmatch(r"[a-f0-9]{40}", sha)):
         raise ValueError("unexpected Combined coordinator role or mode")
-    receipt = capture(path, single)
+    receipt = capture(path, single, post_proposal)
     joins = summarize_single(receipt["events"]) if single else []
     status = "observed" if ((not single or any(r["status"] == "joined_observed_info" for r in joins))
                            and not receipt["prior_tail_truncation"] and receipt["full_committed_values"]
                            and not receipt["omitted"].get("unrecognized_selected_lines")
                            and not receipt["omitted"].get("partial_final_line")) else "incomplete"
+    if post_proposal and (not single or not all(
+            receipt["post_proposal"][key] for key in ("proposal", "commit_request", "reply_stats"))):
+        status = "incomplete"
     receipt.update(schema=1, status=status, node=int(node), host=host, run=run, source_sha=sha)
     if single:
         receipt.update(single_info_joins=joins, interval_scope=(
@@ -275,6 +472,11 @@ def main():
     if not single:
         raise ValueError("expected single-node coordinator input")
     dest = Path("/workspace/.ci/dumps/native-single-coordinator.json")
+    write_receipt(dest, receipt)
+    return status == "observed"
+
+
+def write_receipt(dest, receipt):
     if dest.parent.resolve(strict=True) != dest.parent or dest.parent.stat().st_uid != os.getuid():
         raise ValueError("unexpected coordinator output directory")
     pending = dest.with_suffix(".pending")
@@ -285,7 +487,7 @@ def main():
         os.link(pending, dest, follow_symlinks=False)
     finally:
         pending.unlink()
-    return status == "observed"
+
 
 
 if __name__ == "__main__":

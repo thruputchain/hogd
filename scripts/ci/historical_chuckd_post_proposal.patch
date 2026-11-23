@@ -1,0 +1,28 @@
+--- a/sub/baton/baton/propose.go
++++ b/sub/baton/baton/propose.go
+@@ -23,0 +24,2 @@
++var historicalTimingEpoch = time.Now()
++
+@@ -66,0 +69 @@
++	callerStart := time.Now()
+@@ -67,0 +71 @@
++	callerEnd := time.Now()
+@@ -117,0 +122,7 @@
++	}
++	if numTxs == 1_000_000 {
++		local := time.Since(callerEnd)
++		liblog.Infof(ctx, "CHUCKD_PROPOSE_TIMING height=%d block_id=%d tx_count=%d value=%s rpc_ns=%d local_ns=%d reply_end_ns=%d",
++			height, proposedBlock.Block_id, numTxs, protoutil.ValueDisplay(value),
++			callerEnd.Sub(callerStart).Nanoseconds(), local.Nanoseconds(),
++			callerEnd.Sub(historicalTimingEpoch).Nanoseconds())
+--- a/sub/baton/baton/commit.go
++++ b/sub/baton/baton/commit.go
+@@ -5,0 +6 @@
++	"time"
+@@ -76,0 +78 @@
++	requestStamp := time.Since(historicalTimingEpoch)
+@@ -79,0 +82,4 @@
++	if xdrutil.TokenSizeOfBatch(cb.AsConsensusBasis().Proposal_txs.Signed_hash) == 1_000_000 {
++		liblog.Infof(ctx, "CHUCKD_COMMIT_REQUEST_TIMING height=%d block_id=%d value=%s request_ns=%d",
++			cb.BlockHeight(), *validatedBlockID, protoutil.ValueDisplay(cb.ConsensusValue()), requestStamp.Nanoseconds())
++	}

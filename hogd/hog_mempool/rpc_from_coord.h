@@ -898,4 +898,20 @@ private:
 };
 static_assert(is_SchedulerCoord1<MempoolCoordinatorRpc *, x23::Async>);
 
+using SchedulerProposeProcedure =
+    SchedulerCoord1::proc_meta<static_cast<uint32_t>(
+        SchedulerCoord1::procs::schedulercoord_propose_block)>;
+
+struct SchedulerReplyPorts {
+  uint16_t peer = 0;
+  uint16_t local = 0;
+};
+
+SchedulerReplyPorts async_rpc_reply_connection(const MempoolCoordinatorRpc &,
+                                               int fd) noexcept;
+x23::Buf encode_async_rpc_reply(const MempoolCoordinatorRpc &,
+                                SchedulerProposeProcedure, const x23::rpc_msg &,
+                                const SchedulerProposalResult &,
+                                SchedulerReplyPorts);
+
 } // namespace hogd

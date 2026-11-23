@@ -14,6 +14,36 @@ WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
 coordinator_stderr=
+event_stderr=
+coordinator_stats=()
+if native_single_selected && [[ $GIT_BRANCH == codex/combined-native-single-post-proposal ]]; then
+  native_single_check || exit 2
+  coordinator_stats=(--rpc-log-stats)
+fi
+
+start_single_observed() {
+  local host=$1
+  local -n stderr_path=$2
+  shift 2
+  if ! native_single_selected; then
+    "$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" start "$@"
+    return
+  fi
+  native_single_check || return
+  local output
+  local -a paths
+  if ! output=$("$CONTROL_CLI" "$host" "$CI_CONTROL_PORT" start "$@" 2>&1); then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  mapfile -t paths < <(sed -n 's/^CONTROL_STDERR_PATH=//p' <<<"$output")
+  if [[ ${#paths[@]} -ne 1 || ! ${paths[0]} =~ ^/tmp/hogd_stderr_[0-9]{1,24}_[0-9]{1,12}_[a-zA-Z0-9]{6}$ ]]; then
+    echo "Missing or ambiguous single-node control stderr on $host" >&2
+    return 1
+  fi
+  stderr_path=${paths[0]}
+}
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -31,6 +61,13 @@ cleanup() {
     if ! native_single_peer hog4 "$command"; then
       echo 'Could not capture the stopped single-node coordinator INFO summary' >&2
       exit_code=1
+    fi
+    if [[ $GIT_BRANCH == codex/combined-native-single-post-proposal ]]; then
+      printf -v command 'python3 -I /workspace/scripts/ci/combined_multi_coordinator.py event %q' "$event_stderr"
+      if ! native_single_peer hog9 "$command"; then
+        echo 'Could not capture the stopped single-node Event timing summary' >&2
+        exit_code=1
+      fi
     fi
   fi
 
@@ -107,7 +144,11 @@ $CONTROL_CLI hog5 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog6 $CI_CONTROL_PORT expect_running
 
 echo 'launch event'
-$CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir "$EVENT_WORK_DIR" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
+event_start=("$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" start)
+if native_single_selected && [[ $GIT_BRANCH == codex/combined-native-single-post-proposal ]]; then
+  event_start=(start_single_observed hog9 event_stderr)
+fi
+"${event_start[@]}" hogd/hog_event/hog-event --mempool-addr "$(hog_ip hog10)":$MEMPOOL_EVENT_PORT --bind-ip "$(hog_ip hog9)" --work-dir "$EVENT_WORK_DIR" --executor-port $EVENT_EXECUTOR_PORT --mempool-port $EVENT_MEMPOOL_PORT --indexer-port $EVENT_INDEXER_PORT --metrics-port $EVENT_HTTP_PORT
 
 echo 'launch indexer'
 $CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path "$INDEXER_DB_DIR" --bind-ip "$(hog_ip hog9)" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
@@ -118,32 +159,12 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR
 echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
-start_single_coordinator() {
-  if ! native_single_selected; then
-    "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start "$@"
-    return
-  fi
-  native_single_check || return
-  local output
-  local -a paths
-  if ! output=$("$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start "$@" 2>&1); then
-    printf '%s\n' "$output"
-    return 1
-  fi
-  printf '%s\n' "$output"
-  mapfile -t paths < <(sed -n 's/^CONTROL_STDERR_PATH=//p' <<<"$output")
-  if [[ ${#paths[@]} -ne 1 || ! ${paths[0]} =~ ^/tmp/hogd_stderr_[0-9]{1,24}_[0-9]{1,12}_[a-zA-Z0-9]{6}$ ]]; then
-    echo 'Missing or ambiguous single-node coordinator control stderr' >&2
-    return 1
-  fi
-  coordinator_stderr=${paths[0]}
-}
-
 echo 'launch coordinator and scp'
-start_single_coordinator \
+start_single_observed hog4 coordinator_stderr \
   chuckd.dev \
   -l info \
   --stack \
+  "${coordinator_stats[@]}" \
   --config ./scripts/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
