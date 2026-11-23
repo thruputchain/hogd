@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -77,6 +78,36 @@ sum_native_tokens(const NativeTokenAge &age)
   return partial + received;
 }
 
+// The token-weighted mean of two average ages, rounded up, exactly as the
+// mempool scheduler's compute_average_age() blends tokens into a group: the
+// rounding never makes the account's tokens look older than they are. Returns
+// std::nullopt if the weighted sum overflows uint128_t, which only a balance
+// or an age far beyond any real chain can make it do.
+//
+// Both ages must be nonnegative and the token counts must have a nonzero sum
+// that fits in uint128_t.
+std::optional<BlockHeight>
+weighted_average_age(uint128_t tokens_a, BlockHeight age_a, uint128_t tokens_b,
+                     BlockHeight age_b)
+{
+  CHECK_GE(age_a, 0);
+  CHECK_GE(age_b, 0);
+  const auto [weighted_a, a_overflowed] =
+      overflowing_mul(tokens_a, static_cast<uint128_t>(age_a));
+  const auto [weighted_b, b_overflowed] =
+      overflowing_mul(tokens_b, static_cast<uint128_t>(age_b));
+  const auto [numerator, sum_overflowed] =
+      overflowing_add(weighted_a, weighted_b);
+  if (a_overflowed || b_overflowed || sum_overflowed) {
+    return std::nullopt;
+  }
+  const uint128_t denominator = tokens_a + tokens_b;
+  CHECK_GT(denominator, 0UL);
+  // The mean is at most the larger age, so it fits in a BlockHeight.
+  return static_cast<BlockHeight>((numerator / denominator) +
+                                  ((numerator % denominator) != 0 ? 1 : 0));
+}
+
 // [address] is the address the row was keyed and read under. Diagnostics must
 // use it rather than the embedded age.address: the two can disagree on a
 // tampered row while the XDR stays valid, and
@@ -87,6 +118,7 @@ HogDbStatus<void>
 reconcile_address_native_token_age_helper(const Address &address,
                                           const uint128_t balance,
                                           const NativeTokenAge &age,
+                                          const BlockHeight recovered_height,
                                           HogDbDAO &db)
 {
   const std::optional<uint128_t> summed = sum_native_tokens(age);
@@ -140,9 +172,25 @@ reconcile_address_native_token_age_helper(const Address &address,
       from_xdr(age.num_native_tokens[kNativeTokenAgeGroupReceived]);
 
   if (existing_total < balance) {
+    // The row is missing tokens the account received in blocks whose age
+    // write never became durable. Credit them the way the scheduler would
+    // have, as received, at the recovered height: the latest they can have
+    // arrived, so the guess never makes them older than they are. Adding them
+    // to the to-schedule group instead would give them that group's average,
+    // which for an account first funded in those blocks is 0, the genesis age
+    // that sorts ahead of every account the chain has funded since.
     const uint128_t deficit = balance - existing_total;
-    new_age.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
-        to_xdr(to_schedule_before + deficit);
+    // Cannot overflow: received_before + deficit <= balance.
+    new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(received_before + deficit);
+    // If the blend overflows, count every received token as received at the
+    // recovered height. No honest received age is later than that, so this
+    // still never makes the account's tokens older.
+    new_age.average_ages[kNativeTokenAgeGroupReceived] =
+        weighted_average_age(received_before,
+                             age.average_ages[kNativeTokenAgeGroupReceived],
+                             deficit, recovered_height)
+            .value_or(recovered_height);
   }
   else {
     uint128_t excess = existing_total - balance;
@@ -174,7 +222,8 @@ reconcile_address_native_token_age_helper(const Address &address,
 }
 
 HogDbStatus<void>
-reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
+reconcile_address_native_token_age(HogDbDAO &db, const Address &address,
+                                   const BlockHeight recovered_height)
 {
   HogDbStatus<int128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
@@ -200,14 +249,18 @@ reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
     return age.error();
   }
 
-  return reconcile_address_native_token_age_helper(address, *balance, *age, db);
+  return reconcile_address_native_token_age_helper(address, *balance, *age,
+                                                   recovered_height, db);
 }
 
 } // namespace
 
 HogDbStatus<void>
-reconcile_startup_native_token_ages(HogDbDAO &db)
+reconcile_startup_native_token_ages(HogDbDAO &db,
+                                    const BlockHeight recovered_height)
 {
+  CHECK_GE(recovered_height, 0);
+
   // [ConcurrentSet<T>] requires [T] to be an unsigned integral type, which
   // [Address] is not. [ConcurrentMap<K, V>] places no constraints on [K], and
   // its inserts are lock-free, so the scan below can run fully parallel: the
@@ -226,15 +279,15 @@ reconcile_startup_native_token_ages(HogDbDAO &db)
   // Now reconcile.
   HogDbStatus<void> ret;
   std::mutex lock;
-  addresses.for_each_parallel(
-      [&ret, &lock, &db](std::pair<const Address &, char &> entry) {
-        HogDbStatus<void> status =
-            reconcile_address_native_token_age(db, entry.first);
-        if (!status.has_value()) {
-          std::lock_guard<std::mutex> guard(lock);
-          ret = status.error();
-        }
-      });
+  addresses.for_each_parallel([&ret, &lock, &db, recovered_height](
+                                  std::pair<const Address &, char &> entry) {
+    HogDbStatus<void> status =
+        reconcile_address_native_token_age(db, entry.first, recovered_height);
+    if (!status.has_value()) {
+      std::lock_guard<std::mutex> guard(lock);
+      ret = status.error();
+    }
+  });
 
   return ret;
 }
