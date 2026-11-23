@@ -1,6 +1,7 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -8,6 +9,7 @@
 #include <cstdlib>
 #include <exception>
 #include <filesystem>
+#include <format>
 #include <fstream>
 #include <functional>
 #include <ios>
@@ -17,6 +19,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -71,6 +74,121 @@ namespace hogd {
 namespace {
 
 enum class CommitMetricsOutcome { kOk, kBlockNotFound, kConcurrent };
+
+bool
+historical_proposal_dag_enabled()
+{
+  static const bool enabled = [] {
+    const auto env_is = [](const char *name, std::string_view value) {
+      const char *actual = std::getenv(name);
+      return actual && actual == value;
+    };
+    return env_is("HOGD_CI_CONTAINER", "1") && env_is("HOGD_CI_OFFLINE", "1") &&
+           env_is("HOG_HOST", "hog10") &&
+           env_is("GIT_BRANCH", "codex/combined-native-single-proposal-dag");
+  }();
+  return enabled;
+}
+
+void
+record_historical_proposal_dag(const x23::Dag &dag,
+                               const SchedulerProposedBlock &block,
+                               size_t tx_count)
+{
+  using Clock = std::chrono::steady_clock;
+  using namespace std::literals::string_view_literals;
+  constexpr auto phases = std::to_array({
+      std::pair{"wait transfer data"sv, "transfers"sv},
+      std::pair{"wait auth data"sv, "auth"sv},
+      std::pair{"prepare nomination cache"sv, "cache"sv},
+      std::pair{"create proposal snapshot"sv, "db_open"sv},
+      std::pair{"open event block"sv, "event_open"sv},
+      std::pair{"open executor proposal block"sv, "exec_open"sv},
+      std::pair{"check initialized block"sv, "init_finish"sv},
+      std::pair{"check initialize block"sv, "init_verify"sv},
+      std::pair{"start scheduler nomination"sv, "scheduler_start"sv},
+      std::pair{"schedule nomination chunk"sv, "scheduler"sv},
+      std::pair{"propose nomination chunk"sv, "exec_propose"sv},
+      std::pair{"summarize nomination schedule"sv, "summarize"sv},
+      std::pair{"insert txset hash batch"sv, "txset_insert"sv},
+      std::pair{"serialize nomination tx hashes"sv, "pack_hashes"sv},
+      std::pair{"serialize nomination nondeterministic data"sv,
+                "pack_nomination"sv},
+      std::pair{"serialize nominated txs"sv, "pack_txs"sv},
+      std::pair{"resize nominated txs"sv, "resize"sv},
+      std::pair{"finish executor"sv, "exec_finish"sv},
+      std::pair{"close proposal snapshot"sv, "db_close"sv},
+      std::pair{"compute proposal txs hash"sv, "proposal_hash"sv},
+      std::pair{"close event block"sv, "event_close"sv},
+      std::pair{"compute txset hash"sv, "txset_hash"sv},
+      std::pair{"build nomination header"sv, "header"sv},
+  });
+  // Successful full-block records only, with a process-local output cap.
+  static std::atomic<unsigned> samples{0};
+  constexpr unsigned kMaxSamples = 128;
+  const unsigned sample = samples.fetch_add(1, std::memory_order_relaxed);
+  if (sample >= kMaxSamples) {
+    if (sample == kMaxSamples) {
+      info("HISTORICAL_PROPOSAL_DAG_LIMIT max={}", kMaxSamples);
+    }
+    return;
+  }
+
+  struct Span {
+    size_t count{0};
+    Clock::time_point begin{Clock::time_point::max()};
+    Clock::time_point end{Clock::time_point::min()};
+    Clock::duration longest{};
+  };
+  std::array<Span, phases.size()> spans;
+  const auto stats = dag.stats();
+  Clock::time_point graph_start = Clock::time_point::max();
+  Clock::time_point graph_end = Clock::time_point::min();
+  size_t unmatched = 0;
+  for (const auto &node : stats) {
+    const auto category =
+        std::ranges::find(phases, node.name,
+                          &decltype(phases)::value_type::first);
+    if (category == phases.end() || !node.started || !node.finished ||
+        node.queued_at > node.started_at ||
+        node.started_at > node.finished_at) {
+      ++unmatched;
+      continue;
+    }
+    auto &span = spans[category - phases.begin()];
+    ++span.count;
+    graph_start = std::min(graph_start, node.queued_at);
+    graph_end = std::max(graph_end, node.finished_at);
+    span.begin = std::min(span.begin, node.started_at);
+    span.end = std::max(span.end, node.finished_at);
+    span.longest = std::max(span.longest, node.finished_at - node.started_at);
+  }
+  const auto ns = [](Clock::duration duration) {
+    return std::chrono::duration_cast<std::chrono::nanoseconds>(duration)
+        .count();
+  };
+  std::string fields;
+  for (size_t i = 0; i < spans.size(); ++i) {
+    const auto &span = spans[i];
+    if (span.count != 0) {
+      // Per group: node count, first start, last finish, longest node, all
+      // relative to the graph start. Windows may overlap across groups.
+      fields += std::format(" {}={},{},{},{}", phases[i].second, span.count,
+                            ns(span.begin - graph_start),
+                            ns(span.end - graph_start), ns(span.longest));
+    }
+  }
+  const auto &data = block.proposal.transactions;
+  // XDR blob sizes only. Record headers, vector counts and padding are outside
+  // these fields. The existing serializer already filled all three blobs.
+  info("HISTORICAL_PROPOSAL_DAG schema=1 height={} block_id={} tx_count={} "
+       "tx_xdr_bytes={} hash_xdr_bytes={} nondet_xdr_bytes={} "
+       "nodes={} unmatched={} graph_ns={}{}",
+       block.proposal.header.block_height, block.block_id, tx_count,
+       block.txs.xdr.size(), data.signed_hash.xdr.size(),
+       data.nondeterministic_data.xdr.size(), stats.size(), unmatched,
+       fields.empty() ? 0 : ns(graph_end - graph_start), fields);
+}
 
 template<typename T>
 void
@@ -1900,6 +2018,12 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .value = std::move(value),
       .default_wallet = last_committed_block_.default_wallet,
       .network_config = last_committed_block_.network_config};
+  if (nomination_telemetry.nominated_tx_count == 1'000'000 &&
+      historical_proposal_dag_enabled() && nomination_dag.ok()) {
+    record_historical_proposal_dag(
+        nomination_dag, nominated_block_cache_.proposal_result.proposed_block(),
+        nomination_telemetry.nominated_tx_count);
+  }
   debug("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }

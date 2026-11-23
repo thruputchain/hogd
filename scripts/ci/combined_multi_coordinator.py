@@ -256,7 +256,8 @@ def main():
     sha = os.environ["GIT_COMMIT"]
     if ((single and node != "0") or expected.get(node) != host or os.environ.get("HOGD_CI_CONTAINER") != "1"
             or os.environ.get("HOGD_CI_OFFLINE") != "1"
-            or os.environ.get("GIT_BRANCH") != "codex/combined-native-single-replay"
+            or os.environ.get("GIT_BRANCH") not in (
+                "codex/combined-native-single-replay", "codex/combined-native-single-proposal-dag")
             or not re.fullmatch(r"hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*", run)
             or not re.fullmatch(r"[a-f0-9]{40}", sha)):
         raise ValueError("unexpected Combined coordinator role or mode")

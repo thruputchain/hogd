@@ -1,6 +1,7 @@
 # Activated only by the protected Combined driver selecting this exact source branch.
 native_single_selected() {
-  [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ]]
+  [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ||
+    ${GIT_BRANCH:-} == codex/combined-native-single-proposal-dag ]]
 }
 
 native_single_check_host() {
