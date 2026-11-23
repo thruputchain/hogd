@@ -1105,10 +1105,8 @@ TEST_F(HogDbTest,
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 46);
 }
 
-// An account first funded in a block whose age write never became durable
-// recovers with the all-zero row BalanceLock created alongside its balance.
-// Its tokens must not inherit that row's to-schedule average of 0, the genesis
-// age, which would sort the account ahead of every account funded since.
+// A newly funded account recovering an all-zero row must not inherit the
+// genesis to-schedule age.
 TEST_F(HogDbTest,
        StartupNativeTokenAgeReconciliationGivesNewlyFundedAccountTipAge)
 {

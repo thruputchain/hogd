@@ -79,14 +79,8 @@ sum_native_tokens(const NativeTokenAge &age)
   return partial + received;
 }
 
-// The token-weighted mean of two average ages, rounded up, exactly as the
-// mempool scheduler's compute_average_age() blends tokens into a group: the
-// rounding never makes the account's tokens look older than they are. Returns
-// std::nullopt if the weighted sum overflows uint128_t, which only a balance
-// or an age far beyond any real chain can make it do.
-//
-// Both ages must be nonnegative and the token counts must have a nonzero sum
-// that fits in uint128_t.
+// Token-weighted mean of two average ages, rounded up like the scheduler's
+// compute_average_age(). std::nullopt on uint128_t overflow.
 std::optional<BlockHeight>
 weighted_average_age(uint128_t tokens_a, BlockHeight age_a, uint128_t tokens_b,
                      BlockHeight age_b)
@@ -173,20 +167,13 @@ reconcile_address_native_token_age_helper(const Address &address,
       from_xdr(age.num_native_tokens[kNativeTokenAgeGroupReceived]);
 
   if (existing_total < balance) {
-    // The row is missing tokens the account received in blocks whose age
-    // write never became durable. Credit them the way the scheduler would
-    // have, as received, at the recovered height: the latest they can have
-    // arrived, so the guess never makes them older than they are. Adding them
-    // to the to-schedule group instead would give them that group's average,
-    // which for an account first funded in those blocks is 0, the genesis age
-    // that sorts ahead of every account the chain has funded since.
+    // Missing tokens are credited as received at the recovered height;
+    // crediting to-schedule would hand a newly funded account the genesis age.
     const uint128_t deficit = balance - existing_total;
     // Cannot overflow: received_before + deficit <= balance.
     new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
         to_xdr(received_before + deficit);
-    // If the blend overflows, count every received token as received at the
-    // recovered height. No honest received age is later than that, so this
-    // still never makes the account's tokens older.
+    // On overflow, every received token counts as received at the tip.
     new_age.average_ages[kNativeTokenAgeGroupReceived] =
         weighted_average_age(received_before,
                              age.average_ages[kNativeTokenAgeGroupReceived],

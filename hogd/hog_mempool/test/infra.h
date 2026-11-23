@@ -243,11 +243,8 @@ public:
     return get_db().read_address_average_native_token_age(address);
   }
 
-  // Reconciles native-token age rows against balances at the recovered tip, as
-  // hog-db's main and hog-devnode do at startup. The stack does not do this on
-  // its own when reopened over a database: its seeded accounts hold more
-  // native tokens for scheduling than balance, and reconciling would drain
-  // them.
+  // Mirrors the startup reconciliation hog-db and hog-devnode run; the stack
+  // skips it because seeded accounts hold more scheduling tokens than balance.
   HogDbStatus<void> reconcile_native_token_ages_at_recovered_tip()
   {
     CHECK(ctx_->has_committed_tip());

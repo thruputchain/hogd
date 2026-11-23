@@ -2311,14 +2311,9 @@ TEST(Mempool, NewlyDeployedContractNativeTokenCount)
             static_cast<uint128_t>(*deployed_address_balance));
 }
 
-// The scheduler writes native-token ages to hog_db between block commits, so a
-// write becomes durable only with the next commit's sync. A node that stops
-// after committing the block that first funds an account therefore recovers
-// that account's balance without its age: the row on disk is the all-zero one
-// BalanceLock created with the balance. Startup reconciliation must give the
-// account the age it would have had, its tokens received at the recovered
-// height, and not the row's to-schedule average of 0, the genesis age that
-// sorts ahead of every account funded since.
+// An age write becomes durable only with the next commit's sync, so a node that
+// stops right after first funding an account recovers an all-zero age row.
+// Reconciliation must credit the tokens as received at the recovered height.
 TEST(Mempool, RestartReconcilesUnwrittenNativeTokenAgeAsReceivedAtTip)
 {
   TmpDir db_dir;
