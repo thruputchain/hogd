@@ -1069,9 +1069,12 @@ TEST_F(HogDbTest, NewDeploymentLockStagesNoNativeTokenAge)
   EXPECT_EQ(age.error(), HogDbCode::kNotFound);
 }
 
-TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
+TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToReceivedAtTip)
 {
   Address account = make_address(kAddress);
+  ConsensusValue tip_value{};
+  tip_value.proposal_header.block_height = 50;
+  ASSERT_TRUE(db_.write_dbtip(DbTip{.id = 1, .value = std::move(tip_value)}));
   ASSERT_TRUE(db_.write_address_balance(account, 15));
   ASSERT_TRUE(db_.write_address_average_native_token_age(
       make_native_token_age(account, /*to_schedule=*/4,
@@ -1083,18 +1086,20 @@ TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
 
   ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
 
+  // The 6 unaccounted tokens are counted as received at the tip (50); the
+  // other groups keep their counts and ages.
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
-            10U);
+            4U);
   EXPECT_EQ(from_xdr(
                 age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             3U);
-  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 2U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 8U);
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 30);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 50);
 }
 
 TEST_F(HogDbTest,

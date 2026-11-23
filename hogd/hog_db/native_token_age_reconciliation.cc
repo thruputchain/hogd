@@ -18,6 +18,8 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
+#include "rpc_types.hh"
+#include "types.hh"
 
 namespace hogd {
 
@@ -87,7 +89,7 @@ HogDbStatus<void>
 reconcile_address_native_token_age_helper(const Address &address,
                                           const uint128_t balance,
                                           const NativeTokenAge &age,
-                                          HogDbDAO &db)
+                                          BlockHeight tip_height, HogDbDAO &db)
 {
   const std::optional<uint128_t> summed = sum_native_tokens(age);
   if (!summed.has_value()) {
@@ -140,9 +142,19 @@ reconcile_address_native_token_age_helper(const Address &address,
       from_xdr(age.num_native_tokens[kNativeTokenAgeGroupReceived]);
 
   if (existing_total < balance) {
+    // Tokens the row does not account for arrived after the mempool last
+    // wrote it: the mempool writes ages in the background, so a restart can
+    // keep a block's balances without the ages the mempool derived from them,
+    // down to the all-zero row hog_db creates with a new balance. Count them
+    // as received at the tip, the latest they can have arrived, so a lagging
+    // row costs the account priority rather than handing it genesis age.
+    // Moving the received group's average up to the tip, rather than
+    // weighting it, keeps the arithmetic overflow-free and errs the same way.
     const uint128_t deficit = balance - existing_total;
-    new_age.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
-        to_xdr(to_schedule_before + deficit);
+    new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(received_before + deficit);
+    new_age.average_ages[kNativeTokenAgeGroupReceived] =
+        std::max(age.average_ages[kNativeTokenAgeGroupReceived], tip_height);
   }
   else {
     uint128_t excess = existing_total - balance;
@@ -174,7 +186,8 @@ reconcile_address_native_token_age_helper(const Address &address,
 }
 
 HogDbStatus<void>
-reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
+reconcile_address_native_token_age(HogDbDAO &db, const Address &address,
+                                   BlockHeight tip_height)
 {
   HogDbStatus<int128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
@@ -200,7 +213,8 @@ reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
     return age.error();
   }
 
-  return reconcile_address_native_token_age_helper(address, *balance, *age, db);
+  return reconcile_address_native_token_age_helper(address, *balance, *age,
+                                                   tip_height, db);
 }
 
 } // namespace
@@ -208,6 +222,17 @@ reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
 HogDbStatus<void>
 reconcile_startup_native_token_ages(HogDbDAO &db)
 {
+  // A volume with no tip yet holds no committed block, so any balance it has
+  // came from genesis.
+  const HogDbStatus<DbTip> tip = db.read_dbtip();
+  if (!tip.has_value() && tip.error() != HogDbCode::kNotFound) {
+    error("could not read the db tip for native-token age reconciliation: {}",
+          tip.error());
+    return tip.error();
+  }
+  const BlockHeight tip_height =
+      tip.has_value() ? tip->value.proposal_header.block_height : 0;
+
   // [ConcurrentSet<T>] requires [T] to be an unsigned integral type, which
   // [Address] is not. [ConcurrentMap<K, V>] places no constraints on [K], and
   // its inserts are lock-free, so the scan below can run fully parallel: the
@@ -227,9 +252,9 @@ reconcile_startup_native_token_ages(HogDbDAO &db)
   HogDbStatus<void> ret;
   std::mutex lock;
   addresses.for_each_parallel(
-      [&ret, &lock, &db](std::pair<const Address &, char &> entry) {
+      [&ret, &lock, &db, tip_height](std::pair<const Address &, char &> entry) {
         HogDbStatus<void> status =
-            reconcile_address_native_token_age(db, entry.first);
+            reconcile_address_native_token_age(db, entry.first, tip_height);
         if (!status.has_value()) {
           std::lock_guard<std::mutex> guard(lock);
           ret = status.error();
