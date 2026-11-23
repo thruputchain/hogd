@@ -813,7 +813,7 @@ TEST_F(StrictIndexerTest,
   // transaction emits twice from the first address and once from each other
   // address, and the last emitting address is never a root invocation.
   for (size_t i = 0; i < kTransactionCount; ++i) {
-    bodies.push_back(make_body(900 + i, static_cast<uint8_t>(0xA0 + i % 8)));
+    bodies.push_back(make_body(900 + i, static_cast<uint8_t>(0xA0 + (i % 8))));
     auto log = make_log(bodies.back(), std::nullopt);
     for (size_t seq = 0; seq < kEmitterFills.size(); ++seq) {
       TxEmittedEvent event{};
