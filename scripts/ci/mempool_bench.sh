@@ -13,6 +13,7 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+coordinator_stderr=
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -24,6 +25,14 @@ cleanup() {
   ci_enter_cleanup
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
+  if native_single_selected && [[ $exit_code == 0 ]]; then
+    local command
+    printf -v command 'python3 -I /workspace/scripts/ci/combined_multi_coordinator.py single 0 %q' "$coordinator_stderr"
+    if ! native_single_peer hog4 "$command"; then
+      echo 'Could not capture the stopped single-node coordinator INFO summary' >&2
+      exit_code=1
+    fi
+  fi
 
   exit "$exit_code"
 }
@@ -109,8 +118,29 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR
 echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
+start_single_coordinator() {
+  if ! native_single_selected; then
+    "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start "$@"
+    return
+  fi
+  native_single_check || return
+  local output
+  local -a paths
+  if ! output=$("$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" start "$@" 2>&1); then
+    printf '%s\n' "$output"
+    return 1
+  fi
+  printf '%s\n' "$output"
+  mapfile -t paths < <(sed -n 's/^CONTROL_STDERR_PATH=//p' <<<"$output")
+  if [[ ${#paths[@]} -ne 1 || ! ${paths[0]} =~ ^/tmp/hogd_stderr_[0-9]{1,24}_[0-9]{1,12}_[a-zA-Z0-9]{6}$ ]]; then
+    echo 'Missing or ambiguous single-node coordinator control stderr' >&2
+    return 1
+  fi
+  coordinator_stderr=${paths[0]}
+}
+
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+start_single_coordinator \
   chuckd.dev \
   -l info \
   --stack \

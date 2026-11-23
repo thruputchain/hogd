@@ -5,6 +5,8 @@
 CI_BENCH_HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CI_BENCH_REPO_ROOT=$(cd "$CI_BENCH_HARNESS_DIR/../.." && pwd)
 
+. "$CI_BENCH_HARNESS_DIR/combined_native_single_replay.sh"
+
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-60}
 CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 
@@ -57,6 +59,16 @@ ci_describe_exit_status() {
 ci_run_bench_step() {
   local name=$1
   shift
+  if native_single_selected; then
+    native_single_check || exit 2
+    if [[ $name != mempool_bench ]]; then
+      printf 'Historical single replay: skipped suite %s\n' "$name"
+      return 0
+    fi
+    local replay_status=0
+    native_single_execute "$@" || replay_status=$?
+    exit "$replay_status"
+  fi
   local status=0
   local restore_errexit=""
 
@@ -422,6 +434,10 @@ ci_control_shutdown_hosts() {
   local control_port=$2
   local host
   shift 2
+  if native_single_selected && native_single_check; then
+    native_single_shutdown_hosts "$@"
+    return
+  fi
 
   for host in "$@"; do
     "$control_cli" "$host" "$control_port" shutdown || true
