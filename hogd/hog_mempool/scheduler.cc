@@ -97,9 +97,9 @@ try_move_native_tokens_to_already_scheduled_group(
         block_height;
   }
   else {
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     native_token_ages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] =
-        compute_average_age(num_native_tokens, block_height,
+        AverageAge::compute(num_native_tokens, block_height,
                             current_already_scheduled, already_scheduled_age);
   }
   return true;
@@ -956,7 +956,7 @@ Scheduler::cycle_if_needed(NativeTokenAge &native_token_age,
     already_scheduled_average_older = (already_scheduled_age < to_schedule_age);
     combined_averages_older =
         (received > 0) &&
-        (compute_average_age(already_scheduled, already_scheduled_age, received,
+        (AverageAge::compute(already_scheduled, already_scheduled_age, received,
                              received_age) < to_schedule_age);
   }
   else {
@@ -1007,9 +1007,9 @@ Scheduler::cycle_groups(NativeTokenAge &current_averages)
   new_averages.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
       to_xdr(to_schedule_native_tokens + already_scheduled_native_tokens);
   if (to_schedule_native_tokens) {
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     new_averages.average_ages[kNativeTokenAgeGroupToSchedule] =
-        compute_average_age(to_schedule_native_tokens, to_schedule_age,
+        AverageAge::compute(to_schedule_native_tokens, to_schedule_age,
                             already_scheduled_native_tokens,
                             already_scheduled_age);
   }
@@ -1057,12 +1057,12 @@ Scheduler::process_transfers_helper(const Delta &delta,
   if (num_received > 0) {
     new_averages.num_native_tokens[kNativeTokenAgeGroupReceived] =
         to_xdr(received_native_tokens + num_received);
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we
+    // Note that [AverageAge::compute()] will never divide by 0 because we
     // check that [num_received] is not 0.
     new_averages.average_ages[kNativeTokenAgeGroupReceived] =
-        compute_average_age(received_native_tokens, received_age, num_received,
+        AverageAge::compute(received_native_tokens, received_age, num_received,
                             block_height);
   }
   else {

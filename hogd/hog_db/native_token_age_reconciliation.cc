@@ -55,7 +55,7 @@ is_prefixed_address_key(std::span<const std::byte> key, Prefix prefix)
 // would then accept the row as already reconciled and leave it in place. The
 // corruption would only surface much later, on an ordinary transfer into the
 // account, as a fatal denominator check inside the mempool scheduler's
-// compute_average_age() -- a different process, arbitrarily later, with
+// AverageAge::compute() -- a different process, arbitrarily later, with
 // nothing pointing back at the row. Detect it here instead, at startup, where
 // it can be reported against the address that carries it (#3683).
 std::optional<uint128_t>
@@ -150,7 +150,7 @@ reconcile_address_native_token_age_helper(const Address &address,
     new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
         to_xdr(received_before + deficit);
     new_age.average_ages[kNativeTokenAgeGroupReceived] =
-        compute_average_age(received_before,
+        AverageAge::compute(received_before,
                             age.average_ages[kNativeTokenAgeGroupReceived],
                             deficit, recovered_height);
   }
