@@ -1,6 +1,12 @@
 #!/bin/bash
 set -e
 
+if [[ ${GIT_BRANCH:-} == codex/combined-transport-provenance ]]; then
+  . "$(dirname "$0")/ci/combined_transport_provenance.sh"
+  combined_provenance_check
+  exit 0
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history

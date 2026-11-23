@@ -4,6 +4,7 @@
 
 CI_BENCH_HARNESS_DIR=$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)
 CI_BENCH_REPO_ROOT=$(cd "$CI_BENCH_HARNESS_DIR/../.." && pwd)
+. "$CI_BENCH_HARNESS_DIR/combined_transport_provenance.sh"
 
 CI_WAIT_PORT_TIMEOUT_SEC=${CI_WAIT_PORT_TIMEOUT_SEC:-60}
 CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
@@ -68,7 +69,14 @@ ci_run_bench_step() {
   esac
   set +e
   # [tee] is in the pipeline, so [$?] is tee's status; take the step's own.
-  "$@" 2>&1 | tee "$CI_BENCH_LOG_DIR/$name.log"
+  local -a invocation=("$@")
+  if combined_provenance_selected; then
+    case $name in
+    mempool_bench) invocation=(combined_provenance_run single "$@") ;;
+    mempool_multi_node_bench) invocation=(combined_provenance_run multi "$@") ;;
+    esac
+  fi
+  "${invocation[@]}" 2>&1 | tee "$CI_BENCH_LOG_DIR/$name.log"
   status=${PIPESTATUS[0]}
   [ -z "$restore_errexit" ] || set -e
 
