@@ -178,8 +178,12 @@ IndexerPullController::run(const std::stop_token &stop)
     indexer_phase::open(evidence, "indexer-phase-ingest.tsv");
     evidence << "request_state\trequest_height\tpull_outcome\tpull_ns\t"
                 "pulled_height\tevent_logs\tapply_outcome\tapply_ns\t"
-                "shape_validation_ns\tprepare_write_ns\tsync_write_ns\n"
-             << std::flush;
+                "shape_validation_ns\tprepare_write_ns\tsync_write_ns\t"
+                "rocks_batch_bytes";
+    for (const auto name : IndexDB::kRocksWriteColumns) {
+      evidence << '\t' << name;
+    }
+    evidence << '\n' << std::flush;
   }
 
   while (!stop.stop_requested()) {
@@ -256,12 +260,27 @@ IndexerPullController::run(const std::stop_token &stop)
         evidence << static_cast<int>(state) << '\t' << height << '\t'
                  << static_cast<int>(result.outcome()) << '\t' << pull_ns;
       };
+      const auto write_rocks = [&](const IndexDB::ApplyPhaseTimings &timings) {
+        if (timings.rocks_write) {
+          evidence << '\t' << timings.write_batch_bytes;
+          for (const auto value : *timings.rocks_write) {
+            evidence << '\t' << value;
+          }
+        } else {
+          evidence << "\t-1";
+          for (size_t i = 0; i < std::size(IndexDB::kRocksWriteColumns); ++i) {
+            evidence << "\t-1";
+          }
+        }
+        evidence << '\n' << std::flush;
+      };
       if (diagnostic && result.outcome() !=
                             EventIndexerPullOutcome::EventIndexerPullBlock &&
           other_rows < kMaxOtherRows) {
         ++other_rows;
         write_pull();
-        evidence << "\t-1\t-1\t-1\t-1\t-1\t-1\t-1\n" << std::flush;
+        evidence << "\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
+        write_rocks({});
       }
 
       switch (result.outcome()) {
@@ -279,11 +298,12 @@ IndexerPullController::run(const std::stop_token &stop)
             pulled.block.payload.event_logs.size();
         const auto apply_start = x23::fastclock::now();
         IndexDB::ApplyPhaseTimings timings;
+        const bool sample = diagnostic && block_rows < kMaxBlockRows;
         IndexerBlockApplyResult applied =
             db_.apply_committed_block(pulled.origin, std::move(pulled.block),
-                                      diagnostic ? &timings : nullptr)();
+                                      sample ? &timings : nullptr)();
         const auto apply_end = x23::fastclock::now();
-        if (diagnostic && block_rows < kMaxBlockRows) {
+        if (sample) {
           ++block_rows;
           write_pull();
           evidence << '\t' << pulled_height << '\t' << pulled_event_logs
@@ -291,7 +311,8 @@ IndexerPullController::run(const std::stop_token &stop)
                    << (apply_end - apply_start).count() << '\t'
                    << timings.shape_validation_ns << '\t'
                    << timings.prepare_write_ns << '\t'
-                   << timings.sync_write_ns << '\n' << std::flush;
+                   << timings.sync_write_ns;
+          write_rocks(timings);
         }
         if (applied.outcome() !=
                 IndexerBlockApplyOutcome::IndexerBlockApplied &&

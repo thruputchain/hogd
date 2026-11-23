@@ -27,8 +27,11 @@
 // NOLINTNEXTLINE(misc-header-include-cycle)
 #include <rocksdb/db.h>
 #include <rocksdb/env.h>
+#include <rocksdb/iostats_context.h>
 #include <rocksdb/iterator.h>
 #include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/perf_level.h>
 #include <rocksdb/slice.h>
 #include <rocksdb/sst_file_writer.h>
 #include <rocksdb/status.h>
@@ -68,6 +71,35 @@
 namespace hogd {
 
 namespace {
+
+class RocksWritePerfScope {
+  rocksdb::PerfLevel previous_ = rocksdb::GetPerfLevel();
+
+public:
+  RocksWritePerfScope() { rocksdb::SetPerfLevel(rocksdb::kEnableTime); }
+  ~RocksWritePerfScope() { rocksdb::SetPerfLevel(previous_); }
+
+  RocksWritePerfScope(const RocksWritePerfScope &) = delete;
+  RocksWritePerfScope &operator=(const RocksWritePerfScope &) = delete;
+
+  static IndexDB::RocksWriteCounters snapshot()
+  {
+    const auto &perf = *rocksdb::get_perf_context();
+    const auto &io = *rocksdb::get_iostats_context();
+    return {perf.write_wal_time,
+            perf.write_memtable_time,
+            perf.write_delay_time,
+            perf.write_scheduling_flushes_compactions_time,
+            perf.write_pre_and_post_process_time,
+            perf.write_thread_wait_nanos,
+            perf.db_mutex_lock_nanos,
+            perf.db_condition_wait_nanos,
+            io.write_nanos,
+            io.fsync_nanos,
+            io.range_sync_nanos,
+            io.bytes_written};
+  }
+};
 
 rocksdb::Options
 indexer_options(rocksdb::CompressionType compression_algorithm)
@@ -1516,13 +1548,26 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
 
     rocksdb::WriteOptions options;
     options.sync = true;
-    const auto write_start =
-        timings ? x23::fastclock::now() : x23::fastclock::time_point{};
-    const rocksdb::Status status = db_->Write(options, &batch);
-    if (timings) {
+    const rocksdb::Status status = [&] {
+      if (!timings) {
+        return db_->Write(options, &batch);
+      }
+      // The batch write is synchronous on this thread. Take differences
+      // without resetting either thread-local context or timing other writes.
+      const RocksWritePerfScope perf;
+      const auto before = perf.snapshot();
+      const auto write_start = x23::fastclock::now();
+      auto result = db_->Write(options, &batch);
       timings->sync_write_ns = (x23::fastclock::now() - write_start).count();
       timings->prepare_write_ns = (write_start - prepare_start).count();
-    }
+      timings->write_batch_bytes = batch.GetDataSize();
+      auto after = perf.snapshot();
+      for (size_t i = 0; i < after.size(); ++i) {
+        after[i] -= before[i];
+      }
+      timings->rocks_write = after;
+      return result;
+    }();
     if (!status.ok()) {
       error("failed to atomically apply committed indexer block {}: {}", height,
             status.ToString());

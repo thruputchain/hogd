@@ -1,5 +1,6 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
@@ -12,6 +13,7 @@
 #include <span>
 #include <stop_token>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <vector>
 
@@ -97,10 +99,20 @@ public:
   // synchronous RocksDB WriteBatch durability point.
   IndexerProgress durable_progress() const;
   IndexerEpochResult initialize_epoch(const IndexerOutboxOrigin &origin);
+  // Order matches the per-thread snapshot in db.cc and the diagnostic TSV.
+  static constexpr std::string_view kRocksWriteColumns[]{
+      "rocks_wal_ns", "rocks_memtable_ns", "rocks_write_delay_ns",
+      "rocks_schedule_ns", "rocks_pre_post_ns", "rocks_write_thread_wait_ns",
+      "rocks_db_mutex_ns", "rocks_db_condition_ns", "rocks_file_write_ns",
+      "rocks_file_sync_ns", "rocks_file_range_sync_ns", "rocks_file_bytes_written"};
+  using RocksWriteCounters = std::array<uint64_t, std::size(kRocksWriteColumns)>;
+
   struct ApplyPhaseTimings {
     int64_t shape_validation_ns = -1;
     int64_t prepare_write_ns = -1;
     int64_t sync_write_ns = -1;
+    size_t write_batch_bytes = 0;
+    std::optional<RocksWriteCounters> rocks_write;
   };
 
   x23::Async<IndexerBlockApplyResult>

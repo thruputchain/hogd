@@ -21,7 +21,7 @@ env(const char *name)
 inline bool
 requested()
 {
-  return env("GIT_BRANCH") == "codex/indexer-phase-probe";
+  return env("GIT_BRANCH") == "codex/indexer-rocks-phases";
 }
 
 inline bool
@@ -49,7 +49,7 @@ open(std::ofstream &output, std::string_view filename)
   }
   output.exceptions(std::ios::badbit | std::ios::failbit);
   output.open(directory / filename, std::ios::out | std::ios::noreplace);
-  output << "indexer_phase_v1\t" << version::kHogdGitHash << '\t'
+  output << "indexer_phase_v2\t" << version::kHogdGitHash << '\t'
          << env("GIT_BRANCH") << '\t' << env("HOG_XID") << '\t'
          << env("HOG_HOST") << '\n' << std::flush;
 }
