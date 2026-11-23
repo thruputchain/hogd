@@ -99,6 +99,8 @@ public:
     // directory that outlives the instance to restart a stack over the
     // database an earlier instance committed to.
     std::string db_directory;
+    ValidationRpcBatching validation_rpc_batching =
+        ValidationRpcBatching::Legacy;
   };
 
   // Brings up the whole stack and registers every subsystem with the mempool.

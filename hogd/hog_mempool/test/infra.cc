@@ -42,7 +42,8 @@ MempoolTestInfra::MempoolTestInfra(const Options &options)
                                 : options.db_directory),
     mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
         sched_db_server_->impl(), mempool_auth_server_->impl(),
-        options.network_hash, options.mempool_tx_size_limit))
+        options.network_hash, options.mempool_tx_size_limit,
+        /*num_exec_shards=*/1, options.validation_rpc_batching))
 {
   try {
     start(options);

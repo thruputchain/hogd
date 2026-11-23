@@ -39,11 +39,16 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
              NetworkHash network_hash, std::string_view bind_ip,
              uint16_t db_port, uint16_t event_port, uint16_t executor_port,
              uint16_t auth_port, uint16_t coordinator_port,
-             uint16_t gateway_port, uint16_t metrics_port)
+             uint16_t gateway_port, uint16_t metrics_port,
+             ValidationRpcBatching validation_rpc_batching)
 {
   Registration &registration = Registration::registration();
 
   info("NETWORK HASH={}", format_network_hash(network_hash));
+  if (validation_rpc_batching == ValidationRpcBatching::Bounded64) {
+    info("validation RPC batching: max_transactions={} target_record_bytes={}",
+         kValidationRpcMaxTransactions, kValidationRpcBatchTargetBytes);
+  }
 
   registration.set_network_hash(network_hash);
 
@@ -103,7 +108,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
   // TODO(jhumphri): Make [mempool_tx_size_limit] a command line arg.
   RpcServer<MempoolCoordinatorRpc> coord(
       db->impl(), auth->impl(), std::move(network_hash),
-      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
+      MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards,
+      validation_rpc_batching);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_coordinator_port =
       coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
@@ -151,6 +157,7 @@ print_usage(char *argv[])
 {
   std::println(
       "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
+      "[--validation-rpc-batching bounded64] "
       "--network-hash <base58> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
@@ -194,6 +201,8 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   uint16_t gateway_port = 0;
   uint16_t metrics_port = 0;
 
+  auto validation_rpc_batching = hogd::ValidationRpcBatching::Legacy;
+
   for (int i = 1; i < argc; ++i) {
     const std::string arg = argv[i];
     if (arg == "--metrics-port" && i + 1 < argc) {
@@ -213,6 +222,13 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     if (arg == "--num-exec-shards" && i + 1 < argc) {
       num_exec_shards = hogd::parse_integer_arg<size_t>("--num-exec-shards",
                                                         argv[++i], argv, usage);
+      continue;
+    }
+    if (arg == "--validation-rpc-batching" && i + 1 < argc &&
+        std::string_view(argv[i + 1]) == "bounded64" &&
+        validation_rpc_batching == hogd::ValidationRpcBatching::Legacy) {
+      ++i;
+      validation_rpc_batching = hogd::ValidationRpcBatching::Bounded64;
       continue;
     }
     if (arg == "--network-hash" && i + 1 < argc) {
@@ -270,5 +286,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   return hogd::mempool_init(*num_db_shards, *num_exec_shards,
                             std::move(*network_hash), bind_ip, db_port,
                             event_port, executor_port, auth_port,
-                            coordinator_port, gateway_port, metrics_port);
+                            coordinator_port, gateway_port, metrics_port,
+                            validation_rpc_batching);
 }

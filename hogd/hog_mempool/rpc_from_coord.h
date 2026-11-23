@@ -40,6 +40,7 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/hog_mempool/validation_rpc_batch.h"
 #include "hogd/loadgen/ingestion_diagnostics.h"
 #include "hogd/metrics/health.h"
 #include "hogd/metrics/metrics.h"
@@ -82,11 +83,14 @@ public:
 
   MempoolCoordinatorRpc(MempoolDbRpc *db_rpc, MempoolAuthRpc *auth_rpc,
                         NetworkHash network_hash, size_t mempool_tx_size_limit,
-                        size_t num_exec_shards = 1)
+                        size_t num_exec_shards = 1,
+                        ValidationRpcBatching validation_rpc_batching =
+                            ValidationRpcBatching::Legacy)
     : db_rpc_(db_rpc), auth_rpc_(auth_rpc),
       network_hash_(std::move(network_hash)),
       mempool_tx_size_limit_(static_cast<ssize_t>(mempool_tx_size_limit)),
-      num_exec_shards_(num_exec_shards)
+      num_exec_shards_(num_exec_shards),
+      validation_rpc_batching_(validation_rpc_batching)
   {
     Health::instance().set_status(Health::Status::kStarting)();
   }
@@ -845,6 +849,7 @@ private:
   const NetworkHash network_hash_;
   const ssize_t mempool_tx_size_limit_;
   const size_t num_exec_shards_;
+  const ValidationRpcBatching validation_rpc_batching_;
 
   std::unique_ptr<coord_sched_client_t> coord_client_;
   std::shared_ptr<db_sched_client_t> db_sched_client_;

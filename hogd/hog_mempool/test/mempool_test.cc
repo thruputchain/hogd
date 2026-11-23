@@ -2600,6 +2600,112 @@ TEST(Mempool, ValidateBatch)
             SchedulerValidationResult::SchedulerValidationOK);
 }
 
+TEST(ValidationRpcBatch, BoundsMatchSerializedRecord)
+{
+  const BlockID id = 7;
+  ProposedTransactionBatch txs(3);
+  txs[1].signed_tx.tx.invocation.calldata.resize(5, 0x3);
+  txs[1].nondeterministic_proposal_data.nondeterministic_bits.resize(7, 0x5);
+  const auto msg = x23::call_msg<ValidationRpcMethod>();
+  auto size = [&](size_t begin, size_t end) {
+    x23::span<const ProposedTransaction> view(txs.data() + begin, end - begin);
+    return x23::make_record(msg, id, view).size() - sizeof(uint32_t);
+  };
+  const auto first_two = size(0, 2);
+  const auto all_three = size(0, 3);
+  const auto exact = plan_validation_rpc_batches(id, txs, first_two, all_three);
+  ASSERT_EQ(exact.size(), 2U);
+  EXPECT_EQ(exact[0].start, 0U);
+  EXPECT_EQ(exact[0].end, 2U);
+  EXPECT_EQ(exact[1].start, 2U);
+  EXPECT_EQ(exact[1].end, 3U);
+  const auto below =
+      plan_validation_rpc_batches(id, txs, first_two - 1, all_three);
+  ASSERT_FALSE(below.empty());
+  EXPECT_EQ(below[0].end, 1U);
+  const auto singleton_size = size(1, 2);
+  const auto singletons =
+      plan_validation_rpc_batches(id, txs, size(0, 1), singleton_size);
+  ASSERT_EQ(singletons.size(), 3U);
+  EXPECT_EQ(singletons[1].start, 1U);
+  EXPECT_EQ(singletons[1].end, 2U);
+  EXPECT_THROW(plan_validation_rpc_batches(id, txs, size(0, 1),
+                                           singleton_size - 1),
+               x23::XdrBadInput);
+}
+
+TEST(ValidationRpcBatch, BalancedCountAndEmpty)
+{
+  const auto limit = kValidationRpcBatchTargetBytes;
+  EXPECT_TRUE(plan_validation_rpc_batches(1, {}, limit, limit).empty());
+  ProposedTransactionBatch txs(129);
+  const auto ranges = plan_validation_rpc_batches(1, txs, limit, limit);
+  ASSERT_EQ(ranges.size(), 3U);
+  for (size_t i = 0; i < ranges.size(); ++i) {
+    EXPECT_EQ(ranges[i].start, i * 43);
+    EXPECT_EQ(ranges[i].end, (i + 1) * 43);
+  }
+}
+
+TEST(Mempool, ValidateBatchBounded64)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs =
+      generate_unsigned_txs(fib_client, /*num_txs=*/128);
+
+  MempoolTestInfra server(MempoolTestInfra::Options{
+      .validation_rpc_batching = ValidationRpcBatching::Bounded64});
+
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  DbTip db_tip = get_tip.db_tip();
+  auto res_nominate = propose_block(server, db_tip);
+  ASSERT_EQ(res_nominate.outcome(),
+            SchedulerProposalOutcome::SchedulerProposalOK);
+
+  // We reuse the [Proposal] struct.
+  Proposal proposal = res_nominate.proposed_block().proposal;
+  {
+    get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+    EXPECT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    db_tip = get_tip.db_tip();
+    EXPECT_EQ(db_tip.value.proposal_header.block_height, 1);
+  }
+
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  auto res_validate =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               proposal)();
+  ASSERT_EQ(res_validate.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  SignedTransactionHashBatch proposed_hashes;
+  ASSERT_TRUE(parallel_batch_to_t(proposal.transactions.signed_hash,
+                                  proposed_hashes, kNoBatchSizeLimit)());
+  SignedTransactionBatch validated_txs;
+  ASSERT_TRUE(parallel_batch_to_t(res_validate.block().signed_transactions,
+                                  validated_txs, kNoBatchSizeLimit)());
+  ASSERT_EQ(validated_txs.size(), txs.size());
+  ASSERT_EQ(validated_txs.size(), proposed_hashes.size());
+  for (size_t i = 0; i < validated_txs.size(); ++i) {
+    EXPECT_EQ(sha256(validated_txs[i]), proposed_hashes[i]);
+  }
+  const BlockID validated_block = res_validate.block().block_id;
+  ASSERT_EQ(commit_block(server, validated_block, db_tip, proposal),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+  get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(get_tip.db_tip().id, validated_block);
+  EXPECT_EQ(get_tip.db_tip().value.proposal_header, proposal.header);
+}
+
 TEST(Mempool, ValidateRejectsBlockWithFailedTx)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);

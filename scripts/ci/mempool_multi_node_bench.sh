@@ -381,6 +381,15 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
+if [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
+      ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0} == 0 &&
+      ${HOG_XID:-} =~ ^hogd-(combined-metrics|e2e-payment-multi-node)-[0-9]+-[0-9]+$ ]]; then
+  echo 'Use bounded64 validation RPC batches for both mempools'
+  node0_mempool_cmd+=(--validation-rpc-batching bounded64)
+  node1_mempool_cmd+=(--validation-rpc-batching bounded64)
+fi
+
 node0_mempool_script=$(
   cat <<EOF
 set -euo pipefail

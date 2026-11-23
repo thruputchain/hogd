@@ -2344,7 +2344,11 @@ MempoolCoordinatorRpc::multiplex_large_validation_chunk_across_executors(
   co_await default_coropoll().pool_.bg();
 
   const std::vector<ChunkRange> chunks =
-      make_chunks_for_max_size(txs.size(), kChunkSize);
+      validation_rpc_batching_ == ValidationRpcBatching::Bounded64
+          ? plan_validation_rpc_batches(block_id, txs,
+                                        kValidationRpcBatchTargetBytes,
+                                        Executor::kMessageSize)
+          : make_chunks_for_max_size(txs.size(), kChunkSize);
 
   x23::Vec<x23::Async<SchedulerValidationOutcome>> handles;
   handles.reserve(chunks.size());
