@@ -5,7 +5,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <netinet/in.h>
 #include <optional>
+#ifdef __linux__
+#include <linux/tcp.h>
+#endif
 #include <sys/socket.h>
 #include <utility>
 
@@ -23,6 +27,39 @@
 #include <x23/x23.h>
 
 namespace x23::detail {
+
+namespace {
+
+void
+sample_tcp_state(BorrowedFd fd, RpcReplyFrameTiming &row) noexcept
+{
+#ifdef __linux__
+  tcp_info info{};
+  socklen_t len = sizeof(info);
+  if (getsockopt(fd.get(), IPPROTO_TCP, TCP_INFO, &info, &len) != 0 ||
+      len > sizeof(info))
+    return;
+#define X23_RPC_TCP_FIELD(index, name)                                         \
+  if (len >= offsetof(tcp_info, name) + sizeof(info.name)) {                   \
+    row.tcp_valid |= uint64_t{1} << index;                                     \
+    row.tcp[index] = info.name;                                                \
+  }
+  X23_RPC_TCP_FIELD(0, tcpi_rtt);
+  X23_RPC_TCP_FIELD(1, tcpi_rttvar);
+  X23_RPC_TCP_FIELD(2, tcpi_unacked);
+  X23_RPC_TCP_FIELD(3, tcpi_snd_cwnd);
+  X23_RPC_TCP_FIELD(4, tcpi_total_retrans);
+  X23_RPC_TCP_FIELD(5, tcpi_notsent_bytes);
+  X23_RPC_TCP_FIELD(6, tcpi_rwnd_limited);
+  X23_RPC_TCP_FIELD(7, tcpi_sndbuf_limited);
+#undef X23_RPC_TCP_FIELD
+#else
+  (void)fd;
+  (void)row;
+#endif
+}
+
+} // namespace
 
 RpcStreamImpl::RpcStreamImpl(CoroPoll &cp, UniqueFd fd)
   : cp_(cp), fd_(std::move(fd))
@@ -43,7 +80,13 @@ RpcStreamImpl::fail()
   if (!ss_.request_stop())
     return;
 
-  auto oldmap = std::exchange(cstate_->xidmap_, {});
+  auto cs = cstate_.take();
+  auto oldmap = std::exchange(cs->xidmap_, {});
+  if (!cs->frames_.empty()) {
+    cs->frames_.clear();
+    watching_frames_.store(false, std::memory_order_release);
+  }
+  cs.reset();
   for (auto [_xid, cb] : oldmap)
     cb(Buf{});
   cp_->poison(fd_);
@@ -101,15 +144,40 @@ RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
 }
 
 std::uint32_t
-RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
+RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a, const RpcQueueTiming *trace)
 {
   auto cs = cstate_.take();
   if (ss_.stop_requested())
     throw XdrException("RPC call on failed file descriptor");
   for (;;) {
     std::uint32_t xid = ++cs->lastxid_;
-    if (auto r = cs->xidmap_.emplace(xid, a); r.second) [[likely]]
+    if (auto r = cs->xidmap_.emplace(xid, a); r.second) [[likely]] {
+      if (trace && trace->report_frame) [[unlikely]] {
+        static std::atomic_uint64_t next_connection{1};
+        if (!cs->frame_connection_)
+          cs->frame_connection_ =
+              next_connection.fetch_add(1, std::memory_order_relaxed);
+        if (cs->frames_.size() < 64) {
+          try {
+            cs->frames_.emplace(
+                xid,
+                PendingFrame{.timing = {.block = trace->block,
+                                        .transaction = trace->transaction,
+                                        .phase = trace->phase,
+                                        .connection = cs->frame_connection_,
+                                        .xid = xid,
+                                        .outstanding = cs->xidmap_.size(),
+                                        .registered = rpc_queue_now(),
+                                        .framed = 0},
+                             .report = trace->report_frame});
+            watching_frames_.store(true, std::memory_order_release);
+          } catch (const std::bad_alloc &) {
+            // Missing samples are reported as incomplete by the reducer.
+          }
+        }
+      }
       return xid;
+    }
   }
 }
 
@@ -129,6 +197,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
       fail();
       co_return;
     }
+    const auto framed =
+        watching_frames_.load(std::memory_order_acquire) ? rpc_queue_now() : 0;
     rpc_msg msg;
     size_t hdrbytes;
     try {
@@ -145,7 +215,21 @@ RpcStreamImpl::reader(SLOC_ARG0)
         continue;
       auto cb = std::move(it->second);
       cs->xidmap_.erase(it);
+      std::optional<PendingFrame> observation;
+      if (framed) [[unlikely]] {
+        if (auto sample = cs->frames_.find(msg.xid);
+            sample != cs->frames_.end()) {
+          observation.emplace(sample->second).timing.framed = framed;
+          cs->frames_.erase(sample);
+          if (cs->frames_.empty())
+            watching_frames_.store(false, std::memory_order_release);
+        }
+      }
       cs.reset();
+      if (observation) [[unlikely]] {
+        sample_tcp_state(fd_, observation->timing);
+        observation->report(observation->timing);
+      }
       // Re-enqueing this on a CPU of the LLC it came from cuts RPC
       // throughput by about a factor of 10.  Seems to be much better
       // to resume the client directly.

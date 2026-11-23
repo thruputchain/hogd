@@ -7,7 +7,8 @@ if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
     exit 0
   fi
   case ${GIT_BRANCH:-} in
-  codex/payment-srpc-queue-phases | codex/payment-srpc-queue-control)
+  codex/payment-srpc-queue-phases | codex/payment-srpc-queue-control | \
+    codex/payment-rpc-frame-phases | codex/payment-rpc-frame-control)
     [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 &&
       ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
       ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]]

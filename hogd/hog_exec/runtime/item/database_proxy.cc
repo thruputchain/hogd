@@ -322,7 +322,8 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
       queue = x23::RpcQueueTiming{.block = block_id,
                                   .transaction = tx_id,
                                   .phase = 2,
-                                  .report = timing->queue_report};
+                                  .report = timing->queue_report,
+                                  .report_frame = timing->frame_report};
     }
     auto call = [&] {
       if (queue) {
@@ -346,6 +347,7 @@ DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
                                                                resumed)
               .count(),
           timing->queue_report,
+          timing->frame_report,
       };
     }
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
@@ -563,7 +565,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
       queue = x23::RpcQueueTiming{.block = block_id,
                                   .transaction = tx_id,
                                   .phase = 1,
-                                  .report = timing->queue_report};
+                                  .report = timing->queue_report,
+                                  .report_frame = timing->frame_report};
     }
     auto call = [&] {
       if (queue) {
@@ -586,6 +589,7 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                                                resumed)
               .count(),
           timing->queue_report,
+          timing->frame_report,
       };
     }
     switch (res.error()) {

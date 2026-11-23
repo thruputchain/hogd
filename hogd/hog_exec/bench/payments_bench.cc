@@ -276,6 +276,9 @@ run_bench_rep_coro(BenchmarkState &bs,
   const auto queue_report = record_phases && payment_db_queue::records
                                 ? payment_db_queue::report
                                 : nullptr;
+  const auto frame_report = record_phases && payment_db_queue::frame_records
+                                ? payment_db_queue::report_frame
+                                : nullptr;
   for (size_t nrep = 0U; nrep < num_reps; nrep++) {
     info("bench rep {} for {} txs (accts {}) on {} coros", nrep,
          num_txs_per_rep, bs.num_accounts_, concurrency);
@@ -307,6 +310,7 @@ run_bench_rep_coro(BenchmarkState &bs,
          std::span<PaymentPhaseSample> phase_samples,
          std::span<PaymentDbCallerSample> db_samples,
          decltype(queue_report) queue_report,
+         decltype(frame_report) frame_report,
          std::atomic<size_t> &db_sample_count) -> x23::Detached {
         co_await default_threadpool().bg();
         auto runtime_context = make_hog_exec_context();
@@ -340,8 +344,11 @@ run_bench_rep_coro(BenchmarkState &bs,
           if (sample) {
             phase_start = PaymentClock::now();
           }
-          DbRpcAwaitTiming frame_rpc{.queue_report = queue_report};
-          DbRpcAwaitTiming commit_rpc{.queue_report = queue_report};
+          const auto trace_frame = txid % 4096 == 0 ? frame_report : nullptr;
+          DbRpcAwaitTiming frame_rpc{.queue_report = queue_report,
+                                     .frame_report = trace_frame};
+          DbRpcAwaitTiming commit_rpc{.queue_report = queue_report,
+                                      .frame_report = trace_frame};
           SystemCallHandler::CommitPhaseTiming commit_timing{
               .frame_rpc = join_db ? &frame_rpc : nullptr,
               .commit_rpc = join_db ? &commit_rpc : nullptr,
@@ -394,7 +401,8 @@ run_bench_rep_coro(BenchmarkState &bs,
       }(bs, work_txs, num_txs_per_rep, base_height, next_tx, live, all_done,
                                                pending_events, events_done,
                                                phase_samples, db_samples,
-                                               queue_report, db_sample_count);
+                                               queue_report, frame_report,
+                                               db_sample_count);
     }
 
     all_done.wait(false, std::memory_order_acquire);
@@ -470,8 +478,11 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
       std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
   if (payment_db_queue_enabled("hog10") &&
       (num_accounts == 2 || num_accounts == 10) && server_addrs.size() == 2 &&
-      server_addrs[0] == "hog11" && server_addrs[1] == "hog8")
+      server_addrs[0] == "hog11" && server_addrs[1] == "hog8") {
     payment_db_queue::start(num_accounts, "client");
+    if (payment_db_frame_enabled("hog10"))
+      payment_db_queue::start_frames(num_accounts);
+  }
   BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;

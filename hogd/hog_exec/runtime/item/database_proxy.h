@@ -52,6 +52,7 @@ struct DbRpcAwaitTiming {
   int64_t client_await_ns{};
   int64_t threadpool_hop_ns{};
   void (*queue_report)(const x23::RpcQueueTiming &) noexcept {};
+  void (*frame_report)(const x23::RpcReplyFrameTiming &) noexcept {};
 };
 
 class DatabaseProxy {

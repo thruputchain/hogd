@@ -63,4 +63,40 @@ report(const x23::RpcQueueTiming &sample) noexcept
   }
 }
 
+static_assert(sizeof(x23::RpcReplyFrameTiming) == 17 * sizeof(uint64_t));
+inline constexpr size_t kFrameLimit = 2048;
+inline x23::RpcReplyFrameTiming *frame_records{};
+inline std::atomic<uint64_t> frame_count{};
+
+inline void
+start_frames(uint32_t accounts)
+{
+  CHECK(frame_records == nullptr);
+  const char *dump_dir = std::getenv("HOG_DUMP_DIR");
+  CHECK(dump_dir && *dump_dir);
+  const auto path =
+      std::format("{}/payment-db-frame-client-{}.bin", dump_dir, accounts);
+  const int fd =
+      open(path.c_str(), O_CREAT | O_EXCL | O_CLOEXEC | O_RDWR, 0600);
+  CHECK(fd >= 0);
+  constexpr auto bytes = (kFrameLimit + 1) * sizeof(x23::RpcReplyFrameTiming);
+  CHECK(ftruncate(fd, bytes) == 0);
+  void *mapping =
+      mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, fd, 0);
+  close(fd);
+  CHECK(mapping != MAP_FAILED);
+  frame_records = static_cast<x23::RpcReplyFrameTiming *>(mapping);
+}
+
+inline void
+report_frame(const x23::RpcReplyFrameTiming &sample) noexcept
+{
+  const auto index = frame_count.fetch_add(1, std::memory_order_relaxed);
+  if (index < kFrameLimit)
+    std::construct_at(&frame_records[index], sample);
+  else if (index == kFrameLimit)
+    std::construct_at(&frame_records[index],
+                      x23::RpcReplyFrameTiming{.phase = 99});
+}
+
 } // namespace hogd::payment_db_queue

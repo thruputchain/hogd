@@ -1,10 +1,25 @@
 #pragma once
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <cstdint>
 
 namespace x23 {
+
+struct RpcReplyFrameTiming {
+  uint64_t block;
+  uint64_t transaction;
+  uint64_t phase;
+  uint64_t connection;
+  uint64_t xid;
+  uint64_t outstanding;
+  uint64_t registered;
+  uint64_t framed;
+  // Linux TCP_INFO field availability, wire order documented by the consumer.
+  uint64_t tcp_valid{};
+  std::array<uint64_t, 8> tcp{};
+};
 
 // A diagnostic tag is copied with a queued record, without retaining a
 // coroutine, buffer view, or pointer into a request handler.
@@ -19,6 +34,7 @@ struct RpcQueueTiming {
   uint64_t dequeued{};
   uint64_t write_attempt{};
   void (*report)(const RpcQueueTiming &) noexcept {};
+  void (*report_frame)(const RpcReplyFrameTiming &) noexcept {};
 };
 
 inline uint64_t

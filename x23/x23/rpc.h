@@ -330,16 +330,25 @@ protected:
 
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
-  [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
+  [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &,
+                                           const RpcQueueTiming *);
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
 private:
+  struct PendingFrame {
+    RpcReplyFrameTiming timing;
+    void (*report)(const RpcReplyFrameTiming &) noexcept;
+  };
+
   struct ClientState {
     std::uint32_t lastxid_{};
     std::map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_;
+    std::map<std::uint32_t, PendingFrame> frames_;
+    uint64_t frame_connection_{};
   };
   MVar<ClientState> cstate_;
+  std::atomic_bool watching_frames_{false};
 
   void send_msg(const rpc_msg &msg, const is_xdr_type auto &...x)
   {
@@ -462,7 +471,7 @@ struct RpcStream : public detail::RpcStreamImpl {
     // make_record throws because of illegal XDR values (such as an
     // invalid union discriminant).
     Awaitable<Buf> a;
-    putbe(record.data() + 4, msg.xid = gen_call_xid(a));
+    putbe(record.data() + 4, msg.xid = gen_call_xid(a, timing));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
     cp_->awrite(fd_, std::move(record), timing);

@@ -42,21 +42,32 @@ payment_db_queue_run(std::string_view host)
 }
 
 inline bool
-payment_db_queue_enabled(std::string_view host)
+payment_db_frame_enabled(std::string_view host)
 {
   return payment_db_env_matches("GIT_BRANCH",
-                                "codex/payment-srpc-queue-phases") &&
+                                "codex/payment-rpc-frame-phases") &&
+         payment_db_queue_run(host);
+}
+
+inline bool
+payment_db_queue_enabled(std::string_view host)
+{
+  return (payment_db_env_matches("GIT_BRANCH",
+                                 "codex/payment-srpc-queue-phases") ||
+          payment_db_env_matches("GIT_BRANCH",
+                                 "codex/payment-rpc-frame-phases") ||
+          payment_db_env_matches("GIT_BRANCH",
+                                 "codex/payment-rpc-frame-control")) &&
          payment_db_queue_run(host);
 }
 
 inline bool
 payment_db_queue_pair(std::string_view host)
 {
-  return (payment_db_env_matches("GIT_BRANCH",
-                                 "codex/payment-srpc-queue-phases") ||
-          payment_db_env_matches("GIT_BRANCH",
-                                 "codex/payment-srpc-queue-control")) &&
-         payment_db_queue_run(host);
+  return payment_db_queue_enabled(host) ||
+         (payment_db_env_matches("GIT_BRANCH",
+                                 "codex/payment-srpc-queue-control") &&
+          payment_db_queue_run(host));
 }
 
 inline bool
