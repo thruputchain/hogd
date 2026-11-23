@@ -48,6 +48,11 @@ public:
     return status;
   }
 
+  CIServerErrorCode stop_server_checked()
+  {
+    return client_.ciserver_stop(kHogdGitHash);
+  }
+
   void stop_server() { client_.ciserver_stop(kHogdGitHash); }
 
   void shutdown_server() { client_.ciserver_shutdown(kHogdGitHash); }
