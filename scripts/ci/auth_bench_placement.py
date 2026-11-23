@@ -30,9 +30,12 @@ def check_topology():
     nodes = set()
     for cpu in range(8):
         path = Path(f"/sys/devices/system/cpu/cpu{cpu}")
-        [node] = path.glob("node[0-9]*")
-        [llc] = [entry for entry in (path / "cache").glob("index*")
-                 if (entry / "level").read_text().strip() == "3"]
+        cpu_nodes = list(path.glob("node[0-9]*"))
+        cpu_caches = [entry for entry in (path / "cache").glob("index*")
+                      if (entry / "level").read_text().strip() == "3"]
+        require(len(cpu_nodes) == len(cpu_caches) == 1,
+                f"CPU {cpu} lacks a unique NUMA node or last-level cache")
+        [node], [llc] = cpu_nodes, cpu_caches
         nodes.add(node.name)
         caches.add((llc / "shared_cpu_list").read_text().strip())
         siblings.add((path / "topology/thread_siblings_list").read_text().strip())
@@ -64,7 +67,13 @@ def collect_rows(report, expected, cores):
 
 
 def run(binary, destination, flags):
-    check_topology()
+    try:
+        check_topology()
+    except (OSError, ValueError) as error:
+        print(f"Auth benchmark placement unavailable: {error}; running stock benchmark",
+              file=sys.stderr)
+        subprocess.run([binary, *flags], check=True)
+        return
     listing = subprocess.run([binary, "--benchmark_list_tests=true"], check=True,
                              stdout=subprocess.PIPE, text=True).stdout.splitlines()
     cases = set(listing)
