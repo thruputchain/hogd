@@ -8,6 +8,7 @@ ci_enable_error_trace
 
 asan_coordinator_diagnostic=
 asan_proposal_timings=
+asan_sender_sampler_pid=
 coordinator_stats=()
 source "$(dirname "$0")/asan_coordinator_stages.sh"
 if ci_asan_coordinator_branch; then
@@ -19,7 +20,7 @@ if ci_asan_coordinator_branch; then
   asan_coordinator_diagnostic="$HOG_DUMP_DIR/asan-coordinator-stages"
   case $GIT_BRANCH in
   codex/asan-chuckd-propose-timing) asan_proposal_timings=1 ;;
-  codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive)
+  codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive | codex/asan-chuckd-tcp-info)
     asan_proposal_timings=1
     coordinator_stats=(--rpc-log-stats)
     ;;
@@ -38,8 +39,24 @@ kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
 }
 
+stop_asan_sender_sampler() {
+  [[ -n $asan_sender_sampler_pid ]] || return 0
+  local status=0 count
+  local stop="$asan_coordinator_diagnostic/.stop-sender-tcp-info"
+  : >"$stop"
+  wait "$asan_sender_sampler_pid" || status=$?
+  asan_sender_sampler_pid=
+  rm -- "$stop"
+  count=$(wc -l <"$asan_coordinator_diagnostic/sender-tcp-info.jsonl")
+  printf 'source=%s\nrun=%s\nexit_status=%s\nsamples=%s\n' \
+    "$GIT_COMMIT" "$HOG_XID" "$status" "$count" \
+    >"$asan_coordinator_diagnostic/sender-tcp-info-status.txt"
+}
+
 cleanup() {
   local exit_code=$1
+
+  stop_asan_sender_sampler || :
 
   ci_enter_cleanup
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
@@ -187,6 +204,14 @@ if [[ -n $asan_proposal_timings ]]; then
     mempool_env+=(HOGD_ASAN_PROPOSAL_ENCODE_TIMING=1)
   fi
 fi
+if [[ ${GIT_BRANCH:-} == codex/asan-chuckd-tcp-info ]]; then
+  mempool_env+=(HOGD_ASAN_SENDER_TCP_INFO=1)
+  python3 "$(dirname "$0")/asan_sender_tcp_info.py" \
+    --local-ip "$(hog_ip hog10)" --peer-ip "$(hog_ip hog4)" --seconds 185 \
+    --stop-file "$asan_coordinator_diagnostic/.stop-sender-tcp-info" \
+    >"$asan_coordinator_diagnostic/sender-tcp-info.jsonl" 2>/dev/null &
+  asan_sender_sampler_pid=$!
+fi
 set +e
 "${mempool_env[@]}" timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
@@ -201,6 +226,7 @@ set +e
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
 mempool_status=$?
 set -e
+stop_asan_sender_sampler || :
 
 coordinator_status=0
 if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
@@ -254,7 +280,7 @@ if [[ -n $asan_coordinator_diagnostic ]]; then
       "$(hog_ip hog4)" "$(hog_ip hog10)" "$MEMPOOL_COORDINATOR_PORT" \
       <"$asan_coordinator_diagnostic/info.json"
   fi
-  if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive ]]; then
+  if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive || $GIT_BRANCH == codex/asan-chuckd-tcp-info ]]; then
     python3 -c 'import json, sys; sys.exit(not json.load(sys.stdin).get("proposal_receive"))' \
       <"$asan_coordinator_diagnostic/info.json" || {
       echo 'No large scheduler reply receive receipts were collected.' >&2

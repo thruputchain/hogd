@@ -9,7 +9,8 @@ trap 'fail "failed at line $LINENO"' ERR
 [[ $# == 0 && $(pwd -P) == /workspace &&
 (${GIT_BRANCH:-} == codex/asan-chuckd-propose-timing ||
 ${GIT_BRANCH:-} == codex/asan-chuckd-rpc-breakdown ||
-${GIT_BRANCH:-} == codex/asan-chuckd-proposal-receive) &&
+${GIT_BRANCH:-} == codex/asan-chuckd-proposal-receive ||
+${GIT_BRANCH:-} == codex/asan-chuckd-tcp-info) &&
 ${HOG_HOST:-} == hog4 && ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
 ${HOG_XID:-} =~ ^hogd-mempool-bench-[1-9][0-9]*-[1-9][0-9]*$ &&
 ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]] ||
@@ -42,7 +43,7 @@ git -C "$scratch" apply --unidiff-zero "$patch"
 printf '%s  %s\n' 0913591b5ff676b272d1e00f0d82627038591f6e2e0e2382e6e04c27b66792ab "$replacement" |
   sha256sum -c >&2
 overlay_paths=("$proposal" "$replacement")
-if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive ]]; then
+if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive || $GIT_BRANCH == codex/asan-chuckd-tcp-info ]]; then
   scheduler="$chuckd/sub/sched/schedcoord.go"
   receive_patch=/workspace/scripts/ci/asan_chuckd_receive.patch
   printf '%s  %s\n' \

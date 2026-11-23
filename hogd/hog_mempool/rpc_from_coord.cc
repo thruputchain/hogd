@@ -6,6 +6,7 @@
 #include <chrono>
 #include <cstddef>
 #include <cstdlib>
+#include <ctime>
 #include <exception>
 #include <filesystem>
 #include <fstream>
@@ -1705,6 +1706,17 @@ encode_async_rpc_reply(const MempoolCoordinatorRpc &, SchedulerProposeProcedure,
   auto record = x23::make_record(msg, result);
   const auto elapsed = std::chrono::duration_cast<std::chrono::nanoseconds>(
       std::chrono::steady_clock::now() - start);
+  if (const char *enabled = std::getenv("HOGD_ASAN_SENDER_TCP_INFO");
+      enabled && std::string_view(enabled) == "1") {
+    timespec end{};
+    if (clock_gettime(CLOCK_MONOTONIC, &end) == 0) {
+      const int64_t end_ns = end.tv_sec * 1'000'000'000LL + end.tv_nsec;
+      info("MEMPOOL_PROPOSAL_ENCODE_CLOCK xid={} peer_port={} local_port={} "
+           "height={} block_id={} end_mono_ns={}",
+           msg.xid, ports.peer, ports.local, block.proposal.header.block_height,
+           block.block_id, end_ns);
+    }
+  }
   info("MEMPOOL_PROPOSAL_ENCODE xid={} peer_port={} local_port={} height={} "
        "block_id={} tx_count={} record_bytes={} encode_ns={}",
        msg.xid, ports.peer, ports.local, block.proposal.header.block_height,
