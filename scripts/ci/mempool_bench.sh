@@ -50,12 +50,12 @@ cleanup() {
   if [[ $event_tmpfs_active == 1 ]]; then
     # Reclaim before later hog9 suites, after the Event child has been reaped.
     if ! timeout 30 "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" stop_checked ||
-       ! event_tmpfs_peer '
+      ! event_tmpfs_peer '
          df -Pk -- "$path"
          rm -rf --one-file-system -- "$path"
          [[ ! -e $path && ! -L $path ]]
          df -Pk -- /bench-single-node-event
-       ' > "${HOG_DUMP_DIR:?}/storage-single-node-event-final.txt"; then
+       ' >"${HOG_DUMP_DIR:?}/storage-single-node-event-final.txt"; then
       echo 'Could not reclaim the isolated Event scratch before later suites' >&2
       if [[ $exit_code == 0 ]]; then
         exit_code=1
@@ -64,12 +64,12 @@ cleanup() {
   fi
   if [[ $coordinator_tmpfs_active == 1 ]]; then
     if ! timeout --kill-after=3s 30s "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" stop_checked ||
-       ! coordinator_tmpfs_peer '
+      ! coordinator_tmpfs_peer '
          df -Pk -- "$path"
          rm -rf --one-file-system -- "$path"
          [[ ! -e $path && ! -L $path ]]
          df -Pk -- /bench-coordinator
-       ' > "${HOG_DUMP_DIR:?}/storage-single-node-final.txt"; then
+       ' >"${HOG_DUMP_DIR:?}/storage-single-node-final.txt"; then
       echo 'Could not reclaim the isolated coordinator scratch before later suites' >&2
       if [[ $exit_code == 0 ]]; then
         exit_code=1
@@ -131,9 +131,9 @@ kill_stale_processes
 echo 'create event and indexer work dirs'
 if [[ -n ${HOGD_CI_SINGLE_NODE_EVENT_DIR:-} ]]; then
   [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-     ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
-     ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
-     $HOGD_CI_SINGLE_NODE_EVENT_DIR == /bench-single-node-event/data ]]
+    ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
+    ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
+    $HOGD_CI_SINGLE_NODE_EVENT_DIR == /bench-single-node-event/data ]]
   : "${HOG_DUMP_DIR:?}"
   event_tmpfs_peer '[[ -z $(ls -A -- "$path") ]]'
   EVENT_WORK_DIR=$HOGD_CI_SINGLE_NODE_EVENT_DIR
@@ -178,9 +178,9 @@ $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "
 coordinator_data_dir="$WORK_DIR/chuckd-storage"
 if [[ -n ${HOGD_CI_COORDINATOR_DATA_DIR:-} ]]; then
   [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-     ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
-     ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
-     $HOGD_CI_COORDINATOR_DATA_DIR == /bench-coordinator/single-node ]]
+    ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
+    ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
+    $HOGD_CI_COORDINATOR_DATA_DIR == /bench-coordinator/single-node ]]
   : "${HOG_DUMP_DIR:?}"
   coordinator_tmpfs_peer '[[ -z $(ls -A -- "$path") ]]'
   coordinator_tmpfs_active=1

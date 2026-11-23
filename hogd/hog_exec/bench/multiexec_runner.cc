@@ -315,12 +315,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'a':
       num_accounts = std::stoi(optarg);
       break;
-    case 'b': {
+    case 'b':
+    {
       std::string_view value(optarg);
       if (batch_size || (value != "1" && value != "5" && value != "10")) {
         usage(argv);
       }
-      batch_size = value == "10" ? 10 : static_cast<unsigned>(value.front() - '0');
+      batch_size =
+          value == "10" ? 10 : static_cast<unsigned>(value.front() - '0');
       break;
     }
     case 'E':

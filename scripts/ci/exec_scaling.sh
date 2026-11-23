@@ -38,8 +38,8 @@ ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
 MULTIEXEC_RUNNER=("./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner")
 if [[ ${HOGD_MULTIEXEC_EVENT_ROOT+x} ]]; then
   if [[ ${HOGD_CI_CONTAINER:-} != 1 ||
-        $HOGD_MULTIEXEC_EVENT_ROOT != /bench-multiexec-event/trials ||
-        ! -r /opt/hog-ci/multiexec-event-tmpfs.sh ]]; then
+    $HOGD_MULTIEXEC_EVENT_ROOT != /bench-multiexec-event/trials ||
+    ! -r /opt/hog-ci/multiexec-event-tmpfs.sh ]]; then
     echo 'Invalid multiexec Event tmpfs configuration' >&2
     exit 1
   fi

@@ -367,8 +367,7 @@ public:
         {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
          format_advertised_address(mempool_ip, sched_event_port), "--work-dir",
          event_work_dir.empty() ? work_dir_str : event_work_dir,
-         "--indexer-port",
-         std::to_string(kBenchEventIndexerPort)});
+         "--indexer-port", std::to_string(kBenchEventIndexerPort)});
     const std::string event_ip = hog_ip(server_addrs[server_idx]);
     server_idx++;
 

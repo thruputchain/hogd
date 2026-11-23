@@ -22,7 +22,8 @@ usage(char *argv[])
   std::println("  shutdown        - Shutdown the control server");
   std::println("  start [--cores <cpu-list>] <program> <args...>");
   std::println("  stop            - Stop a process");
-  std::println("  stop_checked    - Require confirmation that all processes stopped");
+  std::println(
+      "  stop_checked    - Require confirmation that all processes stopped");
   std::println("  wait            - Wait for the most recent process to exit");
   std::println("  expect_running  - Check if a process is running");
   std::println("  clear_work_dir  - Clear the work directory");
