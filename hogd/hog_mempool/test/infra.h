@@ -101,6 +101,7 @@ public:
     std::string db_directory;
     ValidationRpcBatching validation_rpc_batching =
         ValidationRpcBatching::Legacy;
+    bool second_executor = false;
   };
 
   // Brings up the whole stack and registers every subsystem with the mempool.
@@ -138,9 +139,8 @@ public:
       // mempool_coord_server_.shut_down();
 
       // TODO(jhumphri): Implement clean shutdown for all RPC servers.
-      // We need to call [executor_.shut_down()] so that the [Executor]
-      // destructor does not block.
-      executor_.shut_down();
+      // Shut down each executor before its destructor waits.
+      shutdown_executors();
 
       // coordinator_sched_server_.shut_down();
 
@@ -471,6 +471,18 @@ private:
         host_port_to_sockaddr(kAddress, sched_exec_server_.port());
     executor_.start(/*bind_ip=*/"127.0.0.1", /*self_port=*/0,
                     coordinator_sockaddr);
+    if (second_executor_) {
+      second_executor_->start(/*bind_ip=*/"127.0.0.1", /*self_port=*/0,
+                              coordinator_sockaddr);
+    }
+  }
+
+  void shutdown_executors()
+  {
+    executor_.shut_down();
+    if (second_executor_) {
+      second_executor_->shut_down();
+    }
   }
 
   x23::Async<void> register_coordinator_with_mempool()
@@ -520,6 +532,7 @@ private:
 
   // The executor server.
   Executor executor_;
+  std::optional<Executor> second_executor_;
 
   // This is a fake coordinator server that the mempool notifies when txs
   // become vetted.

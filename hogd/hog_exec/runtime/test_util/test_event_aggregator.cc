@@ -170,6 +170,21 @@ TestEventAggregator::get_events(BlockID block_id, TransactionID tx_id)
   co_return std::optional<TxEventLog>(it->second.at(tx_id));
 }
 
+x23::Async<std::vector<TransactionID>>
+TestEventAggregator::transaction_ids(BlockID block_id)
+{
+  x23::CoroGuard guard;
+  co_await guard(lock_);
+  std::vector<TransactionID> ids;
+  if (auto it = events_.find(block_id); it != events_.end()) {
+    ids.reserve(it->second.size());
+    for (const auto &[id, log] : it->second) {
+      ids.push_back(id);
+    }
+  }
+  co_return ids;
+}
+
 x23::Async<std::optional<TxEventLog>>
 TestEventAggregator::get_events_by_hash(BlockID block_id,
                                         SHA256Hash const &tx_hash)

@@ -55,6 +55,8 @@ public:
   x23::Async<std::optional<TxEventLog>> get_events(BlockID block_id,
                                                    TransactionID tx_id);
 
+  x23::Async<std::vector<TransactionID>> transaction_ids(BlockID block_id);
+
   // Get events by transaction hash (linear scan over the block's transactions)
   x23::Async<std::optional<TxEventLog>>
   get_events_by_hash(BlockID block_id, SHA256Hash const &tx_hash);

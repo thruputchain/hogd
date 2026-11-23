@@ -43,9 +43,12 @@ MempoolTestInfra::MempoolTestInfra(const Options &options)
     mempool_coord_server_(RpcServer<MempoolCoordinatorRpc>(
         sched_db_server_->impl(), mempool_auth_server_->impl(),
         options.network_hash, options.mempool_tx_size_limit,
-        /*num_exec_shards=*/1, options.validation_rpc_batching))
+        options.second_executor ? 2 : 1, options.validation_rpc_batching))
 {
   try {
+    if (options.second_executor) {
+      second_executor_.emplace();
+    }
     start(options);
   } catch (...) {
     prepare_for_failed_construction();
@@ -168,6 +171,7 @@ MempoolTestInfra::start(const Options &options)
 void
 MempoolTestInfra::prepare_for_failed_construction() noexcept
 {
+  shutdown_executors();
   try {
     // The scheduler only exists once the coordinator intro completed the
     // mempool's finish_init(); a rejected intro never registers one.
@@ -177,7 +181,6 @@ MempoolTestInfra::prepare_for_failed_construction() noexcept
       sched_db_server_.impl()->reset_scheduler()();
       scheduler->shut_down()();
     }
-    executor_.shut_down();
   } catch (const std::exception &e) {
     error("MempoolTestInfra failed-start cleanup received exception: {}",
           e.what());

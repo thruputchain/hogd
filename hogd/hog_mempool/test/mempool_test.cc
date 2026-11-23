@@ -2647,14 +2647,22 @@ TEST(ValidationRpcBatch, BalancedCountAndEmpty)
   }
 }
 
-TEST(Mempool, ValidateBatchBounded64)
+TEST(Mempool, ValidateBatchBounded64AcrossExecutors)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  // Each inner group must contain two RPCs at width 64. Give each
+  // available worker 128 transactions within one outer validation chunk.
+  const size_t tx_count = 128 * available_parallelism();
+  if (tx_count > MempoolCoordinatorRpc::kNumTxsPerNominationChunk) {
+    GTEST_SKIP() << "Too many workers for one validation fixture chunk";
+  }
   const SignedTransactionBatch txs =
-      generate_unsigned_txs(fib_client, /*num_txs=*/128);
+      generate_unsigned_txs(fib_client, tx_count);
 
-  MempoolTestInfra server(MempoolTestInfra::Options{
-      .validation_rpc_batching = ValidationRpcBatching::Bounded64});
+  MempoolTestInfra server(
+      MempoolTestInfra::Options{.validation_rpc_batching =
+                                    ValidationRpcBatching::Bounded64,
+                                .second_executor = true});
 
   ValidatorID validator_id{};
   server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
@@ -2698,6 +2706,18 @@ TEST(Mempool, ValidateBatchBounded64)
     EXPECT_EQ(sha256(validated_txs[i]), proposed_hashes[i]);
   }
   const BlockID validated_block = res_validate.block().block_id;
+  const auto event_ids =
+      server.event_aggregator().transaction_ids(validated_block)();
+  ASSERT_EQ(event_ids.size(), txs.size());
+  // ExecutorMempoolRpc stores its registration ID in the top 16 bits.
+  const auto first = std::ranges::count_if(event_ids, [](TransactionID id) {
+    return (id >> 48) == 0;
+  });
+  const auto second = std::ranges::count_if(event_ids, [](TransactionID id) {
+    return (id >> 48) == 1;
+  });
+  EXPECT_EQ(first, tx_count / 2);
+  EXPECT_EQ(second, tx_count / 2);
   ASSERT_EQ(commit_block(server, validated_block, db_tip, proposal),
             SchedulerCommitOutcome::SchedulerCommitOK);
   get_tip = server.mempool_coord_rpc().schedcoord_get_tip()();
