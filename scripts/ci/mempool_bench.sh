@@ -9,6 +9,8 @@ ci_enable_error_trace
 asan_coordinator_diagnostic=
 asan_proposal_timings=
 asan_sender_sampler_pid=
+asan_sender_enabled=
+asan_cc_mode=
 coordinator_stats=()
 source "$(dirname "$0")/asan_coordinator_stages.sh"
 if ci_asan_coordinator_branch; then
@@ -20,9 +22,16 @@ if ci_asan_coordinator_branch; then
   asan_coordinator_diagnostic="$HOG_DUMP_DIR/asan-coordinator-stages"
   case $GIT_BRANCH in
   codex/asan-chuckd-propose-timing) asan_proposal_timings=1 ;;
-  codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive | codex/asan-chuckd-tcp-info)
+  codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive | codex/asan-chuckd-tcp-info | codex/asan-proposal-cc-stock | codex/asan-proposal-cc-reno)
     asan_proposal_timings=1
     coordinator_stats=(--rpc-log-stats)
+    ;;
+  esac
+  case $GIT_BRANCH in
+  codex/asan-chuckd-tcp-info) asan_sender_enabled=1 ;;
+  codex/asan-proposal-cc-stock | codex/asan-proposal-cc-reno)
+    asan_sender_enabled=1
+    asan_cc_mode=${GIT_BRANCH##*-}
     ;;
   esac
 fi
@@ -175,6 +184,9 @@ start_coordinator() {
 
 if [[ -n $asan_coordinator_diagnostic ]]; then
   mkdir -m 700 "$asan_coordinator_diagnostic"
+  if [[ -n $asan_cc_mode ]]; then
+    ci_asan_proposal_cc_preflight "$asan_cc_mode" >"$asan_coordinator_diagnostic/tcp-cc-preflight.txt"
+  fi
   if [[ -n $asan_proposal_timings ]]; then
     timeout -k 5 240 python3 /opt/hog-ci/peer.py hog4 \
       'bash /workspace/scripts/ci/asan_chuckd_propose.sh' </dev/null >"$asan_coordinator_diagnostic/chuckd-build.txt"
@@ -204,12 +216,19 @@ if [[ -n $asan_proposal_timings ]]; then
     mempool_env+=(HOGD_ASAN_PROPOSAL_ENCODE_TIMING=1)
   fi
 fi
-if [[ ${GIT_BRANCH:-} == codex/asan-chuckd-tcp-info ]]; then
+if [[ -n $asan_sender_enabled ]]; then
   mempool_env+=(HOGD_ASAN_SENDER_TCP_INFO=1)
+  congestion_args=()
+  sampler_receipt=/dev/null
+  if [[ -n $asan_cc_mode ]]; then
+    mempool_env+=("HOGD_ASAN_PROPOSAL_CC=$asan_cc_mode" "HOGD_ASAN_PROPOSAL_CC_PEER=$(hog_ip hog4)")
+    congestion_args=(--congestion-mode "$asan_cc_mode")
+    sampler_receipt="$asan_coordinator_diagnostic/tcp-cc-sampler.txt"
+  fi
   python3 "$(dirname "$0")/asan_sender_tcp_info.py" \
     --local-ip "$(hog_ip hog10)" --peer-ip "$(hog_ip hog4)" --seconds 185 \
-    --stop-file "$asan_coordinator_diagnostic/.stop-sender-tcp-info" \
-    >"$asan_coordinator_diagnostic/sender-tcp-info.jsonl" 2>/dev/null &
+    --stop-file "$asan_coordinator_diagnostic/.stop-sender-tcp-info" "${congestion_args[@]}" \
+    >"$asan_coordinator_diagnostic/sender-tcp-info.jsonl" 2>"$sampler_receipt" &
   asan_sender_sampler_pid=$!
 fi
 set +e
@@ -280,12 +299,18 @@ if [[ -n $asan_coordinator_diagnostic ]]; then
       "$(hog_ip hog4)" "$(hog_ip hog10)" "$MEMPOOL_COORDINATOR_PORT" \
       <"$asan_coordinator_diagnostic/info.json"
   fi
-  if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive || $GIT_BRANCH == codex/asan-chuckd-tcp-info ]]; then
+  if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive || -n $asan_sender_enabled ]]; then
     python3 -c 'import json, sys; sys.exit(not json.load(sys.stdin).get("proposal_receive"))' \
       <"$asan_coordinator_diagnostic/info.json" || {
       echo 'No large scheduler reply receive receipts were collected.' >&2
       exit 1
     }
+  fi
+  if [[ -n $asan_cc_mode ]]; then
+    if ! grep -Fxq exit_status=0 "$asan_coordinator_diagnostic/sender-tcp-info-status.txt"; then
+      echo 'ASAN congestion sampler did not confirm a complete single-algorithm socket cohort.' >&2
+      exit 1
+    fi
   fi
   full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
     <"$asan_coordinator_diagnostic/info.json")

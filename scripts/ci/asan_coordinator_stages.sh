@@ -3,7 +3,7 @@
 
 ci_asan_coordinator_branch() {
   case ${GIT_BRANCH:-} in
-  codex/asan-mempool-coordinator-stages | codex/asan-chuckd-propose-timing | codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive | codex/asan-chuckd-tcp-info) return 0 ;;
+  codex/asan-mempool-coordinator-stages | codex/asan-chuckd-propose-timing | codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive | codex/asan-chuckd-tcp-info | codex/asan-proposal-cc-stock | codex/asan-proposal-cc-reno) return 0 ;;
   *) return 1 ;;
   esac
 }
@@ -87,4 +87,18 @@ ci_asan_coordinator_collect() {
   cat -- "$failure" >&2
   rm -f -- "$errors" "$destination.pending"
   return "$status"
+}
+
+ci_asan_proposal_cc_preflight() {
+  local mode=$1 default available allowed
+  local capabilities=/proc/sys/net/ipv4
+  IFS= read -r default <"$capabilities/tcp_congestion_control"
+  IFS= read -r available <"$capabilities/tcp_available_congestion_control"
+  IFS= read -r allowed <"$capabilities/tcp_allowed_congestion_control"
+  printf 'mode=%s\ndefault=%s\navailable=%s\nallowed=%s\n' "$mode" "$default" "$available" "$allowed"
+  if [[ $default != cubic || ! $available =~ (^|[[:blank:]])reno($|[[:blank:]]) ||
+    ! $allowed =~ (^|[[:blank:]])reno($|[[:blank:]]) ]]; then
+    echo 'ASAN congestion comparison requires a CUBIC default and already available, unprivileged Reno.' >&2
+    return 1
+  fi
 }

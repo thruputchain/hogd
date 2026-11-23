@@ -14,6 +14,7 @@ import time
 PORT = 8070
 NETLINK_SOCK_DIAG = 4
 INFO = 2
+CONG = 4
 ESTABLISHED = 1
 BY_FAMILY = 20
 DONE = 3
@@ -52,7 +53,7 @@ def records(datagram, seq):
         offset += (length + 3) & ~3
 
 
-def diag_row(data, uid, local, peer):
+def diag_row(data, uid, local, peer, congestion=False):
     if len(data) < 72 or data[:2] != bytes((socket.AF_INET, ESTABLISHED)):
         raise ValueError("invalid socket diag message")
     sport, dport = struct.unpack_from("!HH", data, 4)
@@ -63,6 +64,7 @@ def diag_row(data, uid, local, peer):
     if low == high == 0xFFFFFFFF or not dport:
         raise ValueError("missing socket cookie or peer port")
     info = None
+    algorithm = None
     offset = 72
     while offset < len(data):
         if len(data) - offset < ATTR.size:
@@ -74,18 +76,30 @@ def diag_row(data, uid, local, peer):
             if info is not None:
                 raise ValueError("duplicate TCP_INFO")
             info = tcp_info(data[offset + ATTR.size:offset + n])
+        if congestion and attr == CONG:
+            name = data[offset + ATTR.size:offset + n]
+            if algorithm is not None or name not in (b"cubic\0", b"reno\0"):
+                raise ValueError("invalid or unexpected sender congestion algorithm")
+            algorithm = name[:-1].decode("ascii")
         offset += (n + 3) & ~3
     if info is None or not {"bytes_acked", "bytes_sent", "total_retrans"} <= info.keys():
         raise ValueError("required TCP_INFO unavailable")
+    if congestion and algorithm is None:
+        raise ValueError("sender congestion algorithm unavailable")
+    if congestion:
+        info["congestion"] = algorithm
     return {"local_port": sport, "peer_port": dport, "cookie": (high << 32) | low, **info}
 
 
-def query(sock, seq, uid, local, peer):
+def query(sock, seq, uid, local, peer, congestion=False):
     # INET_DIAG_BC_S_EQ (11), true jump reaches end, false jump rejects.
     bytecode = struct.pack("=BBHBBH", 11, 8, 12, 0, 0, PORT)
     attr = ATTR.pack(4 + len(bytecode), 1) + bytecode
+    extensions = 1 << (INFO - 1)
+    if congestion:
+        extensions |= 1 << (CONG - 1)
     req = struct.pack("=BBBBI", socket.AF_INET, socket.IPPROTO_TCP,
-                      1 << (INFO - 1), 0, 1 << ESTABLISHED)
+                      extensions, 0, 1 << ESTABLISHED)
     req += bytes(40) + struct.pack("=II", 0xFFFFFFFF, 0xFFFFFFFF) + attr
     sock.sendto(HEADER.pack(HEADER.size + len(req), BY_FAMILY, NLM_F_REQUEST_DUMP,
                             seq, 0) + req, (0, 0))
@@ -103,7 +117,7 @@ def query(sock, seq, uid, local, peer):
                 raise OSError(-struct.unpack_from("=i", data)[0], "socket diag request failed")
             if kind != BY_FAMILY:
                 raise ValueError("unexpected netlink message")
-            row = diag_row(data, uid, local, peer)
+            row = diag_row(data, uid, local, peer, congestion)
             if row is not None:
                 cookie = row["cookie"]
                 if cookie in rows or len(rows) >= 32:
@@ -118,6 +132,7 @@ def main():
     parser.add_argument("--peer-ip", type=ipaddress.IPv4Address, required=True)
     parser.add_argument("--stop-file", type=Path)
     parser.add_argument("--seconds", type=int, choices=range(1, 241), default=180)
+    parser.add_argument("--congestion-mode", choices=("stock", "reno"))
     args = parser.parse_args()
     if args.local_ip.is_unspecified or args.peer_ip.is_unspecified:
         parser.error("exact non-wildcard scope required")
@@ -133,6 +148,8 @@ def main():
     interval = 50_000_000
     emitted = 0
     previous = {}
+    verified_cookies = set()
+    expected = {"stock": "cubic", "reno": "reno"}.get(args.congestion_mode)
     with socket.socket(socket.AF_NETLINK, socket.SOCK_RAW, NETLINK_SOCK_DIAG) as sock:
         sock.bind((0, 0))
         sock.settimeout(0.15)
@@ -140,11 +157,20 @@ def main():
             if stop or (args.stop_file and args.stop_file.exists()):
                 break
             before = time.monotonic_ns()
-            rows = query(sock, seq, uid, args.local_ip.packed, args.peer_ip.packed)
+            rows = query(sock, seq, uid, args.local_ip.packed, args.peer_ip.packed, expected is not None)
             after = time.monotonic_ns()
             active = {}
             for row in rows:
                 cookie = row["cookie"]
+                # A kernel-created child may be visible before accept and
+                # the typed socket setup. Require the effective algorithm only
+                # after the server has actually sent data on this connection.
+                if expected is not None and row["bytes_sent"] > 0:
+                    if row["congestion"] != expected:
+                        raise ValueError(f"sender socket algorithm {row['congestion']} differs from {expected}")
+                    verified_cookies.add(cookie)
+                    if len(verified_cookies) > 20:
+                        raise ValueError("more than 20 accepted scheduler sockets")
                 active[cookie] = row
                 # Keep a one-second idle heartbeat, plus every TCP state change.
                 if previous.get(cookie) == row and seq % 20:
@@ -158,6 +184,10 @@ def main():
             sys.stdout.flush()
             deadline = start + seq * interval
             time.sleep(max(0, (deadline - time.monotonic_ns()) / 1e9))
+    if expected is not None:
+        if len(verified_cookies) != 20:
+            raise ValueError(f"expected exactly 20 scheduler sockets, observed {len(verified_cookies)}")
+        print(f"verified_congestion={expected} sockets={len(verified_cookies)}", file=sys.stderr)
     print(f"socket_diag_samples={emitted}", file=sys.stderr)
 
 

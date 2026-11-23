@@ -1,6 +1,9 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 
+#include "hogd/hog_mempool/proposal_congestion_diagnostic.h"
+
 #include <algorithm>
+#include <arpa/inet.h>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -1682,7 +1685,34 @@ async_rpc_reply_connection(const MempoolCoordinatorRpc &, int fd) noexcept
   if ((peer.ss_family != AF_INET && peer.ss_family != AF_INET6) ||
       (local.ss_family != AF_INET && local.ss_family != AF_INET6))
     return {};
-  return {.peer = x23::get_port(peer), .local = x23::get_port(local)};
+  const SchedulerReplyPorts ports{.peer = x23::get_port(peer),
+                                  .local = x23::get_port(local)};
+#ifdef __linux__
+  if (const char *mode = std::getenv("HOGD_ASAN_PROPOSAL_CC");
+      mode &&
+      (std::string_view(mode) == "stock" || std::string_view(mode) == "reno")) {
+    in_addr expected{};
+    const char *address = std::getenv("HOGD_ASAN_PROPOSAL_CC_PEER");
+    const auto *ipv4_peer = reinterpret_cast<const sockaddr_in *>(&peer);
+    if (ports.local == 8070 && peer.ss_family == AF_INET && address &&
+        inet_pton(AF_INET, address, &expected) == 1 &&
+        ipv4_peer->sin_addr.s_addr == expected.s_addr) {
+      const auto receipt = apply_proposal_congestion(fd, mode);
+      static std::atomic_uint count{};
+      const auto ordinal = count.fetch_add(1, std::memory_order_relaxed);
+      if (ordinal < 32)
+        info("MEMPOOL_PROPOSAL_CC mode={} peer_port={} local_port={} before={} "
+             "after={} status={}",
+             mode, ports.peer, ports.local, receipt.before, receipt.after,
+             receipt.status);
+      if (ordinal >= 32 || receipt.status != "ok") {
+        (void)shutdown(fd, SHUT_RDWR);
+        return {};
+      }
+    }
+  }
+#endif
+  return ports;
 }
 
 x23::Buf
