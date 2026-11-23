@@ -86,15 +86,16 @@ private:
 
 class ProfiledPaymentDbRpc : public HogDbExecutorRpc {
 public:
-  ProfiledPaymentDbRpc(RPCContext &ctx, PaymentDbHandlerSamples &samples)
-    : HogDbExecutorRpc(ctx), samples_(samples)
+  ProfiledPaymentDbRpc(RPCContext &ctx, PaymentDbHandlerSamples &samples,
+                       uint64_t stride)
+    : HogDbExecutorRpc(ctx), samples_(samples), stride_(stride)
   {}
 
   TryPushSubtransactionResult
   try_push_new_subtransaction(BlockID block, TransactionID tx,
                               StorageDeltaBatch batch)
   {
-    if (tx % kPaymentDbSampleStride != 0) {
+    if (tx % stride_ != 0) {
       return HogDbExecutorRpc::try_push_new_subtransaction(block, tx,
                                                            std::move(batch));
     }
@@ -112,7 +113,7 @@ public:
   RPCError commit_transaction(BlockID block, TransactionID tx,
                               NewContractBatch contracts)
   {
-    if (tx % kPaymentDbSampleStride != 0) {
+    if (tx % stride_ != 0) {
       return HogDbExecutorRpc::commit_transaction(block, tx,
                                                   std::move(contracts));
     }
@@ -142,6 +143,7 @@ private:
   }
 
   PaymentDbHandlerSamples &samples_;
+  const uint64_t stride_;
 };
 
 [[noreturn]] void
@@ -184,7 +186,8 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts)
   std::println("Starting executor server on port {}", exec_port);
   if (accounts != 0) {
     PaymentDbHandlerSamples samples(accounts);
-    if (payment_db_queue_enabled("hog11")) {
+    const bool fib = accounts == kFibDbProbe;
+    if (fib || payment_db_queue_enabled("hog11")) {
       payment_db_queue::start(accounts, "server");
       using DbRpc = DatabaseToExecutorInterfaceV1;
       static constexpr x23::RpcQueueServerProbe kProbe{
@@ -192,7 +195,9 @@ run_bench_server(uint32_t exec_port, uint32_t coord_port, uint32_t accounts)
           DbRpc::proc_meta<1>::proc};
       x23::rpc_queue_server_probe.store(&kProbe, std::memory_order_release);
     }
-    RpcServer<ProfiledPaymentDbRpc> server(ctx, samples);
+    RpcServer<ProfiledPaymentDbRpc> server(ctx, samples,
+                                           fib ? kFibDbSampleStride
+                                               : kPaymentDbSampleStride);
     server.max_message_size_ = kBulkRpcMaxMessageSize;
     serve_executor(server, exec_port);
   }
@@ -236,6 +241,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     case 'D':
     {
       const std::string_view accounts(optarg);
+      if (accounts == "15" && diagnostic_accounts == 0 &&
+          hogd::fib_db_service_enabled("hog11")) {
+        diagnostic_accounts = hogd::kFibDbProbe;
+        break;
+      }
       if (!hogd::payment_db_timing_enabled("hog11") ||
           diagnostic_accounts != 0 || (accounts != "2" && accounts != "10")) {
         std::println(

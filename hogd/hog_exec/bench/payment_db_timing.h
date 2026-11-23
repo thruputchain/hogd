@@ -8,6 +8,8 @@
 namespace hogd {
 
 inline constexpr uint64_t kPaymentDbSampleStride = 256;
+inline constexpr uint32_t kFibDbProbe = 15;
+inline constexpr uint64_t kFibDbSampleStride = 128;
 // The fixed sweep runs approximately 16 million transactions per account
 // setting, with two measured RPCs per 256th transaction.
 inline constexpr uint64_t kPaymentDbSampleLimit = 160'000;
@@ -39,6 +41,14 @@ payment_db_queue_run(std::string_view host)
   };
   return split != suffix.npos && positive_decimal(suffix.substr(0, split)) &&
          positive_decimal(suffix.substr(split + 1));
+}
+
+inline bool
+fib_db_service_enabled(std::string_view host)
+{
+  return payment_db_env_matches("GIT_BRANCH",
+                                "codex/fibonacci-db-service-diagnostics") &&
+         payment_db_queue_run(host);
 }
 
 inline bool

@@ -26,6 +26,43 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
+if [[ ${GIT_BRANCH:-} == codex/fibonacci-db-service-diagnostics ]]; then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+    ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+    ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]]
+  output="${HOG_DUMP_DIR:?}/fibonacci-db-service"
+  mkdir "$output"
+  printf '%s\t%s\t%s\t%s\n' "$GIT_COMMIT" "$GIT_BRANCH" "$HOG_XID" "$HOG_HOST" >"$output/provenance.tsv"
+  ./scripts/metrics/fibonacci_rv32only_bench.sh "$BUILD_DIR" >"$output/client.txt"
+  awk '
+    /^time taken: / {
+      if ($0 !~ /^time taken: [1-9][0-9]* us for 10000 txs [(]fib (15|20), commit (true|false)[)] on 64 threads$/)
+        invalid = 1
+      elapsed[substr($9, 1, 2), $11]++
+    }
+    /^fibonacci_service / {
+      if (NF != 13 || $2 !~ /^[01]$/ || $3 !~ /^[0-4]$/ ||
+          $4 !~ /^[1-9][0-9]*$/ || $5 !~ /^[0-9]+$/ ||
+          $5 >= 10000 || $5 % 128 || seen[$2, $3, $5]++)
+        invalid = 1
+      samples[$2, $3]++
+    }
+    END {
+      if (invalid || elapsed[15, "true)"] != 5 || elapsed[15, "false)"] != 5 ||
+          elapsed[20, "true)"] != 5 || elapsed[20, "false)"] != 5)
+        exit 1
+      for (arm = 0; arm < 2; arm++)
+        for (rep = 0; rep < 5; rep++)
+          if (samples[arm, rep] != 79)
+            exit 1
+    }
+  ' "$output/client.txt" || {
+    echo "Incomplete Fibonacci DB service results" >&2
+    exit 1
+  }
+  exit 0
+fi
+
 queue_pair=0
 case ${GIT_BRANCH:-} in
 codex/payment-srpc-queue-phases | codex/payment-srpc-queue-control | \

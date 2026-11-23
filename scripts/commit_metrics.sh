@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+if [[ ${GIT_BRANCH:-} == codex/fibonacci-db-service-diagnostics ]]; then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+    ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+    ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ && $(git rev-parse HEAD) == "$GIT_COMMIT" ]]
+  exit 0
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
     ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
