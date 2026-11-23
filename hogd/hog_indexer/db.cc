@@ -12,12 +12,14 @@
 #include <format>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <rocksdb/version.h>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1327,7 +1329,7 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
 x23::Async<IndexerBlockApplyResult>
 IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
                                IndexerCommittedBlock block,
-                               ApplyPhaseTimings *timings)
+                               ApplyPhaseTimings *timings, bool sort_batch)
 {
   {
     std::lock_guard g(ingest_mutex_);
@@ -1358,7 +1360,7 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }
-    co_return apply_validated_committed_block(origin, block, timings);
+    co_return apply_validated_committed_block(origin, block, timings, sort_batch);
   } catch (const std::exception &e) {
     error("failed to validate/apply committed indexer block: {}", e.what());
     co_return apply_failure(
@@ -1370,7 +1372,7 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
 IndexerBlockApplyResult
 IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
                                          const IndexerCommittedBlock &block,
-                                         ApplyPhaseTimings *timings)
+                                         ApplyPhaseTimings *timings, bool sort_batch)
 {
   const auto prepare_start =
       timings ? x23::fastclock::now() : x23::fastclock::time_point{};
@@ -1458,6 +1460,32 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     const auto &bodies = block.payload.tx_bodies;
     rocksdb::WriteBatch batch;
     std::string key;
+    struct ContractRow {
+      const ContractAddress *address;
+      const TransactionHash *hash;
+      IndexerKeyFormat::RecordKind kind;
+      uint32_t sequence;
+    };
+    std::vector<ContractRow> contract_rows;
+    if (sort_batch) {
+      size_t count = events.size();
+      for (const auto &event_log : events) {
+        count += event_log.events.size();
+      }
+      contract_rows.reserve(count);
+    }
+    const auto put_contract = [&](const ContractRow &row) {
+      IndexerKeyFormat::make_contract_key(key, *row.address, row.kind, height,
+                                          *row.hash, row.sequence);
+      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+    };
+    const auto add_contract = [&](ContractRow row) {
+      if (sort_batch) {
+        contract_rows.push_back(row);
+      } else {
+        put_contract(row);
+      }
+    };
     for (size_t i = 0; i < events.size(); ++i) {
       const TxEventLog &event_log = events[i];
       const ProposedTransaction &body = bodies[i];
@@ -1479,19 +1507,42 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
             "committed transaction hash already exists at another height");
       }
 
-      batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
+      if (!sort_batch) {
+        batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
+      }
       uint32_t sequence_number = 0;
       for (const TxEmittedEvent &emitted_event : event_log.events) {
-        IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
-                                            IndexerKeyFormat::kEvent, height,
-                                            event_log.tx_hash,
-                                            sequence_number++);
-        batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+        add_contract({&emitted_event.contract_address, &event_log.tx_hash,
+                      IndexerKeyFormat::kEvent, sequence_number++});
       }
-      IndexerKeyFormat::make_contract_key(
-          key, body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
-      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+      add_contract({&body.signed_tx.tx.invocation.invoked_address,
+                    &event_log.tx_hash, IndexerKeyFormat::kRootTx, 0});
+    }
+
+    std::vector<TransactionHash> hashes;
+    hashes.reserve(events.size());
+    if (sort_batch) {
+      // RocksDB's skiplist reuses the previous insertion position. Sort
+      // each column family's independent puts in bytewise key order,
+      // keeping event/body pairs, event sequence and metadata unchanged.
+      std::vector<size_t> order(events.size());
+      std::iota(order.begin(), order.end(), size_t{0});
+      std::ranges::sort(order, {}, [&](size_t i) -> const TransactionHash & {
+        return events[i].tx_hash;
+      });
+      for (size_t i : order) {
+        const auto &event_log = events[i];
+        hashes.push_back(event_log.tx_hash);
+        IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
+        batch.Put(tx_cf_handle_, key,
+                  make_tx_value(height, bodies[i], event_log));
+      }
+      std::ranges::sort(contract_rows, {}, [](const ContractRow &row) {
+        return std::tie(*row.address, row.kind, *row.hash, row.sequence);
+      });
+      for (const auto &row : contract_rows) {
+        put_contract(row);
+      }
     }
 
     // The query projection is committed with rows and progress. It copies
@@ -1505,12 +1556,12 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
               rocksdb::Slice(reinterpret_cast<const char *>(
                                  record_bytes.data()),
                              record_bytes.size()));
-    std::vector<TransactionHash> hashes;
-    hashes.reserve(events.size());
-    for (const auto &event : events) {
-      hashes.push_back(event.tx_hash);
+    if (!sort_batch) {
+      for (const auto &event_log : events) {
+        hashes.push_back(event_log.tx_hash);
+      }
+      std::ranges::sort(hashes);
     }
-    std::ranges::sort(hashes);
     if (std::ranges::adjacent_find(hashes) != hashes.end()) {
       return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict,

@@ -6,11 +6,13 @@
 #include <array>
 #include <atomic>
 #include <cstdint>
+#include <cstdlib>
 #include <filesystem>
 #include <future>
 #include <latch>
 #include <memory>
 #include <optional>
+#include <print>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
@@ -117,13 +119,22 @@ make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 
 IndexerCommittedBlock
 make_block(BlockHeight height, ConsensusValueHash prev_hash,
-           ProposedTransactionBatch bodies = {})
+           ProposedTransactionBatch bodies = {}, bool dense_events = false)
 {
   const ProposedTransactionBatch canonical_bodies = bodies;
   TxEventLogBatch logs;
   for (size_t i = 0; i < bodies.size(); ++i) {
-    logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
-                                              : std::nullopt));
+    if (dense_events) {
+      TxEventLog log = make_log(bodies[i], static_cast<uint8_t>(i % 7));
+      log.events.front().serialized_event.resize(96, static_cast<uint8_t>(i));
+      if (i % 8 == 0) {
+        log.events.push_back(log.events.front());
+      }
+      logs.push_back(std::move(log));
+    } else {
+      logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
+                                                : std::nullopt));
+    }
   }
   ProposalTxs proposal = make_proposal_txs(canonical_bodies);
   ConsensusValue value{};
@@ -211,6 +222,121 @@ protected:
   std::filesystem::path path_;
   std::unique_ptr<IndexDB> db_;
 };
+
+TEST_F(StrictIndexerTest, SortedBatchPreservesEveryPersistedColumnFamilyRow)
+{
+  size_t count = 128;
+  if (const char *value = std::getenv("HOGD_INDEXER_SORT_BENCH_TXS")) {
+    count = std::stoul(value);
+  }
+  ASSERT_GE(count, 128);
+  ASSERT_LE(count, 1'000'000);
+  const IndexerOutboxOrigin origin = make_origin();
+  std::vector<IndexerCommittedBlock> blocks;
+  auto previous = origin.first_prev_hash;
+  for (BlockHeight height : {1, 2}) {
+    ProposedTransactionBatch bodies;
+    for (size_t i = 0; i < count; ++i) {
+      auto body = make_body(height * count + i, static_cast<uint8_t>(i % 5));
+      body.signed_tx.tx.invocation.calldata.resize(128, static_cast<uint8_t>(i));
+      bodies.push_back(std::move(body));
+    }
+    blocks.push_back(make_block(height, previous, std::move(bodies),
+                                /*dense_events=*/true));
+    previous = blocks.back().identity.consensus_hash;
+  }
+  std::array<std::filesystem::path, 4> paths;
+  const auto wal_column = std::ranges::find(IndexDB::kRocksWriteColumns, "rocks_wal_ns") -
+                          std::ranges::begin(IndexDB::kRocksWriteColumns);
+  const auto memtable_column =
+      std::ranges::find(IndexDB::kRocksWriteColumns, "rocks_memtable_ns") -
+      std::ranges::begin(IndexDB::kRocksWriteColumns);
+  for (size_t arm = 0; arm < paths.size(); ++arm) {
+    const bool ordered = arm == 1 || arm == 2;
+    paths[arm] = path_.parent_path() / std::format("arm-{}", arm);
+    {
+      auto store = IndexDB::make_new(paths[arm]);
+      ASSERT_TRUE(store.has_value()) << store.error();
+      ASSERT_EQ(store->initialize_epoch(origin).outcome(),
+                IndexerEpochOutcome::IndexerEpochInitialized);
+      for (const auto &block : blocks) {
+        IndexDB::ApplyPhaseTimings phases;
+        const auto applied = store->apply_committed_block(origin, block, &phases,
+                                                           ordered)();
+        ASSERT_EQ(applied.outcome(), IndexerBlockApplyOutcome::IndexerBlockApplied);
+        ASSERT_TRUE(phases.rocks_write.has_value());
+        std::println("indexer_batch_sort: arm={} ordered={} height={} txs={} "
+                     "batch_bytes={} prepare_ns={} write_ns={} wal_ns={} memtable_ns={}",
+                     arm, ordered, applied.progress().contiguous_height, count,
+                     phases.write_batch_bytes, phases.prepare_write_ns,
+                     phases.sync_write_ns, (*phases.rocks_write)[wal_column],
+                     (*phases.rocks_write)[memtable_column]);
+      }
+      ASSERT_EQ(store->apply_committed_block(origin, blocks.back(), nullptr,
+                                             ordered)().outcome(),
+                IndexerBlockApplyOutcome::IndexerBlockDuplicate);
+    }
+    auto reopened = IndexDB::open(paths[arm]);
+    ASSERT_TRUE(reopened.has_value()) << reopened.error();
+    ASSERT_EQ(reopened->durable_progress().initialized().last_consensus_hash,
+              blocks.back().identity.consensus_hash);
+  }
+
+  const auto same_rows = [](const std::filesystem::path &lhs,
+                            const std::filesystem::path &rhs) {
+    rocksdb::Options options;
+    std::vector<std::string> names, other_names;
+    ASSERT_TRUE(rocksdb::DB::ListColumnFamilies(options, lhs.string(), &names).ok());
+    ASSERT_TRUE(rocksdb::DB::ListColumnFamilies(options, rhs.string(), &other_names).ok());
+    ASSERT_EQ(names, other_names);
+    // Read each CF as raw ordered rows after both indexers closed and reopened.
+    std::vector<rocksdb::ColumnFamilyDescriptor> descriptors;
+    for (const auto &name : names) {
+      descriptors.emplace_back(name, rocksdb::ColumnFamilyOptions{});
+    }
+    struct ReadOnlyDB {
+      std::unique_ptr<rocksdb::DB> db;
+      std::vector<rocksdb::ColumnFamilyHandle *> handles;
+      ~ReadOnlyDB()
+      {
+        for (auto *handle : handles) {
+          db->DestroyColumnFamilyHandle(handle).PermitUncheckedError();
+        }
+      }
+    };
+    ReadOnlyDB a, b;
+    rocksdb::DB *raw = nullptr;
+    auto status = rocksdb::DB::OpenForReadOnly(options, lhs.string(), descriptors,
+                                               &a.handles, &raw);
+    a.db.reset(raw);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    raw = nullptr;
+    status = rocksdb::DB::OpenForReadOnly(options, rhs.string(), descriptors,
+                                          &b.handles, &raw);
+    b.db.reset(raw);
+    ASSERT_TRUE(status.ok()) << status.ToString();
+    for (size_t cf = 0; cf < names.size(); ++cf) {
+      SCOPED_TRACE(names[cf]);
+      const rocksdb::ReadOptions reads;
+      std::unique_ptr<rocksdb::Iterator> left(a.db->NewIterator(reads, a.handles[cf]));
+      std::unique_ptr<rocksdb::Iterator> right(b.db->NewIterator(reads, b.handles[cf]));
+      left->SeekToFirst();
+      right->SeekToFirst();
+      while (left->Valid() && right->Valid()) {
+        ASSERT_EQ(left->key(), right->key());
+        ASSERT_EQ(left->value(), right->value());
+        left->Next();
+        right->Next();
+      }
+      ASSERT_FALSE(left->Valid());
+      ASSERT_FALSE(right->Valid());
+      ASSERT_TRUE(left->status().ok());
+      ASSERT_TRUE(right->status().ok());
+    }
+  };
+  same_rows(paths[0], paths[1]);
+  same_rows(paths[3], paths[2]);
+}
 
 TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
 {

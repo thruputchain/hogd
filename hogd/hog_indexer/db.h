@@ -118,7 +118,8 @@ public:
   x23::Async<IndexerBlockApplyResult>
   apply_committed_block(IndexerOutboxOrigin origin,
                         IndexerCommittedBlock block,
-                        ApplyPhaseTimings *timings = nullptr);
+                        ApplyPhaseTimings *timings = nullptr,
+                        bool sort_batch = false);
 
   // Everything stored in the tx_index for one transaction.
   struct TxRecord {
@@ -253,7 +254,7 @@ private:
   IndexerBlockApplyResult
   apply_validated_committed_block(const IndexerOutboxOrigin &origin,
                                   const IndexerCommittedBlock &block,
-                                  ApplyPhaseTimings *timings);
+                                  ApplyPhaseTimings *timings, bool sort_batch);
 
   IndexerStatus<void> initialize_progress_from_db();
   static std::string block_query_format();

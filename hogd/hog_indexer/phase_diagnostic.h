@@ -21,7 +21,9 @@ env(const char *name)
 inline bool
 requested()
 {
-  return env("GIT_BRANCH") == "codex/indexer-rocks-phases";
+  const auto branch = env("GIT_BRANCH");
+  return branch == "codex/indexer-rocks-phases" ||
+         branch == "codex/indexer-sorted-probe";
 }
 
 inline bool

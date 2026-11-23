@@ -168,6 +168,8 @@ void
 IndexerPullController::run(const std::stop_token &stop)
 {
   const bool diagnostic = indexer_phase::enabled("hog4");
+  const bool sort_batch =
+      diagnostic && indexer_phase::env("GIT_BRANCH") == "codex/indexer-sorted-probe";
   std::ofstream evidence;
   size_t block_rows = 0;
   size_t other_rows = 0;
@@ -301,7 +303,7 @@ IndexerPullController::run(const std::stop_token &stop)
         const bool sample = diagnostic && block_rows < kMaxBlockRows;
         IndexerBlockApplyResult applied =
             db_.apply_committed_block(pulled.origin, std::move(pulled.block),
-                                      sample ? &timings : nullptr)();
+                                      sample ? &timings : nullptr, sort_batch)();
         const auto apply_end = x23::fastclock::now();
         if (sample) {
           ++block_rows;
