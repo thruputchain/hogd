@@ -86,7 +86,7 @@ def storage():
           'expected an owned Event work directory')
     check(run('findmnt', '-rn', '-o', 'TARGET,FSTYPE', '-T', str(WORK)).split()
           == ['/bench-event', 'tmpfs'], 'bad Event storage backing')
-    stat = WORK.statvfs()
+    stat = os.statvfs(WORK)
     cap = stat.f_blocks * stat.f_frsize
     check(cap == CAPACITY, 'wrong Event tmpfs cap')
     return {'path': str(WORK), 'filesystem': 'tmpfs', 'capacity': cap,
