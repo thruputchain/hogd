@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+if [[ ${GIT_BRANCH:-} == codex/event-standard-transport-abba ]]; then
+  [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+     ${HOG_HOST:-} == hog10 && ${HOGD_EVENT_NETWORK_DIAGNOSTICS:-} == 1 &&
+     ${HOG_XID:-} =~ ^hogd-event-bench-[1-9][0-9]*-[1-9][0-9]*$ ]] || exit 2
+  [[ ! -e metrics_history/.publish-requested && ! -L metrics_history/.publish-requested ]]
+  exit
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
