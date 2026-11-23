@@ -9,17 +9,23 @@
 #include <map>
 #include <memory>
 #include <mutex>
+#include <stdexcept>
+#ifdef __linux__
+#include <sched.h>
+#endif
 #include <utility>
 #include <vector>
 
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/interface/executor_context.h"
+#include "hogd/hog_exec/runtime/item/db_connection_map.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
@@ -186,6 +192,52 @@ write_validation_samples(ValidationKey key, bool caller_hint)
 }
 
 } // namespace
+
+int
+ExecutorMempoolRpc::validation_db_connection_experiment(uint16_t bound_port)
+{
+  const char *value = std::getenv("HOGD_VALIDATION_DB_CONNECTIONS");
+  if (!value)
+    return 0;
+  const auto matches = [](const char *name, std::string_view expected) {
+    const char *setting = std::getenv(name);
+    return setting && setting == expected;
+  };
+  if (!matches("HOGD_CI_CONTAINER", "1") || !matches("HOGD_CI_OFFLINE", "1") ||
+      !matches("HOGD_VALIDATION_DB_RESUME_HINT", "reader") ||
+      !(matches("HOG_HOST", "hog5") || matches("HOG_HOST", "hog9")) ||
+      !(bound_port == 8040 || bound_port == 8041))
+    throw std::runtime_error(
+        "DB connection diagnostic outside isolated executor roles");
+#ifdef __linux__
+  cpu_set_t actual, expected;
+  CPU_ZERO(&expected);
+  const int first_cpu = bound_port == 8040 ? 0 : 32;
+  for (int cpu = first_cpu; cpu < first_cpu + 32; ++cpu) {
+    CPU_SET(cpu, &expected);
+    CPU_SET(cpu + 64, &expected);
+  }
+  if (sched_getaffinity(0, sizeof(actual), &actual) != 0 ||
+      !CPU_EQUAL(&actual, &expected) || available_parallelism() != 64)
+    throw std::runtime_error(
+        "DB connection diagnostic requires the exact executor CPU slots");
+#else
+  throw std::runtime_error("DB connection diagnostic requires Linux");
+#endif
+  int requested;
+  if (std::string_view(value) == "32" &&
+      matches("GIT_BRANCH", "codex/nightly-two-cohort-validation-batch64-db32"))
+    requested = 32;
+  else if (std::string_view(value) == "64" &&
+           matches("GIT_BRANCH",
+                   "codex/nightly-two-cohort-validation-batch64-db64"))
+    requested = 64;
+  else
+    throw std::runtime_error("unrecognized DB connection diagnostic arm");
+  // Reject an unstaffed target before attempting coordinator registration.
+  (void)db_connection_experiment_map(requested);
+  return requested;
+}
 
 void
 ExecutorMempoolRpc::enable_validation_timing(uint16_t bound_port)

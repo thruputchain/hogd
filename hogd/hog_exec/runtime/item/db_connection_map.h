@@ -29,6 +29,10 @@ int db_connection_count();
 // outlive every client built from it.
 const x23::CpuMap &db_connection_map();
 
+// Startup-only maps for the isolated physical comparison. The reader
+// baseline must resolve to stock 32, and the widened map must staff all 64.
+const x23::CpuMap &db_connection_experiment_map(int expected);
+
 // The cpu -> connection vector behind db_connection_map(), for nbuckets
 // connections over the allowed CPU ids (ascending).  No connection serves
 // CPUs of two LLCs unless nbuckets is below the LLC count.  Exposed for tests.

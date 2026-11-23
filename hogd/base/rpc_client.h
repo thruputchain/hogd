@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cerrno>
 #include <chrono>
 #include <expected>
 #include <format>
@@ -167,12 +168,25 @@ template<typename RpcService>
 auto
 make_rpc_multiclient(sockaddr_storage &ss, x23::CoroPoll &cp,
                      bool retry = false, x23::CpuMap const &map = *x23::llc_map,
-                     size_t max_message_size = x23::default_max_message_size)
+                     size_t max_message_size = x23::default_max_message_size,
+                     size_t *actual_connections = nullptr)
 {
   while (true) {
     try {
       auto client = x23::RpcMulticlient<x23::RpcLogger>::make(
           cp, ss, map, x23::RpcLogger::default_logfd, max_message_size);
+      if (actual_connections) {
+        *actual_connections = 0;
+        for (const auto &stream : *client) {
+          sockaddr_storage peer{};
+          socklen_t size = sizeof(peer);
+          if (getpeername(stream.get()->get_fd(),
+                          reinterpret_cast<sockaddr *>(&peer), &size) != 0)
+            throw std::system_error(errno, std::generic_category(),
+                                    "cannot verify connected RPC socket");
+          ++*actual_connections;
+        }
+      }
       return client->template client<RpcService>();
     } catch (const std::system_error &e) {
       if (retry && e.code() == std::errc::connection_refused) {
@@ -191,14 +205,15 @@ template<typename RpcService>
 auto
 make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
                      x23::CpuMap const &map = *x23::llc_map,
-                     size_t max_message_size = x23::default_max_message_size)
+                     size_t max_message_size = x23::default_max_message_size,
+                     size_t *actual_connections = nullptr)
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
     exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
-                                          max_message_size);
+                                          max_message_size, actual_connections);
 }
 
 } // namespace hogd

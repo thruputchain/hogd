@@ -116,7 +116,11 @@ nightly_stages_enabled()
                     "codex/nightly-two-cohort-validation-batch64") ||
             matches(
                 "GIT_BRANCH",
-                "codex/nightly-two-cohort-validation-batch64-caller-hint")) &&
+                "codex/nightly-two-cohort-validation-batch64-caller-hint") ||
+            matches("GIT_BRANCH",
+                    "codex/nightly-two-cohort-validation-batch64-db32") ||
+            matches("GIT_BRANCH",
+                    "codex/nightly-two-cohort-validation-batch64-db64")) &&
            matches("HOGD_CI_CONTAINER", "1") &&
            matches("HOGD_CI_OFFLINE", "1") &&
            matches("HOG_E2E_PAYMENT_MULTI_NODE_ASAN", "0") &&
@@ -136,7 +140,9 @@ validation_rpc_diagnostics_enabled()
            (name == "codex/nightly-two-cohort-validation-rpc" ||
             name == "codex/nightly-two-cohort-validation-batch10" ||
             name == "codex/nightly-two-cohort-validation-batch64" ||
-            name == "codex/nightly-two-cohort-validation-batch64-caller-hint");
+            name == "codex/nightly-two-cohort-validation-batch64-caller-hint" ||
+            name == "codex/nightly-two-cohort-validation-batch64-db32" ||
+            name == "codex/nightly-two-cohort-validation-batch64-db64");
   }();
   return enabled;
 }
@@ -153,7 +159,9 @@ validation_rpc_batch_override()
     if (name == "codex/nightly-two-cohort-validation-batch10")
       return 10;
     if (name == "codex/nightly-two-cohort-validation-batch64" ||
-        name == "codex/nightly-two-cohort-validation-batch64-caller-hint")
+        name == "codex/nightly-two-cohort-validation-batch64-caller-hint" ||
+        name == "codex/nightly-two-cohort-validation-batch64-db32" ||
+        name == "codex/nightly-two-cohort-validation-batch64-db64")
       return 64;
     return 0;
   }();

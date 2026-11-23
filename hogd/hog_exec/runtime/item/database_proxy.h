@@ -68,7 +68,8 @@ public:
   // Caps the client streams only; tests lower it rather than the process-wide
   // x23::default_max_message_size, which server threads also read.
   DatabaseProxy(DatabaseIdentifier identifier,
-                size_t max_message_size = kBulkRpcMaxMessageSize);
+                size_t max_message_size = kBulkRpcMaxMessageSize,
+                int experiment_count = 0, uint16_t executor_port = 0);
 
   DatabaseProxy(DatabaseProxy const &) = delete;
   DatabaseProxy &operator=(DatabaseProxy const &) = delete;

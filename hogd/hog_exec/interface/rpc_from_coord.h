@@ -36,7 +36,10 @@ public:
 
   void enable_validation_timing(uint16_t bound_port);
 
-  void init(IntroExecResult &&exec_result)
+  static int validation_db_connection_experiment(uint16_t bound_port);
+
+  void init(IntroExecResult &&exec_result, int db_connection_count = 0,
+            uint16_t bound_port = 0)
   {
     if (exec_result.exec_id >= std::numeric_limits<uint16_t>::max())
         [[unlikely]] {
@@ -46,7 +49,10 @@ public:
     self_executor_id_ = exec_result.exec_id;
 
     DatabaseIdentifier identifier{ShardedDB(exec_result)};
-    auto db_proxy = std::make_unique<DatabaseProxy>(std::move(identifier));
+    auto db_proxy =
+        std::make_unique<DatabaseProxy>(std::move(identifier),
+                                        kBulkRpcMaxMessageSize,
+                                        db_connection_count, bound_port);
     auto event_server_proxy = std::make_unique<EventServerProxy>(
         EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =

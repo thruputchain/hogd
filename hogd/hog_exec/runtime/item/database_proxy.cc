@@ -4,11 +4,16 @@
 #include <cassert>
 #include <chrono>
 #include <concepts>
+#include <cstdlib>
 #include <exception>
+#include <filesystem>
 #include <format>
+#include <fstream>
 #include <optional>
 #include <random>
 #include <set>
+#include <stdexcept>
+#include <sys/resource.h>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -77,6 +82,16 @@ report_rpc_failure(const char *method, std::exception const &e) noexcept
   } catch (...) {
     report_dropped_log("DatabaseProxy RPC failure diagnostic");
   }
+}
+
+size_t
+executor_fd_count()
+{
+  size_t count = 0;
+  for ([[maybe_unused]] const auto &entry :
+       std::filesystem::directory_iterator("/proc/self/fd"))
+    ++count;
+  return count; // Includes the directory fd itself, conservatively.
 }
 
 using DbClock = std::chrono::steady_clock;
@@ -209,7 +224,8 @@ to_system_error_code(auto err, auto &&f)
 } // namespace
 
 DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier,
-                             size_t max_message_size)
+                             size_t max_message_size, int experiment_count,
+                             uint16_t executor_port)
   : client_([&] -> client_t {
       if (std::holds_alternative<LocalMockDB>(db_identifier)) {
         auto mock_db = std::get<LocalMockDB>(db_identifier);
@@ -232,13 +248,46 @@ DatabaseProxy::DatabaseProxy(DatabaseIdentifier db_identifier,
         }
         // See db_connection_map.h for why the count is derived from the
         // machine rather than fixed, and what it was measured against.
-        const x23::CpuMap &conn_map = db_connection_map();
+        const x23::CpuMap &conn_map =
+            experiment_count ? db_connection_experiment_map(experiment_count)
+                             : db_connection_map();
         info("DatabaseProxy: {} connections (llc_map would give {}, core_map "
              "{})",
              conn_map.nbuckets(), x23::llc_map->nbuckets(),
              x23::core_map->nbuckets());
-        return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
-            hostport, false, conn_map, max_message_size);
+        if (!experiment_count)
+          return make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+              hostport, false, conn_map, max_message_size);
+
+        rlimit limit{};
+        if (getrlimit(RLIMIT_NOFILE, &limit) != 0)
+          throw std::runtime_error("cannot verify the executor FD limit");
+        const size_t before = executor_fd_count();
+        if (before + static_cast<size_t>(experiment_count) >= limit.rlim_cur)
+          throw std::runtime_error(
+              "insufficient executor FD headroom for DB experiment");
+        size_t connected = 0;
+        auto rpc = make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+            hostport, false, conn_map, max_message_size, &connected);
+        const size_t after = executor_fd_count();
+        if (connected != static_cast<size_t>(experiment_count) ||
+            after >= limit.rlim_cur)
+          throw std::runtime_error(
+              "DB connection count or FD bound did not verify");
+        const char *path = std::getenv("HOGD_EXEC_VALIDATION_TIMING");
+        if (!path || !*path)
+          throw std::runtime_error(
+              "missing DB connection diagnostic artifact path");
+        std::ofstream evidence(std::string(path) + ".connections.tsv",
+                               std::ios::app);
+        evidence << "executor_db_connections_v1\t" << executor_port << '\t'
+                 << experiment_count << '\t' << conn_map.nbuckets() << '\t'
+                 << connected << '\t' << before << '\t' << after << '\t'
+                 << limit.rlim_cur << '\t' << limit.rlim_max << '\n';
+        evidence.flush();
+        if (!evidence)
+          throw std::runtime_error("failed to write DB connection diagnostics");
+        return rpc;
       }
       panic("unimplemented");
     }())

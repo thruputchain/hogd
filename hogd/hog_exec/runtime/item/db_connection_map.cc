@@ -10,6 +10,8 @@
 #include <sched.h>
 #endif
 
+#include <stdexcept>
+
 #include "hogd/base/os.h"
 #include "x23/cpumap.h"
 #include "x23/vec.h"
@@ -120,11 +122,10 @@ db_connection_buckets(const x23::Vec<int> &allowed, int nbuckets,
   return buckets;
 }
 
-const x23::CpuMap &
-db_connection_map()
+namespace {
+x23::CpuMap
+make_db_connection_map(int nconnections, bool exact)
 {
-  static const x23::CpuMap map = [] {
-    const int nconnections = db_connection_count();
     // The CPU ids this process may run on. They need not be 0..n-1: with an
     // affinity of 8-15, a map over ids 0-7 has no allowed CPU in any bucket,
     // the multiclient builds no connection, and the first lookup divides by
@@ -138,16 +139,50 @@ db_connection_map()
         if (CPU_ISSET(id, &mask))
           allowed.push_back(id);
 #endif
+    if (exact && allowed.empty())
+      throw std::runtime_error("cannot verify executor CPU affinity");
     if (allowed.empty())
       for (int i = 0; i < ncpu; i++)
         allowed.push_back(i);
     // ncpu also honors DEFAULT_THREADPOOL_SIZE.
     const int nbuckets =
         std::min({nconnections, ncpu, static_cast<int>(allowed.size())});
-    return x23::CpuMap{db_connection_buckets(allowed, nbuckets, *x23::llc_map,
-                                             *x23::core_map)};
-  }();
+    if (exact && nbuckets != nconnections)
+      throw std::runtime_error(
+          "executor cannot staff the requested DB connection count");
+    auto map =
+        x23::CpuMap{db_connection_buckets(allowed, nbuckets, *x23::llc_map,
+                                          *x23::core_map)};
+    if (exact)
+      for (int bucket = 0; bucket < map.nbuckets(); ++bucket)
+        if (!map.cpuset(bucket).valid())
+          throw std::runtime_error("DB connection bucket has no available CPU");
+    return map;
+}
+} // namespace
+
+const x23::CpuMap &
+db_connection_map()
+{
+  static const x23::CpuMap map =
+      make_db_connection_map(db_connection_count(), false);
   return map;
+}
+
+const x23::CpuMap &
+db_connection_experiment_map(int expected)
+{
+  if (db_connection_count() != 32)
+    throw std::runtime_error("stock DB connection target is not 32");
+  if (expected == 32) {
+    static const x23::CpuMap stock = make_db_connection_map(32, true);
+    return stock;
+  }
+  if (expected == 64) {
+    static const x23::CpuMap widened = make_db_connection_map(64, true);
+    return widened;
+  }
+  throw std::invalid_argument("expected 32 or 64 DB connections");
 }
 
 } // namespace hogd

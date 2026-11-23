@@ -54,12 +54,16 @@ public:
         server_.bind_server(make_bind_host_port(bind_ip, self_port));
     assert(executor_port == self_port || self_port == 0);
 
+    const int db_connections =
+        ExecutorMempoolRpc::validation_db_connection_experiment(executor_port);
+
     // Now register with the coordinator.
     IntroExecResult exec_result =
         MempoolExecutorClient::register_with_coordinator(
             make_bind_host_port(bind_ip, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
-    server_->impl()->init(std::move(exec_result));
+    server_->impl()->init(std::move(exec_result), db_connections,
+                          executor_port);
     server_->impl()->enable_validation_timing(executor_port);
 
     // init() has published all state the RPC handlers read; it is now safe to
