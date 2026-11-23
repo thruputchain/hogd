@@ -803,11 +803,12 @@ TEST_F(StrictIndexerTest,
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
-  ProposedTransaction first = make_body(900, 0x90);
-  ProposedTransaction second = make_body(901, 0x91);
-  IndexerCommittedBlock block =
-      make_block(1, origin.first_prev_hash,
-                 ProposedTransactionBatch{first, second});
+  ProposedTransactionBatch bodies;
+  for (uint64_t i = 0; i < 256; ++i) {
+    bodies.push_back(make_body(900 + i, static_cast<uint8_t>(i % 8)));
+  }
+  const IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, std::move(bodies));
   ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
@@ -815,13 +816,36 @@ TEST_F(StrictIndexerTest,
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(first.signed_tx.tx)).has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(second.signed_tx.tx)).has_value());
+  std::vector<TransactionHash> hashes;
+  for (size_t i = 0; i < block.payload.tx_bodies.size(); ++i) {
+    const auto &body = block.payload.tx_bodies[i];
+    const auto &event_log = block.payload.event_logs[i];
+    hashes.push_back(event_log.tx_hash);
+    auto stored = reopened->get_tx_record(event_log.tx_hash);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->height, 1);
+    EXPECT_EQ(stored->tx, body);
+    EXPECT_EQ(stored->events, event_log);
+  }
+  std::ranges::sort(hashes);
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  std::vector<TransactionHash> page_hashes;
+  do {
+    auto page = reopened->get_transactions_by_block(query);
+    ASSERT_TRUE(page);
+    ASSERT_FALSE(page->refs.empty());
+    for (const auto &ref : page->refs) {
+      page_hashes.push_back(ref.tx_hash);
+    }
+    query.cursor = page->cursor;
+    ASSERT_LE(page_hashes.size(), hashes.size());
+  } while (!query.cursor.empty());
+  EXPECT_EQ(page_hashes, hashes);
   IndexerProgress progress = reopened->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().contiguous_height, 1);
-  EXPECT_EQ(progress.initialized().last_consensus_hash,
-            block.identity.consensus_hash);
   EXPECT_EQ(progress.initialized().last_consensus_hash,
             block.identity.consensus_hash);
 }
@@ -1751,18 +1775,24 @@ TEST_F(StrictIndexerTest, DuplicateHashesCannotCommitPartialBlockProjection)
   const auto origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
-  const auto body = make_body(1, 1);
-  auto block =
-      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
-  // The production source validates payloads, but duplicate rows must not
-  // collapse silently if an internal caller violates that contract.
-  block.payload.tx_bodies.push_back(body);
-  block.payload.event_logs.push_back(block.payload.event_logs.front());
-  EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
-            IndexerBlockApplyOutcome::IndexerBlockContentConflict);
-  EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
-  EXPECT_FALSE(db_->get_tx_record(sha256(body.signed_tx.tx)));
-  EXPECT_FALSE(db_->get_block_by_height(1));
+  for (const size_t count : {size_t{1}, size_t{256}}) {
+    ProposedTransactionBatch bodies;
+    for (size_t i = 0; i < count; ++i) {
+      bodies.push_back(make_body(i + 1, 1));
+    }
+    auto block = make_block(1, origin.first_prev_hash, std::move(bodies));
+    // Both small and ordered batches must reject duplicate hashes before
+    // publishing rows or a new watermark.
+    const auto body = block.payload.tx_bodies.front();
+    const auto event = block.payload.event_logs.front();
+    block.payload.tx_bodies.push_back(body);
+    block.payload.event_logs.push_back(event);
+    EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+    EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
+    EXPECT_FALSE(db_->get_tx_record(event.tx_hash));
+    EXPECT_FALSE(db_->get_block_by_height(1));
+  }
 }
 
 } // namespace
