@@ -203,6 +203,8 @@ struct PaymentDbCallerSample {
   TransactionID tx;
   int64_t frame_lock_ns;
   int64_t db_commit_ns;
+  DbRpcAwaitTiming frame_rpc;
+  DbRpcAwaitTiming commit_rpc;
 };
 
 using PaymentClock = std::chrono::steady_clock;
@@ -317,7 +319,12 @@ run_bench_rep_coro(BenchmarkState &bs,
           if (sample) {
             phase_start = PaymentClock::now();
           }
-          SystemCallHandler::CommitPhaseTiming commit_timing;
+          DbRpcAwaitTiming frame_rpc;
+          DbRpcAwaitTiming commit_rpc;
+          SystemCallHandler::CommitPhaseTiming commit_timing{
+              .frame_rpc = join_db ? &frame_rpc : nullptr,
+              .commit_rpc = join_db ? &commit_rpc : nullptr,
+          };
           const auto commit_result = co_await handler.try_commit_transaction(
               (sample || join_db) ? &commit_timing : nullptr);
           if (sample) {
@@ -340,7 +347,8 @@ run_bench_rep_coro(BenchmarkState &bs,
                 db_sample_count.fetch_add(1, std::memory_order_relaxed);
             CHECK(index < db_samples.size());
             db_samples[index] = {txid, commit_timing.frame_lock_ns,
-                                 commit_timing.db_commit_ns};
+                                 commit_timing.db_commit_ns, frame_rpc,
+                                 commit_rpc};
           }
           handler.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = tx})(
@@ -417,9 +425,13 @@ run_bench_rep_coro(BenchmarkState &bs,
     }
     for (const auto &sample :
          std::span(db_samples).first(db_sample_count.load())) {
-      std::println("payment_db_caller {} {} {} {} {} {}", bs.num_accounts_,
-                   nrep, base_height, sample.tx, sample.frame_lock_ns,
-                   sample.db_commit_ns);
+      std::println("payment_db_caller {} {} {} {} {} {} {} {} {} {}",
+                   bs.num_accounts_, nrep, base_height, sample.tx,
+                   sample.frame_lock_ns, sample.db_commit_ns,
+                   sample.frame_rpc.client_await_ns,
+                   sample.frame_rpc.threadpool_hop_ns,
+                   sample.commit_rpc.client_await_ns,
+                   sample.commit_rpc.threadpool_hop_ns);
     }
     bs.clear_uniquifiers(num_txs_per_rep);
   }

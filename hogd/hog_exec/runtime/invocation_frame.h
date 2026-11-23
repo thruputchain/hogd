@@ -41,6 +41,7 @@
 namespace hogd {
 
 class PerTransactionDatabaseProxy;
+struct DbRpcAwaitTiming;
 struct InvokeResult;
 
 // The consecutive auth token ids start..start+count-1 of one frame.
@@ -155,7 +156,8 @@ public:
 
   [[nodiscard]] x23::Async<SystemStatus<bool>> try_acquire_frame_locks(
       PerTransactionDatabaseProxy &db_proxy,
-      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations);
+      std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+      DbRpcAwaitTiming *timing = nullptr);
 
   // Records a successful child TryInvoke against the depth cap. finish_frame
   // calls this once a child's success is settled in any execution mode, so

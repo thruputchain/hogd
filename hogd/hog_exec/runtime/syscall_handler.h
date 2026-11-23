@@ -256,6 +256,8 @@ public:
   struct CommitPhaseTiming {
     int64_t frame_lock_ns{};
     int64_t db_commit_ns{};
+    DbRpcAwaitTiming *frame_rpc{};
+    DbRpcAwaitTiming *commit_rpc{};
   };
 
   // Optional caller timings are populated only on the successful body commit.

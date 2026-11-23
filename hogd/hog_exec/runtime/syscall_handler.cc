@@ -673,7 +673,10 @@ SystemCallHandler::try_commit_transaction(CommitPhaseTiming *timing)
 
   using Clock = std::chrono::steady_clock;
   const auto lock_start = timing ? Clock::now() : Clock::time_point{};
-  auto r = co_await last_frame.try_acquire_frame_locks(db_proxy_, observations);
+  auto r =
+      co_await last_frame.try_acquire_frame_locks(db_proxy_, observations,
+                                                  timing ? timing->frame_rpc
+                                                         : nullptr);
   const auto lock_end = timing ? Clock::now() : Clock::time_point{};
   if (!r.has_value()) {
     co_return co_await abort_after_commit_failure(to_exec_result(
@@ -701,7 +704,8 @@ SystemCallHandler::try_commit_transaction(CommitPhaseTiming *timing)
     auto new_contract_hashes = last_frame.get_committed_contracts();
     const auto db_start = timing ? Clock::now() : Clock::time_point{};
     auto res = co_await db_proxy_.commit_transaction(
-        newly_created_contracts_.borrow_contracts(new_contract_hashes));
+        newly_created_contracts_.borrow_contracts(new_contract_hashes),
+        timing ? timing->commit_rpc : nullptr);
     if (timing) {
       db_commit_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
                          Clock::now() - db_start)
@@ -726,12 +730,11 @@ SystemCallHandler::try_commit_transaction(CommitPhaseTiming *timing)
                                   get_block_execution_mode());
   transaction_committed_or_aborted_ = true;
   if (timing) {
-    *timing = CommitPhaseTiming{
-        .frame_lock_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
-                             lock_end - lock_start)
-                             .count(),
-        .db_commit_ns = db_commit_ns,
-    };
+    timing->frame_lock_ns =
+        std::chrono::duration_cast<std::chrono::nanoseconds>(lock_end -
+                                                             lock_start)
+            .count();
+    timing->db_commit_ns = db_commit_ns;
   }
   co_return ExecResult::ExecResultOK;
 }

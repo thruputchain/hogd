@@ -177,7 +177,8 @@ InvocationFrame::note_try_invoke_success(NetworkConfigParams const &params)
 x23::Async<SystemStatus<bool>>
 InvocationFrame::try_acquire_frame_locks(
     PerTransactionDatabaseProxy &db_proxy,
-    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations)
+    std::map<AddressAndKey, std::vector<QueueEntry>> const &observations,
+    DbRpcAwaitTiming *timing)
 {
   // Pushes the accumulated delta batch as a HogDb subtransaction. Returns
   // true on a successful lock acquisition, false on contention failure.
@@ -232,7 +233,7 @@ InvocationFrame::try_acquire_frame_locks(
                        std::to_underlying(StorageDeltaFlags::None));
   }
 
-  auto res = co_await db_proxy.try_push_current_subtransaction();
+  auto res = co_await db_proxy.try_push_current_subtransaction(timing);
   if (!res.has_value()) {
     co_return res.error();
   }

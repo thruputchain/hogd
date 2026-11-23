@@ -51,13 +51,15 @@ if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
         next
       }
       /^payment_db_caller / {
-        if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
+        if (NF != 11 || $2 != accounts || $3 !~ /^[0-9]$/ ||
             $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ || $5 % 256 ||
             $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ ||
-            caller_seen[$4, $5]++) {
+            $8 !~ /^[0-9]+$/ || $9 !~ /^[0-9]+$/ ||
+            $10 !~ /^[0-9]+$/ || $11 !~ /^[0-9]+$/ ||
+            $8 + $9 > $6 || $10 + $11 > $7 || caller_seen[$4, $5]++) {
           invalid = 1
         }
-        print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 > callers
+        print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 "\t" $8 "\t" $9 "\t" $10 "\t" $11 > callers
         caller_reps[$3]++
         next
       }

@@ -2,6 +2,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <concepts>
 #include <exception>
 #include <format>
@@ -310,12 +311,25 @@ DatabaseProxy::get_concurrent_retrocausal_queue_entry(BlockID block_id,
 
 x23::Async<SystemStatus<void>>
 DatabaseProxy::commit_transaction(BlockID block_id, TransactionID tx_id,
-                                  BorrowedContractBatch const &new_contracts)
+                                  BorrowedContractBatch const &new_contracts,
+                                  DbRpcAwaitTiming *timing)
 {
   try {
+    using Clock = std::chrono::steady_clock;
+    const auto start = timing ? Clock::now() : Clock::time_point{};
     auto res =
         co_await client_.commit_transaction(block_id, tx_id, new_contracts);
+    const auto resumed = timing ? Clock::now() : Clock::time_point{};
     co_await default_threadpool().bg();
+    if (timing && res == RPCError::kRPCNone) {
+      *timing = {
+          std::chrono::duration_cast<std::chrono::nanoseconds>(resumed - start)
+              .count(),
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+                                                               resumed)
+              .count(),
+      };
+    }
     co_return to_system_error_code<VoidMarker{}>(res, [] {});
   } catch (std::exception const &e) {
     // commit_transaction runs on a detached executor worker; any escaping
@@ -491,7 +505,8 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
                                            TransactionID tx_id,
                                            StorageDeltaBatch const &delta_batch,
                                            DbConflictResult *conflict_out,
-                                           size_t max_message_bytes)
+                                           size_t max_message_bytes,
+                                           DbRpcAwaitTiming *timing)
 {
   // Reject (as a concurrency-control conflict -- the existing `false`
   // lock-acquisition signal, surfaced as a nondeterministic-tx abort) any batch
@@ -523,9 +538,21 @@ DatabaseProxy::try_push_new_subtransaction(BlockID block_id,
     }
   }
   try {
+    using Clock = std::chrono::steady_clock;
+    const auto start = timing ? Clock::now() : Clock::time_point{};
     auto res = co_await client_.try_push_new_subtransaction(block_id, tx_id,
                                                             delta_batch);
+    const auto resumed = timing ? Clock::now() : Clock::time_point{};
     co_await default_threadpool().bg();
+    if (timing && res.error() == RPCError::kRPCNone) {
+      *timing = {
+          std::chrono::duration_cast<std::chrono::nanoseconds>(resumed - start)
+              .count(),
+          std::chrono::duration_cast<std::chrono::nanoseconds>(Clock::now() -
+                                                               resumed)
+              .count(),
+      };
+    }
     switch (res.error()) {
     case RPCError::kRPCNone:
       co_return true;
@@ -625,7 +652,8 @@ DatabaseProxy::close_viewing_snapshot(BlockID block_id)
 }
 
 x23::Async<SystemStatus<bool>>
-PerTransactionDatabaseProxy::try_push_current_subtransaction()
+PerTransactionDatabaseProxy::try_push_current_subtransaction(
+    DbRpcAwaitTiming *timing)
 {
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -647,7 +675,7 @@ PerTransactionDatabaseProxy::try_push_current_subtransaction()
   last_push_conflict_ = DbConflictResult(DbDiagnosticLevel::kDbDiagnosticNone);
   auto r = co_await db_proxy_.try_push_new_subtransaction(
       block_id_, tx_id_, current_subtransaction_batch_, &last_push_conflict_,
-      max_subtransaction_output_bytes_);
+      max_subtransaction_output_bytes_, timing);
   current_subtransaction_batch_.clear();
   co_return r;
 }

@@ -48,6 +48,11 @@ using DatabaseIdentifier = std::variant<LocalMockDB, ShardedDB>;
 // Abstract away database sharding from the rest of the executor.
 // Handles the RPC Error codes, changing them into restricted forms
 // that the executor can handle (or abort on).
+struct DbRpcAwaitTiming {
+  int64_t client_await_ns{};
+  int64_t threadpool_hop_ns{};
+};
+
 class DatabaseProxy {
 public:
   // Caps the client streams only; tests lower it rather than the process-wide
@@ -111,12 +116,14 @@ public:
       BlockID block_id, TransactionID tx_id,
       StorageDeltaBatch const &delta_batch,
       DbConflictResult *conflict_out = nullptr,
-      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes);
+      size_t max_message_bytes = kDefaultMaxSubtransactionOutputBytes,
+      DbRpcAwaitTiming *timing = nullptr);
 
   // [new_contracts] is borrowed across the suspension; see above.
   [[nodiscard]] x23::Async<SystemStatus<void>>
   commit_transaction(BlockID block_id, TransactionID tx_id,
-                     BorrowedContractBatch const &new_contracts);
+                     BorrowedContractBatch const &new_contracts,
+                     DbRpcAwaitTiming *timing = nullptr);
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   abort_transaction(BlockID block_id, TransactionID tx_id);
@@ -194,7 +201,7 @@ public:
   // unused, so a header definition would make every includer's link need
   // DatabaseProxy.
   [[nodiscard]] x23::Async<SystemStatus<bool>>
-  try_push_current_subtransaction();
+  try_push_current_subtransaction(DbRpcAwaitTiming *timing = nullptr);
 
   [[nodiscard]] x23::Async<SystemStatus<void>>
   pop_subtransactions(uint32_t count)
@@ -214,9 +221,11 @@ public:
   // [new_contracts] is borrowed for the duration of the call; the caller owns
   // it (see DatabaseProxy::commit_transaction).
   [[nodiscard]] x23::Async<SystemStatus<void>>
-  commit_transaction(BorrowedContractBatch const &new_contracts)
+  commit_transaction(BorrowedContractBatch const &new_contracts,
+                     DbRpcAwaitTiming *timing = nullptr)
   {
-    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts);
+    return db_proxy_.commit_transaction(block_id_, tx_id_, new_contracts,
+                                        timing);
   }
 
   [[nodiscard]] x23::Async<SystemStatus<void>> abort_transaction()
