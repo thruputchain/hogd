@@ -5,6 +5,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <bit>
 #include <cstdint>
 #include <filesystem>
 #include <fstream>
@@ -16,6 +17,8 @@
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/perf_level.h>
+#include <rocksdb/transaction_log.h>
+#include <rocksdb/write_batch.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -216,6 +219,10 @@ protected:
 
   rocksdb::DB &storage() { return *db_->db_; }
   rocksdb::ColumnFamilyHandle *tx_cf() { return db_->tx_cf_handle_; }
+  rocksdb::ColumnFamilyHandle *contract_cf()
+  {
+    return db_->contract_cf_handle_;
+  }
 };
 
 namespace {
@@ -272,6 +279,90 @@ TEST_F(StrictIndexerTest, DuplicateLookupPreservesFirstFailureInBlockOrder)
             : "committed transaction hash already exists at another height");
     EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 2);
   }
+}
+
+TEST_F(StrictIndexerTest, CommittedWriteBatchMatchesSerialEncoding)
+{
+  const auto origin = make_origin();
+  const auto initialized = db_->initialize_epoch(origin);
+  ASSERT_EQ(initialized.outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto first_sequence = storage().GetLatestSequenceNumber() + 1;
+  const BlockHeight height = 1;
+  ProposedTransactionBatch bodies;
+  // Span multiple worker jobs, lookup chunks, and an uneven final window.
+  for (uint64_t nonce = 0; nonce < 8201; ++nonce) {
+    bodies.push_back(make_body(nonce, static_cast<uint8_t>(nonce)));
+  }
+  auto block = make_block(height, origin.first_prev_hash, std::move(bodies));
+  auto &logs = block.payload.event_logs;
+  logs.back().events = logs.front().events;
+  logs.back().events.push_back(logs.front().events.front());
+  const auto applied = db_->apply_committed_block(origin, block)();
+  ASSERT_EQ(applied.outcome(), IndexerBlockApplyOutcome::IndexerBlockApplied);
+
+  // Reconstruct the pre-parallel writer in input order and compare the
+  // complete encoded batch, including interleaved column-family IDs.
+  auto bytes = [](const auto &value) {
+    return std::string(reinterpret_cast<const char *>(&value), sizeof(value));
+  };
+  auto xdr_bytes = [](const auto &value) {
+    auto buf = x23::serialize(value);
+    return std::string(reinterpret_cast<const char *>(buf.data()), buf.size());
+  };
+  rocksdb::WriteBatch expected;
+  std::vector<TransactionHash> hashes;
+  std::string key;
+  for (size_t i = 0; i < logs.size(); ++i) {
+    const auto &body = block.payload.tx_bodies[i];
+    const auto &log = logs[i];
+    hashes.push_back(log.tx_hash);
+    IndexerKeyFormat::make_tx_key(key, log.tx_hash);
+    expected.Put(tx_cf(), key,
+                 bytes(height) + xdr_bytes(body) + xdr_bytes(log));
+    uint32_t sequence = 0;
+    for (const auto &event : log.events) {
+      IndexerKeyFormat::make_contract_key(key, event.contract_address,
+                                          IndexerKeyFormat::kEvent, height,
+                                          log.tx_hash, sequence++);
+      expected.Put(contract_cf(), key, "");
+    }
+    IndexerKeyFormat::make_contract_key(
+        key, body.signed_tx.tx.invocation.invoked_address,
+        IndexerKeyFormat::kRootTx, height, log.tx_hash, 0);
+    expected.Put(contract_cf(), key, "");
+  }
+  expected.Put(IndexerKeyFormat::make_block_query_key(
+                   IndexerKeyFormat::kBlockQueryRecordPrefix, height),
+               xdr_bytes(
+                   BlockQueryRecord{.value = block.payload.consensus_value,
+                                    .transaction_count = logs.size()}));
+  std::ranges::sort(hashes);
+  for (uint64_t i = 0; i < hashes.size(); ++i) {
+    expected.Put(IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
+                 bytes(std::byteswap(i)));
+  }
+  auto progress = initialized.progress();
+  progress.contiguous_height = height;
+  progress.last_consensus_hash = block.identity.consensus_hash;
+  expected.Put(IndexerKeyFormat::make_block_identity_meta_key(height),
+               xdr_bytes(block.identity));
+  expected.Put(IndexerKeyFormat::kDurableProgressMetaKey, xdr_bytes(progress));
+  expected.Put(IndexerKeyFormat::kHighestIndexedBlockMetaKey,
+               bytes(std::byteswap(static_cast<uint64_t>(height))));
+
+  std::unique_ptr<rocksdb::TransactionLogIterator> wal;
+  ASSERT_TRUE(storage().GetUpdatesSince(first_sequence, &wal).ok());
+  ASSERT_TRUE(wal->Valid());
+  const auto actual = wal->GetBatch();
+  ASSERT_EQ(actual.sequence, first_sequence);
+  // RocksDB assigns the leading sequence number only when it writes the WAL.
+  constexpr size_t offset = sizeof(rocksdb::SequenceNumber);
+  EXPECT_TRUE(std::string_view(actual.writeBatchPtr->Data()).substr(offset) ==
+              std::string_view(expected.Data()).substr(offset));
+  wal->Next();
+  EXPECT_FALSE(wal->Valid());
+  EXPECT_TRUE(wal->status().ok());
 }
 
 TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
@@ -1820,8 +1911,11 @@ TEST_F(StrictIndexerTest, DuplicateHashesCannotCommitPartialBlockProjection)
   // collapse silently if an internal caller violates that contract.
   block.payload.tx_bodies.push_back(body);
   block.payload.event_logs.push_back(block.payload.event_logs.front());
-  EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+  const auto result = db_->apply_committed_block(origin, block)();
+  ASSERT_EQ(result.outcome(),
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+  EXPECT_EQ(std::string_view(result.diagnostic()),
+            "committed block repeats a transaction hash");
   EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
   EXPECT_FALSE(db_->get_tx_record(sha256(body.signed_tx.tx)));
   EXPECT_FALSE(db_->get_block_by_height(1));

@@ -13,6 +13,7 @@
 #include <future>
 #include <memory>
 #include <optional>
+#include <ranges>
 #include <rocksdb/version.h>
 #include <span>
 #include <string>
@@ -425,20 +426,75 @@ apply_gap(BlockHeight expected_height)
   return result;
 }
 
-std::string
-make_tx_value(BlockHeight block_height, const ProposedTransaction &body,
-              const TxEventLog &event_log)
+void
+make_tx_value(std::string &value, BlockHeight block_height,
+              const ProposedTransaction &body, const TxEventLog &event_log)
 {
   static_assert(std::endian::native == std::endian::little);
-  std::string value(reinterpret_cast<const char *>(&block_height),
-                    sizeof(block_height));
+  value.assign(reinterpret_cast<const char *>(&block_height),
+               sizeof(block_height));
   const x23::Buf body_bytes = x23::serialize(body);
   value.append(reinterpret_cast<const char *>(body_bytes.data()),
                body_bytes.size());
   const x23::Buf event_bytes = x23::serialize(event_log);
   value.append(reinterpret_cast<const char *>(event_bytes.data()),
                event_bytes.size());
-  return value;
+}
+
+void
+append_transaction_rows(rocksdb::WriteBatch &batch,
+                        rocksdb::ColumnFamilyHandle *tx_cf,
+                        rocksdb::ColumnFamilyHandle *contract_cf,
+                        BlockHeight height,
+                        const IndexerCommittedBlockPayload &payload)
+{
+  struct Rows {
+    std::string_view tx_key;
+    std::string tx_value;
+    std::vector<std::string> contract_keys;
+  };
+  // Reuse the buffers across windows so a large block doesn't require a
+  // second block-sized copy of its serialized rows alongside the batch.
+  constexpr size_t kWindow = 8192;
+  constexpr size_t kJobSize = 256;
+  const size_t total = payload.event_logs.size();
+  std::vector<Rows> rows(std::min(kWindow, total));
+  for (size_t start = 0; start < total; start += rows.size()) {
+    const size_t count = std::min(rows.size(), total - start);
+    auto build = [&](size_t i) {
+      auto &row = rows[i];
+      const auto &log = payload.event_logs[start + i];
+      const auto &body = payload.tx_bodies[start + i];
+      row.tx_key = IndexerKeyFormat::tx_key_view(log.tx_hash);
+      make_tx_value(row.tx_value, height, body, log);
+      row.contract_keys.resize(log.events.size() + 1);
+      for (size_t j = 0; j < log.events.size(); ++j) {
+        IndexerKeyFormat::make_contract_key(row.contract_keys[j],
+                                            log.events[j].contract_address,
+                                            IndexerKeyFormat::kEvent, height,
+                                            log.tx_hash,
+                                            static_cast<uint32_t>(j));
+      }
+      IndexerKeyFormat::make_contract_key(
+          row.contract_keys.back(),
+          body.signed_tx.tx.invocation.invoked_address,
+          IndexerKeyFormat::kRootTx, height, log.tx_hash, 0);
+    };
+    auto indices = std::views::iota(size_t{0}, count);
+    if (count <= kJobSize) {
+      std::ranges::for_each(indices, build);
+    }
+    else {
+      WorkerPool::get_default_pool().for_each_parallel(indices, build,
+                                                       kJobSize);
+    }
+    for (const Rows &row : std::span(rows).first(count)) {
+      batch.Put(tx_cf, row.tx_key, row.tx_value);
+      for (const std::string &key : row.contract_keys) {
+        batch.Put(contract_cf, key, rocksdb::Slice());
+      }
+    }
+  }
 }
 
 struct IndexedHash {
@@ -1463,7 +1519,6 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     }
 
     const auto &events = block.payload.event_logs;
-    const auto &bodies = block.payload.tx_bodies;
     std::vector<IndexedHash> hashes;
     hashes.reserve(events.size());
     for (size_t i = 0; i < events.size(); ++i) {
@@ -1474,26 +1529,8 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
       return std::move(*failure);
     }
     rocksdb::WriteBatch batch;
-    std::string key;
-    for (size_t i = 0; i < events.size(); ++i) {
-      const TxEventLog &event_log = events[i];
-      const ProposedTransaction &body = bodies[i];
-      IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
-
-      batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
-      uint32_t sequence_number = 0;
-      for (const TxEmittedEvent &emitted_event : event_log.events) {
-        IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
-                                            IndexerKeyFormat::kEvent, height,
-                                            event_log.tx_hash,
-                                            sequence_number++);
-        batch.Put(contract_cf_handle_, key, rocksdb::Slice());
-      }
-      IndexerKeyFormat::make_contract_key(
-          key, body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
-      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
-    }
+    append_transaction_rows(batch, tx_cf_handle_, contract_cf_handle_, height,
+                            block.payload);
 
     // The query projection is committed with rows and progress. It copies
     // consensus metadata only; bodies and logs remain in tx_index.
