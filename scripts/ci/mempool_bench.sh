@@ -17,7 +17,7 @@ event_tmpfs_active=0
 coordinator_tmpfs_active=0
 
 event_tmpfs_peer() {
-  python3 /opt/hog-ci/peer.py hog9 "
+  timeout --kill-after=3s 30s python3 /opt/hog-ci/peer.py hog9 "
     set -euo pipefail
     path=/bench-single-node-event/data
     [[ -d \$path && ! -L \$path && -O \$path && -w \$path ]]
@@ -25,7 +25,7 @@ event_tmpfs_peer() {
     [[ \$(findmnt -n -o FSTYPE -T "\$path") == tmpfs &&
        \$(findmnt -n -o TARGET -T "\$path") == /bench-single-node-event ]]
     $1
-  "
+  " </dev/null
 }
 
 coordinator_tmpfs_peer() {
@@ -49,7 +49,7 @@ cleanup() {
   ci_enter_cleanup
   if [[ $event_tmpfs_active == 1 ]]; then
     # Reclaim before later hog9 suites, after the Event child has been reaped.
-    if ! timeout 30 "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" stop_checked ||
+    if ! timeout --kill-after=3s 30s "$CONTROL_CLI" hog9 "$CI_CONTROL_PORT" stop_checked ||
       ! event_tmpfs_peer '
          df -Pk -- "$path"
          rm -rf --one-file-system -- "$path"
