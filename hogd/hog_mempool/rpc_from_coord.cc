@@ -1974,7 +1974,9 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
         nomination_telemetry.nominated_tx_count);
   }
   debug("schedulercoord_nominate ret");
-  co_return nominated_block_cache_.proposal_result;
+  // The reply owns its encoded batches. Commit retains its own transactions
+  // and DB tip, and the next nomination reconstructs the cached reply.
+  co_return std::move(nominated_block_cache_.proposal_result);
 }
 
 x23::Async<GenesisCeremonyResult>
