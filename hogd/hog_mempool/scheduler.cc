@@ -59,12 +59,14 @@ mul_div_round_up(uint128_t n, BlockHeight d, uint128_t t)
   if (!overflow) [[likely]] {
     return static_cast<BlockHeight>((product / t) + (product % t != 0 ? 1 : 0));
   }
-  const auto wide =
+  const auto divided =
       limbs_mul_div_rem<2>(limbs_from_u128(n), limbs_from_u128(wide_d),
                            limbs_from_u128(t));
-  CHECK(wide.has_value());
-  return static_cast<BlockHeight>(wide->quotient_lo[0]) +
-         (wide->remainder != Limbs<2>{} ? 1 : 0);
+  // Not empty: t is not zero.
+  // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+  const LimbsMulDivRem<2> &result = divided.value();
+  return static_cast<BlockHeight>(result.quotient_lo[0]) +
+         (result.remainder != Limbs<2>{} ? 1 : 0);
 }
 
 BlockHeight
