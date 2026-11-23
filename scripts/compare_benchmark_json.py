@@ -35,7 +35,11 @@ def load_benchmarks(path):
             continue
         if benchmark.get("run_type", "iteration") == "iteration":
             iterations[name] = benchmark
-    return iterations | aggregates | means
+    rows = iterations | aggregates | means
+    for name, placement in data.get("auth_bench_placement", {}).items():
+        if name in rows:
+            rows[name] = dict(rows[name], auth_bench_placement=placement)
+    return rows
 
 
 def markdown_escape(value):
@@ -115,6 +119,12 @@ def selected_names(before, after, regex):
     return [name for name in names if regex.search(name)]
 
 
+def format_auth_placement(placement):
+    if placement is None:
+        return "default"
+    return f"{placement['auth_bench_cores']} workers on CPUs {placement['cpus']}"
+
+
 def write_markdown(before, after, pattern, output):
     names = selected_names(before, after, pattern)
     print(
@@ -149,8 +159,16 @@ def write_markdown(before, after, pattern, output):
         cpu_delta = percent_change(cpu_before, cpu_after)
         real_delta = percent_change(real_before, real_after)
         items_delta = percent_change(items_before, items_after)
+        name_text = markdown_escape(name)
+        before_placement = before_benchmark.get("auth_bench_placement")
+        after_placement = after_benchmark.get("auth_bench_placement")
+        if before_placement != after_placement:
+            change = (f"Auth timing uses different CPU placement: "
+                      f"{format_auth_placement(before_placement)} → "
+                      f"{format_auth_placement(after_placement)}")
+            name_text += "<br>" + markdown_escape(change)
         print(
-            f"| {markdown_escape(name)} | {format_number(cpu_before)} ns | "
+            f"| {name_text} | {format_number(cpu_before)} ns | "
             f"{format_number(cpu_after)} ns | "
             f"{format_delta(cpu_delta, faster_is_positive=True)} | "
             f"{format_number(real_before)} ns | {format_number(real_after)} ns | "
