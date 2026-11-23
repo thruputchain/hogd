@@ -37,7 +37,7 @@ def scope(path=None):
 
 
 def usage():
-    st = ROOT.statvfs()
+    st = os.statvfs(ROOT)
     total = st.f_blocks * st.f_frsize
     used = (st.f_blocks - st.f_bfree) * st.f_frsize
     require(total == CAPACITY and 0 <= used < total, 'unexpected Event mount capacity or full mount')
