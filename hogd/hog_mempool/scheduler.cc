@@ -238,8 +238,12 @@ Scheduler::commit_pending_nomination(BlockID block_id)
   for (const auto &[account, native_token_age] :
        pending_nomination_.native_token_ages) {
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
-    account_state->native_token_age_dirty = true;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
   }
   co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
   co_await refresh_accounts_excluded_from_block();
@@ -345,8 +349,12 @@ Scheduler::apply_committed_block_native_token_ages(
     }
 
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
-    account_state->native_token_age_dirty = true;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
     touched_accounts.insert(account);
   }
   co_await refresh_ready_accounts(touched_accounts);
