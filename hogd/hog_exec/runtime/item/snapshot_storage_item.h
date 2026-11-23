@@ -12,7 +12,6 @@
 
 #include "address_auth.hh"
 #include "hogd/base/log.h"
-#include "hogd/base/thread_checked_mutex.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/hog_exec/common/status.h"
@@ -21,6 +20,8 @@
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/corosync.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -48,11 +49,31 @@ public:
   // variant.  So it's easier (and slightly less memory) to wrap accesses in
   // these methods, rather than storing the same data access parameters in and
   // out of the variant.
-  SystemStatus<const RetrocausalQueueBlock *>
+  // Coroutines: both lazily load from hog_db under rcq_mtx_, which is a
+  // CoroLock, so acquiring it suspends the caller instead of parking the
+  // thread.
+  [[nodiscard]] x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_rcq_block(uint64_t search_start_block) const;
-  SystemStatus<Nondeterministic<std::optional<QueueEntry>>>
+  [[nodiscard]] x23::Async<
+      SystemStatus<Nondeterministic<std::optional<QueueEntry>>>>
   get_concurrent_rcq_entry(uint32_t index) const;
 
+private:
+  // The two locked halves of get_concurrent_rcq_entry, split so that each one
+  // holds rcq_mtx_ for a single straight-line region it can leave through
+  // reset_and_return (see the note on rcq_mtx_).  The database read runs
+  // between them with the lock released.
+  //
+  // Returns the entry already recorded at [index], nullopt if [index] is the
+  // next one to load, or Unrecoverable for an out-of-order access.
+  x23::Async<SystemStatus<std::optional<QueueEntry>>>
+  peek_concurrent_entry(uint32_t index) const;
+  // Records [entry] at [index], or checks it against what a racing load
+  // already recorded there.
+  [[nodiscard]] x23::Async<SystemStatus<void>>
+  record_concurrent_entry(uint32_t index, QueueEntry entry) const;
+
+public:
   RetrocausalQueueMetadata const &retrocausal_queue_metadata() const
   {
     CHECK(type() == ItemViewType::kRetrocausalQueue);
@@ -100,22 +121,24 @@ public:
   auto const &addrkey() const { return addrkey_; }
 
   // We must have already loaded up to count retrocausally consumed entries from
-  // the db.
-  x23::Vec<QueueEntry> get_retrocausally_consumed_entries(uint32_t count) const
+  // the db.  A coroutine only because rcq_mtx_ is a CoroLock; it touches no
+  // database and never suspends once it holds the lock.
+  //
+  // Releases the lock through reset_and_return rather than letting ~CoroGuard
+  // do it -- see the note on rcq_mtx_.
+  x23::Async<x23::Vec<QueueEntry>>
+  get_retrocausally_consumed_entries(uint32_t count) const
   {
-    std::scoped_lock ul(rcq_mtx_);
+    x23::CoroGuard g;
+    co_await g(rcq_mtx_);
     CHECK_LE(count, concurrent_queue_entries_.size());
-    return x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
-                                concurrent_queue_entries_.begin() + count);
+    co_await g.reset_and_return(
+        x23::Vec<QueueEntry>(concurrent_queue_entries_.begin(),
+                             concurrent_queue_entries_.begin() + count));
+    panic("unreachable");
   }
 
 private:
-#ifdef NDEBUG
-  using mutex_type = std::mutex;
-#else
-  using mutex_type = ThreadCheckedMutex<std::mutex>;
-#endif
-
   struct BytestringEntry {
     Bytestring bytestring_;
     constexpr static ItemViewType kItemType = ItemViewType::kBytestring;
@@ -162,11 +185,13 @@ private:
 
     RetrocausalQueueMetadata const &metadata() const { return metadata_; }
 
-    // only returns from past blocks
-    SystemStatus<const RetrocausalQueueBlock *>
+    // only returns from past blocks.  The caller must hold rcq_mtx_ for the
+    // whole call: this suspends on the database read with the lock held, which
+    // a CoroLock (unlike a std::mutex) supports.
+    [[nodiscard]] x23::Async<SystemStatus<const RetrocausalQueueBlock *>>
     get_next_block(DatabaseProxy &db_proxy, BlockID block_id,
-                   AddressAndKey const &addrkey, uint64_t search_start_index,
-                   std::unique_lock<mutex_type> &ul) const;
+                   AddressAndKey const &addrkey,
+                   uint64_t search_start_index) const;
 
   private:
     // INVARIANT: These should only be modified while holding the rcq_mtx_ lock.
@@ -212,12 +237,24 @@ private:
   // Protects both the concurrent_queue_entries and the RetrocausalQueueEntry
   // contents.
   //
-  // This mutex is checked (currently only in debug builds) for migration across
-  // threads because it is held accesses to hog_db via the DatabaseProxy, which
-  // currently uses an SRpcClient. An SRpcClient is safe inside DatabaseProxy,
-  // as calls suspend instead of migrating across threads. If we ever change the
-  // internals of DatabaseProxy, this mutex would cause
-  mutable mutex_type rcq_mtx_;
+  // A CoroLock rather than a std::mutex because it is held across the
+  // DatabaseProxy reads below, which now suspend.  A std::mutex cannot survive
+  // that on either count: the coroutine may resume on a different thread than
+  // the one that locked it (unlocking a std::mutex from another thread is UB),
+  // and because this item is shared between the concurrent transactions of a
+  // block, a second transaction resuming on this thread would block the whole
+  // worker waiting for a lock whose holder is parked on an RPC.  Acquiring a
+  // CoroLock suspends the waiter instead, so neither happens.
+  //
+  // Every holder below releases it with `co_await g.reset_and_return(...)` and
+  // never by letting ~CoroGuard run.  The destructor path calls CoroLock's
+  // unlock(), which resumes the next waiter as a plain nested call on the
+  // current stack; under contention that builds an unbounded
+  // unlock->resume->unlock chain and overruns the thread stack.
+  // reset_and_return hands the next waiter back from await_suspend instead, so
+  // the resume is a symmetric transfer that reuses this frame rather than
+  // stacking on it (cf. EventRPCContext::get_context_slow).
+  mutable x23::CoroLock rcq_mtx_;
 
   // Note: the elements of the concurrent read cache
   // can't be part of the variant, since the type of the storage item

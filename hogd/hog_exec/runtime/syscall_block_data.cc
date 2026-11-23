@@ -25,7 +25,8 @@ syscall_GetBlockHeight_inner(SystemCallHandler &syscall_handler,
     trace_data->outputs.emplace(
         SyscallGetBlockHeightOutputs{.result = output_result});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

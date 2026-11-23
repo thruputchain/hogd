@@ -135,14 +135,16 @@ fi
 mkdir -p "$BUILD_DIR"
 
 if test -z "$DISABLE_CCACHE" && command -v ccache >/dev/null 2>&1; then
-  # Make cache keys portable across checkouts on different build hosts. Keep
-  # explicit settings intact for callers that need different ccache behavior.
+  # Persist path normalization in the generated build system, including builds
+  # started later through Ninja, Make, or an IDE without this shell environment.
   BUILD_DIR_ABS="$(cd "$BUILD_DIR" && pwd -P)"
-  export CCACHE_BASEDIR="${CCACHE_BASEDIR:-$BUILD_DIR_ABS:$ROOT_DIR}"
-  export CCACHE_COMPILERCHECK="${CCACHE_COMPILERCHECK:-content}"
+  CCACHE_LAUNCHER="$(command -v python3);$SCRIPT_DIR/ccache_launcher.py;$ROOT_DIR;$BUILD_DIR_ABS;$(command -v ccache)"
   ccache --max-size="${HOGD_CCACHE_MAXSIZE:-50G}"
-  CMAKE_FLAGS+=(-DCMAKE_C_COMPILER_LAUNCHER=ccache
-    -DCMAKE_CXX_COMPILER_LAUNCHER=ccache)
+  CMAKE_FLAGS+=("-DCMAKE_C_COMPILER_LAUNCHER=$CCACHE_LAUNCHER"
+    "-DCMAKE_CXX_COMPILER_LAUNCHER=$CCACHE_LAUNCHER")
+elif test -n "$DISABLE_CCACHE"; then
+  CMAKE_FLAGS+=(-DCMAKE_C_COMPILER_LAUNCHER=
+    -DCMAKE_CXX_COMPILER_LAUNCHER=)
 fi
 
 # Do the build

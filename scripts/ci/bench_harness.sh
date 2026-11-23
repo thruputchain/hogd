@@ -13,6 +13,11 @@ CI_SSH_OPTS=(-n -T -o BatchMode=yes -o ConnectTimeout=5 -o VisualHostKey=no)
 CI_BENCH_LOG_DIR=${CI_BENCH_LOG_DIR:-bench_logs}
 CI_BENCH_FAIL_TAIL_LINES=${CI_BENCH_FAIL_TAIL_LINES:-400}
 
+# How much of an x23 panic report to replay. The report is the message, the
+# source location, the command line and the stack trace -- tens of lines, not
+# hundreds -- and the cap is what keeps the dump that follows it out.
+CI_PANIC_REPORT_LINES=${CI_PANIC_REPORT_LINES:-40}
+
 # "<step name>:<exit status>" for each step that [ci_run_bench_step] saw fail.
 declare -a CI_FAILED_BENCH_STEPS=()
 
@@ -74,6 +79,71 @@ ci_run_bench_step() {
   return 0
 }
 
+# Emits a program that prints the x23 panic reports in the log at $1, each
+# capped at $2 lines. Written as a program rather than run directly because the
+# log it has to read is as often on a remote host as it is on this one.
+#
+# A panic prints its report and then raises SIGUSR1, whose handlers dump every
+# live file descriptor and every thread before the process aborts. On a mempool
+# under load that dump runs to thousands of lines, so any tail of the log lands
+# wholly inside it: the step is reported as "killed by signal 6: SIGABRT" and
+# the report that says which assertion failed is nowhere in the job log. Pull
+# it back out by name instead of tailing harder, which only trades one
+# arbitrary window for another.
+#
+# A log that merges several processes prefixes each line with
+# "[host label stream] ", and the report's lines are interleaved with whatever
+# the processes that are still alive were saying at the time. A report is
+# therefore continued by the lines that share the prefix of its first line;
+# lines carrying any other prefix are stepped over rather than counted against
+# the cap. Each prefix is counted on its own, because the condition that trips
+# one node's assertion is as likely as not to trip its peer's in the same
+# second: one report in progress must not swallow the panic header of another,
+# which would leave the second crash with no trace in the job log at all.
+#
+# The cap is a line count rather than the start of the dump, which has no
+# marker that holds across binaries, so a few lines of dump ride along at the
+# end of each report.
+ci_panic_report_program() {
+  cat <<EOF
+awk -v limit=$2 '
+{
+  if (match(\$0, /^\[[^]]*\] /))
+    prefix = substr(\$0, 1, RLENGTH)
+  else
+    prefix = ""
+}
+index(\$0, ":PANIC: ") && !(prefix in shown) {
+  shown[prefix] = 1
+  print
+  next
+}
+prefix in shown {
+  if (++shown[prefix] <= limit)
+    print
+  next
+}
+' $1
+EOF
+}
+
+# Replays the x23 panic reports in the local log at $1, if it has any, under a
+# header of their own. Silent for a log without a panic in it, so that a step
+# that failed some other way reads exactly as it did before.
+ci_replay_panic_reports() {
+  local log=$1
+  local quoted_log reports
+
+  printf -v quoted_log '%q' "$log"
+  reports=$(bash -c \
+    "$(ci_panic_report_program "$quoted_log" "$CI_PANIC_REPORT_LINES")" \
+    2>/dev/null) || true
+  [ -n "$reports" ] || return 0
+
+  echo "===== panic reports in $log ====="
+  printf '%s\n' "$reports"
+}
+
 # Names every failed step with its exit status and replays the tail of each
 # failed step's captured log, so the failure lands in the part of the job log
 # that survives. Returns 0 when every step passed and 1 otherwise.
@@ -103,6 +173,9 @@ ci_report_failed_bench_steps() {
     echo "===== last $CI_BENCH_FAIL_TAIL_LINES lines of $log ====="
     if [ -f "$log" ]; then
       tail -n "$CI_BENCH_FAIL_TAIL_LINES" "$log" || true
+      # After the tail, so that the one thing a crashed step has to say is the
+      # last thing the job log says about it.
+      ci_replay_panic_reports "$log"
     else
       echo "(no captured log at $log)"
     fi
@@ -234,6 +307,89 @@ ci_wait_port_hosts() {
 
   for host in "$@"; do
     ci_wait_port "$host" "$port" &
+    wait_pids+=("$!")
+  done
+  for wait_pid in "${wait_pids[@]}"; do
+    if ! wait "$wait_pid"; then
+      status=1
+    fi
+  done
+  return "$status"
+}
+
+# How long [ci_wait_control_server] sleeps between probes, and how long one
+# probe gets before it counts as not-ready. The overall timeout defaults to
+# whatever the caller allows a plain port wait, since this replaces one.
+#
+# The per-probe bound matters: a connect to a host that has stopped answering
+# (rather than refusing) blocks for the kernel's TCP timeout, which is longer
+# than the waits here allow in total, so an unbounded probe would let one such
+# host overrun the timeout it is supposed to be held to.
+CI_WAIT_CONTROL_POLL_SEC=${CI_WAIT_CONTROL_POLL_SEC:-1}
+CI_WAIT_CONTROL_PROBE_SEC=${CI_WAIT_CONTROL_PROBE_SEC:-10}
+
+# Waits until the control server on [$2]:[$3] answers an RPC as a server built
+# from this commit, using [$1] (a [control_cli] path) to probe.
+#
+# A bench control server outlives the run that started it often enough that
+# the schedules reap one by name before starting their own, and the reap can
+# come too late: each host reaps just before it starts its own server, while
+# the driving job starts talking to every host as soon as *its* own build
+# finishes. Waiting for the port to open does not close that window, because
+# the stale server holds the port open and answers [nc -z] immediately. The
+# benchmark then proceeds and dies on the first real RPC with
+# [kCIServerErrorCodeVersionMismatch] (hogd issue #3940).
+#
+# So wait on the thing that actually has to be true -- that the server on the
+# far end is this build's -- rather than on a port being open. A stale server
+# still holding the port now delays the wait instead of failing the run, and
+# the run recovers once the host that owns the port replaces it.
+ci_wait_control_server() {
+  local control_cli=$1
+  local host=$2
+  local port=$3
+  local timeout=${CI_WAIT_CONTROL_TIMEOUT_SEC:-$CI_WAIT_PORT_TIMEOUT_SEC}
+  local start_seconds=$SECONDS
+  local probe=""
+
+  echo "Waiting for this build's control server on $host:$port" \
+    "(timeout: ${timeout}s)..."
+  while true; do
+    if probe=$(timeout "$CI_WAIT_CONTROL_PROBE_SEC" \
+      "$control_cli" "$host" "$port" ready 2>&1); then
+      echo "Control server on $host:$port is serving this build"
+      return 0
+    fi
+
+    if [ "$timeout" != "0" ] &&
+      [ $((SECONDS - start_seconds)) -ge "$timeout" ]; then
+      # The last probe separates the two ways this wait times out -- nothing
+      # listening yet versus a stale server still holding the port -- which
+      # decide whether the host is slow or needs reaping.
+      echo "Timed out after ${timeout}s waiting for this build's control" \
+        "server on $host:$port; last probe said:" >&2
+      echo "$probe" >&2
+      return 1
+    fi
+
+    sleep "$CI_WAIT_CONTROL_POLL_SEC"
+  done
+}
+
+# [ci_wait_control_server] across several hosts at once. Every host is waited
+# on even when one fails, so a timeout report names all of the hosts that were
+# not ready rather than just the first.
+ci_wait_control_server_hosts() {
+  local control_cli=$1
+  local port=$2
+  local host
+  local wait_pid
+  local status=0
+  local -a wait_pids=()
+  shift 2
+
+  for host in "$@"; do
+    ci_wait_control_server "$control_cli" "$host" "$port" &
     wait_pids+=("$!")
   done
   for wait_pid in "${wait_pids[@]}"; do
@@ -421,4 +577,26 @@ ci_remote_killall_hosts() {
     fi
   done
   return "$status"
+}
+
+# Cap a log copied into metrics_history at its last [CI_LOG_TAIL_BYTES] bytes,
+# with a first line saying how much was dropped. A healthy multi-node run's
+# chuckd stderr carries scpd's span events and runs past 250 MB; GitHub
+# refuses any file over 100 MB, and one such file sinks the whole
+# metrics_history push, so nothing from the run is recorded at all.
+CI_LOG_TAIL_BYTES=${CI_LOG_TAIL_BYTES:-1048576}
+
+ci_truncate_log_to_tail() {
+  local path=$1
+  local size
+
+  size=$(stat -c %s "$path") || return 1
+  if ((size <= CI_LOG_TAIL_BYTES)); then
+    return 0
+  fi
+  {
+    printf '[truncated by ci_truncate_log_to_tail: kept the last %d of %d bytes]\n' \
+      "$CI_LOG_TAIL_BYTES" "$size"
+    tail -c "$CI_LOG_TAIL_BYTES" "$path"
+  } >"$path.tail" && mv -- "$path.tail" "$path"
 }

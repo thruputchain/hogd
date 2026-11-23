@@ -1,7 +1,6 @@
 #include <array>
 #include <atomic>
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 
@@ -15,16 +14,18 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/coropoll.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
@@ -35,17 +36,18 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/x23.h"
 
 namespace hogd {
 
-class RCQDeleteTest : public ::testing::TestWithParam<TestDB>,
+class RCQDeleteTest : public ::testing::Test,
                       public NativeContractTestFramework {
 protected:
   RCQDeleteTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   std::vector<uint8_t> last_consumed_values_;
@@ -79,76 +81,78 @@ protected:
   // on purpose, still need real frames.
   //
   // Each returns true on success; callers report and bail on false.
-  [[nodiscard]] static bool rcq_insert(NativeSyscallContext &ctx,
-                                       uint32_t value)
+  [[nodiscard]] static x23::Async<bool> rcq_insert(NativeSyscallContext &ctx,
+                                                   uint32_t value)
   {
-    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+    auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
         kStorageKey, std::as_bytes(std::span(&value, 1)));
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
-  [[nodiscard]] static bool rcq_consume_expect(NativeSyscallContext &ctx,
-                                               uint32_t expected)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_consume_expect(NativeSyscallContext &ctx, uint32_t expected)
   {
     uint32_t out = 0;
     RuntimeMemoryLength written_len = 0;
-    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+    auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-           written_len == 4 && out == expected;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&written_len ==
+            4 &&
+        out == expected;
   }
 
-  [[nodiscard]] static bool rcq_consume_expect_empty(NativeSyscallContext &ctx)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_consume_expect_empty(NativeSyscallContext &ctx)
   {
     uint32_t out = 0;
     RuntimeMemoryLength written_len = 0;
-    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+    auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           ((res.value() ==
-             SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) ||
-            (res.value() ==
-             SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) &&
-           written_len == 0;
+    co_return res.has_value() &&
+        ((res.value() ==
+          SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) ||
+         (res.value() ==
+          SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) &&
+        written_len == 0;
   }
 
   // Mirrors entrypoint 24: peek does not advance the queue.
-  [[nodiscard]] static bool rcq_peek_expect(NativeSyscallContext &ctx,
-                                            uint32_t expected)
+  [[nodiscard]] static x23::Async<bool>
+  rcq_peek_expect(NativeSyscallContext &ctx, uint32_t expected)
   {
     uint32_t peeked = 0;
     RuntimeMemoryLength peek_len = 0;
-    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+    auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
         peek_len);
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
-           peek_len == 4 && peeked == expected;
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone &&peek_len ==
+            4 &&
+        peeked == expected;
   }
 
   // Mirrors entrypoint 4: consuming a key that is not a queue must fail.
-  [[nodiscard]] static bool
+  [[nodiscard]] static x23::Async<bool>
   rcq_consume_expect_failure(NativeSyscallContext &ctx)
   {
     uint32_t out = 0;
     RuntimeMemoryLength written_len = 0;
-    auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+    auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
         kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
         written_len);
-    return res.has_value() &&
-           res.value() != SyscallErrorCode::kSyscallErrorCodeNone;
+    co_return res.has_value() &&
+        res.value() != SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
-  [[nodiscard]] static bool rcq_delete(NativeSyscallContext &ctx)
+  [[nodiscard]] static x23::Async<bool> rcq_delete(NativeSyscallContext &ctx)
   {
-    auto res = ctx.syscall<SyscallNo::kDeleteObject>(
-        kStorageKey, std::to_underlying(StorageDeltaFlags::None));
-    return res.has_value() &&
-           res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
+    auto res = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
+    co_return res.has_value() &&
+        res.value() == SyscallErrorCode::kSyscallErrorCodeNone;
   }
 
   // NOLINTNEXTLINE(readability-function-size)
@@ -156,47 +160,51 @@ protected:
   {
     NativeContractBuilder builder;
     builder.add<SerializationFormat::kTxs>(
-        0, [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        0,
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           // insert an entry to the queue
-          auto res = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               kStorageKey, std::as_bytes(std::span(&value, 1)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "failed to insert element to RCQ";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder.add<SerializationFormat::kTxs>(
-        1, [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        1,
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           // consume an entry, and check that against the supplied input
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
 
-          auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
               written_len);
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "failed to consume element to RCQ";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 4 || out != value) {
             ADD_FAILURE() << "Got bad result from RCQ: expected " << value
                           << " but got " << out;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder.add<SerializationFormat::kTxs>(
-        2, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        2, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // consume an entry, expect to get nothing
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
 
-          auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
               written_len);
           if (!res.has_value() ||
@@ -205,46 +213,45 @@ protected:
                (res.value() !=
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist))) {
             ADD_FAILURE() << "Got unexpected item from rcq";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 0) {
             ADD_FAILURE() << "Got bad result from RCQ";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder.add<SerializationFormat::kTxs>(
         3,
         [](NativeSyscallContext &ctx,
-           Bytestring bytestring) -> InvokeStatus<void> {
+           Bytestring bytestring) -> x23::Async<InvokeStatus<void>> {
           // Write a bytestring
-          auto res = ctx.syscall<SyscallNo::kBytestringSet>(
-              kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              kStorageKey, std::as_bytes(std::span(bytestring)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     builder.add<SerializationFormat::kTxs>(
-        4, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        4, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // try to consume, expect invalid syscall input
 
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
-          auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
               written_len);
           if (!res.has_value() ||
               res.value() == SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Consume should have failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Test for NoDoubleConsumeDeletedEntries:
@@ -253,22 +260,22 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         10,
         [](NativeSyscallContext &ctx, uint32_t consume_a,
-           uint32_t consume_b) -> InvokeStatus<void> {
+           uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
           // consume -> delete -> consume
-          if (!rcq_consume_expect(ctx, consume_a)) {
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
             ADD_FAILURE() << "Failed to consume " << consume_a;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
             ADD_FAILURE() << "Failed to consume " << consume_b;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Test for NoDeleteUnobservedEntries
@@ -284,39 +291,40 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         11,
         [](NativeSyscallContext &ctx,
-           uint32_t consume_b) -> InvokeStatus<void> {
+           uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
           // consume, observing nothing: the queue is empty at this point
           {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
-                written_len);
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    kStorageKey, false,
+                    std::as_writable_bytes(std::span(&out, 1)), written_len);
             if (!res.has_value() ||
                 ((res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) &&
                  (res.value() !=
                   SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist)) ||
                 written_len != 0) {
-              ADD_FAILURE() << "consume(expect none) did not come back empty";
+              ADD_FAILURE()
+                  << "co_await consume(expect none) did not come back empty";
               // Wake the main thread: it blocks on wait_flag_1_, so returning
               // without setting the flag deadlocks the test instead of failing
               // it. (Same guard as the delete branch below.)
               wait_flag_1_ = true;
               wait_flag_1_.notify_all();
-              return InvokeError{InvokeErrorCode::None};
+              co_return InvokeError{InvokeErrorCode::None};
             }
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
             // stop deadlock on test failure
             wait_flag_1_ = true;
             wait_flag_1_.notify_all();
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           wait_flag_1_ = true;
@@ -324,485 +332,496 @@ protected:
 
           // The main thread inserts consume_b concurrently, in its own
           // transaction, while this frame is parked here.
-          wait_flag_2_.wait(false);
+          //
+          // Park on a thread outside the pool. The consume above resumes this
+          // body by symmetric transfer straight from the RPC reply, so this
+          // frame runs on the thread pool worker that drains that stream.
+          // Blocking it there stalls the transport, so the concurrent insert
+          // never completes and never sets the flag -- a deadlock, not just a
+          // parked worker.
+          co_await default_coropoll().pool_.async(
+              [] { wait_flag_2_.wait(false); });
 
           // That entry was never observed by this transaction, so the delete
           // above must not have removed it.
           {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
-                written_len);
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    kStorageKey, false,
+                    std::as_writable_bytes(std::span(&out, 1)), written_len);
             if (!res.has_value() ||
                 res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "Failed to consume concurrently inserted entry";
-              return InvokeError{InvokeErrorCode::None};
+              co_return InvokeError{InvokeErrorCode::None};
             }
             if (written_len != 4 || out != consume_b) {
               ADD_FAILURE() << "Got bad result from RCQ: expected " << consume_b
                             << " but got " << out;
-              return InvokeError{InvokeErrorCode::None};
+              co_return InvokeError{InvokeErrorCode::None};
             }
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Test for DeleteSelfInsertedEntry
     builder.add<SerializationFormat::kTxs>(
         12,
         [](NativeSyscallContext &ctx, uint32_t insert_a,
-           uint32_t consume_b) -> InvokeStatus<void> {
+           uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
           // insert -> delete -> consume
-          if (!rcq_insert(ctx, insert_a)) {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
             ADD_FAILURE() << "Failed to consume " << consume_b;
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Test for DeleteAndRecreateRemovesPastBlocks
     builder.add<SerializationFormat::kTxs>(
         13,
-        [](NativeSyscallContext &ctx, uint32_t insert_1) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t insert_1) -> x23::Async<InvokeStatus<void>> {
           // delete -> insert
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_1)) {
+          if (!co_await rcq_insert(ctx, insert_1)) {
             ADD_FAILURE() << "Failed to insert";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // ConsumeOneOfManyDeleteConsumeRest:
-    // consume(a) -> delete -> consume(b) -> consume(c)
+    // co_await consume(a) -> delete -> co_await consume(b) -> co_await
+    // consume(c)
     builder.add<SerializationFormat::kTxs>(
         14,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
-           uint32_t consume_c) -> InvokeStatus<void> {
-          // consume(a) -> delete -> consume(b) -> consume(c)
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
-            return InvokeError{InvokeErrorCode::None};
+           uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
+          // co_await consume(a) -> delete -> co_await consume(b) -> co_await
+          // consume(c)
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // InsertSelfConsumeSelfDeleteInsertConsume:
-    // insert(a) -> consume(a) -> delete -> insert(b) -> consume(b)
+    // insert(a) -> co_await consume(a) -> delete -> insert(b) -> co_await
+    // consume(b)
     builder.add<SerializationFormat::kTxs>(
         15,
         [](NativeSyscallContext &ctx, uint32_t insert_a,
-           uint32_t insert_b) -> InvokeStatus<void> {
-          if (!rcq_insert(ctx, insert_a)) {
+           uint32_t insert_b) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_a)) {
-            ADD_FAILURE() << "Failed to consume(a)";
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, insert_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a)";
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_b)) {
+          if (!co_await rcq_insert(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_b)) {
-            ADD_FAILURE() << "Failed to consume(b)";
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, insert_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b)";
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
-    // DeleteConsumeEmpty: delete -> consume(expect nothing)
+    // DeleteConsumeEmpty: delete -> co_await consume(expect nothing)
     builder.add<SerializationFormat::kTxs>(
-        17, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          if (!rcq_delete(ctx)) {
+        17, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "consume did not come back empty";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // ConsumeEmptyDeleteConsumeEmpty:
-    // consume(nothing) -> delete -> consume(nothing)
+    // co_await consume(nothing) -> delete -> co_await consume(nothing)
     builder.add<SerializationFormat::kTxs>(
-        18, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          if (!rcq_consume_expect_empty(ctx)) {
+        18, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "first consume did not come back empty";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "second consume did not come back empty";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // MultipleDeleteRecreate:
-    // consume(a) -> delete -> consume(b) -> delete -> consume(c)
+    // co_await consume(a) -> delete -> co_await consume(b) -> delete ->
+    // co_await consume(c)
     builder.add<SerializationFormat::kTxs>(
         19,
         [](NativeSyscallContext &ctx, uint32_t consume_a, uint32_t consume_b,
-           uint32_t consume_c) -> InvokeStatus<void> {
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
-            return InvokeError{InvokeErrorCode::None};
+           uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (second)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // DeleteInsertDeleteInsertConsume:
-    // delete -> insert(a) -> delete -> insert(b) -> consume(concurrent)
+    // delete -> insert(a) -> delete -> insert(b) -> co_await
+    // consume(concurrent)
     builder.add<SerializationFormat::kTxs>(
         20,
         [](NativeSyscallContext &ctx, uint32_t insert_a, uint32_t insert_b,
-           uint32_t consume_c) -> InvokeStatus<void> {
-          if (!rcq_delete(ctx)) {
+           uint32_t consume_c) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_a)) {
+          if (!co_await rcq_insert(ctx, insert_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue (second)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_b)) {
+          if (!co_await rcq_insert(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_b)) {
+          if (!co_await rcq_consume_expect(ctx, insert_b)) {
             ADD_FAILURE() << "Failed to consume self(b)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, consume_c)) {
-            ADD_FAILURE() << "Failed to consume(c) " << consume_c;
-            return InvokeError{InvokeErrorCode::None};
+          if (!co_await rcq_consume_expect(ctx, consume_c)) {
+            ADD_FAILURE() << "Failed to co_await consume(c) " << consume_c;
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // PeekDeleteConsume:
-    // peek(expected) -> delete -> consume(expected)
+    // peek(expected) -> delete -> co_await consume(expected)
     builder.add<SerializationFormat::kTxs>(
         21,
-        [](NativeSyscallContext &ctx, uint32_t expected) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t expected) -> x23::Async<InvokeStatus<void>> {
           // peek
           uint32_t peeked = 0;
           RuntimeMemoryLength peek_len = 0;
-          auto rp = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto rp = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
               peek_len);
           if (!rp.has_value() ||
               rp.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
           if (peek_len != 4 || peeked != expected) {
             ADD_FAILURE() << "Peek: expected " << expected << " but got "
                           << peeked;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // delete
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // consume (should get same entry since peek doesn't advance)
-          if (!rcq_consume_expect(ctx, expected)) {
+          if (!co_await rcq_consume_expect(ctx, expected)) {
             ADD_FAILURE() << "Failed to consume " << expected
                           << " after peek+delete";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // ConsumePastBlockDeleteConsumeConcurrent:
-    // consume(past_entry) -> delete -> insert(new) -> consume(self) ->
-    // consume(concurrent)
+    // co_await consume(past_entry) -> delete -> insert(new) -> co_await
+    // consume(self) -> co_await consume(concurrent)
     builder.add<SerializationFormat::kTxs>(
         22,
         [](NativeSyscallContext &ctx, uint32_t past_value,
            uint32_t insert_value,
-           uint32_t concurrent_value) -> InvokeStatus<void> {
-          if (!rcq_consume_expect(ctx, past_value)) {
+           uint32_t concurrent_value) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect(ctx, past_value)) {
             ADD_FAILURE() << "Failed to consume past block entry "
                           << past_value;
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_insert(ctx, insert_value)) {
+          if (!co_await rcq_insert(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to insert";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, insert_value)) {
+          if (!co_await rcq_consume_expect(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to consume self entry " << insert_value;
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
-          if (!rcq_consume_expect(ctx, concurrent_value)) {
+          if (!co_await rcq_consume_expect(ctx, concurrent_value)) {
             ADD_FAILURE() << "Failed to consume concurrent entry "
                           << concurrent_value;
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // ChangeTypeAndRecreateFromEmpty:
-    // consume(retrocausal) -> delete -> create bytestring -> delete ->
+    // co_await consume(retrocausal) -> delete -> create bytestring -> delete ->
     // create nnint -> delete -> insert(item)
     builder.add<SerializationFormat::kTxs>(
         23,
         [](NativeSyscallContext &ctx, uint32_t consume_value,
-           uint32_t insert_value) -> InvokeStatus<void> {
+           uint32_t insert_value) -> x23::Async<InvokeStatus<void>> {
           // consume retrocausal item
-          if (!rcq_consume_expect(ctx, consume_value)) {
+          if (!co_await rcq_consume_expect(ctx, consume_value)) {
             ADD_FAILURE() << "Failed to consume retrocausal item "
                           << consume_value;
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue (first)";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
-          auto r3 = ctx.syscall<SyscallNo::kBytestringSet>(
-              kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              kStorageKey, std::as_bytes(std::span(bytestring)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
-          auto r4 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r4 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // create nnint
           int128_t set_value = 42;
-          auto r5 = ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
-              kStorageKey, &set_value, 0,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r5 = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kStorageKey, &set_value, 0);
           if (!r5.has_value() ||
               r5.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create nnint";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // delete
-          auto r6 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r6 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r6.has_value() ||
               r6.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete nnint";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // insert item
-          if (!rcq_insert(ctx, insert_value)) {
+          if (!co_await rcq_insert(ctx, insert_value)) {
             ADD_FAILURE() << "Failed to insert item";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 24: peek_only(value) — peek and verify value matches
     builder.add<SerializationFormat::kTxs>(
         24,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           uint32_t peeked = 0;
           RuntimeMemoryLength peek_len = 0;
-          auto rp = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto rp = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
               peek_len);
           if (!rp.has_value() ||
               rp.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (peek_len != 4 || peeked != value) {
             ADD_FAILURE() << "Peek: expected " << value << " but got "
                           << peeked;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 25: delete_and_fail — delete then return error to revert
     builder.add<SerializationFormat::kTxs>(
-        25, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+        25, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 26: try_delete_revert_then_consume(expected_value)
-    // invoke(method 25, TryInvoke) -> consume(expected_value)
+    // invoke(method 25, TryInvoke) -> co_await consume(expected_value)
     builder.add<SerializationFormat::kTxs>(
         26,
         [](NativeSyscallContext &ctx,
-           uint32_t expected_value) -> InvokeStatus<void> {
+           uint32_t expected_value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 25,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue should be intact after reverted delete
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(expected_value),
                 std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after reverted delete";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 27: peek_peek_consume_consume(peek_val, consume_a, consume_b)
     builder.add<SerializationFormat::kTxs>(
         27,
         [](NativeSyscallContext &ctx, uint32_t peek_val, uint32_t consume_a,
-           uint32_t consume_b) -> InvokeStatus<void> {
-          if (!rcq_peek_expect(ctx, peek_val)) {
+           uint32_t consume_b) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed first peek of " << peek_val;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, peek_val)) {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed second peek of " << peek_val;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_a)) {
-            ADD_FAILURE() << "Failed to consume(a) " << consume_a;
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await rcq_consume_expect(ctx, consume_a)) {
+            ADD_FAILURE() << "Failed to co_await consume(a) " << consume_a;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_consume_expect(ctx, consume_b)) {
-            ADD_FAILURE() << "Failed to consume(b) " << consume_b;
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await rcq_consume_expect(ctx, consume_b)) {
+            ADD_FAILURE() << "Failed to co_await consume(b) " << consume_b;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 29: insert_try_delete_revert_consume_consume(self_val,
@@ -810,128 +829,125 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         29,
         [](NativeSyscallContext &ctx, uint32_t self_val,
-           uint32_t concurrent_val) -> InvokeStatus<void> {
+           uint32_t concurrent_val) -> x23::Async<InvokeStatus<void>> {
           // insert(self_val)
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(self_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(self_val),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert self entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // try_invoke delete (reverted via inner error)
           CopyableInvokeOutputs r2_outputs{};
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 25,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, r2_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, r2_outputs);
           }();
           if (!r2.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          // consume(self_val) - self entries consumed first
-          auto r3 = [&]() {
+          // co_await consume(self_val) - self entries consumed first
+          auto r3 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(self_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(self_val),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume self entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          // consume(concurrent_val)
-          auto r4 = [&]() {
+          // co_await consume(concurrent_val)
+          auto r4 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(concurrent_val),
                 std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r4.has_value() ||
               r4.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 30: delete_insert_insert(val_a, val_b)
     builder.add<SerializationFormat::kTxs>(
         30,
         [](NativeSyscallContext &ctx, uint32_t val_a,
-           uint32_t val_b) -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+           uint32_t val_b) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, val_a)) {
+          if (!co_await rcq_insert(ctx, val_a)) {
             ADD_FAILURE() << "Failed to insert(a)";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, val_b)) {
+          if (!co_await rcq_insert(ctx, val_b)) {
             ADD_FAILURE() << "Failed to insert(b)";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 31: just_delete — only deletes, no error return
     builder.add<SerializationFormat::kTxs>(
-        31, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+        31, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 32: try_invoke_delete_then_consume(expected_value)
@@ -939,447 +955,450 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         32,
         [](NativeSyscallContext &ctx,
-           uint32_t expected_value) -> InvokeStatus<void> {
+           uint32_t expected_value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 31,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); expect it to have
           // rolled back (lock conflict) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Expect conflict when concurrent insert exists
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "try_invoke delete should have conflicted";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue still intact
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(expected_value),
                 std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after conflicted delete";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 33: consume_delete_peek(old_val, peek_val)
     builder.add<SerializationFormat::kTxs>(
         33,
         [](NativeSyscallContext &ctx, uint32_t old_val,
-           uint32_t peek_val) -> InvokeStatus<void> {
-          if (!rcq_consume_expect(ctx, old_val)) {
+           uint32_t peek_val) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect(ctx, old_val)) {
             ADD_FAILURE() << "Failed to consume old entry " << old_val;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, peek_val)) {
+          if (!co_await rcq_peek_expect(ctx, peek_val)) {
             ADD_FAILURE() << "Failed to peek " << peek_val << " after delete";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 28: consume_delete_insert_peek(old_val, new_val)
     builder.add<SerializationFormat::kTxs>(
         28,
         [](NativeSyscallContext &ctx, uint32_t old_val,
-           uint32_t new_val) -> InvokeStatus<void> {
-          if (!rcq_consume_expect(ctx, old_val)) {
+           uint32_t new_val) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect(ctx, old_val)) {
             ADD_FAILURE() << "Failed to consume old entry " << old_val;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_delete(ctx)) {
+          if (!co_await rcq_delete(ctx)) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, new_val)) {
+          if (!co_await rcq_insert(ctx, new_val)) {
             ADD_FAILURE() << "Failed to insert new entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_peek_expect(ctx, new_val)) {
+          if (!co_await rcq_peek_expect(ctx, new_val)) {
             ADD_FAILURE() << "Failed to peek new entry " << new_val;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 34: insert_and_fail(value) — insert then error (for inner frame
     // revert)
     builder.add<SerializationFormat::kTxs>(
         34,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          if (!rcq_insert(ctx, value)) {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_insert(ctx, value)) {
             ADD_FAILURE() << "Failed to insert in insert_and_fail";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 35: consume_and_fail(value) — consume then error (for inner frame
     // revert)
     builder.add<SerializationFormat::kTxs>(
         35,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          if (!rcq_consume_expect(ctx, value)) {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
+          if (!co_await rcq_consume_expect(ctx, value)) {
             ADD_FAILURE() << "Failed to consume " << value
                           << " in consume_and_fail";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 36: inner_insert_revert_then_consume_empty(value)
     builder.add<SerializationFormat::kTxs>(
         36,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(value), std::span<uint32_t>{},
+                inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // queue should be empty after reverted insert
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 2,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume_empty after reverted insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 37: inner_insert_revert_then_insert_consume(revert_val, real_val)
     builder.add<SerializationFormat::kTxs>(
         37,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
-           uint32_t real_val) -> InvokeStatus<void> {
+           uint32_t real_val) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(revert_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(revert_val),
+                std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // successful insert
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(real_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(real_val),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to insert real_val";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // only real_val should be consumable
-          auto r3 = [&]() {
+          auto r3 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(real_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(real_val),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume real_val";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 38: inner_consume_revert_then_consume(value)
     builder.add<SerializationFormat::kTxs>(
         38,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(value), std::span<uint32_t>{},
+                inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // entry should still be available after reverted consume
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(value), std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume after reverted consume";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 39: inner_consume_revert_then_peek(value)
     builder.add<SerializationFormat::kTxs>(
         39,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 35,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(value), std::span<uint32_t>{},
+                inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // entry should still be visible via peek
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 24,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(value), std::span<uint32_t>{},
+                inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to peek after reverted consume";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 40: inner_consume_revert_twice_then_consume(value)
-    builder.add<SerializationFormat::kTxs>(
-        40,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
-          // first reverted consume
-          CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 35,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::TryInvoke),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
-          }();
-          if (!r1.has_value()) {
-            ADD_FAILURE() << "System error on try_invoke consume (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          // The child ran (so the syscall returns None); it must have
-          // rolled back (revert or fault) rather than committed.
-          if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE()
-                << "try_invoke was rejected before running child (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-            ADD_FAILURE() << "expected the child frame to fault (1st)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+    builder
+        .add<SerializationFormat::kTxs>(
+            40,
+            [](NativeSyscallContext &ctx,
+               uint32_t value) -> x23::Async<InvokeStatus<void>> {
+              // first reverted consume
+              CopyableInvokeOutputs r1_outputs{};
+              auto r1 =
+                  co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 35,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                };
+                co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                    kContractAddress, x23::serialize(value),
+                    std::span<uint32_t>{}, inputs, r1_outputs);
+              }();
+              if (!r1.has_value()) {
+                ADD_FAILURE() << "System error on try_invoke consume (1st)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              // The child ran (so the syscall returns None); it must have
+              // rolled back (revert or fault) rather than committed.
+              if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "try_invoke was rejected before running child (1st)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+                ADD_FAILURE() << "expected the child frame to fault (1st)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          // second reverted consume
-          CopyableInvokeOutputs r2_outputs{};
-          auto r2 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 35,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::TryInvoke),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r2_outputs);
-          }();
-          if (!r2.has_value()) {
-            ADD_FAILURE() << "System error on try_invoke consume (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          // The child ran (so the syscall returns None); it must have
-          // rolled back (revert or fault) rather than committed.
-          if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE()
-                << "try_invoke was rejected before running child (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
-          if (r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
-            ADD_FAILURE() << "expected the child frame to fault (2nd)";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+              // second reverted consume
+              CopyableInvokeOutputs r2_outputs{};
+              auto r2 =
+                  co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 35,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                };
+                co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                    kContractAddress, x23::serialize(value),
+                    std::span<uint32_t>{}, inputs, r2_outputs);
+              }();
+              if (!r2.has_value()) {
+                ADD_FAILURE() << "System error on try_invoke consume (2nd)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              // The child ran (so the syscall returns None); it must have
+              // rolled back (revert or fault) rather than committed.
+              if (r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "try_invoke was rejected before running child (2nd)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
+              if (r2_outputs.frame_status != InvocationFrameStatusCode::Fault) {
+                ADD_FAILURE() << "expected the child frame to fault (2nd)";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          // entry should still be available
-          auto r3 = [&]() {
-            CopyableInvokeInputs inputs{
-                .entrypoint_id = 1,
-                .gas_limit = std::numeric_limits<GasAmount>::max(),
-                .flags = std::to_underlying(InvokeFlag::None),
-            };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(value),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
-          }();
-          if (!r3.has_value() ||
-              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            ADD_FAILURE() << "Failed to consume after two reverted consumes";
-            return InvokeError{InvokeErrorCode::Deterministic};
-          }
+              // entry should still be available
+              auto r3 =
+                  co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
+                CopyableInvokeInputs inputs{
+                    .entrypoint_id = 1,
+                    .gas_limit = std::numeric_limits<GasAmount>::max(),
+                    .flags = std::to_underlying(InvokeFlag::None),
+                };
+                co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                    kContractAddress, x23::serialize(value),
+                    std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
+              }();
+              if (!r3.has_value() ||
+                  r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                ADD_FAILURE()
+                    << "Failed to consume after two reverted consumes";
+                co_return InvokeError{InvokeErrorCode::Deterministic};
+              }
 
-          return {};
-        });
+              co_return InvokeStatus<void>{};
+            });
 
     // Method 41:
     // inner_consume_insert_revert_then_consume_and_empty(consume_val,
@@ -1387,73 +1406,72 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         41,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           // try_invoke: consume + insert, both reverted
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 42,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(consume_val, insert_val),
                 std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke consume+insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // The child ran (so the syscall returns None); it must have rolled
           // back (revert or fault) rather than committed.
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // original entry still available
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(consume_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(consume_val),
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume original entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // reverted insert should be gone
-          auto r3 = [&]() {
+          auto r3 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 2,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume_empty after reverted insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 42: consume_insert_and_fail(consume_val, insert_val) — consume
@@ -1461,71 +1479,72 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         42,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           // Runs as the TryInvoke'd child, so its own operations are in-frame:
           // invoking this contract again from here would be reentrant even
           // with an orchestrator driving the outer frame.
-          if (!rcq_consume_expect(ctx, consume_val)) {
+          if (!co_await rcq_consume_expect(ctx, consume_val)) {
             ADD_FAILURE() << "Failed to consume " << consume_val
                           << " in consume_insert_and_fail";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!rcq_insert(ctx, insert_val)) {
+          if (!co_await rcq_insert(ctx, insert_val)) {
             ADD_FAILURE() << "Failed to insert in consume_insert_and_fail";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 43: inner_insert_revert_then_consume(revert_val, concurrent_val)
     builder.add<SerializationFormat::kTxs>(
         43,
         [](NativeSyscallContext &ctx, uint32_t revert_val,
-           uint32_t concurrent_val) -> InvokeStatus<void> {
+           uint32_t concurrent_val) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs r1_outputs{};
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 34,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::TryInvoke),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                                   x23::serialize(revert_val),
-                                                   std::span<uint32_t>{},
-                                                   inputs, r1_outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kContractAddress, x23::serialize(revert_val),
+                std::span<uint32_t>{}, inputs, r1_outputs);
           }();
           if (!r1.has_value()) {
             ADD_FAILURE() << "System error on try_invoke insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "try_invoke was rejected before running child";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (r1_outputs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the child frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume concurrent entry (unaffected by reverted insert)
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = std::numeric_limits<GasAmount>::max(),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                 kContractAddress, x23::serialize(concurrent_val),
                 std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
           }();
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to consume concurrent entry";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 44: delete_queue_create_bytestring_delete_bytestring_consume
@@ -1534,97 +1553,93 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         44,
         [](NativeSyscallContext &ctx,
-           uint32_t concurrent_val) -> InvokeStatus<void> {
+           uint32_t concurrent_val) -> x23::Async<InvokeStatus<void>> {
           // delete queue
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
-          auto r2 = ctx.syscall<SyscallNo::kBytestringSet>(
-              kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              kStorageKey, std::as_bytes(std::span(bytestring)));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // delete bytestring
-          auto r3 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r3 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete bytestring";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           // consume concurrent entry -- the consume should succeed
-          if (!rcq_consume_expect(ctx, concurrent_val)) {
+          if (!co_await rcq_consume_expect(ctx, concurrent_val)) {
             ADD_FAILURE() << "Consume concurrent entry " << concurrent_val
                           << " should have succeeded";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 45: delete_queue_create_bytestring_consume(concurrent_val)
     // Delete queue -> create bytestring -> consume
     // consume should fail, so bytestring should be left
     builder.add<SerializationFormat::kTxs>(
-        45, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        45, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // delete queue
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // create bytestring
           Bytestring bytestring =
               NativeContractTestFramework::make_bytestring("test");
-          auto r2 = ctx.syscall<SyscallNo::kBytestringSet>(
-              kStorageKey, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              kStorageKey, std::as_bytes(std::span(bytestring)));
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to create bytestring";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // consume concurrent entry -- the consume should fail because the
           // bytestring exists there
-          if (!rcq_consume_expect_failure(ctx)) {
+          if (!co_await rcq_consume_expect_failure(ctx)) {
             ADD_FAILURE() << "Consume should have failed over the bytestring";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // ConsumeAll: drain the queue until empty (single TX).
     // Buffer is max entry size (kQueueEntryMaxLen = 256) so this works
     // regardless of how entries were inserted.
     builder.add<SerializationFormat::kTxs>(
-        50, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
+        50, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           while (true) {
             std::array<uint8_t, 256> out{};
             RuntimeMemoryLength written_len = 0;
-            auto res = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                kStorageKey, false, std::as_writable_bytes(std::span(out)),
-                written_len);
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    kStorageKey, false, std::as_writable_bytes(std::span(out)),
+                    written_len);
             if (!res.has_value()) {
               ADD_FAILURE() << "System error consuming entry";
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
             if (res.value() == SyscallErrorCode::
                                    kSyscallErrorCodeNoRetrocausalQueueEntry ||
@@ -1634,26 +1649,26 @@ protected:
             }
             if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "Unexpected error consuming entry";
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
-    // Method 51: delete -> peek(expect nothing) -> consume(expect nothing)
+    // Method 51: delete -> peek(expect nothing) -> co_await consume(expect
+    // nothing)
     builder.add<SerializationFormat::kTxs>(
-        51, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+        51, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to delete queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
           uint32_t peeked = 0;
           RuntimeMemoryLength peek_len = 0;
-          auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, true, std::as_writable_bytes(std::span(&peeked, 1)),
               peek_len);
           if (!r2.has_value() ||
@@ -1662,19 +1677,19 @@ protected:
                (r2.value() !=
                 SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist))) {
             ADD_FAILURE() << "Peek should not find an entry";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
           if (peek_len != 0) {
             ADD_FAILURE() << "Peek wrote output for an empty queue";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          if (!rcq_consume_expect_empty(ctx)) {
+          if (!co_await rcq_consume_expect_empty(ctx)) {
             ADD_FAILURE() << "consume after peek did not come back empty";
-            return InvokeError{InvokeErrorCode::None};
+            co_return InvokeError{InvokeErrorCode::None};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 60: consume_delete_insert_direct(consume_val, insert_val)
@@ -1682,40 +1697,39 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         60,
         [](NativeSyscallContext &ctx, uint32_t consume_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
-          auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
               written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "consume failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 4 || out != consume_val) {
             ADD_FAILURE() << "consume: expected " << consume_val << " got "
                           << out;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "insert failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 61: consume_consume_delete_insert_direct(val_a, val_b, insert_val)
@@ -1723,42 +1737,41 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         61,
         [](NativeSyscallContext &ctx, uint32_t val_a, uint32_t val_b,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           for (uint32_t expected : {val_a, val_b}) {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
                 kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
                 written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "consume failed";
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
             if (written_len != 4 || out != expected) {
               ADD_FAILURE()
                   << "consume: expected " << expected << " got " << out;
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "insert failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 62: consume_delete_consume_delete_insert_direct(val_a, val_b,
@@ -1767,70 +1780,70 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         62,
         [](NativeSyscallContext &ctx, uint32_t val_a, uint32_t val_b,
-           uint32_t insert_val) -> InvokeStatus<void> {
-          auto consume_one = [&](uint32_t expected) -> bool {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
+          auto consume_one = [&](uint32_t expected) -> x23::Async<bool> {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
                 kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
                 written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "consume failed";
-              return false;
+              co_return false;
             }
             if (written_len != 4 || out != expected) {
               ADD_FAILURE()
                   << "consume: expected " << expected << " got " << out;
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
-          auto delete_queue = [&]() -> bool {
-            auto r = ctx.syscall<SyscallNo::kDeleteObject>(
-                kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto delete_queue = [&]() -> x23::Async<bool> {
+            auto r =
+                co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "delete failed";
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
-          auto insert_one = [&](uint32_t val) -> bool {
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto insert_one = [&](uint32_t val) -> x23::Async<bool> {
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 kStorageKey, std::as_bytes(std::span(&val, 1)));
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "insert failed";
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
 
-          // consume(a) -> delete -> insert(b) -> consume(b) -> delete ->
-          // insert(final)
-          // After first delete-recreate, self-entries are consumed before
-          // concurrent, so consume gets the just-inserted val_b.
-          if (!consume_one(val_a)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          // co_await consume(a) -> delete -> insert(b) -> co_await consume(b)
+          // -> delete -> insert(final) After first delete-recreate,
+          // self-entries are consumed before concurrent, so consume gets the
+          // just-inserted val_b.
+          if (!co_await consume_one(val_a)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!delete_queue()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await delete_queue()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!insert_one(val_b)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await insert_one(val_b)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!consume_one(val_b)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await consume_one(val_b)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!delete_queue()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await delete_queue()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!insert_one(insert_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await insert_one(insert_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 63: peek_delete_insert_consume_direct(peek_val, insert_val)
@@ -1841,54 +1854,53 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         63,
         [](NativeSyscallContext &ctx, uint32_t peek_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
-          auto consume = [&](bool peek, uint32_t expected) -> bool {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
+          auto consume = [&](bool peek, uint32_t expected) -> x23::Async<bool> {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
                 kStorageKey, peek, std::as_writable_bytes(std::span(&out, 1)),
                 written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << (peek ? "peek" : "consume") << " failed";
-              return false;
+              co_return false;
             }
             if (written_len != 4 || out != expected) {
               ADD_FAILURE() << (peek ? "peek" : "consume") << ": expected "
                             << expected << " got " << out;
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
 
-          if (!consume(true, peek_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await consume(true, peek_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "insert failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          if (!consume(false, insert_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await consume(false, insert_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!consume(false, peek_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await consume(false, peek_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 64: peek_only_delete_insert_direct(peek_val, insert_val)
@@ -1898,39 +1910,38 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         64,
         [](NativeSyscallContext &ctx, uint32_t peek_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           uint32_t out = 0;
           RuntimeMemoryLength written_len = 0;
-          auto r1 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          auto r1 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
               kStorageKey, true, std::as_writable_bytes(std::span(&out, 1)),
               written_len);
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "peek failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (written_len != 4 || out != peek_val) {
             ADD_FAILURE() << "peek: expected " << peek_val << " got " << out;
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r3 = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          auto r3 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
               kStorageKey, std::as_bytes(std::span(&insert_val, 1)));
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "insert failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 65: insert_consume_self_delete_insert_consume_concurrent(
@@ -1941,96 +1952,94 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         65,
         [](NativeSyscallContext &ctx, uint32_t self_val, uint32_t insert_val,
-           uint32_t concurrent_val) -> InvokeStatus<void> {
-          auto do_insert = [&](uint32_t val) -> bool {
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+           uint32_t concurrent_val) -> x23::Async<InvokeStatus<void>> {
+          auto do_insert = [&](uint32_t val) -> x23::Async<bool> {
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 kStorageKey, std::as_bytes(std::span(&val, 1)));
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "insert failed";
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
-          auto do_consume = [&](uint32_t expected) -> bool {
+          auto do_consume = [&](uint32_t expected) -> x23::Async<bool> {
             uint32_t out = 0;
             RuntimeMemoryLength written_len = 0;
-            auto r = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
                 kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
                 written_len);
             if (!r.has_value() ||
                 r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
               ADD_FAILURE() << "consume failed";
-              return false;
+              co_return false;
             }
             if (written_len != 4 || out != expected) {
               ADD_FAILURE()
                   << "consume: expected " << expected << " got " << out;
-              return false;
+              co_return false;
             }
-            return true;
+            co_return true;
           };
 
-          // insert(self_val) -> consume(self_val) -> delete ->
-          // insert(insert_val) -> consume(insert_val) ->
-          // consume(concurrent_val)
-          if (!do_insert(self_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          // insert(self_val) -> co_await consume(self_val) -> delete ->
+          // insert(insert_val) -> co_await consume(insert_val) ->
+          // co_await consume(concurrent_val)
+          if (!co_await do_insert(self_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(self_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await do_consume(self_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = ctx.syscall<SyscallNo::kDeleteObject>(
-              kStorageKey, std::to_underlying(StorageDeltaFlags::None));
+          auto r2 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "delete failed";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          if (!do_insert(insert_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await do_insert(insert_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(insert_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await do_consume(insert_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          if (!do_consume(concurrent_val)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (!co_await do_consume(concurrent_val)) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
-    // Method 67 (issue #3152 reachability, multi-frame): consume(concurrent) ->
-    // delete -> insert(different), with the consume and insert each in their
-    // own child frame. Because deltas are flushed to the DB only at a frame
-    // boundary (try_push_new_subtransaction), the delete lands as its own
-    // subtransaction before the recreate, so HogDb sees a deletion -> RCQ
-    // exclusive upgrade. The recreated RCQ reloads the consumed concurrent
-    // entry into current_block_consumed (via make_fully_consumed_item) while
-    // added_entries holds only the new insert -- the exact shape HogDb's RCQ
-    // ExclusiveLock rejects as kInvalidExecutorBehavior. Unlike methods 62-65
-    // (single frame, so delete+recreate fold into one delta) this actually
-    // splits them across a push.
+    // Method 67 (issue #3152 reachability, multi-frame): co_await
+    // consume(concurrent) -> delete -> insert(different), with the consume and
+    // insert each in their own child frame. Because deltas are flushed to the
+    // DB only at a frame boundary (try_push_new_subtransaction), the delete
+    // lands as its own subtransaction before the recreate, so HogDb sees a
+    // deletion -> RCQ exclusive upgrade. The recreated RCQ reloads the consumed
+    // concurrent entry into current_block_consumed (via
+    // make_fully_consumed_item) while added_entries holds only the new insert
+    // -- the exact shape HogDb's RCQ ExclusiveLock rejects as
+    // kInvalidExecutorBehavior. Unlike methods 62-65 (single frame, so
+    // delete+recreate fold into one delta) this actually splits them across a
+    // push.
     builder.add<SerializationFormat::kTxs>(
         67,
         [](NativeSyscallContext &ctx, uint32_t concurrent_val,
-           uint32_t insert_val) -> InvokeStatus<void> {
+           uint32_t insert_val) -> x23::Async<InvokeStatus<void>> {
           // Consume the concurrent entry in a child frame (entrypoint 1).
           CopyableInvokeInputs consume_in{
               .entrypoint_id = 1,
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r1 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(concurrent_val),
-                                              std::span<uint32_t>{}, consume_in,
-                                              CopyableInvokeOutputs{});
+          auto r1 = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, x23::serialize(concurrent_val),
+              std::span<uint32_t>{}, consume_in, CopyableInvokeOutputs{});
           if (!r1.has_value() ||
               r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Delete in a child frame (entrypoint 31, which only deletes). The
           // deletion delta propagates up into this frame when that child
@@ -2044,14 +2053,12 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r2 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, delete_in,
-                                              CopyableInvokeOutputs{});
+          auto r2 = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, std::span<const std::byte>{},
+              std::span<uint32_t>{}, delete_in, CopyableInvokeOutputs{});
           if (!r2.has_value() ||
               r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Insert a DIFFERENT entry in a child frame (entrypoint 0). Crossing
           // this boundary first flushes the deletion subtransaction.
@@ -2060,16 +2067,14 @@ protected:
               .gas_limit = std::numeric_limits<GasAmount>::max(),
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto r3 =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(insert_val),
-                                              std::span<uint32_t>{}, insert_in,
-                                              CopyableInvokeOutputs{});
+          auto r3 = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kContractAddress, x23::serialize(insert_val),
+              std::span<uint32_t>{}, insert_in, CopyableInvokeOutputs{});
           if (!r3.has_value() ||
               r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 68: TryInvoke a *successful* insert into kContractAddress3, then
@@ -2078,7 +2083,8 @@ protected:
     // reverts, which must discard them.
     builder.add<SerializationFormat::kTxs>(
         68,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs outs{};
           CopyableInvokeInputs in{
               .entrypoint_id = 0,
@@ -2086,28 +2092,30 @@ protected:
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress3,
-                                              x23::serialize(value),
-                                              std::span<uint32_t>{}, in, outs);
+              co_await ctx.syscall<SyscallNo::kInvoke>(kContractAddress3,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       in, outs);
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "System error on nested try_invoke insert";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (outs.frame_status != InvocationFrameStatusCode::Return) {
             ADD_FAILURE() << "nested try_invoke insert should have succeeded";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           // Revert this frame, discarding the insert the TryInvoke committed
           // into it.
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
 
     // Method 69: orchestrator for 68. Invokes it and expects it to fault.
     builder.add<SerializationFormat::kTxs>(
         69,
-        [](NativeSyscallContext &ctx, uint32_t value) -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs outs{};
           CopyableInvokeInputs in{
               .entrypoint_id = 68,
@@ -2115,19 +2123,20 @@ protected:
               .flags = std::to_underlying(InvokeFlag::None),
           };
           auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(value),
-                                              std::span<uint32_t>{}, in, outs);
+              co_await ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       in, outs);
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "System error invoking the reverting frame";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (outs.frame_status != InvocationFrameStatusCode::Fault) {
             ADD_FAILURE() << "expected the reverting frame to fault";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     // Method 70: try_invoke_child(child_entrypoint, value, expect_fault).
@@ -2138,7 +2147,7 @@ protected:
     builder.add<SerializationFormat::kTxs>(
         70,
         [](NativeSyscallContext &ctx, uint32_t child_entrypoint, uint32_t value,
-           uint32_t expect_fault) -> InvokeStatus<void> {
+           uint32_t expect_fault) -> x23::Async<InvokeStatus<void>> {
           CopyableInvokeOutputs outs{};
           CopyableInvokeInputs in{
               .entrypoint_id = child_entrypoint,
@@ -2146,13 +2155,14 @@ protected:
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
-                                              x23::serialize(value),
-                                              std::span<uint32_t>{}, in, outs);
+              co_await ctx.syscall<SyscallNo::kInvoke>(kContractAddress,
+                                                       x23::serialize(value),
+                                                       std::span<uint32_t>{},
+                                                       in, outs);
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "System error on try_invoke";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto expected = expect_fault != 0 ? InvocationFrameStatusCode::Fault
                                             : InvocationFrameStatusCode::Return;
@@ -2160,9 +2170,58 @@ protected:
             ADD_FAILURE() << "try_invoke child entrypoint " << child_entrypoint
                           << ": expected "
                           << (expect_fault != 0 ? "Fault" : "Return");
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
+        });
+
+    builder.add<SerializationFormat::kTxs>(
+        71, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          // reads never convert a key, so consuming a bytestring is wrong-type
+          // input, even if another transaction converted it this block
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!res.has_value() ||
+              res.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            ADD_FAILURE() << "expected InvalidSyscallInput consuming from a "
+                             "key that holds a bytestring";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+
+    builder.add<SerializationFormat::kTxs>(
+        72,
+        [](NativeSyscallContext &ctx,
+           uint32_t value) -> x23::Async<InvokeStatus<void>> {
+          // delete, then retrocausally consume a concurrent entry: the delete
+          // is a write, so the key is no longer a bytestring for this tx
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(kStorageKey);
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to delete";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              kStorageKey, false, std::as_writable_bytes(std::span(&out, 1)),
+              written_len);
+          if (!r2.has_value() ||
+              r2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "failed to consume element after delete";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          if (written_len != 4 || out != value) {
+            ADD_FAILURE() << "Got bad result from RCQ: expected " << value
+                          << " but got " << out;
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
         });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -2252,15 +2311,15 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
 
-    auto r = handler.root_invoke();
+    auto r = handler.root_invoke()();
     ASSERT_TRUE(r.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_EQ(res, ExecResult::ExecResultOK);
   }
 
@@ -2283,15 +2342,15 @@ protected:
                         Invocation{.invoked_address = root_address,
                                    .entrypoint =
                                        entrypoint_from_method_id(method),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = x23::serialize(args...)},
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
 
-    auto r = handler.root_invoke();
+    auto r = handler.root_invoke()();
     ASSERT_TRUE(r.is_root_success());
-    auto res = handler.try_commit_transaction();
+    auto res = handler.try_commit_transaction()();
     ASSERT_NE(res, ExecResult::ExecResultOK);
   }
 
@@ -2307,7 +2366,7 @@ protected:
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -2322,21 +2381,7 @@ protected:
   testing::AssertionResult check_rcq_empty_for(ContractAddress const &addr)
   {
     auto queue = lookup_storage_item_from_db(get_queue_addrkey_for(addr));
-    if (GetParam() == TestDB::kHogDb) {
-      if (queue.has_value()) {
-        return testing::AssertionFailure() << "Queue has live entries";
-      }
-      return testing::AssertionSuccess();
-    }
-
-    if (!queue.has_value()) {
-      return testing::AssertionFailure() << "No queue found";
-    }
-    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-      return testing::AssertionFailure() << "Queue has wrong type";
-    }
-    auto const &qe = queue->metadata();
-    if (qe.live_entries != 0) {
+    if (queue.has_value()) {
       return testing::AssertionFailure() << "Queue has live entries";
     }
     return testing::AssertionSuccess();
@@ -2362,22 +2407,8 @@ protected:
     }
 
     auto queue = lookup_storage_item_from_db(get_queue_addrkey());
-    if (GetParam() == TestDB::kHogDb) {
-      // On HogDb, metadata is removed when live_entries drops to 0.
-      if (queue.has_value()) {
-        return testing::AssertionFailure() << "Queue has live entries";
-      }
-      return testing::AssertionSuccess();
-    }
-
-    if (!queue.has_value()) {
-      return testing::AssertionFailure() << "No queue found";
-    }
-    if (queue->type() != StorageItemType::kItemTypeRetrocausalQueue) {
-      return testing::AssertionFailure() << "Queue has wrong type";
-    }
-    auto const &qe = queue->metadata();
-    if (qe.live_entries != 0) {
+    // Metadata is removed when live_entries drops to 0.
+    if (queue.has_value()) {
       return testing::AssertionFailure() << "Queue has live entries";
     }
     return testing::AssertionSuccess();
@@ -2387,7 +2418,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_P(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
+TEST_F(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
 {
   insert(42);
   insert(99);
@@ -2399,7 +2430,7 @@ TEST_P(RCQDeleteTest, NoDoubleConsumeDeletedEntries)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
+TEST_F(RCQDeleteTest, NoDeleteUnobservedEntries)
 {
   std::thread t([&] { invoke_method(11, uint32_t{42}); });
 
@@ -2416,7 +2447,7 @@ TEST_P(RCQDeleteTest, NoDeleteUnobservedEntries)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
+TEST_F(RCQDeleteTest, DeleteSelfInsertedEntry)
 {
   insert(42);
 
@@ -2428,7 +2459,7 @@ TEST_P(RCQDeleteTest, DeleteSelfInsertedEntry)
   ASSERT_TRUE(check_rcq_empty());
 }
 
-TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
+TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 {
   insert(42);
   insert(99);
@@ -2445,8 +2476,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
   auto const &qe = queue->metadata();
   ASSERT_EQ(qe.live_entries, 1);
   ASSERT_EQ(qe.max_live_block_num,
-            2); // TODO(geoff): is this assertion correct?   This matches in
-                // hog_db and mockdb, so I guess so?
+            2); // TODO(geoff): is this assertion correct?
 }
 
 // Verifies that when an RCQ with entries in past blocks is deleted and
@@ -2458,12 +2488,8 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesPastBlocks)
 // doing this, the old block records would be orphaned as ghost entries.
 // DeleteAndRecreateRemovesPastBlocks verifies the metadata is correct but
 // doesn't check the block records directly.
-TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
+TEST_F(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert entries that become a past block
   insert(10);
   insert(20);
@@ -2525,7 +2551,7 @@ TEST_P(RCQDeleteTest, DeleteAndRecreateRemovesBlockRecords)
 
 // Consume 1 of 3 concurrent entries, delete, consume remaining 2.
 // Exposes the bug where current_block_consumed lost entries across delete.
-TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
+TEST_F(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 {
   insert(42);
   insert(99);
@@ -2539,7 +2565,7 @@ TEST_P(RCQDeleteTest, ConsumeOneOfManyDeleteConsumeRest)
 
 // Consume entry from past block, delete queue, insert new entry,
 // consume concurrent entry.
-TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
+TEST_F(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 {
   // Block 1: insert entries that become past block entries
   insert(42);
@@ -2559,7 +2585,7 @@ TEST_P(RCQDeleteTest, ConsumePastBlockDeleteConsumeConcurrent)
 
 // Insert and consume a self entry, delete, insert and consume another self.
 // Verifies self entries before delete are discarded correctly.
-TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
+TEST_F(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 {
   invoke_method(15, uint32_t{42}, uint32_t{99});
 
@@ -2570,7 +2596,7 @@ TEST_P(RCQDeleteTest, InsertSelfConsumeSelfDeleteInsertConsume)
 
 // Insert a self entry, delete, then consume a concurrent entry.
 // Verifies self insert is gone, concurrent is consumed.
-TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
+TEST_F(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 {
   insert(42);
   invoke_method(12, uint32_t{99}, uint32_t{42});
@@ -2583,7 +2609,7 @@ TEST_P(RCQDeleteTest, InsertSelfDeleteConsumeConcurrent)
 // Delete queue, then try to consume. Should get no entry.
 // Insert is in previous block so no concurrent entries are available.
 // The empty consume should leave the key deleted, not convert to empty RCQ.
-TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
+TEST_F(RCQDeleteTest, DeleteConsumeEmpty)
 {
   insert(42);
 
@@ -2600,7 +2626,7 @@ TEST_P(RCQDeleteTest, DeleteConsumeEmpty)
 // Consume (nothing available) -> delete -> consume (nothing available).
 // Both should return no entry. retrocausally_consumed_count_ should remain 0.
 // The key should end up deleted, not converted to empty RCQ.
-TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
+TEST_F(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
 {
   invoke_method(18);
 
@@ -2610,9 +2636,9 @@ TEST_P(RCQDeleteTest, ConsumeEmptyDeleteConsumeEmpty)
   EXPECT_FALSE(queue.has_value());
 }
 
-// Delete -> peek(empty) -> consume(empty). The peek must not decide the final
-// write shape; the empty consume should leave the key deleted.
-TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
+// Delete -> peek(empty) -> co_await consume(empty). The peek must not decide
+// the final write shape; the empty consume should leave the key deleted.
+TEST_F(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
 {
   invoke_method(51);
 
@@ -2622,10 +2648,11 @@ TEST_P(RCQDeleteTest, DeletePeekEmptyConsumeEmpty)
   EXPECT_FALSE(queue.has_value());
 }
 
-// Multiple delete-recreate cycles: consume(a) -> delete -> consume(b) -> delete
-// -> consume(c). Verifies that preserved entries accumulate correctly across
-// multiple cycles.
-TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
+// Multiple delete-recreate cycles: co_await consume(a) -> delete -> co_await
+// consume(b) -> delete
+// -> co_await consume(c). Verifies that preserved entries accumulate correctly
+// across multiple cycles.
+TEST_F(RCQDeleteTest, MultipleDeleteRecreate)
 {
   insert(42);
   insert(99);
@@ -2639,7 +2666,7 @@ TEST_P(RCQDeleteTest, MultipleDeleteRecreate)
 
 // Two delete-recreate cycles without consumes in between,
 // then consume a concurrent entry at the end.
-TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
+TEST_F(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 {
   insert(42);
   invoke_method(20, uint32_t{10}, uint32_t{20}, uint32_t{42});
@@ -2654,7 +2681,7 @@ TEST_P(RCQDeleteTest, DeleteInsertDeleteInsertConsume)
 // Peek at concurrent entry, delete, consume. Since peek doesn't advance
 // the cursor, retrocausally_consumed_count_ stays 0. After delete,
 // consume should return the same entry (index 0).
-TEST_P(RCQDeleteTest, PeekDeleteConsume)
+TEST_F(RCQDeleteTest, PeekDeleteConsume)
 {
   insert(42);
   invoke_method(21, uint32_t{42});
@@ -2668,7 +2695,7 @@ TEST_P(RCQDeleteTest, PeekDeleteConsume)
 // then creates a bytestring, then deletes, then creates an nnint,
 // then deletes, then inserts an item.  Verify that at the next block there's
 // only the one item inserted at the end
-TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
+TEST_F(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 {
   // Insert an item in a previous block so it becomes retrocausal
   insert(42);
@@ -2694,7 +2721,7 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromEmpty)
 // then creates a bytestring, then deletes, then creates an nnint,
 // then deletes, then inserts an item.  Verify that at the next block there's
 // only the one item inserted at the end
-TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
+TEST_F(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 {
   // Insert an item in a previous block
   insert(42);
@@ -2721,7 +2748,7 @@ TEST_P(RCQDeleteTest, ChangeTypeAndRecreateFromNonEmpty)
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // delete the bytestring, then consume from the queue. A concurrent tx has
 // inserted a retrocausal item into the queue.
-TEST_P(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2744,7 +2771,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringDeleteBytestringConsume)
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // then consume from the queue (without deleting the bytestring). A concurrent
 // tx has inserted a retrocausal item into the queue.
-TEST_P(RCQDeleteTest, DeleteCreateBytestringConsume)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringConsume)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2772,7 +2799,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringConsume)
 
 // Start with a nonempty queue. Delete the item, create a bytestring,
 // then consume from the queue (without deleting the bytestring)
-TEST_P(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
+TEST_F(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
 {
   // Insert an item in a previous block so queue is nonempty
   insert(42);
@@ -2799,7 +2826,7 @@ TEST_P(RCQDeleteTest, DeleteCreateBytestringConsumeSuccess)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 {
   // Start from empty, delete (no-op), then insert a new item
   invoke_method(13, uint32_t{42});
@@ -2817,15 +2844,40 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmpty)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 {
   set_bytestring(make_bytestring("test"));
   advance_block();
   // delete, then insert a new item
   invoke_method(13, uint32_t{42});
 
-  // Then retrocausally consume the item
+  // A reader that has not written the key sees the committed bytestring, not
+  // this block's conversion, and is rejected; the entry survives the block.
+  invoke_method(71);
+
+  advance_block();
+
+  // Now the queue is the committed value, and the entry is consumable.
   invoke_method(1, uint32_t{42});
+
+  advance_block();
+
+  // Verify the queue is now empty (item was consumed)
+  ASSERT_TRUE(check_rcq_empty());
+}
+
+// Same block as above: tx1 deletes and inserts, tx2 deletes and consumes.
+// The delete is a write, so tx2's base is the deleted key rather than the
+// committed bytestring, and tx1's concurrent entry is in reach.
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestringSameBlock)
+{
+  set_bytestring(make_bytestring("test"));
+  advance_block();
+  // tx1: delete, then insert a new item
+  invoke_method(13, uint32_t{42});
+
+  // tx2, same block: delete, then retrocausally consume tx1's item
+  invoke_method(72, uint32_t{42});
 
   advance_block();
 
@@ -2837,7 +2889,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromBytestring)
 // Starts from empty, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 {
   insert(42);
   invoke_method(1, uint32_t{42});
@@ -2858,7 +2910,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromEmptyQueue)
 // Starts from nonempty queue, then deletes the item, then inserts a new item.
 // Then, another transaction should successfully be able to (retrocausally)
 // consume that item.
-TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
+TEST_F(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 {
   insert(42);
 
@@ -2881,7 +2933,7 @@ TEST_P(RCQDeleteTest, ConsumeOnlyWhenNecessaryStartFromNonEmptyQueue)
 
 // Peek returns the next entry without advancing the cursor.
 // A subsequent consume should return the same entry.
-TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
+TEST_F(RCQDeleteTest, PeekThenConsumeSameEntry)
 {
   insert(42);
   invoke_method(24, uint32_t{42}); // peek verifies value
@@ -2894,7 +2946,7 @@ TEST_P(RCQDeleteTest, PeekThenConsumeSameEntry)
 
 // Multiple peeks without intervening consume return the same entry,
 // confirming the cursor doesn't advance on peek.
-TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
+TEST_F(RCQDeleteTest, PeekTwiceReturnsSameEntry)
 {
   insert(42);
   insert(99);
@@ -2907,7 +2959,7 @@ TEST_P(RCQDeleteTest, PeekTwiceReturnsSameEntry)
 
 // After delete+recreate, peek should see entries from the new queue.
 // Verifies peek state is reset by delete.
-TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
+TEST_F(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 {
   insert(42);
   invoke_method(28, uint32_t{42}, uint32_t{99});
@@ -2924,7 +2976,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteRecreateSeesNewEntry)
 
 // After delete, peek can still observe a concurrent entry, but it does not
 // recreate the queue or consume the entry. The pending delete still conflicts.
-TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
+TEST_F(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 {
   insert(42);
   insert(99);
@@ -2941,7 +2993,7 @@ TEST_P(RCQDeleteTest, PeekAfterDeleteSeesConcurrentEntryButDeleteConflicts)
 
 // A delete inside a reverted try_invoke frame should leave the queue intact.
 // Entries remain consumable after the revert.
-TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
+TEST_F(RCQDeleteTest, RevertedDeletePreservesQueue)
 {
   insert(42);
   invoke_method_orchestrated(26, uint32_t{42});
@@ -2953,7 +3005,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueue)
 
 // Same as RevertedDeletePreservesQueue but entries come from a past block.
 // Verifies reverting a delete works for committed entries.
-TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
+TEST_F(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 {
   insert(42);
 
@@ -2968,7 +3020,7 @@ TEST_P(RCQDeleteTest, RevertedDeletePreservesQueueFromPastBlock)
 
 // Insert a self entry, then try_invoke a delete that reverts.
 // Both self-inserted and concurrent entries remain consumable.
-TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
+TEST_F(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 {
   insert(99); // concurrent
   invoke_method_orchestrated(29, uint32_t{42}, uint32_t{99});
@@ -2982,7 +3034,7 @@ TEST_P(RCQDeleteTest, RevertedDeleteWithInsertPreservesQueue)
 // made it later reverts. The child ran at a third address, so nothing here is
 // reentrant: orchestrator -> kContractAddress (reverts) -> kContractAddress3
 // (the TryInvoke'd insert).
-TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
+TEST_F(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
 {
   invoke_method_orchestrated(69, uint32_t{42});
 
@@ -2999,7 +3051,7 @@ TEST_P(RCQDeleteTest, RevertedFrameDiscardsSuccessfulNestedTryInvoke)
 // A successful delete inside a try_invoke frame should fail to acquire locks
 // when a concurrent transaction has inserted into the same queue.
 // The delete is reverted due to conflict, and the entry remains consumable.
-TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
+TEST_F(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 {
   insert(42); // concurrent insert creates conflicting lock
   invoke_method_orchestrated(32, uint32_t{42});
@@ -3014,7 +3066,7 @@ TEST_P(RCQDeleteTest, TryInvokeDeleteConflictsWithConcurrentInsert)
 // transaction commits it for real. A second transaction in the same block
 // consumes the entry retrocausally, proving the insert landed in the DB
 // rather than only in the child frame.
-TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
+TEST_F(RCQDeleteTest, TryInvokeInsertCommits)
 {
   invoke_method_orchestrated(70, uint32_t{0}, uint32_t{42}, uint32_t{0});
   invoke_method(1, uint32_t{42});
@@ -3027,18 +3079,9 @@ TEST_P(RCQDeleteTest, TryInvokeInsertCommits)
 // A consume of a past-block entry inside a successful TryInvoke commits: the
 // entry is gone from the queue after the block. This is the flow that pushes
 // the item's consume delta twice -- once at the TryInvoke probe and again,
-// cumulatively, at root commit.
-//
-// Skipped on MockDB: the re-push is idempotent on HogDb, but MockDB rejects
-// this transaction's second consume push as a competing consumer (see
-// mockdb/KNOWN_ISSUES.md).
-TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
+// cumulatively, at root commit. The re-push is idempotent.
+TEST_F(RCQDeleteTest, TryInvokeConsumeCommits)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   insert(42);
 
   advance_block();
@@ -3054,13 +3097,8 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeCommits)
 // in the same block, so the consume is a nondeterministic observation made
 // inside the TryInvoke'd frame and then committed through the probe's
 // mid-transaction subtransaction push.
-TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
+TEST_F(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   insert(42); // concurrent
   invoke_method_orchestrated(70, uint32_t{1}, uint32_t{42}, uint32_t{0});
 
@@ -3073,7 +3111,7 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeConcurrentEntryCommits)
 // concurrent transaction's delete holds the queue's exclusive lock, so a
 // TryInvoke'd insert fails the probe and comes back Fault instead of
 // committing.
-TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
+TEST_F(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
 {
   insert(42);
 
@@ -3092,7 +3130,7 @@ TEST_P(RCQDeleteTest, TryInvokeInsertConflictsWithConcurrentDelete)
 // The consume counterpart: the child consumes a past-block entry successfully
 // in-frame (against the transaction's snapshot, where the concurrent delete
 // is not visible), and the lock probe then conflicts with that delete.
-TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
+TEST_F(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
 {
   insert(42);
 
@@ -3109,7 +3147,7 @@ TEST_P(RCQDeleteTest, TryInvokeConsumeConflictsWithConcurrentDelete)
 
 // After delete+recreate, entries inserted in the same block should be
 // lexicographically sorted when consumed in a later block.
-TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
+TEST_F(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
 {
   // Block 1: insert entries
   insert(5);
@@ -3137,7 +3175,7 @@ TEST_P(RCQDeleteTest, OrderingPreservedAfterDeleteRecreate)
 }
 
 // Deleting a queue destroys ALL pending entries across multiple past blocks.
-TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
+TEST_F(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 {
   // Block 1: insert(10)
   insert(10);
@@ -3154,7 +3192,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
   advance_block();
 
-  // Block 4: consume(30) — 10 and 20 are gone
+  // Block 4: co_await consume(30) — 10 and 20 are gone
   invoke_method(1, uint32_t{30});
 
   advance_block();
@@ -3164,7 +3202,7 @@ TEST_P(RCQDeleteTest, DeleteDestroysMultiplePastBlocks)
 
 // A failed inner invoke that inserts an entry should leave no trace — the
 // queue should remain empty.
-TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
+TEST_F(RCQDeleteTest, RevertedInsertDiscardsEntry)
 {
   invoke_method_orchestrated(36, uint32_t{42});
 
@@ -3178,7 +3216,7 @@ TEST_P(RCQDeleteTest, RevertedInsertDiscardsEntry)
 
 // After a reverted inner insert, a subsequent successful insert should work
 // normally. Only the successful entry is consumable.
-TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
+TEST_F(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 {
   invoke_method_orchestrated(37, uint32_t{42}, uint32_t{99});
 
@@ -3189,7 +3227,7 @@ TEST_P(RCQDeleteTest, RevertedInsertThenSuccessfulInsert)
 
 // A reverted inner insert does not affect concurrent entries from other
 // transactions.
-TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
+TEST_F(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 {
   insert(99); // concurrent
   invoke_method_orchestrated(43, uint32_t{42}, uint32_t{99});
@@ -3200,7 +3238,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesConcurrentEntries)
 }
 
 // A reverted inner insert does not affect entries from past blocks.
-TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
+TEST_F(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 {
   insert(99);
 
@@ -3215,7 +3253,7 @@ TEST_P(RCQDeleteTest, RevertedInsertPreservesPastEntries)
 
 // A failed inner invoke that consumes an entry should leave the entry
 // available for a subsequent consume.
-TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
+TEST_F(RCQDeleteTest, RevertedConsumePreservesEntry)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(38, uint32_t{42});
@@ -3226,7 +3264,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesEntry)
 }
 
 // Same as RevertedConsumePreservesEntry but the entry comes from a past block.
-TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
+TEST_F(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 {
   insert(42);
 
@@ -3240,7 +3278,7 @@ TEST_P(RCQDeleteTest, RevertedConsumePreservesPastEntry)
 }
 
 // After a reverted inner consume, peek should still see the entry.
-TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
+TEST_F(RCQDeleteTest, RevertedConsumeThenPeek)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(39, uint32_t{42});
@@ -3255,7 +3293,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeThenPeek)
 }
 
 // An entry survives multiple consecutive reverted inner consume attempts.
-TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
+TEST_F(RCQDeleteTest, SequentialRevertedConsumes)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(40, uint32_t{42});
@@ -3267,7 +3305,7 @@ TEST_P(RCQDeleteTest, SequentialRevertedConsumes)
 
 // A failed inner invoke that both consumes AND inserts should revert both: the
 // original entry is available, the inserted entry is gone.
-TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
+TEST_F(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 {
   insert(42); // concurrent
   invoke_method_orchestrated(41, uint32_t{42}, uint32_t{99});
@@ -3281,7 +3319,7 @@ TEST_P(RCQDeleteTest, RevertedConsumeAndInsertPreservesOriginal)
 // separate block. This exercises DeletionLock::write_committed_change removing
 // an RCQ trie entry — the trie type must match kRetrocausalQueue used by
 // RetrocausalQueueLock, not some other value.
-TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
+TEST_F(RCQDeleteTest, PureDeleteOfCommittedRCQ)
 {
   // Block 1: insert an entry so the RCQ is written to the DAO
   insert(42);
@@ -3305,7 +3343,7 @@ TEST_P(RCQDeleteTest, PureDeleteOfCommittedRCQ)
 // inflated live_entries/max_live_block_num. Then deletes it and inserts into an
 // RCQ at the same key. Verifies the system doesn't inherit the bogus metadata
 // from the bytestring payload -- the RCQ should be treated as fresh.
-TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
+TEST_F(RCQDeleteTest, BogusMetadataInBytestringIgnored)
 {
   // Construct a RetrocausalQueueMetadata with non-zero fields
   RetrocausalQueueMetadata bogus_meta{};
@@ -3323,7 +3361,12 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   // Delete the bytestring, then insert into RCQ at the same key
   invoke_method(13, uint32_t{42});
 
-  // Another tx retrocausally consumes the entry
+  // Another tx in the same block still sees the bytestring and is rejected.
+  invoke_method(71);
+
+  advance_block();
+
+  // Next block the key is a queue with the one entry; consume it.
   invoke_method(1, uint32_t{42});
 
   advance_block();
@@ -3334,16 +3377,39 @@ TEST_P(RCQDeleteTest, BogusMetadataInBytestringIgnored)
   ASSERT_TRUE(check_rcq_empty());
 }
 
+// Same block as above: the delete in tx2 lets it consume tx1's entry without
+// ever reading the bogus bytes as queue metadata.
+TEST_F(RCQDeleteTest, BogusMetadataInBytestringIgnoredSameBlock)
+{
+  RetrocausalQueueMetadata bogus_meta{};
+  bogus_meta.live_entries = 9999;
+  bogus_meta.max_live_block_num = 42;
+  bogus_meta.consume_state.max_fully_consumed_block_number = 10;
+  bogus_meta.consume_state.partial_consumed_number = 5;
+
+  auto buf = x23::serialize(bogus_meta);
+  Bytestring bs(buf.begin(), buf.end());
+  set_bytestring(bs);
+  advance_block();
+
+  // tx1: delete the bytestring, then insert into RCQ at the same key
+  invoke_method(13, uint32_t{42});
+
+  // tx2, same block: delete, then retrocausally consume tx1's entry
+  invoke_method(72, uint32_t{42});
+
+  advance_block();
+
+  // One insert, one consume, net zero; bogus metadata never leaked through.
+  ASSERT_TRUE(check_rcq_empty());
+}
+
 // Verifies that when an RCQ with entries in past (committed) blocks is
 // purely deleted, the underlying block records in the DAO are also removed.
 // This catches a storage leak where DeletionLock::write_committed_change only
 // removes the metadata record but leaves orphaned block records behind.
-TEST_P(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
+TEST_F(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert an entry
   insert(10);
 
@@ -3391,7 +3457,7 @@ TEST_P(RCQDeleteTest, PureDeleteCleansUpPastBlocks)
 // Delete an RCQ with multiple past blocks, then in a later block re-insert.
 // The new queue should contain only the newly inserted entry — none of the
 // old entries should survive.
-TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
+TEST_F(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
 {
   // Block 1: insert entries that become past block entries
   insert(10);
@@ -3450,12 +3516,8 @@ TEST_P(RCQDeleteTest, DeleteThenReinsertInLaterBlock)
 // the consumed block records are actually pruned from RAMDB.  Existing tests
 // check metadata (live_entries) but not block-level RAMDB state for pure
 // consume (no delete involved).
-TEST_P(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
+TEST_F(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert 2 entries → creates block 1.
   insert(10);
   insert(20);
@@ -3500,12 +3562,8 @@ TEST_P(RCQDeleteTest, MultiBlockConsumeRemovesOldBlocks)
 // cleans up old RCQ block records.  After delete, old blocks are gone.
 // After recreate in a later block, the new RCQ creates its own block 1,
 // which should not be confused with the old block 1.
-TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
+TEST_F(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   // Block 1: insert entries → creates block 1.
   insert(10);
   insert(20);
@@ -3552,7 +3610,7 @@ TEST_P(RCQDeleteTest, DeleteAcrossBlocksCleansOldBlocks)
       << "No block 2 should exist (old ghost or new)";
 }
 
-TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
+TEST_F(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
 {
   auto make_tx = [this](Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3560,7 +3618,7 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
                            Invocation{.invoked_address = kContractAddress,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3572,18 +3630,18 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
   NondeterministicProposalData delete_recreate_proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    insert_proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    insert_proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_delete_recreate, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    delete_recreate_proposal_data = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    delete_recreate_proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(delete_recreate_proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(
         delete_recreate_proposal_data.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -3592,19 +3650,19 @@ TEST_P(RCQDeleteTest, ValidationDeleteRecreateAfterConcurrentConsume)
     auto handler =
         make_new_system_call_handler_validation(tx_insert, *context_,
                                                 insert_proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_delete_recreate, *context_,
                                                 delete_recreate_proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
+TEST_F(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3612,7 +3670,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3625,25 +3683,25 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
   // Insert concurrent entries on both addresses.
   for (auto const &tx : {tx_insert_a, tx_insert_b}) {
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Proposal on address A.
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Validation on address B, reusing A's proposal data.
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3660,7 +3718,7 @@ TEST_P(RCQDeleteTest, ProposalValidationDeleteRecreateMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3668,7 +3726,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3678,12 +3736,12 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
-  // Method 60: consume(42) -> delete -> insert(77).
+  // Method 60: co_await consume(42) -> delete -> insert(77).
   // The second concurrent entry (99) is lost with the delete.
   auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
   auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
@@ -3691,15 +3749,15 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3716,7 +3774,7 @@ TEST_P(RCQDeleteTest, ProposalValidationConsumeDeleteConsumeMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
+TEST_F(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3724,7 +3782,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3734,12 +3792,13 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
-  // Method 61: consume(42) -> consume(99) -> delete -> insert(77).
+  // Method 61: co_await consume(42) -> co_await consume(99) -> delete ->
+  // insert(77).
   auto tx_a =
       make_tx(kContractAddress, 61, uint32_t{42}, uint32_t{99}, uint32_t{77});
   auto tx_b =
@@ -3748,15 +3807,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3773,7 +3832,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiConsumeDeleteMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
+TEST_F(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3781,7 +3840,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3791,12 +3850,13 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
     for (uint32_t v : {uint32_t{42}, uint32_t{99}}) {
       auto tx = make_tx(addr, 0, v);
       auto handler = make_new_system_call_handler(tx, *context_);
-      ASSERT_TRUE(handler.root_invoke().is_root_success());
-      ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      ASSERT_TRUE(handler.root_invoke()().is_root_success());
+      ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
   }
 
-  // Method 62: consume(42)->delete->insert(55)->consume(55)->delete->insert(77)
+  // Method 62: co_await
+  // consume(42)->delete->insert(55)->consume(55)->delete->insert(77)
   auto tx_a =
       make_tx(kContractAddress, 62, uint32_t{42}, uint32_t{55}, uint32_t{77});
   auto tx_b =
@@ -3805,15 +3865,15 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3830,7 +3890,7 @@ TEST_P(RCQDeleteTest, ProposalValidationMultiCycleDeleteRecreateMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3838,7 +3898,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3847,39 +3907,39 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
 
-  // Block 2: insert concurrent entries, then consume(past) -> delete ->
-  // insert(new).
+  // Block 2: insert concurrent entries, then co_await consume(past) -> delete
+  // -> insert(new).
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{99});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 60 consumes a concurrent entry. But here entry 42 is from a past
   // block and will be consumed first (past-block entries are consumed before
-  // concurrent entries). So consume(42) -> delete -> insert(77).
+  // concurrent entries). So co_await consume(42) -> delete -> insert(77).
   auto tx_a = make_tx(kContractAddress, 60, uint32_t{42}, uint32_t{77});
   auto tx_b = make_tx(kContractAddress2, 60, uint32_t{42}, uint32_t{77});
 
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3896,7 +3956,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPastBlockConsumeDeleteMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
 {
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
@@ -3904,7 +3964,7 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3912,26 +3972,27 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
-  // Method 63: peek(42) -> delete -> insert(99) -> consume(99) -> consume(42)
+  // Method 63: peek(42) -> delete -> insert(99) -> co_await consume(99) ->
+  // co_await consume(42)
   auto tx_a = make_tx(kContractAddress, 63, uint32_t{42}, uint32_t{99});
   auto tx_b = make_tx(kContractAddress2, 63, uint32_t{42}, uint32_t{99});
 
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -3948,19 +4009,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekDeleteConsumeMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
+TEST_F(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
     return Transaction{.invocation =
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -3968,8 +4025,8 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{42});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Method 64: peek(42) -> delete -> insert(99). No consume, so
@@ -3980,15 +4037,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -4018,19 +4075,15 @@ TEST_P(RCQDeleteTest, ProposalValidationPeekOnlyDeleteInsertMatch)
   }
 }
 
-TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
+TEST_F(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "Block record check requires HogDb DAO access";
-  }
-
   auto make_tx = [this](ContractAddress const &addr, Runtime::MethodID method,
                         auto const &...args) -> Transaction {
     return Transaction{.invocation =
                            Invocation{.invoked_address = addr,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = x23::serialize(args...)},
                        .uniquifier = make_new_uniquifier()};
   };
@@ -4038,12 +4091,12 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   for (auto const &addr : {kContractAddress, kContractAddress2}) {
     auto tx = make_tx(addr, 0, uint32_t{77});
     auto handler = make_new_system_call_handler(tx, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
-  // Method 65: insert(10) -> consume(10) -> delete -> insert(20) ->
-  //            consume(20) -> consume(77)
+  // Method 65: insert(10) -> co_await consume(10) -> delete -> insert(20) ->
+  //            co_await consume(20) -> co_await consume(77)
   auto tx_a =
       make_tx(kContractAddress, 65, uint32_t{10}, uint32_t{20}, uint32_t{77});
   auto tx_b =
@@ -4052,15 +4105,15 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_a, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_b, *context_, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   advance_block();
@@ -4077,30 +4130,30 @@ TEST_P(RCQDeleteTest, ProposalValidationSelfConsumeDeleteConcurrentConsumeMatch)
 // conflicts with a concurrent insert and logs a false nondeterministic bit;
 // validation must consume that bit and fail the child frame the same way,
 // without probing any locks itself.
-TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
+TEST_F(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
 {
   // Concurrent insert whose lock the TryInvoke'd delete conflicts with.
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
-  // Method 32: TryInvoke delete (expects the conflict) -> consume(42).
+  // Method 32: TryInvoke delete (expects the conflict) -> co_await consume(42).
   auto tx_orch = make_tx(kContractAddress2, 32, uint32_t{42});
 
   NondeterministicProposalData insert_pd;
   NondeterministicProposalData orch_pd;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    insert_pd = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    insert_pd = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    orch_pd = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    orch_pd = handler.extract_proposal_data();
     // Two bits: the TryInvoke lock probe (false, the conflict) and the
     // consume of the concurrent entry, which is also observed.
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
     ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -4108,33 +4161,28 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeDeleteConflictMatch)
   {
     auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
                                                            insert_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
 // A successful TryInvoke under validation mode. The proposal's probe succeeds
 // and logs a true bit; validation consumes it, checks the child's queue
 // observations against its item views, and bumps the frame's TryInvoke depth
-// (note_validation_try_invoke_success) instead of pushing a subtransaction.
-//
-// Skipped on MockDB for the same reason as TryInvokeConsumeCommits: the
-// proposal-phase commit re-pushes the consume delta the probe already pushed.
-TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
+// (note_try_invoke_success) instead of pushing a subtransaction. As in
+// TryInvokeConsumeCommits, the proposal-phase commit re-pushes the consume
+// delta the probe already pushed.
+TEST_F(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "MockDB rejects a same-transaction consume re-push (see "
-                    "mockdb/KNOWN_ISSUES.md)";
-  }
-
   auto tx_insert = make_tx(kContractAddress, 0, uint32_t{42});
-  // Method 70: TryInvoke consume(42), expecting the frame to commit (Return).
+  // Method 70: TryInvoke co_await consume(42), expecting the frame to commit
+  // (Return).
   auto tx_orch =
       make_tx(kContractAddress2, 70, uint32_t{1}, uint32_t{42}, uint32_t{0});
 
@@ -4142,19 +4190,19 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   NondeterministicProposalData orch_pd;
   {
     auto handler = make_new_system_call_handler(tx_insert, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    insert_pd = handler.get_proposal_data();
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    insert_pd = handler.extract_proposal_data();
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler = make_new_system_call_handler(tx_orch, *context_);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    orch_pd = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    orch_pd = handler.extract_proposal_data();
     // Two bits: the consume of the concurrent entry and the TryInvoke lock
     // probe (true, no conflict).
     ASSERT_EQ(orch_pd.nondeterministic_bit_count, 2U);
     ASSERT_EQ(orch_pd.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -4162,14 +4210,14 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
   {
     auto handler = make_new_system_call_handler_validation(tx_insert, *context_,
                                                            insert_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler =
         make_new_system_call_handler_validation(tx_orch, *context_, orch_pd);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -4183,12 +4231,8 @@ TEST_P(RCQDeleteTest, ProposalValidationTryInvokeConsumeCommitMatch)
 // rejects as kInvalidExecutorBehavior -> kRPCUnrecoverable. A correct executor
 // must never produce it, so the transaction must not commit unrecoverably. (A
 // deterministic per-tx rejection during invoke is a safe outcome and allowed.)
-TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
+TEST_F(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
 {
-  if (GetParam() != TestDB::kHogDb) {
-    GTEST_SKIP() << "kInvalidExecutorBehavior guard is HogDb-specific";
-  }
-
   // Committed in its own tx; observable as a concurrent entry to the next tx.
   insert(77);
 
@@ -4202,7 +4246,7 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
                   .invocation =
                       Invocation{.invoked_address = kContractAddress2,
                                  .entrypoint = entrypoint_from_method_id(67),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = x23::serialize(uint32_t{77},
                                                             uint32_t{42})},
                   .uniquifier = make_new_uniquifier(),
@@ -4214,9 +4258,9 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
   // kInvalidExecutorBehavior surfaces as an Unrecoverable invoke error, not
   // just at commit. Check both. A deterministic per-tx rejection during invoke
   // is a safe outcome and is allowed.
-  auto r = handler.root_invoke();
+  auto r = handler.root_invoke()();
   if (r.is_root_success()) {
-    ASSERT_NE(handler.try_commit_transaction(),
+    ASSERT_NE(handler.try_commit_transaction()(),
               ExecResult::ExecResultUnrecoverable)
         << "executor drove HogDb to reject a contract-produced RCQ delta as "
            "invalid executor behavior at commit (issue #3152)";
@@ -4229,10 +4273,5 @@ TEST_P(RCQDeleteTest, ConcurrentConsumeDeleteFramePushInsertNotUnrecoverable)
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQDeleteTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

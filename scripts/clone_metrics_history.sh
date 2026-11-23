@@ -1,6 +1,14 @@
 #!/bin/bash
 set -e
 
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  mkdir -p metrics_history/metrics
+  exit 0
+fi
+
+SCRIPT_DIR=$(dirname $(readlink -f "$0"))
+source ${SCRIPT_DIR}/metrics_history_git.sh
+
 METRICS_HISTORY_BRANCH=${METRICS_HISTORY_BRANCH:-main}
 METRICS_HISTORY_URL=${METRICS_HISTORY_URL:-https://github.com/groundhogchain/metrics_history.git}
 
@@ -18,7 +26,8 @@ else
   echo "metrics_history/ already exists and is a git repository."
 fi
 
-git -C metrics_history fetch --depth=1 --filter=blob:none --quiet origin "$METRICS_HISTORY_BRANCH"
+metrics_history_git -C metrics_history fetch --depth=1 --filter=blob:none --quiet \
+  origin "$METRICS_HISTORY_BRANCH"
 git -C metrics_history update-ref "refs/heads/$METRICS_HISTORY_BRANCH" FETCH_HEAD
 git -C metrics_history symbolic-ref HEAD "refs/heads/$METRICS_HISTORY_BRANCH"
 git -C metrics_history config "branch.$METRICS_HISTORY_BRANCH.remote" origin

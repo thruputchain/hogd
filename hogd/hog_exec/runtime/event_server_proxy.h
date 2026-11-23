@@ -6,6 +6,7 @@
 #include "event.hh"
 #include "event_rpc.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "rpc_types.hh"
@@ -27,7 +28,7 @@ public:
   // x23::default_max_message_size, which racing server threads also read).
   EventServerProxy(x23::HostPort const &host_port,
                    x23::CpuMap const &map = *x23::llc_map,
-                   size_t max_message_size = x23::default_max_message_size);
+                   size_t max_message_size = kEventExecutorRpcMaxMessageSize);
 
   static EventServerProxy make_from_exec_result(EventCard const &event)
   {
@@ -40,24 +41,18 @@ public:
     return EventServerProxy(host_port);
   }
 
-  x23::Async<SystemStatus<void>> open_block(BlockID block_id);
-  x23::Async<SystemStatus<void>> close_block(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>> open_block(BlockID block_id);
+  [[nodiscard]] x23::Async<SystemStatus<void>> close_block(BlockID block_id);
 
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_event(BlockID block_id, TransactionID tx_id,
              TxEventLog const &tx_event_log,
              ProposedTransaction const &proposed_tx);
 
-  // Best-effort report that [tx_hash] failed nondeterministically during 2pc,
-  // with the diagnostic hog_db attached. Awaitable; callers fire-and-forget it
-  // (see report_db_conflict_diagnostic, which spawns it detached the same way
-  // ExecutorContext spawns emit_events). The coroutine copies client_ up front
-  // (client_t wraps a refcounted ClientRef), so a spawned send is
-  // self-contained and can safely outlive this proxy; a slow or dead event
-  // server costs nothing but the dropped report -- RPC errors are logged and
-  // swallowed, because a diagnostic must never disturb execution.
-  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
-                                     TxFailureDiagnostic diag);
+  // Best-effort report that [tx_hash] was excluded from the proposal (a 2pc
+  // conflict or a refused attachment). Sends detached; never fails.
+  x23::Detached report_tx_failure(TransactionHash tx_hash,
+                                  TxFailureDiagnostic diag);
 
 private:
   using client_t =
@@ -80,17 +75,15 @@ public:
   PerTransactionEventServerProxy &
   operator=(PerTransactionEventServerProxy &&) = delete;
 
-  x23::Async<SystemStatus<void>>
+  [[nodiscard]] x23::Async<SystemStatus<void>>
   emit_events(TxEventLog const &tx_event_log,
               ProposedTransaction const &proposed_tx);
 
-  // Awaitable; see EventServerProxy::report_tx_failure. Callers
-  // fire-and-forget.
-  x23::Async<void> report_tx_failure(TransactionHash tx_hash,
-                                     TxFailureDiagnostic diag) const
+  // See EventServerProxy::report_tx_failure.
+  void report_tx_failure(TransactionHash tx_hash,
+                         TxFailureDiagnostic diag) const
   {
-    return event_server_proxy_.report_tx_failure(std::move(tx_hash),
-                                                 std::move(diag));
+    event_server_proxy_.report_tx_failure(std::move(tx_hash), std::move(diag));
   }
 
 private:

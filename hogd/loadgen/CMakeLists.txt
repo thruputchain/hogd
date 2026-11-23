@@ -27,7 +27,7 @@ add_executable(
   loadgen_tests
   erc20_experiment_tests.cc
 )
-gtest_discover_tests(loadgen_tests)
+hogd_discover_tests(loadgen_tests)
 
 target_link_libraries(
   loadgen_tests
@@ -143,4 +143,11 @@ if(BUILD_BENCHMARKS)
   if(CMAKE_BUILD_TYPE STREQUAL "Release")
     set_property(TARGET payments_exec_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
+endif()
+
+# The opt-in corpus builder supplies generated headers; normal builds do not
+# compile hundreds of synthetic contract variants.
+set(HACKATHON_ARTIFACT_DIR "" CACHE PATH "Compiled hackathon contract corpus")
+if(HACKATHON_ARTIFACT_DIR)
+  add_subdirectory(hackathon)
 endif()

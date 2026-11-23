@@ -19,7 +19,7 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/loadgen/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "loadgen.hh"
@@ -51,8 +51,8 @@ make_init_mint_expiry_height(size_t mint_index)
          static_cast<BlockHeight>(mint_index / kInitMintUniquifiersPerHeight);
 }
 
-std::tuple<uint64_t, uint64_t>
-make_amount(uint128_t amount)
+std::tuple<int64_t, uint64_t>
+make_amount(int128_t amount)
 {
   return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
 }
@@ -129,20 +129,18 @@ ERC20BasicAuthExperimentState::generate_experiment()
 
   const ContractAddress owner_address = get_owner_address();
 
-  constexpr int128_t kWalletInitialHogsEpsilon = 100'000;
+  constexpr int128_t kWalletInitialNativeTokensEpsilon = 100'000;
   const auto num_initial_allocations =
       static_cast<int128_t>(wallets_.size()) + 1;
-  const int128_t wallet_initial_hogs =
-      ((int128_t{kTotalHogSupply} * int128_t{kHogDivisibility}) /
-       num_initial_allocations) -
-      kWalletInitialHogsEpsilon;
+  const int128_t wallet_initial_native_tokens =
+      (std::numeric_limits<int128_t>::max() / num_initial_allocations) -
+      kWalletInitialNativeTokensEpsilon;
   GenesisConfigurationBuilder builder;
-  builder.add_distribution(erc20_contract, make_nonce(0),
-                           erc20_meta::entrypoint<u8"initialize">(),
-                           erc20_meta::make_calldata<u8"initialize">(
-                               owner_address),
-                           // The number of hogs each wallet starts with.
-                           wallet_initial_hogs);
+  builder.add_distribution(
+      erc20_contract, make_nonce(0), erc20_meta::entrypoint<u8"initialize">(),
+      erc20_meta::make_calldata<u8"initialize">(owner_address),
+      // The number of native tokens each wallet starts with.
+      wallet_initial_native_tokens);
   erc20_address_ = calculate_genesis_deployment_address(sha256(*erc20_contract),
                                                         make_nonce(0));
 
@@ -156,7 +154,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                              wallet_meta::entrypoint<u8"initialize">(),
                              wallet_meta::make_calldata<u8"initialize">(
                                  wallet.public_key),
-                             wallet_initial_hogs);
+                             wallet_initial_native_tokens);
   }
 
   // make mint txs
@@ -170,7 +168,7 @@ ERC20BasicAuthExperimentState::generate_experiment()
                        GasAmount{1'000'000},
                        erc20_meta::make_calldata<u8"mint">(
                            wallets_[i].address,
-                           make_amount(uint128_t{1'000'000'000})));
+                           make_amount(int128_t{1'000'000'000})));
 
     auto calldata =
         wallet_meta::make_calldata<u8"do_action">(internal_calldata);

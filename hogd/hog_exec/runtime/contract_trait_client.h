@@ -12,7 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -21,6 +21,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 
 namespace hogd {
@@ -36,19 +37,15 @@ public:
   template<StringLiteral Name, typename... Args>
   Invocation make_invocation(GasAmount gas_amount, Args &&...args)
   {
-    auto calldata =
-        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
-    return Invocation{.invoked_address = contract_address_,
-                      .entrypoint = trait_meta_t::template entrypoint<Name>(),
-                      .gas_limit = gas_amount,
-                      .calldata = calldata};
+    return trait_meta_t::template make_invocation<Name>(
+        contract_address_, gas_amount, std::forward<Args>(args)...);
   }
 
   template<StringLiteral Name,
            InvokeFlagSet Flags = std::to_underlying(InvokeFlag::None)>
   auto invoke_opt(NativeSyscallContext &ctx, auto &&...args)
-      -> HostFnStatus<SyscallStatus<
-          std::optional<typename trait_meta_t::template return_t<Name>>>>
+      -> x23::Async<HostFnStatus<SyscallStatus<
+          std::optional<typename trait_meta_t::template return_t<Name>>>>>
   {
     auto calldata = trait_meta_t::template make_calldata<Name>(
         std::forward<decltype(args)>(args)...);
@@ -67,14 +64,14 @@ public:
         .flags = Flags,
     };
 
-    auto invoke_result = ctx.template syscall<SyscallNo::kInvoke>(
+    auto invoke_result = co_await ctx.template syscall<SyscallNo::kInvoke>(
         contract_address_,
         std::as_bytes(std::span(calldata.data(), calldata.size())),
         std::span<const std::byte>{}, inputs, outputs);
 
     if (!invoke_result.has_value()) {
       trace("Invoke HostFnError: {}", invoke_result.error());
-      return invoke_result.error();
+      co_return invoke_result.error();
     }
 
     // A nonzero error code means the invoke was rejected before a child frame
@@ -83,12 +80,12 @@ public:
     // buffer and is surfaced below via get_return_buffer().
     if (*invoke_result != SyscallErrorCode::kSyscallErrorCodeNone) {
       trace("Invoke SyscallStatus error: {}", *invoke_result);
-      return SyscallError{*invoke_result};
+      co_return SyscallError{*invoke_result};
     }
 
     auto return_buffer = ctx.handler().get_return_buffer();
     if (!return_buffer.has_value()) {
-      return return_buffer.error().to_host_fn_error();
+      co_return return_buffer.error().to_host_fn_error();
     }
     assert(return_buffer);
     // A Fault frame_status leaves no return buffer available (the syscall
@@ -96,7 +93,7 @@ public:
     // handled, not asserted: surface it as the syscall error.
     if (!(*return_buffer).has_value()) {
       trace("No return buffer available: {}", (*return_buffer).error());
-      return (*return_buffer).error();
+      co_return (*return_buffer).error();
     }
     assert(*return_buffer);
     assert(**return_buffer);
@@ -105,7 +102,7 @@ public:
     if (outputs.return_buffer_len != unwrapped_return_buffer->size()) {
       trace("Unrecoverable: Return buffer size mismatch: {} != {}",
             outputs.return_buffer_len, unwrapped_return_buffer->size());
-      return HostFnError{HostFnErrorCode::Unrecoverable};
+      co_return HostFnError{HostFnErrorCode::Unrecoverable};
     }
     std::span<const std::byte> return_span =
         std::as_bytes(std::span(unwrapped_return_buffer->data(),
@@ -121,9 +118,9 @@ public:
                                                    manually_reverted);
     if (!return_value.has_value()) {
       trace("Invoke Error: Decode Return Failed");
-      return std::nullopt;
+      co_return std::nullopt;
     }
-    return *return_value;
+    co_return *return_value;
   }
 
 private:

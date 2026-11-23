@@ -4,7 +4,6 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
-#include <optional>
 #include <span>
 #include <string>
 #include <string_view>
@@ -16,26 +15,27 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hog_exec_constants.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
-#include "hogd/hog_exec/common/limits.h"
+#include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "precompiles.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
@@ -45,12 +45,12 @@ namespace hogd {
 // the results match.  Also test that tampered proposal data causes
 // validation failure.
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class ProposeValidateRoundtripTest : public ::testing::TestWithParam<TestDB>,
+class ProposeValidateRoundtripTest : public ::testing::Test,
                                      public NativeContractTestFramework {
 public:
   ProposeValidateRoundtripTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -94,16 +94,15 @@ protected:
                                                       std::string_view value)
   {
     return [k = std::string(key_name), v = std::string(value)](
-               NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+               NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
       auto key = make_storage_key(k);
-      auto [ws, _wg] = syscall_BytestringSet_inner(
-          ctx.handler(), key, std::as_bytes(std::span(std::string_view(v))),
-          std::to_underlying(StorageDeltaFlags::None));
+      auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+          key, std::as_bytes(std::span(std::string_view(v))));
       if (!ws.has_value() ||
           ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       }
-      return {};
+      co_return InvokeStatus<void>{};
     };
   }
 
@@ -138,7 +137,7 @@ protected:
                            Invocation{.invoked_address = kAddrA,
                                       .entrypoint =
                                           entrypoint_from_method_id(method),
-                                      .gas_limit = UINT64_MAX,
+                                      .gas_limit = kDefaultMaxTxGas,
                                       .calldata = {}},
                        .uniquifier = make_new_uniquifier()};
   }
@@ -149,29 +148,30 @@ protected:
                                        RuntimeContext &ctx, bool commit = true)
   {
     auto handler = make_new_system_call_handler(tx, ctx);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
-    auto data = handler.get_proposal_data();
+    auto data = handler.extract_proposal_data();
     if (commit) {
-      EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+      EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
     }
     else {
-      EXPECT_TRUE(handler.abort_transaction().has_value());
+      EXPECT_TRUE(handler.abort_transaction()().has_value());
     }
     return data;
   }
 
   // try_invoke helper for use inside A-contract lambdas.
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
-                                           std::span<uint32_t>{}, inputs,
-                                           CopyableInvokeOutputs{});
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        CopyableInvokeOutputs{});
   }
 
   // Same as try_invoke_b, but writes the child frame outcome into `outputs`
@@ -179,27 +179,28 @@ protected:
   // from one that ran but rolled back (frame_status != Return). Under the
   // current Invoke ABI both cases return kSyscallErrorCodeNone, so the
   // frame_status channel is the only way to tell them apart.
-  static auto try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method,
-                           CopyableInvokeOutputs &outputs)
+  static x23::Async<HostFnStatus<SyscallErrorCode>>
+  try_invoke_b(NativeSyscallContext &ctx, Runtime::MethodID method,
+               CopyableInvokeOutputs &outputs)
   {
     CopyableInvokeInputs inputs{
         .entrypoint_id = method,
         .gas_limit = UINT64_MAX,
         .flags = std::to_underlying(InvokeFlag::TryInvoke),
     };
-    return ctx.syscall<SyscallNo::kInvoke>(kAddrB, std::span<const std::byte>{},
-                                           std::span<uint32_t>{}, inputs,
-                                           outputs);
+    co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+        kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+        outputs);
   }
 
   // Build a NativeContext with a single no-op contract (for structural
   // validation tests that don't need real execution).
   static std::unique_ptr<NativeContext> make_noop_context()
   {
-    auto noop = make_contract(
-        [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-          return {};
-        });
+    auto noop = make_contract([](NativeSyscallContext & /*unused*/)
+                                  -> x23::Async<InvokeStatus<void>> {
+      co_return InvokeStatus<void>{};
+    });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(noop));
     return std::make_unique<NativeContext>(std::move(contract_map));
@@ -213,27 +214,32 @@ protected:
   static std::unique_ptr<RuntimeContext> make_rcq_context()
   {
     auto contract = make_contract(
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           auto key = make_storage_key("rcq0");
           for (uint8_t val : cd) {
-            auto res = ctx.handler().retrocausal_queue_insert(
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
                 key, std::as_bytes(std::span(&val, 1)));
             if (!res.has_value())
-              return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
           }
-          return {};
+          co_return InvokeStatus<void>{};
         },
-        [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &cd = ctx.handler().get_calldata();
           uint8_t count = cd.empty() ? 1 : cd[0];
           auto key = make_storage_key("rcq0");
           for (uint8_t i = 0; i < count; i++) {
-            auto res = ctx.handler().retrocausal_queue_consume(key, false);
+            RuntimeMemoryLength entry_len = 0;
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::span<std::byte>{}, entry_len);
             if (!res.has_value())
-              return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(contract));
@@ -247,7 +253,7 @@ protected:
         .invocation =
             Invocation{.invoked_address = kAddrA,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier = make_new_uniquifier()};
   }
@@ -271,14 +277,14 @@ protected:
     auto tx_consume = make_rcq_consume_tx(1);
 
     auto ha = make_new_system_call_handler(tx_insert, ctx);
-    EXPECT_TRUE(ha.root_invoke().is_root_success());
-    auto insert_p = ha.get_proposal_data();
-    EXPECT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    EXPECT_TRUE(ha.root_invoke()().is_root_success());
+    auto insert_p = ha.extract_proposal_data();
+    EXPECT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, ctx);
-    EXPECT_TRUE(hb.root_invoke().is_root_success());
-    auto consume_p = hb.get_proposal_data();
-    EXPECT_TRUE(hb.abort_transaction().has_value());
+    EXPECT_TRUE(hb.root_invoke()().is_root_success());
+    auto consume_p = hb.extract_proposal_data();
+    EXPECT_TRUE(hb.abort_transaction()().has_value());
 
     return {insert_p, consume_p};
   }
@@ -293,15 +299,15 @@ protected:
     auto tx_consume = make_rcq_consume_tx(1);
 
     auto ha = make_new_system_call_handler_validation(tx_insert, ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_consume, ctx,
                                                 std::move(tampered_consume_p));
-    EXPECT_FALSE(hb.root_invoke().is_root_success())
+    EXPECT_FALSE(hb.root_invoke()().is_root_success())
         << "Tampered proposal data should cause validation failure";
-    ASSERT_TRUE(hb.abort_transaction().has_value());
+    ASSERT_TRUE(hb.abort_transaction()().has_value());
   }
 };
 
@@ -309,25 +315,23 @@ protected:
 // Both succeed, producing 2 nondeterministic bits (both true).
 // Nondeterministic bits are only logged when the inner frame succeeds
 // (deterministic errors skip lock acquisition entirely).
-TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        if (auto r = try_invoke_b(ctx, kWriteWorld); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await try_invoke_b(ctx, kWriteHello); !r.has_value())
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        if (auto r = co_await try_invoke_b(ctx, kWriteWorld); !r.has_value())
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         // Write something to prove we survived both try_invokes
         auto key = make_storage_key("result");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), key,
-            std::as_bytes(std::span(std::string_view("ok"))),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(std::string_view("ok"))));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -345,21 +349,21 @@ TEST_P(ProposeValidateRoundtripTest, SuccessfulRoundtrip)
   {
     auto handler = make_new_system_call_handler_validation(tx, *native_context,
                                                            proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
 // Test that validation fails when the proposal data has extra unconsumed
 // nondeterministic bits (entropy grinding attack vector).
-TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 {
   // A: single try_invoke of B.write_hello → produces 1 nondeterministic bit.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        if (auto r = try_invoke_b(ctx, kWriteHello); !r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        if (auto r = co_await try_invoke_b(ctx, kWriteHello); !r.has_value())
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -378,9 +382,9 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
                                                          std::move(tampered));
   // check_all_consumed() should fail because 2 bits were supplied but
   // only 1 was consumed.
-  EXPECT_FALSE(handler.root_invoke().is_root_success())
+  EXPECT_FALSE(handler.root_invoke()().is_root_success())
       << "Validation should fail with extra unconsumed bits";
-  ASSERT_TRUE(handler.abort_transaction().has_value());
+  ASSERT_TRUE(handler.abort_transaction()().has_value());
 }
 
 // Test that validation fails when proposal data has a flipped bit.
@@ -388,17 +392,17 @@ TEST_P(ProposeValidateRoundtripTest, ExtraBitsCauseValidationFailure)
 // succeeds.  In proposal mode both succeed, producing 2 bits (both true).
 // Flipping bit 0 to false causes the validator to skip the second
 // try_invoke, consuming only 1 of 2 bits → check_all_consumed() fails.
-TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 {
   // A: try_invoke B.write_hello, then conditionally try_invoke B.write_world.
   // Both succeed in proposal → 2 bits.  Flipping bit 0 makes validator
   // skip the second try_invoke → 1 of 2 bits consumed → failure.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeOutputs r0_outputs{};
-        auto r0 = try_invoke_b(ctx, kWriteHello, r0_outputs);
+        auto r0 = co_await try_invoke_b(ctx, kWriteHello, r0_outputs);
         if (!r0.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
 
         // Only do the second try_invoke if the first one actually committed.
         // A child frame that ran but rolled back also returns
@@ -407,10 +411,11 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
         // replayed as a rollback, so this branch is correctly skipped.
         if (r0.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
             r0_outputs.frame_status == InvocationFrameStatusCode::Return) {
-          if (auto r1 = try_invoke_b(ctx, kWriteWorld); !r1.has_value())
-            return InvokeError{InvokeErrorCode::Deterministic};
+          if (auto r1 = co_await try_invoke_b(ctx, kWriteWorld);
+              !r1.has_value())
+            co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -433,23 +438,23 @@ TEST_P(ProposeValidateRoundtripTest, FlippedBitsCauseValidationFailure)
 
   auto handler = make_new_system_call_handler_validation(tx, *native_context,
                                                          std::move(tampered));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   // The root invoke succeeds (contract A returns Ok), but
   // check_final_validation_data detects the unconsumed bit.
   if (res.is_root_success()) {
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_NE(commit_res, ExecResult::ExecResultOK)
         << "Validation with flipped bits should not commit successfully";
   }
   else {
     // Root invoke failed — also acceptable
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 }
 
 // Test that validation fails when the proposal is structurally malformed
 // (e.g. bit count doesn't match byte count).
-TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
+TEST_F(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -461,17 +466,17 @@ TEST_P(ProposeValidateRoundtripTest, MalformedProposalRejectedEarly)
 
   auto handler = make_new_system_call_handler_validation(tx, *native_context,
                                                          std::move(malformed));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   // validate() should reject this in perform_initial_validation
   EXPECT_FALSE(res.is_root_success())
       << "Malformed proposal (bit count/byte count mismatch) should be "
          "rejected";
-  ASSERT_TRUE(handler.abort_transaction().has_value());
+  ASSERT_TRUE(handler.abort_transaction()().has_value());
 }
 
 // Test that validation fails when there are padding bits set in the last
 // byte (entropy grinding vector).
-TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
+TEST_F(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -485,11 +490,11 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 
   auto handler = make_new_system_call_handler_validation(tx, *native_context,
                                                          std::move(grinding));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success())
       << "Padding bits set in last byte should be rejected (entropy "
          "grinding)";
-  ASSERT_TRUE(handler.abort_transaction().has_value());
+  ASSERT_TRUE(handler.abort_transaction()().has_value());
 }
 
 // ===================================================================
@@ -499,14 +504,13 @@ TEST_P(ProposeValidateRoundtripTest, PaddingBitEntropyGrinding)
 // These tests exercise the proposer/validator pipeline for
 // RetrocausalQueue operations.  The key code paths are:
 //   - concurrent-entry observation replay (item_view.cc)
-//   - consumed_but_not_inserted reconciliation (refcounted_delta_variant.cc)
 //   - consumed_set check in block finalization (retrocausal_queue_lock.cc)
 
 // Two TXs in same block: TX_A inserts {10}, TX_B consumes the
 // concurrent entry.  This produces 1 nondeterministic bit (entry
 // exists) and 1 queue entry observation ({10}).  Validates that
 // the full propose→validate pipeline preserves these correctly.
-TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
 {
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
@@ -516,16 +520,16 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   NondeterministicProposalData insert_p, consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    consume_p = hb.get_proposal_data();
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    consume_p = hb.extract_proposal_data();
     EXPECT_EQ(consume_p.nondeterministic_bit_count, 1U);
     EXPECT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Capture the proposal block's resulting trie root, then reset to the
@@ -540,13 +544,13 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb =
         make_new_system_call_handler_validation(tx_consume, *ctx, consume_p);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Validation must reproduce the proposal's resulting state exactly: closing
@@ -555,16 +559,14 @@ TEST_P(ProposeValidateRoundtripTest, RCQConcurrentEntryRoundtrip)
   // so the roots must match. (Only HogDb computes real trie roots.)
   StorageShortHash validation_hash =
       discard_block(BlockExecutionMode::kBlockExecutionModeProposal);
-  if (GetParam() == TestDB::kHogDb) {
-    EXPECT_EQ(proposal_hash, validation_hash)
-        << "Proposal and validation trie root hashes must match";
-  }
+  EXPECT_EQ(proposal_hash, validation_hash)
+      << "Proposal and validation trie root hashes must match";
 }
 
 // Insert 1 entry in block 1.  Block 2: consume past entry (deterministic),
 // then try concurrent consume (no entries → bit=false).  Validates that
 // the bit=false replay path works correctly.
-TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
 {
   auto ctx = make_rcq_context();
 
@@ -572,8 +574,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
   {
     auto tx = make_rcq_insert_tx({1});
     auto handler = make_new_system_call_handler(tx, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 
@@ -583,11 +585,11 @@ TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
     EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     EXPECT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -595,40 +597,43 @@ TEST_P(ProposeValidateRoundtripTest, RCQConsumeEmptyRoundtrip)
   {
     auto handler = make_new_system_call_handler_validation(tx_consume, *ctx,
                                                            proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success())
+    ASSERT_TRUE(handler.root_invoke()().is_root_success())
         << "Validation with bit=false (empty concurrent) should succeed";
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
 // Single TX inserts {10, 20} then consumes 3 times.  First 2 consumes
 // return self-entries (deterministic), third tries concurrent (miss →
 // bit=false).  Validates that self-entry + concurrent-miss replay works.
-TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
 {
   std::vector<uint8_t> consumed_values;
 
   // Custom contract: single method that inserts then consumes.
-  auto contract = make_contract(
-      [&consumed_values](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto key = make_storage_key("rcq0");
-        consumed_values.clear();
-        for (uint8_t val : {10, 20}) {
-          auto r = ctx.handler().retrocausal_queue_insert(
-              key, std::as_bytes(std::span(&val, 1)));
-          if (!r.has_value())
-            return r.error().to_invoke_error();
-        }
-        for (int i = 0; i < 3; i++) {
-          auto r = ctx.handler().retrocausal_queue_consume(key, false);
-          if (!r.has_value())
-            return r.error().to_invoke_error();
-          if (r.value().has_value() && r.value().value().size() == 1)
-            consumed_values.push_back(r.value().value()[0]);
-        }
-        return {};
-      });
+  auto contract = make_contract([&consumed_values](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
+    consumed_values.clear();
+    for (uint8_t val : {10, 20}) {
+      auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+          key, std::as_bytes(std::span(&val, 1)));
+      if (!r.has_value())
+        co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+    }
+    for (int i = 0; i < 3; i++) {
+      uint8_t entry = 0;
+      RuntimeMemoryLength entry_len = 0;
+      auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+          key, false, std::as_writable_bytes(std::span(&entry, 1)), entry_len);
+      if (!r.has_value())
+        co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+      if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+          entry_len == 1)
+        consumed_values.push_back(entry);
+    }
+    co_return InvokeStatus<void>{};
+  });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::move(contract));
   auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
@@ -638,11 +643,11 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
     EXPECT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10, 20}));
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -650,9 +655,9 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
   {
     auto handler =
         make_new_system_call_handler_validation(tx, *ctx, proposal_data);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
     EXPECT_EQ(consumed_values, (std::vector<uint8_t>{10, 20}));
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 }
 
@@ -666,7 +671,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQInsertConsumeSameTxRoundtrip)
 
 // Tamper: add an extra queue entry observation.
 // check_all_consumed() detects the surplus → validation fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
+TEST_F(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -682,7 +687,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExtraObservationsCauseFailure)
 
 // Tamper: remove the queue entry observation (keep bit=true).
 // consume_queue_entry_observation returns nullptr → validation fails.
-TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
+TEST_F(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -698,7 +703,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQMissingObservationCausesFailure)
 // Tamper: flip existence bit true→false.
 // Validator skips observation consumption → unconsumed observation →
 // check_all_consumed() fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
+TEST_F(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
 {
   auto ctx = make_rcq_context();
   auto [insert_p, consume_p] = propose_rcq_insert_and_consume(*ctx);
@@ -713,7 +718,7 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToFalse)
 
 // Tamper: flip existence bit false→true.
 // Validator tries to consume an observation that doesn't exist → fails.
-TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
+TEST_F(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
 {
   auto ctx = make_rcq_context();
 
@@ -721,8 +726,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
   {
     auto tx = make_rcq_insert_tx({10});
     auto handler = make_new_system_call_handler(tx, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 
@@ -732,11 +737,11 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
   NondeterministicProposalData proposal_data;
   {
     auto handler = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    proposal_data = handler.get_proposal_data();
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    proposal_data = handler.extract_proposal_data();
     ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 
   auto tampered = proposal_data;
@@ -747,9 +752,9 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
   {
     auto handler = make_new_system_call_handler_validation(tx_consume, *ctx,
                                                            std::move(tampered));
-    EXPECT_FALSE(handler.root_invoke().is_root_success())
+    EXPECT_FALSE(handler.root_invoke()().is_root_success())
         << "Flipped bit (false→true) with no observation should fail";
-    ASSERT_TRUE(handler.abort_transaction().has_value());
+    ASSERT_TRUE(handler.abort_transaction()().has_value());
   }
 }
 
@@ -766,11 +771,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQExistenceBitFlippedToTrue)
 
 // Proposer claims TX_B consumed {99} but TX_A only inserted {10}.
 // Block finalization: consumed_set={99} vs added_entries={10} → error.
-TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
+TEST_F(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
   auto tx_consume = make_rcq_consume_tx(1);
@@ -778,15 +780,15 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
   NondeterministicProposalData insert_p, consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    consume_p = hb.get_proposal_data();
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    consume_p = hb.extract_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 1U);
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Tamper: change observation {10} → {99}
@@ -798,13 +800,13 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler_validation(tx_consume, *ctx,
                                                       std::move(tampered));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_FALSE(try_advance_block().has_value())
@@ -813,11 +815,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQFabricatedObservationValue)
 
 // Proposer claims TX_B consumed {10} from TX_A, but TX_A is absent
 // from validation (aborted).  No insert → consumed_set non-empty → error.
-TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
+TEST_F(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert = make_rcq_insert_tx({10});
   auto tx_consume = make_rcq_consume_tx(1);
@@ -825,13 +824,13 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
   NondeterministicProposalData consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    consume_p = hb.get_proposal_data();
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    consume_p = hb.extract_proposal_data();
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -840,8 +839,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
   {
     auto hb = make_new_system_call_handler_validation(tx_consume, *ctx,
                                                       std::move(consume_p));
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_FALSE(try_advance_block().has_value())
@@ -851,11 +850,8 @@ TEST_P(ProposeValidateRoundtripTest, RCQAbortedInserterEntryConsumed)
 // Two inserters, one consumer.  Proposer claims consumer saw 2 entries,
 // but only 1 inserter is included in validation.  Second consumed entry
 // has no matching insert → error.
-TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
+TEST_F(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "consumed_set validation requires kHogDb";
-
   auto ctx = make_rcq_context();
   auto tx_insert_a = make_rcq_insert_tx({10});
   auto tx_insert_b = make_rcq_insert_tx({20});
@@ -864,19 +860,19 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
   NondeterministicProposalData insert_a_p, consume_p;
   {
     auto ha = make_new_system_call_handler(tx_insert_a, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_a_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_a_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hb = make_new_system_call_handler(tx_insert_b, *ctx);
-    ASSERT_TRUE(hb.root_invoke().is_root_success());
-    ASSERT_EQ(hb.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hc = make_new_system_call_handler(tx_consume, *ctx);
-    ASSERT_TRUE(hc.root_invoke().is_root_success());
-    consume_p = hc.get_proposal_data();
+    ASSERT_TRUE(hc.root_invoke()().is_root_success());
+    consume_p = hc.extract_proposal_data();
     ASSERT_EQ(consume_p.observed_queue_entry_sequence.size(), 2U);
-    ASSERT_EQ(hc.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(hc.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -886,13 +882,13 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert_a, *ctx, insert_a_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto hc = make_new_system_call_handler_validation(tx_consume, *ctx,
                                                       std::move(consume_p));
-    ASSERT_TRUE(hc.root_invoke().is_root_success());
-    ASSERT_EQ(hc.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(hc.root_invoke()().is_root_success());
+    ASSERT_EQ(hc.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   EXPECT_FALSE(try_advance_block().has_value())
@@ -902,38 +898,38 @@ TEST_P(ProposeValidateRoundtripTest, RCQMoreConsumedThanInserted)
 // Root manual revert must still submit observation deltas to HogDb.
 // A forged observation on an empty queue that triggers manual revert
 // must be rejected at block close.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        RootManualRevertSkipsForgedRCQObservationValidation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   static constexpr uint8_t kForgedEntry = 0xE7;
 
   auto revert_on_forged_observation = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto observed = ctx.handler().retrocausal_queue_consume(key, true);
+        uint8_t entry = 0;
+        RuntimeMemoryLength entry_len = 0;
+        auto observed =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::as_writable_bytes(std::span(&entry, 1)),
+                entry_len);
         if (!observed.has_value())
-          return observed.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              observed.error());
 
-        if (observed.value().has_value() &&
-            observed.value().value().size() == 1 &&
-            observed.value().value()[0] == kForgedEntry) {
+        if (observed.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
+            entry_len == 1 && entry == kForgedEntry) {
           ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-          return {};
+          co_return InvokeStatus<void>{};
         }
 
         auto marker = std::string_view("honest");
-        auto [write_status, _gas] = syscall_BytestringSet_inner(
-            ctx.handler(), make_storage_key("marker"),
-            std::as_bytes(std::span(marker)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto write_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_storage_key("marker"), std::as_bytes(std::span(marker)));
         if (!write_status.has_value() ||
             write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
@@ -943,13 +939,13 @@ TEST_P(ProposeValidateRoundtripTest,
 
   {
     auto proposal_handler = make_new_system_call_handler(tx, *ctx);
-    ASSERT_TRUE(proposal_handler.root_invoke().is_root_success());
-    auto honest_proposal = proposal_handler.get_proposal_data();
+    ASSERT_TRUE(proposal_handler.root_invoke()().is_root_success());
+    auto honest_proposal = proposal_handler.extract_proposal_data();
     ASSERT_EQ(honest_proposal.nondeterministic_bit_count, 1U);
     ASSERT_EQ(honest_proposal.observed_queue_entry_sequence.size(), 0U);
     ASSERT_EQ(honest_proposal.nondeterministic_bits[0] & uint8_t{1}, 0U)
         << "Honest proposal on an empty queue must observe no entry";
-    ASSERT_EQ(proposal_handler.try_commit_transaction(),
+    ASSERT_EQ(proposal_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -962,10 +958,10 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
-  ASSERT_TRUE(validation_handler.root_invoke().is_root_success())
+  ASSERT_TRUE(validation_handler.root_invoke()().is_root_success())
       << "The forged observation is consumed and makes the contract choose "
          "manual root-frame revert";
-  ASSERT_EQ(validation_handler.try_commit_transaction(),
+  ASSERT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultTxRootFrameReverted)
       << "Manual root revert commits through the revert branch";
   EXPECT_FALSE(
@@ -975,7 +971,7 @@ TEST_P(ProposeValidateRoundtripTest,
          "insert";
 }
 
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ValidationRejectsOverDepthTryInvokeTrueBits)
 {
   auto make_depth_poc_key = [](uint32_t index) {
@@ -1020,7 +1016,7 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto contract_a = make_contract(
       [make_index_calldata](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         uint32_t successes = 0;
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           CopyableInvokeInputs inputs{
@@ -1030,11 +1026,12 @@ TEST_P(ProposeValidateRoundtripTest,
           };
           CopyableInvokeOutputs outputs{};
           auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB, make_index_calldata(i),
-                                              std::span<uint32_t>{}, inputs,
-                                              outputs);
+              co_await ctx.syscall<SyscallNo::kInvoke>(kAddrB,
+                                                       make_index_calldata(i),
+                                                       std::span<uint32_t>{},
+                                                       inputs, outputs);
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Count only try_invokes that actually committed. A child frame
           // that ran but rolled back (e.g. the depth-cap rejection on the
@@ -1046,29 +1043,27 @@ TEST_P(ProposeValidateRoundtripTest,
           }
         }
         if (successes != kMaxSavepointDepth + 1) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto contract_b = make_contract(
       [make_depth_poc_key](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto const &calldata = ctx.handler().get_calldata();
         if (calldata.size() != 2) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         uint32_t index = static_cast<uint32_t>(calldata[0]) |
                          (static_cast<uint32_t>(calldata[1]) << 8);
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), make_depth_poc_key(index),
-            std::as_bytes(std::span(calldata)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            make_depth_poc_key(index), std::as_bytes(std::span(calldata)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_context =
@@ -1081,17 +1076,17 @@ TEST_P(ProposeValidateRoundtripTest,
   static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
   {
     auto proposal_handler = make_new_system_call_handler(tx, *native_context);
-    auto proposal_res = proposal_handler.root_invoke();
+    auto proposal_res = proposal_handler.root_invoke()();
     ASSERT_FALSE(proposal_res.is_root_success());
     ASSERT_EQ(proposal_res.result_.error().code(),
               InvokeErrorCode::Deterministic);
 
-    auto const &honest_proposal = proposal_handler.get_proposal_data();
+    auto honest_proposal = proposal_handler.extract_proposal_data();
     ASSERT_EQ(honest_proposal.nondeterministic_bit_count, kChildCap);
     for (uint32_t i = 0; i < kChildCap; ++i) {
       EXPECT_TRUE(proposal_bit(honest_proposal, i));
     }
-    ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+    ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
   }
 
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -1100,10 +1095,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *native_context,
                                               make_all_true_proposal_data());
-  ASSERT_FALSE(validation_handler.root_invoke().is_root_success())
+  ASSERT_FALSE(validation_handler.root_invoke()().is_root_success())
       << "Validation must reject an all-true bitstring past the savepoint cap";
 
-  auto commit_res = validation_handler.try_commit_transaction();
+  auto commit_res = validation_handler.try_commit_transaction()();
   ASSERT_NE(commit_res, ExecResult::ExecResultOK)
       << "Validation must not commit the malicious over-depth child storage";
 
@@ -1117,36 +1112,34 @@ TEST_P(ProposeValidateRoundtripTest,
       << "Over-cap child storage must not be persisted";
 }
 
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ValidationRejectsStaleTrailingBitAtDepthCap)
 {
   // A is tolerant: it does NOT propagate child failures, so a single dangling
   // proposal bit reaches finalize_after_root_frame instead of short-circuiting
   // in A's logic.
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kMaxSavepointDepth + 1; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           // Tolerant: propagate system errors but ignore user-level failures
           // (including the deterministic depth-cap failure on the last try).
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
@@ -1168,39 +1161,37 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(stale));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success())
       << "Validation must reject when the proposal has a trailing bit that "
          "the depth-cap branch refuses to consume";
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
-  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_NE(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
-TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
+TEST_F(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i + 1 < kMaxSavepointDepth; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           if (!r.has_value() ||
               r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
@@ -1209,18 +1200,18 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
   // Proposal succeeds and produces exactly (kMaxSavepointDepth - 1) `true`
   // bits.
   auto handler = make_new_system_call_handler(tx, *ctx);
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  auto proposal_data = handler.get_proposal_data();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  auto proposal_data = handler.extract_proposal_data();
   EXPECT_EQ(proposal_data.nondeterministic_bit_count,
             static_cast<uint32_t>(kMaxSavepointDepth - 1));
-  ASSERT_TRUE(handler.abort_transaction().has_value());
+  ASSERT_TRUE(handler.abort_transaction()().has_value());
 
   // Validation with the captured proposal data succeeds.
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *ctx, proposal_data);
-  ASSERT_TRUE(validation_handler.root_invoke().is_root_success());
-  ASSERT_EQ(validation_handler.try_commit_transaction(),
+  ASSERT_TRUE(validation_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
 }
 
@@ -1229,33 +1220,31 @@ TEST_P(ProposeValidateRoundtripTest, TryInvokeAtCapMinusOneSucceedsRoundtrip)
 // a proposal with many more `true` bits than the cap would silently roll
 // through. Honest proposal can never produce more than kMaxSavepointDepth
 // `true` bits.
-TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
+TEST_F(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 {
   static constexpr uint32_t kAttempts = 2 * kMaxSavepointDepth;
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kAttempts; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
-          auto r =
-              ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
           // Tolerant: propagate system errors, ignore deterministic child
           // failures (including the depth-cap rejection past the cap).
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_b = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(contract_a), std::move(contract_b));
@@ -1278,12 +1267,12 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(mal));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success())
       << "Validation must reject a proposal with more `true` bits than "
          "kMaxSavepointDepth (each `true` bit corresponds to a +1 depth "
          "increment, and depth is capped).";
-  ASSERT_NE(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_NE(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
 // Nested-chain depth propagation: A -> TryInvoke(B); B ->
@@ -1296,7 +1285,7 @@ TEST_P(ProposeValidateRoundtripTest, ValidationRejectsExcessTrueBitsBeyondCap)
 //
 // This exercises depth accumulation through a parent-child boundary
 // (B inherits depth from C), distinct from sequential siblings at one level.
-TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
+TEST_F(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
 {
   static constexpr ContractAddress kAddrC = make_contract_address(2);
   static constexpr uint32_t kChildCap = kMaxSavepointDepth - 1;
@@ -1308,19 +1297,18 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   setup_grant_storage_token(kAddrC, 1'000'000'000);
 
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = std::to_underlying(InvokeFlag::TryInvoke),
         };
         CopyableInvokeOutputs outputs{};
-        auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrB,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kAddrB, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+            outputs);
         if (!r.has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // B's frame hits the depth cap and rolls back. The child frame still
         // ran, so the Invoke syscall returns kSyscallErrorCodeNone; the
@@ -1328,12 +1316,12 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
         // deterministic failure.
         if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
             outputs.frame_status != InvocationFrameStatusCode::Return) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (uint32_t i = 0; i < kChildCap; i++) {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
@@ -1341,26 +1329,25 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
               .flags = std::to_underlying(InvokeFlag::TryInvoke),
           };
           CopyableInvokeOutputs outputs{};
-          auto r = ctx.syscall<SyscallNo::kInvoke>(kAddrC,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+          auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddrC, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, outputs);
           if (!r.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // These C invocations are expected to commit. A child frame that
           // ran but rolled back also returns kSyscallErrorCodeNone, so a
           // non-commit is detected via frame_status != Return.
           if (r.value() == SyscallErrorCode::kSyscallErrorCodeNone &&
               outputs.frame_status != InvocationFrameStatusCode::Return) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_c = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -1375,44 +1362,44 @@ TEST_P(ProposeValidateRoundtripTest, NestedTryInvokeChainHitsCapAtParentFrame)
   // failure, A propagates. Proposal logs exactly kChildCap bits
   // (one per C success); none for B's own try_invoke.
   auto proposal_handler = make_new_system_call_handler(tx, *ctx);
-  auto proposal_res = proposal_handler.root_invoke();
+  auto proposal_res = proposal_handler.root_invoke()();
   ASSERT_FALSE(proposal_res.is_root_success());
   EXPECT_EQ(proposal_res.result_.error().code(),
             InvokeErrorCode::Deterministic);
-  auto const &proposal_data = proposal_handler.get_proposal_data();
+  auto proposal_data = proposal_handler.extract_proposal_data();
   EXPECT_EQ(proposal_data.nondeterministic_bit_count,
             static_cast<uint32_t>(kChildCap));
-  ASSERT_TRUE(proposal_handler.abort_transaction().has_value());
+  ASSERT_TRUE(proposal_handler.abort_transaction()().has_value());
 
   // Validation round-trips: A -> B -> kChildCap successful C invocations
   // (each consuming a true bit and bumping depth via
-  // note_validation_try_invoke_success); B's frame hits the cap; no bit
+  // note_try_invoke_success); B's frame hits the cap; no bit
   // consumed for B; A's TryInvoke of B fails deterministically; A propagates.
   discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *ctx, proposal_data);
-  auto validation_res = validation_handler.root_invoke();
+  auto validation_res = validation_handler.root_invoke()();
   ASSERT_FALSE(validation_res.is_root_success())
       << "Validation must reach the same deterministic failure as proposal";
   EXPECT_EQ(validation_res.result_.error().code(),
             InvokeErrorCode::Deterministic);
-  ASSERT_TRUE(validation_handler.abort_transaction().has_value());
+  ASSERT_TRUE(validation_handler.abort_transaction()().has_value());
 }
 
 // Regression: deterministic root errors must still check that all proposal
 // data was consumed.  Before the fix, finalize_after_root_frame() returned
 // early for non-success results, skipping check_all_consumed().
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DeterministicRootErrorSkipsExtraProposalBitCheck)
 {
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, kWriteHello);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, kWriteHello);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         if (r.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   auto native_context =
@@ -1423,16 +1410,16 @@ TEST_P(ProposeValidateRoundtripTest,
   NondeterministicProposalData proposal_data;
   {
     auto proposal_handler = make_new_system_call_handler(tx, *native_context);
-    auto proposal_res = proposal_handler.root_invoke();
+    auto proposal_res = proposal_handler.root_invoke()();
     ASSERT_FALSE(proposal_res.is_root_success());
     ASSERT_EQ(proposal_res.result_.error().code(),
               InvokeErrorCode::Deterministic);
 
-    proposal_data = proposal_handler.get_proposal_data();
+    proposal_data = proposal_handler.extract_proposal_data();
     ASSERT_EQ(proposal_data.nondeterministic_bit_count, 1U);
     ASSERT_EQ(proposal_data.observed_queue_entry_sequence.size(), 0U);
     ASSERT_NE(proposal_data.nondeterministic_bits[0] & uint8_t{1}, 0);
-    ASSERT_EQ(proposal_handler.try_commit_transaction(),
+    ASSERT_EQ(proposal_handler.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }
 
@@ -1445,10 +1432,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto validation_handler =
       make_new_system_call_handler_validation(tx, *native_context,
                                               std::move(tampered));
-  auto validation_res = validation_handler.root_invoke();
+  auto validation_res = validation_handler.root_invoke()();
   ASSERT_FALSE(validation_res.is_root_success());
 
-  EXPECT_EQ(validation_handler.try_commit_transaction(),
+  EXPECT_EQ(validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure)
       << "Unused proposal bit must cause validation failure, not deterministic "
          "error";
@@ -1458,19 +1445,20 @@ TEST_P(ProposeValidateRoundtripTest,
 // contracts_to_deploy triggers a deterministic error during initial validation,
 // returning before check_all_consumed(). Unused proposal bits must still be
 // detected as a validation failure.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        InvalidAttachedContractChecksUnusedProposalBits)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
-      kMaxContractSizeBytes + 1);
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes +
+      1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;
@@ -1482,10 +1470,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto handler =
       make_new_system_call_handler_validation(tx, *native_context,
                                               std::move(proposal_data));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
 
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure)
       << "Unused proposal bit must cause validation failure even when initial "
          "validation rejects an invalid attached contract";
@@ -1496,7 +1484,7 @@ TEST_P(ProposeValidateRoundtripTest,
 // proposer-attributable ValidationFailure rather than the Unrecoverable that
 // proposal mode reports -- a peer must not be able to induce an internal
 // error on every validating node.
-TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
+TEST_F(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
@@ -1511,29 +1499,30 @@ TEST_P(ProposeValidateRoundtripTest, AttachedNativeContractIsValidationFailure)
   auto handler =
       make_new_system_call_handler_validation(tx, *native_context,
                                               NondeterministicProposalData{});
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error(),
             InvokeError{InvokeErrorCode::ValidationFailure});
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
 // Regression test for issue #2063: verify that unused queue entry observations
 // are also detected when initial validation fails before root execution.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        InvalidAttachedContractChecksUnusedQueueObservations)
 {
   auto native_context = make_noop_context();
   auto tx = make_invoke_a_tx(0);
 
-  // Oversized rather than native: the size gate rejects it Deterministically
-  // before verify_contract runs, which is what lets check_final_validation_-
-  // data() still convert to a ValidationFailure. A native attachment is now
-  // Unrecoverable and would short-circuit that conversion.
+  // Oversized: the size gate rejects the attachment as a ValidationFailure
+  // during initial validation (malformed transactions are dropped), before
+  // verify_contract runs. check_final_validation_data() must still flag the
+  // unused proposal data rather than downgrade it.
   Contract invalid_contract(ContractType::kRv32);
   invalid_contract.rv32_contract().data.resize_uninitialized(
-      kMaxContractSizeBytes + 1);
+      NetworkConfigParams(stock_network_config().v0()).max_contract_size_bytes +
+      1);
   tx.contracts_to_deploy = {invalid_contract};
 
   NondeterministicProposalData proposal_data;
@@ -1546,10 +1535,10 @@ TEST_P(ProposeValidateRoundtripTest,
   auto handler =
       make_new_system_call_handler_validation(tx, *native_context,
                                               std::move(proposal_data));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
 
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure)
       << "Unused queue entry observation must cause validation failure even "
          "when initial validation rejects an invalid attached contract";
@@ -1558,7 +1547,7 @@ TEST_P(ProposeValidateRoundtripTest,
 // Regression test for issue #2063: when initial validation itself reports
 // ValidationFailure (malformed proposal shape), adding extra unused data
 // should still result in ValidationFailure, not get downgraded.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        MalformedProposalShapeWithExtraDataStillValidationFailure)
 {
   auto native_context = make_noop_context();
@@ -1572,23 +1561,25 @@ TEST_P(ProposeValidateRoundtripTest,
 
   auto handler = make_new_system_call_handler_validation(tx, *native_context,
                                                          std::move(malformed));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_FALSE(res.is_root_success());
   EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxValidationFailure);
 }
 
-TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
+TEST_F(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 {
   auto tx = make_invoke_a_tx(0);
 
   auto run_case = [this, &tx](InvokeErrorCode root_error,
                               ExecResult expected_result) {
     auto make_error_context = [root_error] {
-      auto contract_a = make_contract(
-          [root_error](NativeSyscallContext & /*unused*/) noexcept
-              -> InvokeStatus<void> { return InvokeError{root_error}; });
+      auto contract_a =
+          make_contract([root_error](NativeSyscallContext & /*unused*/)
+                            -> x23::Async<InvokeStatus<void>> {
+            co_return InvokeError{root_error};
+          });
       return make_ab_context(std::move(contract_a), make_contract());
     };
 
@@ -1604,10 +1595,10 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
       auto handler =
           make_new_system_call_handler_validation(tx, *ctx,
                                                   std::move(empty_proposal));
-      auto res = handler.root_invoke();
+      auto res = handler.root_invoke()();
       ASSERT_FALSE(res.is_root_success());
       ASSERT_EQ(res.result_.error().code(), root_error);
-      EXPECT_EQ(handler.try_commit_transaction(), expected_result);
+      EXPECT_EQ(handler.try_commit_transaction()(), expected_result);
     }
 
     {
@@ -1621,10 +1612,10 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
       auto handler =
           make_new_system_call_handler_validation(tx, *ctx,
                                                   std::move(unused_bit));
-      auto res = handler.root_invoke();
+      auto res = handler.root_invoke()();
       ASSERT_FALSE(res.is_root_success());
       ASSERT_EQ(res.result_.error().code(), root_error);
-      EXPECT_EQ(handler.try_commit_transaction(), expected_result);
+      EXPECT_EQ(handler.try_commit_transaction()(), expected_result);
     }
   };
 
@@ -1648,11 +1639,8 @@ TEST_P(ProposeValidateRoundtripTest, FinalValidationDoesNotMaskFatalErrors)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
 // concurrent entry then overwrites the key with a bytestring.
 // Observation key has a bytestring delta, not RCQ → conflict.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10} into rcq0, commit (same block).
@@ -1660,27 +1648,28 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: consume concurrent entry, then overwrite with bytestring.
   auto consume_overwrite_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
-        auto ws =
-            ctx.handler().set_bytestring(key, std::as_bytes(std::span(data)),
-                                         std::to_underlying(
-                                             StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(data)));
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(ws.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_overwrite_contract));
@@ -1697,15 +1686,15 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError)
       << "Observation on key overwritten with bytestring should conflict";
 }
@@ -1713,11 +1702,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenBytestringOverwriteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B consumes the
 // concurrent entry then deletes the key.
 // Observation key has a delete delta, not RCQ → conflict.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1725,24 +1711,26 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: consume concurrent entry, then delete.
   auto consume_delete_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        auto del =
-            ctx.handler().delete_object(key, std::to_underlying(
-                                                 StorageDeltaFlags::None));
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        auto del = co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
         if (!del.has_value())
-          return del.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              del.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_delete_contract));
@@ -1756,15 +1744,15 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError)
       << "Observation on key that was deleted should conflict";
 }
@@ -1772,11 +1760,8 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenDeleteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
 // concurrent entry then consumes it.  The observation is covered by
 // current_block_consumed → success.
-TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
+TEST_F(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1784,22 +1769,30 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: peek then consume.
   auto peek_then_consume_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>{}, peek_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        RuntimeMemoryLength consume_len = 0;
+        auto consume_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>{}, consume_len);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_then_consume_contract));
@@ -1813,26 +1806,23 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenConsumeSucceeds)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Peek followed by consume should succeed — observation is covered";
 }
 
 // TX_A inserts {10} into "rcq0" (same block).  TX_B only peeks at the
 // concurrent entry, does nothing else.  An observation-only RCQ delta is
 // emitted for the key (not in modified_items_) and validated by HogDb.
-TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
+TEST_F(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1840,19 +1830,22 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: peek only, no write.
   auto peek_only_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_only_contract));
@@ -1866,15 +1859,15 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Peek-only observation with no write to the key should succeed — "
          "unmatched observations are harmless if no delta is emitted";
 }
@@ -1883,11 +1876,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekOnlyWithoutWriteSucceeds)
 // contract B consumes from "rcq0" then faults (frame reverts).
 // Contract A catches the fault via try_invoke, then re-consumes from
 // "rcq0" itself.  The re-consume in A succeeds → commit should succeed.
-TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
+TEST_F(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1895,33 +1885,39 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: A try_invokes B (which consumes + faults), then A re-consumes.
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
         // Fault — frame will be reverted
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         // B faulted, frame reverted. Now A re-consumes from rcq0.
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -1934,15 +1930,15 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Re-consume after reverted frame should succeed";
 }
 
@@ -1953,12 +1949,9 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeInRevertedFrameReconsumeSucceeds)
 // so no observation is generated, and the transaction commits cleanly.
 // Contrast with ConsumeInRevertedFrameReconsumeSucceeds where A's
 // subsequent root-frame re-consume DOES observe the concurrent entry.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ConsumeInRevertedFrameNoReconsumeCommitsCleanly)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -1966,29 +1959,32 @@ TEST_P(ProposeValidateRoundtripTest,
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: A try_invokes B (which consumes + faults), A does nothing else.
   auto contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
         // Fault — frame will be reverted
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
   auto contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // try_invoke B method 0 — it will fault
-        auto r = try_invoke_b(ctx, 0);
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         // Do NOT re-consume — no observation generated in reverted child
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -2008,15 +2004,15 @@ TEST_P(ProposeValidateRoundtripTest,
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "No observation generated — reverted child saw no concurrent entry";
 }
 
@@ -2024,11 +2020,8 @@ TEST_P(ProposeValidateRoundtripTest,
 // concurrent entry then overwrites the key with a bytestring.
 // Peek without consume means retrocausally_consumed_count=0, so
 // subspan keeps the full observation.  Type conflict fires.
-TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2036,27 +2029,29 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: peek at concurrent entry, then overwrite with bytestring.
   auto peek_overwrite_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>{}, peek_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
         // Overwrite with a bytestring
         uint8_t data[] = {0xAB};
-        auto ws =
-            ctx.handler().set_bytestring(key, std::as_bytes(std::span(data)),
-                                         std::to_underlying(
-                                             StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(data)));
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(ws.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_overwrite_contract));
@@ -2070,15 +2065,15 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError)
       << "Peek observation on key overwritten with bytestring should conflict";
 }
@@ -2086,11 +2081,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenBytestringOverwriteConflicts)
 // TX_A inserts {10} into "rcq0" (same block).  TX_B peeks at the
 // concurrent entry then overwrites the key with set_nnint.
 // Same conflict as PeekThenBytestringOverwriteConflicts but via NNInt.
-TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
+TEST_F(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2098,26 +2090,29 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: peek at concurrent entry, then overwrite with nnint.
   auto peek_nnint_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength peek_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>{}, peek_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
         // Overwrite with set_nnint(set_value=0, add_value=42)
-        auto ws = ctx.handler().set_nnint(key, std::optional<int128_t>{0},
-                                          int128_t{42},
-                                          std::to_underlying(
-                                              StorageDeltaFlags::None));
+        const int128_t set_value = 0;
+        auto ws = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+            key, &set_value, int128_t{42});
         if (!ws.has_value())
-          return ws.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(ws.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_nnint_contract));
@@ -2131,15 +2126,15 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(),
+  EXPECT_EQ(handler.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError)
       << "Peek observation on key overwritten with nnint should conflict";
 }
@@ -2148,11 +2143,8 @@ TEST_P(ProposeValidateRoundtripTest, PeekThenNNIntOverwriteConflicts)
 // TX_B consumes one entry then peeks the next.
 // The consumed entry goes into current_block_consumed; the peeked entry
 // goes into observed_concurrent_entries.  Both should succeed.
-TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
+TEST_F(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entries {10} and {20}, commit.
@@ -2160,22 +2152,30 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: consume one, then peek the next.
   auto consume_then_peek_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength consume_len = 0;
+        auto consume_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>{}, consume_len);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        RuntimeMemoryLength peek_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>{}, peek_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_then_peek_contract));
@@ -2189,15 +2189,15 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Consume then peek on same key should succeed — consumed entry in "
          "current_block_consumed, peeked entry in observed_concurrent_entries";
 }
@@ -2206,24 +2206,26 @@ TEST_P(ProposeValidateRoundtripTest, ConsumeThenPeekSameKey)
 // The consume gets the self-inserted entry (step 2 in get_next_item),
 // never reaching concurrent entries (step 3).  No nondeterministic bits
 // or observations should be generated.
-TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
+TEST_F(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // Single TX: insert then consume from the same key.
   auto self_insert_consume_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 42;
-        auto ins_res = ctx.handler().retrocausal_queue_insert(
+        auto ins_res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!ins_res.has_value())
-          return ins_res.error().to_invoke_error();
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              ins_res.error());
+        RuntimeMemoryLength consume_len = 0;
+        auto consume_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>{}, consume_len);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(self_insert_consume_contract));
@@ -2240,9 +2242,9 @@ TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Self-insert then self-consume should succeed with no observations";
 }
 
@@ -2252,11 +2254,8 @@ TEST_P(ProposeValidateRoundtripTest, SelfInsertSelfConsumeNoObservation)
 // observation-only delta records observed_concurrent_entries={0xFF}.
 // Block close: HogDb checks that every observed entry was actually
 // inserted by some TX.  {0xFF} was never inserted → reject_block.
-TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
+TEST_F(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // TX_A: insert entry {10}, commit.
@@ -2264,19 +2263,22 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: peek only (no consume, no write).
   auto peek_only_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(peek_only_contract));
@@ -2295,16 +2297,16 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
   {
     auto ha =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
   // try_commit succeeds — the executor does not validate observation content.
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Block close: HogDb detects that {0xFF} was never inserted → reject.
   reject_block(BlockExecutionMode::kBlockExecutionModeValidation);
@@ -2314,25 +2316,23 @@ TEST_P(ProposeValidateRoundtripTest, ForgedObservationRejectedEndToEnd)
 // TX_B: contract A try_invokes B (which peeks at kAddrB's "rcq0"),
 // B returns success.  The peek observation at kAddrB is logged in the
 // child frame and promoted to the parent on success.  Commit succeeds.
-TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
+TEST_F(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // First, insert {10} into kAddrB's "rcq0" via a simple insert contract.
   auto insert_contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   auto insert_contract_a = make_contract(
-      [](NativeSyscallContext & /*ctx*/) noexcept -> InvokeStatus<void> {
-        return {};
+      [](NativeSyscallContext & /*ctx*/) -> x23::Async<InvokeStatus<void>> {
+        co_return InvokeStatus<void>{};
       });
   auto insert_ctx = make_ab_context(std::move(insert_contract_a),
                                     std::move(insert_contract_b));
@@ -2342,33 +2342,36 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
 
   NondeterministicProposalData insert_p;
   {
     auto ha = make_new_system_call_handler(tx_insert, *insert_ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: A try_invokes B (which peeks at kAddrB's "rcq0"), B succeeds.
   auto peek_contract_b = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   auto invoke_contract_a = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_ctx =
@@ -2382,15 +2385,15 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
   {
     auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
                                                       insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Peek observation from successful child frame should be promoted "
          "to parent and commit cleanly";
 }
@@ -2400,19 +2403,16 @@ TEST_P(ProposeValidateRoundtripTest, PeekInSuccessfulChildFrame)
 // (gets {10} from past block), then peeks (gets {20} from concurrent).
 // Past-block consume does not generate an observation; the peek does.
 // Both should succeed.
-TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
+TEST_F(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto ctx = make_rcq_context();
 
   // Block 1: insert {10}, commit, advance.
   {
     auto tx_insert = make_rcq_insert_tx({10});
     auto ha = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 
@@ -2421,22 +2421,30 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
   NondeterministicProposalData insert_20_p;
   {
     auto ha = make_new_system_call_handler(tx_insert_20, *ctx);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    insert_20_p = ha.get_proposal_data();
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_20_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // TX_B: consume one (gets past-block {10}), peek next (gets concurrent {20}).
   auto consume_peek_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto consume_res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength consume_len = 0;
+        auto consume_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, false, std::span<std::byte>{}, consume_len);
         if (!consume_res.has_value())
-          return consume_res.error().to_invoke_error();
-        auto peek_res = ctx.handler().retrocausal_queue_consume(key, true);
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              consume_res.error());
+        RuntimeMemoryLength peek_len = 0;
+        auto peek_res =
+            co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                key, true, std::span<std::byte>{}, peek_len);
         if (!peek_res.has_value())
-          return peek_res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              peek_res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
   cmap.emplace(0, std::move(consume_peek_contract));
@@ -2451,15 +2459,15 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
   {
     auto ha = make_new_system_call_handler_validation(tx_insert_20, *ctx,
                                                       insert_20_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler = make_new_system_call_handler_validation(tx_b, *native_ctx,
                                                          std::move(proposal_b));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  EXPECT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  EXPECT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Past-block consume then concurrent peek should both succeed";
 }
 
@@ -2467,43 +2475,44 @@ TEST_P(ProposeValidateRoundtripTest, PastBlockConsumeThenPeekConcurrent)
 // concurrent RCQ entry at kAddrB and faults. The observation persists in
 // queue_entry_observations_. Root A does nothing with that key. The
 // observation must be emitted as an observation-only delta for kAddrB.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        ConsumeInRevertedFrameWithConcurrentEntryEmitsObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   // A: method 0 = try_invoke B.0 (faults), return success.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB (same block → concurrent entry visible to B).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2513,7 +2522,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
@@ -2532,15 +2541,15 @@ TEST_P(ProposeValidateRoundtripTest,
   {
     auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
                                                       insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(proposal));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK)
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK)
       << "Reverted child frame observation should be emitted as an "
          "observation-only delta and validated by HogDb";
   advance_block();
@@ -2553,60 +2562,60 @@ TEST_P(ProposeValidateRoundtripTest,
 // conflict), so the nondeterministic bit is false.  A malicious proposer
 // doctors the bit to true.  In validation mode, finish_frame must detect
 // the observation/type mismatch and return ValidationFailure.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DoctoredTryInvokeBitOnObservedKeyReturnsValidationFailure)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   //    method 1 = write bytestring to "rcq0".
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       },
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         auto overwrite = std::string_view("overwritten");
-        auto [ws, _wg] = syscall_BytestringSet_inner(
-            ctx.handler(), key, std::as_bytes(std::span(overwrite)),
-            std::to_underlying(StorageDeltaFlags::None));
+        auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+            key, std::as_bytes(std::span(overwrite)));
         if (!ws.has_value() ||
             ws.value() != SyscallErrorCode::kSyscallErrorCodeNone)
-          return InvokeError{InvokeErrorCode::Deterministic};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeStatus<void>{};
       });
 
   // A: method 0 = try_invoke B.0 (faults), then try_invoke B.1.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         // Frame 1: B.0 consumes + faults
-        auto r1 = try_invoke_b(ctx, 0);
+        auto r1 = co_await try_invoke_b(ctx, 0);
         if (!r1.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         // Frame 2: B.1 writes bytestring
-        auto r2 = try_invoke_b(ctx, 1);
+        auto r2 = co_await try_invoke_b(ctx, 1);
         if (!r2.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB so B's consume can find the concurrent entry.
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2617,7 +2626,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
@@ -2649,7 +2658,7 @@ TEST_P(ProposeValidateRoundtripTest,
   // Replay doctored TX first — should fail at root_invoke.
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   EXPECT_FALSE(res.is_root_success())
       << "finish_frame should detect observation/type mismatch when the "
          "doctored bit claims Frame 2 succeeded";
@@ -2657,8 +2666,9 @@ TEST_P(ProposeValidateRoundtripTest,
   // Replay the insert TX after (in the same validation block).
   auto insert_handler =
       make_new_system_call_handler_validation(tx_insert, *insert_ctx, insert_p);
-  EXPECT_TRUE(insert_handler.root_invoke().is_root_success());
-  EXPECT_EQ(insert_handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  EXPECT_TRUE(insert_handler.root_invoke()().is_root_success());
+  EXPECT_EQ(insert_handler.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
 }
 
 // Malicious proposer scenario: contract A try_invokes B.  B peeks at a
@@ -2674,42 +2684,43 @@ TEST_P(ProposeValidateRoundtripTest,
 // should still pass (bits and observations were consumed from the stream).
 // The real question is whether the block finalizes without catching the
 // suppressed observation.
-TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
+TEST_F(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = peek at "rcq0", return success.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
 
   // A: method 0 = try_invoke B.0.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert at kAddrB (same block, concurrent entry for B's peek).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2719,7 +2730,7 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
@@ -2744,21 +2755,21 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
   {
     auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
                                                       insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   // Replay with doctored proposal.
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   // Root invoke succeeds — the doctored bit just makes the frame "fail",
   // which is handled normally (frame reverted, A continues).
   ASSERT_TRUE(res.is_root_success());
   // try_commit succeeds — the observation persists in queue_entry_observations_
   // even though the frame reverted. try_acquire_frame_locks emits an
   // observation-only RCQ delta for kAddrB (key not in modified_items_).
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   // Block close succeeds because HogDb validates the observation against
@@ -2770,40 +2781,41 @@ TEST_P(ProposeValidateRoundtripTest, DoctoredTryInvokeBitFalseDropsObservation)
 // Same as DoctoredTryInvokeBitFalseDropsObservation, but the concurrent
 // insert is NOT replayed in validation mode.  The observation-only delta
 // reaches HogDb with no matching insert → block rejected.
-TEST_P(ProposeValidateRoundtripTest,
+TEST_F(ProposeValidateRoundtripTest,
        DoctoredTryInvokeBitFalseNoInsertRejectsBlock)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, true);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
 
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r = co_await try_invoke_b(ctx, 0);
         if (!r.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2813,7 +2825,7 @@ TEST_P(ProposeValidateRoundtripTest,
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   propose(tx_insert, *insert_ctx);
@@ -2832,8 +2844,8 @@ TEST_P(ProposeValidateRoundtripTest,
   // Do NOT replay the insert TX. Only replay the doctored TX.
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(doctored));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Block close rejects: observation-only delta has observe_count=1 for
   // entry {10} but insert_count=0 (no insert TX in this validation block).
@@ -2846,48 +2858,49 @@ TEST_P(ProposeValidateRoundtripTest,
 // (parent's value is restored on revert), all three observe at index 0
 // and hit the same cached entry in queue_entry_observations_.  The
 // observation count should be 1 (not 3), so a single insert suffices.
-TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
+TEST_F(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
 {
-  if (GetParam() != TestDB::kHogDb)
-    GTEST_SKIP() << "RCQ observation validation requires kHogDb";
-
   // B: method 0 = consume from "rcq0" then fault.
   auto b_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
-        auto res = ctx.handler().retrocausal_queue_consume(key, false);
+        RuntimeMemoryLength entry_len = 0;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, false, std::span<std::byte>{}, entry_len);
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return InvokeError{InvokeErrorCode::Deterministic};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   // A: method 0 = try_invoke B.0 three times, all fault.
   auto a_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto r1 = try_invoke_b(ctx, 0);
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto r1 = co_await try_invoke_b(ctx, 0);
         if (!r1.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        auto r2 = try_invoke_b(ctx, 0);
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        auto r2 = co_await try_invoke_b(ctx, 0);
         if (!r2.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        auto r3 = try_invoke_b(ctx, 0);
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        auto r3 = co_await try_invoke_b(ctx, 0);
         if (!r3.has_value())
-          return InvokeError{InvokeErrorCode::Unrecoverable};
-        return {};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        co_return InvokeStatus<void>{};
       });
 
   auto ctx = make_ab_context(std::move(a_contract), std::move(b_contract));
 
   // Insert one entry at kAddrB (same block → concurrent).
   auto b_insert_contract = make_contract(
-      [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto key = make_storage_key("rcq0");
         uint8_t val = 10;
-        auto res = ctx.handler().retrocausal_queue_insert(
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
             key, std::as_bytes(std::span(&val, 1)));
         if (!res.has_value())
-          return res.error().to_invoke_error();
-        return {};
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
       });
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> insert_cmap;
   insert_cmap.emplace(1, std::move(b_insert_contract));
@@ -2897,7 +2910,7 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
       Transaction{.invocation =
                       Invocation{.invoked_address = kAddrB,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()};
   auto insert_p = propose(tx_insert, *insert_ctx);
@@ -2916,24 +2929,172 @@ TEST_P(ProposeValidateRoundtripTest, RepeatedRevertedObservationsCountAsOne)
   {
     auto ha = make_new_system_call_handler_validation(tx_insert, *insert_ctx,
                                                       insert_p);
-    ASSERT_TRUE(ha.root_invoke().is_root_success());
-    ASSERT_EQ(ha.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
 
   auto handler =
       make_new_system_call_handler_validation(tx, *ctx, std::move(proposal));
-  ASSERT_TRUE(handler.root_invoke().is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Block closes: one insert, one observation. observe_count=1 <=
   // insert_count=1.
   advance_block();
 }
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, ProposeValidateRoundtripTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
+// #1946: two peeks of one current-block position log two presence bits but
+// hold one entry, so present-then-absent is a proposal no honest run makes.
+TEST_F(ProposeValidateRoundtripTest, RCQRepeatedPeekPresentThenAbsentRejected)
+{
+  // Bit 4 set: first peek saw an entry. Bit 0 set: second peek saw an entry.
+  uint8_t peeks_seen = 0;
+
+  auto contract = make_contract(
+      [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("rcq0");
+        uint8_t val = 10;
+        auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            key, std::as_bytes(std::span(&val, 1)));
+        if (!res.has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              res.error());
+        co_return InvokeStatus<void>{};
+      },
+      [&peeks_seen](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto key = make_storage_key("rcq0");
+        RuntimeMemoryLength first_len = 0;
+        auto first = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, first_len);
+        if (!first.has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              first.error());
+        RuntimeMemoryLength second_len = 0;
+        auto second = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+            key, true, std::span<std::byte>{}, second_len);
+        if (!second.has_value())
+          co_return NativeContractBuilder::host_fn_error_conversion(
+              second.error());
+        peeks_seen = static_cast<uint8_t>(
+            (first.value() == SyscallErrorCode::kSyscallErrorCodeNone ? 0x10
+                                                                      : 0x00) |
+            (second.value() == SyscallErrorCode::kSyscallErrorCodeNone ? 0x01
+                                                                       : 0x00));
+        co_return InvokeStatus<void>{};
+      });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto tx_insert = make_rcq_tx(0);
+  auto tx_peek = make_rcq_tx(1);
+
+  NondeterministicProposalData insert_p, peek_p;
+  {
+    auto ha = make_new_system_call_handler(tx_insert, *ctx);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    insert_p = ha.extract_proposal_data();
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    auto hb = make_new_system_call_handler(tx_peek, *ctx);
+    ASSERT_TRUE(hb.root_invoke()().is_root_success());
+    peek_p = hb.extract_proposal_data();
+    EXPECT_EQ(peeks_seen, 0x11) << "Both peeks see the same present entry";
+    ASSERT_EQ(peek_p.nondeterministic_bit_count, 2U);
+    ASSERT_EQ(peek_p.observed_queue_entry_sequence.size(), 1U);
+    ASSERT_EQ(hb.try_commit_transaction()(), ExecResult::ExecResultOK);
+  }
+
+  // Tamper: the second presence bit now says absent.
+  auto tampered = peek_p;
+  tampered.nondeterministic_bits[0] &= static_cast<uint8_t>(~(uint8_t{1} << 1));
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  {
+    auto ha =
+        make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
+    ASSERT_TRUE(ha.root_invoke()().is_root_success());
+    ASSERT_EQ(ha.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+    peeks_seen = 0;
+    auto hb = make_new_system_call_handler_validation(tx_peek, *ctx,
+                                                      std::move(tampered));
+    auto res = hb.root_invoke()();
+    ASSERT_FALSE(res.is_root_success())
+        << "Validation must reject present-then-absent for one queue position";
+    EXPECT_EQ(res.result_.error().code(), InvokeErrorCode::ValidationFailure);
+    EXPECT_EQ(peeks_seen, 0) << "The contract never reached the absent branch";
+    ASSERT_TRUE(hb.abort_transaction()().has_value());
+  }
+}
+
+// Absent-then-present variant of #1946: per-tx replay accepts it (a producer
+// may appear between reads); block close rejects it, since no insert matches.
+TEST_F(ProposeValidateRoundtripTest,
+       RCQRepeatedPeekAbsentThenPresentWithoutProducerFailsBlockClose)
+{
+  static const QueueEntry kFabricatedEntry{1, 2, 3, 4};
+
+  auto contract = make_contract([](NativeSyscallContext &ctx)
+                                    -> x23::Async<InvokeStatus<void>> {
+    auto key = make_storage_key("rcq0");
+
+    RuntimeMemoryLength first_len = 0;
+    auto first = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        key, true, std::span<std::byte>{}, first_len);
+    if (!first.has_value())
+      co_return NativeContractBuilder::host_fn_error_conversion(first.error());
+    if (first.value() !=
+        SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    QueueEntry second_entry;
+    second_entry.resize(kQueueEntryMaxLen);
+    RuntimeMemoryLength second_len = 0;
+    auto second = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+        key, true, std::as_writable_bytes(std::span(second_entry)), second_len);
+    if (!second.has_value())
+      co_return NativeContractBuilder::host_fn_error_conversion(second.error());
+    second_entry.resize(second_len);
+    if (second.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+        second_entry != kFabricatedEntry) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+
+    auto marker = std::string_view("seen");
+    auto ws = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+        make_storage_key("marker"), std::as_bytes(std::span(marker)));
+    if (!ws.has_value() ||
+        ws.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+      co_return InvokeError{InvokeErrorCode::Deterministic};
+    }
+    co_return InvokeStatus<void>{};
+  });
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto ctx = std::make_unique<NativeContext>(std::move(contract_map));
+  auto tx = make_invoke_a_tx(0);
+
+  NondeterministicProposalData forged;
+  forged.nondeterministic_bit_count = 2;
+  forged.nondeterministic_bits = {uint8_t{0b10}};
+  forged.observed_queue_entry_sequence = {kFabricatedEntry};
+
+  discard_block(BlockExecutionMode::kBlockExecutionModeValidation);
+
+  auto handler =
+      make_new_system_call_handler_validation(tx, *ctx, std::move(forged));
+  ASSERT_TRUE(handler.root_invoke()().is_root_success())
+      << "Per-tx replay accepts the sequence: a producer could have appeared";
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+
+  EXPECT_FALSE(try_advance_block().has_value())
+      << "Block close must reject the fabricated peek observation, which no "
+         "insert in the block matches";
+}
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

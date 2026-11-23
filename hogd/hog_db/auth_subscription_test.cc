@@ -22,6 +22,7 @@
 #include "auth_rpc.hh"
 #include "consensus.hh"
 #include "db_sched.hh"
+#include "hog_exec_constants.hh"
 #include "hogd/base/cleanup.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/io.h"
@@ -209,7 +210,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -289,6 +291,36 @@ TEST_F(AuthSubscriptionTest, AuthChangesAreForwardedToSubscriber)
   }
 }
 
+TEST_F(AuthSubscriptionTest, AuthChangesOverTheChunkBoundArriveWhole)
+{
+  // Two changes per chunk; five changes make a run of three chunks, and the
+  // subscriber sees all five once the run is complete.
+  constexpr BlockHeight kHeight = 3;
+  constexpr uint64_t kNumChanges = 5;
+  AuthChangeSubscriptionManager manager(/*max_key_changes_per_chunk=*/2);
+  ASSERT_TRUE(
+      manager.add_full_auth_change_subscriber(auth_card_)().has_value());
+
+  std::set<ContractAddress> published;
+  PerThread<KeyChangeBatch> key_changes;
+  for (uint64_t i = 0; i < kNumChanges; ++i) {
+    const ContractAddress address = make_address(0x5000 + i).get_raw();
+    published.insert(address);
+    key_changes->push_back(KeyChange{.address = address, .auth_data = {}});
+  }
+  manager.publish_auth_changes(kHeight, std::move(key_changes))();
+
+  mock_auth_server_->impl()->wait_for_changes(kHeight);
+  auto received = mock_auth_server_->impl()->get_changes_at_height(kHeight);
+  ASSERT_TRUE(received.has_value());
+  EXPECT_EQ(received->size(), kNumChanges);
+  std::set<ContractAddress> arrived;
+  for (const KeyChange &change : *received) {
+    arrived.insert(change.address);
+  }
+  EXPECT_EQ(arrived, published);
+}
+
 TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
 {
   // Subscribe to auth changes
@@ -315,7 +347,8 @@ TEST_F(AuthSubscriptionTest, AuthDeletionsAreForwardedToSubscriber)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -391,7 +424,8 @@ TEST_F(AuthSubscriptionTest, AuthChangesHandledGracefullyWhenServerShutsDown)
                                                   nullptr);
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -467,7 +501,8 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
   PerThreadARC<BlockTX> block_tx(
       db_, kTestCostModel, background_commit_worker, height,
-      BlockExecutionMode::kBlockExecutionModeProposal);
+      BlockExecutionMode::kBlockExecutionModeProposal,
+      static_cast<uint32_t>(kMaxSavepointDepth));
   ASSERT_TRUE(block_tx.try_acquire_reference());
   InvokeTX invoke_tx(block_tx);
 
@@ -506,17 +541,18 @@ TEST_F(AuthSubscriptionTest, ErrorBadAuthCard)
 
 namespace {
 
-// Mirrors AuthServer's strict ordered-height gate: refuses to complete
-// authdb_forward_key_changes(H) until H-1 has been processed. Used to
-// demonstrate that concurrent publishes must not be serialized on the
-// client side while one is parked on the server-side gate.
+// Mirrors AuthServer's strict ordered-height gate: refuses to complete a
+// chunk of height H until H-1 has been processed. Used to demonstrate that
+// concurrent publishes must not be serialized on the client side while one is
+// parked on the server-side gate. The publishes here are empty, so each
+// height is a run of one chunk and one call.
 class HeightOrderedMockAuthDBRpc {
 public:
   using rpc_service = AuthDB1;
 
-  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
-                                              KeyChangeBatch /*key_changes*/)
+  x23::Async<void> authdb_forward_key_changes_chunk(KeyChangeChunk chunk)
   {
+    const BlockHeight height = chunk.height;
     active_calls_.fetch_add(1, std::memory_order_release);
     arrivals_.fetch_add(1, std::memory_order_release);
     last_arrived_height_.store(height, std::memory_order_release);

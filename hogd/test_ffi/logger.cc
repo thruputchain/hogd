@@ -13,6 +13,7 @@
 #include "hogd/base/ansi_color.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
+#include "hogd/base/time.h"
 
 namespace hogd {
 
@@ -34,10 +35,13 @@ ThreadsafeLogger::vlog(LogLevel level, std::string_view fmt,
 
   // generate the log message
   std::string buf;
-  std::format_to(std::back_inserter(buf), "{}{}{}[{:%m%d %H:%M:%OS} {}:{}]{} ",
+  const UtcTime utc(now);
+  std::format_to(std::back_inserter(buf),
+                 "{}{}{}[{:02}{:02} {:02}:{:02}:{:02} {}:{}]{} ",
                  ansi_color(Style::kBold), log_level_to_char(level),
-                 ansi_color(Style::kNormal, Color::kBlue), now, filename,
-                 loc.line(), ansi_reset());
+                 ansi_color(Style::kNormal, Color::kBlue), utc.month, utc.day,
+                 utc.hours, utc.minutes, utc.seconds, filename, loc.line(),
+                 ansi_reset());
   std::vformat_to(std::back_inserter(buf), fmt, args);
   std::format_to(std::back_inserter(buf), "\n");
 

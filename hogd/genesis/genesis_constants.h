@@ -17,11 +17,23 @@ genesis_contract_address(GenesisContractAddresses value)
   return address;
 }
 
+// All-zero address reserved to mean "no address" (cleared approval, unset
+// consumer, mint/burn). Genesis load rejects deployments here.
+inline constexpr ContractAddress kNullContractAddress =
+    genesis_contract_address(GenesisContractAddresses::kAddressNull);
+static_assert(kNullContractAddress == ContractAddress{},
+              "the null address is the all-zero ContractAddress");
+
 inline constexpr ContractAddress kNativeTokenContractAddress =
     genesis_contract_address(GenesisContractAddresses::kAddressNativeToken);
 
 inline constexpr ContractAddress kGenesisRootContractAddress =
     genesis_contract_address(GenesisContractAddresses::kAddressGenesisRoot);
+
+// Genesis deploys the native token and the root contract at fixed addresses;
+// neither may be the reserved null address.
+static_assert(kNativeTokenContractAddress != kNullContractAddress);
+static_assert(kGenesisRootContractAddress != kNullContractAddress);
 
 // Contract-data key reserved to the native token implementation. Ordinary
 // contracts cannot write storage owned by the native token address.

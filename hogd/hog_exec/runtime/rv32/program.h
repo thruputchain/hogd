@@ -4,6 +4,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <expected>
+#include <limits>
 #include <span>
 #include <vector>
 
@@ -11,26 +12,58 @@ namespace hogd::rv32 {
 
 constexpr uint32_t kInstructionBytes = 4;
 constexpr uint32_t kRegisterCount = 32;
-constexpr uint32_t kMaxMemoryBytes = 64 * 1024;
-constexpr uint32_t kMaxCodeBytes = 64 * 1024;
-// Gas tiers, in units of one dispatch. Measured by the calibration harness on
-// hog10 (see gas_calibration/README.md); the ratios each tier is rounded up
-// from are in the comments below. An opcode costs what the engine spends on its
-// worst reachable context, since the guest author picks the context.
-//
-// One gas is one baseline instruction -- the resolution the harness calls 1.
-// A finer unit was measured and rejected: it narrows the ns-per-gas spread
-// across real workloads from 4.59x only to 4.03x, and buys that by scaling
-// every number in the protocol. See DEFAULT_RESOLUTION in rv32_gas_report.py.
+
+// The bounds in force when a chain's configuration states none: the protocol
+// defaults, restated so the VM does not depend on the XDR headers
+// (rv32_contract.cc pins them equal).
+constexpr uint32_t kDefaultMaxMemoryBytes = 64 * 1024;
+constexpr uint32_t kDefaultMaxCodeBytes = 256 * 1024;
+
+// The most this VM provisions and translates: the ceilings on the configured
+// bounds, checked at genesis load. Memory is copied in per invocation and a
+// translation holds a Slot per instruction, neither charged to gas.
+constexpr uint32_t kMemoryCeilingBytes = 16 * 1024 * 1024;
+constexpr uint32_t kCodeCeilingBytes = 4 * 1024 * 1024;
+static_assert(kDefaultMaxMemoryBytes <= kMemoryCeilingBytes);
+static_assert(kDefaultMaxCodeBytes <= kCodeCeilingBytes);
+
+// The bounds an artifact is admitted under: the chain's configuration at
+// attachment, the ceilings when a deployed contract is instantiated.
+struct Rv32Limits {
+  uint32_t max_code_bytes;
+  uint32_t max_memory_bytes;
+  // Inclusive range of format versions admitted, among those the parser
+  // reads. Unbounded unless a caller narrows it to its chain's configuration.
+  uint32_t min_artifact_version = 0;
+  uint32_t max_artifact_version = std::numeric_limits<uint32_t>::max();
+  // Inclusive range of syscall API minor versions a v7 artifact may declare.
+  // Unbounded unless a caller narrows it: attachment narrows it to the
+  // chain's configuration, and a deployed contract was admitted under one.
+  uint32_t min_syscall_api_minor = 0;
+  uint32_t max_syscall_api_minor = std::numeric_limits<uint32_t>::max();
+
+  static constexpr Rv32Limits defaults()
+  {
+    return Rv32Limits{.max_code_bytes = kDefaultMaxCodeBytes,
+                      .max_memory_bytes = kDefaultMaxMemoryBytes};
+  }
+  static constexpr Rv32Limits ceiling()
+  {
+    return Rv32Limits{.max_code_bytes = kCodeCeilingBytes,
+                      .max_memory_bytes = kMemoryCeilingBytes};
+  }
+};
+// Gas tiers measured on hog10, normalized to baseline dispatch cost. Pricing
+// uses the worst reachable measured context; see gas_calibration/README.md.
 constexpr uint64_t kBaseInstructionGas = 1;
-// Taken branches (1.38-1.42x) and integer divide (1.65-1.98x). Divide is not
-// the outlier it was priced as: the divider overlaps with dispatch, so a chain
-// of them costs about twice a dispatch, not eight times.
+// Taken branches (1.38-1.42x) and integer divide (1.65-1.98x).
 constexpr uint64_t kBranchInstructionGas = 2;
 constexpr uint64_t kDivInstructionGas = 2;
-// Indirect jump (2.61x) and the loads that can carry a pointer (2.49-2.65x).
-// These are the ISA's most expensive instructions -- JALR because the engine
-// cannot predict the target, LH/LHU/LW because a dependent chain of them pays
+// Direct jump: 4.8832 ns / 1.6213 ns = 3.012 units on hog10's largest
+// shuffled layout. Use 3 gas; the 0.4% excess is measurement-scale variation.
+constexpr uint64_t kDirectJumpGas = 3;
+// Indirect jump (2.72x) and the loads that can carry a pointer (2.49-2.65x).
+// LH/LHU/LW carry pointers: a dependent chain of them pays
 // full cache latency the interpreter's dispatch cannot hide.
 constexpr uint64_t kIndirectJumpGas = 3;
 constexpr uint64_t kWideLoadGas = 3;
@@ -118,8 +151,7 @@ constexpr size_t kOpCount = static_cast<size_t>(Op::kCount);
 
 struct InstructionGasEntry {
   Op op;
-  // `u8"..."` literal: folded into the RV32 gas-schedule digest (an artifact
-  // wire constant), so the hashed bytes must be the standard's UTF-8 code units
+  // `u8"..."` literal, so the bytes are the standard's UTF-8 code units
   // rather than implementation-defined ordinary-literal bytes that depend on
   // the execution character set (`-fexec-charset`). See hogd issue #2689.
   const char8_t *name;
@@ -129,7 +161,7 @@ struct InstructionGasEntry {
 constexpr std::array<InstructionGasEntry, kOpCount> kInstructionGasSchedule = {{
     {.op = Op::kLui, .name = u8"LUI", .cost = kBaseInstructionGas},
     {.op = Op::kAuipc, .name = u8"AUIPC", .cost = kBaseInstructionGas},
-    {.op = Op::kJal, .name = u8"JAL", .cost = kBaseInstructionGas},
+    {.op = Op::kJal, .name = u8"JAL", .cost = kDirectJumpGas},
     {.op = Op::kJalr, .name = u8"JALR", .cost = kIndirectJumpGas},
     {.op = Op::kBeq, .name = u8"BEQ", .cost = kBranchInstructionGas},
     {.op = Op::kBne, .name = u8"BNE", .cost = kBranchInstructionGas},
@@ -253,8 +285,8 @@ struct ProgramResult {
   ProgramError error = ProgramError::kNone;
 };
 
-// Immutable, already-decoded RV32IM code. Program is the validation boundary:
-// Machine never executes raw bytes and never lets guest memory alias code.
+// Immutable, decoded RV32IM code for the canonical Machine. Guest memory cannot
+// alias code. Production preparation uses ThreadedProgram.
 class Program {
 public:
   static ProgramResult validate(std::span<const uint8_t> code);

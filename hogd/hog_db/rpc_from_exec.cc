@@ -2,21 +2,18 @@
 
 #include <cassert>
 #include <cstddef>
-#include <exception>
 #include <set>
 #include <span>
 #include <string>
 #include <utility>
 #include <vector>
 
-#include "hogd/hog_exec/common/block_id_util.h"
-
 // generated x23 headers
 #include "address_auth.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
 #include "executor_to_db_rpc.hh"
-#include "hog_exec_constants.hh"
+#include "hogd/base/block_id.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/debug/delta_validity_checks.h"
@@ -35,10 +32,12 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
+#include "hogd/hog_db/preserialized_reply.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
+#include "hogd/hog_db/storage_item_reply.h"
 #include "hogd/ramdb/db_status.h"
-#include "x23/cleanup.h"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
@@ -177,8 +176,9 @@ HogDbExecutorRpc::commit_transaction(BlockID block, TransactionID tx,
     // write_contract fails if a sibling block commits and this block is
     // abandoned (kStaleBlock), or if the serialized contract exceeds
     // kMaxSerializedContractBytes (kInvalidExecutorBehavior): hog_exec
-    // enforces the contract size limit before execution and storage chunks
-    // any legal row, so an oversized row here means the executor is buggy.
+    // enforces the chain's contract size limit before execution, genesis load
+    // keeps that limit under the ceiling, and storage chunks any legal row,
+    // so an oversized row here means the executor is buggy.
     // Either way, abort just this transaction.
     if (auto r = write_contract(std::move(contract)); !r.has_value()) {
       CHECK(r.error().code() == HogDbCode::kStaleBlock ||
@@ -240,10 +240,12 @@ HogDbExecutorRpc::try_push_new_subtransaction(BlockID block, TransactionID tx,
   if (!itx)
     return TryPushSubtransactionResult(RPCError::kRPCBadBlockID);
   const DbDiagnosticLevel level = diagnostic_level_for(itx->execution_mode());
-  if (itx->get_savepoint_head() >= kMaxSavepointDepth) [[unlikely]] {
+  // hog_exec enforces the depth cap first, so a push past it is misbehavior.
+  if (itx->get_savepoint_head() >= itx->max_savepoint_depth()) [[unlikely]] {
     return TryPushSubtransactionResult(RPCError::kRPCUnrecoverable);
   }
   int depth = itx->create_savepoint();
+  itx->reserve_changes(batch.size());
 
   if constexpr (is_debug_build()) {
     // Invariant: hog_exec sends at most one delta per key per subtransaction.
@@ -368,7 +370,7 @@ HogDbExecutorRpc::pop_subtransactions(BlockID block, TransactionID tx,
   return RPCError::kRPCNone;
 }
 
-ExpectedStorageItem
+StorageItemReply<ExpectedStorageItem>
 HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
 {
   // TODO(abelay): BlockID is ignored because we can only read the latest
@@ -376,6 +378,7 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
   // heads for each BlockID, but the database is not currently designed to do
   // this.
 
+  using Reply = StorageItemReply<ExpectedStorageItem>;
   ItemKey key = make_item_key(addrkey);
   ExpectedStorageItem ret;
 
@@ -384,37 +387,37 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
         ctx_.get_db().read_address_balance(key.get_address());
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!nnint)
-      return ExpectedStorageItem(to_rpc_error(nnint.error()));
+      return Reply(to_rpc_error(nnint.error()));
     WireStorageItem out(StorageItemType::kItemTypeNonnegativeInt);
     out.nnint() = to_xdr(*nnint);
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
   else if (key.is_address_auth_data()) {
     HogDbStatus<AddressAuthData> auth_data =
         ctx_.get_db().read_address_auth_data(key.get_address());
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!auth_data)
-      return ExpectedStorageItem(to_rpc_error(auth_data.error()));
+      return Reply(to_rpc_error(auth_data.error()));
     WireStorageItem out(StorageItemType::kItemTypeAuthData);
-    out.auth_data() = *auth_data;
+    out.auth_data() = std::move(*auth_data);
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
   else {
     HogDbStatus<DBItem> item = ctx_.get_db().read_contract_data_item(key);
 
     if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-      return ExpectedStorageItem(RPCError::kRPCBadBlockID);
+      return Reply(RPCError::kRPCBadBlockID);
 
     if (!item)
-      return ExpectedStorageItem(to_rpc_error(item.error()));
+      return Reply(to_rpc_error(item.error()));
 
     WireStorageItem out;
     switch (item->type) {
@@ -429,13 +432,15 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
       break;
     }
     case kBytes:
-    {
-      out.type(StorageItemType::kItemTypeBytestring);
-      const auto *cptr = reinterpret_cast<const char *>(item->value.data());
-      out.bytestring().append_range(
-          std::span<const char>(cptr, item->value.size()));
-      break;
-    }
+      // The row already is the Bytestring: hand x23 the bytes read out of
+      // ramdb to write into the reply, rather than copying them into a
+      // WireStorageItem on the way.
+      if (item->value.size() > kBytestringCeilingLen) [[unlikely]] {
+        error("bytestring row of {} bytes exceeds the {} byte ceiling",
+              item->value.size(), kBytestringCeilingLen);
+        return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+      }
+      return Reply::bytestring(std::move(item->value));
     case kRetrocausalQueue:
     {
       out.type(StorageItemType::kItemTypeRetrocausalQueue);
@@ -443,43 +448,47 @@ HogDbExecutorRpc::get_snapshot_item(BlockID block, AddressAndKey const &addrkey)
         x23::deserialize(&out.metadata(), x23::BufViewEnd(item->value));
       } catch (x23::XdrException &e) {
         error("failed to deserialize rcq metadata: {}", e.what());
-        return ExpectedStorageItem(
-            to_rpc_error(HogDbError(HogDbCode::kInternal)));
+        return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
       }
       break;
     }
     default:
-      return ExpectedStorageItem(
-          to_rpc_error(HogDbError(HogDbCode::kInternal)));
+      return Reply(to_rpc_error(HogDbError(HogDbCode::kInternal)));
     }
 
     ret.error(RPCError::kRPCNone);
-    ret.item() = out;
+    ret.item() = std::move(out);
   }
 
-  return ret;
+  return Reply(std::move(ret));
 }
 
-ExpectedContract
+PreserializedReply<ExpectedContract>
 HogDbExecutorRpc::get_contract(BlockID block, SHA256Hash const &hash)
 {
   // TODO(abelay): BlockID is ignored here too for the same reasons.
 
-  HogDbStatus<OwningSpan<const std::byte>> wasm =
-      ctx_.get_db().read_wasm_code(hash);
+  using Reply = PreserializedReply<ExpectedContract>;
+  HogDbStatus<OwningSpan<const std::byte>> code =
+      ctx_.get_db().read_contract_code(hash);
 
   if (ctx_.is_snapshot_read_stale(block)) [[unlikely]]
-    return ExpectedContract(RPCError::kRPCBadBlockID);
+    return Reply(RPCError::kRPCBadBlockID);
 
-  if (!wasm)
-    return ExpectedContract(to_rpc_error(wasm.error()));
+  if (!code)
+    return Reply(to_rpc_error(code.error()));
 
-  ExpectedContract out;
-  out.error(RPCError::kRPCNone);
+  // Stored rows are the encodings NewContractLock wrote, so they go out
+  // unparsed and the executor's decode is what rejects a corrupt one.  XDR
+  // pads every encoding to a multiple of four bytes, though, and the reply
+  // relies on that to size the message, so a row that is not is refused here.
+  if (code->size() % 4 != 0) [[unlikely]] {
+    error("persistent contract row of {} bytes is not an XDR encoding",
+          code->size());
+    return Reply(to_rpc_error(HogDbError(HogDbCode::kCorruption)));
+  }
 
-  x23::deserialize(&out.contract(), x23::BufView{*wasm});
-
-  return out;
+  return Reply(std::move(*code));
 }
 
 ExpectedDeployment
@@ -528,91 +537,96 @@ HogDbExecutorRpc::get_next_retrocausal_queue_block(BlockID block,
   return out;
 }
 
-ExpectedQueueEntry
+BorrowedQueueEntryReply
 HogDbExecutorRpc::get_concurrent_retrocausal_queue_entry(
     BlockID block, AddressAndKey const &addrkey, uint32_t index)
 {
   PerThreadARC<BlockTX> *btx = ctx_.get_block_tx(block);
-  x23::Defer _d([&]() noexcept {
-    try {
-      if (btx && btx->release_reference()) {
-        ctx_.remove_shutdown_block_tx(block);
-      }
-    } catch (...) {
-      std::terminate();
-    }
-  });
+  // The reply owns the reference from here rather than a scope guard: x23
+  // writes the borrowed bytes after this frame is gone, and the reply is
+  // destroyed only once it has.
+  BorrowedQueueEntryReply reply(ctx_, btx, block);
+
   if (!btx || btx->get().is_invalidated()) [[unlikely]] {
-    return ExpectedQueueEntry(RPCError::kRPCBadBlockID);
+    reply.fail(RPCError::kRPCBadBlockID);
+    return reply;
   }
 
-  auto entry_res =
+  auto view_res =
       btx->get().get_concurrent_rcq_entry(make_item_key(addrkey), index);
-  if (!entry_res.has_value()) {
-    return ExpectedQueueEntry(to_rpc_error(entry_res.error()));
+  if (!view_res.has_value()) {
+    reply.fail(to_rpc_error(view_res.error()));
+    return reply;
+  }
+  if (!*view_res) {
+    reply.fail(RPCError::kRPCNotFound);
+    return reply;
   }
 
-  auto &maybe_entry = entry_res.value();
-
-  ExpectedQueueEntry ret;
-  if (maybe_entry) {
-    ret.error(RPCError::kRPCNone);
-    ret.queue_entry() = *maybe_entry;
-  }
-  else {
-    ret.error(RPCError::kRPCNotFound);
-  }
-  return ret;
+  reply.set_entry(**view_res);
+  return reply;
 }
 
-ExpectedDBTip
-HogDbExecutorRpc::get_db_tip(BlockID block_id)
+x23::Async<ExpectedDBTip>
+HogDbExecutorRpc::get_db_tip(BlockID block_id, BlockHeight block_height)
 {
-  // Read the tip first, then check staleness. This ordering is paired with
-  // commit_block()'s ordering of invalidate_siblings before update_dbtip: if
-  // we observe a non-stale block at the stale check, then at the time of the
-  // tip read no sibling had begun committing yet, so the tip is still the
-  // parent's tip rather than a freshly committed sibling's.
+  // Serving is decided off the committed tip alone, keyed on the height the
+  // caller opened its block with -- never on per-block snapshot state -- so
+  // this cannot race the block's own creation (executor_to_db_rpc.x). Settle
+  // any in-flight commit publication first: mid-publication the tip can
+  // still read one below where it is about to land, the one transient way it
+  // can sit under block_height - 1.
+  co_await ctx_.co_wait_for_no_commit_publishing();
+
   HogDbStatus<DbTip> tip = ctx_.get_tip();
-
-  if (ctx_.is_snapshot_read_stale(block_id)) [[unlikely]]
-    return ExpectedDBTip(RPCError::kRPCBadBlockID);
-
   if (!tip) {
-    return ExpectedDBTip(to_rpc_error(tip.error()));
+    co_return ExpectedDBTip(to_rpc_error(tip.error()));
   }
-  // block_id is the id of the current (open) block; the returned tip is its
-  // parent. If the tip *is* block_id, this block has itself been committed out
-  // from under the reader (e.g. it was advanced while a transaction handler
-  // still held this snapshot). Report that as a bad block id, the same way the
-  // staleness check above does. DatabaseProxy::get_db_tip already treats an
-  // id == block_id tip as a recoverable error on the client side, so this just
-  // moves that handling to the server and makes both build types agree -- the
-  // assert that used to live here crashed debug builds on a condition release
-  // already handled gracefully.
+
+  const BlockHeight tip_height = tip->value.proposal_header.block_height;
+  if (tip_height >= block_height) [[unlikely]] {
+    // The chain has moved to or past the caller's block: the block is dead.
+    // Routine for staleness probes (the view gateway's refresh path), so not
+    // logged. A sibling whose commit begins after the wait above can still
+    // slip past this check; its per-transaction operations then report
+    // Abandon, the same window the per-transaction tip pin used to have.
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
+  if (tip_height < block_height - 1) [[unlikely]] {
+    // Still below with no commit in flight: the caller opened a block whose
+    // parent never committed, which dbsched_create_snapshot forbids.
+    error("get_db_tip for block {} at height {}: committed tip is at {}",
+          block_id, block_height, tip_height);
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
+  }
+
+  // The tip *is* the requested block: the caller is loading a tip for the
+  // committed block itself (e.g. a view opened on the tip's own id).
+  // DatabaseProxy::get_db_tip also refuses this client-side; answering here
+  // keeps both build types agreeing on the wire.
   if (tip->id == block_id) [[unlikely]] {
-    return ExpectedDBTip(RPCError::kRPCBadBlockID);
+    co_return ExpectedDBTip(RPCError::kRPCBadBlockID);
   }
 
   ExpectedDBTip out;
   out.error(RPCError::kRPCNone);
   out.db_tip() = *tip;
-  return out;
+  co_return out;
 }
 
-ExpectedViewingSnapshot
+x23::Async<ExpectedViewingSnapshot>
 HogDbExecutorRpc::open_viewing_snapshot()
 {
-  BlockID block_id = generate_block_id();
-  auto res = ctx_.open_viewing_snapshot(block_id);
+  BlockID block_id = BlockIdGenerator::generate(BlockIdLane::kViewSnapshot);
+  auto res = co_await ctx_.open_viewing_snapshot(block_id);
   if (!res) {
-    return ExpectedViewingSnapshot(to_rpc_error(res.error()));
+    co_return ExpectedViewingSnapshot(to_rpc_error(res.error()));
   }
 
   ExpectedViewingSnapshot out;
   out.error(RPCError::kRPCNone);
   out.snapshot() = std::move(*res);
-  return out;
+  co_return out;
 }
 
 RPCError

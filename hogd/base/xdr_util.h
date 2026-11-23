@@ -24,6 +24,7 @@
 #include "x23/async.h"
 #include "x23/serialize.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -195,6 +196,11 @@ constexpr size_t kNumThreadsForParallelBatch = 20;
 // [max_objects] for input this node produced itself.  Grep it to find every
 // decode that trusts its source.
 inline constexpr size_t kNoBatchSizeLimit = SIZE_MAX;
+
+// #4030: parallel_batch_to_t's segment prefix sums assume a 64-bit size_t.
+static_assert(sizeof(size_t) >= sizeof(uint64_t),
+              "parallel_batch_to_t segment prefix sums assume a 64-bit size_t "
+              "(#4030)");
 
 // Decodes a ParallelBatch, returning false for any malformed input: metadata
 // mismatches (segment_tokens/segment_bytes size, total segment bytes vs

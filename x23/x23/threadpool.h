@@ -125,6 +125,7 @@
 #include <x23/err.h>
 #include <x23/move_only_function.h>
 #include <x23/mvar.h>
+#include <x23/refcnt.h>
 #include <x23/signal.h>
 #include <x23/utility.h>
 #include <x23/vec.h>
@@ -203,6 +204,8 @@ public:
   const size_t nqueues_;
 
   ThreadPool(size_t nthreads = nproc());
+  // Stop independent producers before destruction.  Waits for async()
+  // helpers and the tails of external submissions before stopping workers.
   ~ThreadPool();
 
   void go(std::vector<Job> &&jobs);
@@ -261,9 +264,13 @@ public:
     auto [async, cb] = make_async<R>();
     // Note: since we are detaching the thread, we have to move f and
     // args into the lambda.  Otherwise we could return and they could
-    // be destroyed before they are used.  That incurs a second move
-    // into the new thread, but that's unavoidable for safety.
-    std::jthread([this, cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
+    // be destroyed before they are used.  That could incur a second
+    // move as the lambda and its captures are moved into the new
+    // thread, but this is unavoidable for safety.  It's important to
+    // keep ref first in the captures list to ensure the ThreadPool
+    // outlives the destructors of any other captures.
+    std::jthread([this, ref = RefPtr{external_users_},
+                  cb = CpuHinted(cb, cpuid()), f = std::forward<F>(f),
                   ... args = std::forward<Args>(args)] {
       if constexpr (std::is_void_v<R>) {
         std::invoke(f, args...);
@@ -324,8 +331,8 @@ public:
     // wasn't part of a thread pool:
     x23assert(tp);
     return SuspendCount{std::this_thread::get_id(),
-                        tp->tstate_[my_thread_no].count_.load(
-                            std::memory_order_relaxed)};
+                        quiesce_count(tp->tstate_[my_thread_no].count_.load(
+                            std::memory_order_relaxed))};
   }
 
   // A CrashIfSuspended will crash your program if the coroutine in
@@ -362,6 +369,14 @@ public:
 private:
   // Timestamp for empty queues
   static constexpr uint64_t kEmpty = std::numeric_limits<uint64_t>::max();
+  // Reserve one counter bit so quiesce() and a worker can atomically order a
+  // request for notification against the worker becoming idle.
+  static constexpr size_t kQuiesceWake =
+      size_t{1} << (std::numeric_limits<size_t>::digits - 1);
+  static constexpr size_t quiesce_count(size_t value)
+  {
+    return value & ~kQuiesceWake;
+  }
 
   // Number of threads currently associated with each runqueue.  We
   // assume threads don't migrade that often, so we can pack these
@@ -385,7 +400,7 @@ private:
   using QPtr = MVar<QueueState>::Ptr;
   struct alignas(hardware_destructive_interference_size) RunQueue
     : public MVar<QueueState> {
-    // qtime of oldest Job at back of queue, or kEmpty if empty.  Kept
+    // qtime of oldest Job at front of queue, or kEmpty if empty.  Kept
     // outside the queue state in its own cache line so it can be
     // checked approximately without acquiring the mutex.
     std::atomic_uint64_t qtime_{kEmpty};
@@ -421,15 +436,15 @@ private:
     }
   }
 
-  void enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
+  // Returns true if the queue was previously empty
+  bool enqueue_selected(QPtr &lq, const Job &job, uint64_t now)
   {
     qselect(&lq, job.cpuhint);
     bool wasempty = lq->q.empty();
     lq->q.emplace_back(job, now);
-    if (wasempty) {
+    if (wasempty)
       RunQueue::set_qtime(lq, now);
-      lq->nonempty.notify_all();
-    }
+    return wasempty;
   }
 
   class Worker {
@@ -455,7 +470,6 @@ private:
     // 2*count of iterations of the loop.  Even numbers mean the
     // thread is idle, odd numbers means it is executing a coroutine.
     std::atomic_size_t count_{0};
-    std::atomic_bool please_wake_{false};
   };
   std::unique_ptr<ThreadState[]> tstate_;
 
@@ -467,6 +481,10 @@ private:
   std::mutex qcbq_lock_;
   std::condition_variable qcbq_nonempty_;
   std::vector<move_only_function<void() noexcept>> qcbq_;
+  // Workers are protected by joining them.  External go() calls and
+  // detached async() helpers need references through their last access.
+  // Keep their counter away from the fields read by the worker hot path.
+  DestroyInhibit external_users_;
   std::jthread qcbq_service_thread_;
 
   void qcbq_service();

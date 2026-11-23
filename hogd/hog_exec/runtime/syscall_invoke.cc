@@ -6,12 +6,13 @@
 #include <cstring>
 #include <span>
 #include <utility>
-#include <vector>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/validated_auth_tokens.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_buffer.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -25,30 +26,6 @@
 #include "x23/vec.h"
 
 namespace hogd {
-
-namespace {
-
-// Returns whether the span contains duplicate ids. A std::bad_alloc from the
-// duplicate-detection buffer propagates to wrap_after_parse's exception
-// boundary, which translates it to a structured Unrecoverable error
-// (issue #2698).
-//
-// The ids are contract-controlled, so we copy and sort them and scan adjacent
-// values instead of inserting into a std::unordered_set: the default integer
-// hasher lets a contract pick distinct ids that collapse into one bucket,
-// forcing quadratic duplicate-scan work before the syscall is rejected and
-// before any gas is charged. Sorting gives deterministic O(n log n) work
-// regardless of the id values (issue #2788).
-bool
-has_duplicate_auth_token_ids(std::span<const uint32_t> auth_token_ids)
-{
-  std::vector<uint32_t> sorted_ids(auth_token_ids.begin(),
-                                   auth_token_ids.end());
-  std::ranges::sort(sorted_ids);
-  return std::ranges::adjacent_find(sorted_ids) != sorted_ids.end();
-}
-
-} // namespace
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetMsgSender_inner(SystemCallHandler &syscall_handler,
@@ -103,7 +80,7 @@ syscall_GetCalldataLen_inner(SystemCallHandler &syscall_handler,
 {
   output_len = syscall_handler.get_calldata().size();
   output_auth_token_count =
-      syscall_handler.get_parent_supplied_auth_tokens().size();
+      syscall_handler.get_parent_supplied_auth_token_count();
   if (auto *trace_data =
           syscall_handler
               .get_syscall_trace_data<SyscallNo::kGetCalldataLen>()) {
@@ -117,37 +94,30 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_GetCalldata_inner(SystemCallHandler &syscall_handler,
                           std::span<std::byte> output_buffer,
                           RuntimeMemoryLength &output_written_len,
-                          std::span<std::byte> output_auth_token_list,
-                          RuntimeMemoryLength &output_auth_token_written_len)
+                          uint32_t &output_auth_token_count)
 {
-  if (output_auth_token_list.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-
   auto const &calldata = syscall_handler.get_calldata();
   output_written_len =
       copy_to_guest_buffer(output_buffer,
                            std::as_bytes(
                                std::span(calldata.data(), calldata.size())));
-
-  auto span_auth_token_list = syscall_handler.get_parent_supplied_auth_tokens();
-  output_auth_token_written_len =
-      copy_to_guest_buffer(output_auth_token_list,
-                           std::as_bytes(span_auth_token_list));
+  // The frame's forwarded tokens are its ids 0..N-1.
+  output_auth_token_count =
+      syscall_handler.get_parent_supplied_auth_token_count();
 
   if (auto *trace_data =
           syscall_handler.get_syscall_trace_data<SyscallNo::kGetCalldata>()) {
-    x23::Vec<uint32_t, 0xffffffff> auth_token_list;
-    auth_token_list.append_range(span_auth_token_list);
     trace_data->outputs.emplace(
         SyscallGetCalldataOutputs{.calldata = calldata,
-                                  .auth_tokens = auth_token_list});
+                                  .auth_token_count = output_auth_token_count});
   }
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered, as for GetReturnedBuffer.
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), calldata.size()))}};
 }
 
-std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
+MaybeAsyncSyscallInnerResult
 syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      WrappedGasAmount remaining_gas,
                      const ContractAddress &input_address,
@@ -157,48 +127,49 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                      CopyableInvokeOutputs &output_outputs)
 {
   if (!SystemCallHandler::validate_invoke_flags(input_inputs.flags)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
-  if (input_owned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+  // Length first, so an oversized list costs the comparison rather than the
+  // parse. Parsing is proportional to the span and a rejection reports gas 0,
+  // which is what let a contract repeat it for the syscall crossing (#4174).
+  // Rejected as InvalidSyscallInput, the same code a malformed or duplicated
+  // list already reports, so the precedence pinned by
+  // DuplicateAuthTokenIdsBeatDepth is unchanged.
+  if (input_owned_auth_token_ids.size() >
+      static_cast<size_t>(syscall_handler.config_params().max_auth_tokens) *
+          sizeof(uint32_t)) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
-  // owned_auth_token_ids may or may not be aligned.
-  // Hence we perform a memcpy before passing to the invoke function.
-  std::vector<uint32_t> owned_auth_token_ids_vec;
-  owned_auth_token_ids_vec.resize(input_owned_auth_token_ids.size() /
-                                  sizeof(uint32_t));
-
-  if (!input_owned_auth_token_ids.empty()) {
-    assert(owned_auth_token_ids_vec.data() != nullptr);
-    assert(input_owned_auth_token_ids.data() != nullptr);
-    std::memcpy(owned_auth_token_ids_vec.data(),
-                input_owned_auth_token_ids.data(),
-                input_owned_auth_token_ids.size());
-  }
-
-  if (has_duplicate_auth_token_ids(owned_auth_token_ids_vec)) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
+  // Materialized once; the frame stack takes the list over without copying.
+  auto owned_auth_tokens =
+      ValidatedAuthTokens::parse(input_owned_auth_token_ids);
+  if (!owned_auth_tokens.has_value()) {
+    co_return SyscallInnerResult{owned_auth_tokens.error().code(),
+                                 WrappedGasAmount{0}};
   }
 
   // Admission before the calldata is copied: a rejection reports gas 0, so
   // copying first would be unpriced, length-proportional work a contract could
-  // repeat at will (#2973). invoke() runs the same checks again below, which is
-  // a pure query on the handler.
+  // repeat at will (#2973). invoke() relies on this having run.
   auto admitted =
       syscall_handler.validate_new_invocation(input_address, input_inputs.flags,
-                                              owned_auth_token_ids_vec);
-  // Reading the depth bound off the tip failed: a SystemError, which ends
-  // execution of the whole block rather than being reported to the caller.
+                                              *owned_auth_tokens);
   if (!admitted.has_value()) {
-    return {admitted.error().to_host_fn_error(), WrappedGasAmount{0}};
+    co_return SyscallInnerResult{admitted.error().code(), WrappedGasAmount{0}};
   }
-  if (!admitted->has_value()) {
-    return {admitted->error().code(), WrappedGasAmount{0}};
+
+  // After admission, so reentrance and depth keep their own codes (#4040).
+  if (input_calldata.size() >
+      syscall_handler.config_params().max_calldata_len) {
+    co_return SyscallInnerResult{
+        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
+        WrappedGasAmount{0}};
   }
 
   Calldata calldata;
@@ -211,17 +182,15 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
                 input_calldata.size());
   }
 
-  auto [invoke_res, gas_amount] =
-      syscall_handler.invoke(input_address, input_inputs.entrypoint_id,
-                             std::min<GasAmount>(input_inputs.gas_limit,
-                                                 remaining_gas.get()),
-                             std::move(calldata), input_inputs.flags,
-                             owned_auth_token_ids_vec);
+  auto [invoke_res, gas_amount] = co_await syscall_handler.invoke(
+      input_address, input_inputs.entrypoint_id,
+      std::min<GasAmount>(input_inputs.gas_limit, remaining_gas.get()),
+      std::move(calldata), input_inputs.flags, std::move(*owned_auth_tokens));
 
   // A SystemError ends execution of the whole block.
   if (!invoke_res.has_value()) {
-    return {invoke_res.error().to_host_fn_error(),
-            WrappedGasAmount{gas_amount}};
+    co_return SyscallInnerResult{invoke_res.error().to_host_fn_error(),
+                                 WrappedGasAmount{gas_amount}};
   }
 
   // A SyscallError means the invoke was rejected before a child frame ran: a
@@ -229,7 +198,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   // other syscall) and report the error code.
   SyscallStatus<InvocationFrameStatusCode> const &frame = *invoke_res;
   if (!frame.has_value()) {
-    return {frame.error().code(), WrappedGasAmount{gas_amount}};
+    co_return SyscallInnerResult{frame.error().code(),
+                                 WrappedGasAmount{gas_amount}};
   }
 
   // A child frame ran. Report its outcome (Return / Abort / Fault) via
@@ -238,8 +208,8 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   auto return_buffer_host = syscall_handler.get_return_buffer();
   if (!return_buffer_host.has_value()) {
     // Handle the SystemError case
-    return {return_buffer_host.error().to_host_fn_error(),
-            WrappedGasAmount{gas_amount}};
+    co_return SyscallInnerResult{return_buffer_host.error().to_host_fn_error(),
+                                 WrappedGasAmount{gas_amount}};
   }
 
   SyscallStatus<const ReturnBuffer *> return_buffer = *return_buffer_host;
@@ -249,13 +219,13 @@ syscall_Invoke_inner(SystemCallHandler &syscall_handler,
   else {
     output_outputs.return_buffer_len = 0;
   }
-  output_outputs.returned_auth_token_len =
-      syscall_handler.get_returned_auth_token_ids().size() * sizeof(uint32_t);
+  output_outputs.returned_auth_token_count =
+      syscall_handler.get_returned_auth_tokens().count;
   // operator* (not value()) so this stays noexcept: has_value() is checked
   // above, so the dereference is safe.
   output_outputs.frame_status = *frame;
-  return {SyscallErrorCode::kSyscallErrorCodeNone,
-          WrappedGasAmount{gas_amount}};
+  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                               WrappedGasAmount{gas_amount}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -265,16 +235,13 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                      std::span<const std::byte> input_returned_auth_token_ids)
 {
   // If the return buffer is too large, we return a deterministic error`
-  // equivalent to a wasm `unreachable` instruction.
+  // equivalent to a guest trap.
   // This is instead of return a kInvalidSyscallInput error.  The generated
   // contract bindings in the SDK for this call has a signature of (&[u8], bool)
   // -> !, which could lead to UB in the contract code if that function then
   // returns an error.
-  if (input_buffer.size() > kMaxReturnBufferLen) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
-  }
-
-  if (input_returned_auth_token_ids.size() % sizeof(uint32_t) != 0) {
+  if (input_buffer.size() >
+      syscall_handler.config_params().max_return_buffer_len) {
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
@@ -283,11 +250,35 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
     return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
   }
 
+  // Length first, as on Invoke: every rejection here is Exit at gas 0, so the
+  // parse is work a parent can repeat by catching the child fault (#4042).
+  if (input_returned_auth_token_ids.size() >
+      static_cast<size_t>(syscall_handler.config_params().max_auth_tokens) *
+          sizeof(uint32_t)) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  // Ordered ids go to the parent; the sorted scan only serves the duplicate
+  // check.
+  auto returned_auth_tokens =
+      ValidatedAuthTokens::parse(input_returned_auth_token_ids);
+  if (!returned_auth_tokens.has_value()) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  if (!syscall_handler.check_auth_tokens_owned(returned_auth_tokens->ids())) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
+  // Refuse here, while the child can still fault, rather than at the merge,
+  // which cannot fail (#4688).
+  if (!syscall_handler.check_parent_can_take_auth_tokens(
+          returned_auth_tokens->ids().size())) {
+    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
+  }
+
   ReturnBuffer buffer;
-  std::vector<uint32_t> returned_auth_token_ids_vec;
   buffer.resize_uninitialized(input_buffer.size());
-  returned_auth_token_ids_vec.resize(input_returned_auth_token_ids.size() /
-                                     sizeof(uint32_t));
   if (!input_buffer.empty()) {
     assert(buffer.data() != nullptr);
     assert(input_buffer.data() != nullptr);
@@ -295,34 +286,19 @@ syscall_Return_inner(SystemCallHandler &syscall_handler,
                 reinterpret_cast<const uint8_t *>(input_buffer.data()),
                 input_buffer.size());
   }
-  if (!input_returned_auth_token_ids.empty()) {
-    assert(returned_auth_token_ids_vec.data() != nullptr);
-    assert(input_returned_auth_token_ids.data() != nullptr);
-    std::memcpy(returned_auth_token_ids_vec.data(),
-                input_returned_auth_token_ids.data(),
-                input_returned_auth_token_ids.size());
-  }
-
-  if (has_duplicate_auth_token_ids(returned_auth_token_ids_vec)) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
-  }
-
-  if (!syscall_handler.check_auth_tokens_owned(returned_auth_token_ids_vec)) {
-    return {HostFnError{HostFnErrorCode::Exit}, WrappedGasAmount{0}};
-  }
 
   syscall_handler.set_return_buffer(std::move(buffer), input_revert_frame,
-                                    std::move(returned_auth_token_ids_vec));
+                                    std::move(*returned_auth_tokens).release());
 
   return {HostFnError{HostFnErrorCode::Return}, WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
-syscall_GetReturnedBuffer_inner(
-    SystemCallHandler &syscall_handler, std::span<std::byte> output_buffer,
-    RuntimeMemoryLength &output_written_len,
-    std::span<std::byte> output_restored_auth_token_ids,
-    RuntimeMemoryLength &output_restored_auth_token_ids_written_len)
+syscall_GetReturnedBuffer_inner(SystemCallHandler &syscall_handler,
+                                std::span<std::byte> output_buffer,
+                                RuntimeMemoryLength &output_written_len,
+                                uint32_t &output_returned_auth_token_start,
+                                uint32_t &output_returned_auth_token_count)
 {
   auto status = syscall_handler.get_return_buffer();
   if (!status.has_value()) {
@@ -333,20 +309,15 @@ syscall_GetReturnedBuffer_inner(
   }
   CHECK(**status != nullptr);
 
-  if (output_restored_auth_token_ids.size() % sizeof(uint32_t) != 0) {
-    return {SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput,
-            WrappedGasAmount{0}};
-  }
-
   auto const &return_buffer = ***status;
   output_written_len =
       copy_to_guest_buffer(output_buffer,
                            std::as_bytes(std::span(return_buffer.data(),
                                                    return_buffer.size())));
-  auto returned_ids = syscall_handler.get_returned_auth_token_ids();
-  output_restored_auth_token_ids_written_len =
-      copy_to_guest_buffer(output_restored_auth_token_ids,
-                           std::as_bytes(returned_ids));
+  // The returned tokens took consecutive ids in this frame.
+  auto returned_auth_tokens = syscall_handler.get_returned_auth_tokens();
+  output_returned_auth_token_start = returned_auth_tokens.start;
+  output_returned_auth_token_count = returned_auth_tokens.count;
 
   if (auto *trace_data =
           syscall_handler
@@ -354,11 +325,17 @@ syscall_GetReturnedBuffer_inner(
     // Trace the full return buffer (pre-truncation), regardless of how much
     // fit in the contract's buffer — consistent with the other
     // buffer-writing syscalls, which trace their full output.
-    trace_data->outputs.emplace(
-        SyscallGetReturnedBufferOutputs{.buffer = return_buffer});
+    trace_data->outputs.emplace(SyscallGetReturnedBufferOutputs{
+        .buffer = return_buffer,
+        .returned_auth_token_start = returned_auth_tokens.start,
+        .returned_auth_token_count = returned_auth_tokens.count});
   }
 
-  return {SyscallErrorCode::kSyscallErrorCodeNone, WrappedGasAmount{0}};
+  // The bytes copied, not the buffer offered: the saved output can be read
+  // again and again, and max_return_buffer_len is configurable (#4798).
+  return {SyscallErrorCode::kSyscallErrorCodeNone,
+          WrappedGasAmount{GasCost::guest_buffer_copy(
+              std::min(output_buffer.size(), return_buffer.size()))}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

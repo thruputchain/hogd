@@ -31,6 +31,17 @@ public:
 
   int128_t get_delta() const { return delta_.load(std::memory_order_relaxed); }
 
+  // Add to the committed delta without adjusting the add_/sub_ reservation
+  // counters. Those counters bound concurrent reservations; a refund is not a
+  // reservation and must not consume add-capacity, which can be exhausted near
+  // INT128_MAX. The caller guarantees the resulting committed value stays in
+  // range (see BalanceLock::add_committed_credit) (#4095).
+  void apply_committed_refund(int128_t amount)
+  {
+    assert(amount > 0);
+    delta_.fetch_add(amount, std::memory_order_relaxed);
+  }
+
   // For testing only
   uint128_t get_add_capacity() const { return add_.load(); }
   int128_t get_sub_capacity() const { return sub_.load(); }

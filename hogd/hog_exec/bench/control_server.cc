@@ -389,14 +389,17 @@ public:
 
   CIServerErrorCode ciserver_shutdown(HogdGitHash const &hogd_git_hash)
   {
+    // Shutdown is honored no matter which build sent it. It is the one RPC
+    // a client of a different vintage has a legitimate reason to send: it
+    // is how the next run clears a stale server (hogd issue #3945), and the
+    // whole point of that ask is that the vintages differ.
     if (!check_hogd_git_hash(hogd_git_hash)) {
-      error("version mismatch: received {}, expected {}",
-            hash_sv(hogd_git_hash), version::kHogdGitHash);
-      return CIServerErrorCode::kCIServerErrorCodeVersionMismatch;
+      warn("shutting down on a mismatched request: received {}, expected {}",
+           hash_sv(hogd_git_hash), version::kHogdGitHash);
     }
 
     info("stopping any running process");
-    ciserver_stop(hogd_git_hash);
+    ciserver_stop(hogd_git_hash_);
 
     info("shutting down control server");
     waiting_for_shutdown_ = true;

@@ -13,12 +13,11 @@
 
 namespace hogd {
 
-class RCQReadTest : public ::testing::TestWithParam<TestDB>,
-                    public NativeContractTestFramework {
+class RCQReadTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   RCQReadTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   auto make_new_per_tx_db_proxy()
@@ -80,15 +79,15 @@ public:
     auto tx = make_new_per_tx_db_proxy();
     tx.add_delta(key, std::move(delta),
                  std::to_underlying(StorageDeltaFlags::None));
-    auto r = tx.try_push_current_subtransaction();
+    auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value() && r.value());
-    ASSERT_TRUE(tx.commit_transaction().has_value());
+    ASSERT_TRUE(tx.commit_transaction()().has_value());
     advance_block();
   }
 };
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
+TEST_F(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -97,13 +96,13 @@ TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      0);
+                                                      0)();
   ASSERT_TRUE(block_from_zero.has_value());
   ASSERT_FALSE(block_from_zero.value().has_value());
 
   auto block_from_one =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block_from_one.has_value());
   ASSERT_TRUE(block_from_one.value().has_value());
   ASSERT_EQ(block_from_one.value()->block_number, 1);
@@ -111,7 +110,7 @@ TEST_P(RCQReadTest, ExactLookupDoesNotReturnBlockForZero)
   ASSERT_EQ(block_from_one.value()->entries[0], make_rcq_entry(9));
 }
 
-TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
+TEST_F(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -124,19 +123,19 @@ TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      0);
+                                                      0)();
   ASSERT_TRUE(block_from_zero.has_value());
   ASSERT_FALSE(block_from_zero.value().has_value());
 
   auto block_from_one =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block_from_one.has_value());
   ASSERT_FALSE(block_from_one.value().has_value());
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(block_from_two.has_value());
   ASSERT_TRUE(block_from_two.value().has_value());
   EXPECT_EQ(block_from_two.value()->block_number, 2);
@@ -144,7 +143,7 @@ TEST_P(RCQReadTest, ExactLookupDoesNotSkipFullyConsumedBlocks)
   EXPECT_EQ(block_from_two.value()->entries[0], make_rcq_entry(2));
 }
 
-TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
+TEST_F(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -156,20 +155,20 @@ TEST_P(RCQReadTest, ExactLookupAfterDeleteAndRecreate)
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      0);
+                                                      0)();
   ASSERT_TRUE(block_from_zero.has_value());
   ASSERT_FALSE(block_from_zero.value().has_value());
 
   auto block_from_one =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block_from_one.has_value());
   ASSERT_TRUE(block_from_one.value().has_value());
   ASSERT_EQ(block_from_one.value()->entries.size(), 1);
   EXPECT_EQ(block_from_one.value()->entries[0], make_rcq_entry(9));
 }
 
-TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -181,12 +180,12 @@ TEST_P(RCQReadTest, DeleteRecreateClearsPriorExactBlockLookup)
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(block_from_two.has_value());
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -198,12 +197,12 @@ TEST_P(RCQReadTest, ConsumeRecreateClearsPriorExactBlockLookup)
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(block_from_two.has_value());
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -216,12 +215,12 @@ TEST_P(RCQReadTest, ConsumeInsertClearsPriorExactBlockLookup)
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(block_from_two.has_value());
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
+TEST_F(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -233,27 +232,27 @@ TEST_P(RCQReadTest, ConcurrentConsumeAndInsertClearPriorExactBlockLookup)
   auto tx_consume = make_new_per_tx_db_proxy();
   tx_consume.add_delta(key, make_rcq_consume_delta(2, 0, 2),
                        std::to_underlying(StorageDeltaFlags::None));
-  auto r = tx_consume.try_push_current_subtransaction();
+  auto r = tx_consume.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
   auto tx_insert = make_new_per_tx_db_proxy();
   tx_insert.add_delta(key, make_rcq_insert_delta({make_rcq_entry(9)}),
                       std::to_underlying(StorageDeltaFlags::None));
-  r = tx_insert.try_push_current_subtransaction();
+  r = tx_insert.try_push_current_subtransaction()();
   ASSERT_TRUE(r.has_value() && r.value());
 
-  ASSERT_TRUE(tx_consume.commit_transaction().has_value());
-  ASSERT_TRUE(tx_insert.commit_transaction().has_value());
+  ASSERT_TRUE(tx_consume.commit_transaction()().has_value());
+  ASSERT_TRUE(tx_insert.commit_transaction()().has_value());
   advance_block();
 
   auto block_from_two =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      2);
+                                                      2)();
   ASSERT_TRUE(block_from_two.has_value());
   EXPECT_FALSE(block_from_two.value().has_value());
 }
 
-TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
+TEST_F(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 {
   setup_grant_storage_token(kContractAddress, 1'000'000'000);
   auto key = make_contract_data_addrkey(kContractAddress, "rcq_read");
@@ -273,25 +272,25 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 
   auto block_from_zero =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      0);
+                                                      0)();
   ASSERT_TRUE(block_from_zero.has_value());
   ASSERT_FALSE(block_from_zero.value().has_value());
 
   auto block_from_one =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      1);
+                                                      1)();
   ASSERT_TRUE(block_from_one.has_value());
   ASSERT_FALSE(block_from_one.value().has_value());
 
   auto block_from_four =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      4);
+                                                      4)();
   ASSERT_TRUE(block_from_four.has_value());
   ASSERT_FALSE(block_from_four.value().has_value());
 
   auto block_from_five =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      5);
+                                                      5)();
   ASSERT_TRUE(block_from_five.has_value());
   ASSERT_TRUE(block_from_five.value().has_value());
   ASSERT_EQ(block_from_five.value()->entries.size(), 1);
@@ -299,7 +298,7 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 
   auto next_block =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      6);
+                                                      6)();
   ASSERT_TRUE(next_block.has_value());
   ASSERT_TRUE(next_block.value().has_value());
   ASSERT_EQ(next_block.value()->entries.size(), 1);
@@ -307,16 +306,11 @@ TEST_P(RCQReadTest, ExactLookupWithManyInsertAndConsumeBlocks)
 
   auto block_from_seven =
       get_db_proxy().get_next_retrocausal_queue_block(get_block_number(), key,
-                                                      7);
+                                                      7)();
   ASSERT_TRUE(block_from_seven.has_value());
   ASSERT_FALSE(block_from_seven.value().has_value());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQReadTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

@@ -65,7 +65,8 @@ export EVENT_INDEXER_PORT=8092
 export EVENT_HTTP_PORT=8093
 
 echo 'make sure bench servers are running'
-ci_wait_port_hosts "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
+ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${BENCH_HOSTS[@]}"
 
 echo 'clear work dirs'
 ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
@@ -84,12 +85,12 @@ ci_wait_port hog7 $LOADGEN_PORT
 
 echo 'launch first hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+$CONTROL_CLI hog5 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog5)" --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hog-exec: that's waiting on the coordinator
 
 echo 'launch second hog-exec'
 # the mempool runs on hog10
-$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --nthreads 1024 --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
+$CONTROL_CLI hog6 $CI_CONTROL_PORT start hogd/hog_exec/hog-exec --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_EXECUTOR_PORT --bind-ip "$(hog_ip hog6)" --mempool-port $EXECUTOR_MEMPOOL_PORT --metrics-port $EXECUTOR_HTTP_PORT
 # can't wait for hog-exec: that's waiting on the coordinator
 
 echo 'check hog-exec is running'
@@ -112,19 +113,19 @@ echo 'launch coordinator and scp'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
   chuckd.dev \
   -l info \
-  --skip 20 \
   --stack \
   --config ./scripts/config-chuckd.json \
   --instance 970c9b \
   --seed 1410441218572558875 \
   --metrics :2223 \
   bench coordinator_loadgen \
+  --skip 20 \
   --in-addr "$(hog_ip hog4)":7888 \
   --debug-port 5500 \
   --num-accts 10000 \
   --txs-per-block 1000000 \
   --num-blocks 1000 \
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
+  --network-hash 11111111111111111111111111111112 \
   --storage-dir $WORK_DIR/chuckd-storage \
   --out-addr :50000 \
   --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
@@ -147,7 +148,7 @@ set +e
 timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001 \
+  --network-hash 11111111111111111111111111111112 \
   --num-db-shards 1 \
   --num-exec-shards 2 \
   --db-port "$MEMPOOL_DB_PORT" \
@@ -183,8 +184,11 @@ if [[ $coordinator_status -ne 0 ]]; then
   exit "$coordinator_status"
 fi
 
+echo 'coordinator benchmark results'
+cat coordinator_output.txt
+
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
 
 echo 'log integration metrics'
-./scripts/log_metric.sh nightly_integration_mempool coordinator_output.txt
+./scripts/log_metric.sh "${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool}" coordinator_output.txt

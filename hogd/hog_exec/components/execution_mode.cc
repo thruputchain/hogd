@@ -59,6 +59,22 @@ ValidationModeData::consume_nondeterministic_bit()
   return out;
 }
 
+std::optional<Nondeterministic<bool>>
+ValidationModeData::consume_queue_entry_presence_bit(
+    AddressAndKey const &addrkey, uint32_t index)
+{
+  auto bit = consume_nondeterministic_bit();
+  if (!bit.has_value() || bit->get()) {
+    return bit;
+  }
+  // An absent read is consistent only while nothing is held at this index.
+  auto it = queue_entry_observations_.find(addrkey);
+  if (it != queue_entry_observations_.end() && index < it->second.size()) {
+    return std::nullopt;
+  }
+  return bit;
+}
+
 Nondeterministic<const QueueEntry *>
 ProposalModeData::log_queue_entry_observation(AddressAndKey const &addrkey,
                                               uint32_t index, QueueEntry entry)

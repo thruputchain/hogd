@@ -8,11 +8,13 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "event_outbox_internal.hh"
 #include "hogd/base/cleanup.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "hogd/xdr/protocol_token.h"
 #include "indexer.hh"
@@ -100,6 +102,7 @@ enum class IndexerOutboxFaultPoint {
   kUnlinkPublishedTemp,
   kFsyncPublishedDirectory,
   kFsyncParentDirectory,
+  kSyncDeferredCommitted,
 };
 
 // Process-global, one-shot syscall fault injection for durability tests.
@@ -173,8 +176,16 @@ public:
   // full payload. The referenced file must exist -- publication fails closed
   // if it does not -- and its size is checked against the pull RPC replay
   // bound so an unservable record is rejected at commit, not at first pull.
+  //
+  // Not durable on return: call sync_committed() for this height before
+  // publishing the next.
   x23::Async<IndexerOutboxStatus<void>> publish_committed_reference(
       const IndexerOutboxCommittedStoredPayload &stored) const;
+  // Makes a publish_committed_reference() record durable: fsyncs the record,
+  // then the directory. Blocking, and safe to call off the publication lock
+  // from any thread -- it touches only the record's own file and the directory
+  // fd.
+  IndexerOutboxStatus<void> sync_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxCommittedPayload>>
   load_committed(BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<IndexerOutboxLoadedCommittedRecord>>
@@ -240,6 +251,17 @@ private:
   static IndexerOutboxStatus<IndexerOutboxStore>
   finish_opening(UniqueFd directory_fd);
   IndexerOutboxStatus<void> cleanup_stale_temp_files();
+  // Leaves the newest committed record either durable or gone, since a
+  // reference publication may have crashed before its sync_committed(). A
+  // record that reads back complete is synced; one that does not is removed.
+  // Older records are left for validation to reject.
+  IndexerOutboxStatus<void> settle_committed_tail();
+  // Whether [filename] holds a complete committed record for [block_height]:
+  // a well-formed header and, for the current protocol, a stored payload that
+  // decodes and matches it. Does not look at the events file.
+  IndexerOutboxStatus<void>
+  check_committed_record_intact(std::string_view filename,
+                                BlockHeight block_height) const;
   x23::Async<IndexerOutboxStatus<void>>
   initialize_current_epoch_origin_unlocked(
       BlockHeight first_height, ConsensusValueHash first_prev_hash) const;
@@ -251,12 +273,17 @@ private:
   validate_committed_history_unlocked(
       std::optional<BlockHeight> max_height = std::nullopt) const;
   IndexerOutboxStatus<std::vector<std::string>> list_names() const;
+  // kSynced is the crash-safe sequence: the bytes are fsynced before the final
+  // name is linked, and the directory is fsynced after. kDeferred links the
+  // name with neither fsync.
+  enum class Durability { kSynced, kDeferred };
+  IndexerOutboxStatus<void> publish_bytes(std::string_view filename,
+                                          std::span<const std::byte> bytes,
+                                          Durability durability) const;
   IndexerOutboxStatus<void>
   publish_bytes(std::string_view filename,
-                std::span<const std::byte> bytes) const;
-  IndexerOutboxStatus<void>
-  publish_bytes(std::string_view filename,
-                std::span<const std::span<const std::byte>> pieces) const;
+                std::span<const std::span<const std::byte>> pieces,
+                Durability durability) const;
   IndexerOutboxStatus<std::vector<uint8_t>>
   load_bytes(std::string_view filename) const;
   IndexerOutboxStatus<IndexerOutboxRecordHeader>
@@ -295,8 +322,9 @@ private:
   IndexerOutboxStatus<void> validate_committed_record_reference(
       const IndexerOutboxCommittedRecordInfo &record) const;
   // Common tail of committed publication. [payload_for_ensure] non-null means
-  // the caller holds the full payload and a missing events file is written
-  // from it (publish_committed); null means the file must already exist
+  // the caller holds the full payload, a missing events file is written from
+  // it, and the record is published synced (publish_committed); null means
+  // the file must already exist and the record's sync is deferred
   // (publish_committed_reference).
   x23::Async<IndexerOutboxStatus<void>> publish_committed_stored(
       const IndexerOutboxCommittedStoredPayload &stored,
@@ -325,6 +353,13 @@ private:
   mutable std::unique_ptr<x23::CoroLock> committed_publication_lock_ =
       std::make_unique<x23::CoroLock>();
   mutable std::optional<CommittedAppendCache> committed_append_cache_;
+  // Event roots whose files this process has established: streamed by one of
+  // its own blocks, validated in full at promotion, or recomputed once on
+  // first load. A load of an established file is a parse and nothing more;
+  // a file first seen after a restart gets the full root recomputation once.
+  // Guarded by committed_publication_lock_.
+  mutable std::unordered_set<SHA256Hash, SipHash24Hasher>
+      established_event_roots_;
   mutable size_t committed_history_scan_count_ = 0;
 };
 

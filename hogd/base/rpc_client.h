@@ -9,6 +9,7 @@
 
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "x23/async.h"
@@ -70,7 +71,7 @@ make_rpc_client(x23::HostPort host_port, x23::CoroPoll &cp, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_client<RpcService>(*ss, cp, retry, max_message_size);
 }
@@ -82,7 +83,7 @@ make_rpc_client(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_client<RpcService>(*ss, default_coropoll(), retry,
                                      max_message_size);
@@ -94,19 +95,19 @@ make_srpc_client(sockaddr_storage &ss, bool retry = false,
                  size_t max_message_size = x23::default_max_message_size)
 {
   while (true) {
-    x23::UniqueFd fd;
-    try {
-      fd = x23::tcpconnect(ss);
-    } catch (const std::system_error &e) {
-      if (retry && e.code() == std::errc::connection_refused) {
+    std::expected<x23::UniqueFd, x23::Errno> res = x23::tcpconnect(ss);
+    if (!res) {
+      if (retry && res.error().error_code() == std::errc::connection_refused) {
         std::this_thread::sleep_for(std::chrono::milliseconds(100));
         warn_every_n_sec(5.0F, "RPC client on {} is not ready",
                          x23::show_ipaddr(ss));
         continue;
       }
-      error("caught system error: {} {}", e.what(), e.code().message());
-      throw;
+      error("could not connect to {}: {}", x23::show_ipaddr(ss),
+            res.error().error_code().message());
+      res.error().raise("connect({})", x23::HostPort(ss));
     }
+    x23::UniqueFd fd = std::move(*res);
 
     auto client_config = x23::srpc_stream_logged(fd.release());
     client_config->max_message_size_ = max_message_size;
@@ -121,7 +122,7 @@ make_srpc_client(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_srpc_client<RpcService>(*ss, retry, max_message_size);
 }
@@ -157,7 +158,7 @@ make_srpc_multiclient(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_srpc_multiclient<RpcService>(*ss, retry, map);
 }
@@ -194,7 +195,7 @@ make_rpc_multiclient(x23::HostPort host_port, bool retry = false,
 {
   auto ss = host_port.to_addr(true);
   if (!ss) {
-    panic("failed to convert host port to sockaddr_storage: {}", ss.error());
+    exit_cannot_resolve(host_port, ss.error());
   }
   return make_rpc_multiclient<RpcService>(*ss, default_coropoll(), retry, map,
                                           max_message_size);

@@ -12,7 +12,6 @@
 #include "hogd/base/cli.h"
 #include "hogd/base/log.h"
 #include "hogd/base/network.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/interface/executor.h"
@@ -51,7 +50,7 @@ parse_host_port(const std::string &label, const std::string &address)
 
 int
 hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
-              int nthreads, uint16_t mempool_port, uint16_t metrics_port,
+              uint16_t mempool_port, uint16_t metrics_port,
               const std::optional<std::string> &db_executor_addr,
               const std::optional<std::string> &event_executor_addr,
               std::optional<uint16_t> view_gateway_port)
@@ -75,7 +74,7 @@ hog_exec_init(const std::string &coordinator_addr, const std::string &bind_ip,
           "must be provided together");
   }
 
-  Executor executor(nthreads);
+  Executor executor;
   const sockaddr_storage coordinator_sockaddr =
       host_port_to_sockaddr(coordinator.host, coordinator.port);
   uint16_t actual_mempool_port =
@@ -116,7 +115,7 @@ void
 print_usage(char *argv[])
 {
   std::println("usage: {} --coordinator-addr <host:port> --bind-ip <ip> "
-               "[--nthreads <nthreads>] [--mempool-port <port>] "
+               "[--mempool-port <port>] "
                "[--metrics-port <port>] "
                "[--db-executor-addr <host:port> "
                "--event-executor-addr <host:port> "
@@ -129,17 +128,6 @@ usage(char *argv[])
 {
   print_usage(argv);
   exit(EXIT_FAILURE);
-}
-
-int
-parse_nthreads(char *argv[], const std::string &value)
-{
-  const std::optional<int> nthreads = hogd::try_parse_integer<int>(value);
-  if (!nthreads || *nthreads <= 0) {
-    std::println(stderr, "Invalid --nthreads: {}", value);
-    usage(argv);
-  }
-  return *nthreads;
 }
 
 } // namespace
@@ -161,7 +149,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
 
   std::string coord_address;
   std::string bind_ip;
-  std::optional<int> nthreads;
   uint16_t mempool_port = 0;
   uint16_t metrics_port = 0;
   std::optional<std::string> db_executor_addr;
@@ -183,10 +170,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
       bind_ip = argv[++i];
       continue;
     }
-    if (arg == "--nthreads" && i + 1 < argc) {
-      nthreads = parse_nthreads(argv, argv[++i]);
-      continue;
-    }
     if (arg == "--mempool-port" && i + 1 < argc) {
       mempool_port =
           hogd::parse_port_arg("--mempool-port", argv[++i], argv, usage);
@@ -205,10 +188,6 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
           hogd::parse_port_arg("--view-gateway-port", argv[++i], argv, usage);
       continue;
     }
-    if (arg == "-n" && i + 1 < argc) {
-      nthreads = parse_nthreads(argv, argv[++i]);
-      continue;
-    }
     if (arg == "-p" && i + 1 < argc) {
       mempool_port = hogd::parse_port_arg("-p", argv[++i], argv, usage);
       continue;
@@ -219,15 +198,11 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     usage(argv);
   }
 
-  if (!nthreads) {
-    nthreads = hogd::available_parallelism();
-  }
-
   if (coord_address.empty() || bind_ip.empty()) {
     usage(argv);
   }
 
-  return hogd::hog_exec_init(coord_address, bind_ip, *nthreads, mempool_port,
-                             metrics_port, db_executor_addr,
-                             event_executor_addr, view_gateway_port);
+  return hogd::hog_exec_init(coord_address, bind_ip, mempool_port, metrics_port,
+                             db_executor_addr, event_executor_addr,
+                             view_gateway_port);
 }

@@ -14,6 +14,7 @@
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "hogd/hog_exec/runtime/syscall_types.h"
 #include "hogd/hog_exec/test_main.h"
@@ -232,7 +233,7 @@ TEST(MockSyscallTest, IntTypeTest)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
@@ -255,7 +256,17 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
                                 db_context);
   ASSERT_TRUE(context.push_context());
 
-  EmptyRuntime runtime(Invocation{.gas_limit = 7});
+  // What one call to the metering syscall costs: what its body asks for, plus
+  // the crossing every syscall pays. Written in terms of kSyscallBaseCost
+  // rather than as a literal so a repricing moves this test with it instead of
+  // failing it -- what is under test is that returned gas is consumed and that
+  // the second call runs out, not what the base happens to be.
+  constexpr GasAmount kBodyGas = 5;
+  constexpr GasAmount kCallGas = kBodyGas + hogd::kSyscallBaseCost;
+  // Enough for exactly one call, with a remainder too small for a second.
+  constexpr GasAmount kLimit = kCallGas + 2;
+
+  EmptyRuntime runtime(Invocation{.gas_limit = kLimit});
   context.push_mock_runtime(&runtime);
 
   auto res =
@@ -264,22 +275,22 @@ TEST(MockSyscallTest, MockRuntimeConsumesReturnedGas)
   ASSERT_EQ(res.panic, 0);
   ASSERT_EQ(res.result_code,
             std::to_underlying(SyscallErrorCode::kSyscallErrorCodeNone));
-  EXPECT_EQ(runtime.gas_consumed(), 5);
-  EXPECT_EQ(runtime.gas_remaining(), 2);
+  EXPECT_EQ(runtime.gas_consumed(), kCallGas);
+  EXPECT_EQ(runtime.gas_remaining(), kLimit - kCallGas);
 
   auto out_of_gas =
       mock_syscall_parser<GasMeteringTestSyscallMeta>(SyscallNo::kExit, 0, 0, 0,
                                                       0, 0, 0, 0);
   EXPECT_EQ(out_of_gas.panic, std::to_underlying(HostFnErrorCode::OutOfGas));
   EXPECT_EQ(out_of_gas.result_code, 0);
-  EXPECT_EQ(runtime.gas_consumed(), 7);
+  EXPECT_EQ(runtime.gas_consumed(), kLimit);
   EXPECT_EQ(runtime.gas_remaining(), 0);
 
   context.pop_mock_runtime();
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 }
 
@@ -311,7 +322,7 @@ TEST(MockSyscallTest, SpanTest)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
@@ -335,7 +346,8 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   MockRuntime mock_runtime(MockContract(dummy_entrypoint, nullptr), &context);
   context.push_mock_runtime(&mock_runtime);
 
-  // Under the wasm32 ABI a value slot is a bare 32-bit word, so int32_t -1 is
+  // Under the 32-bit syscall ABI a value slot is a bare 32-bit word, so
+  // int32_t -1 is
   // encoded as 0xFFFFFFFF in the low 32 bits. Verify the mock decodes that bare
   // slot back to int32_t -1 (signed_i32_type_test asserts the decoded value is
   // -1). Every 32-bit pattern is a valid i32, so there is no "non-canonical"
@@ -354,12 +366,12 @@ TEST(MockSyscallTest, ParseMockSignedNarrowCanonicality)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 }
 
 // A value-typed (non-pointer/offset) slot whose value does not fit a 32-bit
-// slot can never have come from the real wasm32 runtime, so it signifies the
+// slot can never have come from the real RV32 runtime, so it signifies the
 // test harness leaking an out-of-range value into the syscall. The mock reports
 // that as an FFI error (a host-level panic), NOT a contract-observable syscall
 // fault. (Offset slots keep the full u64 to carry host pointers and sentinels.)
@@ -410,7 +422,7 @@ TEST(MockSyscallTest, ParseMockUnsignedSlotOverflow)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 }
 
@@ -435,7 +447,7 @@ TEST(MockSyscallTest, NoReturnTest)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, std::to_underlying(HostFnErrorCode::Exit));
@@ -467,7 +479,7 @@ TEST(MockSyscallTest, NoSyscallTest)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);
@@ -495,7 +507,7 @@ TEST(MockSyscallTest, ErrorSyscallTest)
   context.pop_context();
   // Finalize the transaction before the handler is destroyed: the destructor
   // hard-CHECKs that it was committed or aborted (issue #2488).
-  EXPECT_TRUE(context.to_handler().abort_transaction().has_value());
+  EXPECT_TRUE(context.to_handler().abort_transaction()().has_value());
   context.mark_committed_or_aborted();
 
   ASSERT_EQ(res.panic, 0);

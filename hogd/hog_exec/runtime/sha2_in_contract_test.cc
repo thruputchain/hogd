@@ -1,4 +1,3 @@
-#include <cstdint>
 #include <cstring>
 #include <gtest/gtest.h>
 
@@ -8,10 +7,11 @@
 
 #include "built_contracts/contract_loader.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/string.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "rpc_types.hh"
@@ -26,8 +26,7 @@ class Sha2InContractTest : public ::testing::Test,
 public:
   Sha2InContractTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -101,19 +100,19 @@ TEST_F(Sha2InContractTest, InvokeFFFFF)
           .tx = Transaction{.invocation =
                                 Invocation{.invoked_address = contract_addr_,
                                            .entrypoint = entrypoint,
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   const auto output = handler.get_most_recent_frame_output();
   ASSERT_EQ(output.status_code(), InvocationFrameStatusCode::Return);
   EXPECT_TRUE(std::ranges::equal(output.return_buffer(), hash_actual));
 
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 

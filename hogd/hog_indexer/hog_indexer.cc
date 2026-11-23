@@ -11,6 +11,7 @@
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/metrics.h"
 #include "hogd/hog_indexer/pull_controller.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/rpc_from_block_explorer.h"
@@ -29,6 +30,8 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
              const std::string &bind_ip, uint16_t block_explorer_port,
              uint16_t metrics_port)
 {
+  init_indexer_metrics();
+
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
@@ -45,6 +48,7 @@ indexer_init(const std::string &path, const std::string &event_server_addr,
     panic("[IndexDB::latest_block] failed with {}", startup_height.error());
   }
   Health::instance().set_current_block_height (*startup_height)();
+  record_indexer_height(*startup_height);
 
   RecentTxFailureCache failure_cache;
   IndexerPullController pull_controller(event_server_addr, db, failure_cache);

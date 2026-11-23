@@ -123,6 +123,8 @@ init_submodules() {
       "external/crc32c"
       "external/blake3"
       "external/corrosion"
+      "external/mldsa-native"
+      "external/wycheproof"
     )
 
     for submodule in "${public_submodules[@]}"; do

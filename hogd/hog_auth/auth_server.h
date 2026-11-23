@@ -10,6 +10,11 @@
 #include "address_auth.hh"
 #include "auth_card.hh"
 #include "auth_rpc.hh"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_assembler.h"
+#include "hogd/base/chunk_run_sender.h"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
@@ -32,13 +37,25 @@ using AuthCacheEntry =
 
 class AuthServer {
 public:
+  // The most key changes one KeyChangeChunk forwarded to the mempool carries.
+  // A KeyChange is 1.1 KB on the wire at most (21 signer slots), so a chunk
+  // stays under 9 MiB, below x23's 16 MiB default record cap.
+  static constexpr size_t kMaxKeyChangesPerChunk = size_t{1} << 13;
+
+  // [max_key_changes_per_chunk] is a test seam; production uses the default.
   explicit AuthServer(dbauth_client_t &&dbauth_client, NetworkHash network_hash,
-                      int bucket_size = 1'048'576)
+                      int bucket_size = 1'048'576,
+                      size_t max_key_changes_per_chunk = kMaxKeyChangesPerChunk)
     : auth_data_cache_(bucket_size), dbauth_client_(std::move(dbauth_client)),
-      network_hash_(network_hash)
+      network_hash_(network_hash),
+      max_key_changes_per_chunk_(max_key_changes_per_chunk)
   {}
 
   NetworkHash const &network_hash() const { return network_hash_; }
+
+  // Fewest transactions in a verify_transactions() chunk; a call that fits in
+  // one chunk is verified on the calling coroutine, without a hop.
+  static constexpr size_t kMinTxsPerVerifyChunk = 256;
 
   // The height supplied here should be the height returned by
   // DB::get_dbtip().height. That height is the count of the number of blocks
@@ -53,16 +70,37 @@ public:
   x23::Async<AuthStatus<AuthCacheEntry>>
   lookup_auth_data(BlockHeight height, ContractAddress address);
 
-  // This mentod can be called in any order.  However, it is vital for cache
-  // integrity that batches of block updates are only added to the auth cache in
-  // strictly increasing order, with no gaps. The CoroFutex manages this. During
-  // initialization from an empty cache, if we get two blocks of updates
-  // concurrently, we might process the second before the first.  In this case,
-  // the first will be dropped.
-  x23::Async<void> register_auth_data_updates(BlockHeight height,
-                                              KeyChangeBatch key_changes);
+  // lookup_auth_data()'s answer when it is a cache hit that needs no wait:
+  // [address]'s cached entry if this server has reached [height] and the entry
+  // is valid there, else nullptr. Callers fall back to lookup_auth_data(),
+  // which waits for [height], reads the db, or reports a stale height, so a
+  // batch of cache hits costs no coroutine per account.
+  AuthCacheEntry try_cached_auth_data(BlockHeight height,
+                                      const ContractAddress &address);
+
+  // Applies a committed block's key changes to the cache, then forwards them
+  // to the mempool as a run of KeyChangeChunk records. Forwards of consecutive
+  // heights may overlap; the mempool applies them in height order.
+  // [key_changes] is the run of chunks the block arrived in, or a
+  // plain batch. This method can be called in any order.  However, it is
+  // vital for cache integrity that batches of block updates are only added to
+  // the auth cache in strictly increasing order, with no gaps. The CoroFutex
+  // manages this. During initialization from an empty cache, if we get two
+  // blocks of updates concurrently, we might process the second before the
+  // first.  In this case, the first will be dropped.
+  x23::Async<void>
+  register_auth_data_updates(BlockHeight height,
+                             ChunkedVector<KeyChangeBatch> key_changes);
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card);
+
+  // Subscribes to the db's auth-data changes, then registers with the mempool
+  // through the client given to [set_mempool_client]. The mempool starts
+  // serving the coordinator once auth registers, so registering only after the
+  // subscription keeps a block from committing before it; that block's
+  // changes would otherwise never reach the mempool (issue #1927). Fails
+  // without subscribing if no mempool client was set.
+  x23::Async<IntroAuthResult> subscribe_and_register(AuthCard card);
 
   void set_mempool_client(sched_auth_client_t &&client)
   {
@@ -71,8 +109,25 @@ public:
   }
 
 private:
-  x23::Async<AuthStatus<AuthCacheEntry>>
-  populate_auth_data(BlockHeight height, ContractAddress const &address);
+  // [address]'s cached entry if it is valid at [height], else nullptr. The
+  // caller must have seen this server reach [height].
+  AuthCacheEntry cached_entry_at(BlockHeight height,
+                                 const ContractAddress &address);
+
+  // Issues one chunk of [height]'s run to the mempool.
+  struct ForwardKeyChangeChunk {
+    sched_auth_client_t client;
+    BlockHeight height;
+
+    x23::Async<void> operator()(ChunkPosition position,
+                                ChunkItems<KeyChange> changes);
+  };
+
+  // Sends [height]'s changes to the mempool as a run of KeyChangeChunk
+  // records.
+  x23::Async<void>
+  forward_key_changes(BlockHeight height,
+                      const ChunkedVector<KeyChangeBatch> &key_changes);
 
   // If the auth data cache contains data for a ContractAddress, then that data
   // must be valid for a block height at least as recent as the current height.
@@ -93,6 +148,7 @@ private:
   std::optional<sched_auth_client_t> mempool_client_;
 
   const NetworkHash network_hash_;
+  const size_t max_key_changes_per_chunk_;
 };
 
 class AuthDBRpc {
@@ -107,13 +163,23 @@ public:
     auth_server_ = &auth_server;
   }
 
-  x23::Async<void> authdb_forward_key_changes(BlockHeight height,
-                                              KeyChangeBatch key_changes)
+  // Collects the run of chunks hog_db sends for a committed block and hands
+  // the auth server the whole height once, so its ordered-height gate keeps
+  // seeing one update per height. Chunks may arrive in any order and the runs
+  // of several heights may interleave.
+  x23::Async<void> authdb_forward_key_changes_chunk(KeyChangeChunk chunk)
   {
     CHECK_PTR(auth_server_);
 
-    return auth_server_->register_auth_data_updates(height,
-                                                    std::move(key_changes));
+    std::optional<KeyChangeRunAssembler::Run> run =
+        run_assembler_.push(chunk.height,
+                            ChunkPosition{.index = chunk.chunk_index,
+                                          .count = chunk.chunk_count},
+                            std::move(chunk.changes));
+    if (run.has_value()) {
+      co_await auth_server_->register_auth_data_updates(run->key,
+                                                        std::move(run->parts));
+    }
   }
 
   x23::Async<void> subscribe_to_auth_data_changes(AuthCard card)
@@ -124,7 +190,10 @@ public:
   }
 
 private:
+  using KeyChangeRunAssembler = ChunkRunAssembler<BlockHeight, KeyChangeBatch>;
+
   AuthServer *auth_server_ = nullptr;
+  KeyChangeRunAssembler run_assembler_;
 };
 
 static_assert(is_AuthDB1<AuthDBRpc *, x23::Async>);

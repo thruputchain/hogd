@@ -2,11 +2,33 @@ echo "prepare the environment for building hogd"
 
 set -ex
 
+# Container inputs and toolchains are prepared before the isolated job starts.
+# Keep this branch separate from Namespace and developer environment setup.
+if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  for tool in cargo rustup cbindgen sccache gcc-15 g++-15 clang; do
+    command -v "$tool" >/dev/null || {
+      echo "Missing image tool: $tool" >&2
+      return 1
+    }
+  done
+  export CARGO_NET_OFFLINE=true GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
+  export HOGD_SCCACHE_REMOTE=0
+  printf 'GCC_CC=%q\nGCC_CXX=%q\n' "${HOGD_CI_GCC_CC:-gcc-15}" "${HOGD_CI_GCC_CXX:-g++-15}" >./scripts/conf.sh
+  return 0
+fi
+
 echo 'setting up cargo'
 source ./scripts/ci/setup_cargo.sh
 
+# Fetch private workspace sources before any potentially lengthy tool builds.
+echo 'cargo fetch'
+CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh || return $?
+
 echo 'setting up ccache'
 ln -s "$USER_HOME/.cache" "$HOME/.cache"
+
+echo 'setting up sccache'
+source ./scripts/ci/setup_sccache.sh || return $?
 
 CBINDGEN_VERSION=0.29.2
 if command -v cbindgen >/dev/null 2>&1 && cbindgen --version | grep -qx "cbindgen ${CBINDGEN_VERSION}"; then
@@ -16,11 +38,15 @@ else
   cargo install --locked --force --version "${CBINDGEN_VERSION}" cbindgen
 fi
 
-echo 'gcc-15 version check'
-gcc-15 --version
+# Benchmark jobs use a stable toolchain; cache warmup can follow the host default.
+ci_gcc_cc="${HOGD_CI_GCC_CC:-gcc-15}"
+ci_gcc_cxx="${HOGD_CI_GCC_CXX:-g++-15}"
 
-echo 'g++-15 version check'
-g++-15 --version
+echo "$ci_gcc_cc version check"
+"$ci_gcc_cc" --version
+
+echo "$ci_gcc_cxx version check"
+"$ci_gcc_cxx" --version
 
 echo 'clang version check'
 clang --version
@@ -34,8 +60,5 @@ echo $PATH
 echo 'cargo version check'
 cargo --version
 
-echo 'cargo fetch'
-CARGO_NET_GIT_FETCH_WITH_CLI=true ./scripts/fetch.sh
-
-echo 'set gcc-15 in check'
-echo "GCC_CC=gcc-15 GCC_CXX=g++-15" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh
+echo "set GCC compilers: $ci_gcc_cc / $ci_gcc_cxx"
+printf 'GCC_CC=%q\nGCC_CXX=%q\n' "$ci_gcc_cc" "$ci_gcc_cxx" >./scripts/conf.sh && chmod u+x ./scripts/conf.sh

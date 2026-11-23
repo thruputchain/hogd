@@ -21,6 +21,11 @@ SH_FORMAT=shfmt
 
 # enable custom environment setup if file conf.sh is present
 if [ -f ${SCRIPT_DIR}/conf.sh ]; then
+  # Mark conf.sh's NPROC assignments as pins, even when equal to the detected count.
+  # The marker is not exported; build-jobs.sh consumes and unsets it in this shell.
+  if grep -qE '^[[:space:]]*(export[[:space:]]+)?NPROC=' ${SCRIPT_DIR}/conf.sh 2>/dev/null; then
+    HOGD_NPROC_PINNED=1
+  fi
   source ${SCRIPT_DIR}/conf.sh
 fi
 

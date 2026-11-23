@@ -1,3 +1,5 @@
+add_subdirectory(test_support)
+
 # create base module library
 add_library(
   base_objects OBJECT
@@ -22,19 +24,32 @@ target_link_libraries(
 )
 
 add_library(base_test_objects OBJECT
+  arc_test.cc
   atomic_test.cc
   base_test.cc
+  base58_test.cc
   bits_test.cc
+  block_id_test.cc
+  chunk_items_test.cc
+  chunk_run_assembler_test.cc
+  chunk_run_sender_test.cc
+  chunked_vector_test.cc
   cli_test.cc
   cpputil_test.cc
   io_test.cc
   json_test.cc
+  network_config_params_test.cc
+  os_test.cc
   perthread_arc_test.cc
   perthread_test.cc
+  rc_bytes_test.cc
+  rc_test.cc
   status_test.cc
   string_test.cc
+  time_test.cc
   unique_function_test.cc
   wide_integral_test.cc
+  wide_math_test.cc
   worker_pool_test.cc
   xdr_util_test.cc
 )
@@ -56,4 +71,20 @@ target_link_libraries(
   hogd
   GTest::gtest
 )
-gtest_discover_tests(base_test)
+hogd_discover_tests(base_test)
+
+if(BUILD_BENCHMARKS AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_executable(
+    io_bench
+    io_bench.cc
+  )
+  target_link_libraries(
+    io_bench
+    hogd
+    benchmark::benchmark
+  )
+
+  if(CMAKE_BUILD_TYPE STREQUAL "Release")
+    set_property(TARGET io_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+  endif()
+endif()

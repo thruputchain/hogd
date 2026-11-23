@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # Launch the full set of node binaries on localhost in a deliberately-varied
-# order and assert that no process crashes on startup. No hog_sched, no hogx.
+# order and assert that no process crashes on startup. No hog_sched.
 #
 # Usage: startup_order_test.sh <scenario>
 #   scenarios: mempool-first mempool-middle mempool-last
@@ -190,14 +190,14 @@ launch() {
     ;;
   mempool)
     spawn mempool "$MEMPOOL_BIN" --bind-ip "$IP" --metrics-port "$MEMPOOL_HTTP_PORT" \
-      --network-hash 0000000000000000000000000000000000000000000000000000000000000000 --num-db-shards 1 --num-exec-shards 1 \
+      --network-hash 11111111111111111111111111111111 --num-db-shards 1 --num-exec-shards 1 \
       --db-port "$MEMPOOL_DB_PORT" --event-port "$MEMPOOL_EVENT_PORT" \
       --executor-port "$MEMPOOL_EXECUTOR_PORT" --auth-port "$MEMPOOL_AUTH_PORT" \
       --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
     ;;
   hog-exec)
     spawn hog-exec "$HOG_EXEC_BIN" --coordinator-addr "$IP:$MEMPOOL_EXECUTOR_PORT" \
-      --bind-ip "$IP" --nthreads 64 --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
+      --bind-ip "$IP" --mempool-port "$EXECUTOR_MEMPOOL_PORT" \
       --metrics-port "$EXECUTOR_HTTP_PORT"
     ;;
   event)
@@ -248,10 +248,11 @@ launch() {
   esac
 }
 
-# Do NOT pre-create the daemons' own data directories. The indexer's
-# IndexDB::open_or_make_new() only creates a fresh DB when its path does NOT
-# exist; a pre-existing empty dir sends it down the open() path, which aborts
-# with "DB Not Found". Each daemon creates its own dir (matches launch-multi.sh).
+# Each daemon creates its own data directory, which is how launch-multi.sh
+# starts them. Pre-creating one is no longer fatal to the indexer -- its
+# IndexDB::open_or_make_new() asks whether a database is there rather than
+# whether the directory is -- but leaving them out keeps this test starting
+# the daemons the way production does.
 mkdir -p "$WORK_DIR/event" "$WORK_DIR/chuckd-storage"
 
 echo "=== scenario $SCENARIO: launching in order: ${ORDER[*]} ==="

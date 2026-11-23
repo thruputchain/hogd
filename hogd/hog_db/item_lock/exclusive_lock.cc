@@ -3,6 +3,7 @@
 #include <cassert>
 #include <set>
 
+#include "db_conflict.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_db/item_change.h"
@@ -11,7 +12,6 @@
 #include "hogd/hog_db/status.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
-#include "x23/debug.h"
 
 namespace hogd {
 
@@ -28,7 +28,11 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
   // but I do not want to mess storage accounting inside ItemChange yet
 
   if (after->is_bytes()) {
-    return ctx.cost_model->get_bytestring_cost(after->to_bytes().size());
+    // Read the size in place rather than via to_bytes(), which would copy
+    // the whole bytestring just to measure it.
+    auto const *bytes = after->get_inner<Bytes>();
+    CHECK_PTR(bytes);
+    return ctx.cost_model->get_bytestring_cost(bytes->value_view().size());
   }
   if (after->is_nnint128()) {
     return ctx.cost_model->get_nnint_cost();
@@ -46,23 +50,37 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
         deployment->deployed_contract_hash());
   }
   if (after->is_auth_data()) {
-    auto const &auth_data = after->to_auth_data();
-    x23assert(auth_data.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    return ctx.cost_model->get_auth_data_cost(auth_data->count_active_keys());
+    // Read the change in place rather than via to_auth_data(), which would
+    // copy the whole auth table into an optional.
+    auto const *auth_data = after->get_inner<PointerItem<AuthDataItem>>();
+    CHECK_PTR(auth_data);
+    auto const &item = **auth_data;
+    // Refused here, at reservation: the AuthLock admission that commit_change
+    // runs comes after the transaction's balance changes are committed, and
+    // a conflict there poisons the block.
+    if (item.introduces_duplicate_signer()) {
+      return ctx.conflict(DbConflictCode::DuplicateSigner);
+    }
+    // A change that leaves no row reserves nothing, as AuthLock charges it.
+    if (!item.writes_row()) {
+      return 0;
+    }
+    return ctx.cost_model->get_auth_data_cost(item.count_active_keys());
   }
   if (after->is_retrocausal_queue()) {
     // Delegate validation and consume-counting to RetrocausalQueueLock.
     // We intentionally discard its returned cost and compute our own tight
     // cost that accounts for consumes immediately, since there is no
     // concurrency concern under an exclusive lock.
-    auto inner_opt = after->to_retrocausal_queue();
-    CHECK(inner_opt.has_value());
-    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-    auto &inner = *inner_opt;
+    // Read the change in place rather than via to_retrocausal_queue(), which
+    // would deep-copy the entire typed cumulative delta (nested QueueEntry
+    // buffers and payloads) into an optional just to validate it. Mirrors the
+    // is_deploy_contract() branch above.
+    auto const *inner = after->get_inner<RetrocausalQueueIt>();
+    CHECK_PTR(inner);
 
     RetrocausalQueueLock lock;
-    auto cost = lock.try_atomic_change_lock(nullptr, &inner, ctx);
+    auto cost = lock.try_atomic_change_lock(nullptr, inner, ctx);
     if (!cost) {
       return cost;
     }
@@ -70,10 +88,10 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     // Under exclusive lock there is no concurrency, so every
     // current-block consumed entry must have been added by this same TX.
     // Verify identity: each consumed entry exists in added_entries.
-    if (inner.delta().consume &&
-        !inner.delta().consume->current_block_consumed.empty()) {
-      auto const &consumed = inner.delta().consume->current_block_consumed;
-      auto const &added = inner.delta().insert.added_entries;
+    if (inner->delta().consume &&
+        !inner->delta().consume->current_block_consumed.empty()) {
+      auto const &consumed = inner->delta().consume->current_block_consumed;
+      auto const &added = inner->delta().insert.added_entries;
 
       std::multiset<QueueEntry> added_set(added.begin(), added.end());
       for (auto const &entry : consumed) {
@@ -92,11 +110,11 @@ ExclusiveLock::try_atomic_change_lock(const ItemChange * /*unused*/,
     CHECK(meta.has_value());
 
     uint64_t live = (*meta)->live_entries;
-    uint64_t added = inner.delta().insert.added_entries.size();
+    uint64_t added = inner->delta().insert.added_entries.size();
     uint64_t consumed = 0;
-    if (inner.delta().consume) {
-      consumed = inner.delta().consume->past_block_consumed_count +
-                 inner.delta().consume->current_block_consumed.size();
+    if (inner->delta().consume) {
+      consumed = inner->delta().consume->past_block_consumed_count +
+                 inner->delta().consume->current_block_consumed.size();
     }
 
     if (consumed > live + added) {

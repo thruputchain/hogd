@@ -13,6 +13,7 @@ extern "C" {
 #include <crc32c/crc32c.h>
 
 #include <array>
+#include <bit>
 #include <cassert>
 #include <cstddef>
 #include <cstdio>
@@ -220,6 +221,11 @@ struct SipHash24Hasher {
   std::size_t operator()(const std::array<uint8_t, N> &array) const
   {
     return SipHash24::get_default()(std::as_bytes(std::span(array)));
+  }
+
+  std::size_t operator()(uint32_t key) const
+  {
+    return (*this)(std::bit_cast<std::array<uint8_t, sizeof(key)>>(key));
   }
 };
 

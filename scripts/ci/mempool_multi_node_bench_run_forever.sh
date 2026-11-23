@@ -8,7 +8,6 @@ SCRIPT_DIR=$(cd "$(dirname "$0")" && pwd)
 REPO_ROOT=$(cd "$SCRIPT_DIR/../.." && pwd)
 . "$SCRIPT_DIR/bench_harness.sh"
 . "$SCRIPT_DIR/wait_port_report.sh"
-WAIT_PORT=ci_wait_port
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
@@ -171,6 +170,8 @@ publish_multi_node_logs() {
     echo "copying ${label} logs from ${host}"
     copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
     copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stdout.log"
+    ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stderr.log"
   done
 }
 
@@ -277,9 +278,8 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-for host in "${ALL_HOSTS[@]}"; do
-  "$WAIT_PORT" "$host" "$CI_CONTROL_PORT"
-done
+ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
+  "${ALL_HOSTS[@]}"
 
 echo 'clear work dirs'
 for host in "${ALL_HOSTS[@]}"; do
@@ -314,7 +314,7 @@ node1_mempool_host="${MEMPOOL_HOSTS[1]}"
 node0_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node0_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -327,7 +327,7 @@ node0_mempool_cmd=(
 node1_mempool_cmd=(
   "$MEMPOOL_BINARY"
   --bind-ip "$(hog_ip "$node1_mempool_host")"
-  --network-hash 0000000000000000000000000000000000000000000000000000000000000001
+  --network-hash 11111111111111111111111111111112
   --num-db-shards 1
   --num-exec-shards 2
   --db-port "$MEMPOOL_DB_PORT"
@@ -456,9 +456,9 @@ for node in "${NODE_IDS[@]}"; do
   coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
   bind_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
   control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_a" "$SLOT_A_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_A_PORT" --metrics-port "$HOG_EXEC_SLOT_A_HTTP_PORT"
+    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --mempool-port "$HOG_EXEC_SLOT_A_PORT" --metrics-port "$HOG_EXEC_SLOT_A_HTTP_PORT"
   control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_b" "$SLOT_B_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --nthreads 1024 --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
+    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
 "$CONTROL_CLI" "$node0_mempool_host" "$CI_CONTROL_PORT" wait &

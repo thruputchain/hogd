@@ -23,62 +23,23 @@ static_assert(std::is_trivially_copyable_v<ContractAddress>);
 
 template<typename T> struct FFIHelperType;
 
-template<> struct FFIHelperType<generated::PublicKey> {
-  static std::optional<PublicKey>
-  to_cpp(generated::PublicKey const &ffi_public_key)
-  {
-    switch (ffi_public_key.tag()) {
-    case generated::PublicKey::PublicKey_Ed25519:
-      PublicKey cpp_public_key;
-      cpp_public_key.scheme(CryptographicScheme::Ed25519);
-      cpp_public_key.ed25519() = ffi_public_key.ed25519.ed25519;
-      return cpp_public_key;
-    }
-    error("Unknown public key type: {}",
-          static_cast<int32_t>(ffi_public_key.tag()));
-    return std::nullopt;
-  }
-
-  static generated::PublicKey to_ffi(PublicKey const &cpp_public_key)
-  {
-    generated::PublicKey ffi_public_key{};
-    ffi_public_key.ed25519 = {
-        .tag = generated::PublicKey::PublicKey_Ed25519,
-        .ed25519 = cpp_public_key.ed25519(),
-    };
-    return ffi_public_key;
-  }
-
-  constexpr static bool kFFIHelperRequired = true;
-};
-
-static_assert(std::is_trivially_copyable_v<generated::PublicKey>);
-static_assert(sizeof(generated::PublicKey) == sizeof(PublicKey));
-
 template<> struct FFIHelperType<generated::PubkeyAccountPreimage> {
   static std::optional<PubkeyAccountPreimage>
   to_cpp(generated::PubkeyAccountPreimage const &ffi_pubkey_account_preimage)
   {
-    PubkeyAccountPreimage cpp_pubkey_account_preimage;
-    auto cpp_pk = FFIHelperType<generated::PublicKey>::to_cpp(
-        ffi_pubkey_account_preimage.pubkey);
-    if (!cpp_pk) {
-      return std::nullopt;
-    }
-    cpp_pubkey_account_preimage.pubkey = *cpp_pk;
-    cpp_pubkey_account_preimage.nonce = ffi_pubkey_account_preimage.nonce;
-    return cpp_pubkey_account_preimage;
+    return PubkeyAccountPreimage{
+        .pubkey_hash = ffi_pubkey_account_preimage.pubkey_hash,
+        .nonce = ffi_pubkey_account_preimage.nonce,
+    };
   }
 
   static generated::PubkeyAccountPreimage
   to_ffi(PubkeyAccountPreimage const &cpp_pubkey_account_preimage)
   {
-    generated::PubkeyAccountPreimage ffi_pubkey_account_preimage{};
-    ffi_pubkey_account_preimage.pubkey =
-        FFIHelperType<generated::PublicKey>::to_ffi(
-            cpp_pubkey_account_preimage.pubkey);
-    ffi_pubkey_account_preimage.nonce = cpp_pubkey_account_preimage.nonce;
-    return ffi_pubkey_account_preimage;
+    return {
+        .pubkey_hash = cpp_pubkey_account_preimage.pubkey_hash,
+        .nonce = cpp_pubkey_account_preimage.nonce,
+    };
   }
 
   constexpr static bool kFFIHelperRequired = true;

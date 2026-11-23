@@ -61,4 +61,4 @@ target_link_libraries(
 # same budget. A 100 pinned here is what withheld the TSAN schedule's
 # --timeout 300 from InsertUntilOOM and got it killed at 100s (#3584). Every
 # ctest invocation that runs these tests passes its own --timeout instead.
-gtest_discover_tests(ramdb_test)
+hogd_discover_tests(ramdb_test)

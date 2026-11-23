@@ -1,4 +1,5 @@
 #include "hogd/base/json.h"
+#include "x23/tests/death_test.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -125,10 +126,10 @@ TEST(JsonWriter, RejectsValueDirectlyInObject)
 #ifdef NDEBUG
   GTEST_SKIP() << "CHECK failures compile to unreachable in release builds";
 #else
-  EXPECT_DEATH(encode([](Writer &w) {
-                 w.object([](Writer &w) { w.value(true); });
-               }),
-               "");
+  X23_EXPECT_DEATH(encode([](Writer &w) {
+                     w.object([](Writer &w) { w.value(true); });
+                   }),
+                   "");
 #endif
 }
 
@@ -137,11 +138,11 @@ TEST(JsonWriter, RejectsMultipleTopLevelValues)
 #ifdef NDEBUG
   GTEST_SKIP() << "CHECK failures compile to unreachable in release builds";
 #else
-  EXPECT_DEATH(encode([](Writer &w) {
-                 w.value("first");
-                 w.value("second");
-               }),
-               "");
+  X23_EXPECT_DEATH(encode([](Writer &w) {
+                     w.value("first");
+                     w.value("second");
+                   }),
+                   "");
 #endif
 }
 

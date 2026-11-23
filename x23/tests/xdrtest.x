@@ -41,6 +41,20 @@ struct contains_test_recursive {
   test_recursive t;
 };
 
+// Non-recursive transport envelopes must not change the payload's depth bound.
+struct recursive_envelope {
+  int tag;
+  contains_test_recursive payload;
+  int trailer;
+};
+
+union recursive_union_envelope switch (bool present) {
+case TRUE:
+  recursive_envelope payload;
+case FALSE:
+  void;
+};
+
 // Mutually recursive structs (inline struct in union with forward ref)
 %struct MutualFrame;
 
@@ -175,6 +189,17 @@ program blank_rpc
   = 1;
 }
 = 3123124;
+
+program CompatProbe {
+  version CompatProbe1 {
+    void ping(void) = 0;
+  } = 1;
+
+  version CompatProbe2 {
+    void ping(void) = 0;
+    void added(int) = 1;
+  } = 2;
+} = 0x7ee7aafe;
 
 struct MultilineComment {
   hyper value;
@@ -388,6 +413,26 @@ case TRUE:
   double true_val;
 };
 
+// Bool union whose default arm stands for FALSE
+union bool_with_default switch (bool ok)
+{
+case TRUE:
+  int value;
+default:
+  string message<>;
+};
+
+typedef bool flag_t;
+
+// The same through a typedef of bool
+union flag_with_default switch (flag_t ok)
+{
+case TRUE:
+  int value;
+default:
+  string message<>;
+};
+
 // Struct mixing fixed-opaque of various alignments
 // (exercises first_unsafe_field optimization with mixed field sizes)
 struct mixed_opaque_struct {
@@ -428,4 +473,73 @@ case kBoxAdd:
 struct box_add_args {
   box_expr left;
   box_expr right;
+};
+
+// #[cpp(box)] on scalar union arms and struct fields whose types are not
+// structs. box_arms_plain and box_leaves_plain are the same types unboxed, so
+// tests can check that boxing does not change the encoding.
+typedef opaque box_big_opaque[1952];
+typedef opaque box_bytes<>;
+typedef int box_ints<>;
+
+enum box_arm_type {
+  kBoxArmSmall = 0,
+  kBoxArmBig = 1,
+  kBoxArmStruct = 2,
+  kBoxArmBytes = 3,
+  kBoxArmInts = 4
+};
+
+union box_arms switch (box_arm_type t)
+{
+case kBoxArmSmall:
+  int small;
+case kBoxArmBig:
+  box_big_opaque big; // #[cpp(box)]
+case kBoxArmStruct:
+  fix_12 st; // #[cpp(box)]
+case kBoxArmBytes:
+  box_bytes bytes; // #[cpp(box)]
+case kBoxArmInts:
+  box_ints ints; // #[cpp(box)]
+};
+
+union box_arms_plain switch (box_arm_type t)
+{
+case kBoxArmSmall:
+  int small;
+case kBoxArmBig:
+  box_big_opaque big;
+case kBoxArmStruct:
+  fix_12 st;
+case kBoxArmBytes:
+  box_bytes bytes;
+case kBoxArmInts:
+  box_ints ints;
+};
+
+struct box_leaves {
+  box_big_opaque big; // #[cpp(box)]
+  unsigned hyper n;   // #[cpp(box)]
+  box_bytes bytes;    // #[cpp(box)]
+  box_arms arm;
+};
+
+struct box_leaves_plain {
+  box_big_opaque big;
+  unsigned hyper n;
+  box_bytes bytes;
+  box_arms_plain arm;
+};
+
+// #[cpp(box)] on a struct field whose type is a union. box_union_field_plain
+// is the same type unboxed.
+struct box_union_field {
+  box_arms_plain u; // #[cpp(box)]
+  int tail;
+};
+
+struct box_union_field_plain {
+  box_arms_plain u;
+  int tail;
 };

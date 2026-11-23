@@ -26,10 +26,11 @@
 #include "built_contracts/payment_channel.hh"
 #include "built_contracts/simple_wallet.h"
 #include "exec_result.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -49,8 +50,7 @@ class PaymentChannelIntegrationTest : public ::testing::Test,
 public:
   PaymentChannelIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       rv32_runtime_context_(make_hog_exec_context())
   {}
 
@@ -143,7 +143,7 @@ protected:
 
   uint64_t nonce_ = 0;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -244,16 +244,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_client.make_invocation<u8"do_action">(
-                UINT64_MAX, mint_sig, mint_calldata),
+                kDefaultMaxTxGas, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -267,17 +267,15 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    // Use adjust_allowance to set the allowance (i128 can be positive to
-    // increase)
-    Calldata approve_calldata =
+    Calldata allowance_calldata =
         x23::serialize(kERC20Address,
                        erc20_meta::entrypoint<u8"adjust_allowance">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"adjust_allowance">(
                            kPaymentChannelAddress,
                            make_difference(static_cast<int128_t>(amount))));
-    Ed25519Signature approve_sig =
-        ed25519_sign(secret_key, approve_calldata).value();
+    Ed25519Signature allowance_sig =
+        ed25519_sign(secret_key, allowance_calldata).value();
 
     auto &wallet_client =
         (wallet == kWalletAAddress) ? wallet_a_client_ : wallet_b_client_;
@@ -285,16 +283,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_client.make_invocation<u8"do_action">(
-                UINT64_MAX, approve_sig, approve_calldata),
+                kDefaultMaxTxGas, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -320,16 +318,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, open_sig, open_calldata),
+                kDefaultMaxTxGas, open_sig, open_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     EXPECT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     EXPECT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -357,18 +355,18 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_b_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, join_sig, join_calldata),
+                kDefaultMaxTxGas, join_sig, join_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -391,7 +389,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = pc_client_.make_invocation<u8"close_channel">(
-                UINT64_MAX, channel_id, make_difference(balance_a),
+                kDefaultMaxTxGas, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -399,11 +397,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -426,7 +424,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = pc_client_.make_invocation<u8"dispute">(
-                UINT64_MAX, channel_id, make_difference(balance_a),
+                kDefaultMaxTxGas, channel_id, make_difference(balance_a),
                 make_difference(balance_b), state_nonce, sig_a, sig_b),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -434,11 +432,11 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -455,19 +453,20 @@ protected:
   {
     SignedTransaction handler_tx{
         .tx = Transaction{
-            .invocation = pc_client_.make_invocation<u8"finalize">(UINT64_MAX,
-                                                                   channel_id),
+            .invocation =
+                pc_client_.make_invocation<u8"finalize">(kDefaultMaxTxGas,
+                                                         channel_id),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -492,7 +491,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                pc_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                pc_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas,
                                                            kTestDisputePeriod),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -500,9 +499,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -514,7 +513,7 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation =
-                erc20_client_.make_invocation<u8"initialize">(UINT64_MAX,
+                erc20_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas,
                                                               kWalletAAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
@@ -522,9 +521,9 @@ protected:
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -534,16 +533,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, party_a_pubkey_),
+                kDefaultMaxTxGas, party_a_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -553,16 +552,16 @@ protected:
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_b_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, party_b_pubkey_),
+                kDefaultMaxTxGas, party_b_pubkey_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -591,23 +590,23 @@ TEST_F(PaymentChannelIntegrationTest, OpenJoinAndClose)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -652,23 +651,23 @@ TEST_F(PaymentChannelIntegrationTest, DisputeWithNewerState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -714,23 +713,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotFinalizeBeforeDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -766,23 +765,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeAfterDisputePeriod)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -819,23 +818,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDisputeWithOlderState)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -875,23 +874,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotDoubleFinalizeInSameBlock)
         x23::serialize(kERC20Address, erc20_meta::entrypoint<u8"transfer">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
-                           kWalletBAddress, make_amount(uint128_t{deposit_b})));
+                           kWalletBAddress, make_amount(int128_t{deposit_b})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -935,23 +934,23 @@ TEST_F(PaymentChannelIntegrationTest, CannotJoinTwice)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -988,23 +987,23 @@ TEST_F(PaymentChannelIntegrationTest, TwoJoinTxsInSameBlockOneFails)
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"transfer">(
                            kWalletBAddress,
-                           make_amount(uint128_t{deposit_b * 2})));
+                           make_amount(int128_t{deposit_b * 2})));
     Ed25519Signature transfer_sig =
         ed25519_sign(party_a_secret_, transfer_calldata).value();
 
     SignedTransaction handler_tx{
         .tx = Transaction{
             .invocation = wallet_a_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, transfer_sig, transfer_calldata),
+                kDefaultMaxTxGas, transfer_sig, transfer_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,

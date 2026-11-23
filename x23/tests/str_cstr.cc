@@ -236,6 +236,27 @@ TEST(StrCstr, ReinterpretFromVecU8)
   check_cstr(s, 5);
 }
 
+// An unallocated Vec has null begin/end/bufend.  Reinterpreting to a type
+// with a smaller kExtraAlloc must not offset the null bufend, or the result
+// claims capacity over a null buffer and the next insert writes through it.
+TEST(StrCstr, ReinterpretEmptyKeepsNullBuffer)
+{
+  x23::Str s;
+  auto v = std::move(s).reinterpret<x23::Vec<unsigned char>>();
+  EXPECT_EQ(v.data(), nullptr);
+  EXPECT_EQ(v.size(), 0U);
+  EXPECT_EQ(v.capacity(), 0U);
+  v.push_back('x');
+  EXPECT_EQ(v.size(), 1U);
+  EXPECT_EQ(v[0], 'x');
+
+  x23::Vec<unsigned char> empty;
+  auto s2 = std::move(empty).reinterpret<x23::Str>();
+  EXPECT_EQ(s2.size(), 0U);
+  s2.push_back('y');
+  check_cstr(s2, 1);
+}
+
 // Construct a Str directly via the Buf-based constructor with a
 // poisoned byte at *b_.end.  Verifies the constructor itself calls
 // terminate(), rather than relying on callers.

@@ -16,7 +16,6 @@
 #include "auth_claim.hh"
 #include "contract.hh"
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/span.h"
@@ -26,6 +25,7 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/item_change.h"
+#include "hogd/hog_db/item_lock.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
@@ -140,7 +140,7 @@ InvokeTX::update_balance_lock(Address const &addr)
       return status.error();
     }
 
-    change.emplace_back(std::move(new_item), tx_depth_);
+    change.emplace_back(std::move(new_item), tx_depth_, status->lock);
     return {};
   }
 
@@ -162,7 +162,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return {};
   }
 
-  auto status = block_.get().modify_lock(key, last.change, new_item,
+  auto status = block_.get().modify_lock(*last.lock, key, last.change, new_item,
                                          &last_conflict_reason_);
   if (!status) {
     if constexpr (is_debug_build()) {
@@ -180,7 +180,7 @@ InvokeTX::update_balance_lock(Address const &addr)
     return status.error();
   }
   assert(last.tx_depth < tx_depth_);
-  change.emplace_back(std::move(new_item), tx_depth_);
+  change.emplace_back(std::move(new_item), tx_depth_, last.lock);
   return {};
 }
 
@@ -226,7 +226,8 @@ InvokeTX::commit()
   for (auto &[key, vec] : changes_) {
     if (!vec.empty() && key.is_address_balance()) {
       auto cost_change =
-          block_.get().commit_change(key, std::move(vec.back().change));
+          block_.get().commit_change(*vec.back().lock, key,
+                                     std::move(vec.back().change));
       if (!cost_change.has_value()) {
         commit_error = cost_change.error();
         failed = true;
@@ -243,7 +244,8 @@ InvokeTX::commit()
     for (auto &[key, vec] : changes_) {
       if (!vec.empty() && !key.is_address_balance()) {
         auto cost_change =
-            block_.get().commit_change(key, std::move(vec.back().change));
+            block_.get().commit_change(*vec.back().lock, key,
+                                       std::move(vec.back().change));
         if (!cost_change.has_value()) {
           commit_error = cost_change.error();
           failed = true;
@@ -279,7 +281,7 @@ InvokeTX::abort()
 
   for (auto &[key, vec] : changes_) {
     if (!vec.empty()) {
-      block_.get().unlock(key, vec.back().change);
+      block_.get().unlock(*vec.back().lock, key, vec.back().change);
     }
   }
   changes_.clear();
@@ -306,13 +308,14 @@ InvokeTX::rollback_to_savepoint(int depth)
     }
 
     // revert and erase the history of changes made after savepoint.
+    ItemLock *lock = vec.back().lock;
     ItemChange tmp{std::move(vec.back().change)};
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
     if (!vec.empty()) {
       HogDbStatus<int128_t> ret =
-          block_.get().modify_lock(key, tmp, vec.back().change);
+          block_.get().modify_lock(*lock, key, tmp, vec.back().change);
       if (!ret) [[unlikely]] {
         // modify_lock only fails here when a committed sibling block pruned
         // DAO state this restored change depends on (e.g. an RCQ consume's
@@ -334,7 +337,7 @@ InvokeTX::rollback_to_savepoint(int depth)
       ++it;
       continue;
     }
-    block_.get().unlock(key, tmp);
+    block_.get().unlock(*lock, key, tmp);
     it = changes_.erase(it);
   }
 
@@ -360,7 +363,7 @@ InvokeTX::release_savepoint(int depth)
       continue;
 
     // retain latest change but erase any history after savepoint.
-    ItemVersion tmp(std::move(vec.back().change), tx_depth_);
+    ItemVersion tmp(std::move(vec.back().change), tx_depth_, vec.back().lock);
     vec.erase(std::ranges::upper_bound(vec, tx_depth_, {},
                                        &ItemVersion::tx_depth),
               vec.end());
@@ -411,8 +414,7 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
 
   // this is the first change for this key; try to acquire a lock on the item.
   if (v.empty()) {
-    HogDbStatus<int128_t> ret =
-        block_.get().lock(key, change, &last_conflict_reason_);
+    auto ret = block_.get().lock(key, change, &last_conflict_reason_);
     if (!ret) {
       // A failed first-time admission must not leave a retained empty entry
       // behind: rollback_to_savepoint() skips empty vectors and would never
@@ -422,10 +424,10 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
       return ret.error();
     }
 
-    assert(*ret >= 0 || change.is_permanent_exclusive());
-    int128_t marginal_storage = *ret;
+    assert(ret->storage_cost >= 0 || change.is_permanent_exclusive());
+    int128_t marginal_storage = ret->storage_cost;
 
-    v.emplace_back(std::move(change), tx_depth_);
+    v.emplace_back(std::move(change), tx_depth_, ret->lock);
     // now lock the storage
     if (marginal_storage != 0) {
       lock_storage(key.get_address(), marginal_storage);
@@ -439,8 +441,9 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   ItemVersion &item = v.back();
   if (auto r = change.narrow(item.change); !r)
     return r.error();
-  HogDbStatus<int128_t> ret = block_.get().modify_lock(key, item.change, change,
-                                                       &last_conflict_reason_);
+  HogDbStatus<int128_t> ret =
+      block_.get().modify_lock(*item.lock, key, item.change, change,
+                               &last_conflict_reason_);
   if (!ret) {
     return ret.error();
   }
@@ -455,7 +458,8 @@ InvokeTX::request_change(const ItemKey &key, ItemChange &&change)
   }
   else {
     assert(item.tx_depth < tx_depth_);
-    v.emplace_back(std::move(change), tx_depth_, previous_locked_storage);
+    v.emplace_back(std::move(change), tx_depth_, item.lock,
+                   previous_locked_storage);
   }
 
   // It's ok if marginal storage is negative;
@@ -490,7 +494,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t base, int128_t delta,
     return HogDbError(HogDbCode::kOverflow);
   }
   if (sum < std::min<int128_t>(base, 0)) {
-    last_conflict_reason_ = DbConflictCode::kDbConflictBoundsExceeded;
+    last_conflict_reason_ = DbConflictCode::BoundsExceeded;
     return HogDbError(HogDbCode::kConflict);
   }
 
@@ -508,7 +512,7 @@ InvokeTX::request_nnint128(const ItemKey &key, int128_t delta,
 {
   if (key.is_address_balance()) {
     if (flags & std::to_underlying(StorageDeltaFlags::ExclusiveLock)) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictExclusiveLock;
+      last_conflict_reason_ = DbConflictCode::ExclusiveLockDenied;
       return HogDbError(HogDbCode::kConflict);
     }
     request_balance_change(key.get_address(), delta);
@@ -531,17 +535,16 @@ InvokeTX::request_auth_data(Address const &addr,
                             StorageDeltaFlagSet flags)
 {
   auto base_auth_data = block_.get().get_db().read_address_auth_data(addr);
-  if (!base_auth_data) {
-    if (base_auth_data.error() != HogDbCode::kNotFound) {
-      return base_auth_data.error();
-    }
-    base_auth_data = AddressAuthData{};
+  if (!base_auth_data && base_auth_data.error() != HogDbCode::kNotFound) {
+    return base_auth_data.error();
   }
 
-  AuthDataItem auth_data_item(std::move(base_auth_data.value()));
+  AuthDataItem auth_data_item = base_auth_data
+                                    ? AuthDataItem(std::move(*base_auth_data))
+                                    : AuthDataItem::for_missing_row();
   for (const auto &signer : auth_data_change.auth_data_change_signers) {
     if (signer.public_key_id >= kMaxSigners) {
-      last_conflict_reason_ = DbConflictCode::kDbConflictCapacityExceeded;
+      last_conflict_reason_ = DbConflictCode::CapacityExceeded;
       return HogDbError(HogDbCode::kConflict);
     }
     auth_data_item.set_new_pk(signer.public_key_id, signer.public_key);
@@ -598,7 +601,7 @@ DbConflictCode
 InvokeTX::conflict_reason_for(HogDbCode code) const
 {
   if (code == HogDbCode::kOverflow) {
-    return DbConflictCode::kDbConflictOverflow;
+    return DbConflictCode::Overflow;
   }
   CHECK(code == HogDbCode::kConflict);
   // CHECK below guarantees last_conflict_reason_ has a value.
@@ -688,7 +691,7 @@ InvokeTX::assert_is_valid() const noexcept
     return;
   }
   assert(tx_depth_ >= 0);
-  assert(tx_depth_ <= kMaxSavepointDepth);
+  assert(tx_depth_ <= max_savepoint_depth());
   if constexpr (is_debug_build()) {
     try {
       std::unordered_map<Address, int128_t> balance_deltas;
@@ -784,20 +787,22 @@ InvokeTX::assert_is_valid() const noexcept
 HogDbStatus<void>
 InvokeTX::request_new_contract(Contract contract)
 {
-  // hog_exec rejects attached contract blobs above kMaxContractSizeBytes in
-  // perform_initial_validation(), before execution, and storage stores any
-  // legal row (chunked across RAMDB items if necessary; see
-  // for_each_wasm_code_item). A serialized row above the bound here
-  // therefore means the executor is misbehaving, not that the contract is
-  // merely large. xdr_size computes the serialized length without
+  // hog_exec rejects attached contract blobs above the chain's
+  // max_contract_size_bytes in perform_initial_validation(), before
+  // execution; genesis load caps that parameter at kContractSizeCeilingBytes,
+  // and storage stores any row up to it (chunked across RAMDB items if
+  // necessary; see for_each_contract_code_item). A serialized row above the
+  // bound here therefore means the executor is misbehaving, not that the
+  // contract is merely large. xdr_size computes the serialized length without
   // allocating; it equals the byte count NewContractLock stages.
   if (x23::xdr_size(contract) > kMaxSerializedContractBytes)
     return HogDbError(HogDbCode::kInvalidExecutorBehavior);
 
   // One-byte chunk indexes must cover the largest row hog_db accepts.
-  static_assert((kMaxSerializedContractBytes + kWasmCodeChunkPayloadSize - 1) /
-                    kWasmCodeChunkPayloadSize <=
-                255);
+  static_assert(
+      (kMaxSerializedContractBytes + kContractCodeChunkPayloadSize - 1) /
+          kContractCodeChunkPayloadSize <=
+      255);
 
   // hash is computed outside make_contract_code_item_key to dodge an
   // observed gcc-CI miscompile.

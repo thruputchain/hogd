@@ -5,14 +5,12 @@ add_library(genesis
 add_dependencies(
   genesis
   all_contract_headers
-  generate_syscall_inner_h
-  generate_syscall_meta_h
 )
 
 target_link_libraries(genesis
   base
   crypto
-  storage_item
+  storage_cost
   protocol
   contract_loader
   components

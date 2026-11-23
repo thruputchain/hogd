@@ -27,18 +27,15 @@ struct Instr {
 
 class ThreadedProgram {
 public:
-  // `code` is borrowed, not copied: the returned ThreadedProgram holds a
-  // non-owning span into it, so the byte buffer must outlive the program (and
-  // anything it decodes lazily). Today the only caller,
-  // PreInstantiation::create, fully consumes the program before returning, so
-  // the borrow never escapes.
+  // Borrow code and check its size/alignment. Instruction validation happens
+  // lazily in instruction_at(); the buffer must outlive this view.
   static std::expected<ThreadedProgram, ProgramError>
   create(std::span<const uint8_t> code)
   {
     if ((code.size() % kInstructionBytes) != 0) {
       return std::unexpected(ProgramError::kCodeSizeNotAligned);
     }
-    if (code.size() > kMaxCodeBytes) {
+    if (code.size() > kCodeCeilingBytes) {
       return std::unexpected(ProgramError::kCodeTooLarge);
     }
     ThreadedProgram program;

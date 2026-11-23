@@ -6,6 +6,7 @@
 #include <map>
 #include <memory>
 #include <optional>
+#include <stdexcept>
 #include <string>
 #include <utility>
 #include <vector>
@@ -245,6 +246,7 @@ struct BuiltWorkload {
   size_t body_start_index = 0;
   size_t body_slots = 0;
   uint64_t scheduled_gas_per_iteration = 0;
+  uint64_t expected_gas = 0;
   uint64_t instructions_per_iteration = 0;
   std::map<std::string, uint64_t> op_counts;
 };
@@ -271,7 +273,7 @@ build_workload(const Workload &workload, uint32_t trip_count)
 
   BuiltWorkload built;
   built.code = test_program::code_from_words(words);
-  built.memory.assign(kMaxMemoryBytes, 0);
+  built.memory.assign(kDefaultMaxMemoryBytes, 0);
   built.body_start_index = body_start_index;
   built.body_slots = body.size();
   built.instructions_per_iteration = body.size() + 2;
@@ -285,6 +287,15 @@ build_workload(const Workload &workload, uint32_t trip_count)
   }
   built.scheduled_gas_per_iteration =
       *body_gas + scheduled_gas_for(Op::kAddi) + scheduled_gas_for(Op::kBne);
+  // The prologue and terminal execute once; the body and loop control run
+  // trip_count times. Check this against actual consumption on every sample.
+  const auto one_pass_gas = scheduled_gas_for_code(built.code);
+  if (!one_pass_gas.has_value()) {
+    return std::nullopt;
+  }
+  built.expected_gas =
+      *one_pass_gas + ((static_cast<uint64_t>(trip_count) - 1) *
+                       built.scheduled_gas_per_iteration);
 
   std::vector<uint32_t> iteration = body;
   iteration.push_back(test_program::addi(kLoopCounterReg, kLoopCounterReg, -1));
@@ -310,52 +321,54 @@ build_workload(const Workload &workload, uint32_t trip_count)
 std::vector<WorkloadResult>
 measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
 {
+  if (repeats < 3) {
+    throw std::runtime_error("validation workloads require at least 3 repeats");
+  }
   std::vector<WorkloadResult> results;
   std::vector<BuiltWorkload> built;
   std::vector<std::unique_ptr<ThreadedMachinePreInstantiation>> programs;
   std::vector<MeasurementPoint> points;
+  // Workload kernels end on an ecall the halting host turns into a halt; no
+  // workload makes a host call of its own.
+  HaltHost halt_host;
 
-  // Tune each workload's trip count on its own, then measure them together in
-  // one interleaved schedule so they share whatever drift the host has.
-  //
-  // Keyed by name rather than by position: a workload that fails to build has
-  // to drop itself and nothing else. Indexing a compacted vector by the table's
-  // position silently handed every workload after a failed one its neighbour's
-  // trip count and then dropped the tail, which is a hard failure to notice
-  // from output that still looks well-formed.
+  // Tune each workload separately, keyed by name, then interleave measurements
+  // to spread host drift across workloads. Build failures abort the run.
   std::map<std::string, uint32_t> trip_counts;
   for (const Workload &workload : workload_table()) {
     const std::optional<BuiltWorkload> seed = build_workload(workload, 64);
     if (!seed.has_value()) {
-      continue;
+      throw std::runtime_error("cannot build workload seed: " + workload.name);
     }
     auto seed_program =
         ThreadedMachinePreInstantiation::create(seed->code, seed->memory, 0,
-                                                kMaxMemoryBytes,
+                                                kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!seed_program.has_value()) {
-      continue;
+      throw std::runtime_error("cannot instantiate workload seed: " +
+                               workload.name);
     }
-    trip_counts[workload.name] = tune_trip_count(*seed_program, 64, target_ns);
+    trip_counts[workload.name] =
+        tune_trip_count(*seed_program, halt_host, 64, target_ns);
   }
 
   std::vector<uint32_t> measured_trip_counts;
   for (const Workload &workload : workload_table()) {
     const auto trip = trip_counts.find(workload.name);
     if (trip == trip_counts.end()) {
-      continue;
+      throw std::runtime_error("missing workload trip count: " + workload.name);
     }
     const std::optional<BuiltWorkload> tuned =
         build_workload(workload, trip->second);
     if (!tuned.has_value()) {
-      continue;
+      throw std::runtime_error("cannot build workload: " + workload.name);
     }
     auto program =
         ThreadedMachinePreInstantiation::create(tuned->code, tuned->memory, 0,
-                                                kMaxMemoryBytes,
+                                                kDefaultMaxMemoryBytes,
                                                 /*trace=*/false);
     if (!program.has_value()) {
-      continue;
+      throw std::runtime_error("cannot instantiate workload: " + workload.name);
     }
     built.push_back(*tuned);
     programs.push_back(
@@ -366,9 +379,10 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     result.scheduled_gas_per_iteration = tuned->scheduled_gas_per_iteration;
     result.instructions_per_iteration = tuned->instructions_per_iteration;
     result.op_counts = tuned->op_counts;
-    result.fused_slots = audit_body(tuned->code, tuned->memory, kMaxMemoryBytes,
-                                    tuned->body_start_index, tuned->body_slots)
-                             .rewritten_slots;
+    result.fused_slots =
+        audit_body(tuned->code, tuned->memory, kDefaultMaxMemoryBytes,
+                   tuned->body_start_index, tuned->body_slots)
+            .rewritten_slots;
     results.push_back(std::move(result));
     measured_trip_counts.push_back(trip->second);
   }
@@ -378,12 +392,19 @@ measure_workloads(uint32_t repeats, uint32_t warmup_runs, double target_ns)
     points.push_back({.label = results[i].name,
                       .x = static_cast<double>(i),
                       .program = programs[i].get(),
-                      .trip_count = measured_trip_counts[i]});
+                      .trip_count = measured_trip_counts[i],
+                      .expected_gas = built[i].expected_gas});
   }
-  measure_interleaved(points, {.repeats = repeats, .warmup_runs = warmup_runs});
+  measure_interleaved(points, halt_host,
+                      {.repeats = repeats, .warmup_runs = warmup_runs});
 
   for (size_t i = 0; i < results.size(); ++i) {
+    if (!points[i].ran_clean || points[i].samples.size() != repeats) {
+      throw std::runtime_error("workload failed execution or gas accounting: " +
+                               results[i].name);
+    }
     results[i].ns_per_iteration = points[i].median();
+    results[i].samples = points[i].samples.size();
     results[i].relative_mad = points[i].relative_mad();
     if (results[i].scheduled_gas_per_iteration != 0) {
       results[i].ns_per_gas =

@@ -148,7 +148,7 @@ target_link_libraries(
   runtime_test_util
   GTest::gtest
 )
-gtest_discover_tests(test_ffi_mock_syscall_test)
+hogd_discover_tests(test_ffi_mock_syscall_test)
 
 # These tests exercise the public extern "C" API, so they go through
 # lazy_init() on first use exactly as a real consumer does. They link the
@@ -166,6 +166,7 @@ file(GLOB TEST_FFI_REGRESSION_TESTS CONFIGURE_DEPENDS
 add_executable(
   test_ffi_test
   test_bindings_test.cc
+  rv32_stack_usage_test.cc
   ${TEST_FFI_REGRESSION_TESTS}
 )
 
@@ -186,7 +187,7 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
 )
-gtest_discover_tests(test_ffi_test)
+hogd_discover_tests(test_ffi_test)
 
 # Separate binary for coverage that must run before logging is initialized.
 # It links GTest::gtest_main (the default main) instead of the custom main()
@@ -214,4 +215,4 @@ target_link_libraries(
   GTest::gtest
   GTest::gtest_main
 )
-gtest_discover_tests(test_ffi_first_call_test)
+hogd_discover_tests(test_ffi_first_call_test)

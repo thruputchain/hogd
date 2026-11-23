@@ -18,8 +18,6 @@ concurrency:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
 
 jobs:
@@ -35,33 +33,10 @@ jobs:
         partition: [prod, exempt, other]
 
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false # We handle submodules manually for selective init
 
       - name: Configure Namespace Cache
@@ -70,8 +45,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Tidy Scope
         run: |
@@ -89,10 +71,15 @@ jobs:
           fi
 
       - name: Fetch Changed-File Base
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
           if [ "$TIDY_SCOPE" = "changed" ]; then
-            git fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
-            git fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
+            # The checkout does not persist credentials; pass the job token to
+            # these two fetches only, while hogd itself is still private.
+            auth="AUTHORIZATION: basic $(printf 'x-access-token:%s' "$GH_TOKEN" | base64 -w0)"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_BASE_SHA"
+            git -c "http.https://github.com/.extraheader=$auth" fetch --no-tags --depth=1 origin "$TIDY_HEAD_SHA"
           fi
 
       - name: Use Full Scope for Tidy Infrastructure Changes
@@ -136,6 +123,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: |
@@ -148,6 +137,7 @@ jobs:
             external/crc32c \
             external/blake3 \
             external/corrosion \
+            external/mldsa-native \
             built_contracts/integration_test_contracts
 
       # REMOVED: Install Rust/Cargo - baked into base image
@@ -216,7 +206,9 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          sccache --show-stats
 
       - name: Print Log Download Instructions
         if: always()

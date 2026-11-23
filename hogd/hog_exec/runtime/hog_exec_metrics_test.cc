@@ -3,6 +3,7 @@
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/hog_exec/shared.h"
 #include "hogd/init.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -12,9 +13,17 @@ namespace hogd {
 // (#2605).
 TEST(HogexecMetricsTest, LaunchLogWorkerRequiresInitializedMetrics)
 {
-  EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
+  X23_EXPECT_DEATH(HogexecMetrics::launch_log_worker(), "not initialized");
 
   init_hog_exec_metrics();
+  EXPECT_EQ(successful_validation_tx_count_metric.value(), 0U);
+  EXPECT_EQ(failed_validation_tx_count_metric.value(), 0U);
+  HogexecMetrics::mark_successful_validation_tx();
+  HogexecMetrics::mark_failed_validation_tx();
+  EXPECT_EQ(successful_validation_tx_count_metric.value(), 1U);
+  EXPECT_EQ(failed_validation_tx_count_metric.value(), 1U);
+  EXPECT_EQ(successful_proposed_tx_count_metric.value(), 0U);
+  EXPECT_EQ(failed_proposed_tx_count_metric.value(), 0U);
   HogexecMetrics::launch_log_worker();
   // Repeat launch stays an idempotent no-op.
   HogexecMetrics::launch_log_worker();

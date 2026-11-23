@@ -1,23 +1,40 @@
 #include <gtest/gtest.h>
 
+#include <array>
+#include <atomic>
+#include <chrono>
+#include <cstring>
+#include <latch>
 #include <limits>
 #include <memory>
+#include <thread>
 #include <unordered_map>
+#include <unordered_set>
+#include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/chunked_vector.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_db/status.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
+#include "hogd/hog_mempool/rpc_from_gateway.h"
 #include "hogd/hog_mempool/scheduler.h"
 #include "hogd/hog_mempool/test/infra.h"
+#include "hogd/hog_mempool/test/scheduler_checks.h"
 #include "hogd/hog_mempool/test/txs.h"
+#include "hogd/xdr/signed_transaction_hash.h"
+#include "sched_coord.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -25,6 +42,42 @@ namespace {
 
 constexpr size_t kBlockSize = 100;
 constexpr size_t kNumTxs = 100;
+
+TransactionHashBatch
+hash_txs(const SignedTransactionBatch &txs)
+{
+  TransactionHashBatch hashes;
+  hashes.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    hashes.push_back(sha256(tx.tx));
+  }
+  return hashes;
+}
+
+// [tx] with one more placeholder signature, all [byte]: a different signed
+// encoding of the same body for each [byte]. The scheduler does not check
+// signatures.
+SignedTransaction
+with_signature(SignedTransaction tx, uint8_t byte)
+{
+  DecoratedSignature signature;
+  signature.public_key_id = 0;
+  signature.signature = Signature(CryptographicScheme::Ed25519);
+  Ed25519Signature &bytes = signature.signature.ed25519();
+  std::memset(bytes.data(), byte, bytes.size());
+  tx.signatures.push_back(signature);
+  return tx;
+}
+
+// A block's transfers as they arrive when hog_db sent them as one chunk.
+BlockTransfers
+one_chunk_transfer(BlockHeight block, DeltaChunk deltas)
+{
+  std::vector<DeltaChunk> chunks;
+  chunks.push_back(std::move(deltas));
+  return BlockTransfers{.block = block,
+                        .deltas = ChunkedVector<DeltaChunk>(std::move(chunks))};
+}
 
 } // namespace
 
@@ -36,13 +89,62 @@ TEST(Scheduler, ReadAge)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->read_average_hog_ages({MempoolTestInfra::kAccountAddresses[0]})();
-  const auto [ret, lock] =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
-  EXPECT_EQ(ret->num_hogs[kHogAgeGroupToSchedule],
+  scheduler->read_average_native_token_ages(
+      {MempoolTestInfra::kAccountAddresses[0]})();
+  const auto [ret, lock] = scheduler->get_cached_native_token_age(
+      MempoolTestInfra::kAccountAddresses[0]);
+  EXPECT_EQ(ret->num_native_tokens[kNativeTokenAgeGroupToSchedule],
             // TODO(jhumphri): Update this, too.
             to_xdr(static_cast<uint128_t>(5'000'000'000 * 10)));
-  EXPECT_EQ(ret->average_ages[kHogAgeGroupToSchedule], 0);
+  EXPECT_EQ(ret->average_ages[kNativeTokenAgeGroupToSchedule], 0);
+}
+
+// Native-token ages travel to and from the database in records under the bound,
+// as many as the accounts take.
+TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
+{
+  MempoolTestInfra server;
+  // Genesis transfer processing updates and persists the same cached ages.
+  server.mempool_coord_rpc().wait_for_transfer_data(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+  scheduler->set_max_native_token_ages_per_record(3);
+
+  x23::XdrVec<ContractAddress> accounts;
+  for (const ContractAddress &address : MempoolTestInfra::kAccountAddresses) {
+    accounts.push_back(address);
+  }
+  const Scheduler::ReadAverageNativeTokenAgesResult read =
+      scheduler->read_average_native_token_ages(accounts)();
+  EXPECT_EQ(read.found.size(), accounts.size());
+  EXPECT_TRUE(read.missing.empty());
+
+  // A distinct transfer to each account gives each a distinct age to write.
+  DeltaChunk deltas;
+  for (size_t i = 0; i < accounts.size(); i++) {
+    deltas.push_back(Delta{.address = accounts[i],
+                           .native_token_delta =
+                               to_xdr(static_cast<int128_t>(i + 1) * 1000)});
+  }
+  scheduler->process_transfers(
+      one_chunk_transfer(/*block=*/7, std::move(deltas)))();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), accounts.size());
+  std::vector<NativeTokenAge> written;
+  for (const ContractAddress &account : accounts) {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    written.push_back(*age);
+  }
+  scheduler->write_dirty_native_token_ages_to_db()();
+
+  // Reading again replaces the cached ages with what the database holds.
+  const Scheduler::ReadAverageNativeTokenAgesResult reread =
+      scheduler->read_average_native_token_ages(accounts)();
+  EXPECT_EQ(reread.found.size(), accounts.size());
+  for (size_t i = 0; i < accounts.size(); i++) {
+    const auto [age, lock] =
+        scheduler->get_cached_native_token_age(accounts[i]);
+    EXPECT_EQ(*age, written[i]);
+  }
 }
 
 TEST(Scheduler, AddVettedTx)
@@ -54,7 +156,10 @@ TEST(Scheduler, AddVettedTx)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
@@ -71,42 +176,88 @@ TEST(Scheduler, AddVettedTxFromUnknownAccount)
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
   EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
 }
 
-TEST(Scheduler, LocalSchedulingDropsTxWhenAllHogAgeGroupsAreEmpty)
+TEST(Scheduler, IsPendingReturnsFalseForUncachedAccount)
+{
+  const ContractAddress kUncachedAccount = make_account_address(99);
+  fib_client_t fib_client(kUncachedAccount);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  EXPECT_FALSE(scheduler->is_pending(txs[0], sha256(txs[0].tx)));
+}
+
+TEST(Scheduler, LocalSchedulingDropsTxWhenAllNativeTokenAgeGroupsAreEmpty)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+
+  const TransactionHash tx_hash = sha256(txs[0].tx);
+  MempoolGatewayRpc gateway(&server.mempool_coord_rpc());
+  auto lookup = gateway.schedgateway_lookup_tx({tx_hash})();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_TRUE(lookup[0]);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
 
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(tx_hash));
+
+  lookup = gateway.schedgateway_lookup_tx({tx_hash})();
+  ASSERT_EQ(lookup.size(), 1UL);
+  EXPECT_FALSE(lookup[0]);
+
+  // A later tx submission must restore the tx to both the [Scheduler::txs_]
+  // cache and the runqueue ([Scheduler::accounts_]).
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({txs[0]}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->find_tx(tx_hash));
 }
 
 TEST(Scheduler, AddVettedTxDuplicate)
@@ -118,36 +269,709 @@ TEST(Scheduler, AddVettedTxDuplicate)
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
   EXPECT_EQ(scheduler->size(), 0UL);
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch first =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(first.size(), 1UL);
+  EXPECT_EQ(first[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
   // Now add the transaction a second time.
-  scheduler->add_txs({txs[0]})();
+  const SchedGatewaySubmitOutcomeBatch duplicate =
+      scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  ASSERT_EQ(duplicate.size(), 1UL);
+  EXPECT_EQ(duplicate[0],
+            SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
   EXPECT_EQ(scheduler->size(), 1UL);
 }
 
-TEST(Scheduler, CycleGroupsMovesHogsBetweenBuckets)
+TEST(Scheduler, ResubmittedNominationTxIsScheduledOnce)
 {
-  HogAge hog_age{};
-  hog_age.address = MempoolTestInfra::kAccountAddresses[0];
-  hog_age.num_hogs[kHogAgeGroupToSchedule] = to_xdr(static_cast<uint128_t>(1));
-  hog_age.average_ages[kHogAgeGroupToSchedule] = 10;
-  hog_age.num_hogs[kHogAgeGroupAlreadyScheduled] =
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHashBatch hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  const BlockHeight height = scheduler->current_block();
+
+  scheduler->add_txs(txs, hashes)();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->is_pending(txs[0], hashes[0]));
+
+  // Submissions can arrive between scheduling chunks of the same nomination.
+  // The duplicate remains admitted, but must not be scheduled a second time.
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs(txs, hashes)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+
+  // Commit cleanup uses all attempted hashes, including failed executions.
+  // Before the fix, scheduled_hashes contains the same hash twice and this
+  // panics when the second removal finds that the cache entry is already gone.
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduled_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(hashes[0]));
+  EXPECT_FALSE(scheduler->is_pending(txs[0], hashes[0]));
+  EXPECT_EQ(scheduler->current_block(), height);
+}
+
+TEST(Scheduler, ResubmittedNominationTxIsReenqueuedAfterAbandon)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+  const TransactionHashBatch hashes = hash_txs(txs);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs(txs, hashes)();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  scheduler->add_txs(txs, hashes)();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  // The coordinator explicitly restores the losing nomination's transactions.
+  // Suppressing duplicate admission must not suppress this reenqueue.
+  scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
+  scheduler->abandon_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
+  scheduled.clear();
+  scheduler->start_pending_nomination(/*block_id=*/3);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/3)();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+}
+
+TEST(Scheduler, HashSignedTransactionMatchesSeparateHashes)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransaction tx =
+      with_signature(generate_unsigned_txs(fib_client, 1)[0], 7);
+  tx.pubkey_claim_key =
+      x23::Ptr<PublicKey>(new PublicKey(CryptographicScheme::Ed25519));
+
+  const SignedTransactionHashes hashes = hash_signed_transaction(tx);
+  EXPECT_EQ(hashes.tx_hash, sha256(tx.tx));
+  EXPECT_EQ(hashes.signed_tx_hash, sha256(tx));
+  EXPECT_NE(hashes.tx_hash, hashes.signed_tx_hash);
+}
+
+TEST(Scheduler, FindSignedTxMatchesOnlyTheCachedEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const std::shared_ptr<const SignedTransaction> found =
+      scheduler->find_signed_tx(sha256(a));
+  ASSERT_TRUE(found);
+  EXPECT_EQ(*found, a);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_FALSE(scheduler->find_signed_tx(tx_hash));
+}
+
+TEST(Scheduler, KeptVariantLeavesCachedEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                         Scheduler::CachedVariant::kSubmitUnvetted)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  ASSERT_TRUE(scheduler->find_tx(tx_hash));
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), a);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+}
+
+TEST(Scheduler, ReplacedVariantIsScheduledAndRemoved)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                         Scheduler::CachedVariant::kSubmitVetted)();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  // The displaced encoding stays findable, so a proposal naming both signings
+  // resolves and its repeated body is rejected.
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  ASSERT_TRUE(scheduler->find_tx(tx_hash));
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), b);
+  ASSERT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_EQ(*scheduler->find_signed_tx(sha256(a)), a);
+  ASSERT_TRUE(scheduler->find_signed_tx(sha256(b)));
+
+  // The runqueue holds the replacement too.
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), b);
+  ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled_signed_hashes.front(), sha256(b));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+
+  // The index entry went with the cache entry, so the body can be cached again
+  // under either encoding.
+  scheduler->add_txs({a}, {tx_hash})();
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+}
+
+// Vetted replacements keep every encoding they displace findable, and bringing
+// back a displaced encoding makes it live again.
+TEST(Scheduler, ReplacedVariantKeepsEveryEncoding)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const SignedTransaction c = with_signature(body, 3);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  scheduler->add_txs({c}, {tx_hash}, {sha256(c)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), c);
+  for (const SignedTransaction &encoding : {a, b, c}) {
+    TransactionHash found_tx_hash{};
+    const std::shared_ptr<const SignedTransaction> found =
+        scheduler->find_signed_tx(sha256(encoding), &found_tx_hash);
+    ASSERT_TRUE(found);
+    EXPECT_EQ(*found, encoding);
+    EXPECT_EQ(found_tx_hash, tx_hash);
+  }
+
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), b);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(a)));
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(c)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+}
+
+TEST(Scheduler, SignedVariantsShareHashSetLifetime)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  std::weak_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
+      shared_hashes;
+  {
+    auto [entry, lock] = scheduler->txs_.find(sha256(a));
+    ASSERT_NE(entry, nullptr);
+    shared_hashes = (*entry)->signed_tx_hashes;
+  }
+  auto held_a = scheduler->find_signed_tx(sha256(a));
+
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  {
+    auto [entry, lock] = scheduler->txs_.find(sha256(b));
+    ASSERT_NE(entry, nullptr);
+    EXPECT_EQ((*entry)->signed_tx_hashes, shared_hashes.lock());
+  }
+  auto held_b = scheduler->find_signed_tx(sha256(b));
+  TransactionHashBatch removed{tx_hash};
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(removed))();
+  EXPECT_FALSE(shared_hashes.expired());
+  held_a.reset();
+  EXPECT_FALSE(shared_hashes.expired());
+  held_b.reset();
+  EXPECT_TRUE(shared_hashes.expired());
+}
+
+TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  const SignedTransaction a = with_signature(body, 1);
+  const SignedTransaction b = with_signature(body, 2);
+  const TransactionHash tx_hash = sha256(body.tx);
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  scheduler->start_pending_nomination(/*block_id=*/2);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), a);
+  ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled_signed_hashes.front(), sha256(a));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  // Replacing a body the nomination holds swaps only the cache entry: the
+  // nomination keeps its copy, and the body stays off the runqueue.
+  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduled.front(), a);
+  EXPECT_TRUE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  scheduler->reenqueue_txs(scheduled_hashes.begin(), scheduled_hashes.end());
+  scheduler->abandon_pending_nomination(/*block_id=*/2)();
+  EXPECT_EQ(scheduler->size(), 1);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+  scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
+  scheduled.clear();
+  scheduler->start_pending_nomination(/*block_id=*/3);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), b);
+  ASSERT_EQ(scheduled_signed_hashes.size(), 1UL);
+  EXPECT_EQ(scheduled_signed_hashes.front(), sha256(b));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(scheduled_hashes))();
+  scheduler->commit_pending_nomination(/*block_id=*/3)();
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(b)));
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+}
+
+TEST(Scheduler, LatestFailedTransactionOutcomeWins)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->set_current_block(0);
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      scheduler->current_block(),
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(
+          SchedulerErrorCode::SchedulerErrorNativeTokenAgeUnavailable))();
+
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().height, 0);
+
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+
+  EXPECT_EQ(scheduler->lookup_transaction_outcome(tx_hash)().height, 0);
+
+  scheduler->set_current_block(43);
+  const SchedulerTransactionOutcome pending =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(pending.status,
+            SchedulerTransactionStatus::SchedulerTransactionPending);
+  EXPECT_EQ(pending.height, 43);
+  const TransactionHashBatch tx_hashes{tx_hash};
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(tx_hashes))();
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      scheduler->current_block(),
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionDropped);
+  EXPECT_EQ(
+      outcome.error_source,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler);
+  EXPECT_EQ(outcome.error_code,
+            static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+  EXPECT_EQ(outcome.height, 43);
+}
+
+TEST(Scheduler, CommittedTransactionOutcomeIsNeverOverwritten)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransaction tx = generate_unsigned_txs(fib_client, 1)[0];
+  const TransactionHash tx_hash = sha256(tx.tx);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/42,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorNone, 0)();
+  const SchedGatewaySubmitOutcomeBatch outcomes =
+      scheduler->add_txs({tx}, {tx_hash})();
+  ASSERT_EQ(outcomes.size(), 1UL);
+  EXPECT_EQ(outcomes[0], SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+  scheduler->record_transaction_outcome(
+      tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+      scheduler->current_block(),
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+      static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired))();
+
+  const SchedulerTransactionOutcome outcome =
+      scheduler->lookup_transaction_outcome(tx_hash)();
+  EXPECT_EQ(outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(outcome.height, 42);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesPreserveSuccessAndReplaceFailure)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHash first{};
+  TransactionHash second{};
+  second[0] = 1;
+  const TransactionHashBatch hashes{first, second, first};
+  scheduler.record_transaction_outcome(
+      first, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/7)();
+  scheduler.record_transaction_outcome(
+      second, SchedulerTransactionStatus::SchedulerTransactionRetry,
+      /*height=*/9,
+      SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+      /*error_code=*/123)();
+
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  const SchedulerTransactionOutcome first_outcome =
+      scheduler.lookup_transaction_outcome(first)();
+  EXPECT_EQ(first_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(first_outcome.height, 7);
+  EXPECT_EQ(first_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(first_outcome.error_code, 0);
+  const SchedulerTransactionOutcome second_outcome =
+      scheduler.lookup_transaction_outcome(second)();
+  EXPECT_EQ(second_outcome.status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+  EXPECT_EQ(second_outcome.height, 10);
+  EXPECT_EQ(second_outcome.error_source,
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+  EXPECT_EQ(second_outcome.error_code, 0);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesExpireFromProcessingHeight)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  const TransactionHashBatch hashes{TransactionHash{}};
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/7)();
+  scheduler.set_current_block(10 + Scheduler::kTransactionOutcomeBlockLifetime -
+                              1);
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 7);
+  scheduler.increment_current_block()();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().status,
+            SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/60)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>{}, /*height=*/61)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hashes[0])().height, 60);
+}
+
+TEST(Scheduler, BatchCommittedOutcomesRecordEveryTransaction)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 5000; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
+    hashes.push_back(hash);
+  }
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  for (const TransactionHash &hash : hashes) {
+    const SchedulerTransactionOutcome outcome =
+        scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+  }
+}
+
+TEST(Scheduler, BatchCommitWinsOverConcurrentRetryOutcomes)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  TransactionHashBatch hashes;
+  for (size_t i = 0; i < 8192; ++i) {
+    TransactionHash hash{};
+    hash[0] = static_cast<uint8_t>(i);
+    hash[1] = static_cast<uint8_t>(i >> 8);
+    hashes.push_back(hash);
+  }
+  std::jthread retries([&] {
+    for (const auto &hash : hashes) {
+      scheduler.record_transaction_outcome(
+          hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+          /*height=*/9,
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+          /*error_code=*/123)();
+    }
+  });
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  retries.join();
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_code, 0);
+  }
+}
+
+TEST(Scheduler, BatchCommittedOutcomesCrossChunks)
+{
+  Scheduler scheduler(/*current_block=*/10, nullptr);
+  constexpr size_t kChunkSize = Scheduler::kTransactionOutcomeChunkSize;
+  TransactionHashBatch hashes;
+  // The scheduler adds at most [kChunkSize] txs to a shard before it needs to
+  // drop the shard lock and acquire it again. Thus, we create [(2 * kChunkSize)
+  // + 1] hashes so that the scheduler needs to split the txs across 3 groups,
+  // releasing/acquiring the shard lock each time.
+  static_assert((2 * kChunkSize) + 1 < Scheduler::kMaxTransactionsPerShard);
+  for (size_t nonce = 0; hashes.size() < (2 * kChunkSize) + 1; ++nonce) {
+    TransactionHash hash{};
+    std::memcpy(hash.data(), &nonce, sizeof(nonce));
+    if (Scheduler::transaction_outcome_shard_index(hash) == 0) {
+      hashes.push_back(hash);
+    }
+  }
+  for (const auto &hash : hashes) {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        /*height=*/9,
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  }
+
+  const std::array<size_t, 5> probes{0, kChunkSize - 1, kChunkSize,
+                                     (2 * kChunkSize) - 1, 2 * kChunkSize};
+  std::latch reader_started(1);
+  std::atomic<bool> commit_finished = false;
+  std::jthread reader([&] {
+    std::array<bool, probes.size()> committed{};
+    const auto check_outcomes = [&] {
+      for (size_t i = 0; i < probes.size(); ++i) {
+        const auto outcome =
+            scheduler.lookup_transaction_outcome(hashes[probes[i]])();
+        if (outcome.status ==
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+          committed[i] = true;
+          EXPECT_EQ(outcome.height, 10);
+          EXPECT_EQ(
+              outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+          EXPECT_EQ(outcome.error_code, 0);
+        }
+        else {
+          EXPECT_FALSE(committed[i]);
+          EXPECT_EQ(outcome.status,
+                    SchedulerTransactionStatus::SchedulerTransactionRetry);
+          EXPECT_EQ(outcome.height, 9);
+          EXPECT_EQ(outcome.error_source,
+                    SchedulerTransactionErrorSource::
+                        SchedulerTransactionErrorExecutor);
+          EXPECT_EQ(outcome.error_code, 123);
+        }
+      }
+    };
+    check_outcomes();
+    reader_started.count_down();
+    while (!commit_finished.load(std::memory_order_acquire)) {
+      check_outcomes();
+    }
+    check_outcomes();
+    for (bool observed : committed) {
+      EXPECT_TRUE(observed);
+    }
+  });
+  reader_started.wait();
+  scheduler.record_committed_transaction_outcomes(
+      x23::span<const TransactionHash>(hashes), /*height=*/10)();
+  commit_finished.store(true, std::memory_order_release);
+  reader.join();
+
+  for (const auto &hash : hashes) {
+    const auto outcome = scheduler.lookup_transaction_outcome(hash)();
+    EXPECT_EQ(outcome.status,
+              SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+    EXPECT_EQ(outcome.height, 10);
+    EXPECT_EQ(outcome.error_source,
+              SchedulerTransactionErrorSource::SchedulerTransactionErrorNone);
+    EXPECT_EQ(outcome.error_code, 0);
+  }
+}
+
+TEST(Scheduler, ClearFailureAfterOutcomeReplacementAndExpiry)
+{
+  Scheduler scheduler(/*current_block=*/0, nullptr);
+  const TransactionHash hash{};
+  const auto record_failure = [&] {
+    scheduler.record_transaction_outcome(
+        hash, SchedulerTransactionStatus::SchedulerTransactionRetry,
+        scheduler.current_block(),
+        SchedulerTransactionErrorSource::SchedulerTransactionErrorExecutor,
+        /*error_code=*/123)();
+  };
+  const auto clear_failure = [&] {
+    scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+    EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+              SchedulerTransactionStatus::SchedulerTransactionNotFound);
+  };
+  for (size_t i = 0; i < 2; ++i) {
+    record_failure();
+    clear_failure();
+  }
+  record_failure();
+  scheduler.record_transaction_outcome(
+      hash, SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      /*height=*/0)();
+  scheduler.clear_transaction_outcome_if_not_already_committed(hash)();
+  EXPECT_EQ(scheduler.lookup_transaction_outcome(hash)().status,
+            SchedulerTransactionStatus::SchedulerTransactionSucceeded);
+
+  scheduler.set_current_block(Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
+  record_failure();
+  scheduler.set_current_block(2 * Scheduler::kTransactionOutcomeBlockLifetime);
+  scheduler.increment_current_block()();
+  record_failure();
+  clear_failure();
+}
+
+TEST(Scheduler, CycleGroupsMovesNativeTokensBetweenBuckets)
+{
+  NativeTokenAge native_token_age{};
+  native_token_age.address = MempoolTestInfra::kAccountAddresses[0];
+  native_token_age.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+      to_xdr(static_cast<uint128_t>(1));
+  native_token_age.average_ages[kNativeTokenAgeGroupToSchedule] = 10;
+  native_token_age.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
       to_xdr(static_cast<uint128_t>(2));
-  hog_age.average_ages[kHogAgeGroupAlreadyScheduled] = 5;
-  hog_age.num_hogs[kHogAgeGroupReceived] = to_xdr(static_cast<uint128_t>(3));
-  hog_age.average_ages[kHogAgeGroupReceived] = 1;
+  native_token_age.average_ages[kNativeTokenAgeGroupAlreadyScheduled] = 5;
+  native_token_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
+      to_xdr(static_cast<uint128_t>(3));
+  native_token_age.average_ages[kNativeTokenAgeGroupReceived] = 1;
 
-  Scheduler::cycle_groups(hog_age);
+  Scheduler::cycle_groups(native_token_age);
 
-  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]),
+  EXPECT_EQ(from_xdr(native_token_age
+                         .num_native_tokens[kNativeTokenAgeGroupToSchedule]),
             static_cast<uint128_t>(3));
-  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupToSchedule], 7);
-  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(native_token_age.average_ages[kNativeTokenAgeGroupToSchedule], 7);
+  EXPECT_EQ(from_xdr(
+                native_token_age
+                    .num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(3));
-  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupAlreadyScheduled], 1);
-  EXPECT_EQ(from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(native_token_age.average_ages[kNativeTokenAgeGroupAlreadyScheduled],
+            1);
+  EXPECT_EQ(from_xdr(native_token_age
+                         .num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(hog_age.average_ages[kHogAgeGroupReceived], 0);
+  EXPECT_EQ(native_token_age.average_ages[kNativeTokenAgeGroupReceived], 0);
 }
 
 TEST(Scheduler, Single)
@@ -158,37 +982,41 @@ TEST(Scheduler, Single)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
-  // Check that the correct number of hogs was deducted.
-  auto [age, lock] =
-      scheduler->get_cached_hog_age(MempoolTestInfra::kAccountAddresses[0]);
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  // Check that the correct number of native tokens was deducted.
+  auto [age, lock] = scheduler->get_cached_native_token_age(
+      MempoolTestInfra::kAccountAddresses[0]);
   lock.unlock();
 
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
             5'000'000'000 * 10);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 0);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+  scheduler->schedule(kBlockSize, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1);
   EXPECT_EQ(scheduled[0].tx.invocation.invoked_address,
             MempoolTestInfra::kAccountAddresses[0]);
 
-  // Check the correct number of hogs was deducted from the
-  // [kHogAgeGroupToSchedule] group.
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 5'000'000'000 * 9);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupToSchedule], 0);
+  // Check the correct number of native tokens was deducted from the
+  // [kNativeTokenAgeGroupToSchedule] group.
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            5'000'000'000 * 9);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 0);
 
-  // Check that the correct number of hogs was added to the
-  // [kHogAgeGroupAlreadyScheduled] group.
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  // Check that the correct number of native tokens was added to the
+  // [kNativeTokenAgeGroupAlreadyScheduled] group.
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             5'000'000'000);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled],
-            age->average_ages[kHogAgeGroupToSchedule] + 2);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled],
+            age->average_ages[kNativeTokenAgeGroupToSchedule] + 2);
 }
 
-TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
+TEST(Scheduler, PendingNominationKeepsLiveNativeTokenAgesUnchangedUntilCommit)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
@@ -196,39 +1024,53 @@ TEST(Scheduler, PendingNominationKeepsLiveHogAgesUnchangedUntilCommit)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
-  auto [before_commit, before_lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(before_commit->num_hogs[kHogAgeGroupToSchedule]),
+  auto [before_commit, before_lock] =
+      scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(before_commit
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
             5'000'000'000 * 10);
-  EXPECT_EQ(from_xdr(before_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(
+                before_commit
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             0UL);
   before_lock.unlock();
 
   scheduler->start_pending_nomination(/*block_id=*/1);
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
 
   auto [during_nomination, during_lock] =
-      scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(during_nomination->num_hogs[kHogAgeGroupToSchedule]),
+      scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(during_nomination
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
             5'000'000'000 * 10);
-  EXPECT_EQ(from_xdr(during_nomination->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(
+                during_nomination
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             0UL);
   during_lock.unlock();
 
-  scheduler->commit_pending_nomination(/*block_id=*/1);
+  scheduler->commit_pending_nomination(/*block_id=*/1)();
 
-  auto [after_commit, after_lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupToSchedule]),
-            (5'000'000'000 * 10) - gas_limit);
-  EXPECT_EQ(from_xdr(after_commit->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  auto [after_commit, after_lock] =
+      scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(
+      from_xdr(after_commit->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+      (5'000'000'000 * 10) - gas_limit);
+  EXPECT_EQ(from_xdr(
+                after_commit
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             gas_limit);
-  EXPECT_EQ(after_commit->average_ages[kHogAgeGroupAlreadyScheduled], 2);
+  EXPECT_EQ(after_commit->average_ages[kNativeTokenAgeGroupAlreadyScheduled],
+            2);
   after_lock.unlock();
 }
 
@@ -244,40 +1086,54 @@ TEST(Scheduler, PendingNominationExcludesUnschedulableAccountAcrossSchedules)
   txs[2].tx.uniquifier.block_expiry_height = 12;
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1], txs[2]})();
+  scheduler->add_txs({txs[0], txs[1], txs[2]},
+                     hash_txs({txs[0], txs[1], txs[2]}))();
   EXPECT_EQ(scheduler->size(), 3UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 1UL);
+  // txs[1] was discarded from the cache along with the runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
   scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
   scheduled.clear();
   // Check that no tx is scheduled.
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  scheduler->commit_pending_nomination(/*block_id=*/1);
+  scheduler->commit_pending_nomination(/*block_id=*/1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  // This test never removes txs[0], so both scheduled txs stay cached.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/2));
 }
 
 TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
@@ -292,40 +1148,253 @@ TEST(Scheduler, AddTxsDoesNotReenableAccountExcludedByPendingNomination)
   txs[2].tx.uniquifier.block_expiry_height = 12;
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
 
   scheduler->start_pending_nomination(/*block_id=*/1);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[0]);
   EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  scheduler->add_txs({txs[2]})();
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
   scheduled.clear();
   // Check that no tx is scheduled.
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_TRUE(scheduled_hashes.empty());
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 1UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  scheduler->abandon_pending_nomination(/*block_id=*/1);
+  // This test does not reenqueue txs[0], so it stays cached off the runqueue.
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
 
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[2]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/2));
+}
+
+TEST(Scheduler, CommitTouchingExcludedAccountRemovesFromScheduler)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto balance = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit =
+      txs[0].tx.invocation.gas_limit * 2;        // > balance
+  txs[2].tx.uniquifier.block_expiry_height = 12; // ordinary follow-up
+
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/balance);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  // txs[0] is nominated; txs[1] is over budget, so [account] is excluded from
+  // the block and dropped from [ready_accounts_] for the rest of the block.
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  // An ordinary follow-up submission lands on the excluded account's runqueue,
+  // but [add_txs] refuses to re-insert the account into [ready_accounts_].
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
+  EXPECT_EQ(scheduler->size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  EXPECT_TRUE(scheduled.empty()); // still excluded
+
+  // Commit a block that touches the excluded account's runqueue tx.
+  // In [remove_from_scheduler()], [account_is_ready()] is false and
+  // [ready_accounts_.erase(...)] returns 0. Before the fix,
+  // [ready_accounts_.erase(...)] would trigger a CHECK.
+  x23::Vec<TransactionHash> hashes;
+  hashes.push_back(sha256(txs[2].tx));
+  scheduler->remove_from_scheduler(x23::span<const TransactionHash>(hashes))();
+
+  // We only reach this point if the fix is working.
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+}
+
+// A validated-block commit empties an excluded account's runqueue while the
+// nomination is pending: remove_from_scheduler(), then abandon.
+TEST(Scheduler, ValidatedCommitForPendingExcludedAccountLeavesAccountReady)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 4);
+  const auto balance = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10; // affordable
+  txs[1].tx.uniquifier.block_expiry_height = 11;
+  txs[1].tx.invocation.gas_limit =
+      txs[0].tx.invocation.gas_limit * 2;        // > balance
+  txs[2].tx.uniquifier.block_expiry_height = 12; // affordable
+  txs[3].tx.uniquifier.block_expiry_height = 13; // submitted after commit
+
+  MempoolTestInfra server;
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/balance);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1], txs[2]},
+                     hash_txs({txs[0], txs[1], txs[2]}))();
+  EXPECT_EQ(scheduler->size(), 3UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[0]);
+  EXPECT_EQ(scheduler->size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+
+  x23::Vec<TransactionHash> committed;
+  committed.push_back(sha256(txs[0].tx));
+  committed.push_back(sha256(txs[2].tx));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[0].tx)), nullptr);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[2].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+
+  scheduler->add_txs({txs[3]}, hash_txs({txs[3]}))();
+  scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  ASSERT_EQ(scheduled.size(), 1UL);
+  EXPECT_EQ(scheduled.front(), txs[3]);
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/1));
+}
+
+// Same commit sequence as above, but the unaffordable tx is the account's
+// first: nomination schedules nothing for the account, excludes it, and leaves
+// the later affordable tx on the runqueue for a competing block to commit.
+TEST(Scheduler, ValidatedCommitAfterUnaffordableHeadTxLeavesAccountReady)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 3);
+  const auto balance = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
+  txs[0].tx.uniquifier.block_expiry_height = 10;
+  txs[0].tx.invocation.gas_limit =
+      txs[1].tx.invocation.gas_limit * 2;        // > balance
+  txs[1].tx.uniquifier.block_expiry_height = 11; // affordable
+  txs[2].tx.uniquifier.block_expiry_height = 12; // submitted after commit
+
+  MempoolTestInfra server;
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/balance);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
+
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
+  EXPECT_EQ(scheduler->size(), 2UL);
+
+  scheduler->start_pending_nomination(/*block_id=*/1);
+
+  x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  x23::XdrVec<SignedTransaction> scheduled;
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 1UL);
+  ASSERT_NE(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+  // The unaffordable head tx was discarded from the cache along with the
+  // runqueue.
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+
+  x23::Vec<TransactionHash> committed;
+  committed.push_back(sha256(txs[1].tx));
+  scheduler->remove_from_scheduler(
+      x23::span<const TransactionHash>(committed))();
+  scheduler->abandon_pending_nomination(/*block_id=*/1)();
+
+  EXPECT_EQ(scheduler->size(), 0UL);
+  EXPECT_EQ(scheduler->find_tx(sha256(txs[1].tx)), nullptr);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+
+  scheduler->add_txs({txs[2]}, hash_txs({txs[2]}))();
+  scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
+  scheduled.clear();
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front(), txs[2]);
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -339,21 +1408,21 @@ TEST(Scheduler, ProcessTransfersUpdatesReceivedGroup)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = kBlock;
-  transfer.deltas.push_back(
-      Delta{.address = account,
-            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  const BlockTransfers transfer =
+      one_chunk_transfer(kBlock,
+                         {Delta{.address = account,
+                                .native_token_delta = to_xdr(
+                                    static_cast<int128_t>(5'000'000'000))}});
 
   scheduler->process_transfers(transfer)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(5'000'000'000));
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kBlock);
 }
 
-TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
+TEST(Scheduler, ProcessTransfersCreatesNativeTokenAgeForFirstTimeRecipient)
 {
   constexpr BlockHeight kBlock = 5;
   const ContractAddress account = make_account_address(99);
@@ -361,22 +1430,203 @@ TEST(Scheduler, ProcessTransfersCreatesHogAgeForFirstTimeRecipient)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = kBlock;
-  transfer.deltas.push_back(
-      Delta{.address = account,
-            .hog_delta = to_xdr(static_cast<int128_t>(5'000'000'000))});
+  const BlockTransfers transfer =
+      one_chunk_transfer(kBlock,
+                         {Delta{.address = account,
+                                .native_token_delta = to_xdr(
+                                    static_cast<int128_t>(5'000'000'000))}});
 
   scheduler->process_transfers(transfer)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
   EXPECT_EQ(age->address, account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(5'000'000'000));
-  EXPECT_EQ(age->average_ages[kHogAgeGroupReceived], kBlock);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kBlock);
 }
 
-TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
+TEST(Scheduler, WriteDirtyNativeTokenAgesWritesOnlyChangedAccounts)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &changed = MempoolTestInfra::kAccountAddresses[0];
+  const ContractAddress &unchanged = MempoolTestInfra::kAccountAddresses[1];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  // Reading ages from hog_db caches them but leaves them clean.
+  scheduler->write_dirty_native_token_ages_to_db()();
+  scheduler->read_average_native_token_ages({changed, unchanged})();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  // Change [unchanged]'s row behind the scheduler's back. A write of every
+  // cached account would overwrite it with the cached value.
+  server.set_native_tokens(unchanged, kNativeTokenAgeGroupReceived, /*age=*/3,
+                           /*num_native_tokens=*/7);
+
+  scheduler->process_transfers(one_chunk_transfer(
+      kBlock, {Delta{.address = changed,
+                     .native_token_delta =
+                         to_xdr(static_cast<int128_t>(5'000'000'000))}}))();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  HogDbStatus<NativeTokenAge> changed_row =
+      server.read_address_average_native_token_age(changed);
+  ASSERT_TRUE(changed_row.has_value());
+  {
+    const auto [cached, lock] = scheduler->get_cached_native_token_age(changed);
+    EXPECT_EQ(*changed_row, *cached);
+  }
+  EXPECT_EQ(from_xdr(
+                changed_row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(changed_row->average_ages[kNativeTokenAgeGroupReceived], kBlock);
+
+  HogDbStatus<NativeTokenAge> unchanged_row =
+      server.read_address_average_native_token_age(unchanged);
+  ASSERT_TRUE(unchanged_row.has_value());
+  EXPECT_EQ(from_xdr(
+                unchanged_row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(7));
+  EXPECT_EQ(unchanged_row->average_ages[kNativeTokenAgeGroupReceived], 3);
+}
+
+TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesMarksAccountDirty)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  scheduler->read_average_native_token_ages({account})();
+  scheduler->write_dirty_native_token_ages_to_db()();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  scheduler->apply_committed_block_native_token_ages({txs[0]},
+                                                     /*block_height=*/1)();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  const auto [cached, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(*row, *cached);
+}
+
+// An age that changes after a write has copied it is marked again, and the
+// next write stores the newer age rather than leaving the older one in hog_db.
+// The copy and the flag clear happen under the account's bucket lock, which
+// every age change also takes, so "after the copy" is the only interleaving
+// besides "before the copy".
+TEST(Scheduler, NativeTokenAgeChangedAfterWriteGoesOutInNextWrite)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  auto transfer_at = [&](BlockHeight block, int128_t amount) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block,
+        {Delta{.address = account, .native_token_delta = to_xdr(amount)}}))();
+  };
+  auto cached_age = [&] {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return *age;
+  };
+
+  transfer_at(/*block=*/5, 1'000);
+  const NativeTokenAge first = cached_age();
+  scheduler->write_dirty_native_token_ages_to_db()();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  transfer_at(/*block=*/9, 2'000);
+  const NativeTokenAge second = cached_age();
+  ASSERT_NE(second, first);
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  EXPECT_EQ(*row, second);
+}
+
+// The background writer sends a changed age to hog_db on its own, without
+// any caller asking for a write.
+TEST(Scheduler, BackgroundWriterWritesChangedNativeTokenAges)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->process_transfers(one_chunk_transfer(
+      kBlock, {Delta{.address = account,
+                     .native_token_delta =
+                         to_xdr(static_cast<int128_t>(5'000'000'000))}}))();
+
+  // Several write intervals, so a slow machine does not fail the test.
+  const auto deadline = std::chrono::steady_clock::now() +
+                        (10 * Scheduler::kDefaultNativeTokenAgeWriteInterval);
+  while (scheduler->num_dirty_native_token_ages() != 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+  // The writer clears a mark before sending the age; stopping it waits out a
+  // write in progress, so hog_db holds the age once this returns.
+  scheduler->stop_native_token_age_writer();
+
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  const auto [cached, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(*row, *cached);
+  EXPECT_EQ(from_xdr(row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+}
+
+TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
+{
+  // Total supply stays below INT128_MAX, but token-times-age sums such as
+  // 2^125 * 4 + 2^125 * 7 = 11 * 2^125 would wrap uint128_t.
+  constexpr uint128_t kAmount = static_cast<uint128_t>(1) << 125;
+  const ContractAddress account = make_account_address(99);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  const auto transfer_at = [&](BlockHeight block) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block, {Delta{.address = account,
+                      .native_token_delta =
+                          to_xdr(static_cast<int128_t>(kAmount))}}))();
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return age->average_ages[kNativeTokenAgeGroupReceived];
+  };
+
+  EXPECT_EQ(transfer_at(4), 4UL);
+  // Equal halves at ages 4 and 7 average to 5.5, which rounds up to 6.
+  EXPECT_EQ(transfer_at(7), 6UL);
+  // 2^126 tokens at age 6 plus 2^125 at age 6 + 2^62 weight the newer tokens
+  // 1:3, so the average is 6 + 2^62 / 3, which rounds up.
+  constexpr BlockHeight kFar = static_cast<BlockHeight>(1) << 62;
+  EXPECT_EQ(transfer_at(6 + kFar), 6 + ((kFar + 2) / 3));
+}
+
+TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesUpdatesLiveState)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
@@ -384,47 +1634,61 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesUpdatesLiveState)
   const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5, /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/5,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/1,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
+  scheduler->apply_committed_block_native_token_ages({txs[0]},
+                                                     /*block_height=*/1)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), gas_limit);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 1);
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0UL);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            gas_limit);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 1);
 }
 
-TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsAccountWhenGasExceedsLocalHogs)
+TEST(
+    Scheduler,
+    ApplyCommittedBlockNativeTokenAgesSkipsAccountWhenGasExceedsLocalNativeTokens)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
   const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0]})();
-  scheduler->apply_committed_block_hog_ages({txs[0]}, /*block_height=*/1)();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
+  scheduler->apply_committed_block_native_token_ages({txs[0]},
+                                                     /*block_height=*/1)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(0));
 }
 
-TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsOnlyInvalidAccounts)
+TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesSkipsOnlyInvalidAccounts)
 {
   const ContractAddress &valid_account = MempoolTestInfra::kAccountAddresses[0];
   const ContractAddress &invalid_account =
@@ -439,42 +1703,56 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesSkipsOnlyInvalidAccounts)
       static_cast<uint128_t>(valid_txs[0].tx.invocation.gas_limit);
 
   MempoolTestInfra server;
-  server.set_hogs(valid_account, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(valid_account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(valid_account, kHogAgeGroupReceived, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(invalid_account, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(invalid_account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(invalid_account, kHogAgeGroupReceived, /*age=*/0,
-                  /*num_hogs=*/0);
+  server.set_native_tokens(valid_account, kNativeTokenAgeGroupToSchedule,
+                           /*age=*/0,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(valid_account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(valid_account, kNativeTokenAgeGroupReceived,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(invalid_account, kNativeTokenAgeGroupToSchedule,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(invalid_account,
+                           kNativeTokenAgeGroupAlreadyScheduled, /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(invalid_account, kNativeTokenAgeGroupReceived,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({valid_txs[0], invalid_txs[0]})();
-  scheduler->apply_committed_block_hog_ages({valid_txs[0], invalid_txs[0]},
-                                            /*block_height=*/1)();
+  scheduler->add_txs({valid_txs[0], invalid_txs[0]},
+                     hash_txs({valid_txs[0], invalid_txs[0]}))();
+  scheduler->apply_committed_block_native_token_ages({valid_txs[0],
+                                                      invalid_txs[0]},
+                                                     /*block_height=*/1)();
 
   {
-    const auto [age, lock] = scheduler->get_cached_hog_age(valid_account);
-    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+    const auto [age, lock] =
+        scheduler->get_cached_native_token_age(valid_account);
+    EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
               static_cast<uint128_t>(0));
-    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]), gas_limit);
+    EXPECT_EQ(from_xdr(
+                  age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+              gas_limit);
   }
   {
-    const auto [age, lock] = scheduler->get_cached_hog_age(invalid_account);
-    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]),
+    const auto [age, lock] =
+        scheduler->get_cached_native_token_age(invalid_account);
+    EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
               static_cast<uint128_t>(0));
-    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+    EXPECT_EQ(from_xdr(
+                  age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
               static_cast<uint128_t>(0));
-    EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+    EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
               static_cast<uint128_t>(0));
   }
 }
 
-TEST(Scheduler, ApplyCommittedBlockHogAgesRollsBackAccountWhenLaterTxFails)
+TEST(Scheduler,
+     ApplyCommittedBlockNativeTokenAgesRollsBackAccountWhenLaterTxFails)
 {
   const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
   fib_client_t fib_client(account);
@@ -483,22 +1761,26 @@ TEST(Scheduler, ApplyCommittedBlockHogAgesRollsBackAccountWhenLaterTxFails)
   const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
-  scheduler->add_txs({txs[0], txs[1]})();
-  scheduler->apply_committed_block_hog_ages({txs[0], txs[1]},
-                                            /*block_height=*/1)();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
+  scheduler->apply_committed_block_native_token_ages({txs[0], txs[1]},
+                                                     /*block_height=*/1)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), gas_limit);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            gas_limit);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(0));
 }
 
@@ -508,27 +1790,32 @@ TEST(Scheduler, ProcessTransfersHandlesWithdrawalsAcrossGroups)
   constexpr auto kGas = static_cast<uint128_t>(5'000'000'000);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/0, kGas * 4);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/0, kGas * 3);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0, kGas * 2);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           kGas * 4);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0, kGas * 3);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           kGas * 2);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  HogsTransferred transfer;
-  transfer.block = 10;
   const auto signed_gas = static_cast<int128_t>(kGas);
   const int128_t delta_value = -8 * signed_gas;
-  transfer.deltas.push_back(
-      Delta{.address = account, .hog_delta = to_xdr(delta_value)});
+  const BlockTransfers transfer =
+      one_chunk_transfer(10,
+                         {Delta{.address = account,
+                                .native_token_delta = to_xdr(delta_value)}});
 
   scheduler->process_transfers(transfer)();
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupReceived]),
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(0));
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), kGas);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            kGas);
 }
 
 TEST(Scheduler, CycleAccountWhenGasInsufficient)
@@ -540,28 +1827,33 @@ TEST(Scheduler, CycleAccountWhenGasInsufficient)
   const auto gas_limit = static_cast<uint128_t>(txs[0].tx.invocation.gas_limit);
 
   MempoolTestInfra server;
-  server.set_hogs(account, kHogAgeGroupToSchedule, /*age=*/5,
-                  /*num_hogs=*/0);
-  server.set_hogs(account, kHogAgeGroupAlreadyScheduled, /*age=*/1,
-                  /*num_hogs=*/gas_limit);
-  server.set_hogs(account, kHogAgeGroupReceived, /*age=*/0,
-                  /*num_hogs=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupToSchedule, /*age=*/5,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/1,
+                           /*num_native_tokens=*/gas_limit);
+  server.set_native_tokens(account, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
 
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(scheduled.front().tx.invocation.invoked_address, account);
 
-  const auto [age, lock] = scheduler->get_cached_hog_age(account);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupToSchedule]), 0UL);
-  EXPECT_EQ(age->average_ages[kHogAgeGroupAlreadyScheduled], 2);
-  EXPECT_EQ(from_xdr(age->num_hogs[kHogAgeGroupAlreadyScheduled]),
+  const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0UL);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 2);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
             static_cast<uint128_t>(txs[0].tx.invocation.gas_limit));
 }
 
@@ -573,7 +1865,7 @@ TEST(Scheduler, FindTx)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0]})();
+  scheduler->add_txs({txs[0]}, hash_txs({txs[0]}))();
   EXPECT_EQ(scheduler->size(), 1UL);
 
   TransactionHash hash = sha256(txs[0].tx);
@@ -596,7 +1888,7 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
 
@@ -609,8 +1901,10 @@ TEST(Scheduler, RemoveFromRunqueueSingleTx)
 
   // Nominate a block.
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 1UL);
   EXPECT_EQ(sha256(scheduled.front().tx), sha256(txs[1].tx));
   EXPECT_EQ(scheduler->size(), 0UL);
@@ -634,7 +1928,7 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
 
@@ -646,8 +1940,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxs)
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -665,12 +1961,14 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_EQ(scheduled_hashes.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 2UL);
@@ -683,8 +1981,10 @@ TEST(Scheduler, RemoveFromRunqueueMultipleTxsNomination)
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
 
   scheduled_hashes.clear();
+  scheduled_signed_hashes.clear();
   scheduled.clear();
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   EXPECT_TRUE(scheduled.empty());
   EXPECT_EQ(scheduler->size(), 0UL);
   EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
@@ -698,12 +1998,14 @@ TEST(Scheduler, ReenqueueTxs)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  scheduler->add_txs({txs[0], txs[1]})();
+  scheduler->add_txs({txs[0], txs[1]}, hash_txs({txs[0], txs[1]}))();
   EXPECT_EQ(scheduler->size(), 2UL);
 
   x23::XdrVec<TransactionHash> scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
   x23::XdrVec<SignedTransaction> scheduled;
-  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled);
+  scheduler->schedule(/*num_txs=*/2, scheduled_hashes, scheduled_signed_hashes,
+                      scheduled)();
   ASSERT_EQ(scheduled.size(), 2UL);
   EXPECT_EQ(scheduler->size(), 0UL);
 
@@ -737,44 +2039,48 @@ TEST(Scheduler, Fairness)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // Sets the age and hogs for all accounts. Each account has this age and hogs:
+  // Sets the age and native tokens for all accounts. Each account has this age
+  // and native tokens:
   //
-  // Account 0: Age 3 and 5 billion hogs.
-  // Account 1: Age 2 and 10 billion hogs.
-  // Account 2: Age 1 and 15 billion hogs.
-  // Account 3: Age 0 and 20 billion hogs.
+  // Account 0: Age 3 and 5 billion native tokens.
+  // Account 1: Age 2 and 10 billion native tokens.
+  // Account 2: Age 1 and 15 billion native tokens.
+  // Account 3: Age 0 and 20 billion native tokens.
   //
-  // Thus, there are 50 billion hogs in total across the four accounts.
+  // Thus, there are 50 billion native tokens in total across the four accounts.
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
-    server.set_hogs(MempoolTestInfra::kAccountAddresses[i],
-                    /*group=*/kHogAgeGroupToSchedule,
-                    /*age=*/MempoolTestInfra::kAccountAddresses.size() - i - 1,
-                    /*num_hogs=*/5'000'000'000 * (i + 1));
+    server.set_native_tokens(
+        MempoolTestInfra::kAccountAddresses[i],
+        /*group=*/kNativeTokenAgeGroupToSchedule,
+        /*age=*/MempoolTestInfra::kAccountAddresses.size() - i - 1,
+        /*num_native_tokens=*/5'000'000'000 * (i + 1));
   }
   for (const SignedTransactionBatch &tx : txs) {
-    scheduler->add_txs(tx)();
+    scheduler->add_txs(tx, hash_txs(tx))();
   }
 
   std::unordered_map<ContractAddress, size_t, SipHash24Hasher> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<TransactionHash> scheduled_hashes;
+    SignedTransactionHashBatch scheduled_signed_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled);
+    scheduler->schedule(kBlockSize, scheduled_hashes, scheduled_signed_hashes,
+                        scheduled)();
     for (const SignedTransaction &tx : scheduled) {
       tx_counts[tx.tx.invocation.invoked_address]++;
     }
 
     // We simulate committing the block by increment the current block number in
     // the scheduler.
-    scheduler->increment_current_block();
+    scheduler->increment_current_block()();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
     const ContractAddress &address = MempoolTestInfra::kAccountAddresses[i];
-    // The number of txs scheduled should be the proportion of total hogs that
-    // this account has multiplied by [kBlockSize]. For example, account 1 has
-    // 10 billion hogs, so its proportion of total hogs is 10 billion / (5
-    // billion
+    // The number of txs scheduled should be the proportion of total native
+    // tokens that this account has multiplied by [kBlockSize]. For example,
+    // account 1 has 10 billion native tokens, so its proportion of total native
+    // tokens is 10 billion / (5 billion
     // + 10 billion + 15 billion + 20 billion) = 10 billion / 50 billion = 0.2.
     // Thus, the number of txs scheduled for account 1 should be 0.2 *
     // [kBlockSize] * [kNumRounds].
@@ -811,36 +2117,39 @@ TEST(Scheduler, FairnessAcrossBlocks)
   MempoolTestInfra server;
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
-  // Sets the age and hogs for all accounts. Each account has this age and
-  // hogs:
+  // Sets the age and native tokens for all accounts. Each account has this age
+  // and native tokens:
   //
-  // Account 0: Age 0 and 5 billion hogs.  (Will get 10% of the throughput.)
-  // Account 1: Age 0 and 10 billion hogs. (Will get 20% of the throughput.)
-  // Account 2: Age 0 and 15 billion hogs. (Will get 30% of the throughput.)
-  // Account 3: Age 0 and 20 billion hogs. (Will get 40% of the throughput.)
+  // Account 0: Age 0 and 5 billion native tokens.  (Will get 10% of the
+  // throughput.) Account 1: Age 0 and 10 billion native tokens. (Will get 20%
+  // of the throughput.) Account 2: Age 0 and 15 billion native tokens. (Will
+  // get 30% of the throughput.) Account 3: Age 0 and 20 billion native tokens.
+  // (Will get 40% of the throughput.)
   //
-  // Thus, there are 50 billion hogs in total across the four accounts.
+  // Thus, there are 50 billion native tokens in total across the four accounts.
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
-    server.set_hogs(MempoolTestInfra::kAccountAddresses[i],
-                    /*group=*/kHogAgeGroupToSchedule,
-                    /*age=*/0,
-                    /*num_hogs=*/5'000'000'000 * (i + 1));
+    server.set_native_tokens(MempoolTestInfra::kAccountAddresses[i],
+                             /*group=*/kNativeTokenAgeGroupToSchedule,
+                             /*age=*/0,
+                             /*num_native_tokens=*/5'000'000'000 * (i + 1));
   }
   for (const auto &[_, tx] : txs) {
-    scheduler->add_txs(tx)();
+    scheduler->add_txs(tx, hash_txs(tx))();
   }
 
   std::unordered_map<ContractAddress, size_t, SipHash24Hasher> tx_counts;
   for (size_t i = 0; i < kNumRounds; i++) {
     x23::XdrVec<TransactionHash> scheduled_hashes;
+    SignedTransactionHashBatch scheduled_signed_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
-    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes,
+                        scheduled_signed_hashes, scheduled)();
     EXPECT_EQ(scheduled.size(), 1UL);
     tx_counts[scheduled.front().tx.invocation.invoked_address]++;
 
     // We simulate committing the block by increment the current block number in
     // the scheduler.
-    scheduler->increment_current_block();
+    scheduler->increment_current_block()();
   }
 
   for (size_t i = 0; i < MempoolTestInfra::kAccountAddresses.size(); i++) {
@@ -862,12 +2171,13 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
   fib_client_t fib_client_b(account_b);
 
   MempoolTestInfra server;
-  server.set_hogs(account_a, kHogAgeGroupToSchedule, /*age=*/0,
-                  /*num_hogs=*/100);
-  server.set_hogs(account_a, kHogAgeGroupAlreadyScheduled, /*age=*/0,
-                  /*num_hogs=*/0);
-  server.set_hogs(account_a, kHogAgeGroupReceived, /*age=*/0,
-                  /*num_hogs=*/0);
+  server.set_native_tokens(account_a, kNativeTokenAgeGroupToSchedule, /*age=*/0,
+                           /*num_native_tokens=*/100);
+  server.set_native_tokens(account_a, kNativeTokenAgeGroupAlreadyScheduled,
+                           /*age=*/0,
+                           /*num_native_tokens=*/0);
+  server.set_native_tokens(account_a, kNativeTokenAgeGroupReceived, /*age=*/0,
+                           /*num_native_tokens=*/0);
 
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
 
@@ -902,14 +2212,16 @@ TEST(Scheduler, UnschedulableHeadTxCrashesScheduler)
           .contracts_to_deploy = {},
       }};
 
-  scheduler->add_txs({tx1, tx2, tx_b})();
+  scheduler->add_txs({tx1, tx2, tx_b}, hash_txs({tx1, tx2, tx_b}))();
 
   {
     x23::XdrVec<TransactionHash> scheduled_hashes;
+    SignedTransactionHashBatch scheduled_signed_hashes;
     x23::XdrVec<SignedTransaction> scheduled;
     // Ensure that this does not trigger a CHECK in the scheduler (see issue
     // #1474).
-    scheduler->schedule(/*num_txs=*/1, scheduled_hashes, scheduled);
+    scheduler->schedule(/*num_txs=*/1, scheduled_hashes,
+                        scheduled_signed_hashes, scheduled)();
   }
 }
 

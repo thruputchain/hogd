@@ -1,0 +1,10 @@
+# Project-local Thruput config.
+#
+# `thruput build` requires an active profile. CI and other hermetic
+# environments have no global ~/.config/thruput/config.toml, so pin a
+# default here. The profile's network settings are irrelevant for builds.
+
+default_profile = "local"
+
+[profile.local]
+network = "local"

@@ -12,7 +12,6 @@
 
 #include "contract.hh"
 #include "db_conflict.hh"
-#include "hog_exec_constants.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/perthread_arc.h"
 #include "hogd/base/span.h"
@@ -30,6 +29,7 @@
 
 namespace hogd {
 
+class ItemLock;
 class RPCContext;
 
 // BlockTXRef owns an InvokeTX's counted reference to a PerThreadARC<BlockTX>.
@@ -101,6 +101,17 @@ public:
 
   // get_savepoint_head returns the depth of the most recent savepoint.
   unsigned int get_savepoint_head() const { return tx_depth_; }
+  // reserve_changes makes room for [additional] more keys, so a large batch of
+  // requests does not rehash the change map repeatedly as it grows.
+  void reserve_changes(size_t additional)
+  {
+    changes_.reserve(changes_.size() + additional);
+  }
+  // The chain's savepoint limit for the block this transaction runs in.
+  uint32_t max_savepoint_depth() const
+  {
+    return block_.get().max_savepoint_depth();
+  }
 
   //
   // All of the read_* methods below read the current value of an item in just
@@ -219,13 +230,18 @@ private:
   struct ItemVersion {
     ItemChange change;
     unsigned int tx_depth;
+    // Fits in the alignment padding before locked_storage_cost. block_ keeps
+    // the owning block alive through commit/abort and destructor-time cleanup.
+    ItemLock *lock;
     int128_t locked_storage_cost{0};
 
-    ItemVersion(ItemChange &&change, unsigned int tx_depth,
+    ItemVersion(ItemChange &&change, unsigned int tx_depth, ItemLock *lock,
                 int128_t locked_storage_cost = 0)
-      : change(std::move(change)), tx_depth(tx_depth),
+      : change(std::move(change)), tx_depth(tx_depth), lock(lock),
         locked_storage_cost(locked_storage_cost)
-    {}
+    {
+      assert(lock != nullptr);
+    }
 
     // Disable copy and allow move.
     // This is not strictly necessary, but eliminates the possibility
@@ -233,6 +249,11 @@ private:
     ItemVersion(ItemVersion &&) noexcept = default;
     ItemVersion &operator=(ItemVersion &&) noexcept = default;
   };
+
+  // The handle must not enlarge each saved version: depth and pointer share
+  // the 16-byte slot that previously contained depth and alignment padding.
+  static_assert(sizeof(ItemVersion) ==
+                sizeof(ItemChange) + (2 * sizeof(int128_t)));
 
   struct StorageBalanceVersion {
     // The amount of storage that was manually transferred (by explicit contract
@@ -281,7 +302,7 @@ private:
 inline int
 InvokeTX::create_savepoint()
 {
-  CHECK(tx_depth_ < kMaxSavepointDepth);
+  CHECK(tx_depth_ < max_savepoint_depth());
   return ++tx_depth_;
 }
 

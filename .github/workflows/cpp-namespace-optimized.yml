@@ -20,9 +20,10 @@ concurrency:
 # Reusable setup steps as a composite (defined inline since GHA doesn't support job templates)
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   # Fast format check - gates all other jobs
@@ -32,41 +33,25 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
 
       - name: Configure Namespace Cache
         uses: namespacelabs/nscloud-cache-action@v1
         with:
           cache: rust
+          # ~/.cache/rustup holds the toolchains (1.93.0, 1.96.0, the contracts
+          # nightly; see .github/actions/cached-rustup-home). Uncached, every
+          # job downloaded them again (~20s of each Cargo Fetch).
           path: |
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
 
       # No submodules needed - format.sh formats files in main repo only
 
@@ -83,10 +68,12 @@ jobs:
         run: ./scripts/fetch.sh
 
       - name: Protocol Fetch
-        run: git submodule update --init --recursive groundhog-go protocol
+        run: git submodule update --init --recursive thruput-go protocol
 
       - name: Format Check
-        run: ./scripts/format.sh -c
+        run: |
+          ./scripts/format.sh -c
+          python3 scripts/test_sccache_env.py
 
       - name: Protocol Check
         run : ./scripts/check-protocol.sh
@@ -97,38 +84,20 @@ jobs:
 
   # GCC Debug build + tests
   gcc-debug:
-    runs-on: namespace-profile-hogd-linux-2604
+    # Each build job gets its own cache volume. Every job forks the volume at
+    # start and, if it succeeds, commits its copy back; the last commit wins.
+    # When all jobs shared the profile's volume, each run kept only the cache
+    # of whichever job finished last, so the other configurations kept losing
+    # their ccache entries.
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-gcc-debug
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
 
       - name: Configure Namespace Cache
@@ -137,8 +106,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -167,6 +143,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -182,10 +160,15 @@ jobs:
           echo 'NPROC=20' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -194,6 +177,16 @@ jobs:
         run: >-
           ./scripts/build.sh -d build/gcc -t Debug -c gcc -f "-Werror"
           -x -DCRASHDUMP_ON_TIMEOUT=ON
+
+      # Shipped binaries must not need GCC 15's libstdc++ (see release.yml).
+      - name: Check libstdc++ compatibility
+        run: >-
+          ./scripts/check-max-glibcxx.sh 3.4.33
+          build/gcc/hogd/hog_db/hog-db build/gcc/hogd/hog_exec/hog-exec
+          build/gcc/hogd/hog_mempool/hog-mempool build/gcc/hogd/hog_auth/hog-auth
+          build/gcc/hogd/hog_event/hog-event build/gcc/hogd/hog_indexer/hog-indexer
+          build/gcc/hogd/devnode/hog-devnode
+          build/gcc/hogd/devnode/hog-hosted-bootstrap
 
       - name: Run Tests
         run: |
@@ -219,7 +212,12 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
+          python3 scripts/ci/ninja_build_profile.py build/gcc
 
       - name: Print Log Download Instructions
         if: always()
@@ -227,38 +225,15 @@ jobs:
 
   # LLVM/Clang Debug build + tests (runs parallel with gcc-debug)
   llvm-debug:
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-llvm-debug
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
 
       - name: Configure Namespace Cache
@@ -267,8 +242,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -297,6 +279,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -312,10 +296,15 @@ jobs:
           echo 'NPROC=28' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=llvm-debug" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -330,7 +319,12 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
+          python3 scripts/ci/ninja_build_profile.py build/llvm
 
       - name: Print Log Download Instructions
         if: always()
@@ -338,38 +332,15 @@ jobs:
 
   # GCC Release build (parallel with debug builds)
   gcc-release:
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: namespace-profile-hogd-linux-2604;overrides.cache-tag=hogd-gcc-release
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
 
       - name: Configure Namespace Cache
@@ -378,8 +349,15 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
             ~/.cargo
+            ~/.cache/rustup
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -408,6 +386,8 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -423,10 +403,15 @@ jobs:
           echo 'NPROC=18' >> ./scripts/conf.sh
           chmod u+x ./scripts/conf.sh
 
-          # Configure ccache with namespace to avoid contention between parallel jobs
+          # This job has its own cache volume (see runs-on). One full build
+          # is 1-2 GB of ccache (gcc-debug 2.2 GB, llvm-debug 1.0 GB), so
+          # 10G keeps several generations of main and open PRs.
           echo "CCACHE_DIR=$HOME/.cache/ccache" >> $GITHUB_ENV
           echo "CCACHE_NAMESPACE=gcc-release" >> $GITHUB_ENV
           echo "CCACHE_MAXSIZE=10G" >> $GITHUB_ENV
+          # Zero the persisted counters so "Show ccache stats" reports this
+          # run, not totals accumulated over every run on the volume.
+          CCACHE_DIR="$HOME/.cache/ccache" ccache -z
 
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
@@ -436,7 +421,12 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
+          python3 scripts/ci/ninja_build_profile.py build/gcc_release
 
       - name: Print Log Download Instructions
         if: always()

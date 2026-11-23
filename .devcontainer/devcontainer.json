@@ -46,6 +46,6 @@
     }
   },
   "initializeCommand": "docker volume create hogd-ccache; docker volume create hogd-cargo-registry; docker volume create hogd-cargo-git || true",
-  "postCreateCommand": "git submodule update --init --recursive && ./scripts/fetch.sh",
+  "postCreateCommand": "git submodule update --init --recursive --force && ./scripts/fetch.sh",
   "remoteUser": "builder"
 }

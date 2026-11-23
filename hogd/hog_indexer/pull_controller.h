@@ -19,9 +19,12 @@ struct IndexerOutboxOrigin;
 
 struct IndexerPullControllerOptions {
   std::chrono::milliseconds retry_delay = std::chrono::milliseconds(100);
-  std::chrono::milliseconds caught_up_poll_delay =
-      std::chrono::milliseconds(100);
-  std::chrono::milliseconds rpc_timeout = std::chrono::seconds(30);
+  // Pause after a caught-up reply before asking again. The event server
+  // answers the first caught-up pull at a progress immediately and parks a
+  // repeat of it until the next publication, so the re-ask is what arms the
+  // park and there is nothing to wait for first. Nonzero only matters against
+  // a server that answers every caught-up pull eagerly.
+  std::chrono::milliseconds caught_up_poll_delay = std::chrono::milliseconds(0);
 };
 
 // Owns the standalone indexer's event connection and durable replay loop.
@@ -47,6 +50,10 @@ private:
   void fail_event_client();
   void mark_caught_up();
   void mark_not_ready();
+  // True once this connection has been answered caught up and nothing has
+  // since marked it not ready. Such a pull sends its cursor in the CaughtUp
+  // state so the server holds it until the next publication.
+  bool caught_up_now();
   void reset_event_client();
 
   std::string event_server_addr_;

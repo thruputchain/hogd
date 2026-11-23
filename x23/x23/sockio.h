@@ -44,6 +44,12 @@ void set_nodelay(BorrowedFd fd, bool on = true);
 // Set (on) or clear (!on) the O_NONBLOCK flag on a file descriptor
 void set_nonblock(BorrowedFd fd, bool on = true);
 
+// Create a SOCK_STREAM socket with the close-on-exec flag set.  Uses
+// SOCK_CLOEXEC where available; otherwise (e.g., macOS) sets
+// FD_CLOEXEC with fcntl after socket creation.  Returns a null
+// UniqueFd with errno set if socket creation fails.
+UniqueFd cloexec_stream_socket(int family);
+
 // After calling this function, closing fd (which must be a TCP
 // socket) will send a RST segment instead of a FIN segment, thereby
 // avoiding TIME_WAIT on the active closer.
@@ -71,6 +77,12 @@ tcplisten(const sockaddr_storage &bind_addr, int backlog = 5)
   set_nonblock(fd);
   return fd;
 }
+
+// Like tcplisten(bind_addr), but returns a failure to listen (the address
+// already in use, say) rather than throwing it, for callers whose listen
+// address is configuration they can report.
+std::expected<UniqueFd, Errno> try_tcplisten(const sockaddr_storage &bind_addr,
+                                             int backlog = 5);
 
 constexpr socklen_t
 sockaddr_len(const sockaddr_storage &ss)
@@ -159,16 +171,22 @@ namespace x23 {
 
 // Create a TCP connection.  You can bind the socket or make the file
 // descriptor non-blocking in prep_fd.
-UniqueFd tcpconnect(const sockaddr_storage &ss,
-                    std::function<void(int)> prep_fd = nullptr);
-inline UniqueFd
+//
+// The sockaddr_storage overload reports failure through std::expected and
+// does not throw.  The host/port overload resolves the address first and
+// throws on failure: the GaiError from address resolution, or the connect
+// error re-raised as a std::system_error.
+std::expected<UniqueFd, Errno>
+tcpconnect(const sockaddr_storage &ss,
+           std::function<void(int)> prep_fd = nullptr);
+inline std::expected<UniqueFd, MultiError<Errno, GaiError>>
 tcpconnect(auto host, auto port, std::function<void(int)> prep_fd = nullptr)
     requires requires { HostPort{std::move(host), std::move(port)}; }
 {
-  if (auto addr = HostPort{host, port}.to_addr())
-    return tcpconnect(*addr, std::move(prep_fd));
-  else
-    throw addr.error();
+  auto addr = HostPort{host, port}.to_addr();
+  if (!addr)
+    return addr.error();
+  return tcpconnect(*addr, std::move(prep_fd));
 }
 
 } // namespace x23

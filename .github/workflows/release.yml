@@ -1,18 +1,21 @@
 name: Release
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Hogd release dry run ({0})', github.ref_name) || format('Hogd release {0}', github.ref_name) }}
 
 on:
   push:
     tags:
       - 'v*'
-  workflow_dispatch:
+  workflow_dispatch:  # Dry run. Only tag pushes upload and publish.
 
+# Release profiles use the regular toolchain images with all Namespace caching disabled.
 env:
+  RUSTC_WRAPPER: ""
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
   CARGO_BUILD_JOBS: "6"
+  # Reuse RV32 intermediates across builds within this job.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
   # Version embedded in binaries assembled by this component release.
-  HOGD_DISTRIBUTION_VERSION: "0.1.25-rc.4"
+  HOGD_DISTRIBUTION_VERSION: "0.1.36"
 
 permissions:
   contents: write
@@ -25,86 +28,27 @@ jobs:
       matrix:
         include:
           - architecture: x86_64
-            runner: namespace-profile-hogd-linux-2604
+            runner: namespace-profile-release-x86
             machine: x86_64
             build_architecture: x86-64-v2
             rust_build_cpu: x86-64-v2
             nproc: 18
           - architecture: arm64
-            runner: namespace-profile-hogd-linux-arm64
+            runner: namespace-profile-release-arm64
             machine: aarch64
             build_architecture: armv8.2-a
             rust_build_cpu: neoverse-n1
-            nproc: 8
+            # Leave memory headroom for parallel -O3 -g compiles.
+            nproc: 12
     runs-on: ${{ matrix.runner }}
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
+          persist-credentials: false
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -115,7 +59,8 @@ jobs:
       - name: Set up Go
         uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6.5.0
         with:
-          go-version-file: groundhog-go/chuckd/go.mod
+          go-version-file: thruput-go/chuckd/go.mod
+          cache: false
 
       - name: Configure Environment
         run: |
@@ -131,15 +76,24 @@ jobs:
       - name: Cargo Fetch
         run: ./scripts/fetch.sh
 
+      # The static libcrypto that HOGD_STATIC_DEPS links needs libjitterentropy.a.
+      - name: Install static link dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends libjitterentropy3-dev
+
       - name: Build GCC Release
         run: |
           ./scripts/build.sh \
             -d build/release \
             -t Release \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
+            -x "-DHOGD_STATIC_DEPS=ON" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Build GCC Debug
@@ -148,9 +102,11 @@ jobs:
             -d build/debug \
             -t Debug \
             -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             -x "-DBUILD_ARCHITECTURE=${{ matrix.build_architecture }}" \
             -x "-DRUST_BUILD_CPU=${{ matrix.rust_build_cpu }}" \
+            -x "-DHOGD_STATIC_DEPS=ON" \
             hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
 
       - name: Check Linux binaries for unexpected AVX-512
@@ -174,6 +130,15 @@ jobs:
             build/debug/hogd/devnode/hog-devnode \
             build/debug/hogd/devnode/hog-hosted-bootstrap
 
+      # Linux binaries must start on hosts with only glibc 2.38 or newer, the
+      # minimum the thruput-tools toolchain catalog declares for hog-devnode.
+      - name: Check Linux binaries need only glibc
+        run: |
+          binaries=(hog_db/hog-db hog_exec/hog-exec hog_mempool/hog-mempool hog_auth/hog-auth hog_event/hog-event hog_indexer/hog-indexer devnode/hog-devnode devnode/hog-hosted-bootstrap)
+          ./scripts/check-linux-runtime-deps.sh 2.38 \
+            "${binaries[@]/#/build/release/hogd/}" \
+            "${binaries[@]/#/build/debug/hogd/}"
+
       - name: Verify distribution version
         run: |
           set -euo pipefail
@@ -190,6 +155,7 @@ jobs:
 
       - name: Prepare artifacts
         run: |
+          sudo apt-get install -y binutils
           ./scripts/package_hogd_validator_release.sh \
             build/release artifacts release "${{ matrix.architecture }}"
           ./scripts/package_hogd_validator_release.sh \
@@ -197,13 +163,37 @@ jobs:
 
           for archive in artifacts/*.tar.gz; do
             contents=$(tar -tzf "$archive")
-            grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
+            if [[ "$archive" == *-debuginfo.tar.gz ]]; then
+              grep -Eq '^usr/lib/debug/\.build-id/[[:xdigit:]]{2}/[[:xdigit:]]+\.debug$' <<<"$contents"
+              continue
+            fi
             grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
           done
 
+      # Keep server code generation separate from portable developer artifacts.
+      # These binaries must be runtime-qualified on a Zen 5 host before deployment.
+      - name: Build and package Zen 5 server binaries
+        if: matrix.architecture == 'x86_64'
+        run: |
+          ./scripts/build.sh \
+            -d build/znver5 -t Release -c gcc \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
+            -x "-DBUILD_BENCHMARKS=OFF" \
+            -x "-DHOGD_RELEASE_DEBUGINFO=ON" \
+            -x "-DBUILD_ARCHITECTURE=znver5" \
+            -x "-DRUST_BUILD_CPU=znver5" \
+            -x "-DHOGD_STATIC_DEPS=ON" \
+            hog-db hog-exec hog-mempool hog-auth hog-event hog-indexer hog-devnode hog-hosted-bootstrap
+          binaries=(hog_db/hog-db hog_exec/hog-exec hog_mempool/hog-mempool hog_auth/hog-auth hog_event/hog-event hog_indexer/hog-indexer devnode/hog-devnode devnode/hog-hosted-bootstrap)
+          ./scripts/check-linux-runtime-deps.sh 2.38 "${binaries[@]/#/build/znver5/hogd/}"
+          ./scripts/package_hogd_validator_release.sh \
+            build/znver5 artifacts release x86_64 znver5
+
       - name: Upload Linux artifacts
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
+          if-no-files-found: error
           name: hogd-linux-${{ matrix.architecture }}-release-artifacts
           path: artifacts/*.tar.gz
 
@@ -216,75 +206,15 @@ jobs:
         uses: ./.github/actions/print-log-instructions
 
   hog-devnode-macos-arm64:
-    runs-on: namespace-profile-hogd-arm64-macos
+    runs-on: namespace-profile-release-macos-arm64
     permissions:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@e83874834305fe9a4a2997156cb26c5de65a8555 # v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
-        uses: namespacelabs/nscloud-checkout-action@def520b6c21233362f09c9ceda4352c51cceca26 # v8
+        uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
         with:
-          submodules: false
-
-      - name: Configure Namespace Cache
-        uses: namespacelabs/nscloud-cache-action@c5f8dab7560444c4bf8dbc64f1b203431873c547 # v1
-        with:
-          cache: rust
-          path: |
-            ~/.cache/ccache
-            ~/.cache/hogcache
-
-      - name: Configure Git for Submodule Caching
-        run: |
-          mkdir -p ~/.cache/hogcache/
-          git config --global protocol.file.allow always
-
-          cache_repo() {
-            local repo_path="$1"
-            local cache_dir="$HOME/.cache/hogcache/$repo_path"
-            if [[ ! -d "$cache_dir" ]]; then
-              echo "HOGCACHE: Cloning fresh mirror for $repo_path"
-              mkdir -p "$(dirname "$cache_dir")"
-              git clone --mirror --quiet https://github.com/$repo_path.git "$cache_dir"
-            else
-              echo "HOGCACHE: Using cached mirror for $repo_path"
-              git -C "$cache_dir" fetch --prune origin 2>/dev/null || true
-            fi
-            git config --global url."file://$cache_dir".insteadOf https://github.com/$repo_path.git
-          }
-
-          cache_repo facebook/rocksdb
-          cache_repo gramseyer/model-checker
-          cache_repo google/googletest
-          cache_repo google/benchmark
-          cache_repo google/crc32c
-          cache_repo google/glog
-          cache_repo BLAKE3-team/BLAKE3
-          cache_repo corrosion-rs/corrosion
+          persist-credentials: false
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
@@ -308,6 +238,7 @@ jobs:
             -d build/release \
             -t Release \
             -c clang \
+            -x "-DHOGD_USE_SCCACHE=OFF" \
             -x "-DBUILD_BENCHMARKS=OFF" \
             hog-devnode
 
@@ -317,7 +248,6 @@ jobs:
           cp build/release/hogd/devnode/hog-devnode package/hog-devnode-macos-arm64/hog-devnode
           chmod +x package/hog-devnode-macos-arm64/hog-devnode
           mkdir -p package/hog-devnode-macos-arm64/contracts
-          cp build/release/built_contracts/dev_wallet.rv32a package/hog-devnode-macos-arm64/contracts/dev_wallet.rv32a
           cp build/release/built_contracts/genesis_root.rv32a package/hog-devnode-macos-arm64/contracts/genesis_root.rv32a
 
           pushd package/hog-devnode-macos-arm64 >/dev/null
@@ -407,13 +337,29 @@ jobs:
 
           readiness_file="$(mktemp)"
           log_file="$(mktemp)"
+          bootstrap_file="$(mktemp)"
+          cat >"$bootstrap_file" <<'JSON'
+          {
+            "schemaVersion": 5,
+            "kind": "groundhog-bootstrap",
+            "networkHash": "11111111111111111111111111111111",
+            "profile": "local-dev",
+            "bootstrapFaucet": {
+              "publicKey": "FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z",
+              "initialStorageTokens": "10000000000000"
+            },
+            "bootstrapAccounts": [{
+              "publicKey": "586Z7H2vpX9qNhN2T4e9Utugie3ogjbxzGaMtM3E6HR5",
+              "initialStorageTokens": "1000000000"
+            }],
+            "storageCostModel": {"profile": "hogd-default"}
+          }
+          JSON
           ./hog-devnode \
             --listen-host 127.0.0.1 \
             --scheduler-port 0 \
             --readiness stdout \
-            --dev-accounts 1 \
-            --dev-account-seed groundhog-dev-accounts \
-            --dev-account-tokens 1000000000 \
+            --bootstrap-manifest "$bootstrap_file" \
             >"$readiness_file" 2>"$log_file" &
           devnode_pid=$!
           cleanup_devnode() {
@@ -428,7 +374,7 @@ jobs:
               fi
             fi
             wait "$devnode_pid" 2>/dev/null || true
-            rm -f "$readiness_file" "$log_file"
+            rm -f "$readiness_file" "$log_file" "$bootstrap_file"
           }
           trap cleanup_devnode EXIT
 
@@ -460,10 +406,22 @@ jobs:
               raise SystemExit(f"unexpected readiness payload: {readiness}")
           with open(readiness["manifestPath"], encoding="utf-8") as handle:
               manifest = json.load(handle)
+          if readiness.get("schemaVersion") != 4 or manifest.get("schemaVersion") != 5:
+              raise SystemExit("packaged hog-devnode must emit readiness schema 4 and runtime manifest schema 5")
+          if "bootstrapAccountDerivation" in manifest:
+              raise SystemExit("packaged hog-devnode still advertises signer derivation")
+          if "devWallet" in manifest.get("bootstrap", {}):
+              raise SystemExit("packaged hog-devnode still advertises devWallet")
           accounts = manifest.get("bootstrapAccounts")
           expected = [
-              {"index": 0, "role": "faucet", "initialStorageTokens": "10000000000000"},
-              {"index": 1, "role": "local_user", "initialStorageTokens": "1000000000"},
+              {
+                  "role": "faucet", "initialStorageTokens": "10000000000000",
+                  "publicKey": "FVen3X669xLzsi6N2V91DoiyzHzg1uAgqiT8jZ9nS96Z",
+              },
+              {
+                  "role": "local_user", "initialStorageTokens": "1000000000",
+                  "publicKey": "586Z7H2vpX9qNhN2T4e9Utugie3ogjbxzGaMtM3E6HR5",
+              },
           ]
           if not isinstance(accounts, list) or len(accounts) != len(expected):
               raise SystemExit(f"unexpected bootstrap accounts: {accounts}")
@@ -480,16 +438,16 @@ jobs:
           tar -czf artifacts/hog-devnode-macos-arm64.tar.gz \
             -C package/hog-devnode-macos-arm64 \
             hog-devnode \
-            contracts/dev_wallet.rv32a \
             contracts/genesis_root.rv32a \
             lib
           contents=$(tar -tzf artifacts/hog-devnode-macos-arm64.tar.gz)
-          grep -Fxq contracts/dev_wallet.rv32a <<<"$contents"
           grep -Fxq contracts/genesis_root.rv32a <<<"$contents"
 
       - name: Upload Artifact
+        if: github.event_name == 'push'
         uses: actions/upload-artifact@b7c566a772e6b6bfb58ed0dc250532a479d7789f # v6
         with:
+          if-no-files-found: error
           name: hog-devnode-macos-arm64
           path: artifacts/hog-devnode-macos-arm64.tar.gz
 
@@ -504,7 +462,7 @@ jobs:
   publish:
     if: github.event_name == 'push'
     needs: [release, hog-devnode-macos-arm64]
-    runs-on: namespace-profile-hogd-linux-2604
+    runs-on: ubuntu-24.04
     permissions:
       contents: write
       actions: read
@@ -540,7 +498,7 @@ jobs:
           set -euo pipefail
           cd artifacts
           archives=(*.tar.gz)
-          test "${#archives[@]}" -eq 9
+          test "${#archives[@]}" -eq 19
           for archive in "${archives[@]}"; do
             test -s "$archive"
           done

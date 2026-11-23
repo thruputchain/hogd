@@ -17,4 +17,4 @@ target_link_libraries(
   http
   GTest::gtest_main
 )
-gtest_discover_tests(http_test)
+hogd_discover_tests(http_test)

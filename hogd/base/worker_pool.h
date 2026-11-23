@@ -40,7 +40,7 @@
 namespace hogd {
 
 #ifdef __APPLE__
-// On macOS, use LargeStackThread to set a larger stack size for WASM
+// On macOS, use LargeStackThread to set a larger stack size for contract
 // compilation
 using WorkerThread = LargeStackThread;
 #else

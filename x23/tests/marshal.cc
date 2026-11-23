@@ -2,6 +2,7 @@
 #include <cassert>
 #include <cstdint>
 #include <print>
+#include <vector>
 
 #include <x23/serialize.h>
 #include <x23/vec.h>
@@ -235,6 +236,143 @@ check_box()
   assert(a == c);
 }
 
+// The plain twin of a boxed union holding the same arm and value.
+box_arms_plain
+plain_arm(const box_arms &u)
+{
+  using enum box_arm_type;
+  box_arms_plain p(u.t());
+  switch (u.t()) {
+  case kBoxArmSmall:
+    p.small() = u.small();
+    break;
+  case kBoxArmBig:
+    p.big() = *u.big();
+    break;
+  case kBoxArmStruct:
+    p.st() = *u.st();
+    break;
+  case kBoxArmBytes:
+    p.bytes() = *u.bytes();
+    break;
+  case kBoxArmInts:
+    p.ints() = *u.ints();
+    break;
+  }
+  return p;
+}
+
+// A boxed union arm or struct field serializes, sizes and compares exactly as
+// its unboxed twin, whatever the boxed type, including an arm that was
+// selected but never written: an empty Box reads as a value-initialized T.
+void
+check_box_arms()
+{
+  using namespace x23;
+  using enum box_arm_type;
+
+  static_assert(sizeof(box_arms) < sizeof(box_arms_plain));
+  static_assert(sizeof(box_arms) <= 32);
+
+  std::vector<box_arms> arms;
+  for (auto t :
+       {kBoxArmSmall, kBoxArmBig, kBoxArmStruct, kBoxArmBytes, kBoxArmInts})
+    arms.emplace_back(t); // selected, never written
+
+  box_arms big(kBoxArmBig);
+  big.big()->fill(0x5a);
+  arms.push_back(big);
+  box_arms st(kBoxArmStruct);
+  *st.st() = fix_12{.i = 7, .d = 2.5};
+  arms.push_back(st);
+  box_arms bytes(kBoxArmBytes);
+  bytes.bytes() = box_bytes{1, 2, 3, 4, 5};
+  arms.push_back(bytes);
+  box_arms ints(kBoxArmInts);
+  ints.ints()->push_back(-1);
+  ints.ints()->push_back(9);
+  arms.push_back(ints);
+
+  for (const box_arms &u : arms) {
+    box_arms_plain p = plain_arm(u);
+    assert(xdr_size(u) == xdr_size(p));
+    Buf buf = serialize(u);
+    assert(buf == serialize(p));
+
+    box_arms back;
+    deserialize(&back, buf);
+    assert(back == u);
+    assert(plain_arm(back) == p);
+
+    box_arms copied = u;
+    assert(copied == u);
+  }
+
+  // A written arm and a fresh one holding the same (zero) value are equal.
+  box_arms zero(kBoxArmBig);
+  zero.big()->fill(0);
+  assert(zero == box_arms(kBoxArmBig));
+  assert(big != box_arms(kBoxArmBig));
+
+  box_leaves leaves{};
+  box_leaves_plain leaves_plain{};
+  assert(serialize(leaves) == serialize(leaves_plain));
+  leaves.big->fill(3);
+  *leaves.n = 0x0102030405060708;
+  leaves.bytes = box_bytes{9, 8, 7};
+  leaves.arm = big;
+  leaves_plain.big.fill(3);
+  leaves_plain.n = 0x0102030405060708;
+  leaves_plain.bytes = box_bytes{9, 8, 7};
+  leaves_plain.arm = plain_arm(big);
+  assert(xdr_size(leaves) == xdr_size(leaves_plain));
+  Buf leaves_buf = serialize(leaves);
+  assert(leaves_buf == serialize(leaves_plain));
+  box_leaves leaves_back;
+  deserialize(&leaves_back, leaves_buf);
+  assert(leaves_back == leaves);
+}
+
+// A boxed union field serializes, sizes and compares exactly as its unboxed
+// twin. Its discriminant and arms are set through the box.
+void
+check_box_union_field()
+{
+  using namespace x23;
+  using enum box_arm_type;
+
+  static_assert(sizeof(box_union_field) < sizeof(box_union_field_plain));
+
+  box_union_field fresh{};
+  box_union_field_plain fresh_plain{};
+  assert(serialize(fresh) == serialize(fresh_plain));
+  assert(fresh == box_union_field{});
+
+  box_union_field f{};
+  f.u->t(kBoxArmInts);
+  f.u->ints().push_back(-1);
+  f.u->ints().push_back(9);
+  f.tail = 42;
+  box_union_field_plain p{};
+  p.u.t(kBoxArmInts);
+  p.u.ints().push_back(-1);
+  p.u.ints().push_back(9);
+  p.tail = 42;
+
+  assert(xdr_size(f) == xdr_size(p));
+  Buf buf = serialize(f);
+  assert(buf == serialize(p));
+
+  box_union_field back;
+  deserialize(&back, buf);
+  assert(back == f);
+  assert(back.u->t() == kBoxArmInts);
+  assert(back != fresh);
+
+  box_union_field copied = f;
+  assert(copied == f);
+}
+
 int
 main()
 {
@@ -242,4 +380,6 @@ main()
   round_trip();
   projected_view();
   check_box();
+  check_box_arms();
+  check_box_union_field();
 }

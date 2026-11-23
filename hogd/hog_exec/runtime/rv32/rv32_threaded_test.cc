@@ -19,10 +19,12 @@
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/musttail.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
+#include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/rv32/test_corpus.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_program.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd::rv32 {
 
@@ -264,15 +266,9 @@ TEST(Rv32Threaded, decodeRejectVerdictMatchesCanonicalOnMultiErrorPrograms)
 TEST(Rv32Threaded, createSplitsRunExceedingGasCapInsteadOfRejecting)
 {
   using test_program::op;
-  // A straight-line run whose total gas exceeds kMaxRunGas is split into chunks
-  // of <= kMaxRunGas by the lowering (rather than metered as one run, or
-  // rejected). div gas is 8; kMaxRunGas/8 = 1250 divs per chunk, so 1258 divs
-  // (10064 gas) form two chunks and thus exactly one break carrier. We assert
-  // the carrier *count* rather than a position, since the exact split point is
-  // an implementation detail (the lowering places breaks greedily). (A run that
-  // exceeds the ORIGINAL 65535 bound -- formerly rejected -- is covered by
-  // splitRunBudgetSweepMatchesCanonical below.)
-  constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas; // 1250
+  // Exceeding kMaxRunGas splits the run into two chunks with one break carrier.
+  // Check the count; backward-greedy lowering determines the split position.
+  constexpr size_t kDivPerChunk = kMaxRunGas / kDivInstructionGas;
   constexpr size_t kDivCount = kDivPerChunk + 8; // spills over -> 2 chunks
   const std::vector<uint32_t> words(kDivCount,
                                     op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
@@ -424,12 +420,12 @@ TEST(Rv32Threaded, memorySlotRecycledAndReinitializedAcrossMachines)
                                        op(3, 1, 2, 0, 0)};
   // Different memory sizes on purpose: the system allocator can hand the next
   // same-size allocation the just-freed block (which would fake a recycling
-  // signal), but it cannot serve a kMaxMemoryBytes request from a freed
-  // 256-byte block. Pool slots are reserved to kMaxMemoryBytes, so only real
-  // pool recycling reproduces the first machine's buffer address here.
+  // signal), but it cannot serve a kDefaultMaxMemoryBytes request from a freed
+  // 256-byte block. Pool slots are reserved to kDefaultMaxMemoryBytes, so only
+  // real pool recycling reproduces the first machine's buffer address here.
   auto small_program = threaded_from_words(words, /*total_memory_size=*/256);
   auto full_program =
-      threaded_from_words(words, /*total_memory_size=*/kMaxMemoryBytes);
+      threaded_from_words(words, /*total_memory_size=*/kDefaultMaxMemoryBytes);
 
   const uint8_t *first_buffer = nullptr;
   {
@@ -584,8 +580,6 @@ TEST(Rv32Threaded, jalLinksAndJumps)
 {
   using test_program::j_type;
   // jal x1,+8 writes link (pc+4=4) to x1 and jumps over the addi at pc=4.
-  // Use x4 for the skipped instruction (x2 was avoided when sp seeded
-  // nonzero at entry; sp now seeds 0 but x4 keeps the test stable).
   const std::vector<uint32_t> words = {j_type(1, 8), addi(4, 0, 7),
                                        addi(3, 0, 9)};
   auto program = threaded_from_words(words);
@@ -606,7 +600,8 @@ TEST(Rv32Threaded, jalBadTargetTrapsAfterGas)
   RecordingHost host;
   EXPECT_EQ(machine.run(host), StepResult::kTrap);
   EXPECT_EQ(machine.trap(), Trap::kBadPc);
-  EXPECT_EQ(machine.gas_remaining(), 99U); // jal gas charged before the trap
+  // JAL gas is charged before the trap.
+  EXPECT_EQ(machine.gas_remaining(), 100 - kDirectJumpGas);
 }
 
 TEST(Rv32Threaded, branchBadTargetTakenTrapsBadPc)
@@ -675,24 +670,9 @@ TEST(Rv32Threaded, outOfGasMidRunSettlesAtNextSeam)
 
 TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
 {
-  using test_program::j_type;
-  // The block-granular charger bills a whole run at its head in one check. For
-  // a run of 1-gas instructions, that must be indistinguishable from debiting
-  // one gas per instruction: under every budget, the gas left at termination --
-  // including the out-of-gas case -- must agree with per-instruction metering.
-  //
-  // Two programs do the same kWork units of 1-gas work, then fall off the end:
-  //   fused:     kWork back-to-back addi nops -> ONE run of run_gas == kWork.
-  //   per_instr: (kWork-1) jal(+4), each landing on the next, then a trailing
-  //              addi nop -> kWork single-instruction runs (run_gas 1 each).
-  //              jal is a barrier that still costs kBaseInstructionGas, so this
-  //              is literal one-gas-at-a-time accounting -- the ground truth.
-  //              A taken branch would also end each run, but branches cost more
-  //              than one gas, which would make the two programs do different
-  //              amounts of work and the comparison meaningless.
-  // Block metering must match it for all budgets, so on OOG the fused run head
-  // debits the whole (unaffordable) run -- saturating gas_remaining to 0 --
-  // exactly as the per-instruction program drains to 0 before it traps.
+  // Compare the same ADDI stream under block and per-instruction metering.
+  // JAL is no longer a one-gas barrier, so use the canonical interpreter as
+  // the per-instruction oracle instead of changing the instruction stream.
   constexpr uint32_t kWork = 6;
 
   std::vector<uint32_t> fused_words;
@@ -702,19 +682,13 @@ TEST(Rv32Threaded, fusedRunGasMatchesPerInstructionAccountingOnOutOfGas)
   }
   auto fused_program = threaded_from_words(fused_words);
 
-  std::vector<uint32_t> per_instr_words;
-  per_instr_words.reserve(kWork);
-  for (uint32_t i = 0; i + 1 < kWork; ++i) {
-    per_instr_words.push_back(j_type(0, 4)); // jal x0,+4 -> next instruction
-  }
-  per_instr_words.push_back(
-      addi(0, 0, 0)); // trailing nop the last jump lands on
-  auto per_instr_program = threaded_from_words(per_instr_words);
+  const auto per_instr_program = make_program(fused_words);
+  ASSERT_NE(per_instr_program, nullptr);
 
   // Sweep every budget from starved through comfortably past the work.
   for (uint64_t gas = 0; gas <= kWork + 2; ++gas) {
     ThreadedMachine fused_machine(*fused_program, gas);
-    ThreadedMachine per_instr_machine(*per_instr_program, gas);
+    Machine per_instr_machine(per_instr_program, 1024, gas);
     RecordingHost host;
     const StepResult fused_result = fused_machine.run(host);
     const StepResult per_instr_result = per_instr_machine.run(host);
@@ -888,7 +862,7 @@ TEST(Rv32Threaded, endOverlapLoadTraps)
   EXPECT_EQ(machine.reg(4), 0U); // load never wrote
 }
 
-// --- load + reg-arith fusion (EXPERIMENT(fuse)) -----------------------------
+// --- load + reg-arith fusion -----------------------------
 // A lw immediately followed by a fusible R-type runs through op_load_rr (one
 // dispatch for the pair). The corpus differential test is the broad net; these
 // pin the three behaviors fusion must preserve: fall-through result, a branch
@@ -1397,7 +1371,7 @@ TEST(Rv32ThreadedYieldApi, resumeFromEcallRejectsHostTrap)
   auto program = threaded_from_words(words);
   ThreadedMachine machine(*program, 100);
   EXPECT_EQ(machine.start(), StepResult::kEcall);
-  EXPECT_DEATH(
+  X23_EXPECT_DEATH(
       {
         [[maybe_unused]] const StepResult ignored =
             machine.resume_from_ecall(HostResult::trap());
@@ -1516,12 +1490,13 @@ TEST(Rv32Threaded, createRejectsTotalMemoryAboveLimitAcceptsAtLimit)
   const std::vector<uint32_t> words = {addi(1, 0, 5)};
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                /*total_memory_size=*/kMaxMemoryBytes + 1, /*trace=*/false)
+                /*total_memory_size=*/kMemoryCeilingBytes + 1,
+                /*trace=*/false)
                 .error(),
             ProgramError::kMemoryTooLarge);
   EXPECT_TRUE(ThreadedMachinePreInstantiation::create(
                   words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0,
-                  /*total_memory_size=*/kMaxMemoryBytes, /*trace=*/false)
+                  /*total_memory_size=*/kMemoryCeilingBytes, /*trace=*/false)
                   .has_value());
 }
 
@@ -1529,8 +1504,8 @@ TEST(Rv32Threaded, createRejectsCodeTooLargeAndUnsupportedLikeCanonical)
 {
   // The remaining two ProgramError values the production gate must report
   // identically to canonical decode (the other three are pinned above).
-  const std::vector<uint32_t> oversized((kMaxCodeBytes / kInstructionBytes) + 1,
-                                        addi(0, 0, 0));
+  const std::vector<uint32_t> oversized(
+      (kCodeCeilingBytes / kInstructionBytes) + 1, addi(0, 0, 0));
   EXPECT_EQ(ThreadedMachinePreInstantiation::create(
                 words_to_bytes(oversized), /*memory=*/{}, /*memory_start=*/0,
                 /*total_memory_size=*/256, /*trace=*/false)
@@ -1618,7 +1593,8 @@ TEST(Rv32ThreadedTrapGas, misalignedControlFlowTargetsTrapLikeCanonical)
   {
     const std::vector<uint32_t> words = {j_type(0, 6), addi(1, 0, 1)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/99, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 - kDirectJumpGas,
+                           /*check_pc=*/false);
   }
   {
     const std::vector<uint32_t> words = {branch(0, 0, 0, 6), addi(1, 0, 1)};
@@ -1648,7 +1624,9 @@ TEST(Rv32ThreadedTrapGas, jumpToExactCodeEndTrapsLikeCanonical)
   {
     const std::vector<uint32_t> words = {addi(1, 0, 1), j_type(0, 4)};
     expect_trap_gas_parity(words, Trap::kBadPc,
-                           /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                           /*expected_gas_remaining=*/100 -
+                               (kBaseInstructionGas + kDirectJumpGas),
+                           /*check_pc=*/false);
   }
   {
     const std::vector<uint32_t> words = {addi(1, 0, 8), jalr(0, 1, 0)};
@@ -1984,17 +1962,9 @@ TEST(Rv32ThreadedTrapGas, gasBudgetSweepAcrossMidRunFaultingProgram)
 TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
 {
   using test_program::op;
-  // A single straight-line run of divs (gas 8 each), long enough that its total
-  // body gas (65600) exceeds the ORIGINAL uint16 run bound (65535) -- so this
-  // program was formerly rejected with kRunGasTooLarge and now loads, split
-  // into seven chunks (six of 10000 + a 5600 remainder), terminated by an ecall
-  // that halts via RecordingHost. The threaded engine meters per chunk; the
-  // canonical Machine meters per instruction with no chunks. Their visible
-  // (trap class, gas_remaining) must agree at every budget -- including budgets
-  // that run dry inside the first chunk, exactly at a chunk boundary, inside a
-  // later chunk, and at/after completion. threaded_from_words EXPECT_TRUEs
-  // has_value(), so a reappearance of the reject would fail here too.
-  constexpr size_t kDivCount = 8200; // 65600 body gas (> 65535) -> 7 chunks
+  // Compare chunk metering with canonical per-instruction metering across
+  // budgets that exhaust the first chunk, a later chunk, or complete the run.
+  constexpr size_t kDivCount = 8200;
   std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   words.push_back(kEcallWord);                                  // halts
 
@@ -2002,8 +1972,7 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
   ASSERT_NE(canonical, nullptr);
   auto threaded = threaded_from_words(words);
 
-  const uint64_t total =
-      (kDivCount * kDivInstructionGas) + 1; // 65601 (+ ecall)
+  const uint64_t total = (kDivCount * kDivInstructionGas) + 1; // includes ecall
   const uint64_t budgets[] = {
       0,     1,     8,         9999,  10000,     10001,           59999,
       60000, 60001, total - 1, total, total + 1, 1'000'000'000ULL};
@@ -2026,13 +1995,10 @@ TEST(Rv32ThreadedTrapGas, splitRunBudgetSweepMatchesCanonical)
 TEST(Rv32ThreadedTrapGas, chunkAtCapBeforeBarrierDoesNotExceedCap)
 {
   using test_program::op;
-  // Regression: a maximal non-barrier run of EXACTLY kMaxRunGas (1250 divs =
-  // 10000) immediately followed by a barrier (ecall, +1 gas) is a 10001-gas
-  // run. The lowering must still split it so no slot's gas_to_run exceeds
-  // kMaxRunGas (the chunk cap / max deficit bound); the backward-greedy pass
-  // breaks the first div into its own chunk, leaving the [rest + ecall] chunk
-  // at 9993. Gas must match the canonical Machine at and around completion.
-  constexpr size_t kDivCount = kMaxRunGas / kDivInstructionGas; // 1250 -> 10000
+  // A DIV sequence filling kMaxRunGas still needs a split when followed by
+  // ECALL: the barrier's gas counts toward the cap. Check canonical gas parity
+  // at and around completion.
+  constexpr size_t kDivCount = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kDivCount, op(3, 1, 2, 4, 0x01)); // div x3,x1,x2
   words.push_back(kEcallWord); // barrier (halts via RecordingHost)
 
@@ -2200,6 +2166,58 @@ TEST(Rv32ThreadedTrapGas, ecallProgramBudgetSweepMatchesCanonical)
   }
 }
 
+TEST(Rv32ThreadedTrapGas, postHostDeficitResumeMatchesCanonicalConsensusState)
+{
+  // #3832: a recoverable invalid-syscall host debit leaves a partial budget, so
+  // the resumed post-ecall run [addi; ori] (two standalone I-type slots, cost
+  // 2) is unaffordable with one gas remaining and executes speculatively in
+  // deficit. The speculative run writes x12 and advances pc past the canonical
+  // failing boundary -- but that state is frame-local: a trap discards it, and
+  // the RV32 runtime propagates only the trap classification and gas consumed
+  // (rv32_contract.cc invoke_internal reads neither pc nor registers on a
+  // trap). The consensus-visible pair (trap, gas_remaining) must therefore
+  // match canonical even though pc/regs diverge -- the same guarantee
+  // outOfGasMidRunSettlesAtNextSeam documents for the non-resume case, here on
+  // the post-host resume path.
+  const std::vector<uint32_t> words = {
+      addi(10, 0, -1),                          // x10 = -1 (bad syscall number)
+      kEcallWord,                               // routes to a 10-gas NoSyscall
+      addi(11, 0, 5),                           // resumed run head
+      test_program::i_type(0x13U, 12, 6, 0, 7), // ori x12, x0, 7 (speculative)
+  };
+
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, /*memory_bytes=*/256, /*gas=*/13);
+  GasHost chost(/*gas_per_call=*/10);
+  const StepResult cresult = cmachine.run(chost);
+
+  auto threaded = threaded_from_words(words);
+  ASSERT_NE(threaded, nullptr);
+  ThreadedMachine tmachine(*threaded, /*gas=*/13);
+  GasHost thost(/*gas_per_call=*/10);
+  const StepResult tresult = tmachine.run(thost);
+
+  // Consensus-visible outputs agree between the two engines.
+  EXPECT_EQ(tresult, cresult);
+  EXPECT_EQ(cresult, StepResult::kTrap);
+  EXPECT_EQ(tmachine.trap(), cmachine.trap());
+  EXPECT_EQ(cmachine.trap(), Trap::kOutOfGas);
+  EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining());
+  EXPECT_EQ(cmachine.gas_remaining(), 0U);
+  EXPECT_EQ(thost.call_count(), chost.call_count());
+  EXPECT_EQ(chost.call_count(), 1U);
+
+  // Frame-local, trap-discarded state legitimately diverges: canonical stops at
+  // the ori boundary (pc 12, x12 untouched); the threaded deficit run also ran
+  // the unpayable ori (pc 16, x12 = 7). Neither pc nor x12 is consensus-visible
+  // after a trap, so this divergence is by design, not a consensus fault.
+  EXPECT_EQ(cmachine.pc(), 12U);
+  EXPECT_EQ(cmachine.reg(12), 0U);
+  EXPECT_EQ(tmachine.pc(), 16U);
+  EXPECT_EQ(tmachine.reg(12), 7U);
+}
+
 TEST(Rv32ThreadedTrapGas, deficitRunEndingInEbreakReportsOutOfGas)
 {
   // The speculative run reaches its ebreak barrier, but canonical never got
@@ -2343,13 +2361,15 @@ TEST(Rv32ThreadedTrapGas, jalOutOfRangeGasParity)
 {
   using test_program::j_type;
   // Out-of-range jal bakes trap_at<kBadPc> as the slot's own handler; jal is
-  // a barrier so its run charge is exact. Charged: addi, jal = 2 -> 98.
+  // a barrier so its run charge is exact. Charged: addi, jal = 4 -> 96.
   const std::vector<uint32_t> words = {
       addi(5, 0, 1),   // x5 = 1
       j_type(1, 4096), // jal x1, +4096 -> target OOB
   };
   expect_trap_gas_parity(words, Trap::kBadPc,
-                         /*expected_gas_remaining=*/98, /*check_pc=*/false);
+                         /*expected_gas_remaining=*/100 -
+                             (kBaseInstructionGas + kDirectJumpGas),
+                         /*check_pc=*/false);
 }
 
 TEST(Rv32ThreadedTrapGas, fallOffEndGasParity)
@@ -2393,15 +2413,11 @@ TEST(Rv32ThreadedTrapGas, unimpGasParity)
 // --- Host-consumed ecall gas
 // ----------------------------------------------------
 //
-// The host's gas_consumed on an ecall is debited by BOTH engines and moves the
-// consensus-visible gas_remaining, but every host in the corpus/differential
-// harness (RecordingHost, ThreadedMemoryHost) reports 0 host gas, so the debit
-// -- and the threaded engine's apply_ecall host-gas out-of-gas branch, and the
-// deficit a resumed run can fall into -- is otherwise untested. GasHost debits
-// a fixed cost per ecall so these pin cross-engine parity of that charge.
+// GasHost charges a fixed cost per ECALL to exercise host debits, host-induced
+// out-of-gas, and deficits after resuming guest execution.
 
 // Drive `words` through the canonical Machine and both (untraced/traced)
-// ThreadedMachine instantiations under the SAME gas-consuming host, and require
+// ThreadedMachine instantiations under the same gas-consuming host, and require
 // the consensus-visible outcome (result, trap, gas_remaining) and the host-call
 // count to agree.
 void
@@ -2561,9 +2577,8 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   constexpr size_t kLeadDivs = (kMaxRunGas - kWideLoadGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(
-      load(4, 2, 0,
-           2047)); // lw x4, 2047(x0) -> OOB fault (slot 1249 = carrier)
+  words.push_back(load(4, 2, 0,
+                       2047)); // lw x4, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
@@ -2591,9 +2606,8 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
       (kMaxRunGas - kBaseInstructionGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
   std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(
-      store(0, 2, 2047,
-            2)); // sw x2, 2047(x0) -> OOB fault (slot 1249 = carrier)
+  words.push_back(store(0, 2, 2047,
+                        2)); // sw x2, 2047(x0) -> OOB fault at break carrier
   words.insert(words.end(), kTrailDivs,
                op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
@@ -2653,13 +2667,8 @@ constexpr uint32_t kMinRunGasCap = static_cast<uint32_t>(kMaxInstructionGas);
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
 {
   using test_program::load;
-  // Chunk cap 8 over [7 addi][LW][7 addi][ecall] (gas 1 each, 16 slots).
-  // Backward-greedy lowering: the trailing [7 addi + ecall] fills an 8-gas
-  // chunk, the lw cannot fold into it (1+8 > 8), so the lw at slot 7 is the
-  // break carrier ending the first chunk. Its Brk fault path must refund
-  // nothing at every budget: below 8 the run enters in deficit (canonical
-  // OOGs inside the prefix), at exactly 8 the fault lands with zero balance,
-  // above 8 the remainder must match canonical's charge-through-the-lw.
+  // At kMinRunGasCap, LW fills a chunk by itself. Its break-carrier fault
+  // refunds no suffix gas. Sweep budgets across the prefix and faulting load.
   std::vector<uint32_t> words(7, addi(1, 0, 1));
   words.push_back(load(5, 2, 0, 300)); // slot 7: OOB lw -> carrier
   words.insert(words.end(), 7, addi(2, 0, 2));
@@ -2674,14 +2683,10 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
 {
   using test_program::load;
-  // Chunk cap 8 over [8 addi][LW][6 addi][ecall] (16 slots): the trailing
-  // [LW + 6 addi + ecall] fills an 8-gas chunk headed by the faulting lw, and
-  // the addi at slot 7 becomes the break carrier ending the first chunk. The
-  // fault fires at a run head -- straight out of enter_run's charge (budget >=
-  // the 9-gas prefix) or inside a deficit run (budget below it, where
-  // canonical ran dry in the first chunk or exactly at the boundary).
+  // At kMinRunGasCap, LW fills a chunk by itself. The preceding ADDI must
+  // carry a break, so the fault follows enter_run's charge for the load.
   std::vector<uint32_t> words(8, addi(1, 0, 1));
-  words.push_back(load(5, 2, 0, 300)); // slot 8: OOB lw heads chunk 2
+  words.push_back(load(5, 2, 0, 300)); // slot 8: OOB lw at a chunk head
   words.insert(words.end(), 6, addi(2, 0, 2));
   words.push_back(kEcallWord);
   auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
@@ -2760,6 +2765,139 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
                            /*expected_gas_remaining=*/98);
   }
 }
+
+#if HOGD_RV32_STACK_USAGE_ENABLED
+
+// --- Guest stack-usage diagnostic (HOGD_RV32_STACK_USAGE, Debug only) --------
+//
+// write_rd records the first value the handlers store to sp (x2) and lowers
+// sp_min to every one. These pin what the per-invocation record in
+// rv32_contract.cc relies on: the initial value is the first store, the
+// minimum covers every architectural sp write, other registers never count,
+// and both start at kSpUnwritten.
+
+TEST(Rv32ThreadedStackUsage, recordsMinimumOfEverySpWrite)
+{
+  using test_program::store;
+  using test_program::u_type;
+  // Establish sp at 4096, push two frames (16 then 32 bytes), pop both, then
+  // push 8 bytes and stop. The deepest point, 4048, is reached mid-run and
+  // restored before any barrier, so only a per-write record can see it. The
+  // addi x1 between lui and the first addi sp keeps them from lowering to
+  // op_lui_addi; the alu;alu, alu;store and store;alu pairs the lowering does
+  // form all write their members' rd individually.
+  const std::vector<uint32_t> words = {
+      u_type(0x37U, 2, 0x1000U), // lui  sp, 1       -> 4096
+      addi(1, 0, 5),             // addi x1, x0, 5   (not sp)
+      addi(2, 2, -16),           // addi sp, sp, -16 -> 4080
+      store(2, 1, 0, 2),         // sw   x1, 0(sp)
+      addi(2, 2, -32),           // addi sp, sp, -32 -> 4048 (deepest)
+      addi(2, 2, 48),            // addi sp, sp, 48  -> 4096
+      addi(2, 2, -8),            // addi sp, sp, -8  -> 4088
+      kEbreakWord,
+  };
+  auto program = threaded_from_words(words, /*total_memory_size=*/8192);
+  ThreadedMachine machine(*program, /*gas=*/100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.trap(), Trap::kBreakpoint);
+  EXPECT_EQ(machine.reg(2), 4088U);
+  EXPECT_EQ(machine.sp_initial(), 4096U);
+  EXPECT_EQ(machine.sp_min(), 4048U);
+}
+
+TEST(Rv32ThreadedStackUsage, loadsIntoSpAreRecorded)
+{
+  using test_program::load;
+  using test_program::store;
+  // Save sp to memory, then restore a lower value with lw sp, 0(x1): the load
+  // handlers (plain and fused) write rd through the same hook as the ALU ones.
+  const std::vector<uint32_t> words = {
+      addi(2, 0, 128),   // sp = 128
+      addi(1, 0, 8),     // x1 = 8
+      addi(3, 0, 64),    // x3 = 64
+      store(1, 3, 0, 2), // sw x3, 0(x1)
+      load(2, 2, 1, 0),  // lw sp, 0(x1) -> 64 (deepest)
+      addi(2, 2, 32),    // sp = 96
+      kEbreakWord,
+  };
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, /*gas=*/100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(2), 96U);
+  EXPECT_EQ(machine.sp_initial(), 128U);
+  EXPECT_EQ(machine.sp_min(), 64U);
+}
+
+TEST(Rv32ThreadedStackUsage, ignoresOtherRegistersAndStartsUnwritten)
+{
+  // Writes to x1, x3, x4 and x0 (the regs_[0] trash sink) leave the record at
+  // kSpUnwritten, which is how the report tells "never wrote sp" apart from a
+  // genuine minimum.
+  const std::vector<uint32_t> words = {addi(1, 0, 5), addi(3, 1, 7),
+                                       addi(0, 1, 1), op(4, 1, 3, 0, 0),
+                                       kEbreakWord};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, /*gas=*/100);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(4), 17U);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
+}
+
+TEST(Rv32ThreadedStackUsage, resetClearsTheRecord)
+{
+  const std::vector<uint32_t> words = {addi(2, 0, 64), addi(2, 2, -16),
+                                       kEbreakWord};
+  auto program = threaded_from_words(words);
+  ThreadedMachine machine(*program, /*gas=*/100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.sp_initial(), 64U);
+  EXPECT_EQ(machine.sp_min(), 48U);
+
+  machine.reset(/*gas=*/100);
+  EXPECT_EQ(machine.sp_initial(), kSpUnwritten);
+  EXPECT_EQ(machine.sp_min(), kSpUnwritten);
+}
+
+TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsTheMaterializedConstant)
+{
+  using test_program::u_type;
+  // lui sp ; addi sp, sp, -16 lowers to op_lui_addi, which on the untraced
+  // (production) path stores only the pair's final value. That skips the lui's
+  // higher intermediate: the initial value is the constant the pair
+  // materializes, and the minimum is the same as on the traced path, where
+  // both architectural writes retire and the initial value is the lui's.
+  const std::vector<uint32_t> words = {u_type(0x37U, 2, 0x1000U),
+                                       addi(2, 2, -16), kEbreakWord};
+  {
+    auto program = threaded_from_words(words);
+    ASSERT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 0),
+              (&op_lui_addi<false>));
+    ThreadedMachine machine(*program, /*gas=*/100);
+    RecordingHost host;
+    EXPECT_EQ(machine.run(host), StepResult::kTrap);
+    EXPECT_EQ(machine.sp_initial(), 4080U);
+    EXPECT_EQ(machine.sp_min(), 4080U);
+  }
+  {
+    auto program = threaded_from_words(words, /*total_memory_size=*/256,
+                                       /*trace=*/true);
+    ThreadedMachine machine(*program, /*gas=*/100);
+    RecordingHost host;
+    TraceObserver obs;
+    EXPECT_EQ(machine.run(host, obs), StepResult::kTrap);
+    EXPECT_EQ(machine.sp_initial(), 4096U);
+    EXPECT_EQ(machine.sp_min(), 4080U);
+  }
+}
+
+#endif // HOGD_RV32_STACK_USAGE_ENABLED
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 

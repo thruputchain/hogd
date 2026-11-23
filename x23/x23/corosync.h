@@ -114,9 +114,10 @@ public:
       return [](Self::AwaitAcquire await) -> Async<void> {
         co_await await;
         if (ThreadPool *pool = ThreadPool::get_thread_pool())
-          co_await pool->async(&Self::block_while_inhibited, &await.lk_);
+          co_await pool->async(&Self::block_while_inhibited,
+                               &static_cast<Self &>(await.lk_));
         else
-          await.lk_.block_while_inhibited();
+          static_cast<Self &>(await.lk_).block_while_inhibited();
       }({self, ls});
     else
       // Self is a plain CoroLock
@@ -393,7 +394,7 @@ struct CoroGuard : CoroLock::LockerState {
   {
     x23assert(!lkp_);
     lkp_ = &lk;
-    return lkp_->lock(this);
+    return lk.lock(this);
   }
 
   void reset()
@@ -539,9 +540,7 @@ public:
 
 private:
   T *p_;
-  [[no_unique_address]] ThreadPool::CrashIfSuspended cis_;
-
-  static void make_cis(T *p)
+  static auto make_cis(T *p)
   {
     return p ? CrashIfSuspended{} : CrashIfSuspended{nullptr};
   }

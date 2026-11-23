@@ -53,4 +53,4 @@ add_dependencies(
   all_riscvs_built
 )
 
-gtest_discover_tests(exec_interface_test)
+hogd_discover_tests(exec_interface_test)

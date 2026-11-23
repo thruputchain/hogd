@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -10,11 +9,13 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -22,19 +23,19 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
-class FibonacciTest : public ::testing::TestWithParam<TestDB>,
+class FibonacciTest : public ::testing::Test,
                       public NativeContractTestFramework {
 public:
   FibonacciTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -56,7 +57,7 @@ protected:
 };
 
 // Simple test for sdk, to verify that calls actually happen.
-TEST_P(FibonacciTest, FibonacciCalls)
+TEST_F(FibonacciTest, FibonacciCalls)
 {
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
@@ -74,14 +75,14 @@ TEST_P(FibonacciTest, FibonacciCalls)
                                 kSufficientGas, 5U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
 
-TEST_P(FibonacciTest, FibonacciGasLimit)
+TEST_F(FibonacciTest, FibonacciGasLimit)
 {
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
   auto contract_addr = make_contract_address(0);
@@ -100,14 +101,14 @@ TEST_P(FibonacciTest, FibonacciGasLimit)
                                                                            20U),
                             .uniquifier = make_new_uniquifier()}},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_FALSE(res.is_root_success());
     ASSERT_EQ(res.gas_consumed_, 2000);
   }
 }
 
 // Test whether the output of the fibonacci contract is correct.
-TEST_P(FibonacciTest, FibonacciCorrectness)
+TEST_F(FibonacciTest, FibonacciCorrectness)
 {
   // deploy the fibonacci contract
   auto contract = hogd::load_rv32_contract("fibonacci.rv32a");
@@ -121,17 +122,18 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
   builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
       0,
       [](NativeSyscallContext &ctx, uint32_t input,
-         uint32_t expect) -> InvokeStatus<void> {
+         uint32_t expect) -> x23::Async<InvokeStatus<void>> {
         fib_client_t client(kFibContractAddr);
-        auto decoded = client.template invoke_opt<u8"fibonacci">(ctx, input);
+        auto decoded =
+            co_await client.template invoke_opt<u8"fibonacci">(ctx, input);
         if (!decoded.has_value() || !decoded.value().has_value() ||
             !decoded.value().value().has_value()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         if (decoded.value().value().value() != expect) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   auto native_contract = builder.build();
@@ -179,7 +181,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                         Invocation{
                             .invoked_address = native_contract_addr,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata =
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
@@ -187,9 +189,9 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -203,7 +205,7 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                         Invocation{
                             .invoked_address = native_contract_addr,
                             .entrypoint = entrypoint_from_method_id(0),
-                            .gas_limit = UINT64_MAX,
+                            .gas_limit = kDefaultMaxTxGas,
                             .calldata =
                                 Serializer<NativeContractBuilder::
                                                kDefaultSerializationFormat>::
@@ -212,17 +214,12 @@ TEST_P(FibonacciTest, FibonacciCorrectness)
                                         .value()},
                     .uniquifier = make_new_uniquifier()}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
   // NOLINTEND(bugprone-unchecked-optional-access)
 }
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, FibonacciTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 } // namespace hogd

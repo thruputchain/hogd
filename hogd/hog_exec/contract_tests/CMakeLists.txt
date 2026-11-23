@@ -42,4 +42,4 @@ add_dependencies(
   all_riscvs_built
 )
 
-gtest_discover_tests(contract_tests)
+hogd_discover_tests(contract_tests)

@@ -4,7 +4,7 @@ version = "0.2.0"
 edition = "2021"
 
 [dependencies]
-sdk = { workspace = true }
+thruput-sdk = { workspace = true }
 
 [lib]
 crate-type = ["cdylib", "rlib"]
@@ -12,8 +12,8 @@ doctest = false
 
 [features]
 entrypoints = []
-dev = ["sdk/dev"]
-logging = ["sdk/logging"]
+dev = ["thruput-sdk/dev"]
+logging = ["thruput-sdk/logging"]
 
 [[bin]]
 name = "tx_context_test"

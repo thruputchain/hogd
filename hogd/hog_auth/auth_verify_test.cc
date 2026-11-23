@@ -190,7 +190,7 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
 TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
 
   // No auth data is registered for the derived address.
   mock_db().compute_key_changes_for_current_height();
@@ -207,6 +207,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
 
   SignedTransaction stx{};
   stx.tx = tx;
+  stx.pubkey_claim_key = pk;
   stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
@@ -222,6 +223,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
   auto [pk2, sk2] = make_key_pair();
   SignedTransaction bad_stx{};
   bad_stx.tx = tx;
+  bad_stx.pubkey_claim_key = pk;
   bad_stx.signatures.push_back(make_signature(sk2, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> bad_vec{bad_stx};
@@ -231,10 +233,55 @@ TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
   EXPECT_EQ(bad_result[0], AuthErrorCode::kAuthFailed);
 }
 
+// Results stay in transaction order whether verify_transactions() verifies a
+// call inline (one chunk) or splits it over the pool.
+TEST_F(AuthVerifyTest, VerifyTransactionsInlineAndSplit)
+{
+  auto [pk, sk] = make_key_pair();
+  auto [pk2, sk2] = make_key_pair();
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
+
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto derived_address = pubkey_auth_address(preimage);
+  ASSERT_TRUE(derived_address.has_value());
+  Transaction tx{};
+  tx.invocation.invoked_address = *derived_address;
+  tx.auth_claim = make_pubkey_claim(preimage);
+
+  SignedTransaction good{};
+  good.tx = tx;
+  good.pubkey_claim_key = pk;
+  good.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
+  SignedTransaction bad = good;
+  bad.signatures[0] = make_signature(sk2, tx, /*public_key_id=*/0);
+
+  // One call that fits in a chunk, and one split into three.
+  for (size_t count : {AuthServer::kMinTxsPerVerifyChunk - 1,
+                       (3 * AuthServer::kMinTxsPerVerifyChunk) + 5}) {
+    x23::Vec<SignedTransaction> stx_vec;
+    for (size_t i = 0; i < count; i++) {
+      stx_vec.push_back(i % 7 == 3 ? bad : good);
+    }
+    x23::span<SignedTransaction> stx_span(stx_vec);
+    auto result =
+        auth_server().verify_transactions(0, stx_span, /*max_parallelism=*/8)();
+    ASSERT_EQ(result.size(), count);
+    for (size_t i = 0; i < count; i++) {
+      EXPECT_EQ(result[i], i % 7 == 3 ? AuthErrorCode::kAuthFailed
+                                      : AuthErrorCode::kAuthSuccess)
+          << "count " << count << " index " << i;
+    }
+  }
+}
+
 TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
   auto derived_address = pubkey_auth_address(preimage);
   ASSERT_TRUE(derived_address.has_value());
   ContractAddress address = *derived_address;
@@ -250,6 +297,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 
   SignedTransaction stx{};
   stx.tx = tx;
+  stx.pubkey_claim_key = pk;
   stx.signatures.push_back(make_signature(sk, tx, /*public_key_id=*/0));
 
   x23::Vec<SignedTransaction> stx_vec{stx};
@@ -282,7 +330,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimRejectedOnceAuthDataRegistered)
 TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 {
   auto [pk, sk] = make_key_pair();
-  PubkeyAccountPreimage preimage{.pubkey = pk, .nonce = 42};
+  PubkeyAccountPreimage preimage = make_pubkey_account_preimage(pk, 42);
   auto derived_address = pubkey_auth_address(preimage);
   ASSERT_TRUE(derived_address.has_value());
   ContractAddress address = *derived_address;
@@ -301,6 +349,7 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
   pubkey_tx.auth_claim = make_pubkey_claim(preimage);
   SignedTransaction pubkey_stx{};
   pubkey_stx.tx = pubkey_tx;
+  pubkey_stx.pubkey_claim_key = pk;
   pubkey_stx.signatures.push_back(
       make_signature(sk, pubkey_tx, /*public_key_id=*/0));
 
@@ -346,9 +395,12 @@ TEST_F(AuthVerifyTest, PubkeyClaimAcceptedOnceAuthDataDeleted)
 TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
 {
   constexpr size_t kNumAddresses = 4;
-  constexpr size_t kTxsPerAddress = 16;
+  constexpr size_t kTxsPerAddress = AuthServer::kMinTxsPerVerifyChunk;
   constexpr size_t kTotalTxs = kNumAddresses * kTxsPerAddress;
   constexpr size_t kMaxParallelism = 4;
+  // Enough transactions that the call splits into kMaxParallelism chunks.
+  static_assert(kTotalTxs / AuthServer::kMinTxsPerVerifyChunk >=
+                kMaxParallelism);
 
   ContractAddress addresses[kNumAddresses];
   std::pair<PublicKey, SecretKey> keys[kNumAddresses];
@@ -393,6 +445,60 @@ TEST_F(AuthVerifyTest, ParallelVerifyTransactionsMapDataRace)
   for (AuthErrorCode status : result) {
     EXPECT_EQ(status, AuthErrorCode::kAuthSuccess);
   }
+}
+
+// Admission through the auth server for the behavior
+// AuthClaimTests.ZeroRequiredWeightAuthDataAcceptsUnsignedSourceClaim pins: a
+// present row with required_weight 0 is cached like any other and admits an
+// unsigned source-address claim, while a row with threshold 1 and a missing row
+// reject it. Genesis ceremony transactions reach the genesis root this way.
+//
+// Reported on issue #3069 and confirmed working-as-intended; this test pins
+// that behavior.
+TEST_F(AuthVerifyTest, ZeroRequiredWeightAuthDataAdmitsUnsignedSourceClaim)
+{
+  ContractAddress zero_weight_address = make_test_address(11);
+  ContractAddress one_weight_address = make_test_address(12);
+  ContractAddress missing_address = make_test_address(13);
+
+  AddressAuthData zero_weight_auth_data{};
+  AddressAuthData one_weight_auth_data{};
+  one_weight_auth_data.required_weight = 1;
+
+  mock_db().set(zero_weight_address, zero_weight_auth_data);
+  mock_db().set(one_weight_address, one_weight_auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto make_unsigned_stx = [](ContractAddress const &address) {
+    SignedTransaction stx{};
+    stx.tx.invocation.invoked_address = address;
+    stx.tx.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
+    stx.tx.auth_claim.source_address_claim().allowed_keys = 0;
+    stx.tx.auth_claim.source_address_claim().required_weight = 0;
+    return stx;
+  };
+  SignedTransaction zero_weight_stx = make_unsigned_stx(zero_weight_address);
+  SignedTransaction one_weight_stx = make_unsigned_stx(one_weight_address);
+  SignedTransaction missing_stx = make_unsigned_stx(missing_address);
+
+  x23::Vec<SignedTransaction> stx_vec{zero_weight_stx, one_weight_stx,
+                                      missing_stx};
+  x23::span<SignedTransaction> stx_span(stx_vec);
+  auto result = auth_server().verify_transactions(0, stx_span)();
+  ASSERT_EQ(result.size(), 3);
+  EXPECT_EQ(result[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(result[1], AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+
+  EXPECT_EQ(auth_server().verify_batch(0, {zero_weight_stx})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {one_weight_stx})(),
+            AuthErrorCode::kAuthFailed);
+  EXPECT_EQ(auth_server().verify_batch(0, {missing_stx})(),
+            AuthErrorCode::kAuthFailed);
 }
 
 } // namespace hogd

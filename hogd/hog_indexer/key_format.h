@@ -7,6 +7,7 @@
 #include <string_view>
 
 #include "network.hh"
+#include "transaction.hh"
 #include "types.hh"
 
 namespace hogd {
@@ -60,6 +61,20 @@ public:
       "meta:indexer_durable:block:";
   static constexpr std::string_view kEpochHistoryMetaKeyPrefix =
       "meta:indexer_durable:epoch:";
+  // Query projections share the default CF and the strict ingest WriteBatch.
+  // Metadata: prefix || height (8 BE) -> XDR BlockQueryRecord.
+  // Refs: prefix || height (8 BE) || hash (32) -> ordinal (8 BE).
+  // The ordinal detects missing rows without scanning the rest of a block.
+  static constexpr std::string_view kBlockQueryFormatKey =
+      "meta:indexer_durable:queries:format";
+  static constexpr std::string_view kBlockQueryRecordPrefix =
+      "meta:indexer_durable:queries:blocks:";
+  static constexpr std::string_view kBlockQueryRefPrefix =
+      "meta:indexer_durable:queries:refs:";
+  static std::string make_block_query_key(std::string_view prefix,
+                                          BlockHeight height);
+  static std::string make_block_ref_key(BlockHeight height,
+                                        const TransactionHash &hash);
   static std::string make_block_identity_meta_key(BlockHeight block_height);
   static std::string
   make_epoch_history_meta_key(const ProtocolCommit &protocol);

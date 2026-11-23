@@ -134,15 +134,17 @@ private:
         lk.lock();
       }
       else if (!done_) {
-#if HAVE_BROKEN_WAIT_UNTIL
+        // An empty queue means waiting on Clock::time_point::max().  Some
+        // implementations of wait_until (libstdc++) mishandle a deadline
+        // that far out and return immediately, turning this loop into a
+        // busy spin, so wait for the notification instead.  Finite
+        // deadlines are safe because fastclock's rep is signed -- see the
+        // comment on it in fastclock.h.
         auto wake_time = next_wake();
         if (wake_time == Clock::time_point::max())
           recheck_.wait(lk);
         else
           recheck_.wait_until(lk, wake_time);
-#else  // !HAVE_BROKEN_WAIT_UNTIL
-        recheck_.wait_until(lk, next_wake());
-#endif // !HAVE_BROKEN_WAIT_UNTIL
       }
       else
         return;

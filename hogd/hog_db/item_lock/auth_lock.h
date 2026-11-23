@@ -30,8 +30,12 @@ class AuthLock {
 public:
   using change_type = PointerItem<AuthDataItem>;
 
+  // A lock on an address whose committed row is base_auth_data.
   AuthLock(AddressAuthData base_auth_data)
-    : base_auth_data_(std::move(base_auth_data))
+    : AuthLock(std::move(base_auth_data), /*row_exists=*/true)
+  {}
+  AuthLock(AddressAuthData base_auth_data, bool row_exists)
+    : base_auth_data_(std::move(base_auth_data)), row_exists_(row_exists)
   {}
 
   HogDbStatus<int128_t>
@@ -46,10 +50,17 @@ public:
 
   AddressAuthData build_result(BlockHeight block_height) const;
 
+  // Whether the committed changes leave a row to write. An address with no
+  // committed row gets one only once a change registers a key or writes a
+  // threshold; until then the lock is held, but nothing is written or charged.
+  bool writes_row() const;
+
 private:
   size_t count_active_keys() const;
+  int128_t committed_cost(const StorageCostModel &cost_model) const;
 
   AddressAuthData base_auth_data_;
+  bool row_exists_;
   x23::TestLock lock_;
   bool locked_{false};
   std::array<std::optional<PublicKeyConfigOpt>, kMaxSigners> pk_changes_;

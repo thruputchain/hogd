@@ -142,12 +142,13 @@ private:
         mmap(/*addr=*/nullptr, kMmapLength, /*prot=*/PROT_READ | PROT_WRITE,
              /*flags=*/MAP_PRIVATE | MAP_ANONYMOUS, /*fildes=*/-1, /*off=*/0);
     CHECK_NE(addr, MAP_FAILED);
-    // POSIX guarantees that a successful anonymous mmap() returns a
-    // page-aligned address. On the LP64 platforms we support (Linux x86-64 and
-    // ARM64 under GCC/Clang), reinterpret_cast<uintptr_t> yields the numeric
-    // virtual address, so this is a defensive sanity check on that guarantee
-    // rather than a portability hazard.
-    CHECK_EQ(reinterpret_cast<uintptr_t>(addr) % kPageSize, 0UL);
+    // POSIX guarantees a successful anonymous mmap() returns a page-aligned
+    // address. Check it via std::align rather than reinterpret_cast<uintptr_t>
+    // so the check doesn't depend on implementation-defined pointer-to-integer
+    // representation; std::align leaves an already-aligned pointer unchanged.
+    // (space is a separate local only because std::align takes it by ref.)
+    size_t space = kMmapLength;
+    CHECK_EQ(std::align(kPageSize, kPageSize, addr, space), addr);
 
 #ifdef __cpp_lib_start_lifetime_as
     unsigned char *region =

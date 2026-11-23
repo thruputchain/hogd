@@ -1,5 +1,4 @@
 # Build hog_exec modules
-# Note: wasmi is now built via the main rust workspace
 add_subdirectory(common)
 add_subdirectory(components)
 add_subdirectory(runtime)

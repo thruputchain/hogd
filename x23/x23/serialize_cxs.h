@@ -586,18 +586,25 @@ template<is_xdr_cat<XdrCategory::kPtr> X> struct CxsSerializer<X> {
   }
 };
 
-// float and double are special cased because they are not integral types
+// A Box of a non-struct, non-union type encodes as its contents (see
+// is_boxed_leaf). Boxed structs and unions take the struct and union paths.
+template<typename T> requires is_boxed_leaf<Box<T>>
+struct CxsSerializer<Box<T>> {
+  static constexpr CxsStatus<void> store(x23::Buf &buf, const Box<T> &value)
+  {
+    return CxsSerializer<T>::store(buf, *value);
+  }
+};
+
+// float and double are raw little-endian IEEE 754 bytes, not compressed like
+// integers (CXS.md).
 template<typename T>
 requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
 struct CxsSerializer<T> {
-  using uint_type = std::conditional_t<sizeof(T) == 4, uint32_t, uint64_t>;
-  static_assert(sizeof(uint_type) == sizeof(T),
-                "uint_type must be the same size as T");
-
   static constexpr CxsStatus<void> store(x23::Buf &buf, T value)
   {
-    return CxsSerializer<uint_type>::store(buf,
-                                           std::bit_cast<uint_type>(value));
+    buf.append_range(std::bit_cast<std::array<uint8_t, sizeof(T)>>(value));
+    return {};
   }
 };
 
@@ -656,7 +663,9 @@ cxs_size(const T &x)
 {
   using X = std::remove_cvref_t<T>;
   using enum XdrCategory;
-  if constexpr (std::same_as<X, bool>)
+  if constexpr (is_boxed_leaf<X>)
+    return cxs_size(*x);
+  else if constexpr (std::same_as<X, bool>)
     return 1;
   else if constexpr (std::signed_integral<X>)
     return cxs_integral_encoded_size(cxs_int_get_function_index(x));
@@ -664,10 +673,8 @@ cxs_size(const T &x)
     return cxs_integral_encoded_size(cxs_uint_get_function_index(x));
   else if constexpr (std::is_enum_v<X>)
     return cxs_size(static_cast<std::underlying_type_t<X>>(x));
-  else if constexpr (std::same_as<X, float> || std::same_as<X, double>) {
-    using uint_type = std::conditional_t<sizeof(X) == 4, uint32_t, uint64_t>;
-    return cxs_size(std::bit_cast<uint_type>(x));
-  }
+  else if constexpr (std::same_as<X, float> || std::same_as<X, double>)
+    return sizeof(X);
   else if constexpr (is_xdr_cat<X, kOpaqueArray>)
     return std::tuple_size_v<X>;
   else if constexpr (is_xdr_cat<X, kOpaqueVec, kString>)
@@ -733,7 +740,7 @@ serialize_cxs_array(const T &value)
 template<bool CheckRecursion> struct CxsRecursionTracker {};
 
 template<> struct CxsRecursionTracker<true> {
-  size_t remaining_ = deserialization_recursion_limit;
+  size_t remaining_;
 
   CxsStatus<void> recurse()
   {
@@ -748,7 +755,12 @@ template<bool CheckRecursion>
 struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
   std::span<const uint8_t> &data;
 
-  explicit CxsDeserializer(std::span<const uint8_t> &d) noexcept : data(d) {}
+  CxsDeserializer(std::span<const uint8_t> &d, size_t recursion_limit) noexcept
+    : data(d)
+  {
+    if constexpr (CheckRecursion)
+      this->remaining_ = recursion_limit;
+  }
 
   CxsStatus<void> go(std::monostate & /*unused*/) { return {}; }
 
@@ -782,13 +794,10 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
   requires (is_xdr_cat<T, XdrCategory::kPrimitive> && !std::is_integral_v<T>)
   CxsStatus<void> go(T &value)
   {
-    using uint_type =
-        std::conditional_t<sizeof(T) == sizeof(uint32_t), uint32_t, uint64_t>;
-    static_assert(sizeof(uint_type) == sizeof(T));
-    uint_type bits;
-    if (auto status = go(bits); !status) [[unlikely]]
+    if (auto status = check_size(data, sizeof(T)); !status) [[unlikely]]
       return status.error();
-    value = std::bit_cast<T>(bits);
+    std::memcpy(&value, data.data(), sizeof(T));
+    data = data.subspan(sizeof(T));
     return {};
   }
 
@@ -831,6 +840,12 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
     return {};
   }
 
+  template<typename T> requires is_boxed_leaf<Box<T>>
+  CxsStatus<void> go(Box<T> &value)
+  {
+    return go(*value);
+  }
+
   template<is_xdr_struct T> CxsStatus<void> go(T &value)
   {
     if constexpr (CheckRecursion && is_recursive_xdr<T>) {
@@ -844,6 +859,8 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
             status = this->go(field);
         },
         value);
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->remaining_++;
     return status;
   }
 
@@ -861,8 +878,11 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
     union_set_discriminant(value, d);
     if (ops::index(value) == -1) [[unlikely]]
       return CxsError{CxsErrorCode::kBadDiscriminant};
-    return union_visit_arm([this](auto &arm) { return this->go(arm); }, value,
-                           CxsStatus<void>{});
+    auto status = union_visit_arm([this](auto &arm) { return this->go(arm); },
+                                  value, CxsStatus<void>{});
+    if constexpr (CheckRecursion && is_recursive_xdr<T>)
+      this->remaining_++;
+    return status;
   }
 
   template<is_xdr_cat<XdrCategory::kArray> X> CxsStatus<void> go(X &value)
@@ -909,10 +929,11 @@ struct CxsDeserializer : private CxsRecursionTracker<CheckRecursion> {
 
 template<is_xdr_type T>
 [[nodiscard]] CxsStatus<size_t>
-deserialize_cxs_from(T *value, std::span<const uint8_t> data)
+deserialize_cxs_from(T *value, std::span<const uint8_t> data,
+                     size_t recursion_limit = deserialization_recursion_limit)
 {
   size_t initial_size = data.size();
-  CxsDeserializer<contains_recursive_xdr<T>> d(data);
+  CxsDeserializer<contains_recursive_xdr<T>> d(data, recursion_limit);
   if (auto status = d.go(*value); !status) [[unlikely]]
     return status.error();
   return initial_size - data.size();
@@ -920,9 +941,10 @@ deserialize_cxs_from(T *value, std::span<const uint8_t> data)
 
 template<is_xdr_type T>
 [[nodiscard]] CxsStatus<void>
-deserialize_cxs(T *value, std::span<const uint8_t> data)
+deserialize_cxs(T *value, std::span<const uint8_t> data,
+                size_t recursion_limit = deserialization_recursion_limit)
 {
-  auto used = deserialize_cxs_from(value, data);
+  auto used = deserialize_cxs_from(value, data, recursion_limit);
   if (!used) [[unlikely]]
     return used.error();
   if (*used != data.size()) [[unlikely]]

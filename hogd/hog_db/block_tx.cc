@@ -28,10 +28,10 @@
 #include "hogd/hog_db/item_lock/deletion_lock.h"
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/status.h"
-#include "retrocausal_queue.hh"
 #include "rpc_types.hh"
 #include "sched_db.hh"
 #include "types.hh"
+#include "x23/vec.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -94,6 +94,10 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   auto snapshot_cost =
       db_.get_charged_storage_cost_and_cache_data(key, &cost_model_);
   if (!snapshot_cost) {
+    // Corrupt persisted state: fail-stop here, with the key, rather than
+    // after the executor round trip in the mempool's Unrecoverable CHECK.
+    if (snapshot_cost.error() == HogDbCode::kCorruption)
+      panic("corrupt persisted state under key {}", key);
     if (snapshot_cost.error() != HogDbCode::kNotFound) {
       return snapshot_cost.error();
     }
@@ -105,7 +109,7 @@ BlockTX::get_snapshot_cost_and_cache_data(const ItemKey &key)
   return *snapshot_cost;
 }
 
-HogDbStatus<int128_t>
+HogDbStatus<BlockTX::LockResult>
 BlockTX::lock(const ItemKey &key, ItemChange &change,
               std::optional<DbConflictCode> *conflict_reason)
 {
@@ -123,8 +127,11 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
 
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
-    return do_lock(*lock, change, ctx)
-        .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
+    auto storage_cost = do_lock(*lock, change, ctx);
+    if (!storage_cost) {
+      return storage_cost.error();
+    }
+    return LockResult{.lock = lock, .storage_cost = 0};
   }
 
   auto *item = item_locks_.insert_or_get(key, [&] {
@@ -135,30 +142,29 @@ BlockTX::lock(const ItemKey &key, ItemChange &change,
 
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   ctx.conflict_reason = conflict_reason;
-  return do_lock(*item, change, ctx);
+  auto storage_cost = do_lock(*item, change, ctx);
+  if (!storage_cost) {
+    return storage_cost.error();
+  }
+  return LockResult{.lock = item, .storage_cost = *storage_cost};
 }
 
 HogDbStatus<int128_t>
-BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
-                     const ItemChange &new_change,
+BlockTX::modify_lock(ItemLock &lock, const ItemKey &key,
+                     const ItemChange &old_change, const ItemChange &new_change,
                      std::optional<DbConflictCode> *conflict_reason)
 {
   // no storage cost for address balances.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
     ctx.conflict_reason = conflict_reason;
-    return do_modify_lock(*lock, old_change, new_change, ctx)
+    return do_modify_lock(lock, old_change, new_change, ctx)
         .and_then([](auto /*unused*/) -> HogDbStatus<int128_t> { return 0; });
   }
 
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
-
   LockContext ctx(&db_, block_height_, key, &cost_model_);
   ctx.conflict_reason = conflict_reason;
-  auto r = do_modify_lock(*lock, old_change, new_change, ctx);
+  auto r = do_modify_lock(lock, old_change, new_change, ctx);
   if (!r && is_invalidated()) [[unlikely]] {
     // Catches the narrow race where a sibling invalidated us *during*
     // do_modify_lock: its DAO block removal made an RCQ consume's past-block
@@ -174,44 +180,28 @@ BlockTX::modify_lock(const ItemKey &key, const ItemChange &old_change,
 }
 
 void
-BlockTX::unlock(const ItemKey &key, ItemChange &change)
+BlockTX::unlock(ItemLock &lock, const ItemKey &key, ItemChange &change)
 {
-  // no storage cost for address balances.
-  if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
-    LockContext ctx(&db_, block_height_, key, &cost_model_);
-    do_unlock_item(*lock, change, ctx);
-    return;
-  }
-
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  do_unlock_item(*lock, change, ctx);
+  do_unlock_item(lock, change, ctx);
 }
 
 HogDbStatus<int128_t>
-BlockTX::commit_change(const ItemKey &key, ItemChange change)
+BlockTX::commit_change(ItemLock &lock, const ItemKey &key, ItemChange change)
 {
   // TODO(geoff): In many cases we can evaluate here whether or not the item
   // change commit_change is a no-op.  In such cases, we can avoid acquiring the
   // lock.
   if (key.is_address_balance()) {
-    auto *lock = addr_balance_locks_.get(key.get_address());
-    CHECK_PTR(lock);
     LockContext ctx(&db_, block_height_, key, &cost_model_);
-    auto r = lock->commit_change(std::move(change), ctx);
+    auto r = lock.commit_change(std::move(change), ctx);
     if (!r.has_value()) {
       return r.error();
     }
     return 0;
   }
-  auto *lock = item_locks_.get(key);
-  CHECK_PTR(lock);
-
   LockContext ctx(&db_, block_height_, key, &cost_model_);
-  auto r = lock->commit_change(std::move(change), ctx);
+  auto r = lock.commit_change(std::move(change), ctx);
 
   // Reject the commit if a sibling invalidated this block. An exclusive RCQ
   // commit revalidates against the live DAO and computes its committed cost
@@ -229,7 +219,7 @@ BlockTX::commit_change(const ItemKey &key, ItemChange change)
   return r;
 }
 
-HogDbStatus<std::optional<QueueEntry>>
+HogDbStatus<std::optional<x23::BufView>>
 BlockTX::get_concurrent_rcq_entry(const ItemKey &key, uint32_t index)
 {
   auto *lock = item_locks_.get(key);
@@ -310,7 +300,17 @@ BlockTX::commit(WorkerPool &pool)
   // restart recovers cleanly at the parent block.
   try {
     if (auto r = db_.apply(*changeset_, pool); !r) {
-      return r.error();
+      // An error status has the same no-rollback consequence as an exception:
+      // a failure partway through a multi-key ChangeSet (e.g. an allocator
+      // kNoMemory after an earlier put is already live) leaves a prefix of this
+      // block's writes in the DAO while the published DbTip stays at the
+      // parent. Returning the error would let a later block close from that
+      // stale parent and compute a hash inconsistent with the live DAO (issue
+      // #3930). Fail stop just like the handlers below; a throw while panic()
+      // formats is caught by them and still terminates.
+      panic("BlockTX::commit(): db_.apply() failed ({}); RAMDB has no rollback "
+            "and may be ahead of the published DB tip",
+            r.error());
     }
     changeset_.reset();
 
@@ -326,10 +326,13 @@ BlockTX::commit(WorkerPool &pool)
           if (v.first.is_address_auth_data()) {
             if (auto const *inner =
                     v.second.get_inner<PointerLock<AuthLock>>()) {
-              key_changes->emplace_back(
-                  v.first.to_contract_address(),
-                  x23::Ptr<AddressAuthData>(new AddressAuthData(
-                      inner->get()->build_result(block_height_))));
+              // A lock that wrote no row changed nothing auth can see.
+              if (inner->get()->writes_row()) {
+                key_changes->emplace_back(
+                    v.first.to_contract_address(),
+                    x23::Ptr<AddressAuthData>(new AddressAuthData(
+                        inner->get()->build_result(block_height_))));
+              }
             }
             else if (v.second.get_inner<DeletionLock>()) {
               key_changes->emplace_back(v.first.to_contract_address(), nullptr);
@@ -367,8 +370,8 @@ BlockTX::commit(WorkerPool &pool)
             return;
           }
 
-          balance_deltas->push_back(
-              Delta{.address = v.first.get_raw(), .hog_delta = to_xdr(value)});
+          balance_deltas->push_back(Delta{.address = v.first.get_raw(),
+                                          .native_token_delta = to_xdr(value)});
         },
         pool);
 
@@ -395,13 +398,13 @@ BlockTX::commit(WorkerPool &pool)
 }
 
 HogDbStatus<void>
-BlockTX::close_skip_hash_for_testing()
+BlockTX::close_skip_hash_for_testing(WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/false);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r;
   }
   changeset_ = std::move(changes);
@@ -409,13 +412,13 @@ BlockTX::close_skip_hash_for_testing()
 }
 
 HogDbStatus<StorageLongHash>
-BlockTX::close(const StorageLongHash &base_hash)
+BlockTX::close(const StorageLongHash &base_hash, WorkerPool &pool)
 {
   if (is_poisoned()) {
     return HogDbError(HogDbCode::kInternal);
   }
   ChangeSet changes = db_.create_changeset(/*compute_hash=*/true);
-  if (auto r = stage_locks(changes); !r) {
+  if (auto r = stage_locks(changes, pool); !r) {
     return r.error();
   }
 
@@ -428,7 +431,7 @@ BlockTX::close(const StorageLongHash &base_hash)
 }
 
 HogDbStatus<void>
-BlockTX::stage_locks(ChangeSet &changes)
+BlockTX::stage_locks(ChangeSet &changes, WorkerPool &pool)
 {
   std::mutex err_lock;
   HogDbStatus<void> status;
@@ -444,7 +447,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   if (!status) {
     return status;
@@ -463,7 +467,8 @@ BlockTX::stage_locks(ChangeSet &changes)
           std::scoped_lock guard(err_lock);
           status = r;
         }
-      });
+      },
+      pool);
 
   return status;
 }

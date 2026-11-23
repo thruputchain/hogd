@@ -21,21 +21,29 @@ namespace hogd::rv32 {
 inline constexpr std::array<uint8_t, 8> kArtifactMagic = {u8'G', u8'H', u8'R',
                                                           u8'V', u8'3', u8'2',
                                                           u8'A', u8'1'};
-inline constexpr uint32_t kArtifactFormatVersion = 5;
-inline constexpr uint32_t kArtifactHeaderBytes = 128;
+// v5 and v6 stay readable so existing contracts remain executable; removing
+// either requires a separate network transition decision. v6 added the
+// extension list. v7 declares the syscall API minor version the guest was
+// built against where v5 and v6 declare a gas schedule.
+inline constexpr uint32_t kArtifactVersion5 = 5;
+inline constexpr uint32_t kArtifactVersion6 = 6;
+inline constexpr uint32_t kArtifactVersion7 = 7;
+// A v7 header. A v5 or v6 header adds the gas schedule digest, shifting the
+// fields after it.
+inline constexpr uint32_t kArtifactHeaderBytes = 120;
+inline constexpr uint32_t kArtifactGasDigestBytes = 8;
+inline constexpr uint32_t kArtifactV5V6HeaderBytes =
+    kArtifactHeaderBytes + kArtifactGasDigestBytes;
 inline constexpr uint64_t kArtifactVmProfileDigest = 0x55c53a685f0eb33dULL;
-// v3: the VM seeds sp (x2) to 0 at entry; the guest owns stack placement and
-// must set sp itself (a stack touch before that wraps below 0 and traps OOB).
+// v3: the VM initializes sp (x2) to zero; the guest must establish its stack.
 // v2 seeded sp to the top of data memory.
 inline constexpr uint32_t kArtifactEntryAbiVersion = 3;
+// The syscall API major version (syscall_api_version.major in the protocol's
+// syscalls.yaml; rv32_contract.cc pins the two equal): the calling convention
+// and every syscall's number and signature.
 // v1: register-native syscall ABI (args in a0..a7, no memory frame/footer).
 inline constexpr uint32_t kArtifactSyscallAbiVersion = 1;
 inline constexpr uint32_t kArtifactFlagsRequiredValue = 0;
-// Version of the RV32 gas schedule (instruction + host-syscall costs) stamped
-// into the header at kArtifactGasVersionOffset and validated at load.
-// v3 admits canonical UNIMP (0xc0001073) as a deterministic invalid-instruction
-// trap.
-inline constexpr uint32_t kGasTableVersion = 4;
 inline constexpr size_t kArtifactDigestBytes = 32;
 inline constexpr size_t kArtifactFormatVersionOffset = 8;
 inline constexpr size_t kArtifactHeaderSizeOffset = 12;
@@ -43,89 +51,40 @@ inline constexpr size_t kArtifactVmProfileOffset = 16;
 inline constexpr size_t kArtifactFlagsOffset = 24;
 inline constexpr size_t kArtifactEntryAbiOffset = 28;
 inline constexpr size_t kArtifactSyscallAbiOffset = 32;
+// v7: the syscall API minor version the guest was built against. Admission
+// requires it to be one the chain implements; what a syscall costs is the
+// chain's, not the artifact's.
+inline constexpr size_t kArtifactSyscallApiMinorOffset = 36;
+// v5 and v6: a gas schedule version where the minor is, then its digest. The
+// offsets below are for v7, and kArtifactGasDigestBytes higher in v5 and v6.
 inline constexpr size_t kArtifactGasVersionOffset = 36;
 inline constexpr size_t kArtifactGasDigestOffset = 40;
-inline constexpr size_t kArtifactMemoryBytesOffset = 48;
-inline constexpr size_t kArtifactCodeSizeOffset = 52;
-inline constexpr size_t kArtifactInitialMemorySizeOffset = 56;
-inline constexpr size_t kArtifactInitialMemoryStartOffset = 60;
-inline constexpr size_t kArtifactCodeDigestOffset = 64;
+inline constexpr size_t kArtifactMemoryBytesOffset = 40;
+inline constexpr size_t kArtifactCodeSizeOffset = 44;
+inline constexpr size_t kArtifactInitialMemorySizeOffset = 48;
+inline constexpr size_t kArtifactInitialMemoryStartOffset = 52;
+inline constexpr size_t kArtifactCodeDigestOffset = 56;
 inline constexpr size_t kArtifactInitialMemoryDigestOffset =
     kArtifactCodeDigestOffset + kArtifactDigestBytes;
 inline constexpr char8_t kArtifactSectionDigestAlgorithm[] = u8"sha256";
 inline constexpr char8_t kArtifactCanonicalSectionOrder[] =
-    u8"header|code|initial_memory";
+    u8"header|code|initial_memory|extensions";
 
 static_assert(kArtifactInitialMemoryDigestOffset + kArtifactDigestBytes ==
               kArtifactHeaderBytes);
 
-// FNV-1a digest over the full RV32 gas schedule: the instruction-cost table
-// (from program.h) folded with the host-syscall cost schedule (from
-// gas_cost_table.h). It is stamped into the artifact at
-// kArtifactGasDigestOffset and re-derived here at load time, so an artifact
-// built against a different schedule is rejected. This is an artifact/consensus
-// concern, not an ISA-execution one, so it lives here rather than in the
-// portable program.h core (which only needs the instruction costs themselves).
-constexpr uint64_t
-gas_schedule_digest()
-{
-  uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_u64(digest, kGasTableVersion);
-  digest = fnv_digest_name(digest, u8"rv32-instructions");
-  digest = fnv_digest_u64(digest, kOpCount);
-  for (size_t i = 0; i < kInstructionGasSchedule.size(); ++i) {
-    const auto &entry = kInstructionGasSchedule[i];
-    digest = fnv_digest_u64(digest, i);
-    digest = fnv_digest_u64(digest, static_cast<size_t>(entry.op));
-    digest = fnv_digest_u64(digest, entry.cost);
-    digest = fnv_digest_name(digest, entry.name);
-  }
-  digest = fnv_digest_name(digest, u8"host-syscalls");
-  digest = fnv_digest_u64(digest, hogd::kSyscallGasCostSchedule.size());
-  for (size_t i = 0; i < hogd::kSyscallGasCostSchedule.size(); ++i) {
-    const auto &entry = hogd::kSyscallGasCostSchedule[i];
-    digest = fnv_digest_u64(digest, i);
-    digest = fnv_digest_u64(digest, entry.cost);
-    digest = fnv_digest_name(digest, entry.name);
-  }
-  return digest;
-}
-
-inline constexpr uint64_t kGasScheduleDigest = gas_schedule_digest();
-
-// Relocating this computation from program.h must not change its value (it is
-// validated against every artifact). Pin it.
-static_assert(kGasScheduleDigest == 0xac8aefb00a997407ULL);
-
-// The gas schedules an artifact is allowed to declare. The first entry is what
-// this build meters with and what a current lowerer stamps; any further entry
-// is transitional, accepted so a repricing can land here before the lowerer
-// that stamps it has rolled out.
-//
-// Matched as a pair. Checking version and digest independently would accept a
-// combination no tool ever produced, which is worse than rejecting both.
-//
-// What a transitional entry means, stated plainly: the artifact is metered with
-// the CURRENT schedule, not the one it declares. Costs come from
-// kInstructionGasCosts at execution time and nothing in the artifact bytes
-// depends on them, so an older artifact simply gets the new prices. That is the
-// point -- a repricing has to reach contracts that are already deployed -- and
-// it is also the hazard, because the digest exists precisely to stop an
-// artifact being metered under a schedule it did not agree to. Two consequences
-// follow. Every node must carry an identical list, or they will disagree about
-// which transactions are valid. And the list is not a permanent compatibility
-// surface: drop the transitional entries once the lowerer that stamps the
-// current schedule has rolled out, so the check goes back to meaning what it
-// says.
+// The gas schedule declarations a v5 or v6 artifact may carry, matched as
+// version/digest pairs. They select nothing: every artifact executes at this
+// build's prices. Frozen, because deployed v5 and v6 artifacts carry them.
 struct AcceptedGasSchedule {
   uint32_t version;
   uint64_t digest;
 };
 
-inline constexpr std::array<AcceptedGasSchedule, 2> kAcceptedGasSchedules = {{
-    {.version = kGasTableVersion, .digest = kGasScheduleDigest},
-    // groundhog-cli <= 0.10.2. Remove once the lowerer stamps v4.
+inline constexpr std::array<AcceptedGasSchedule, 3> kV5V6GasSchedules = {{
     {.version = 3, .digest = 0x918317c21c46bb60ULL},
+    {.version = 4, .digest = 0xa958d226df658598ULL},
+    {.version = 5, .digest = 0x0c3a7f084fad6a08ULL},
 }};
 
 constexpr uint64_t
@@ -170,20 +129,14 @@ format_fingerprint_layout_field(uint64_t digest, const char8_t *offset_name,
   return format_fingerprint_u64(digest, size_name, size);
 }
 
-// The `format_version` parameter is a sensitivity-test hook only (the
-// static_assert below perturbs it to prove the digest reacts), NOT a
-// version-dispatch mechanism: the domain string below is hard-wired to the
-// current format version. At a format bump, bump BOTH the domain string
-// (`...format.vN`) and kArtifactFormatVersion together — passing a different
-// format_version here does not produce a correct fingerprint for another
-// version on its own.
+// format_version is a sensitivity-test hook. A format change must also update
+// the domain string below; changing the argument alone cannot reproduce other
+// format versions.
 constexpr uint64_t
-format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
-                   uint32_t gas_version = kGasTableVersion,
-                   uint64_t gas_digest = kGasScheduleDigest)
+format_fingerprint(uint32_t format_version = kArtifactVersion7)
 {
   uint64_t digest = kFnvOffsetBasis;
-  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v5");
+  digest = fnv_digest_name(digest, u8"groundhog.rv32.artifact.format.v7");
 
   digest = format_fingerprint_bytes(digest, u8"magic", kArtifactMagic);
   digest = format_fingerprint_u64(digest, u8"format_version", format_version);
@@ -195,10 +148,8 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                                   kArtifactFlagsRequiredValue);
   digest = format_fingerprint_u64(digest, u8"entry_abi_version",
                                   kArtifactEntryAbiVersion);
-  digest = format_fingerprint_u64(digest, u8"syscall_abi_version",
+  digest = format_fingerprint_u64(digest, u8"syscall_api_major",
                                   kArtifactSyscallAbiVersion);
-  digest = format_fingerprint_u64(digest, u8"gas_table_version", gas_version);
-  digest = format_fingerprint_u64(digest, u8"gas_schedule_digest", gas_digest);
 
   digest = format_fingerprint_layout_field(digest, u8"header.magic.offset",
                                            u8"header.magic.size", 0,
@@ -220,17 +171,14 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
   digest = format_fingerprint_layout_field(digest, u8"header.entry_abi.offset",
                                            u8"header.entry_abi.size",
                                            kArtifactEntryAbiOffset, 4);
-  digest =
-      format_fingerprint_layout_field(digest, u8"header.syscall_abi.offset",
-                                      u8"header.syscall_abi.size",
-                                      kArtifactSyscallAbiOffset, 4);
-  digest =
-      format_fingerprint_layout_field(digest, u8"header.gas_version.offset",
-                                      u8"header.gas_version.size",
-                                      kArtifactGasVersionOffset, 4);
-  digest = format_fingerprint_layout_field(digest, u8"header.gas_digest.offset",
-                                           u8"header.gas_digest.size",
-                                           kArtifactGasDigestOffset, 8);
+  digest = format_fingerprint_layout_field(digest,
+                                           u8"header.syscall_api_major.offset",
+                                           u8"header.syscall_api_major.size",
+                                           kArtifactSyscallAbiOffset, 4);
+  digest = format_fingerprint_layout_field(digest,
+                                           u8"header.syscall_api_minor.offset",
+                                           u8"header.syscall_api_minor.size",
+                                           kArtifactSyscallApiMinorOffset, 4);
   digest =
       format_fingerprint_layout_field(digest, u8"header.memory_bytes.offset",
                                       u8"header.memory_bytes.size",
@@ -266,9 +214,9 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
       format_fingerprint_u64(digest, u8"digest_bytes", kArtifactDigestBytes);
   digest =
       format_fingerprint_u64(digest, u8"instruction_bytes", kInstructionBytes);
-  digest = format_fingerprint_u64(digest, u8"max_code_bytes", kMaxCodeBytes);
-  digest =
-      format_fingerprint_u64(digest, u8"max_memory_bytes", kMaxMemoryBytes);
+  // The minor itself is not folded: it is the guest's, and a chain admits any
+  // minor up to its own.
+  digest = format_fingerprint_u64(digest, u8"syscall_api_minor_le_host", 1);
 
   digest = format_fingerprint_u64(digest, u8"memory_bytes_nonzero", 1);
   digest = format_fingerprint_u64(digest, u8"memory_bytes_le_max", 1);
@@ -279,6 +227,13 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
                              1);
   digest = format_fingerprint_u64(digest,
                                   u8"initial_memory_start_zero_when_empty", 1);
+  // The extension list's framing. Kinds are not folded: adding one does not
+  // change the format.
+  digest = format_fingerprint_string(digest, u8"extensions_encoding", u8"xdr");
+  digest = format_fingerprint_u64(digest, u8"extensions_kind_nonzero", 1);
+  digest =
+      format_fingerprint_u64(digest, u8"extensions_kind_strictly_ascending", 1);
+  digest = format_fingerprint_u64(digest, u8"extensions_xdr_padding_zero", 1);
   digest = format_fingerprint_string(digest, u8"canonical_section_order",
                                      kArtifactCanonicalSectionOrder);
   digest =
@@ -287,50 +242,45 @@ format_fingerprint(uint32_t format_version = kArtifactFormatVersion,
 }
 
 inline constexpr uint64_t kArtifactFormatFingerprint = format_fingerprint();
-static_assert(kArtifactFormatFingerprint == 0xcc78e61a463f927eULL);
-static_assert(format_fingerprint(kArtifactFormatVersion + 1) !=
+static_assert(kArtifactFormatFingerprint == 0x95cbfa8b3b2f37daULL);
+static_assert(format_fingerprint(kArtifactVersion7 + 1) !=
               kArtifactFormatFingerprint);
 
-// The engine fingerprints a lowerer may report while kAcceptedGasSchedules
-// still has transitional entries: one per accepted schedule, in the same order.
-// The fingerprint folds the gas schedule, so a lowerer that stamps a
-// transitional schedule necessarily reports a different value from this build's
-// -- the same rollout skew kAcceptedGasSchedules exists for, seen from the
-// metadata side. This list is derived from that one and disappears with it.
-constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
-accepted_format_fingerprints()
-{
-  std::array<uint64_t, kAcceptedGasSchedules.size()> fingerprints = {};
-  for (size_t i = 0; i < kAcceptedGasSchedules.size(); ++i) {
-    fingerprints[i] = format_fingerprint(kArtifactFormatVersion,
-                                         kAcceptedGasSchedules[i].version,
-                                         kAcceptedGasSchedules[i].digest);
-  }
-  return fingerprints;
-}
-
-inline constexpr std::array<uint64_t, kAcceptedGasSchedules.size()>
-    kAcceptedFormatFingerprints = accepted_format_fingerprints();
-static_assert(kAcceptedFormatFingerprints.front() ==
-              kArtifactFormatFingerprint);
-// The v3 entry is what groundhog-cli 0.10.2 reports. Pinning it here proves
-// this derivation reproduces a fingerprint the lowerer actually emits, rather
-// than one only this header believes in.
-static_assert(kAcceptedFormatFingerprints.back() == 0x8e5caf3e9cd23b22ULL);
+// The fingerprints a lowerer may report: this build's v7 one, and those of
+// the v5 and v6 lowerers, retained with their readers. A fingerprint is a
+// producer/runtime compatibility check and not consensus; adding a syscall
+// does not move it.
+inline constexpr std::array<uint64_t, 6> kAcceptedFormatFingerprints = {
+    kArtifactFormatFingerprint,
+    0x0e336ac8e46602e1ULL, // v6, gas table v3.
+    0xd96927c3425ee88eULL, // v6, gas table v4.
+    0x4171b4b8dc19b9abULL, // v5, gas table v4.
+    0x8e5caf3e9cd23b22ULL, // v5, gas table v3, fixed bounds.
+    0xc5f00a7d4451045eULL, // v5, gas table v3, caller bounds (tools 0.43.0).
+};
 
 using ArtifactDigest = std::array<uint8_t, kArtifactDigestBytes>;
 
-// RV32 artifact v5 header, little-endian:
+// RV32 artifact v7 header, little-endian, 120 bytes:
 // magic[8], format_version, header_bytes, vm_profile_digest, flags,
-// entry_abi_version, syscall_abi_version, gas_schedule_version,
-// gas_schedule_digest, memory_bytes, code_size, initial_memory_size,
-// initial_memory_start, sha256(code), sha256(initial_memory).
-// Body: header || code || initial_memory, exactly — section file positions
-// are derived from the canonical order, not stored. Method dispatch is in the
-// guest (since v4). The stored image is placed at data-space VA
+// entry_abi_version, syscall_api_major, syscall_api_minor, memory_bytes,
+// code_size, initial_memory_size, initial_memory_start, sha256(code),
+// sha256(initial_memory).
+// A v5 or v6 header is 128 bytes: gas_schedule_version in place of
+// syscall_api_minor, followed by an 8-byte gas_schedule_digest.
+// Body: header || code || initial_memory || extensions, exactly; section file
+// positions are derived from the canonical order, not stored. Method dispatch
+// is in the guest (since v4). The stored image is placed at data-space VA
 // initial_memory_start (a guest VA, unrelated to file layout); the runtime
-// zero-fills [0, start) — e.g. a stack-first guest's stack region — and
+// zero-fills [0, start) (e.g. a stack-first guest's stack region) and
 // [start + size, memory_bytes).
+//
+// extensions is an XDR Rv32ArtifactExtensions (contract.x) running to the end
+// of the artifact: (kind, opaque body) pairs with nonzero, strictly ascending
+// kinds. The runtime checks only that framing and stores bodies (such as the
+// contract spec) without interpreting them; they stay outside guest memory
+// and are authenticated by the enclosing contract hash. A v5 body ends after
+// initial_memory and reads as having no extensions.
 enum class ArtifactError {
   kTooSmall,
   kBadMagic,
@@ -340,6 +290,8 @@ enum class ArtifactError {
   kUnsupportedFlags,
   kUnsupportedEntryAbi,
   kUnsupportedSyscallAbi,
+  // v7: the declared syscall API minor is outside the range the caller admits.
+  kUnsupportedSyscallApiMinor,
   kGasScheduleVersionMismatch,
   kGasScheduleDigestMismatch,
   kMemorySizeInvalid,
@@ -357,7 +309,7 @@ struct ArtifactImage {
   // zeros below the image's load VA are included so consumers can keep
   // writing it at data address 0.
   std::vector<uint8_t> initial_memory;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // The ThreadedArtifactImage output from parse_threaded_artifact must not
@@ -367,7 +319,7 @@ struct ThreadedArtifactImage {
   std::span<const uint8_t> initial_memory;
   // Data-space VA where initial_memory is placed; [0, start) zero-fills.
   uint32_t initial_memory_start = 0;
-  uint32_t memory_bytes = kMaxMemoryBytes;
+  uint32_t memory_bytes = kDefaultMaxMemoryBytes;
 };
 
 // Canonical SHA-256 over one artifact section. Infallible by construction:
@@ -376,12 +328,13 @@ struct ThreadedArtifactImage {
 [[nodiscard]]
 ArtifactDigest artifact_digest(std::span<const uint8_t> bytes);
 
+// `limits` bounds the code_size and memory_bytes the header may declare.
 [[nodiscard]]
 std::expected<ArtifactImage, ArtifactError>
-parse_artifact(std::span<const uint8_t> bytes);
+parse_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 [[nodiscard]]
 std::expected<ThreadedArtifactImage, ArtifactError>
-parse_threaded_artifact(std::span<const uint8_t> bytes);
+parse_threaded_artifact(std::span<const uint8_t> bytes, Rv32Limits limits);
 
 } // namespace hogd::rv32

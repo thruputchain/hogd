@@ -13,6 +13,7 @@
 #include <tuple>
 #include <unordered_set>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "address_auth.hh"
@@ -22,10 +23,11 @@
 #include "contract.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
-#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "network_config.hh"
 #include "precompiles.hh"
@@ -36,10 +38,10 @@
 namespace hogd {
 
 namespace {
-std::tuple<std::uint64_t, std::uint64_t>
-make_contract_u128(uint128_t value)
+std::tuple<std::int64_t, std::uint64_t>
+make_contract_i128(int128_t value)
 {
-  return {static_cast<std::uint64_t>(value >> 64),
+  return {static_cast<std::int64_t>(value >> 64),
           static_cast<std::uint64_t>(value)};
 }
 
@@ -102,7 +104,7 @@ visit_genesis_execution_prerequisites(
   visit_auth_data(kGenesisRootContractAddress, root_auth);
 
   auto token = make_native_contract(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken);
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken);
   visit_contract(token);
   visit_deployment(kNativeTokenContractAddress,
                    make_deployed_contract_hash(token));
@@ -123,14 +125,11 @@ load_stock_genesis_root_contract()
 NetworkConfig
 stock_network_config()
 {
-  // Values this repository's dev and test chains run under. They are a choice,
-  // not a protocol default: nothing inherits them, and a real chain passes its
-  // own to build().
-  return NetworkConfig{
-      .ext = ExtensionPoint(0),
-      .max_sha256_buffers = 8,
-      .max_cross_invoke_depth = 256,
-  };
+  // This repository's dev and test chains run at the protocol defaults from
+  // network_config_params.h. Every parameter is stated outright rather than
+  // left to a node's default, so a change to any of them is visible in the
+  // config hash.
+  return NetworkConfigParams::stated_defaults();
 }
 
 GenesisConfiguration
@@ -156,10 +155,10 @@ std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
 GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     StorageCostModel const &cost_model) const
 {
-  using root_client_t = ContractTraitClient<genesis_root::GenesisRoot>;
-  root_client_t client(kGenesisRootContractAddress);
-  constexpr static GasAmount kDistributionGas =
-      std::numeric_limits<GasAmount>::max();
+  using root_meta_t = ContractTraitMeta<genesis_root::GenesisRoot>;
+  // Ample for a distribution chunk, and within the default max_tx_gas: a
+  // chain whose cap refused its own ceremony could not reach height 1.
+  constexpr static GasAmount kDistributionGas = 1'000'000'000;
   // RV32 contracts have a 64 KiB address space. Keep the decoded distribution
   // vector comfortably below that limit, including allocator and contract
   // stack space. A ceremony is one atomic height-1 block, but it may contain
@@ -178,10 +177,11 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
 
   // The root contract mints each distribution plus enough native token to
   // create the root replay/balance rows and token supply/balance rows for every
-  // ceremony transaction. Reject the artifact before emitting transactions if
-  // all of those mints would exceed the protocol supply.
-  uint128_t remaining_supply =
-      uint128_t{kTotalHogSupply} * uint128_t{kHogDivisibility};
+  // ceremony transaction. Total supply is a nonnegative int128, so reject the
+  // artifact before emitting transactions if all of those mints would take it
+  // past INT128_MAX.
+  auto remaining_supply =
+      static_cast<uint128_t>(std::numeric_limits<int128_t>::max());
   const std::size_t transaction_count =
       std::max<std::size_t>(1, (entries_.size() + kDistributionsPerTransaction -
                                 1) /
@@ -215,33 +215,48 @@ GenesisConfigurationBuilder::try_make_genesis_ceremony_transactions(
     const std::size_t end =
         std::min(entries_.size(), begin + kDistributionsPerTransaction);
     x23::Vec<genesis_root::Distribution, UINT32_MAX> distributions;
+    x23::Vec<genesis_root::AccountAllocation, UINT32_MAX> account_allocations;
     decltype(Transaction{}.contracts_to_deploy) contracts_to_deploy;
     std::unordered_set<SHA256Hash, SipHash24Hasher> attached_contract_hashes;
     distributions.reserve(end - begin);
     attached_contract_hashes.reserve(end - begin);
     for (std::size_t i = begin; i < end; ++i) {
       auto const &entry = entries_[i];
-      distributions.push_back(genesis_root::Distribution{
-          .nonce = entry.initial_nonce,
-          .contract_hash = entry.contract_hash,
-          .initializer = entry.entrypoint,
-          .initializer_calldata = entry.calldata,
-          .allocation = to_xdr(static_cast<uint128_t>(entry.amount)),
-      });
-      // A transaction attaches contract code by hash. Attach each distinct
-      // artifact only once within the transaction, even when many accounts use
-      // the same wallet implementation.
-      if (attached_contract_hashes.insert(entry.contract_hash).second) {
-        contracts_to_deploy.push_back(*entry.deployed_contract);
+      if (auto const *address = std::get_if<ContractAddress>(&entry.target)) {
+        account_allocations.push_back(genesis_root::AccountAllocation{
+            .address = *address,
+            .allocation = to_xdr(entry.amount),
+        });
       }
+      else {
+        auto const &deployment = std::get<Deployment>(entry.target);
+        distributions.push_back(genesis_root::Distribution{
+            .nonce = deployment.initial_nonce,
+            .contract_hash = deployment.contract_hash,
+            .initializer = deployment.entrypoint,
+            .initializer_calldata = deployment.calldata,
+            .allocation = to_xdr(entry.amount),
+        });
+        // Attach each distinct artifact only once within the transaction.
+        if (attached_contract_hashes.insert(deployment.contract_hash).second) {
+          contracts_to_deploy.push_back(*deployment.deployed_contract);
+        }
+      }
+    }
+
+    // Fail where the artifact is built, not at a height-1 block the chain's
+    // own rules refuse to execute.
+    if (contracts_to_deploy.size() > kDefaultMaxNewContractsPerTx) {
+      return std::unexpected(GenesisCeremonyError::kTooManyDistinctContracts);
     }
 
     transactions.push_back(SignedTransaction{
         .tx = Transaction{
-            .invocation = client.make_invocation<u8"distribute">(
-                kDistributionGas, distributions,
-                make_contract_u128(root_funding),
-                make_contract_u128(token_funding)),
+            .invocation = root_meta_t::make_invocation<u8"distribute">(
+                kGenesisRootContractAddress, kDistributionGas, distributions,
+                account_allocations,
+                make_contract_i128(static_cast<int128_t>(root_funding)),
+                make_contract_i128(static_cast<int128_t>(token_funding))),
             .uniquifier =
                 {
                     .block_expiry_height =
@@ -277,17 +292,27 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
 }
 
 void
+GenesisConfigurationBuilder::add_account_allocation(
+    ContractAddress const &address, int128_t amount)
+{
+  entries_.push_back({.target = address, .amount = amount});
+}
+
+void
 GenesisConfigurationBuilder::add_distribution(
     std::shared_ptr<const Contract> const &contract, SHA256Hash const &nonce,
     ContractEntrypointID entrypoint, Calldata calldata, int128_t amount)
 {
   entries_.push_back({
-      .initial_nonce = nonce,
-      .contract_hash = sha256(*contract),
-      .entrypoint = entrypoint,
-      .calldata = std::move(calldata),
+      .target =
+          Deployment{
+              .initial_nonce = nonce,
+              .contract_hash = sha256(*contract),
+              .entrypoint = entrypoint,
+              .calldata = std::move(calldata),
+              .deployed_contract = contract,
+          },
       .amount = amount,
-      .deployed_contract = contract,
   });
 }
 } // namespace hogd

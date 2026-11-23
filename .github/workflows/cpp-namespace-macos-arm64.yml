@@ -13,11 +13,10 @@ concurrency:
 
 env:
   CARGO_NET_GIT_FETCH_WITH_CLI: "true"
-  CARGO_REGISTRIES_GROUNDHOG_TOKEN: ${{ secrets.GROUNDHOG_REGISTRY_TOKEN }}
-  CARGO_REGISTRY_GLOBAL_CREDENTIAL_PROVIDERS: cargo:token
-  CARGO_REGISTRIES_GROUNDHOG_INDEX: sparse+https://groundhog.dev/crates/api/v1/crates/
-  CARGO_REGISTRIES_GROUNDHOG_SOURCE: sparse+https://groundhog.dev/crates/api/v1/crates/
   CARGO_BUILD_JOBS: "6"
+  # Keeps the RV32 contracts' cargo intermediates on the cache volume (./target
+  # is cached by `cache: rust`); see built_contracts/build_risc.sh.
+  HOGD_RV32_TARGET_DIR: ${{ github.workspace }}/target/rv32
 
 jobs:
   # Clang Debug build + tests
@@ -27,33 +26,10 @@ jobs:
       contents: read
       actions: read
     steps:
-      - name: Setup SSH Agent
-        uses: webfactory/ssh-agent@v0.10.0
-        with:
-          ssh-private-key: |
-            ${{ secrets.HOGD_GH_ACTIONS_PROTOCOL_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_INTEGRATION_TEST_CONTRACTS_KEY }}
-            ${{ secrets.HOGD_TO_SDK_RS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_BCS_RS_KEY }}
-            ${{ secrets.HOGD_SELF_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_RS_KEY }}
-            ${{ secrets.HOGD_TO_SERDE_ARRAYS }}
-            ${{ secrets.HOGD_TO_METRICS_HISTORY_KEY }}
-            ${{ secrets.HOGD_XDRS_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_XDR_COMMON_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_CHUCKD_ACCESS_KEY }}
-            ${{ secrets.HOGD_TO_PROTOCOL_GO }}
-            ${{ secrets.HOGD_TO_GROUNDHOG_GO }}
-            ${{ secrets.HOGD_TO_LIB_GO_KEY }}
-            ${{ secrets.HOGD_TO_SCP_KEY }}
-            ${{ secrets.HOGD_TO_XDR_RPC }}
-            ${{ secrets.HOGD_TO_ABORT_RS_KEY }}
-            ${{ secrets.HOGD_TO_HOGX_KEY }}
-
       - name: Checkout
         uses: namespacelabs/nscloud-checkout-action@v8
         with:
+          persist-credentials: false
           submodules: false
 
       - name: Configure Namespace Cache
@@ -62,7 +38,35 @@ jobs:
           cache: rust
           path: |
             ~/.cache/ccache
+            ~/.cache/sccache
             ~/.cache/hogcache
+            ~/.cache/cargo-install
+            ~/.cache/rustup
+
+      - name: Configure Build Caches
+        run: |
+          # ccache on macOS defaults to ~/Library/Caches/ccache, which is not on
+          # the cache volume, so every run started cold (933 of 1010 compiles
+          # missed). Point it at the cached path, as the Linux workflows do.
+          echo "CCACHE_DIR=$HOME/.cache/ccache" >> "$GITHUB_ENV"
+          # 10G was full and evicting on every run (a recent PR run: 57% hits,
+          # 56 cleanups). The profile's cache volume is ~53G.
+          echo "CCACHE_MAXSIZE=20G" >> "$GITHUB_ENV"
+
+          # cargo install writes to ~/.cargo/bin, which the cache volume does not
+          # cover, so the thruput CLI was compiled from source on every run.
+          # Install into a cached root instead. ~/.cargo/bin itself is left
+          # alone because rustup's proxies live there.
+          echo "CARGO_INSTALL_ROOT=$HOME/.cache/cargo-install" >> "$GITHUB_ENV"
+          echo "$HOME/.cache/cargo-install/bin" >> "$GITHUB_PATH"
+          mkdir -p "$HOME/.cache/cargo-install/bin"
+          echo "Cached cargo-install binaries:"
+          ls -l "$HOME/.cache/cargo-install/bin"
+
+      - name: Use Cached rustup Home
+        uses: ./.github/actions/cached-rustup-home
+
+      - uses: ./.github/actions/setup-sccache
 
       - name: Configure Git for Submodule Caching
         run: |
@@ -91,13 +95,12 @@ jobs:
           cache_repo google/glog
           cache_repo BLAKE3-team/BLAKE3
           cache_repo corrosion-rs/corrosion
+          cache_repo pq-code-package/mldsa-native
+          cache_repo C2SP/wycheproof
 
       - name: Initialize Submodules
         run: git submodule update --init --recursive
 
-      - name: Cargo Fetch
-        run: ./scripts/fetch.sh
-      
       - name: Use CommandLineTools SDK
         run: |
           # Homebrew LLVM is incompatible with some Xcode SDK versions (e.g. 26.1.1).
@@ -107,8 +110,15 @@ jobs:
             echo "Switched to CommandLineTools SDK: $(xcrun --show-sdk-path)"
           fi
 
+      # macos-setup.sh ends by running scripts/fetch.sh (cargo fetch plus the
+      # thruput tool installs), so there is no separate Cargo Fetch step here.
       - name: Setup Environment
-        run: ./scripts/macos-setup.sh
+        run: |
+          ./scripts/macos-setup.sh
+          # ccache is not in the runner image; macos-setup.sh installs it via
+          # Homebrew, so this is the first point it can run. Zero the persisted
+          # counters so "Show ccache stats" reports this run only.
+          ccache -z
 
       - name: Build Clang Debug
         run: |
@@ -152,7 +162,17 @@ jobs:
 
       - name: Show ccache stats
         if: always()
-        run: ccache -s
+        run: |
+          if ! command -v ccache >/dev/null 2>&1; then
+            echo "ccache is not installed (Setup Environment did not complete)"
+            exit 0
+          fi
+          ccache -p | grep -E 'cache_dir|max_size|base_dir' || true
+          ccache -s
+          if command -v sccache >/dev/null 2>&1; then
+            sccache --show-stats
+          fi
+          python3 scripts/ci/ninja_build_profile.py build/clang
 
       - name: Print Log Download Instructions
         if: always()

@@ -37,7 +37,7 @@ TEST(MaxMessageSize, SrpcClientRejectsOversizedMessage)
   UniqueFd listener = stcplisten(0);
   ASSERT_TRUE(listener);
   uint16_t port = get_port(local_addr(listener));
-  UniqueFd client_fd = tcpconnect("127.0.0.1", port);
+  UniqueFd client_fd = tcpconnect("127.0.0.1", port).value();
   ASSERT_TRUE(client_fd);
   UniqueFd server_fd(::accept(listener.get(), nullptr, nullptr));
   ASSERT_TRUE(server_fd);

@@ -30,6 +30,7 @@ DBAuthResult
 MockDBAuthRpc::authdb_get_auth_data(BlockHeight height, ContractAddress address)
 {
   std::scoped_lock lock(mutex_);
+  ++lookup_count_;
 
   if (height != current_height_) {
     return DBAuthResult(DBAuthError::kDBAuthStaleBlockHeight);
@@ -53,6 +54,7 @@ MockDBAuthRpc::authdb_get_auth_data_batch(BlockHeight height,
   result.reserve(addresses.size());
 
   std::scoped_lock lock(mutex_);
+  lookup_count_ += addresses.size();
 
   if (height != current_height_) {
     for (size_t i = 0; i < addresses.size(); i++) {

@@ -28,7 +28,7 @@ target_link_libraries(
   hogd
   GTest::gtest_main
 )
-gtest_discover_tests(hex_array_test)
+hogd_discover_tests(hex_array_test)
 
 add_executable(
   node_test
@@ -40,7 +40,7 @@ target_link_libraries(
   merkle
   GTest::gtest_main
 )
-gtest_discover_tests(node_test)
+hogd_discover_tests(node_test)
 
 add_executable(
   merkle_trie_test
@@ -53,7 +53,7 @@ target_link_libraries(
   merkle
   GTest::gtest_main
 )
-gtest_discover_tests(merkle_trie_test)
+hogd_discover_tests(merkle_trie_test)
 
 if(BUILD_BENCHMARKS)
   add_executable(

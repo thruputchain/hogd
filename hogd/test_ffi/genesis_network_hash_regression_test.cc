@@ -94,7 +94,7 @@ TEST(TestBindingsTest, GenesisCarriesTheConfiguredNetworkHash)
   // Advance past genesis. The commit path replaces the persisted tip value
   // wholesale, so a committed value that omits the network hash puts the chain
   // back on network zero for every block after the first.
-  ASSERT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  ASSERT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 
   SignedTransaction stx{
       .tx = {.invocation =

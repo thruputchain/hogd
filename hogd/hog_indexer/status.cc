@@ -23,6 +23,15 @@ IndexerErrorCategory::message(int code) const
     return "DB Not Found";
   case kUnsupportedCompressionAlgorithm:
     return "Unsupported Compression Algorithm";
+  case kQueryNotReady:
+    return "Block query history is not ready";
+  case kMigrationRequired:
+    return "Block query format changed; rebuild into a separate index "
+           "directory";
+  case kInvalidCursor:
+    return "Invalid history cursor";
+  case kHistoryUnavailable:
+    return "Continuation history is unavailable";
   }
   return "Unknown code: " + std::to_string(code);
 }

@@ -1,0 +1,97 @@
+name: Publish test_ffi to public S3
+
+on:
+  pull_request:
+    paths:
+      - '.github/workflows/publish_test_ffi.yml'
+      - 'scripts/publish_test_ffi.py'
+      - 'scripts/public_artifacts.py'
+      - 'scripts/test_publish_test_ffi.py'
+  workflow_run:
+    workflows: ['Release test_ffi Library']
+    types: [completed]
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: 'Existing FFI release tag to publish or retry (test-ffi-vX.Y.Z)'
+        required: true
+        type: string
+      dry_run:
+        description: 'Validate existing release assets without writing to S3'
+        type: boolean
+        default: true
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+      - name: Test FFI publication
+        run: python3 -m unittest discover -s scripts -p test_publish_test_ffi.py
+
+  publish:
+    needs: test
+    # workflow_run executes reviewed default-branch code, never release-tag code.
+    # Only successful tag-push builds publish automatically; the build dry run
+    # has a different workflow name. Recovery is explicitly dispatched on main.
+    if: >-
+      github.ref == 'refs/heads/main' &&
+      (github.event_name == 'workflow_dispatch' ||
+       (github.event_name == 'workflow_run' &&
+        github.event.workflow_run.conclusion == 'success' &&
+        github.event.workflow_run.event == 'push' &&
+        github.event.workflow_run.head_repository.full_name == github.repository &&
+        startsWith(github.event.workflow_run.head_branch, 'test-ffi-v')))
+    runs-on: ubuntu-24.04
+    environment: ffi-public-artifacts
+    concurrency:
+      group: public-test-ffi-${{ inputs.tag || github.event.workflow_run.head_branch }}
+      cancel-in-progress: false
+    permissions:
+      contents: read
+      id-token: write
+    env:
+      FFI_TAG: ${{ inputs.tag || github.event.workflow_run.head_branch }}
+      PUBLIC_ARTIFACT_BUCKET: ${{ vars.PUBLIC_ARTIFACT_BUCKET }}
+      PUBLIC_ARTIFACT_BASE_URL: ${{ vars.PUBLIC_ARTIFACT_BASE_URL }}
+    steps:
+      - uses: actions/checkout@d23441a48e516b6c34aea4fa41551a30e30af803 # v6.1.0
+        with:
+          ref: ${{ github.sha }}
+          persist-credentials: false
+      - name: Download the authenticated GitHub release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          [[ "$FFI_TAG" =~ ^test-ffi-v[0-9]+\.[0-9]+\.[0-9]+$ ]]
+          gh release view "$FFI_TAG" --repo "$GITHUB_REPOSITORY" \
+            --json isDraft,isPrerelease --jq '.isDraft == false and .isPrerelease == false' | grep -qx true
+          mkdir -p public-test-ffi
+          for platform in linux-x86_64 linux-arm64 macos-arm64; do
+            for suffix in .tar.gz .tar.gz.sha256; do
+              gh release download "$FFI_TAG" --repo "$GITHUB_REPOSITORY" \
+                --pattern "libtest_ffi-${platform}${suffix}" --dir public-test-ffi
+            done
+          done
+      - name: Validate all archives, checksums, and binary headers
+        run: python3 scripts/publish_test_ffi.py --tag "$FFI_TAG" --assets-dir public-test-ffi
+      - uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: public-${{ env.FFI_TAG }}
+          path: public-test-ffi/
+          if-no-files-found: error
+      - name: Configure dedicated FFI publisher credentials
+        if: github.event_name == 'workflow_run' || !inputs.dry_run
+        uses: aws-actions/configure-aws-credentials@7474bc4690e29a8392af63c5b98e7449536d5c3a # v4.3.1
+        with:
+          role-to-assume: ${{ secrets.AWS_FFI_ARTIFACT_ROLE_ARN }}
+          aws-region: ${{ vars.PUBLIC_ARTIFACT_REGION || 'us-west-2' }}
+      - name: Publish immutable objects and verify public downloads
+        if: github.event_name == 'workflow_run' || !inputs.dry_run
+        run: |
+          python3 scripts/publish_test_ffi.py --tag "$FFI_TAG" --assets-dir public-test-ffi \
+            --publish --bucket "$PUBLIC_ARTIFACT_BUCKET" --base-url "$PUBLIC_ARTIFACT_BASE_URL"

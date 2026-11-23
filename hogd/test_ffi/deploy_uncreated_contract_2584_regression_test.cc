@@ -40,7 +40,7 @@ TEST(TestBindingsTest, DeployUncreatedContractReturnsStructuredError)
 
   // The structured-error path neither terminated nor corrupted state: the DB
   // is still usable afterward.
-  EXPECT_EQ(advance_new_block(db), kTestFFIErrorCodeNone);
+  EXPECT_EQ(advance_new_block(db, nullptr), kTestFFIErrorCodeNone);
 }
 
 } // namespace hogd

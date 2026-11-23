@@ -9,7 +9,6 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
-#include "hogd/base/os.h"
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
@@ -137,7 +136,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPayments)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Open the proposal block
   auto open_res =
@@ -204,7 +203,7 @@ TEST_F(RpcLoadgenPaymentTest, TestProposeLoadgenPaymentBatch)
       .shards = x23::Vec<ShardCard>{make_shard_card()},
       .event = make_event_card(),
   };
-  rpc_server_->impl()->init(std::move(exec_result), available_parallelism());
+  rpc_server_->impl()->init(std::move(exec_result));
 
   // Open the proposal block
   auto open_res =

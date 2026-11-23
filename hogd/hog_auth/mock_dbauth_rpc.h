@@ -91,6 +91,13 @@ public:
     return it->second;
   }
 
+  // Addresses looked up through the RPC methods so far, found or not.
+  size_t lookup_count() const
+  {
+    std::scoped_lock lock(mutex_);
+    return lookup_count_;
+  }
+
   void address_should_be_cached(ContractAddress address)
   {
     std::scoped_lock lock(mutex_);
@@ -136,6 +143,7 @@ private:
   std::map<BlockHeight, KeyChangeBatch> changes_by_height_;
   mutable ThreadCheckedMutex<std::mutex> mutex_;
   BlockHeight current_height_ = 0;
+  size_t lookup_count_ = 0;
 };
 
 static_assert(is_DBAuth1<MockDBAuthRpc *, x23::MaybeAsync>);

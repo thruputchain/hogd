@@ -15,13 +15,14 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -37,16 +38,17 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
-class ReadOnlyTest : public ::testing::TestWithParam<TestDB>,
+class ReadOnlyTest : public ::testing::Test,
                      public NativeContractTestFramework {
 public:
   ReadOnlyTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -85,27 +87,31 @@ check_result(HostFnStatus<SyscallStatus<std::optional<std::tuple<>>>> res)
 
 } // namespace
 
-TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
+TEST_F(ReadOnlyTest, ReadOnlyBytestringSet)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto res = client_.invoke_opt<u8"read_only_bytestring_set">(ctx, false);
-    if (!check_result(res)) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+  fns.emplace(0,
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto res =
+                    co_await client_.invoke_opt<u8"read_only_bytestring_set">(
+                        ctx, false);
+                if (!check_result(res)) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-    return {};
-  });
-  fns.emplace(1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto res =
-        client_.invoke_opt<u8"read_only_bytestring_set",
-                           std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
-    if (!check_result(res)) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+                co_return InvokeStatus<void>{};
+              });
+  fns.emplace(1,
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto res = co_await client_.invoke_opt<
+                    u8"read_only_bytestring_set",
+                    std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
+                if (!check_result(res)) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-    return {};
-  });
+                co_return InvokeStatus<void>{};
+              });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -136,15 +142,15 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -154,40 +160,44 @@ TEST_P(ReadOnlyTest, ReadOnlyBytestringSet)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
+TEST_F(ReadOnlyTest, ReadOnlyLogEvent)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto res = client_.invoke_opt<u8"read_only_log_event">(ctx, false);
-    if (!check_result(res)) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+  fns.emplace(0,
+              [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                auto res =
+                    co_await client_.invoke_opt<u8"read_only_log_event">(ctx,
+                                                                         false);
+                if (!check_result(res)) {
+                  co_return InvokeError{InvokeErrorCode::Deterministic};
+                }
 
-    return {};
-  });
-  fns.emplace(1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    auto res =
-        client_.invoke_opt<u8"read_only_log_event",
-                           std::to_underlying(InvokeFlag::ReadOnly)>(ctx, true);
-    if (!check_result(res)) {
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
+                co_return InvokeStatus<void>{};
+              });
+  fns.emplace(
+      1, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await client_.invoke_opt<
+            u8"read_only_log_event", std::to_underlying(InvokeFlag::ReadOnly)>(
+            ctx, true);
+        if (!check_result(res)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-    return {};
-  });
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -218,15 +228,15 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -239,20 +249,20 @@ TEST_P(ReadOnlyTest, ReadOnlyLogEvent)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = native_contract_addr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler = make_new_system_call_handler(handler_tx, *context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
 
-TEST_P(ReadOnlyTest, ReadOnlyPropagation)
+TEST_F(ReadOnlyTest, ReadOnlyPropagation)
 {
   // Root invokes the middle contract with InvokeFlag::ReadOnly. The middle
   // contract invokes the leaf with InvokeFlag::None (no ReadOnly on that
@@ -264,60 +274,60 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_leaf;
   fns_leaf.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (!ctx.handler().is_read_only()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_leaf = std::make_unique<NativeContract>(std::move(fns_leaf));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_middle;
   fns_middle.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         if (!ctx.handler().is_read_only()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto res = [&]() {
+        auto res =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressLeaf,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressLeaf, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_middle =
       std::make_unique<NativeContract>(std::move(fns_middle));
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_root;
   fns_root.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = [&]() {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::ReadOnly),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(kAddressMiddle,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              kAddressMiddle, std::span<const std::byte>{},
+              std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
         }();
         if (!res.has_value() ||
             res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto contract_root = std::make_unique<NativeContract>(std::move(fns_root));
 
@@ -348,16 +358,16 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kAddressRoot,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
 
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -366,10 +376,10 @@ TEST_P(ReadOnlyTest, ReadOnlyPropagation)
 // precompile. get_balance_of is read-only safe and should succeed;
 // transfer calls modify_native_token_balance and log_event which now
 // return errors in read-only mode, causing the transfer to fail.
-TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 {
-  using amount_t = std::tuple<uint64_t, uint64_t>;
-  auto make_amount = [](uint128_t amount) -> amount_t {
+  using amount_t = std::tuple<int64_t, uint64_t>;
+  auto make_amount = [](int128_t amount) -> amount_t {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   };
 
@@ -391,47 +401,47 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   // Method 2: invoke transfer in normal mode (should succeed)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = native_token_client.invoke_opt<
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await native_token_client.invoke_opt<
             u8"get_balance_of", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kObserverAddr);
         if (!res.has_value() || !res.value().has_value() ||
             !res.value().value().has_value() ||
             !res.value().value().value().is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         auto balance = res.value().value().value().ok();
         if (balance != make_amount(12345)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_caller.emplace(
-      1, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = native_token_client.invoke_opt<
+      1, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await native_token_client.invoke_opt<
             u8"transfer", std::to_underlying(InvokeFlag::ReadOnly)>(
             ctx, kReceiverAddr, make_amount(transfer_amount));
         // The invoke should fail because modify_native_token_balance
         // returns InvalidSyscallInput in read-only mode, which causes
-        // the transfer to return a deterministic error. The frame
+        // the transfer to co_return a deterministic error. The frame
         // should revert.
         if (res.has_value() && res.value().has_value() &&
             res.value().value().has_value() &&
             res.value().value().value().is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_caller.emplace(
-      2, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto res = native_token_client.invoke_opt<u8"transfer">(
+      2, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto res = co_await native_token_client.invoke_opt<u8"transfer">(
             ctx, kReceiverAddr, make_amount(transfer_amount));
         if (!res.has_value() || !res.value().has_value() ||
             !res.value().value().has_value() ||
             !res.value().value().value().is_ok()) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -441,7 +451,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
   contract_map.emplace(kCallerNativeId, std::move(caller_contract));
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -464,15 +474,15 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(0),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -482,15 +492,15 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(1),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -500,15 +510,15 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
         .tx = Transaction{
             .invocation = Invocation{.invoked_address = kCallerAddr,
                                      .entrypoint = entrypoint_from_method_id(2),
-                                     .gas_limit = UINT64_MAX,
+                                     .gas_limit = kDefaultMaxTxGas,
                                      .calldata = {}},
             .uniquifier = make_new_uniquifier(),
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     ASSERT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -520,7 +530,7 @@ TEST_P(ReadOnlyTest, ReadOnlyNativeTokenPrecompile)
 // native token precompile with the read-only flag. get_balance_of should
 // succeed; transfer should fail because modify_native_token_balance is blocked
 // in read-only mode.
-TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
+TEST_F(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 {
   using meta = ContractTraitMeta<read_only_test::ReadOnlyTest>;
 
@@ -529,7 +539,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 
   // Deploy the native token precompile so the RV32 contract can invoke it
   auto token_contract_xdr = make_native_contract(std::to_underlying(
-      HogexecPrecompiledNativeContracts::kNativeContractHogToken));
+      HogexecPrecompiledNativeContracts::kNativeContractNativeToken));
   write_contract(token_contract_xdr);
   write_deployment(kNativeTokenContractAddress, token_contract_xdr);
 
@@ -539,7 +549,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(
       std::to_underlying(
-          HogexecPrecompiledNativeContracts::kNativeContractHogToken),
+          HogexecPrecompiledNativeContracts::kNativeContractNativeToken),
       make_native_token_contract());
   auto native_context =
       std::make_unique<NativeContext>(std::move(contract_map));
@@ -560,7 +570,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_get_balance">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_get_balance">(
                             kObserverAddr)},
@@ -568,9 +578,9 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 
@@ -584,7 +594,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
                     .invoked_address = contract_addr_,
                     .entrypoint =
                         meta::entrypoint<u8"read_only_native_transfer">(),
-                    .gas_limit = UINT64_MAX,
+                    .gas_limit = kDefaultMaxTxGas,
                     .calldata =
                         meta::make_calldata<u8"read_only_native_transfer">(
                             kReceiverAddr)},
@@ -592,9 +602,9 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
         }};
     auto handler =
         make_new_system_call_handler(handler_tx, *multiplexed_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
   }
 }
@@ -603,7 +613,7 @@ TEST_P(ReadOnlyTest, Rv32ReadOnlyNativeTokenPrecompile)
 // is rejected and the output address is not zeroed.  The contract hash handed
 // to the inner frame is a real, deployable contract, so read-only mode is the
 // only thing that can make the deploy fail.
-TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
+TEST_F(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
 {
   deploy_callee();
 
@@ -613,18 +623,19 @@ TEST_P(ReadOnlyTest, ReadOnlyDeployOutputPreserved)
       .tx = Transaction{
           .invocation =
               client_.make_invocation<u8"read_only_deploy_output_preserved">(
-                  UINT64_MAX, callee_addr_, sha256(*contract_)),
+                  kDefaultMaxTxGas, callee_addr_, sha256(*contract_)),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
 // Checks that aliasing guards (returning kFault) are performed before the read
-// only guard
-TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
+// only guard. The contract gets its fault by aliasing an output with an input:
+// two inputs may alias each other.
+TEST_F(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
 {
   deploy_callee();
 
@@ -633,20 +644,22 @@ TEST_P(ReadOnlyTest, AliasingBeforeReadOnlyCheck)
   auto handler_tx = SignedTransaction{
       .tx = Transaction{
           .invocation = client_.make_invocation<
-              u8"read_only_aliasing_before_read_only_check">(UINT64_MAX,
+              u8"read_only_aliasing_before_read_only_check">(kDefaultMaxTxGas,
                                                              callee_addr_),
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
+  handler.enable_transaction_stats();
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-}
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, ReadOnlyTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
+  // The aliased call is the only one that faults; the write the read-only
+  // guard refuses is not a fault.
+  const auto *stats = handler.get_transaction_stats();
+  ASSERT_NE(stats, nullptr);
+  EXPECT_EQ(stats->syscall_fault_count, 1);
+}
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

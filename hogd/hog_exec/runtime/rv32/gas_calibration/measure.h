@@ -11,10 +11,8 @@
 
 namespace hogd::rv32::gas_calibration {
 
-// The only host in the harness: an ecall halts. Kernels never make a real
-// syscall, so no host work enters the measurement. (Syscall pricing, when it
-// lands, replaces this with a host that performs the call under measurement --
-// the sweep machinery above it does not change.)
+// Opcode kernels halt at their terminal ECALL. The timing helpers also accept
+// SyscallDispatchHost, which returns from body ECALLs in the seam kernels.
 class HaltHost : public Host {
 public:
   HostResult ecall(MachineView view, const EcallArgs &args) noexcept override
@@ -38,13 +36,17 @@ struct RunOutcome {
 
 // Resets and runs one kernel, timing only run(). The reset (which restores the
 // 64 KiB memory image) stays outside the timed region.
-[[nodiscard]] RunOutcome run_once(ThreadedMachine &machine, HaltHost &host);
+[[nodiscard]] RunOutcome run_once(ThreadedMachine &machine, Host &host);
 
 // Picks a trip count that makes one run of `program` take at least
 // `target_ns`, so the measurement dominates clock resolution and per-run
 // constant overhead. Returns the multiplier to apply to a seed trip count.
+//
+// Takes the host the sweep will actually be measured under: a syscall kernel
+// tuned against a halting host would stop at its first body ecall and time a
+// few instructions instead of a loop, then extrapolate a trip count from it.
 [[nodiscard]] uint32_t
-tune_trip_count(const ThreadedMachinePreInstantiation & /*program*/,
+tune_trip_count(const ThreadedMachinePreInstantiation & /*program*/, Host &host,
                 uint32_t seed_trip_count, double target_ns);
 
 // One kernel in a sweep, with its independent-variable value and its samples.
@@ -58,6 +60,9 @@ struct MeasurementPoint {
   // ns per loop iteration, one entry per repeat.
   std::vector<double> samples;
   bool ran_clean = true;
+  // Zero disables this check for diagnostic sweeps. Validation workloads
+  // require the exact gas for the prologue, all iterations, and terminal.
+  uint64_t expected_gas = 0;
 
   [[nodiscard]] double median() const;
   // Median absolute deviation over the repeats, relative to the median. The
@@ -71,12 +76,9 @@ struct MeasureConfig {
   uint32_t warmup_runs = 2;
 };
 
-// Runs every point `repeats` times in round-robin order rather than finishing
-// one point before starting the next. Interleaving matters: the dominant error
-// on a shared or thermally-throttled machine is slow drift, and measuring
-// points sequentially aliases that drift straight into the slope. Round-robin
-// spreads any drift across all points, where the per-point median removes it.
-void measure_interleaved(std::span<MeasurementPoint> points,
+// Interleave points so slow host drift is spread across the sweep. Each point
+// is reduced by median; interleaving does not remove systematic layout bias.
+void measure_interleaved(std::span<MeasurementPoint> points, Host &host,
                          const MeasureConfig &config);
 
 struct LinearFit {
@@ -91,12 +93,8 @@ struct LinearFit {
   // Median of pairwise slopes. Insensitive to a single outlying point, so a
   // large gap between this and `slope` flags an outlier the OLS fit absorbed.
   double theil_sen_slope = 0.0;
-  // Standard error of the slope, from the fit's own residuals. This is the
-  // uncertainty that matters: unlike a separately measured timer noise floor,
-  // it includes the per-kernel systematic offsets (code layout, predictor
-  // state) that repeating a measurement cannot average away. A slope smaller
-  // than about twice this is not distinguishable from zero, and an opcode
-  // whose slope is not distinguishable from zero costs what the filler costs.
+  // Fit residuals include between-kernel layout bias as well as timer noise.
+  // The reporter uses this to judge the substitution slope, not saturation.
   double slope_stderr = 0.0;
   size_t points = 0;
 };

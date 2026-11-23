@@ -241,6 +241,30 @@ template<typename T> struct Ptr : std::unique_ptr<T> {
 };
 template<typename T> Ptr(T &&) -> Ptr<T>;
 
+// An owning pointer that serializes as an XDR optional -- a 4-byte presence
+// tag followed by the object -- exactly as [x23::Ptr] does, but from a
+// [std::shared_ptr].
+//
+// [x23::Ptr] is a [std::unique_ptr], so its value constructor takes the object
+// *by value*: building a reply out of [x23::Ptr] deep-copies whatever it is
+// pointing at.  Where the object is already owned by a [std::shared_ptr] --
+// which is how a lookup into a shared cache hands one back -- that copy buys
+// nothing.  Holding the [std::shared_ptr] in the reply keeps the object alive
+// on its own, and x23 serializes a handler's return value while it is still in
+// scope (the [make_record] calls in x23/rpc.h), so the reference outlives the
+// bytes being written.
+//
+// The pointee must not be mutated while a reply holding it is in flight.
+template<typename T> struct XdrSharedPtr : std::shared_ptr<const T> {
+  using super = std::shared_ptr<const T>;
+  using value_type = T;
+
+  using super::super;
+
+  XdrSharedPtr() = default;
+  explicit XdrSharedPtr(super p) : super(std::move(p)) {}
+};
+
 template<typename T> struct Box : private std::unique_ptr<T> {
   using super = std::unique_ptr<T>;
   using element_type = T;
@@ -286,18 +310,28 @@ template<typename T> struct Box : private std::unique_ptr<T> {
       this->reset(new T{});
   }
 
-  T *get() noexcept
+  // An empty Box holds a value-initialized T: reading one gives T{}, and
+  // writing through one allocates it first. A union arm or field that is
+  // selected but never written is empty.
+  T *get()
   {
-    x23assert(has_value());
+    ensure();
     return super::get();
   }
   const T *get() const noexcept
   {
-    x23assert(has_value());
+    if (!has_value()) [[unlikely]]
+      return &empty_value();
     return super::get();
   }
   decltype(auto) operator*(this auto &&self) { return *self.get(); }
-  auto operator->(this auto &&self) noexcept { return self.get(); }
+  auto operator->(this auto &&self) { return self.get(); }
+
+  static const T &empty_value() noexcept
+  {
+    static const T value{};
+    return value;
+  }
 };
 template<typename T> Box(T &&) -> Box<T>;
 
@@ -345,19 +379,36 @@ template<typename T>
 inline bool
 operator==(const Box<T> &a, const Box<T> &b)
 {
-  static const T da{}, db{};
-  return (a.has_value() ? *a : da) == (b.has_value() ? *b : db);
+  return *a == *b;
 }
 
 template<typename T>
 inline std::compare_three_way_result_t<T>
 operator<=>(const Box<T> &a, const Box<T> &b)
 {
-  static const T da{}, db{};
-  return (a.has_value() ? *a : da) <=> (b.has_value() ? *b : db);
+  return *a <=> *b;
 }
 
 template<typename T> struct xdr_meta<Box<T>> : xdr_meta<T> {};
+
+// A Box of anything but a struct or union (an opaque, a string, a vector, a
+// primitive...) has its contents' category but none of its interface, so the
+// serializers unwrap it explicitly. Primitives have no xdr_meta to inherit, so
+// the category is spelled out. Boxed structs and unions need no unwrapping:
+// the serializers reach their fields through get<I>.
+template<typename T> requires (category<T> != XdrCategory::kStruct &&
+                               category<T> != XdrCategory::kUnion)
+struct xdr_meta<Box<T>> {
+  static constexpr XdrCategory category = x23::category<T>;
+};
+
+template<typename X>
+concept is_boxed_leaf =
+    requires { typename std::remove_cvref_t<X>::value_type; } &&
+    std::same_as<std::remove_cvref_t<X>,
+                 Box<typename std::remove_cvref_t<X>::value_type>> &&
+    !is_xdr_cat<typename std::remove_cvref_t<X>::value_type,
+                XdrCategory::kStruct, XdrCategory::kUnion>;
 
 } // namespace x23
 
@@ -368,6 +419,10 @@ template<size_t I, typename T>
 requires requires { typename std::tuple_element<I, T>::type; }
 struct std::tuple_element<I, x23::Box<T>> : std::tuple_element<I, T> {};
 
+namespace x23 {
+
+// In namespace x23 so argument-dependent lookup finds them for a Box of any
+// type, including one declared in another namespace.
 template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &b)
@@ -380,7 +435,6 @@ template<size_t I, typename T> requires requires(const T &t) { get<I>(t); }
 decltype(auto)
 get(const x23::Box<T> &b)
 {
-  x23assert(b.has_value());
   return get<I>(*b);
 }
 
@@ -388,9 +442,10 @@ template<size_t I, typename T> requires requires(T &t) { get<I>(t); }
 decltype(auto)
 get(x23::Box<T> &&b)
 {
-  x23assert(b.has_value());
   return get<I>(*std::move(b));
 }
+
+} // namespace x23
 
 template<x23::is_xdr_enum E>
 struct std::formatter<E> : std::formatter<std::string> {
@@ -602,6 +657,27 @@ private:
   friend T;
 };
 
+// A union field declared #[cpp(box)] is a Box of the union, which is that
+// union to the union protocol: arms are reached through get<I>, which Box
+// forwards, and the discriminant through the boxed value.
+template<is_xdr_union T> struct union_ops<Box<T>> : union_ops<T> {
+  using base = union_ops<T>;
+  using base::get_discriminant;
+  using base::index;
+  using base::set_discriminant;
+  using typename base::discriminant_type;
+
+  static constexpr int index(const Box<T> &u) { return base::index(*u); }
+  static constexpr discriminant_type get_discriminant(const Box<T> &u)
+  {
+    return base::get_discriminant(*u);
+  }
+  static constexpr void set_discriminant(Box<T> &u, discriminant_type d)
+  {
+    base::set_discriminant(*u, d);
+  }
+};
+
 // Set the discriminant of a union.  Note:  you can always get the
 // value of a discriminant of union u with get<0>(u).  But since
 // setting the union requires additional logic for changing the active
@@ -801,6 +877,13 @@ struct serialize_equiv<std::array<X, N>, std::array<T, N>> : std::true_type {};
 template<typename X, serializes_like<X> T>
 struct serialize_equiv<Ptr<X>, Ptr<T>> : std::true_type {};
 
+// Declares that an [XdrSharedPtr] may stand in wherever the wire type is a
+// [Ptr].  x23 composes this through vectors itself, so declaring it for the
+// element type is enough for a vector of them to answer an RPC whose declared
+// return is a vector of optionals.
+template<typename X>
+struct serialize_equiv<Ptr<X>, XdrSharedPtr<X>> : std::true_type {};
+
 // Concept for types you can pass to an RPC function expecting type X.
 template<typename T, typename X>
 concept satisfies_rpc_arg = serializes_like<T, X> || std::convertible_to<T, X>;
@@ -869,6 +952,10 @@ template<typename T, typename Xdr,
          template<typename> typename RetTrans = std::type_identity_t>
 concept satisfies_rpc_return =
     std::convertible_to<T, RetTrans<Xdr>> ||
+    // A wire-equivalent plain return, e.g. a reply borrowing bytes it already
+    // holds, but only where the transform admits an untransformed value:
+    // RetTrans = Async must still reject one.
+    (std::convertible_to<Xdr, RetTrans<Xdr>> && serializes_like<T, Xdr>) ||
     serializes_like<untransform_t<RetTrans, T>, Xdr> ||
     (std::convertible_to<T, RetTrans<untransform_auto_t<T>>> &&
      serializes_like<untransform_auto_t<T>, Xdr>) ||

@@ -208,20 +208,33 @@ public:
   bool contains(T value) { return do_contains(value, false); }
   bool erase(T value) { return do_contains(value, true); }
 
-  // iterator over all of the non-erased values
+  // Iterates the live values while inserts, erases and growth run
+  // concurrently. *it returns the value its slot held when the iterator
+  // reached it. A value present for the whole walk is returned exactly once;
+  // one erased and re-inserted during the walk may be returned twice.
   class Iterator {
     ConcurrentSet *set_;
-    size_t index_;
-    size_t level_;
+    size_t index_{0};
+    size_t level_{0};
+    // Level count when the walk began. Levels added later hold only values
+    // inserted after begin(), which the walk need not return.
+    size_t n_levels_;
+    T value_{};
 
-  public:
-    Iterator(ConcurrentSet *set, size_t index, size_t level)
-      : set_(set), index_(index), level_(level)
+    Iterator(ConcurrentSet *set, size_t n_levels)
+      : set_(set), n_levels_(n_levels)
     {}
-    T operator*() const
+
+    T load() const
     {
       return set_->get_level(level_)[index_].load(std::memory_order_acquire);
     }
+    bool at_end() const { return level_ == n_levels_; }
+
+    friend class ConcurrentSet;
+
+  public:
+    T operator*() const { return value_; }
 
     Iterator &operator++()
     {
@@ -231,12 +244,16 @@ public:
           level_++;
           index_ = 0;
         }
-      } while (*this != set_->end() && is_reserved(**this));
+      } while (!at_end() && is_reserved(value_ = load()));
       return *this;
     }
 
+    // end() is a sentinel: any iterator that has finished its walk equals it.
     bool operator==(const Iterator &other) const
     {
+      if (at_end() || other.at_end()) {
+        return at_end() == other.at_end();
+      }
       return index_ == other.index_ && level_ == other.level_;
     }
     bool operator!=(const Iterator &other) const { return !(*this == other); }
@@ -244,14 +261,15 @@ public:
 
   Iterator begin()
   {
-    auto it = Iterator(this, 0, 0);
-    if (is_reserved(*it)) {
+    auto it = Iterator(this, levels());
+    it.value_ = it.load();
+    if (is_reserved(it.value_)) {
       ++it;
     }
     return it;
   }
 
-  Iterator end() { return Iterator(this, 0, levels()); }
+  Iterator end() { return Iterator(this, 0); }
 
 private:
   // The values the set reserves to mark slot state, which it therefore cannot

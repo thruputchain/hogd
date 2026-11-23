@@ -3,11 +3,14 @@
 #pragma once
 
 #include <filesystem>
+#include <span>
+#include <utility>
 
 #include <fcntl.h>
 #include <netinet/in.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/uio.h>
 #include <unistd.h>
 
 #include <x23/cleanup.h>
@@ -72,9 +75,11 @@ template<is_bytevec BufT>
 std::expected<size_t, Errno>
 readall(BorrowedFd fd, BufT *buf)
 {
-  if (auto sb = seek_bounds(fd); sb && sb->cur != sb->end)
-    // Some /proc files let you seek beyond the end, so set eofok
-    // Other /proc files don't let you seek to the end, so also ignore bounds
+  if (auto sb = seek_bounds(fd);
+      sb && sb->cur < sb->end &&
+      std::cmp_less_equal(sb->end - sb->cur, buf->max_size() - buf->size()))
+    // Files can shrink after seeking, so set eofok. Directory and pseudo-file
+    // offsets need not be byte counts; ignore unusable bounds.
     return fullread(fd, buf, sb->end - sb->cur, true);
 
   size_t nread{};
@@ -101,6 +106,11 @@ readfile(std::filesystem::path p)
 }
 
 std::expected<void, Errno> fullwrite(BorrowedFd fd, BufView buf);
+
+// Writes every byte of `iov`, in order, with as few writev() calls as
+// IOV_MAX allows. Consumes `iov`: entries are advanced past what has been
+// written, so its contents are unspecified afterward.
+std::expected<void, Errno> fullwritev(BorrowedFd fd, std::span<iovec> iov);
 
 std::expected<void, Errno> writefile(const std::filesystem::path &p,
                                      BufView buf, bool sync = false,

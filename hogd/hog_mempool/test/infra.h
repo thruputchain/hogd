@@ -5,6 +5,7 @@
 #include <cstring>
 #include <exception>
 #include <format>
+#include <limits>
 #include <memory>
 #include <span>
 #include <string>
@@ -17,6 +18,7 @@
 #include "contract.hh"
 #include "db_sched.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
@@ -27,6 +29,7 @@
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
+#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/rpc_from_auth.h"
 #include "hogd/hog_db/rpc_from_exec.h"
@@ -58,6 +61,18 @@
 
 namespace hogd {
 
+// The mempool tests exercise native-token age accounting with transactions
+// budgeting 5B gas each (txs.h), past the default max_tx_gas, so their chain
+// states no cap.
+inline NetworkConfig
+mempool_test_network_config()
+{
+  NetworkConfig config = stock_network_config();
+  NetworkConfigParams::set_param(config, ConfigParamID::kConfigParamMaxTxGas,
+                                 std::numeric_limits<GasAmount>::max());
+  return config;
+}
+
 constexpr ContractAddress
 make_account_address(uint8_t i)
 {
@@ -75,9 +90,29 @@ public:
       std::array{make_account_address(3), make_account_address(4),
                  make_account_address(5), make_account_address(6)};
 
+  struct Options {
+    bool skip_genesis_block = false;
+    size_t mempool_tx_size_limit =
+        MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit;
+    // The network this stack runs as: what --network-hash is to the binaries.
+    NetworkHash network_hash = kNetworkHash;
+    // Database directory to open, or empty for a fresh temporary one. Pass a
+    // directory that outlives the instance to restart a stack over the
+    // database an earlier instance committed to.
+    std::string db_directory;
+  };
+
+  // Brings up the whole stack and registers every subsystem with the mempool.
+  // Throws when startup fails, e.g. [x23::XdrCallFailed] when the mempool
+  // rejects the coordinator intro; the partially started stack is torn down.
+  explicit MempoolTestInfra(const Options &options);
+
   MempoolTestInfra(bool skip_genesis_block = false,
                    size_t mempool_tx_size_limit =
-                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit);
+                       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit)
+    : MempoolTestInfra(Options{.skip_genesis_block = skip_genesis_block,
+                               .mempool_tx_size_limit = mempool_tx_size_limit})
+  {}
 
   ~MempoolTestInfra()
   {
@@ -131,23 +166,25 @@ public:
     }
   }
 
-  void set_hogs(const ContractAddress &account, int group, BlockHeight age,
-                uint128_t num_hogs)
+  void set_native_tokens(const ContractAddress &account, int group,
+                         BlockHeight age, uint128_t num_native_tokens)
   {
     CHECK_GE(group, 0);
-    CHECK_LT(group, kHogAgeNumGroups);
+    CHECK_LT(group, kNativeTokenAgeNumGroups);
 
-    HogAge average;
+    NativeTokenAge average;
     memset(&average, 0, sizeof(average));
-    HogDbStatus<HogAge> res = get_db().read_address_average_hog_age(account);
+    HogDbStatus<NativeTokenAge> res =
+        get_db().read_address_average_native_token_age(account);
     if (res.has_value()) {
       average = *res;
     }
 
     average.address = account;
     average.average_ages[group] = age;
-    average.num_hogs[group] = to_xdr(num_hogs);
-    CHECK(get_db().write_address_average_hog_age({average}).has_value());
+    average.num_native_tokens[group] = to_xdr(num_native_tokens);
+    CHECK(
+        get_db().write_address_average_native_token_age({average}).has_value());
   }
 
   void set_address_auth_data(const ContractAddress &account,
@@ -176,9 +213,10 @@ public:
     std::shared_ptr<Contract> contract = load_rv32_contract(artifact_filename);
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
     CHECK(get_db()
               .write_address_metadata(
                   address,
@@ -199,10 +237,31 @@ public:
     return get_db().read_address_balance(address);
   }
 
+  HogDbStatus<NativeTokenAge>
+  read_address_average_native_token_age(const ContractAddress &address)
+  {
+    return get_db().read_address_average_native_token_age(address);
+  }
+
+  // Mirrors the startup reconciliation hog-db and hog-devnode run; the stack
+  // skips it because seeded accounts hold more scheduling tokens than balance.
+  HogDbStatus<void> reconcile_native_token_ages_at_recovered_tip()
+  {
+    CHECK(ctx_->has_committed_tip());
+    return reconcile_startup_native_token_ages(
+        get_db(), ctx_->get_tip().value.proposal_header.block_height);
+  }
+
   HogDbStatus<DeployedContractHash>
   read_address_metadata(const ContractAddress &address)
   {
     return get_db().read_address_metadata(address);
+  }
+
+  HogDbStatus<AddressAuthData>
+  read_address_auth_data(const ContractAddress &address)
+  {
+    return get_db().read_address_auth_data(address);
   }
 
   HogDbStatus<ReplayCacheMetadata>
@@ -282,16 +341,16 @@ private:
   void init_db_backend(std::unique_ptr<sched_db_client_t> sched_db_client)
   {
     // check the database's integrity and find the highest valid LSN.
-    DBStatus<uint64_t> lsn = Database::check(db_dir_.directory(), kRamDbBytes);
+    DBStatus<uint64_t> lsn = Database::check(db_directory_, kRamDbBytes);
     CHECK(lsn.has_value());
     info("database '{}' passed integrity check; current LSN is {}",
-         db_dir_.directory(), *lsn);
+         db_directory_, *lsn);
 
     // create the database, loading up to the highest valid LSN.
     // TODO(abelay): When sharding is supported, this will become a separate
     // step.
     DBStatus<std::unique_ptr<Database>> ramdb =
-        Database::open_lsn(db_dir_.directory(), *lsn, kRamDbBytes);
+        Database::open_lsn(db_directory_, *lsn, kRamDbBytes);
     CHECK(ramdb.has_value());
 
     auto db = HogDbDAO(RAMDB(std::move(*ramdb)));
@@ -305,8 +364,11 @@ private:
         .contract_deployment_cost_per_byte = 10,
     }));
     // Placeholder parameters for tests that never load genesis; a genesis
-    // load installs the real ones over these.
-    ctx_->set_network_config(stock_network_config());
+    // load installs the real ones over these. A recovered database already
+    // carries the parameters its genesis installed.
+    if (!ctx_->has_committed_tip()) {
+      ctx_->set_network_config(mempool_test_network_config());
+    }
   }
 
   HogDbDAO &get_db()
@@ -323,9 +385,10 @@ private:
     // Write contract to hog_db.
     auto bytes = x23::serialize(*contract);
     auto contract_hash = sha256(*contract);
-    CHECK(get_db()
-              .write_wasm_code(contract_hash, std::as_bytes(std::span(bytes)))
-              .has_value());
+    CHECK(
+        get_db()
+            .write_contract_code(contract_hash, std::as_bytes(std::span(bytes)))
+            .has_value());
 
     for (const ContractAddress &address : kAccountAddresses) {
       // Write deployment.
@@ -348,16 +411,14 @@ private:
   void grant_initial_tokens_for_account(const ContractAddress &address)
   {
     static_assert(kStorageTokenAmount >= 0);
-    static_assert(kStorageTokenAmount <=
-                  uint128_t{kHogDivisibility} * uint128_t{kTotalHogSupply});
 
     CHECK(get_db()
               .write_address_balance(address, kStorageTokenAmount)
               .has_value());
     // TODO(jhumphri): Multiply by something other than 10. Or just give the
-    // account unlimited hogs with UINT128_MAX.
-    set_hogs(address, /*group=*/kHogAgeGroupToSchedule,
-             /*age=*/0, /*num_hogs=*/5'000'000'000 * 10);
+    // account unlimited native tokens with UINT128_MAX.
+    set_native_tokens(address, /*group=*/kNativeTokenAgeGroupToSchedule,
+                      /*age=*/0, /*num_native_tokens=*/5'000'000'000 * 10);
   }
 
   void register_db_with_mempool()
@@ -414,9 +475,8 @@ private:
             make_address(kAddress, auth_db_server_.port()).c_str(),
         .address_for_mempool =
             make_address(kAddress, auth_mempool_server_.port()).c_str()};
-    client.mempoolauth_intro_auth(auth_card)();
     auth_server_->set_mempool_client(std::move(client));
-    auth_server_->subscribe_to_auth_data_changes(auth_card)();
+    auth_server_->subscribe_and_register(std::move(auth_card))();
   }
 
   void register_executor_with_mempool()
@@ -440,8 +500,21 @@ private:
              CoordinatorRegistrationOutcome::CoordinatorRegistrationOK);
   }
 
+  // Tears down whatever startup reached before the constructor rethrows. The
+  // destructor body never runs for a failed construction, so this covers what
+  // member destruction alone cannot: the executor blocks in its destructor
+  // until shut down, and a registered scheduler must stop before
+  // [db_scheduler_server_] goes away.
+  void prepare_for_failed_construction() noexcept;
+
+  // The constructor body: starts every server and registers the subsystems.
+  void start(const Options &options);
+
   // Various backend components required by the database.
-  TmpDir db_dir_;
+  // The temporary directory is only created when [Options::db_directory] is
+  // empty; otherwise the caller owns the directory.
+  std::unique_ptr<TmpDir> owned_db_dir_;
+  std::string db_directory_;
   std::unique_ptr<RPCContext> ctx_;
 
   // These hold references to ctx_, so they should be destroyed before ctx_.

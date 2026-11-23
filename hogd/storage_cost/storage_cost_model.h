@@ -10,7 +10,7 @@
 namespace hogd {
 
 struct StorageCostModel {
-  // TODO(geoff): remove: this is for compat with the mockdb implementation.
+  // TODO(geoff): remove: only tests construct a model from raw parameters.
   constexpr StorageCostModel(uint64_t base_item_cost,
                              uint32_t bytestring_cost_per_byte,
                              uint64_t rcq_cost_per_entry,

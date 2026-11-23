@@ -15,7 +15,7 @@ namespace hogd::rv32 {
 
 class MachineTestPeer;
 
-// Deterministic RV32IM interpreter state. The VM owns registers, PC, data
+// Canonical RV32IM interpreter used by tests. The VM owns registers, PC, data
 // memory, gas, and trap state; immutable code lives in Program. Runtime-side
 // dispatch may choose any validated initial PC, but reset always returns to the
 // constructor's initial PC.
@@ -26,10 +26,8 @@ public:
 
   void reset(uint64_t gas);
 
-  // v4 guest-dispatch entry seam: stage the invoked method id into a0/a1
-  // (a0 = low 32 bits, a1 = high 32 bits) after reset()/memory staging and
-  // before run(). The guest _start dispatches on it. Narrow by design -- not a
-  // general register-write API.
+  // Seed the method ID for guest dispatch: a0 = low 32 bits, a1 = high 32.
+  // Call after reset()/memory staging and before run().
   void seed_method_id(uint64_t method_id);
 
   [[nodiscard]] StepResult step();

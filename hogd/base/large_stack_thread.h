@@ -22,7 +22,7 @@ namespace hogd {
 
 // LargeStackThread provides a jthread-compatible API but uses pthread to set
 // a larger stack size. This is necessary on macOS where the default stack is
-// too small for WASM compilation.
+// too small for contract compilation.
 class LargeStackThread {
 public:
   // Default stack size: 8MB (vs macOS default of ~512KB)

@@ -16,6 +16,7 @@ target_link_libraries(
   direct_rpc_test_objects
   GTest::gtest
   hogd_interface
+  components_library_exception
 )
 
 target_include_directories(
@@ -37,4 +38,4 @@ target_link_libraries(
   model_checker
   GTest::gtest
 )
-gtest_discover_tests(direct_rpc_test)
+hogd_discover_tests(direct_rpc_test)

@@ -3,12 +3,15 @@
 #include <cerrno>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdint>
+#include <map>
 #include <mutex>
 #include <set>
 #include <span>
 #include <sys/socket.h>
 #include <type_traits>
 #include <unordered_map>
+#include <utility>
 #include <vector>
 
 #include "contract.hh"
@@ -19,9 +22,11 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/db_hash.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
+#include "hogd/hog_exec/runtime/test_util/queue_util.h"
+#include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/corosync.h"
@@ -41,8 +46,14 @@ public:
 
   // A BlockID says nothing about chain position (in production it is a
   // nanosecond timestamp), so the tip height is tracked separately.
-  BlockSnapshotRpc(BlockID block_id, BlockHeight tip_block_height = 0)
-    : block_id_(block_id), tip_block_height_(tip_block_height)
+  //
+  // The served network config defaults to this build's stock parameters.
+  // Pass one to place a test or benchmark under a chain that states different
+  // execution bounds than this repository's dev chains do.
+  BlockSnapshotRpc(BlockID block_id, BlockHeight tip_block_height = 0,
+                   NetworkConfig network_config = stock_network_config())
+    : block_id_(block_id), tip_block_height_(tip_block_height),
+      network_config_(std::move(network_config))
   {}
 
   // The height the open block claims; what the executor cross-checks against.
@@ -76,9 +87,14 @@ public:
   ExpectedQueueEntry get_concurrent_retrocausal_queue_entry(
       BlockID block, AddressAndKey const &addrkey, uint32_t index);
 
-  ExpectedDBTip get_db_tip(BlockID block) const
+  ExpectedDBTip get_db_tip(BlockID /*block*/, BlockHeight block_height) const
   {
-    if (block != block_id_) {
+    // Height-keyed like the real server (executor_to_db_rpc.x): the caller
+    // states the height it opened its block with, this server holds exactly
+    // one tip, and no per-block state is consulted -- any block opened at
+    // the served height reads the same tip, matching the one-committed-tip
+    // production shape.
+    if (block_height != tip_block_height_ + 1) {
       return ExpectedDBTip(RPCError::kRPCBadBlockID);
     }
 
@@ -97,11 +113,11 @@ public:
               .value = value,
               // No genesis runs against this server; serve the production
               // native wallet so root-fallback behavior matches a real chain,
-              // and this build's stock execution parameters. A
+              // and the execution parameters this server was built with. A
               // default-constructed NetworkConfig would cap the cross-invoke
               // depth at zero and fault every invoke.
               .default_wallet = native_default_wallet_hash(),
-              .network_config = stock_network_config()};
+              .network_config = network_config_};
     return out;
   }
 
@@ -119,7 +135,8 @@ public:
   void setup_create_contract(Contract const &contract);
   void setup_create_deployment(ContractAddress addr,
                                DeployedContractHash deployed_contract_hash);
-  void setup_create_item(AddressAndKey const &addrkey, StorageItemWrapper item);
+  void setup_create_item(AddressAndKey const &addrkey, WireStorageItem item);
+  void setup_create_queue(AddressAndKey const &addrkey, TestQueue queue);
   void setup_add_concurrent_rcq_item(AddressAndKey const &addrkey,
                                      QueueEntry entry);
 
@@ -142,8 +159,12 @@ public:
 private:
   BlockID block_id_;
   BlockHeight tip_block_height_;
+  NetworkConfig network_config_;
 
-  x23::MVar<std::unordered_map<AddressAndKey, StorageItemWrapper>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey, WireStorageItem>> items_;
+  x23::MVar<std::unordered_map<AddressAndKey,
+                               std::map<uint64_t, RetrocausalQueueBlock>>>
+      queue_blocks_;
   x23::MVar<std::unordered_map<SHA256Hash, Contract, SipHash24Hasher>>
       contracts_;
   x23::MVar<std::unordered_map<ContractAddress, DeployedContractHash,
@@ -173,8 +194,9 @@ static_assert(
 
 class BlockSnapshotServer : public RpcServer<BlockSnapshotRpc> {
 public:
-  BlockSnapshotServer(BlockID block_id, BlockHeight tip_block_height = 0)
-    : RpcServer(block_id, tip_block_height)
+  BlockSnapshotServer(BlockID block_id, BlockHeight tip_block_height = 0,
+                      NetworkConfig network_config = stock_network_config())
+    : RpcServer(block_id, tip_block_height, std::move(network_config))
   {}
 };
 

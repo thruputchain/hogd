@@ -58,7 +58,7 @@ public:
   using ops = Ops;
   using pointer_type = Ptr;
   using element_type = std::remove_reference_t<decltype(*declval<Ptr>())>;
-  using tag_type = decltype(ops::incref(declval<Ptr>()));
+  using tag_type = decltype(ops::incref(declval<Ptr &>()));
   static constexpr bool kTagged = true;
 
 protected:

@@ -7,7 +7,7 @@ review, no submodule pointer dance).
 
 Both directories share the cargo workspace rooted at `built_contracts/`
 (`Cargo.toml` / `Cargo.lock`) and the same build pipeline: `build_risc.sh`
-lowers each crate to a `<name>.rv32a` artifact via groundhog-cli, and
+lowers each crate to a `<name>.rv32a` artifact via thruput-cli, and
 `generate_header.py` turns the emitted `<name>_spec.json` into a C++ header
 (`build/built_contracts/<name>.h`). Outputs land flat in
 `build/built_contracts/`, so crate names must be unique across both
@@ -30,6 +30,17 @@ directories.
 
 ## Current contracts
 
+- `input_alias_test` — which memory arguments of a syscall may overlap:
+  inputs may share bytes with each other, an output may share bytes with
+  nothing, and a zero-length span overlaps only a range it lies strictly
+  inside. Each method places its arguments with raw argument words and asserts
+  on the results itself. Driven by
+  `hogd/hog_exec/runtime/input_alias_test_rv32_test.cc`.
+- `math_syscall_test`: U256Sqrt, U256MulDivRem and U128MulDivRem. The host
+  test picks operands and checks the results; the guest checks each syscall
+  against the SDK's software arithmetic, a zero divisor, and which arguments
+  may overlap. Driven by
+  `hogd/hog_exec/runtime/syscall_tests/math_syscall_test_rv32_test.cc`.
 - `tx_context_test` — transaction-context syscalls: GetSourceTransactionHash,
   GetBlockHeight, and the valid-statistic side of GetTransactionStatistics.
   Driven by `hogd/hog_exec/runtime/tx_context_tests.cc`.
@@ -49,7 +60,29 @@ directories.
   concurrent same-window claims compose and only aggregate overdraws are
   rejected (at block packing). Driven by
   `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `erc165_probe` — an ERC165 caller: `supports` runs
+  `ERC165Client::supports` against a target for ERC20, ERC20Permit, ERC165
+  and its own interface, and `probe_interface` makes one read-only
+  `supports_interface` call, returning `None` when the call itself fails.
+  Checks the native token's ERC165 from a real contract-side caller. Driven
+  by `hogd/hog_exec/runtime/erc165_probe_test.cc`.
 - `faucet_caller` — a contract-shaped faucet user for the bootstrap-loop
   scenario: deployed through the default wallet by an airdrop-funded pubkey
   account, then claims from the faucet for itself. Driven by
   `hogd/hog_exec/runtime/faucet_scenario_test.cc`.
+- `invoke_malformed_tokens_test` — the Invoke syscall's handling of a
+  malformed owned-auth-token byte span (not a whole number of 4-byte ids)
+  alongside large calldata (#2327): rejected ahead of admission, so ahead
+  of the host's calldata copy, with a control showing the same calldata does
+  reach a child frame once the span is well-formed. Driven by
+  `hogd/hog_exec/runtime/invoke_malformed_tokens_rv32_test.cc`.
+- `storage_reads` — a transaction whose cost is HogDb round trips, not
+  compute: `read_keys(seed, count)` reads `count` seed-derived keys one after
+  another. Driven by `hogd/hog_exec/bench/makespan_runner.cc`.
+- `itc_erc20_permit`: `itc_erc20` with the `ERC20Permit` interface
+  (`thruput-erc20-permit-if`) implemented on top: the same storage keys,
+  strict updates and events, so it is the RV32 reference the native token's
+  `permit` and `transfer_from_signed` are held byte-identical to. It also
+  invokes `impl_erc165!()` (`thruput-erc165-if`), so it is the reference for
+  the native token's `supports_interface` / `supports_interfaces` answers.
+  Driven by `hogd/hog_exec/runtime/erc20_permit_parity_test.cc`.

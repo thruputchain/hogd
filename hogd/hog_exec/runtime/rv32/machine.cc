@@ -24,7 +24,7 @@ Machine::Machine(std::shared_ptr<const Program> program, uint32_t memory_bytes,
   else if (!program_->contains_pc(initial_pc_)) {
     construction_trap_ = Trap::kBadPc;
   }
-  else if (memory_bytes > kMaxMemoryBytes) {
+  else if (memory_bytes > kMemoryCeilingBytes) {
     construction_trap_ = Trap::kBadMemory;
   }
   else {
@@ -56,9 +56,7 @@ Machine::reset(uint64_t gas)
     halted_ = true;
     return;
   }
-  // Entry ABI v3: sp (x2) is seeded to 0. The guest owns stack placement and
-  // must set sp itself; a stack touch before that computes 0 - frame, wraps,
-  // and traps OOB instead of silently running the stack somewhere valid.
+  // Entry ABI v3 initializes sp to zero; the guest must establish its stack.
   registers_[2] = 0;
 }
 

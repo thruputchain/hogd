@@ -20,9 +20,14 @@ endmacro()
 add_x23_test(affinity)
 add_x23_test(callback)
 add_x23_test(cleanup)
+add_x23_test(compiler_roundtrip compiler.x)
 add_x23_test(corosleep)
 add_x23_test(corowake)
 add_x23_test(event)
+# event's last case spins on yield(), so a round costs a scheduler timeslice
+# rather than microseconds on a loaded host; it blew the schedule's 100s under
+# `ctest --parallel` in #4152.
+set_tests_properties(event PROPERTIES TIMEOUT 300)
 add_x23_test(format)
 add_x23_test(heap)
 add_x23_test(marshal)
@@ -112,32 +117,61 @@ endif()
 
 add_x23_gtest(str_cstr)
 add_x23_gtest(cxs_serialize_test)
+add_x23_gtest(compat_probe)
 add_x23_gtest(deserialize)
+add_x23_gtest(recursion_composition)
+add_x23_gtest(serialize)
+add_x23_gtest(event_edges)
+if(GOOGLETEST_PATH AND USE_EPOLL)
+  add_x23_gtest(event_faults)
+  target_link_options(test_event_faults PRIVATE
+    -Wl,--wrap=epoll_create1 -Wl,--wrap=eventfd
+    -Wl,--wrap=epoll_ctl -Wl,--wrap=epoll_wait)
+  set_tests_properties(event_faults PROPERTIES TIMEOUT 30)
+endif()
+add_x23_gtest(err)
+add_x23_gtest(fileio)
+add_x23_gtest(sockio)
 add_x23_gtest(multiclient)
 add_x23_gtest(nmvec)
 add_x23_gtest(max_message_size)
 add_x23_gtest(srpc_sockio_regression)
 add_x23_gtest(shutdown)
 add_x23_gtest(sync)
+add_x23_gtest(async)
+add_x23_gtest(death_test)
+add_x23_gtest(corosync)
 add_x23_gtest(threadpool)
 add_x23_gtest(detached)
 add_x23_gtest(dag)
 add_x23_gtest(uiobuf)
 add_x23_gtest(xdr)
 add_x23_gtest(refcnt)
+add_x23_gtest(vec)
+add_x23_gtest(rpc_common)
+add_x23_gtest(testlock)
+add_x23_gtest(signal)
+add_x23_gtest(rpc_dispatch)
+add_x23_gtest(rpc_client)
+if(GOOGLETEST_PATH AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
+  add_x23_gtest(srpc)
+  target_link_options(test_srpc PRIVATE
+    -Wl,--wrap=socket -Wl,--wrap=connect -Wl,--wrap=setsockopt
+    -Wl,--wrap=read -Wl,--wrap=writev -Wl,--wrap=shutdown)
+  set_tests_properties(srpc PROPERTIES TIMEOUT 60)
+endif()
+add_x23_gtest(debug)
+add_x23_gtest(progname)
 
 if(GOOGLETEST_PATH)
+set_tests_properties(async corosync testlock signal rpc_dispatch rpc_client
+  PROPERTIES TIMEOUT 60)
+set_tests_properties(event_edges PROPERTIES TIMEOUT 30 ENVIRONMENT "X23SERVER_TRACE=2")
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
-# threadpool gets the same budget as the stress tests above rather than
-# shutdown's 10s.  DestructionWakeupStress creates and destroys 10000
-# thread pools, and its cost tracks the host's CPU count (a pool
-# allocates one run queue per LLC bucket and always starts a qcbq
-# service thread), so on a big CI host under `ctest --parallel` it takes
-# a few seconds even without sanitizers -- 4.5s on the asyncio schedule
-# -- and runs past 10s under ASAN or TSAN.  It is checking for a lost
-# wakeup, which hangs rather than merely running slowly, so the larger
-# budget still catches what the test is for.
-set_tests_properties(threadpool PROPERTIES TIMEOUT 60)
+# threadpool's DestructionWakeupStress builds 10000 pools and its cost tracks
+# the host's CPU count: 33s on its own on a slow CI runner (#4224).  The test
+# catches a lost wakeup, which hangs outright, so a larger budget still works.
+set_tests_properties(threadpool PROPERTIES TIMEOUT 180)
 endif()
 
 if(BENCHMARK_PATH)
@@ -158,3 +192,18 @@ if(BUILD_FUZZERS)
 endif()
 
 add_custom_target(build_tests DEPENDS ${TEST_EXECUTABLES})
+
+add_test(NAME compiler
+  COMMAND ${CMAKE_COMMAND}
+    "-DX23C=${X23C_EXECUTABLE}"
+    "-DINPUT=${CMAKE_CURRENT_SOURCE_DIR}/compiler.x"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/compiler-test"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/compiler.cmake")
+set_tests_properties(compiler PROPERTIES TIMEOUT 30)
+
+add_test(NAME rust_serde_hex
+  COMMAND ${CMAKE_COMMAND}
+    "-DX23C=${X23C_EXECUTABLE}"
+    "-DTEST_DIR=${CMAKE_CURRENT_BINARY_DIR}/rust-serde-hex-test"
+    -P "${CMAKE_CURRENT_SOURCE_DIR}/rust_serde_hex.cmake")
+set_tests_properties(rust_serde_hex PROPERTIES TIMEOUT 30)

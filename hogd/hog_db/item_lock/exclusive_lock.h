@@ -13,10 +13,11 @@ namespace hogd {
 // back into one of the other lock states\ by an unlock or by a commit_change.
 class ExclusiveLock {
 public:
-  // Returns the cost that would be storing the after change, which is ignored
-  // if after is nullptr. This method is infallible, and the before parameter is
-  // ignored. We leave it as is to keep the same method signature as the other
-  // lock types.
+  // Returns the cost of storing the after change, which must not be nullptr.
+  // The before parameter is ignored; it keeps the signature of the other lock
+  // types. Fails only where the typed lock's admission would fail too (an
+  // invalid queue delta, a duplicate signer), so that a transaction is refused
+  // when it reserves rather than when it commits.
   HogDbStatus<int128_t> try_atomic_change_lock(const ItemChange *before,
                                                const ItemChange *after,
                                                const LockContext &ctx);

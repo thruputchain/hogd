@@ -2,6 +2,7 @@
 
 #include <atomic>
 #include <cassert>
+#include <cstdlib>
 #include <format>
 #include <memory>
 #include <regex>
@@ -49,6 +50,13 @@
 
 namespace hogd {
 
+inline bool
+uses_ci_container_network()
+{
+  const char *container = std::getenv("HOGD_CI_CONTAINER");
+  return container != nullptr && std::string_view(container) == "1";
+}
+
 inline std::string
 hog_ip(std::string_view host)
 {
@@ -58,8 +66,35 @@ hog_ip(std::string_view host)
     panic("invalid hog host: {}", host);
   }
 
+  if (uses_ci_container_network()) {
+    // Container host aliases resolve to addresses in this run's network.
+    const x23::HostPort host_port{std::string(host), uint16_t{0}};
+    const auto addr = host_port.to_addr(/*dns=*/true);
+    if (!addr) {
+      exit_cannot_resolve(host_port, addr.error());
+    }
+    return std::string(x23::show_ipaddr(*addr));
+  }
+
   unsigned int hog_num = std::stoul(match[1].str());
   return std::format("10.100.0.{}", 100 + hog_num);
+}
+
+inline std::string
+local_hog_ip()
+{
+  if (uses_ci_container_network()) {
+    // The container's kernel hostname is independent of its network alias.
+    const char *host = std::getenv("HOG_HOST");
+    if (host == nullptr || *host == '\0') {
+      panic("HOG_HOST is required in container benchmark mode");
+    }
+    return hog_ip(host);
+  }
+
+  std::string hostname;
+  CHECK_EQ(get_hostname(hostname), 0);
+  return hog_ip(hostname);
 }
 
 class CommonBenchState {
@@ -103,7 +138,9 @@ public:
                                  TransactionID txid,
                                  RuntimeContext &runtime_context)
   {
-    auto proxy = PerTransactionDatabaseProxy(*db_proxy_, block_number_, txid);
+    auto proxy = PerTransactionDatabaseProxy(
+        *db_proxy_, block_number_, txid,
+        snapshot_cache_->get_network_config_params());
     auto event_proxy = PerTransactionEventServerProxy(*event_server_proxy_,
                                                       block_number_, txid);
     return SystemCallHandler(signed_tx.tx, *snapshot_cache_, std::move(proxy),
@@ -133,16 +170,12 @@ public:
   // rejected at commit).
   BlockID block_height() const { return block_number_; }
 
-  // Height read off the tip the executor itself pins, never from a block id.
-  // Nothing cross-checks the timepoint.
+  // Height tracked alongside the commits this harness itself issues, never
+  // derived from a block id. Nothing cross-checks the timepoint.
   BlockExecutionContext get_block_execution_context() const
   {
-    auto tip = db_proxy_->get_db_tip(block_number_);
-    if (!tip.has_value()) {
-      panic("Failed to read db tip for block {}", block_number_);
-    }
     return BlockExecutionContext{
-        .block_height = tip->value.proposal_header.block_height + 1,
+        .block_height = committed_height_ + 1,
         .block_timepoint = 1'700'000'000,
     };
   }
@@ -231,16 +264,15 @@ private:
 
   EventCard start_event_server(uint16_t event_server_port)
   {
-    std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_ip = hog_ip(hostname);
+    const std::string mempool_ip = local_hog_ip();
 
     auto work_dir = event_server_handle_->ci_client.query_work_dir();
 
     event_server_handle_->ci_client.start_server(
         "hogd/hog_event/hog-event",
-        {"--mempool-addr", std::format("{}:{}", mempool_ip, event_server_port),
-         "--bind-ip", hog_ip(event_server_addr()), "--work-dir",
+        {"--mempool-addr",
+         format_advertised_address(mempool_ip, event_server_port), "--bind-ip",
+         hog_ip(event_server_addr()), "--work-dir",
          std::string(work_dir.work_dir().begin(), work_dir.work_dir().end())});
 
     return mock_sched_event_server_->impl()->await_event_card();
@@ -288,6 +320,8 @@ private:
 
   std::atomic<TransactionID> next_tx_id_ = 0;
   BlockID block_number_ = 0;
+  // The height of the last committed block; genesis commits at 0.
+  BlockHeight committed_height_ = 0;
 
   std::unique_ptr<DatabaseProxy> db_proxy_;
   std::unique_ptr<StorageSnapshotCache> snapshot_cache_;
@@ -319,12 +353,13 @@ CommonBenchState::advance_block()
   close_event_block(block_number_);
 
   ConsensusValue value{};
-  value.proposal_header.block_height = block_number_;
+  value.proposal_header.block_height = committed_height_ + 1;
   auto r2 = coord_client_->dbsched_commit_snapshot(block_number_, value);
   if (r2.result() != DbSchedResult::DbSchedResultOK) {
     panic("Failed to commit snapshot for block {}: {}", block_number_,
           r2.result());
   }
+  committed_height_++;
   auto r3 = coord_client_->dbsched_create_snapshot(
       block_number_, block_number_ + 1,
       BlockExecutionMode::kBlockExecutionModeProposal);
@@ -340,6 +375,10 @@ CommonBenchState::advance_block()
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  auto res = snapshot_cache_->load_db_tip()();
+  if (!res.has_value()) [[unlikely]] {
+    panic("Failed to load db tip for block {}: {}", block_number_, res.error());
+  }
 }
 
 // leaves the benchmark in a state where it's ready to execute transactions
@@ -392,18 +431,28 @@ CommonBenchState::run_genesis_configuration(
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  {
+    auto res = snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("Failed to load db tip for block {}: {}", block_number_,
+            res.error());
+    }
+  }
 
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();
 
+  // The bench harness drives execution from its own thread, never an x23
+  // ThreadPool worker, so it blocks on these coroutines rather than awaiting
+  // them (Async::operator() asserts it is off the pool).
   for (auto const &block : initialization_txs) {
     for (auto const &tx : block) {
       auto handler = make_handler(tx, allocate_txid(), *runtime_context);
-      if (!handler.root_invoke().is_root_success()) {
+      if (!handler.root_invoke()().is_root_success()) {
         panic("Failed to invoke transaction");
       }
-      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+      if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
         panic("failed to perform commit operation");
       }
     }
@@ -440,16 +489,23 @@ CommonBenchState::run_genesis_configuration(
       std::make_unique<StorageSnapshotCache>(block_number_,
                                              get_block_execution_context(),
                                              *db_proxy_);
+  {
+    auto res = snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("Failed to load db tip for block {}: {}", block_number_,
+            res.error());
+    }
+  }
   open_event_block(block_number_);
 
   auto runtime_context = make_hog_exec_context();
   auto run_block = [&](InitializationBlock const &block) {
     for (auto const &tx : block) {
       auto handler = make_handler(tx, allocate_txid(), *runtime_context);
-      if (!handler.root_invoke().is_root_success()) {
+      if (!handler.root_invoke()().is_root_success()) {
         panic("Failed to invoke transaction");
       }
-      if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
+      if (handler.try_commit_transaction()() != ExecResult::ExecResultOK) {
         panic("failed to perform commit operation");
       }
     }

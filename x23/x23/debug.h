@@ -188,7 +188,11 @@ std::string cmdline();
 
 std::string stacktrace(unsigned indent = 2, std::string ret = {});
 
-#ifdef NDEBUG
+// To disable panic as well as x23assert, define X23_NDEBUG
+#ifdef X23_NDEBUG
+#ifndef NDEBUG
+#define NDEBUG 1
+#endif
 
 template<typename... Args>
 [[noreturn]] inline void
@@ -203,9 +207,7 @@ panicking()
   return false;
 }
 
-#define x23assert(cond)
-
-#else // !NDEBUG
+#else // !X23_NDEBUG
 
 namespace detail {
 [[noreturn]] void do_panic(std::string_view fmt, std::format_args args,
@@ -223,18 +225,26 @@ template<typename... Args> struct panic {
 template<typename... Args>
 panic(std::format_string<Args...>, const Args &...args) -> panic<Args...>;
 
-#define x23assert(cond)                                                        \
-  do {                                                                         \
-    if (!(cond)) [[unlikely]]                                                  \
-      ::x23::panic("x23assert failure: {}", #cond);                            \
-  } while (0)
-
 extern std::atomic_bool panicking_flag;
 inline bool
 panicking() noexcept
 {
   return panicking_flag.load(std::memory_order_relaxed);
 }
+
+#endif // !X23_NDEBUG
+
+#ifdef NDEBUG
+
+#define x23assert(cond)
+
+#else // !NDEBUG
+
+#define x23assert(cond)                                                        \
+  do {                                                                         \
+    if (!(cond)) [[unlikely]]                                                  \
+      ::x23::panic("x23assert failure: {}", #cond);                            \
+  } while (0)
 
 #endif // !NDEBUG
 

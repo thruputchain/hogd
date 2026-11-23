@@ -47,6 +47,15 @@ def compute_entrypoint_id(interface_name, version_str, method_name):
     return struct.unpack(">Q", h.digest()[:8])[0]
 
 
+def declared_name(spec_id):
+    """The declared name of a spec id: what the generated C++ calls a type.
+
+    The spec names a user-defined type by an id object (crate, major,
+    module_path, declared). The headers use only the declared name.
+    """
+    return spec_id["declared"]
+
+
 def map_type(ty):
     """Map a spec type descriptor to a C++ type string."""
     kind = ty["kind"]
@@ -87,7 +96,7 @@ def map_type(ty):
             return items[0]
         return f"std::tuple<{', '.join(items)}>"
     elif kind == "named":
-        return ty["name"]
+        return declared_name(ty["name"])
     elif kind == "signed_token":
         # `Signed<T>` serializes to zero bytes; the handle arrives out-of-band.
         # `preimage` (the signed payload type, or null when opaque) is metadata
@@ -110,7 +119,7 @@ def generate_interface_struct(interface, rv32_file=None):
         selector = throw_entry.get("selector", "")
         err_ty = throw_entry.get("type", {})
         if err_ty.get("kind") == "named":
-            name = err_ty["name"]
+            name = declared_name(err_ty["name"])
             exception_types.append(f"ContractException<{name}, {selector}ULL>")
 
     # Method names and entrypoint IDs

@@ -55,6 +55,27 @@ template<> struct DeserializeBranch<uint32_t> {
   }
 };
 
+// An unsigned hyper is eight bytes on the wire and every value decodes, so
+// like uint32_t above this only varies the value, never the framing.
+template<> struct DeserializeBranch<uint64_t> {
+
+  static x23::Buf branch(model::RunnableActionSet &set, bool & /*unused*/)
+  {
+
+    auto choice = set.choice(3);
+    switch (choice) {
+    case 0:
+      return {0, 0, 0, 0, 0, 0, 0, 0};
+    case 1:
+      return {0, 0, 0, 0, 0, 0, 0, 32};
+    case 2:
+      return {255, 255, 255, 255, 255, 255, 255, 255};
+    default:
+      panic("unreachable");
+    }
+  }
+};
+
 template<size_t MS> struct DeserializeBranch<x23::Vec<uint8_t, MS>> {
 
   static x23::Buf branch(model::RunnableActionSet &set, bool &exists_failure)

@@ -5,7 +5,7 @@
 This document defines how logical validator components should behave when a
 peer starts late, stops, crashes, or loses durable state. It is aimed at
 developers and reviewers. The operator-facing response guide lives in the
-[validator recovery runbook](https://github.com/groundhogchain/ops/blob/main/docs/validator-recovery.md).
+[validator recovery runbook](https://github.com/thruputchain/ops/blob/main/docs/validator-recovery.md).
 
 The contract is intentionally stricter than process liveness. A process can be
 running while its data is stale, its dependencies are unavailable, or its
@@ -55,6 +55,10 @@ clean-volume migration.
   same-volume close-to-commit recovery is durable.
 - Event commit is the publication barrier. A closed candidate is not pullable
   by the indexer until consensus finalizes it and the event outbox commits it.
+- A committed record is pullable only once it is durable. The commit reply
+  does not wait for the record's fsyncs, but the pullable tail does.
+- At most the newest committed record is not yet durable: a commit waits for
+  the previous commit's sync before it writes its own record.
 - Committed outbox records form one contiguous consensus-hash chain within and
   across supported protocol epochs.
 - The indexer atomically persists a block's derived rows and its contiguous
@@ -80,6 +84,8 @@ clean-volume migration.
 | Event exits before close returns | Scheduler has no durable event-root acknowledgement and must not finalize that candidate | Event unavailable; block production stops | `EventRpcTest.CrashBeforeCloseLeavesNothingPullableAfterRestart` |
 | Event exits after close but before commit | Restart selects the finalized artifact by consensus event root and publishes exactly that block | Event unready during reconciliation | `EventRpcTest.RecoveryPicksCanonicalEventsFileAmongCompetingBlocks`; `HogDevnode.DataDirPromotesFinalizedEventsFileAfterRestart` |
 | Event exits after committed publication | Restart validates the committed chain and resumes from its durable tip | Event unready during reconciliation | `HogEventProcess.RecoversCommittedOutboxAfterUncleanKill`; committed-record reopen and pull tests |
+| Host crashes after the commit reply but before the record is synced | The newest record is missing, incomplete, or complete but unsynced. Open syncs a complete newest record and discards an incomplete one. Reconciliation then republishes a missing record from the durable events file when the canonical tip is that height, has nothing to restore when the tip is one below, and fails closed when the tip is beyond it | Event unready during reconciliation | `EventRpcTest.RestartRebuildsTornNewestCommittedRecord`; `EventRpcTest.RestartDropsTornNewestRecordAheadOfTheCanonicalTip`; `IndexerOutboxTest.OpenSyncsTheRetainedNewestCommittedRecord`; `IndexerOutboxTest.OpenDiscardsOnlyAnIncompleteNewestCommittedRecord` |
+| The background sync of a committed record fails | The record is never made pullable and `hog-event` panics; restart reconciles against what reached the disk | Event unavailable; block production stops | `EventRpcDeathTest.FailedDeferredSyncFailStops` |
 | Temp and final event names survive a crash as hard links | Reusing a process-local block ID must create a fresh temp inode and must not truncate the final file | Event unready if integrity cannot be proven | `EventRpcTest.ReusedBlockIdWithLinkedTempDoesNotTruncatePublishedFile` |
 | `hog-exec` or `hog-auth` is unavailable | Registration/readiness prevents new work from using a missing dependency; committed state is unchanged | Affected execution path unready | `scripts/ci/startup_order_test.sh starve-auth`; `starve-exec`; `starve-db`; `starve-event`; `Mempool.RuntimeStaysUnreadyWhenExecutorNeverRegisters` |
 | `hog-db` or coordinator restarts on intact data | Canonical state and finalized ordering reopen without rollback; block production pauses until dependencies reconcile | Validator unready until canonical heights agree | `HogDevnode.DataDirRecoversAfterUncleanKill`; `HogDevnode.DataDirRecoversCommittedStateAfterUngracefulKill`; data reopen and coordinator catch-up tests |
@@ -113,7 +119,8 @@ step. Keep these costs separate:
 - At close, wait for pending writes, sync the one file, finish the event root,
   and publish the content-addressed name without copying the payload.
 - On a normal live commit, use metadata retained by the live block context and
-  publish a small committed record.
+  publish a small committed record. Its two fsyncs run after the reply, in
+  the background; the next commit waits for them before writing.
 - On restart promotion, pay the cold-path cost to read and validate the
   finalized file because the live context no longer exists.
 - During indexer catch-up, validate and apply exactly the next record. Do not

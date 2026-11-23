@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-if [[ $# -lt 2 || $# -gt 4 ]]; then
-  echo "usage: $0 <build-dir> <output-dir> [flavor] [architecture]" >&2
+if [[ $# -lt 2 || $# -gt 5 ]]; then
+  echo "usage: $0 <build-dir> <output-dir> [flavor] [architecture] [cpu-profile]" >&2
   exit 1
 fi
 
@@ -10,6 +10,18 @@ build_dir=$1
 output_dir=$2
 flavor=${3:-release}
 architecture=${4:-x86_64}
+cpu_profile=${5:-portable}
+OBJCOPY=${OBJCOPY:-objcopy}
+READELF=${READELF:-readelf}
+
+case "$cpu_profile:$architecture:$flavor" in
+portable:*) ;;
+znver5:x86_64:release) ;;
+*)
+  echo "error: unsupported CPU profile/architecture/flavor" >&2
+  exit 1
+  ;;
+esac
 
 case "$architecture" in
 x86_64 | arm64) ;;
@@ -34,6 +46,10 @@ debug)
   ;;
 esac
 
+if [[ "$cpu_profile" != portable ]]; then
+  validator_package="$validator_package-$cpu_profile"
+fi
+
 copy_exec() {
   local src=$1
   local dest=$2
@@ -45,6 +61,19 @@ copy_exec() {
 
   cp "$src" "$dest"
   chmod +x "$dest"
+  "$OBJCOPY" --only-keep-debug "$dest" "$dest.debug"
+  "$OBJCOPY" --strip-debug --add-gnu-debuglink="$dest.debug" "$dest"
+
+  local notes build_id debug_dir
+  notes=$(LC_ALL=C "$READELF" -n "$dest")
+  build_id=$(awk '/Build ID:/ {print $3}' <<<"$notes")
+  if [[ ! "$build_id" =~ ^[[:xdigit:]]{3,}$ ]]; then
+    echo "error: missing or invalid GNU build-id: $dest" >&2
+    exit 1
+  fi
+  debug_dir="${dest%/*}-debuginfo/usr/lib/debug/.build-id/${build_id:0:2}"
+  mkdir -p "$debug_dir"
+  mv "$dest.debug" "$debug_dir/${build_id:2}.debug"
 }
 
 copy_file() {
@@ -77,17 +106,12 @@ copy_exec "$build_dir/hogd/devnode/hog-devnode" "$validator_dir/hog-devnode"
 copy_exec "$build_dir/hogd/devnode/hog-hosted-bootstrap" \
   "$validator_dir/hog-hosted-bootstrap"
 copy_exec "$build_dir/hogd/devnode/hog-devnode" "$hog_devnode_dir/hog-devnode"
-copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
-  "$validator_dir/contracts/dev_wallet.rv32a"
-copy_file "$build_dir/built_contracts/dev_wallet.rv32a" \
-  "$hog_devnode_dir/contracts/dev_wallet.rv32a"
 copy_file "$build_dir/built_contracts/genesis_root.rv32a" \
   "$validator_dir/contracts/genesis_root.rv32a"
 copy_file "$build_dir/built_contracts/genesis_root.rv32a" \
   "$hog_devnode_dir/contracts/genesis_root.rv32a"
 
 tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
-  contracts/dev_wallet.rv32a \
   contracts/genesis_root.rv32a \
   hog-auth \
   hog-db \
@@ -98,7 +122,14 @@ tar -C "$validator_dir" -czf "$output_dir/$validator_package.tar.gz" \
   hog-indexer \
   hog-mempool
 
+tar -C "$validator_dir-debuginfo" -czf "$output_dir/$validator_package-debuginfo.tar.gz" usr/lib/debug/.build-id
+
+if [[ "$cpu_profile" != portable ]]; then
+  exit 0
+fi
+
 tar -C "$hog_devnode_dir" -czf "$output_dir/$hog_devnode_package.tar.gz" \
-  contracts/dev_wallet.rv32a \
   contracts/genesis_root.rv32a \
   hog-devnode
+
+tar -C "$hog_devnode_dir-debuginfo" -czf "$output_dir/$hog_devnode_package-debuginfo.tar.gz" usr/lib/debug/.build-id

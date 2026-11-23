@@ -12,13 +12,14 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -28,6 +29,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize.h"
 #include <tuple>
 #include <unordered_map>
@@ -41,8 +43,7 @@ class HTLCIntegrationTest : public ::testing::Test,
 public:
   HTLCIntegrationTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb),
+          false, BlockExecutionMode::kBlockExecutionModeProposal),
       rv32_runtime_context_(make_hog_exec_context())
   {}
 
@@ -121,7 +122,7 @@ protected:
 
   uint64_t nonce_ = 0;
 
-  static std::tuple<uint64_t, uint64_t> make_amount(uint128_t amount)
+  static std::tuple<int64_t, uint64_t> make_amount(int128_t amount)
   {
     return std::make_tuple(amount >> 64, amount & 0xffffffffffffffffULL);
   }
@@ -147,16 +148,16 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, mint_sig, mint_calldata),
+                kDefaultMaxTxGas, mint_sig, mint_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -169,28 +170,28 @@ protected:
   {
     using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
 
-    Calldata approve_calldata =
+    Calldata allowance_calldata =
         x23::serialize(kERC20ContractAddress,
                        erc20_meta::entrypoint<u8"adjust_allowance">(),
                        GasAmount{UINT64_MAX},
                        erc20_meta::make_calldata<u8"adjust_allowance">(
                            kHTLCContractAddress, make_difference(amount)));
-    Ed25519Signature approve_sig =
-        ed25519_sign(wallet_secret_key_, approve_calldata).value();
+    Ed25519Signature allowance_sig =
+        ed25519_sign(wallet_secret_key_, allowance_calldata).value();
 
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, approve_sig, approve_calldata),
+                kDefaultMaxTxGas, allowance_sig, allowance_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -217,16 +218,16 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"do_action">(
-                UINT64_MAX, create_sig, create_htlc_calldata),
+                kDefaultMaxTxGas, create_sig, create_htlc_calldata),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,
@@ -241,19 +242,19 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"claim_htlc">(UINT64_MAX, hash,
-                                                             preimage),
+                htlc_client_.make_invocation<u8"claim_htlc">(kDefaultMaxTxGas,
+                                                             hash, preimage),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -271,18 +272,19 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"refund_htlc">(UINT64_MAX, hash),
+                htlc_client_.make_invocation<u8"refund_htlc">(kDefaultMaxTxGas,
+                                                              hash),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return ExecResult::ExecResultTxRootFrameReverted;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res == ExecResult::ExecResultOK) {
       EXPECT_TRUE(
           handler.emit_events(ExecResult::ExecResultOK,
@@ -308,16 +310,16 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                htlc_client_.make_invocation<u8"initialize">(UINT64_MAX),
+                htlc_client_.make_invocation<u8"initialize">(kDefaultMaxTxGas),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
@@ -330,16 +332,16 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = erc20_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, kWalletContractAddress),
+                kDefaultMaxTxGas, kWalletContractAddress),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
@@ -350,16 +352,16 @@ protected:
     auto handler_tx = SignedTransaction{
         .tx = Transaction{
             .invocation = wallet_client_.make_invocation<u8"initialize">(
-                UINT64_MAX, wallet_public_key_),
+                kDefaultMaxTxGas, wallet_public_key_),
             .uniquifier =
                 Uniquifier{.block_expiry_height =
                                std::numeric_limits<BlockHeight>::max(),
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx, *rv32_runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
     advance_block();
@@ -400,25 +402,27 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         kBalanceCheckerContractId,
         [](NativeSyscallContext &ctx,
-           uint128_xdr expected_balance) -> InvokeStatus<void> {
+           uint128_xdr expected_balance) -> x23::Async<InvokeStatus<void>> {
           ContractTraitClient<itc_erc20::ERC20> erc20_client(
               kERC20ContractAddress);
-          auto result = erc20_client.template invoke_opt<u8"get_balance_of">(
-              ctx, kReceiverAddress);
+          auto result =
+              co_await erc20_client.template invoke_opt<u8"get_balance_of">(
+                  ctx, kReceiverAddress);
           if (!result.has_value() || !result.value().has_value() ||
               !result.value().value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           if (!result.value().value().value().is_ok()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           auto balance = result.value().value().value().ok();
           uint128_t balance_unsigned_int =
-              uint128_t{std::get<0>(balance)} << 64 | std::get<1>(balance);
+              static_cast<uint128_t>(std::get<0>(balance)) << 64 |
+              std::get<1>(balance);
           if (balance_unsigned_int != from_xdr(expected_balance)) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract = builder.build();
@@ -457,7 +461,7 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
             .invocation =
                 Invocation{.invoked_address = kBalanceCheckerAddress,
                            .entrypoint = entrypoint_from_method_id(100),
-                           .gas_limit = UINT64_MAX,
+                           .gas_limit = kDefaultMaxTxGas,
                            .calldata =
                                x23::serialize(to_xdr(uint128_t{htlc_amount}))},
             .uniquifier =
@@ -466,9 +470,9 @@ TEST_F(HTLCIntegrationTest, CreateAndClaimHTLC)
                            .nonce = nonce_++}}};
     auto handler =
         make_new_system_call_handler(handler_tx.tx, *balance_check_context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     EXPECT_TRUE(
         handler.emit_events(ExecResult::ExecResultOK,

@@ -48,7 +48,7 @@ HogexecMetrics::MetricsSnapshot
 HogexecMetrics::get_stats()
 {
   MetricsSnapshot snapshot{};
-  snapshot.time_ns = x23::fastclock::get_ns();
+  snapshot.time_ns = x23::fastclock::now().time_since_epoch().count();
 
   snapshot.successful_proposed_tx_count =
       successful_proposed_tx_count_metric.value();
@@ -62,7 +62,7 @@ void
 HogexecMetrics::background_worker(std::stop_token &stoken)
 {
   MetricsSnapshot snapshot{
-      .time_ns = x23::fastclock::get_ns(),
+      .time_ns = x23::fastclock::now().time_since_epoch().count(),
   };
   while (!stoken.stop_requested()) {
     std::unique_lock g(cv_mutex_);

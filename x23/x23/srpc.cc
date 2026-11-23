@@ -67,10 +67,10 @@ SRpcFd::stop() noexcept
   if (ss_.request_stop()) {
     shutdown(fd_.get(), SHUT_RDWR);
     write_ready();
-    decltype(PendingCalls::cbmap_) pcs;
-    pcs.swap(calls_->cbmap_);
-    for (auto &pc : pcs)
-      pc.second(nullptr, {});
+    auto wq = write_queue_.exchange({});
+    for (auto &wi : wq)
+      if (wi.replycb_)
+        wi.replycb_(nullptr, {});
   }
 }
 
@@ -212,26 +212,36 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
 {
   if (cpus)
     cpus->set_affinity();
-  Defer _join([this] { read_thread_.join(); });
+  Defer _cleanup([this] {
+    read_thread_.join();
+    auto pcs = std::exchange(calls_->cbmap_, {});
+    for (auto &pc : pcs)
+      pc.second(nullptr, {});
+  });
   BufVec wrbuf;
   for (;;) {
     Vec<WriteItem> q;
     for (;;) {
       write_ready_ = false;
-      if (ss_.stop_requested())
-        return;
-      q.swap(*write_queue_.take());
+      {
+        auto qptr = write_queue_.take();
+        if (ss_.stop_requested())
+          return;
+        q = std::exchange(*qptr, {});
+      }
       if (!q.empty())
         break;
       write_ready_.wait(false);
     }
 
-    auto calls = calls_.take();
+    decltype(calls_)::Ptr calls;
     for (auto &it : q) {
       if (it.replycb_) {
         x23assert(it.data_.size() >= 36 &&
                   getbe<uint32_t>(it.data_.data() + 8) == uint32_t(CALL) &&
                   getbe<uint32_t>(it.data_.data() + 12) == 2);
+        if (!calls)
+          calls = calls_.take();
         Xid xid = getbe<uint32_t>(it.data_.data() + 4);
         if (!xid)
           putbe(it.data_.data() + 4, xid = ++calls->lastxid_);
@@ -248,7 +258,8 @@ SRpcFd::write_worker(const CpuSet *cpus, RefPtr<SRpcFd> _selfref) noexcept
     for (;;) {
       auto res = wrbuf.write(fd_.get());
       if (!res) {
-        if (res.error() == ECONNRESET || res.error() == EPIPE)
+        if (res.error() == ECONNRESET || res.error() == EPIPE ||
+            res.error() == EBADF)
           stop();
         else
           fail("write_worker: {}", res.error());

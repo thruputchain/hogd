@@ -59,13 +59,34 @@ Balance::narrow(const Balance &other)
   return true;
 }
 
+AuthDataItem
+AuthDataItem::for_missing_row()
+{
+  AuthDataItem item(AddressAuthData{
+      .required_weight = Weight{kDefaultNewAddressRequiredWeight}});
+  item.row_exists_ = false;
+  return item;
+}
+
 HogDbStatus<bool>
 AuthDataItem::narrow(const AuthDataItem &auth_data_item) const
 {
-  if (base_auth_data() != auth_data_item.base_auth_data()) {
+  if (row_exists() != auth_data_item.row_exists() ||
+      base_auth_data() != auth_data_item.base_auth_data()) {
     return HogDbError(HogDbCode::kStaleBlock);
   }
   return true;
+}
+
+bool
+AuthDataItem::writes_row() const
+{
+  if (row_exists() || required_weight_change_.has_value()) {
+    return true;
+  }
+  return std::ranges::any_of(pk_changes_, [](auto const &change) {
+    return change.has_value() && *change != nullptr;
+  });
 }
 
 size_t
@@ -81,6 +102,40 @@ AuthDataItem::count_active_keys() const
     active_keys += base;
   }
   return active_keys;
+}
+
+bool
+AuthDataItem::introduces_duplicate_signer() const
+{
+  // The key a slot holds once this change is applied: its change where it
+  // has one, the committed key otherwise. Null for an empty slot.
+  auto effective = [&](size_t slot) -> PublicKeyConfig const * {
+    if (pk_changes_[slot].has_value()) {
+      // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+      return pk_changes_[slot].value().get();
+    }
+    return base_auth_data_.public_keys[slot].get();
+  };
+
+  for (size_t slot = 0; slot < kMaxSigners; ++slot) {
+    if (!pk_changes_[slot].has_value()) {
+      continue;
+    }
+    PublicKeyConfig const *registered = effective(slot);
+    if (registered == nullptr) {
+      continue; // a clear introduces nothing
+    }
+    for (size_t other = 0; other < kMaxSigners; ++other) {
+      if (other == slot) {
+        continue;
+      }
+      PublicKeyConfig const *held = effective(other);
+      if (held != nullptr && held->key == registered->key) {
+        return true;
+      }
+    }
+  }
+  return false;
 }
 
 HogDbStatus<bool>

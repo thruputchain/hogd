@@ -349,6 +349,8 @@ struct RpcCsvLogger {
 
   void log_client_fail(std::uint32_t xid, std::string_view text)
   {
+    if (logfd_ < 0)
+      return;
     auto logmsg =
         std::format("{:.9f},CLIENT,REPLY,{}{}\n", timestamp(), xid, srcdest_);
     [[maybe_unused]] size_t r = write(logfd_, logmsg.data(), logmsg.size());

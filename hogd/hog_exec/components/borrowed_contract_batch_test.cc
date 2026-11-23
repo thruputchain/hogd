@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <initializer_list>
-#include <memory>
 #include <unordered_map>
 #include <unordered_set>
 
@@ -50,11 +49,9 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
   auto c2_hash = sha256(c2);
 
   std::unordered_set<SHA256Hash, SipHash24Hasher> hashes{c1_hash, c2_hash};
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     SipHash24Hasher>
-      contracts;
-  contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
-  contracts.emplace(c2_hash, std::make_unique<const Contract>(c2));
+  std::unordered_map<SHA256Hash, const Contract *, SipHash24Hasher> contracts;
+  contracts.emplace(c1_hash, &c1);
+  contracts.emplace(c2_hash, &c2);
 
   BorrowedContractBatch borrowed(hashes, contracts);
 
@@ -65,9 +62,7 @@ TEST(BorrowedContractBatchTest, SerializesLikeOwnedBatch)
 TEST(BorrowedContractBatchTest, SerializesEmptyBatch)
 {
   std::unordered_set<SHA256Hash, SipHash24Hasher> hashes;
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     SipHash24Hasher>
-      contracts;
+  std::unordered_map<SHA256Hash, const Contract *, SipHash24Hasher> contracts;
   BorrowedContractBatch borrowed(hashes, contracts);
 
   NewContractBatch owned;
@@ -83,10 +78,8 @@ TEST(BorrowedContractBatchTest, SkipsMissingHashes)
   auto missing_hash = sha256(missing_contract);
 
   std::unordered_set<SHA256Hash, SipHash24Hasher> hashes{c1_hash, missing_hash};
-  std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                     SipHash24Hasher>
-      contracts;
-  contracts.emplace(c1_hash, std::make_unique<const Contract>(c1));
+  std::unordered_map<SHA256Hash, const Contract *, SipHash24Hasher> contracts;
+  contracts.emplace(c1_hash, &c1);
 
   BorrowedContractBatch borrowed(hashes, contracts);
 

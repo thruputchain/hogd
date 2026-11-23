@@ -14,33 +14,29 @@ namespace hogd {
 
 class HashBuffers {
 public:
-  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers, read off the
-  // db tip when the owning frame starts. It is fixed for the frame's life.
+  // `max_buffers` is the chain's kConfigParamMaxSHA256Buffers.
   explicit HashBuffers(uint32_t max_buffers) : max_buffers_(max_buffers) {}
 
-  SyscallStatus<SHA256Hash> finalize(uint32_t index,
-                                     size_t *output_size = nullptr);
-  SyscallStatus<void> update(uint32_t index, std::span<const std::byte> data,
-                             bool reset);
-  SyscallStatus<void> copy(uint32_t src_index, uint32_t dst_index);
+  [[nodiscard]] SyscallStatus<SHA256Hash> finalize(uint32_t index);
+  [[nodiscard]] SyscallStatus<void>
+  update(uint32_t index, std::span<const std::byte> data, bool reset);
+  [[nodiscard]] SyscallStatus<void> copy(uint32_t src_index,
+                                         uint32_t dst_index);
 
 private:
-  // One incremental hash in progress: a streaming SHA-256 midstate plus the
-  // byte count absorbed since the last reset. The state is constant-size
-  // regardless of how many bytes were fed, so copying a stream (a planned
-  // fork operation for keypath derivation) is constant-time. The byte count
-  // enforces kSHA256BufferMaxSize — contract-observable, so it outlives the
-  // representation that needed it — and feeds finalize's size report into
-  // transaction stats.
+  // One incremental hash in progress.
   struct Stream {
     SHA256Hasher hasher;
-    size_t size = 0;
   };
 
-  SyscallStatus<void> update_existing_stream(uint32_t index,
-                                             std::span<const std::byte> data);
+  [[nodiscard]] SyscallStatus<void>
+  update_existing_stream(uint32_t index, std::span<const std::byte> data);
 
-  std::unordered_map<uint32_t, Stream> streams_;
+  // Contract-chosen indices are attacker-controlled, so the table hashes them
+  // with the process-keyed SipHash24 (like the codebase's other attacker-keyed
+  // maps): the key is secret, so collisions can't be precomputed to degrade a
+  // metered lookup, and buckets stay balanced in O(1) average.
+  std::unordered_map<uint32_t, Stream, SipHash24Hasher> streams_;
 
   const uint32_t max_buffers_;
 };

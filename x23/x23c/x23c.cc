@@ -1,5 +1,6 @@
 
 #include <cassert>
+#include <cerrno>
 #include <cstdlib>
 #include <filesystem>
 #include <new>
@@ -10,7 +11,9 @@
 #include <getopt.h>
 #include <set>
 #include <string>
+#include <string_view>
 #include <sys/fcntl.h>
+#include <sys/stat.h>
 #include <unistd.h>
 #include <utility>
 
@@ -93,10 +96,23 @@ lex(XdrCtx *xc)
   };
   int sym;
   int comment_end_line = 0;
+  // Comments opening the file that a blank line sets off from what follows
+  // are its header -- typically a copyright and license notice -- rather
+  // than a comment on the first definition, and a notice must survive into
+  // the generated code.
+  const auto take_header = [xc, &loc, &comment_end_line] {
+    if (xc->syms.empty() && !xc->block_comment.empty() &&
+        loc.first_line > comment_end_line) {
+      if (!xc->header.empty())
+        xc->header += '\n';
+      xc->header += std::exchange(xc->block_comment, {});
+    }
+  };
   do {
     string text;
     sym = real_yylex(&text, &loc, s, xc);
     if (sym == T_BLOCKCOMMENT) {
+      take_header();
       if (!xc->block_comment.empty())
         xc->block_comment += '\n';
       xc->block_comment += text;
@@ -104,12 +120,25 @@ lex(XdrCtx *xc)
       continue;
     }
     else if (sym == T_LINECOMMENT) {
-      assert(!xc->syms.empty());
-      xc->syms.back().sym.eol_comment =
-          string(loc.first_column - 1, ' ') + text + '\n';
+      if (xc->syms.empty()) {
+        // The lexer only reports T_BLOCKCOMMENT for a comment that owns
+        // whole lines, so a comment sharing its line with code -- or one
+        // at end of file with no trailing newline -- arrives here.  With
+        // no preceding token to trail, it belongs to whatever comes next.
+        take_header();
+        if (!xc->block_comment.empty())
+          xc->block_comment += '\n';
+        xc->block_comment += text;
+        xc->block_comment += '\n';
+        comment_end_line = loc.last_line;
+      }
+      else
+        xc->syms.back().sym.eol_comment =
+            string(loc.first_column - 1, ' ') + text + '\n';
       continue;
     }
     else {
+      take_header();
       if (!xc->block_comment.empty() && loc.first_line > comment_end_line)
         xc->block_comment += '\n';
       xc->syms.push_back(TerminalInfo{
@@ -135,8 +164,9 @@ usage(bool error)
   --version    print version and exit
   --rust       generate rust code
   --ts         generate TypeScript code
-  --recursive_type <typename>  generate (rust) code for a recursive type),
-  --rust-feature <feature>   force the generated code to enable a given feature (instead of cfg(feature = "<feature>")))",
+  --recursive_type <typename>  generate (rust) code for a recursive type
+  --rust-feature <feature>      force the generated code to enable a given feature (instead of cfg(feature = "<feature>"))
+  --rust-no-feature <feature>   force the generated code to disable a given feature)",
                progname.string());
   exit(error ? 2 : 0);
 }
@@ -269,13 +299,14 @@ main(int argc, char **argv)
   std::string res;
 
   if (rust_module) {
-    res = gen_rs(&ctx.defs, recursive_types, rust_features, rust_no_features);
+    res = gen_rs(&ctx.defs, ctx.header, recursive_types, rust_features,
+                 rust_no_features);
   }
   else if (ts_module) {
-    res = gen_ts(&ctx.defs);
+    res = gen_ts(&ctx.defs, ctx.header);
   }
   else {
-    res = gen_hh(&ctx.defs);
+    res = gen_hh(&ctx.defs, ctx.header);
   }
 
   int outfd = outfile == "-"
@@ -285,8 +316,32 @@ main(int argc, char **argv)
     std::println(stderr, "{}: {}", outfile.string(), x23::Errno{});
     exit(1);
   }
-  write(outfd, res.data(), res.size());
-  if (outfd != 1)
-    close(outfd);
+  // Only a regular file we opened ourselves is ours to remove on error.
+  struct stat sb;
+  const bool remove_on_error =
+      outfd != 1 && fstat(outfd, &sb) == 0 && S_ISREG(sb.st_mode);
+
+  // Discarding a short or failed write leaves a truncated header behind
+  // with a fresh timestamp, which the build system takes for a successful
+  // run of x23c.
+  const auto fail = [&outfile, remove_on_error](const char *what) {
+    x23::Errno err;
+    if (remove_on_error)
+      unlink(outfile.c_str());
+    std::println(stderr, "{}: {}: {}", outfile.string(), what, err);
+    exit(1);
+  };
+
+  for (std::string_view rest{res}; !rest.empty();) {
+    ssize_t n = write(outfd, rest.data(), rest.size());
+    if (n < 0) {
+      if (errno != EINTR)
+        fail("write");
+      continue;
+    }
+    rest.remove_prefix(std::size_t(n));
+  }
+  if (outfd != 1 && close(outfd) == -1)
+    fail("close");
   return 0;
 }

@@ -11,26 +11,48 @@ else()
         "(nightly toolchain override is intentional)")
 endif()
 
-# Check for sccache and configure it if available
-find_program(SCCACHE_EXECUTABLE sccache)
-if(SCCACHE_EXECUTABLE)
+option(HOGD_USE_SCCACHE "Cache native Rust compilation with sccache when installed" ON)
+if(HOGD_USE_SCCACHE)
+    find_program(SCCACHE_EXECUTABLE sccache)
+endif()
+set(HOGD_RUST_ENV CARGO_NET_OFFLINE=true)
+if(HOGD_USE_SCCACHE AND SCCACHE_EXECUTABLE)
     message(STATUS "sccache found: ${SCCACHE_EXECUTABLE}")
+    execute_process(
+        COMMAND bash "${PROJECT_SOURCE_DIR}/scripts/sccache-env.sh" --print-env
+        RESULT_VARIABLE sccache_env_status
+        OUTPUT_VARIABLE sccache_env
+        OUTPUT_STRIP_TRAILING_WHITESPACE
+    )
+    if(NOT sccache_env_status EQUAL 0)
+        message(FATAL_ERROR "Could not configure the Rust compiler cache")
+    endif()
+    string(REPLACE ";" "\\;" sccache_env "${sccache_env}")
+    string(REPLACE "\n" ";" sccache_env "${sccache_env}")
+    list(APPEND HOGD_RUST_ENV
+        "RUSTC_WRAPPER=${SCCACHE_EXECUTABLE}"
+        CARGO_INCREMENTAL=0
+        ${sccache_env}
+    )
 else()
-    message(STATUS "sccache not found - Rust builds will not use caching")
+    message(STATUS "sccache disabled or not installed - Rust builds will not use caching")
+    if(NOT HOGD_USE_SCCACHE)
+        list(APPEND HOGD_RUST_ENV "RUSTC_WRAPPER=")
+    endif()
 endif()
 
 # Import targets defined in the workspace manifest `Cargo.toml` file
 corrosion_import_crate(MANIFEST_PATH ./Cargo.toml CRATES unified_lib CRATE_TYPES staticlib LOCKED FROZEN)
 # To enable an online build, set CARGO_NET_GIT_FETCH_WITH_CLI=true and remove CARGO_NET_OFFLINE=true
-if(SCCACHE_EXECUTABLE)
-    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true RUSTC_WRAPPER=${SCCACHE_EXECUTABLE})
-else()
-    corrosion_set_env_vars(unified_lib CARGO_NET_OFFLINE=true)
+corrosion_set_env_vars(unified_lib ${HOGD_RUST_ENV})
+set(HOGD_RUST_FLAGS "-C target-cpu=${RUST_BUILD_CPU}")
+if(HOGD_RELEASE_DEBUGINFO)
+    list(APPEND HOGD_RUST_FLAGS "-C debuginfo=line-tables-only")
 endif()
-
-
-
-corrosion_add_target_rustflags(unified_lib "-C target-cpu=${RUST_BUILD_CPU}")
+if(HOGD_FRAME_POINTERS)
+    list(APPEND HOGD_RUST_FLAGS "-C force-frame-pointers=yes")
+endif()
+corrosion_add_target_rustflags(unified_lib ${HOGD_RUST_FLAGS})
 message(STATUS "Rust target CPU: ${RUST_BUILD_CPU}")
 
 # Build list of features to enable
@@ -73,16 +95,14 @@ if(RUST_TSAN)
     # TSAN false-flags any Rust-internal synchronization.
     #
     # --cfg=rustix_use_libc forces the `rustix` crate onto its libc backend
-    # instead of the Linux `linux_raw` backend it picks by default. wasmtime
-    # mmaps/munmaps compiled-code objects through rustix; with the raw backend
-    # those are inline `syscall` instructions that bypass TSAN's libc munmap
-    # interceptor, so freeing a code mmap never clears its shadow. When the
-    # kernel later hands the same virtual address to another worker thread's
-    # fresh compilation, TSAN reports a stale write/write race in
-    # finish_object (no happens-before across the unseen munmap/mmap reuse) —
-    # a false positive with no real shared memory. Routing through libc lets
-    # the interceptor clear shadow on free, eliminating the false positive
-    # while preserving detection of genuine races on that path.
+    # instead of the Linux `linux_raw` backend it picks by default. This was
+    # added for wasmtime, which mmap'd/munmap'd compiled-code objects through
+    # rustix: with the raw backend those are inline `syscall` instructions that
+    # bypass TSAN's libc munmap interceptor, so freeing a code mmap never
+    # cleared its shadow and TSAN reported a stale write/write race when the
+    # kernel reused the address. Neither wasmtime nor rustix is in the
+    # workspace dependency graph any more, so the cfg is currently inert; it is
+    # kept as a no-op guard in case a future dependency pulls rustix back in.
     message(STATUS "RUST_TSAN=ON: enabling Rust ThreadSanitizer instrumentation")
     corrosion_add_target_rustflags(unified_lib
         "-Zsanitizer=thread"
@@ -101,5 +121,5 @@ add_test(
 
 # Set environment variables for the test
 set_tests_properties(rust_workspace_tests PROPERTIES
-  ENVIRONMENT "CARGO_NET_OFFLINE=true"
+  ENVIRONMENT "${HOGD_RUST_ENV}"
 )

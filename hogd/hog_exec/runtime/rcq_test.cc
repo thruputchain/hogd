@@ -1,6 +1,5 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
 #include <format>
 #include <limits>
 #include <memory>
@@ -11,10 +10,12 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -28,6 +29,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 #include "x23/vec.h"
 
@@ -35,12 +37,11 @@ namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class RCQTest : public ::testing::TestWithParam<TestDB>,
-                public NativeContractTestFramework {
+class RCQTest : public ::testing::Test, public NativeContractTestFramework {
 protected:
   RCQTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   std::vector<uint8_t> last_consumed_values_;
@@ -49,200 +50,338 @@ protected:
   {
     // Setup native contract
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0, // Insert
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
+    fns.emplace(
+        0, // Insert
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
 
-                  for (uint8_t val : calldata) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
-                  return {};
-                });
+          for (uint8_t val : calldata) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     fns.emplace(
         1, // Consume
-        [this](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        [this](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           // Calldata is the number of items to consume.
           auto const &consume_count = ctx.handler().get_calldata().at(0);
           auto key = make_storage_key("rcq0");
 
           last_consumed_values_.clear();
           for (uint8_t i = 0; i < consume_count; i++) {
-            auto res = ctx.handler().retrocausal_queue_consume(key, false);
+            uint8_t entry = 0;
+            RuntimeMemoryLength entry_len = 0;
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::as_writable_bytes(std::span(&entry, 1)),
+                    entry_len);
             if (!res.has_value()) {
-              return res.error().to_invoke_error();
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
             }
-            if (!res.value().has_value()) { // No entry found, break out
-              return {};
+            // No entry found, break out
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeStatus<void>{};
             }
-            auto const &entry = res.value().value();
 
-            if (entry.size() != 1) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+            if (entry_len != 1) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
-            last_consumed_values_.push_back(entry[0]);
+            last_consumed_values_.push_back(entry);
           }
 
           if (ctx.handler().get_calldata().size() > 1) {
             uint8_t abort_code = ctx.handler().get_calldata().at(1);
             if (abort_code == 1) {
-              auto status = ctx.handler().abort_transaction();
+              auto status = co_await ctx.handler().abort_transaction();
               if (!status.has_value()) {
-                return status.error().to_invoke_error();
+                co_return status.error().to_invoke_error();
               }
-              return InvokeError{InvokeErrorCode::Abandon};
+              co_return InvokeError{InvokeErrorCode::Abandon};
             }
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
-    fns.emplace(2, // Insert and Consume
-                [this](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+    fns.emplace(
+        2, // Insert and Consume
+        [this](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          // Format: [count_to_consume, val1, val2, ...]
+          // First insert all values, then consume 'count_to_consume'
+          // items.
+          uint8_t consume_count = calldata.at(0);
+          auto key = make_storage_key("rcq0");
+
+          // Insert all values (bytes after the first)
+          for (size_t i = 1; i < calldata.size(); i++) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&calldata[i], 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+
+          // Then consume
+          last_consumed_values_.clear();
+          for (uint8_t i = 0; i < consume_count; i++) {
+            uint8_t entry = 0;
+            RuntimeMemoryLength entry_len = 0;
+            auto res =
+                co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                    key, false, std::as_writable_bytes(std::span(&entry, 1)),
+                    entry_len);
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeStatus<void>{};
+            }
+            if (entry_len != 1) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+            last_consumed_values_.push_back(entry);
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        3, // Write NNInt contract storage address
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &value = ctx.handler().get_calldata().at(0);
+          auto key = make_storage_key("nnint0");
+
+          const int128_t set_value = value;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              key, &set_value, int128_t{0});
+          if (!r.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                r.error());
+          }
+
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        4, // Insert entire calldata as a single RCQ entry
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+              key, std::as_bytes(std::span(calldata)));
+          if (!res.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                res.error());
+          }
+          if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(5, // Set bytestring on rcq0 key (for type-change testing)
+                [](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
                   auto const &calldata = ctx.handler().get_calldata();
-                  // Format: [count_to_consume, val1, val2, ...]
-                  // First insert all values, then consume 'count_to_consume'
-                  // items.
-                  uint8_t consume_count = calldata.at(0);
                   auto key = make_storage_key("rcq0");
-
-                  // Insert all values (bytes after the first)
-                  for (size_t i = 1; i < calldata.size(); i++) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&calldata[i], 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
-
-                  // Then consume
-                  last_consumed_values_.clear();
-                  for (uint8_t i = 0; i < consume_count; i++) {
-                    auto res =
-                        ctx.handler().retrocausal_queue_consume(key, false);
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                    if (!res.value().has_value()) {
-                      return {};
-                    }
-                    auto const &entry = res.value().value();
-                    if (entry.size() != 1) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                    last_consumed_values_.push_back(entry[0]);
-                  }
-                  return {};
-                });
-    fns.emplace(3, // Write NNInt contract storage address
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &value = ctx.handler().get_calldata().at(0);
-                  auto key = make_storage_key("nnint0");
-
-                  auto r = ctx.handler().set_nnint(key, {value}, 0, {});
-                  if (!r.has_value()) {
-                    return r.error().to_invoke_error();
-                  }
-
-                  return {};
-                });
-    fns.emplace(4, // Insert entire calldata as a single RCQ entry
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  auto res = ctx.handler().retrocausal_queue_insert(
+                  auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
                       key, std::as_bytes(std::span(calldata)));
                   if (!res.has_value()) {
-                    return res.error().to_invoke_error();
+                    co_return NativeContractBuilder::host_fn_error_conversion(
+                        res.error());
                   }
-                  if (!res.value().has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                  if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
-                });
-    fns.emplace(5, // Set bytestring on rcq0 key (for type-change testing)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  auto res = ctx.handler().set_bytestring(
-                      key, std::as_bytes(std::span(calldata)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!res.has_value()) {
-                    return res.error().to_invoke_error();
-                  }
-                  if (!res.value().has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
     fns.emplace(6, // Delete rcq0 key
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto r = ctx.syscall<SyscallNo::kDeleteObject>(
-                      make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None));
+                [](NativeSyscallContext &ctx)
+                    -> x23::Async<InvokeStatus<void>> {
+                  auto r = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+                      make_storage_key("rcq0"));
                   if (!r.has_value() ||
                       r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
+                    co_return InvokeError{InvokeErrorCode::Deterministic};
                   }
-                  return {};
+                  co_return InvokeStatus<void>{};
                 });
-    fns.emplace(7, // Delete rcq0 key, then consume (expect no entry)
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-                      make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!r1.has_value() ||
-                      r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  uint32_t out = 0;
-                  RuntimeMemoryLength written_len = 0;
-                  auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                      make_storage_key("rcq0"), false,
-                      std::as_writable_bytes(std::span(&out, 1)), written_len);
-                  if (!r2.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
-    fns.emplace(8, // Delete rcq0 key, consume (expect no entry), set bytestring
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto r1 = ctx.syscall<SyscallNo::kDeleteObject>(
-                      make_storage_key("rcq0"),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!r1.has_value() ||
-                      r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  uint32_t out = 0;
-                  RuntimeMemoryLength written_len = 0;
-                  auto r2 = ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
-                      make_storage_key("rcq0"), false,
-                      std::as_writable_bytes(std::span(&out, 1)), written_len);
-                  if (!r2.has_value()) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  auto const &calldata = ctx.handler().get_calldata();
-                  auto r3 = ctx.syscall<SyscallNo::kBytestringSet>(
-                      make_storage_key("rcq0"),
-                      std::as_bytes(std::span(calldata)),
-                      std::to_underlying(StorageDeltaFlags::None));
-                  if (!r3.has_value() ||
-                      r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
+    fns.emplace(
+        7, // Delete rcq0 key, then consume (expect no entry)
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              make_storage_key("rcq0"));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r2.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        8, // Delete rcq0 key, consume (expect no entry), set bytestring
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r1 = co_await ctx.syscall<SyscallNo::kDeleteObject>(
+              make_storage_key("rcq0"));
+          if (!r1.has_value() ||
+              r1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto r2 = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              make_storage_key("rcq0"), false,
+              std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!r2.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto const &calldata = ctx.handler().get_calldata();
+          auto r3 = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
+          if (!r3.has_value() ||
+              r3.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        9, // All three RCQ reads on rcq0, each expected to report wrong-type
+           // input rather than an empty queue
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto consumed =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  make_storage_key("rcq0"), false,
+                  std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!consumed.has_value() ||
+              consumed.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto peeked =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  make_storage_key("rcq0"), true,
+                  std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!peeked.has_value() ||
+              peeked.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          RuntimeMemoryLength len = 0;
+          auto peek_len =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  make_storage_key("rcq0"), len);
+          if (!peek_len.has_value() ||
+              peek_len.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        10, // Set a bytestring on rcq0, then run the same three reads against
+            // the value this transaction just wrote
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
+          if (!set_status.has_value() ||
+              set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          uint32_t out = 0;
+          RuntimeMemoryLength written_len = 0;
+          auto consumed =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  make_storage_key("rcq0"), false,
+                  std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!consumed.has_value() ||
+              consumed.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          auto peeked =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  make_storage_key("rcq0"), true,
+                  std::as_writable_bytes(std::span(&out, 1)), written_len);
+          if (!peeked.has_value() ||
+              peeked.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          RuntimeMemoryLength len = 0;
+          auto peek_len =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  make_storage_key("rcq0"), len);
+          if (!peek_len.has_value() ||
+              peek_len.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        12, // Set a bytestring on rcq0, then insert into it in the same
+            // transaction; the insert must convert the key, not fail
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto set_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              make_storage_key("rcq0"), std::as_bytes(std::span(calldata)));
+          if (!set_status.has_value() ||
+              set_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          uint8_t entry = 0xEE;
+          auto insert_status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                  make_storage_key("rcq0"),
+                  std::as_bytes(std::span(&entry, 1)));
+          if (!insert_status.has_value() ||
+              insert_status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        11, // Insert calldata bytes as entries into the nnint0 key
+        [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &calldata = ctx.handler().get_calldata();
+          auto key = make_storage_key("nnint0");
+          for (uint8_t val : calldata) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+            if (res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     auto native_contract = std::make_unique<NativeContract>(std::move(fns));
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
     contract_map.emplace(0, std::move(native_contract));
@@ -274,18 +413,18 @@ protected:
                         Invocation{.invoked_address = contract_address_,
                                    .entrypoint =
                                        entrypoint_from_method_id(method_id),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = Calldata(calldata.begin(),
                                                         calldata.end())},
                     .uniquifier = make_new_uniquifier(),
                 }},
         *context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       return testing::AssertionFailure() << "Root invoke failed";
     }
 
-    auto r = handler.try_commit_transaction();
+    auto r = handler.try_commit_transaction()();
     if (r != ExecResult::ExecResultOK) {
       return testing::AssertionFailure() << "Commit failed: " << x23::show(r);
     }
@@ -385,7 +524,7 @@ protected:
   }
 };
 
-TEST_P(RCQTest, InsertThenConsume)
+TEST_F(RCQTest, InsertThenConsume)
 {
   auto const initial_balance = 1'000'000'000;
   setup_grant_storage_token(contract_address_, initial_balance);
@@ -393,9 +532,7 @@ TEST_P(RCQTest, InsertThenConsume)
   // Each committed transaction consumes a uniquifier into the replay cache,
   // whose (non-refundable) cost is charged to contract_address_ as the root
   // invoked address and accumulates with the number of commits. The
-  // replay_cache_cost_charged(k) terms below subtract that running cost; they
-  // are 0 on MockInMemory and the real cost on HogDb, so the underlying
-  // expected balances are unchanged on MockInMemory.
+  // replay_cache_cost_charged(k) terms below subtract that running cost.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   ASSERT_TRUE(consume({1, 2}));
@@ -418,7 +555,7 @@ TEST_P(RCQTest, InsertThenConsume)
   ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
-TEST_P(RCQTest, InsertThenAbortOnConsume)
+TEST_F(RCQTest, InsertThenAbortOnConsume)
 {
   // Abort Case - Insert items, then attempt a consume that fails.
   // Verify that lock state is reverted as if the consume operation never
@@ -431,9 +568,7 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   // the aborted consume below is not included and consumes nothing. The
   // (non-refundable) replay-cache cost is charged to contract_address_ as the
   // root invoked address and accumulates with the number of commits. The
-  // replay_cache_cost_charged(k) terms are 0 on MockInMemory and the real cost
-  // on HogDb, so the underlying expected balances are unchanged on
-  // MockInMemory.
+  // replay_cache_cost_charged(k) terms subtract that running cost.
   ASSERT_TRUE(insert({1, 2, 3}));
 
   // Consume 1 item, but then intentionally abort.
@@ -461,10 +596,10 @@ TEST_P(RCQTest, InsertThenAbortOnConsume)
   ASSERT_TRUE(check_balance(initial_balance - replay_cache_cost_charged(3)));
 }
 
-TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
+TEST_F(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 {
   // This test targets a race where an inserter TX could overwrite the
-  // consumed_past_entries_ of a consumer TX.
+  // consumed past-block count of a consumer TX.
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   ASSERT_TRUE(insert({1, 2, 3}));
   advance_block();
@@ -477,15 +612,15 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                     .invoked_address = contract_address_,
                                     .entrypoint =
                                         entrypoint_from_method_id(1), // Consume
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = Calldata({1}),
                                 },
                             .uniquifier = make_new_uniquifier()}}, // Consume 1
                                                                    // item
       *context_);
-  ASSERT_TRUE(handler_t1.root_invoke().is_root_success());
-  // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
-  // = 1.
+  ASSERT_TRUE(handler_t1.root_invoke()().is_root_success());
+  // At this point, T1's consume delta should report one consumed past-block
+  // entry.
 
   // T2: Inserter TX. Propose insert.
   auto handler_t2 = make_new_system_call_handler(
@@ -495,23 +630,22 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({5, 4})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_t2.root_invoke().is_root_success());
-  // T2's RetrocausalQueueIt should have consumed_past_entries_ = 0.
-  // In the OLD buggy code, this would have overwritten the global lock's
-  // consumed_past_entries_ to 0.
+  ASSERT_TRUE(handler_t2.root_invoke()().is_root_success());
+  // T2 consumes nothing from past blocks. In the OLD buggy code, this would
+  // have overwritten the lock-wide consumed count to 0.
 
   // T1 Commits.
-  ASSERT_EQ(handler_t1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_t1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   ASSERT_FALSE(
       consume({2, 3})); // Aborts because of T1 consume (single consumer).
 
   // T2 Commits.
-  ASSERT_EQ(handler_t2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_t2.try_commit_transaction()(), ExecResult::ExecResultOK);
   advance_block();
 
   // Verify final state: {2, 3, 4, 5} exactly.
@@ -527,7 +661,7 @@ TEST_P(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 // 2) in a later block, run one tx that consumes both entries
 // 3) concurrently run one tx that inserts a new entry
 // 4) commit consume first, then insert
-TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
+TEST_F(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -543,11 +677,11 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    1), // Consume
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({2})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_consume.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_consume.root_invoke()().is_root_success());
 
   auto handler_insert = make_new_system_call_handler(
       SignedTransaction{
@@ -556,18 +690,20 @@ TEST_P(RCQTest, SyscallReproInvokeTxLockedStorageAssertOnConcurrentRCQ)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({9})},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
-  ASSERT_TRUE(handler_insert.root_invoke().is_root_success());
+  ASSERT_TRUE(handler_insert.root_invoke()().is_root_success());
 
   // If the invariant is violated, one of these commits will abort the process.
-  ASSERT_EQ(handler_consume.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_EQ(handler_insert.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_consume.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
+  ASSERT_EQ(handler_insert.try_commit_transaction()(),
+            ExecResult::ExecResultOK);
 }
 
-TEST_P(RCQTest, ConsumeFromPastBlock)
+TEST_F(RCQTest, ConsumeFromPastBlock)
 {
   // Creates a native contract with the following methods:
   // 0: Loads the calldata and interprets it as a sequence of uint8_t values.
@@ -618,7 +754,7 @@ TEST_P(RCQTest, ConsumeFromPastBlock)
   ASSERT_TRUE(consume({1, 2, 3, 0, 100}));
 }
 
-TEST_P(RCQTest, ConsumeNoConcurrentInserts)
+TEST_F(RCQTest, ConsumeNoConcurrentInserts)
 {
   // See prior test. The only difference is that this test never tries to
   // consume entries that were inserted in the current block.
@@ -633,7 +769,7 @@ TEST_P(RCQTest, ConsumeNoConcurrentInserts)
   ASSERT_TRUE(consume({3, 4, 5, 0, 100}));
 }
 
-TEST_P(RCQTest, InvariantStrictSingleConsumerPerBlock)
+TEST_F(RCQTest, InvariantStrictSingleConsumerPerBlock)
 {
   // Invariant 1: Strict Single-Consumer Per Block
   // The RCQ enforces a "Multiple Producer, Single Consumer" (MPSC) pattern
@@ -650,7 +786,7 @@ TEST_P(RCQTest, InvariantStrictSingleConsumerPerBlock)
   ASSERT_FALSE(consume({2}));
 }
 
-TEST_P(RCQTest, InvariantInterBlockSortedOrdering)
+TEST_F(RCQTest, InvariantInterBlockSortedOrdering)
 {
   // Invariant 3: Inter-Block Sorted Ordering
   // Items that are committed (persist to storage) are reordered.
@@ -665,7 +801,7 @@ TEST_P(RCQTest, InvariantInterBlockSortedOrdering)
   ASSERT_TRUE(consume({1, 4, 5}));
 }
 
-TEST_P(RCQTest, InvariantConsumptionPersistence)
+TEST_F(RCQTest, InvariantConsumptionPersistence)
 {
   // Invariant 4: Consumption Persistence (No Zombies)
   // Items successfully consumed in the current block must be permanently
@@ -680,7 +816,7 @@ TEST_P(RCQTest, InvariantConsumptionPersistence)
   ASSERT_TRUE(consume({2, 3}));
 }
 
-TEST_P(RCQTest, InvariantBlockPruningAndCost)
+TEST_F(RCQTest, InvariantBlockPruningAndCost)
 {
   // Invariant 5: Block Pruning & Cost Accuracy
   // When all items in a committed block are fully consumed, the underlying
@@ -696,7 +832,7 @@ TEST_P(RCQTest, InvariantBlockPruningAndCost)
   ASSERT_TRUE(consume({10, 11, 12}));
 }
 
-TEST_P(RCQTest, MixedConcurrentTest)
+TEST_F(RCQTest, MixedConcurrentTest)
 {
   // Checks to ensure self dequeues are prioritized over concurrent dequeues and
   // that persistence works correctly.
@@ -707,7 +843,7 @@ TEST_P(RCQTest, MixedConcurrentTest)
   ASSERT_TRUE(consume({}));
 }
 
-TEST_P(RCQTest, ConcurrentPartialConsume)
+TEST_F(RCQTest, ConcurrentPartialConsume)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   ASSERT_TRUE(insert({10}));
@@ -717,42 +853,32 @@ TEST_P(RCQTest, ConcurrentPartialConsume)
   ASSERT_TRUE(consume({10}));
 }
 
-TEST_P(RCQTest, ConsumeReturnsStorageCost)
+TEST_F(RCQTest, ConsumeReturnsStorageCost)
 {
-  const int128_t hogs = 1'000'000'000;
+  const int128_t native_tokens = 1'000'000'000;
   // Two transactions commit against contract_address_ (insert, consume); each
   // consumes a uniquifier into the replay cache, charged to the root invoked
   // address, so top up the grant by that cost to keep check_balance unchanged.
   setup_grant_storage_token(contract_address_,
-                            hogs + replay_cache_cost_charged(2));
+                            native_tokens + replay_cache_cost_charged(2));
 
   ASSERT_TRUE(insert({1}));
   advance_block();
 
   ASSERT_TRUE(consume({1}));
   advance_block();
-  ASSERT_TRUE(check_balance(hogs));
+  ASSERT_TRUE(check_balance(native_tokens));
 }
 
-TEST_P(RCQTest, OverflowBlockImmediately)
+TEST_F(RCQTest, OverflowBlockImmediately)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen + 1, 1);
   ASSERT_FALSE(insert(values));
 }
 
-TEST_P(RCQTest, OverflowBlockSequentially)
+TEST_F(RCQTest, OverflowBlockSequentially)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   // Insert up to the limit is fine.
   std::vector<uint8_t> values_chunk1(kRetrocausalQueueBlockEntriesMaxLen - 10,
@@ -765,13 +891,8 @@ TEST_P(RCQTest, OverflowBlockSequentially)
   ASSERT_FALSE(insert(values_chunk2));
 }
 
-TEST_P(RCQTest, ConcurrentOverflow)
+TEST_F(RCQTest, ConcurrentOverflow)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    // MockDB does not enforce block size limits
-    SUCCEED();
-    return;
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   // Both T1 and T2 each insert just over half the per-block cap, so either
@@ -786,7 +907,7 @@ TEST_P(RCQTest, ConcurrentOverflow)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -799,20 +920,20 @@ TEST_P(RCQTest, ConcurrentOverflow)
                                            .entrypoint =
                                                entrypoint_from_method_id(
                                                    0), // Insert
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
 
   // First commit should succeed.
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   // Second commit should fail because it exceeds the block limit.
-  ASSERT_EQ(handler2.try_commit_transaction(),
+  ASSERT_EQ(handler2.try_commit_transaction()(),
             ExecResult::ExecResultTxNonDeterministicError);
 }
 
@@ -824,32 +945,31 @@ TEST_P(RCQTest, ConcurrentOverflow)
 // consumption.  Inserts entries across 2 blocks, partially consumes from
 // past block, and checks that the balance reflects the correct live_entries
 // count after each step.
-TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
+TEST_F(RCQTest, CostAccountingMultiBlockPartialConsume)
 {
-  auto const hogs = 1'000'000'000;
-  setup_grant_storage_token(contract_address_, hogs);
+  auto const native_tokens = 1'000'000'000;
+  setup_grant_storage_token(contract_address_, native_tokens);
   auto const *cm = get_default_cost_model();
 
   // Each committed transaction consumes a uniquifier into the replay cache,
   // whose (non-refundable) cost is charged to contract_address_ as the root
   // invoked address and accumulates with the number of commits. The
   // replay_cache_cost_charged(k) terms below subtract that running cost after
-  // k commits; they are 0 on MockInMemory and the real cost on HogDb, so the
-  // underlying expected balances are unchanged on MockInMemory.
+  // k commits.
 
   // Block 1: insert 3 entries (1 commit).
   ASSERT_TRUE(insert({1, 2, 3}));
   advance_block();
 
   // 3 live entries → cost = get_retrocausal_queue_cost(3).
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(3) -
                             replay_cache_cost_charged(1)));
 
   // Block 2: insert 2 more entries (5 total; 2 commits).
   ASSERT_TRUE(insert({4, 5}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(5) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(5) -
                             replay_cache_cost_charged(2)));
 
   // Block 3: consume 2 entries from past block 1 (entries 1, 2; 3 commits).
@@ -857,7 +977,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   ASSERT_TRUE(consume({1, 2}));
   advance_block();
 
-  ASSERT_TRUE(check_balance(hogs - cm->get_retrocausal_queue_cost(3) -
+  ASSERT_TRUE(check_balance(native_tokens - cm->get_retrocausal_queue_cost(3) -
                             replay_cache_cost_charged(3)));
 
   // Block 4: consume remaining 3 (entry 3 from block 1, 4 and 5 from block 2;
@@ -866,7 +986,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
   advance_block();
 
   // Queue empty → full RCQ refund, leaving only the accumulated replay cost.
-  ASSERT_TRUE(check_balance(hogs - replay_cache_cost_charged(4)));
+  ASSERT_TRUE(check_balance(native_tokens - replay_cache_cost_charged(4)));
 }
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
@@ -878,7 +998,7 @@ TEST_P(RCQTest, CostAccountingMultiBlockPartialConsume)
 // Tests the kQueueEntryMaxLen (256 byte) boundary.  A single entry of exactly
 // 256 bytes should succeed; 257 bytes should fail at the syscall layer
 // with kSyscallErrorCodeInvalidSyscallInput.
-TEST_P(RCQTest, MaxEntrySizeBoundary)
+TEST_F(RCQTest, MaxEntrySizeBoundary)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -904,11 +1024,8 @@ TEST_P(RCQTest, MaxEntrySizeBoundary)
 //
 // Inserts exactly kRetrocausalQueueBlockEntriesMaxLen entries
 // in a single TX.  Should succeed without overflow.
-TEST_P(RCQTest, ExactBlockEntriesLimit)
+TEST_F(RCQTest, ExactBlockEntriesLimit)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for block-level verification";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen, 1);
@@ -928,11 +1045,8 @@ TEST_P(RCQTest, ExactBlockEntriesLimit)
 // Two TXs each insert 500 entries (total = 1000 =
 // kRetrocausalQueueBlockEntriesMaxLen). Both should commit successfully since
 // they fill exactly to the limit.
-TEST_P(RCQTest, ConcurrentFillToExactLimit)
+TEST_F(RCQTest, ConcurrentFillToExactLimit)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for block-level verification";
-  }
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
   std::vector<uint8_t> values(kRetrocausalQueueBlockEntriesMaxLen / 2, 1);
@@ -943,7 +1057,7 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
@@ -955,18 +1069,18 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(values.begin(),
                                                                 values.end())},
                             .uniquifier = make_new_uniquifier()}},
       *context_);
 
-  ASSERT_TRUE(handler1.root_invoke().is_root_success());
-  ASSERT_TRUE(handler2.root_invoke().is_root_success());
+  ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+  ASSERT_TRUE(handler2.root_invoke()().is_root_success());
 
   // Both should commit: 500 + 500 = 1000 = exactly at limit.
-  ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
-  ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   advance_block();
 
@@ -989,12 +1103,8 @@ TEST_P(RCQTest, ConcurrentFillToExactLimit)
 // the cost accounting for the second transaction in the same block doesn't
 // correctly account for the type change done by TX1.
 //
-TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
+TEST_F(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
 {
-  if (GetParam() == TestDB::kMockInMemory) {
-    GTEST_SKIP() << "Requires HogDb for cost tracking";
-  }
-
   auto context = make_context();
   // The fuzz crash starts with 1B tokens granted once at init. After
   // many blocks of operations, the balance is partially consumed. Grant
@@ -1010,12 +1120,12 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(5),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({0x2f})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler.root_invoke().is_root_success());
-    ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler.root_invoke()().is_root_success());
+    ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 
@@ -1033,12 +1143,12 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata({0x41})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler1.root_invoke().is_root_success());
-    ASSERT_EQ(handler1.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(handler1.root_invoke()().is_root_success());
+    ASSERT_EQ(handler1.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   {
     auto handler2 = make_new_system_call_handler(
@@ -1048,24 +1158,24 @@ TEST_P(RCQTest, CrossBlockTypeChangeBytestringToRCQCostTracking)
                                 Invocation{.invoked_address = contract_address_,
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = Calldata(
                                                {0x07, 0x02, 0x42, 0x43})},
                             .uniquifier = make_new_uniquifier()}},
         *context);
-    ASSERT_TRUE(handler2.root_invoke().is_root_success());
+    ASSERT_TRUE(handler2.root_invoke()().is_root_success());
     // Before the fix (#1357), this triggered:
     //   CHECK_LE(cost_change, locked_storage_cost) [8 < 0]
     // TX2's reservation was 0 because snapshot_cost_transform clamped
     // against the old bytestring cost, but commit_change returned 8.
     // Now fixed: try_atomic_change_lock returns a conservative standalone
     // cost that survives the snapshot_cost_transform subtraction.
-    ASSERT_EQ(handler2.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_EQ(handler2.try_commit_transaction()(), ExecResult::ExecResultOK);
   }
   advance_block();
 }
 
-TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
+TEST_F(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1077,7 +1187,7 @@ TEST_P(RCQTest, EmptyConsumeOnAbsentKeyDoesNotPinType)
   ASSERT_TRUE(invoke_contract(5, {0xAA}));
 }
 
-TEST_P(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
+TEST_F(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1093,7 +1203,7 @@ TEST_P(RCQTest, EmptyConsumeOnDeletedKeyDoesNotPinType)
   ASSERT_TRUE(invoke_contract(6, {}));
 }
 
-TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
+TEST_F(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
 {
   setup_grant_storage_token(contract_address_, 1'000'000'000);
 
@@ -1114,12 +1224,192 @@ TEST_P(RCQTest, DeleteConsumeEmptyThenBytestringInSameTx)
   EXPECT_EQ(item->type(), StorageItemType::kItemTypeBytestring);
 }
 
-// NOLINTEND(bugprone-unchecked-optional-access)
+// --- Batch 6: RCQ syscalls aimed at a key holding another type (#1673) ---
+// An insert replaces the value; a read rejects it as InvalidSyscallInput.
+// Neither answer depends on whether the value is tx-local or committed.
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, RCQTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
+// (1) A committed bytestring is replaced by an insert, not rejected.
+TEST_F(RCQTest, InsertOnCommittedBytestringConvertsKeyToQueue)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeBytestring);
+
+  ASSERT_TRUE(insert({7}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(after->metadata().live_entries, 1);
+}
+
+// (1) The same conversion applies to a committed NNInt.
+TEST_F(RCQTest, InsertOnCommittedNNIntConvertsKeyToQueue)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "nnint0");
+
+  ASSERT_TRUE(set_nnint(42));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeNonnegativeInt);
+
+  // Method 11 inserts into the nnint0 key rather than rcq0.
+  ASSERT_TRUE(invoke_contract(11, {7}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(after->metadata().live_entries, 1);
+}
+
+// (1) and the same insert against a bytestring this transaction wrote a
+// syscall earlier: same outcome, which is the point.
+TEST_F(RCQTest, InsertOnBytestringWrittenInSameTransactionConvertsKeyToQueue)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  // Method 12 sets the bytestring and then inserts, asserting internally that
+  // the insert succeeds.
+  ASSERT_TRUE(invoke_contract(12, {'h', 'i'}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeRetrocausalQueue);
+  EXPECT_EQ(after->metadata().live_entries, 1);
+}
+
+// (2) Consume, peek and PeekLen against a committed bytestring are wrong-type
+// input, and leave it alone.
+TEST_F(RCQTest, ReadsOnCommittedBytestringAreWrongTypeInput)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  // Method 9 asserts the error code of each read internally, so a successful
+  // commit is the assertion.
+  ASSERT_TRUE(invoke_contract(9, {}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
+  EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
+}
+
+// (2) The same three reads against a bytestring this transaction wrote report
+// the same errors, and the bytestring is what commits.
+TEST_F(RCQTest, ReadsOnBytestringWrittenInSameTransactionAreWrongTypeInput)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(10, {'h', 'i'}));
+  advance_block();
+
+  auto after = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(after.has_value());
+  EXPECT_EQ(after->type(), StorageItemType::kItemTypeBytestring);
+  EXPECT_EQ(after->bytestring(), make_bytestring("hi"));
+}
+
+// (2) Two writers in one block from an absent base: tx2 inserts, then reads
+// its own entry followed by tx1's concurrent one.
+TEST_F(RCQTest, ConcurrentInsertIsReadableFromQueueBase)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  ASSERT_TRUE(insert({10}));
+  // Self entries come before concurrent ones in consumption order.
+  ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
+}
+
+// (1)+(2) Over a committed bytestring, tx2's own insert lets it see tx1's
+// entry; tx3 writes nothing and is rejected until the next block.
+TEST_F(RCQTest, ConcurrentInsertOverBytestringIsReadableOnlyAfterOwnWrite)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  ASSERT_TRUE(insert({10}));
+  ASSERT_TRUE(insert_and_consume({20}, {20, 10}));
+  // Method 9 asserts InvalidSyscallInput on each of the three reads.
+  ASSERT_TRUE(invoke_contract(9, {}));
+  advance_block();
+
+  // tx2 consumed both entries, so the converted key holds an empty queue,
+  // which means it is gone.
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// Emptying a queue removes the key. This is the plain case, with no type
+// change involved, and the second half of rule (1).
+TEST_F(RCQTest, FullyConsumedQueueLeavesKeyAbsent)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(insert({1, 2}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeRetrocausalQueue);
+
+  ASSERT_TRUE(consume({1, 2}));
+  advance_block();
+
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// The #1673 scenario: insert converts, consume empties, key ends up absent.
+TEST_F(RCQTest, NetZeroTouchOnCommittedBytestringLeavesKeyAbsent)
+{
+  setup_grant_storage_token(contract_address_, 1'000'000'000);
+
+  auto addrkey = make_contract_data_addrkey(contract_address_, "rcq0");
+
+  ASSERT_TRUE(invoke_contract(5, {'h', 'i'}));
+  advance_block();
+
+  auto before = lookup_storage_item_from_db(addrkey);
+  ASSERT_TRUE(before.has_value());
+  ASSERT_EQ(before->type(), StorageItemType::kItemTypeBytestring);
+  ASSERT_EQ(before->bytestring(), make_bytestring("hi"));
+
+  // One insert and one consume of that same entry, in one transaction.
+  ASSERT_TRUE(insert_and_consume({9}, {9}));
+  advance_block();
+
+  EXPECT_FALSE(lookup_storage_item_from_db(addrkey).has_value());
+}
+
+// NOLINTEND(bugprone-unchecked-optional-access)
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

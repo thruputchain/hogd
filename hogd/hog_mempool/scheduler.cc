@@ -1,20 +1,29 @@
 #include "hogd/hog_mempool/scheduler.h"
+#include "hogd/loadgen/ingestion_diagnostics.h"
 
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <iterator>
 #include <limits>
+#include <list>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <span>
+#include <stop_token>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
 #include <vector>
 
 #include "db_sched.hh"
+#include "hogd/base/average_age.h"
+#include "hogd/base/chunk_items.h"
+#include "hogd/base/chunk_position.h"
+#include "hogd/base/chunk_run_sender.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
@@ -25,9 +34,13 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/xdr/signed_transaction_hash.h"
 #include "rpc_types.hh"
+#include "sched_coord.hh"
 #include "sched_db.hh"
+#include "sched_gateway.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/corosync.h"
@@ -38,20 +51,6 @@ namespace hogd {
 
 namespace {
 
-BlockHeight
-compute_average_age(uint128_t num_hogs_a, BlockHeight age_a,
-                    uint128_t num_hogs_b, BlockHeight age_b)
-{
-  uint128_t numerator = (num_hogs_a * age_a) + (num_hogs_b * age_b);
-  uint128_t denominator = num_hogs_a + num_hogs_b;
-  CHECK_GT(denominator, 0UL);
-  // When doing division, we introduce imprecision into our calculations. Thus,
-  // we always round the result up to avoid benefitting the account. This helps
-  // to ensure that users are not incentivized to waste network storage or
-  // compute, such as by spreading HOGs among multiple accounts.
-  return (numerator / denominator) + ((numerator % denominator) ? 1 : 0);
-}
-
 bool
 uint128_add_would_overflow(uint128_t a, uint128_t b)
 {
@@ -59,83 +58,146 @@ uint128_add_would_overflow(uint128_t a, uint128_t b)
 }
 
 bool
-hog_age_groups_have_valid_total(const HogAge &hog_age)
+native_token_age_groups_have_valid_total(const NativeTokenAge &native_token_age)
 {
-  uint128_t total = from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
-  const uint128_t already_scheduled =
-      from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  uint128_t total = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupToSchedule]);
+  const uint128_t already_scheduled = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]);
   if (uint128_add_would_overflow(total, already_scheduled)) {
     return false;
   }
   total += already_scheduled;
 
-  const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
+  const uint128_t received = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupReceived]);
   return !uint128_add_would_overflow(total, received);
 }
 
 bool
-try_move_hogs_to_already_scheduled_group(HogAge &hog_ages, uint128_t num_hogs,
-                                         BlockHeight block_height)
+try_move_native_tokens_to_already_scheduled_group(
+    NativeTokenAge &native_token_ages, uint128_t num_native_tokens,
+    BlockHeight block_height)
 {
-  const uint128_xdr already_scheduled_hogs =
-      hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled];
-  const uint128_t current_already_scheduled = from_xdr(already_scheduled_hogs);
-  if (uint128_add_would_overflow(current_already_scheduled, num_hogs)) {
+  const uint128_xdr already_scheduled_native_tokens =
+      native_token_ages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled];
+  const uint128_t current_already_scheduled =
+      from_xdr(already_scheduled_native_tokens);
+  if (uint128_add_would_overflow(current_already_scheduled,
+                                 num_native_tokens)) {
     return false;
   }
 
   const BlockHeight already_scheduled_age =
-      hog_ages.average_ages[kHogAgeGroupAlreadyScheduled];
+      native_token_ages.average_ages[kNativeTokenAgeGroupAlreadyScheduled];
 
   bool empty = current_already_scheduled == 0UL;
-  hog_ages.num_hogs[kHogAgeGroupAlreadyScheduled] =
-      to_xdr(num_hogs + current_already_scheduled);
+  native_token_ages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
+      to_xdr(num_native_tokens + current_already_scheduled);
   if (empty) {
-    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] = block_height;
+    native_token_ages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] =
+        block_height;
   }
   else {
-    // See comment above for [compute_average_age()].
-    hog_ages.average_ages[kHogAgeGroupAlreadyScheduled] =
-        compute_average_age(num_hogs, block_height, current_already_scheduled,
-                            already_scheduled_age);
+    // See [AverageAge::compute()].
+    native_token_ages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] =
+        AverageAge::compute(num_native_tokens, block_height,
+                            current_already_scheduled, already_scheduled_age);
   }
   return true;
 }
 
+// Writes one record of a run of native-token ages to the database. The position
+// goes unused: the database applies each record as its own write pass.
+struct WriteNativeTokenAgeRecord {
+  db_sched_client_t *client;
+
+  x23::Async<void> operator()(ChunkPosition /*position*/,
+                              ChunkItems<NativeTokenAge> ages) const
+  {
+    CHECK_EQ(co_await client->dbsched_write_native_token_ages(ages),
+             DbSchedResult::DbSchedResultOK);
+  }
+};
+
 } // namespace
 
+size_t
+Scheduler::num_dirty_native_token_ages()
+{
+  size_t count = 0;
+  accounts_.for_each([&count](const auto &p) {
+    if (p.second.native_token_age_dirty) {
+      count++;
+    }
+  });
+  return count;
+}
+
 x23::Async<void>
-Scheduler::write_all_average_hog_ages_to_db()
+Scheduler::write_dirty_native_token_ages_to_db()
 {
   co_await default_coropoll().pool_.bg();
 
-  PerThread<HogAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const HogAge &age = p.second.hog_age;
-        CHECK_EQ(p.first, age.address);
-        ages_by_thread->push_back(age);
-      });
+  // Each bucket of [accounts_] is locked only while its dirty ages are copied
+  // out and their marks cleared. An age that changes again after its copy is
+  // marked again and goes out with the next write.
+  PerThread<NativeTokenAgeBatch> ages_by_thread;
+  accounts_.for_each_parallel([&](auto &p) {
+    AccountState &account_state = p.second;
+    if (!account_state.native_token_age_dirty) {
+      return;
+    }
+    CHECK_EQ(p.first, account_state.native_token_age.address);
+    account_state.native_token_age_dirty = false;
+    ages_by_thread->push_back(account_state.native_token_age);
+  });
 
-  HogAgeBatch ages;
-  ages.reserve(accounts_.size());
+  // Each thread's batch is a part of the run; the records are serialized
+  // straight from the parts, so no batch is joined into one.
+  std::vector<NativeTokenAgeBatch> parts;
   {
     auto ul = ages_by_thread.lock_threads();
-    ages_by_thread.for_each(ul, [&ages](HogAgeBatch &per_thread_ages) {
-      ages += per_thread_ages;
+    ages_by_thread.for_each(ul, [&parts](NativeTokenAgeBatch &per_thread_ages) {
+      if (!per_thread_ages.empty()) {
+        parts.push_back(std::move(per_thread_ages));
+      }
     });
   }
-  CHECK_EQ(co_await db_sched_client_->dbsched_write_hog_ages(ages),
-           DbSchedResult::DbSchedResultOK);
-  co_return;
+  if (parts.empty()) {
+    co_return;
+  }
+  // A failed write is fatal, so the marks cleared above are never silently
+  // lost.
+  ChunkRunSender sender(parts, max_native_token_ages_per_record_,
+                        WriteNativeTokenAgeRecord{.client =
+                                                      db_sched_client_.get()});
+  co_await sender.send();
 }
 
-std::pair<HogAge *, std::unique_lock<std::mutex>>
-Scheduler::get_cached_hog_age(const ContractAddress &address)
+void
+Scheduler::native_token_age_writer_loop(const std::stop_token &stop,
+                                        std::chrono::milliseconds interval)
+{
+  while (true) {
+    {
+      std::unique_lock lock(native_token_age_writer_mutex_);
+      native_token_age_writer_cv_.wait_for(lock, stop, interval,
+                                           [] { return false; });
+    }
+    if (stop.stop_requested()) {
+      return;
+    }
+    write_dirty_native_token_ages_to_db()();
+  }
+}
+
+std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
+Scheduler::get_cached_native_token_age(const ContractAddress &address)
 {
   auto [account_state, lock] = get_account_state(address);
-  CHECK_EQ(account_state->hog_age.address, address);
-  return {&account_state->hog_age, std::move(lock)};
+  CHECK_EQ(account_state->native_token_age.address, address);
+  return {&account_state->native_token_age, std::move(lock)};
 }
 
 std::pair<Scheduler::AccountState *, std::unique_lock<std::mutex>>
@@ -154,30 +216,36 @@ Scheduler::start_pending_nomination(BlockID block_id)
   pending_nomination_.block_id = block_id;
 }
 
-void
+x23::Async<void>
 Scheduler::commit_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
-  for (const auto &[account, hog_age] : pending_nomination_.hog_ages) {
+  for (const auto &[account, native_token_age] :
+       pending_nomination_.native_token_ages) {
     auto [account_state, lock] = get_account_state(account);
-    account_state->hog_age = hog_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
   }
-  refresh_ready_accounts(pending_nomination_.touched_accounts);
-  refresh_accounts_excluded_from_block();
+  co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
+  co_await refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
-void
+x23::Async<void>
 Scheduler::abandon_pending_nomination(BlockID block_id)
 {
   CHECK_NE(block_id, 0UL);
   CHECK_EQ(pending_nomination_.block_id, block_id);
 
-  // We want to ensure that [refresh_ready_accounts()] does not use the hog ages
-  // stored in [pending_nomination_.hog_ages]. Thus, we clear out
-  // [pending_nomination_.hog_ages] (along with [pending_nomination_.block_id]
-  // to avoid mistakes in the future).
+  // We want to ensure that [refresh_ready_accounts()] does not use the
+  // native-token ages stored in [pending_nomination_.native_token_ages]. Thus,
+  // we clear out [pending_nomination_.native_token_ages] (along with
+  // [pending_nomination_.block_id] to avoid mistakes in the future).
   //
   // The reason why we do not call [pending_nomination_.clear()] instead is
   // because we pass [pending_nomination_.touched_accounts] to
@@ -186,30 +254,33 @@ Scheduler::abandon_pending_nomination(BlockID block_id)
   // [pending_nomination_.clear()], but it would be best to avoid this copy
   // overhead.
   pending_nomination_.block_id = 0;
-  pending_nomination_.hog_ages.clear();
-  refresh_ready_accounts(pending_nomination_.touched_accounts);
-  refresh_accounts_excluded_from_block();
+  pending_nomination_.native_token_ages.clear();
+  co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
+  co_await refresh_accounts_excluded_from_block();
   pending_nomination_.clear();
 }
 
 x23::Async<void>
-Scheduler::apply_committed_block_hog_ages(
+Scheduler::apply_committed_block_native_token_ages(
     const x23::XdrVec<SignedTransaction> &txs, BlockHeight block_height)
 {
-  ReadAverageHogAgesResult read_result = co_await read_average_hog_ages(txs);
+  ReadAverageNativeTokenAgesResult read_result =
+      co_await read_average_native_token_ages(txs);
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
 
-  std::unordered_map<ContractAddress, HogAge, SipHash24Hasher>
-      hog_ages_by_account;
+  std::unordered_map<ContractAddress, NativeTokenAge, SipHash24Hasher>
+      native_token_ages_by_account;
   std::unordered_map<ContractAddress, uint128_t, SipHash24Hasher>
-      hogs_spent_by_account;
+      native_tokens_spent_by_account;
   std::unordered_set<ContractAddress, SipHash24Hasher> skipped_accounts =
       std::move(read_result.missing);
   std::unordered_set<ContractAddress, SipHash24Hasher> touched_accounts;
-  hog_ages_by_account.reserve(txs.size());
-  hogs_spent_by_account.reserve(txs.size());
+  native_token_ages_by_account.reserve(txs.size());
+  native_tokens_spent_by_account.reserve(txs.size());
   skipped_accounts.reserve(txs.size());
   touched_accounts.reserve(txs.size());
 
@@ -219,79 +290,104 @@ Scheduler::apply_committed_block_hog_ages(
       continue;
     }
 
-    // We cache the [HogAge] struct rather than retrieve it each time with
-    // [get_account_state()] so that (1) we can avoid the locking overhead for
-    // accounts that submitted multiple txs in the block and (2) we can discard
-    // [HogAge] changes when the updates fail (e.g., due to integer overflow,
-    // etc.) by dropping the entry in [hog_ages_by_account] rather than by
-    // having to roll back changes to [accounts_].
-    auto [hog_age_it, inserted] = hog_ages_by_account.try_emplace(account);
+    // We cache the [NativeTokenAge] struct rather than retrieve it each time
+    // with [get_account_state()] so that (1) we can avoid the locking overhead
+    // for accounts that submitted multiple txs in the block and (2) we can
+    // discard [NativeTokenAge] changes when the updates fail (e.g., due to
+    // integer overflow, etc.) by dropping the entry in
+    // [native_token_ages_by_account] rather than by having to roll back changes
+    // to [accounts_].
+    auto [native_token_age_it, inserted] =
+        native_token_ages_by_account.try_emplace(account);
     if (inserted) {
       auto [account_state, lock] = get_account_state(account);
-      hog_age_it->second = account_state->hog_age;
+      native_token_age_it->second = account_state->native_token_age;
     }
 
-    // Recall that even if the [kHogAgeGroupToSchedule] group does not have
-    // enough hogs to schedule [tx], the overall account could have enough, so
-    // in that case we need to cycle the hogs between the groups to get enough
-    // hogs into the [kHogAgeGroupToSchedule] group.
+    // Recall that even if the [kNativeTokenAgeGroupToSchedule] group does not
+    // have enough native tokens to schedule [tx], the overall account could
+    // have enough, so in that case we need to cycle the native tokens between
+    // the groups to get enough native tokens into the
+    // [kNativeTokenAgeGroupToSchedule] group.
     //
-    // This method cycles the hogs as needed and then fills in
-    // [hogs_spent_by_account].
-    uint128_t &hogs_spent_by_this_account = hogs_spent_by_account[account];
-    if (!apply_committed_tx_hog_age(tx, hog_age_it->second,
-                                    hogs_spent_by_this_account, block_height)) {
+    // This method cycles the native tokens as needed and then fills in
+    // [native_tokens_spent_by_account].
+    uint128_t &native_tokens_spent_by_this_account =
+        native_tokens_spent_by_account[account];
+    if (!apply_committed_tx_native_token_age(
+            tx, native_token_age_it->second,
+            native_tokens_spent_by_this_account, block_height)) {
       skipped_accounts.insert(account);
-      hog_ages_by_account.erase(account);
-      hogs_spent_by_account.erase(account);
+      native_token_ages_by_account.erase(account);
+      native_tokens_spent_by_account.erase(account);
     }
   }
-  // Now we move the hogs to the [kHogAgeGroupAlreadyScheduled] group to account
-  // for the cost of executing the txs.
-  for (auto &[account, hog_age] : hog_ages_by_account) {
-    const uint128_t num_hogs = hogs_spent_by_account.at(account);
-    if (num_hogs != 0UL &&
-        !try_move_hogs_to_already_scheduled_group(hog_age, num_hogs,
-                                                  block_height)) {
+  // Now we move the native tokens to the [kNativeTokenAgeGroupAlreadyScheduled]
+  // group to account for the cost of executing the txs.
+  for (auto &[account, native_token_age] : native_token_ages_by_account) {
+    const uint128_t num_native_tokens =
+        native_tokens_spent_by_account.at(account);
+    if (num_native_tokens != 0UL &&
+        !try_move_native_tokens_to_already_scheduled_group(native_token_age,
+                                                           num_native_tokens,
+                                                           block_height)) {
       continue;
     }
 
     auto [account_state, lock] = get_account_state(account);
-    account_state->hog_age = hog_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
     touched_accounts.insert(account);
   }
-  refresh_ready_accounts(touched_accounts);
+  co_await refresh_ready_accounts(touched_accounts);
 }
 
-x23::Async<Scheduler::ReadAverageHogAgesResult>
-Scheduler::read_average_hog_ages(const x23::XdrVec<ContractAddress> &accounts)
+x23::Async<Scheduler::ReadAverageNativeTokenAgesResult>
+Scheduler::read_average_native_token_ages(
+    const x23::XdrVec<ContractAddress> &accounts)
 {
-  ReadAverageHogAgesResult ret;
+  ReadAverageNativeTokenAgesResult ret;
   ret.found.reserve(accounts.size());
 
-  HogAgeResults results =
-      co_await db_sched_client_->dbsched_get_hog_ages(accounts);
-  CHECK_EQ(results.size(), accounts.size());
-  for (size_t i = 0; i < results.size(); i++) {
-    const HogAgeResult &res = results[i];
-    if (res.result() != DbSchedResult::DbSchedResultOK) {
-      info("read_average_hog_ages did not return OK for address {}",
-           show_byte_array(accounts[i]));
-      ret.missing.insert(accounts[i]);
-      continue;
-    }
+  // The addresses go to the database a bounded record at a time, which
+  // bounds each reply the same way.
+  const std::span<const ContractAddress> all(accounts.data(), accounts.size());
+  for (size_t begin = 0; begin < all.size();
+       begin += max_native_token_ages_per_record_) {
+    const std::span<const ContractAddress> batch =
+        all.subspan(begin, std::min(max_native_token_ages_per_record_,
+                                    all.size() - begin));
+    const std::array<std::span<const ContractAddress>, 1> pieces{batch};
+    NativeTokenAgeResults results =
+        co_await db_sched_client_->dbsched_get_native_token_ages(
+            ChunkItems<ContractAddress>(pieces));
+    CHECK_EQ(results.size(), batch.size());
+    for (size_t i = 0; i < results.size(); i++) {
+      const NativeTokenAgeResult &res = results[i];
+      if (res.result() != DbSchedResult::DbSchedResultOK) {
+        info("read_average_native_token_ages did not return OK for address {}",
+             show_byte_array(batch[i]));
+        ret.missing.insert(batch[i]);
+        continue;
+      }
 
-    const HogAge &age = res.hog_age();
-    CHECK_EQ(age.address, accounts[i]);
-    ret.found.insert(age.address);
-    auto [account_state, lock] = accounts_[age.address];
-    account_state.hog_age = age;
+      const NativeTokenAge &age = res.native_token_age();
+      CHECK_EQ(age.address, batch[i]);
+      ret.found.insert(age.address);
+      auto [account_state, lock] = accounts_[age.address];
+      account_state.native_token_age = age;
+    }
   }
   co_return ret;
 }
 
-x23::Async<Scheduler::ReadAverageHogAgesResult>
-Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
+x23::Async<Scheduler::ReadAverageNativeTokenAgesResult>
+Scheduler::read_average_native_token_ages(
+    const x23::XdrVec<SignedTransaction> &txs)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
   for (const SignedTransaction &tx : txs) {
@@ -302,7 +398,9 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -318,15 +416,17 @@ Scheduler::read_average_hog_ages(const x23::XdrVec<SignedTransaction> &txs)
     }
   }
   if (accounts_vec.empty()) {
-    co_return ReadAverageHogAgesResult{.found = already_found, .missing = {}};
+    co_return ReadAverageNativeTokenAgesResult{.found = already_found,
+                                               .missing = {}};
   }
-  ReadAverageHogAgesResult ret = co_await read_average_hog_ages(accounts_vec);
+  ReadAverageNativeTokenAgesResult ret =
+      co_await read_average_native_token_ages(accounts_vec);
   ret.found.merge(already_found);
   co_return ret;
 }
 
-x23::Async<Scheduler::ReadAverageHogAgesResult>
-Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
+x23::Async<Scheduler::ReadAverageNativeTokenAgesResult>
+Scheduler::read_average_native_token_ages(const BlockTransfers &transfers)
 {
   std::unordered_set<ContractAddress, SipHash24Hasher> accounts;
   for (const Delta &delta : transfers.deltas) {
@@ -339,7 +439,9 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
   std::unordered_set<ContractAddress, SipHash24Hasher> already_found;
   already_found.reserve(accounts.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : accounts) {
     bool contains = false;
@@ -355,9 +457,11 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
     }
   }
   if (accounts_vec.empty()) {
-    co_return ReadAverageHogAgesResult{.found = already_found, .missing = {}};
+    co_return ReadAverageNativeTokenAgesResult{.found = already_found,
+                                               .missing = {}};
   }
-  ReadAverageHogAgesResult ret = co_await read_average_hog_ages(accounts_vec);
+  ReadAverageNativeTokenAgesResult ret =
+      co_await read_average_native_token_ages(accounts_vec);
   ret.found.merge(already_found);
   co_return ret;
 }
@@ -365,138 +469,487 @@ Scheduler::read_average_hog_ages(const HogsTransferred &transfers)
 Scheduler::AccountKey
 Scheduler::get_account_key(const ContractAddress &account)
 {
-  // TODO(jhumphri): If the age is 0 (due to no hogs), set the age to INT_MAX.
+  // TODO(jhumphri): If the age is 0 (due to no native tokens), set the age to
+  // INT_MAX.
   const auto [account_state, lock] = get_account_state(account);
 
-  // It is ok to call [get_hog_age_from_pending_nomination_if_exists()] and use
-  // the [HogAge] struct from the pending nomination, even when
+  // It is ok to call [get_native_token_age_from_pending_nomination_if_exists()]
+  // and use the [NativeTokenAge] struct from the pending nomination, even when
   // [get_account_key()] is called from methods such as [add_txs()]. Presumably
-  // these methods do not want to use the hog ages from the pending nomination
-  // if that nomination is not committed. However, if the nomination is not
-  // committed, we call [refresh_ready_accounts()], which updates the account
-  // keys with the correct hog ages. So the account keys end up correct in the
-  // end.
-  const HogAge &hog_age =
-      get_hog_age_from_pending_nomination_if_exists(*account_state, account);
-  BlockHeight average_hog_age = hog_age.average_ages[kHogAgeGroupToSchedule];
-  return {.average_hog_age = average_hog_age, .account = account};
+  // these methods do not want to use the native-token ages from the pending
+  // nomination if that nomination is not committed. However, if the nomination
+  // is not committed, we call [refresh_ready_accounts()], which updates the
+  // account keys with the correct native-token ages. So the account keys end up
+  // correct in the end.
+  const NativeTokenAge &native_token_age =
+      get_native_token_age_from_pending_nomination_if_exists(*account_state,
+                                                             account);
+  BlockHeight average_native_token_age =
+      native_token_age.average_ages[kNativeTokenAgeGroupToSchedule];
+  return {.average_native_token_age = average_native_token_age,
+          .account = account};
 }
 
-// If there is a pending nomination, returns the [HogAge] struct from the
-// nomination and creates one in the pending nomination from [account_state] if
-// needed. This is the behavior we want for [schedule()] and
+// If there is a pending nomination, returns the [NativeTokenAge] struct from
+// the nomination and creates one in the pending nomination from [account_state]
+// if needed. This is the behavior we want for [schedule()] and
 // [cycle_if_needed()].
 //
-// If there is no pending nomination, returns the [HogAge] struct from
+// If there is no pending nomination, returns the [NativeTokenAge] struct from
 // [account_state].
-HogAge *
-Scheduler::get_hog_age_from_pending_nomination_create_if_needed(
+NativeTokenAge *
+Scheduler::get_native_token_age_from_pending_nomination_create_if_needed(
     AccountState &account_state, const ContractAddress &account)
 {
   if (!pending_nomination_.block_id) {
-    return &account_state.hog_age;
+    // The caller may change the cached age directly, e.g. by cycling groups in
+    // [add_txs()], so it must be written back to hog_db.
+    account_state.native_token_age_dirty = true;
+    return &account_state.native_token_age;
   }
 
-  auto [it, inserted] =
-      pending_nomination_.hog_ages.try_emplace(account, account_state.hog_age);
+  auto [it, inserted] = pending_nomination_.native_token_ages.try_emplace(
+      account, account_state.native_token_age);
   pending_nomination_.touched_accounts.insert(account);
   return &it->second;
 }
 
-// If there is a pending nomination, returns the [HogAge] struct from the
-// nomination. This method does *not* create one in the pending nomination from
-// [account_state] if it does not exist. That is the difference between this
-// method and [get_hog_age_from_pending_nomination_create_if_needed()].
+// If there is a pending nomination, returns the [NativeTokenAge] struct from
+// the nomination. This method does *not* create one in the pending nomination
+// from [account_state] if it does not exist. That is the difference between
+// this method and
+// [get_native_token_age_from_pending_nomination_create_if_needed()].
 //
-// If there is no pending nomination, returns the [HogAge] struct from
+// If there is no pending nomination, returns the [NativeTokenAge] struct from
 // [account_state].
-const HogAge &
-Scheduler::get_hog_age_from_pending_nomination_if_exists(
+const NativeTokenAge &
+Scheduler::get_native_token_age_from_pending_nomination_if_exists(
     const AccountState &account_state, const ContractAddress &account) const
 {
   if (pending_nomination_.block_id) {
-    auto it = pending_nomination_.hog_ages.find(account);
-    if (it != pending_nomination_.hog_ages.end()) {
+    auto it = pending_nomination_.native_token_ages.find(account);
+    if (it != pending_nomination_.native_token_ages.end()) {
       return it->second;
     }
   }
-  return account_state.hog_age;
+  return account_state.native_token_age;
 }
 
-bool
-Scheduler::insert_tx_into_runqueue(const TransactionHash &tx_hash,
-                                   const std::shared_ptr<TxValue> &tx_value)
+x23::Async<void>
+Scheduler::prune_transaction_outcomes()
 {
-  const ContractAddress &account = tx_value->tx.tx.invocation.invoked_address;
-  const TxKey key{.expiry_block_height =
-                      tx_value->tx.tx.uniquifier.block_expiry_height,
-                  .tx_hash = tx_hash};
-  auto [account_state, lock] = get_account_state(account);
-  // Check if the tx is already present in [account_state->txs]. If it is, we
-  // are adding a duplicate tx, so we do not want to increment [size_].
-  return account_state->txs.insert({key, tx_value}).second;
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kTransactionOutcomeShards);
+  for (auto &shard : transaction_outcome_shards_) {
+    handles.push_back([](Scheduler &scheduler,
+                         TransactionOutcomeShard &shard) -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
+      x23::CoroGuard cg;
+      co_await cg(shard.lock);
+      prune_transaction_outcomes_locked(shard, scheduler.current_block());
+    }(*this, shard));
+  }
+  for (auto &handle : handles) {
+    co_await handle;
+  }
+}
+
+void
+Scheduler::prune_transaction_outcomes_locked(TransactionOutcomeShard &shard,
+                                             BlockHeight height)
+{
+  while (!shard.order.empty() &&
+         height - shard.order.front().processed_height >=
+             kTransactionOutcomeBlockLifetime) {
+    erase_transaction_outcome_locked(shard, shard.order.begin());
+  }
+}
+
+x23::Async<void>
+Scheduler::record_transaction_outcome(
+    const TransactionHash &tx_hash, SchedulerTransactionStatus status,
+    BlockHeight height, SchedulerTransactionErrorSource error_source,
+    int32_t error_code)
+{
+  const TransactionOutcomeKey key(tx_hash);
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(key)];
+  x23::CoroGuard cg;
+  co_await cg(shard.lock);
+  const BlockHeight processed_height = current_block();
+  prune_transaction_outcomes_locked(shard, processed_height);
+  record_transaction_outcome_locked(
+      shard, key,
+      SchedulerTransactionOutcome{.status = status,
+                                  .error_source = error_source,
+                                  .error_code = error_code,
+                                  .height = height},
+      processed_height);
+}
+
+x23::Async<void>
+Scheduler::record_committed_transaction_outcomes(
+    x23::span<const TransactionHash> tx_hashes, BlockHeight height)
+{
+  if (tx_hashes.empty()) {
+    co_return;
+  }
+  co_await default_coropoll().pool_.bg();
+
+  const SchedulerTransactionOutcome outcome{
+      .status = SchedulerTransactionStatus::SchedulerTransactionSucceeded,
+      .error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      .error_code = 0,
+      .height = height,
+  };
+  std::array<std::vector<TransactionOutcomeKey>, kTransactionOutcomeShards>
+      batches;
+  for (auto &batch : batches) {
+    batch.reserve((tx_hashes.size() / kTransactionOutcomeShards) + 1);
+  }
+  for (const auto &hash : tx_hashes) {
+    TransactionOutcomeKey key(hash);
+    batches[transaction_outcome_shard_index(key)].push_back(std::move(key));
+  }
+  std::vector<x23::Async<void>> handles;
+  handles.reserve(kTransactionOutcomeShards);
+  for (size_t i = 0; i < batches.size(); ++i) {
+    if (batches[i].empty()) {
+      continue;
+    }
+    handles.push_back(
+        [](Scheduler &scheduler, TransactionOutcomeShard &shard,
+           const std::vector<TransactionOutcomeKey> &batch,
+           SchedulerTransactionOutcome outcome) -> x23::Async<void> {
+          co_await default_coropoll().pool_.bg();
+          // Release the shard lock between chunks to let lookups and
+          // admission make progress during a large commit.
+          for (size_t start = 0; start < batch.size();
+               start += kTransactionOutcomeChunkSize) {
+            x23::CoroGuard cg;
+            co_await cg(shard.lock);
+            const BlockHeight processed_height = scheduler.current_block();
+            prune_transaction_outcomes_locked(shard, processed_height);
+            const size_t end =
+                std::min(start + kTransactionOutcomeChunkSize, batch.size());
+            for (size_t j = start; j < end; ++j) {
+              record_transaction_outcome_locked(shard, batch[j], outcome,
+                                                processed_height);
+            }
+          }
+        }(*this, transaction_outcome_shards_[i], batches[i], outcome));
+  }
+  for (auto &handle : handles) {
+    co_await handle;
+  }
+}
+
+void
+Scheduler::record_transaction_outcome_locked(
+    TransactionOutcomeShard &shard, const TransactionOutcomeKey &key,
+    const SchedulerTransactionOutcome &outcome, BlockHeight processed_height)
+{
+  if (auto it = shard.outcomes.find(key); it != shard.outcomes.end()) {
+    // Once a tx is committed, its committed outcome is never overwritten by a
+    // different outcome for a duplicate tx.
+    //
+    // On the other hand, if a tx fails, its failure outcome will be overwritten
+    // by the outcome for a duplicate tx that is submitted after.
+    if (it->second->outcome.status ==
+        SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+      return;
+    }
+    erase_transaction_outcome_locked(shard, it->second);
+  }
+
+  CHECK_LE(shard.outcomes.size(), kMaxTransactionsPerShard);
+  if (shard.outcomes.size() == kMaxTransactionsPerShard) {
+    // Evict the oldest outcome in this shard to keep total capacity bounded.
+    erase_transaction_outcome_locked(shard, shard.order.begin());
+  }
+  CHECK_LT(shard.outcomes.size(), kMaxTransactionsPerShard);
+
+  shard.order.push_back(TransactionOutcomeEntry{
+      .key = key,
+      .outcome = outcome,
+      .processed_height = processed_height,
+  });
+  shard.outcomes[key] = std::prev(shard.order.end());
+  if (outcome.status !=
+      SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+    shard.failed_outcomes.fetch_add(1, std::memory_order_release);
+  }
+}
+
+void
+Scheduler::erase_transaction_outcome_locked(
+    TransactionOutcomeShard &shard,
+    std::list<TransactionOutcomeEntry>::iterator entry)
+{
+  const bool failed = entry->outcome.status !=
+                      SchedulerTransactionStatus::SchedulerTransactionSucceeded;
+  shard.outcomes.erase(entry->key);
+  shard.order.erase(entry);
+  if (failed) {
+    shard.failed_outcomes.fetch_sub(1, std::memory_order_release);
+  }
+}
+
+x23::Async<void>
+Scheduler::clear_transaction_outcome_if_not_already_committed(
+    const TransactionHash &tx_hash)
+{
+  const TransactionOutcomeKey key(tx_hash);
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(key)];
+  if (shard.failed_outcomes.load(std::memory_order_acquire) == 0) {
+    co_return;
+  }
+  x23::CoroGuard cg;
+  co_await cg(shard.lock);
+
+  if (auto it = shard.outcomes.find(key);
+      it != shard.outcomes.end() &&
+      // Once a tx is committed, its committed outcome is never overwritten by a
+      // different outcome for a duplicate tx.
+      //
+      // On the other hand, if a tx fails, its failure outcome will be
+      // overwritten by the outcome for a duplicate tx that is submitted after.
+      it->second->outcome.status !=
+          SchedulerTransactionStatus::SchedulerTransactionSucceeded) {
+    erase_transaction_outcome_locked(shard, it->second);
+  }
+}
+
+x23::Async<SchedulerTransactionOutcome>
+Scheduler::lookup_transaction_outcome(const TransactionHash &tx_hash)
+{
+  const TransactionOutcomeKey key(tx_hash);
+  auto &shard =
+      transaction_outcome_shards_[transaction_outcome_shard_index(key)];
+  x23::CoroGuard cg;
+  co_await cg(shard.lock);
+  prune_transaction_outcomes_locked(shard, current_block());
+
+  if (auto it = shard.outcomes.find(key); it != shard.outcomes.end()) {
+    co_return it->second->outcome;
+  }
+  cg.reset();
+
+  // We checked above that there is no existing recorded outcome for [tx_hash],
+  // so now we check if [tx_hash] is for a tx pending in the scheduler.
+  if (find_tx(tx_hash)) {
+    co_return SchedulerTransactionOutcome{
+        .status = SchedulerTransactionStatus::SchedulerTransactionPending,
+        .error_source =
+            SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+        .error_code = 0,
+        .height = current_block(),
+    };
+  }
+  co_return SchedulerTransactionOutcome{
+      .status = SchedulerTransactionStatus::SchedulerTransactionNotFound,
+      .error_source =
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorNone,
+      .error_code = 0,
+      // [height] has an undefined value when the tx is not found, so we just
+      // set it to 0.
+      .height = 0,
+  };
 }
 
 // TODO(jhumphri): I think we are allocating a new decorated signature vec
 // below when we do [{.tx = tx}]. Can we make this an array rather than a vec?
 bool
-Scheduler::add_txs_helper(const SignedTransaction &tx)
+Scheduler::add_txs_helper(const SignedTransaction &tx,
+                          const TransactionHash &tx_hash,
+                          const SignedTransactionHash &signed_tx_hash,
+                          CachedVariant on_variant)
 {
-  const TransactionHash &tx_hash = sha256(tx.tx);
-  std::shared_ptr<TxValue> value;
-  {
-    // The tx may already exist in [txs_] because it is okay to add a tx back
-    // into the scheduler again. This can happen if the tx was originally
-    // added to the scheduler, then the tx was removed during nomination by
-    // [schedule()], then a validated block was committed rather than the
-    // nominated block, and then the tx was added back to the scheduler.
-    const auto [tx_ptr, lock] =
-        txs_.find_or_insert(tx_hash,
-                            std::make_shared<TxValue>(TxValue{.tx = tx}));
-    CHECK_PTR(tx_ptr);
-    value = *tx_ptr;
-  }
+  const ContractAddress &account = tx.tx.invocation.invoked_address;
+  const TxKey key{.expiry_block_height = tx.tx.uniquifier.block_expiry_height,
+                  .tx_hash = tx_hash};
+  auto [account_state, account_lock] = get_account_state(account);
 
-  return insert_tx_into_runqueue(tx_hash, value);
+  // Publish the cache and runqueue entries while holding both locks in the
+  // account-then-cache order used by removal. Otherwise, [schedule()] could
+  // delete a newly published cache entry while this submission waits for the
+  // account lock, leaving the caller with an admitted outcome for an absent tx.
+  //
+  // A cached tx may already have been scheduled by the pending nomination.
+  // Resubmission must not put it back on the runqueue: another scheduling
+  // chunk could otherwise attempt it again and append its hash twice to the
+  // nomination's commit cleanup. Abandoned nominations explicitly restore
+  // their transactions through [reenqueue_txs()].
+  //
+  // [txs_by_body_] admits one encoding per body. The [txs_] lock nests inside
+  // its lock here; lookups take one map's lock at a time, so this cannot
+  // deadlock.
+  const auto [tx_ptr, txs_lock, inserted] = txs_by_body_.find_or_insert(
+      tx_hash,
+      std::make_shared<TxValue>(TxValue{.tx = tx,
+                                        .tx_hash = tx_hash,
+                                        .signed_tx_hash = signed_tx_hash}));
+  CHECK_PTR(tx_ptr);
+  if (!inserted) {
+    if (on_variant == CachedVariant::kSubmitUnvetted ||
+        (*tx_ptr)->signed_tx_hash == signed_tx_hash) {
+      return false;
+    }
+    // Swap in the submitted encoding wherever the cached one is held. A
+    // pending nomination keeps its own copy of the tx, and [reenqueue_txs()]
+    // re-reads this cache, so an abandoned nomination restores this encoding.
+    //
+    // The cached encoding stays findable by its signed hash. A proposal that
+    // names two signings of this body would otherwise never resolve: each
+    // vetted submission of the missing one would displace the other, and
+    // validation would report that one missing next. With every supplied
+    // encoding kept, validation resolves them all and the executors reject
+    // the repeated body's uniquifier. Vetted submissions are authenticated,
+    // so only the body's signers can mint more encodings, and all of them go
+    // when the body expires or commits.
+    auto replacement = std::make_shared<TxValue>(
+        TxValue{.tx = tx,
+                .tx_hash = tx_hash,
+                .signed_tx_hash = signed_tx_hash,
+                .signed_tx_hashes = (*tx_ptr)->signed_tx_hashes});
+    replacement->signed_tx_hashes->insert(signed_tx_hash);
+
+    *tx_ptr = replacement;
+    if (auto it = account_state->txs.find(key);
+        it != account_state->txs.end()) {
+      it->second = replacement;
+    }
+    txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
+    return false;
+  }
+  (*tx_ptr)->signed_tx_hashes->insert(signed_tx_hash);
+  CHECK_PTR(txs_.insert(signed_tx_hash, *tx_ptr).first);
+  // [txs_by_body_.find_or_insert()] acquires a lock, so the increment to
+  // [tx_cache_size_] happens after the tx is added to the cache from the
+  // perspective of anyone accessing the tx in the cache.
+  tx_cache_size_.fetch_add(1, std::memory_order_relaxed);
+  return account_state->txs.insert({key, *tx_ptr}).second;
 }
 
-x23::Async<void>
-Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
+void
+Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
 {
-  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
-  // hide its overhead by removing the [co_await] below, doing other work, and
-  // then calling [co_await] on the handle. We instead need to execute
-  // [read_average_hog_ages] on a separate thread.
-  const auto &[found, missing] = co_await read_average_hog_ages(txs);
+  std::shared_ptr<TxValue> tx_value;
+  {
+    auto [tx_value_ptr, txs_lock] = txs_by_body_.find(tx_hash);
+    CHECK_PTR(tx_value_ptr);
+    tx_value = *tx_value_ptr;
+    // Removing under the lock, so the subtraction from [tx_cache_size_]
+    // happens before the tx is removed from the cache from the perspective of
+    // anyone accessing the tx in the cache.
+    tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
+    CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
+  }
+  for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+    CHECK_EQ(txs_.remove(signed_hash), 1UL);
+  }
+}
+
+bool
+Scheduler::is_pending(const SignedTransaction & /*tx*/,
+                      const TransactionHash &tx_hash)
+{
+  const auto [tx_value_ptr, lock] = txs_by_body_.find(tx_hash);
+  return tx_value_ptr != nullptr;
+}
+
+x23::Async<SchedGatewaySubmitOutcomeBatch>
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   const x23::XdrVec<TransactionHash> &tx_hashes)
+{
+  SignedTransactionHashBatch signed_tx_hashes;
+  signed_tx_hashes.reserve(txs.size());
+  for (const SignedTransaction &tx : txs) {
+    signed_tx_hashes.push_back(hash_signed_transaction(tx).signed_tx_hash);
+  }
+  co_return co_await add_txs(txs, tx_hashes, signed_tx_hashes,
+                             CachedVariant::kSubmitUnvetted);
+}
+
+x23::Async<SchedGatewaySubmitOutcomeBatch>
+Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
+                   const x23::XdrVec<TransactionHash> &tx_hashes,
+                   const SignedTransactionHashBatch &signed_tx_hashes,
+                   CachedVariant on_variant)
+{
+  CHECK_EQ(txs.size(), tx_hashes.size());
+  CHECK_EQ(txs.size(), signed_tx_hashes.size());
+  SchedGatewaySubmitOutcomeBatch outcomes(
+      txs.size(), SchedGatewaySubmitOutcome::SchedGatewaySubmitAdmitted);
+
+  // Careful! [read_average_native_token_ages] itself calls [co_await], so we
+  // cannot hide its overhead by removing the [co_await] below, doing other
+  // work, and then calling [co_await] on the handle. We instead need to execute
+  // [read_average_native_token_ages] on a separate thread.
+  const auto &[found, missing] = co_await read_average_native_token_ages(txs);
 
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(), available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back(
-        [](const ChunkRange *chunk,
-           const x23::XdrVec<hogd::SignedTransaction> &txs,
-           const std::unordered_set<ContractAddress, SipHash24Hasher> &missing,
-           Scheduler &scheduler) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
+    handles.push_back([](const ChunkRange *chunk,
+                         const x23::XdrVec<hogd::SignedTransaction> &txs,
+                         const x23::XdrVec<TransactionHash> &tx_hashes,
+                         const SignedTransactionHashBatch &signed_tx_hashes,
+                         CachedVariant on_variant,
+                         const std::unordered_set<ContractAddress,
+                                                  SipHash24Hasher> &missing,
+                         SchedGatewaySubmitOutcomeBatch &outcomes,
+                         Scheduler &scheduler) noexcept -> x23::Async<void> {
+      co_await default_coropoll().pool_.bg();
 
-          size_t num_added = 0;
-          for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
-            if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
-              // The account for this tx does not exist in our copy of hog_db,
-              // so we silently drop the tx.
-              info("scheduler: dropping tx for unknown account {}",
-                   show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
-              continue;
-            }
-            if (scheduler.add_txs_helper(txs[tx_idx])) {
-              num_added++;
-            }
-          }
-          scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
-          co_return;
-        }(&chunk, txs, missing, *this));
+      size_t num_added = 0;
+      for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
+        if (missing.contains(txs[tx_idx].tx.invocation.invoked_address)) {
+          // The DB RPC currently cannot distinguish an unknown account
+          // from a transient or internal read failure. Standalone-pubkey
+          // claims can authenticate without an on-chain auth entry and
+          // reach this path, so conservatively report the ambiguous
+          // scheduler-side failure as internal.
+          info("scheduler: dropping tx after native-token-age lookup failed "
+               "for {}",
+               show_byte_array(txs[tx_idx].tx.invocation.invoked_address));
+          outcomes[tx_idx] =
+              SchedGatewaySubmitOutcome::SchedGatewaySubmitInternalError;
+          co_await scheduler.record_transaction_outcome(
+              tx_hashes[tx_idx],
+              /*status=*/SchedulerTransactionStatus::SchedulerTransactionRetry,
+              scheduler.current_block(),
+              /*error_source=*/
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              /*error_code=*/
+              static_cast<int32_t>(
+                  SchedulerErrorCode::SchedulerErrorNativeTokenAgeUnavailable));
+          continue;
+        }
+        const TransactionHash &tx_hash = tx_hashes[tx_idx];
+        // Only failed outcomes need clearing before resubmission. Check
+        // before entering a coroutine so the common success-only path does
+        // not allocate coroutine frames for each incoming transaction.
+        const size_t shard_index = transaction_outcome_shard_index(tx_hash);
+        const auto &shard = scheduler.transaction_outcome_shards_[shard_index];
+        if (shard.failed_outcomes.load(std::memory_order_acquire) != 0) {
+          co_await scheduler.clear_transaction_outcome_if_not_already_committed(
+              tx_hash);
+        }
+        if (scheduler.add_txs_helper(txs[tx_idx], tx_hash,
+                                     signed_tx_hashes[tx_idx], on_variant)) {
+          num_added++;
+        }
+      }
+      scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
+      co_return;
+    }(&chunk, txs, tx_hashes, signed_tx_hashes, on_variant, missing, outcomes,
+                                                        *this));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
@@ -506,7 +959,9 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   account_keys.reserve(found.size());
   // [get_account_key()] accesses [ready_accounts_], so we need to protect it
   // with the lock.
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   for (const ContractAddress &account : found) {
     if (account_excluded_from_block(account)) {
@@ -516,37 +971,41 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs)
   }
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  co_return outcomes;
 }
 
 void
 Scheduler::cycle_if_needed(const ContractAddress &account, GasAmount gas_limit)
 {
-  for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
+  for (size_t i = 0; i < kNativeTokenAgeNumGroups - 1; i++) {
     auto [account_state, lock] = get_account_state(account);
-    HogAge *hog_age =
-        get_hog_age_from_pending_nomination_create_if_needed(*account_state,
-                                                             account);
-    if (!cycle_if_needed(*hog_age, gas_limit)) {
+    NativeTokenAge *native_token_age =
+        get_native_token_age_from_pending_nomination_create_if_needed(
+            *account_state, account);
+    if (!cycle_if_needed(*native_token_age, gas_limit)) {
       break;
     }
   }
 }
 
 bool
-Scheduler::cycle_if_needed(HogAge &hog_age, GasAmount gas_limit)
+Scheduler::cycle_if_needed(NativeTokenAge &native_token_age,
+                           GasAmount gas_limit)
 {
-  const uint128_t to_schedule =
-      from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
+  const uint128_t to_schedule = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupToSchedule]);
   const BlockHeight to_schedule_age =
-      hog_age.average_ages[kHogAgeGroupToSchedule];
+      native_token_age.average_ages[kNativeTokenAgeGroupToSchedule];
 
-  const uint128_t already_scheduled =
-      from_xdr(hog_age.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const uint128_t already_scheduled = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]);
   const BlockHeight already_scheduled_age =
-      hog_age.average_ages[kHogAgeGroupAlreadyScheduled];
+      native_token_age.average_ages[kNativeTokenAgeGroupAlreadyScheduled];
 
-  const uint128_t received = from_xdr(hog_age.num_hogs[kHogAgeGroupReceived]);
-  const BlockHeight received_age = hog_age.average_ages[kHogAgeGroupReceived];
+  const uint128_t received = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupReceived]);
+  const BlockHeight received_age =
+      native_token_age.average_ages[kNativeTokenAgeGroupReceived];
 
   bool already_scheduled_average_older = false;
   bool combined_averages_older = false;
@@ -554,7 +1013,7 @@ Scheduler::cycle_if_needed(HogAge &hog_age, GasAmount gas_limit)
     already_scheduled_average_older = (already_scheduled_age < to_schedule_age);
     combined_averages_older =
         (received > 0) &&
-        (compute_average_age(already_scheduled, already_scheduled_age, received,
+        (AverageAge::compute(already_scheduled, already_scheduled_age, received,
                              received_age) < to_schedule_age);
   }
   else {
@@ -563,70 +1022,76 @@ Scheduler::cycle_if_needed(HogAge &hog_age, GasAmount gas_limit)
   }
 
   // We should cycle if either of the following is true:
-  // 1. Cycling will increase the average age of the [kHogAgeGroupToSchedule]
+  // 1. Cycling will increase the average age of the
+  // [kNativeTokenAgeGroupToSchedule]
   //    group. These are the first two operands of the boolean OR statement.
   //
-  // 2. The [kHogAgeGroupToSchedule] group does not have enough hogs to schedule
-  //    a tx that requires [gas_limit] hogs, but cycling will add enough hogs to
-  //    the group to schedule it. This is the third operand of the boolean OR
-  //    statement.
+  // 2. The [kNativeTokenAgeGroupToSchedule] group does not have enough native
+  // tokens to schedule
+  //    a tx that requires [gas_limit] native tokens, but cycling will add
+  //    enough native tokens to the group to schedule it. This is the third
+  //    operand of the boolean OR statement.
   if (already_scheduled_average_older || combined_averages_older ||
       gas_limit > to_schedule) {
-    cycle_groups(hog_age);
+    cycle_groups(native_token_age);
     return true;
   }
   return false;
 }
 
 void
-Scheduler::cycle_groups(HogAge &current_averages)
+Scheduler::cycle_groups(NativeTokenAge &current_averages)
 {
-  HogAge new_averages{};
+  NativeTokenAge new_averages{};
   new_averages.address = current_averages.address;
 
-  const uint128_t to_schedule_hogs =
-      from_xdr(current_averages.num_hogs[kHogAgeGroupToSchedule]);
+  const uint128_t to_schedule_native_tokens = from_xdr(
+      current_averages.num_native_tokens[kNativeTokenAgeGroupToSchedule]);
   const BlockHeight to_schedule_age =
-      current_averages.average_ages[kHogAgeGroupToSchedule];
+      current_averages.average_ages[kNativeTokenAgeGroupToSchedule];
 
-  const uint128_t already_scheduled_hogs =
-      from_xdr(current_averages.num_hogs[kHogAgeGroupAlreadyScheduled]);
+  const uint128_t already_scheduled_native_tokens = from_xdr(
+      current_averages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]);
   const BlockHeight already_scheduled_age =
-      current_averages.average_ages[kHogAgeGroupAlreadyScheduled];
+      current_averages.average_ages[kNativeTokenAgeGroupAlreadyScheduled];
 
-  const uint128_t received_hogs =
-      from_xdr(current_averages.num_hogs[kHogAgeGroupReceived]);
+  const uint128_t received_native_tokens = from_xdr(
+      current_averages.num_native_tokens[kNativeTokenAgeGroupReceived]);
   const BlockHeight received_age =
-      current_averages.average_ages[kHogAgeGroupReceived];
+      current_averages.average_ages[kNativeTokenAgeGroupReceived];
 
   // Update [kGroupToSchedule].
-  new_averages.num_hogs[kHogAgeGroupToSchedule] =
-      to_xdr(to_schedule_hogs + already_scheduled_hogs);
-  if (to_schedule_hogs) {
-    // See comment above for [compute_average_age()].
-    new_averages.average_ages[kHogAgeGroupToSchedule] =
-        compute_average_age(to_schedule_hogs, to_schedule_age,
-                            already_scheduled_hogs, already_scheduled_age);
+  new_averages.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+      to_xdr(to_schedule_native_tokens + already_scheduled_native_tokens);
+  if (to_schedule_native_tokens) {
+    // See [AverageAge::compute()].
+    new_averages.average_ages[kNativeTokenAgeGroupToSchedule] =
+        AverageAge::compute(to_schedule_native_tokens, to_schedule_age,
+                            already_scheduled_native_tokens,
+                            already_scheduled_age);
   }
   else {
-    new_averages.average_ages[kHogAgeGroupToSchedule] = already_scheduled_age;
+    new_averages.average_ages[kNativeTokenAgeGroupToSchedule] =
+        already_scheduled_age;
   }
 
   // Update [kGroupAlreadyScheduled].
-  if (received_hogs) {
-    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] = to_xdr(received_hogs);
-    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = received_age;
+  if (received_native_tokens) {
+    new_averages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
+        to_xdr(received_native_tokens);
+    new_averages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] =
+        received_age;
   }
   else {
-    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
+    new_averages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
         to_xdr(static_cast<uint128_t>(0));
-    new_averages.average_ages[kHogAgeGroupAlreadyScheduled] = 0;
+    new_averages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] = 0;
   }
 
   // Update [kGroupReceived].
-  new_averages.num_hogs[kHogAgeGroupReceived] =
+  new_averages.num_native_tokens[kNativeTokenAgeGroupReceived] =
       to_xdr(static_cast<uint128_t>(0));
-  new_averages.average_ages[kHogAgeGroupReceived] = 0;
+  new_averages.average_ages[kNativeTokenAgeGroupReceived] = 0;
 
   current_averages = new_averages;
 }
@@ -635,144 +1100,158 @@ void
 Scheduler::process_transfers_helper(const Delta &delta,
                                     BlockHeight block_height) noexcept
 {
-  int128_t num_received = from_xdr(delta.hog_delta);
+  int128_t num_received = from_xdr(delta.native_token_delta);
   CHECK_NE(num_received, static_cast<int128_t>(0));
 
   const ContractAddress &account = delta.address;
-  auto [averages, lock] = get_cached_hog_age(account);
-  HogAge new_averages = *averages;
+  auto [account_state, lock] = get_account_state(account);
+  CHECK_EQ(account_state->native_token_age.address, account);
+  // Every delta is nonzero (CHECKed above), so it changes the account's age.
+  account_state->native_token_age_dirty = true;
+  const NativeTokenAge *averages = &account_state->native_token_age;
+  NativeTokenAge new_averages = *averages;
 
-  uint128_t received_hogs = from_xdr(averages->num_hogs[kHogAgeGroupReceived]);
-  const BlockHeight received_age = averages->average_ages[kHogAgeGroupReceived];
+  uint128_t received_native_tokens =
+      from_xdr(averages->num_native_tokens[kNativeTokenAgeGroupReceived]);
+  const BlockHeight received_age =
+      averages->average_ages[kNativeTokenAgeGroupReceived];
   if (num_received > 0) {
-    new_averages.num_hogs[kHogAgeGroupReceived] =
-        to_xdr(received_hogs + num_received);
-    // See comment above for [compute_average_age()].
+    new_averages.num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(received_native_tokens + num_received);
+    // See [AverageAge::compute()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we
+    // Note that [AverageAge::compute()] will never divide by 0 because we
     // check that [num_received] is not 0.
-    new_averages.average_ages[kHogAgeGroupReceived] =
-        compute_average_age(received_hogs, received_age, num_received,
+    new_averages.average_ages[kNativeTokenAgeGroupReceived] =
+        AverageAge::compute(received_native_tokens, received_age, num_received,
                             block_height);
   }
   else {
     CHECK_LT(num_received, 0);
     auto num_received_abs = static_cast<uint128_t>(num_received * -1);
 
-    uint128_t already_scheduled_hogs =
-        from_xdr(averages->num_hogs[kHogAgeGroupAlreadyScheduled]);
-    uint128_t to_schedule_hogs =
-        from_xdr(averages->num_hogs[kHogAgeGroupToSchedule]);
-    CHECK_LE(num_received_abs,
-             to_schedule_hogs + already_scheduled_hogs + received_hogs);
+    uint128_t already_scheduled_native_tokens = from_xdr(
+        averages->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]);
+    uint128_t to_schedule_native_tokens =
+        from_xdr(averages->num_native_tokens[kNativeTokenAgeGroupToSchedule]);
+    CHECK_LE(num_received_abs, to_schedule_native_tokens +
+                                   already_scheduled_native_tokens +
+                                   received_native_tokens);
 
-    uint128_t to_deduct = std::min(num_received_abs, received_hogs);
+    uint128_t to_deduct = std::min(num_received_abs, received_native_tokens);
     num_received_abs -= to_deduct;
-    received_hogs -= to_deduct;
+    received_native_tokens -= to_deduct;
 
     if (num_received_abs > 0) {
-      to_deduct = std::min(num_received_abs, already_scheduled_hogs);
+      to_deduct = std::min(num_received_abs, already_scheduled_native_tokens);
       num_received_abs -= to_deduct;
-      already_scheduled_hogs -= to_deduct;
+      already_scheduled_native_tokens -= to_deduct;
     }
     if (num_received_abs > 0) {
-      to_deduct = std::min(num_received_abs, to_schedule_hogs);
+      to_deduct = std::min(num_received_abs, to_schedule_native_tokens);
       num_received_abs -= to_deduct;
-      to_schedule_hogs -= to_deduct;
+      to_schedule_native_tokens -= to_deduct;
     }
     CHECK_EQ(num_received_abs, 0UL);
 
-    new_averages.num_hogs[kHogAgeGroupToSchedule] = to_xdr(to_schedule_hogs);
-    new_averages.num_hogs[kHogAgeGroupAlreadyScheduled] =
-        to_xdr(already_scheduled_hogs);
-    new_averages.num_hogs[kHogAgeGroupReceived] = to_xdr(received_hogs);
+    new_averages.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+        to_xdr(to_schedule_native_tokens);
+    new_averages.num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled] =
+        to_xdr(already_scheduled_native_tokens);
+    new_averages.num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(received_native_tokens);
   }
 
   // I really want [averages] to be a const so that I do not accidentally
   // mutate it above. Thus, I keep it const and I do a const cast below since
   // I am sure I want to write it here.
-  *const_cast<HogAge *>(averages) = new_averages;
+  *const_cast<NativeTokenAge *>(averages) = new_averages;
 }
 
 bool
-Scheduler::apply_committed_tx_hog_age(const SignedTransaction &tx,
-                                      HogAge &hog_age,
-                                      uint128_t &hogs_spent_by_this_account,
-                                      BlockHeight block_height)
+Scheduler::apply_committed_tx_native_token_age(
+    const SignedTransaction &tx, NativeTokenAge &native_token_age,
+    uint128_t &native_tokens_spent_by_this_account, BlockHeight block_height)
 {
   const GasAmount gas_limit = tx.tx.invocation.gas_limit;
-  if (!hog_age_groups_have_valid_total(hog_age)) {
+  if (!native_token_age_groups_have_valid_total(native_token_age)) {
     return false;
   }
 
-  for (size_t i = 0; i < kHogAgeNumGroups - 1; i++) {
-    if (gas_limit > from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]) &&
-        hogs_spent_by_this_account) {
-      // The [kHogAgeGroupToSchedule] group does not have enough hogs to
-      // schedule the tx, so we cycle the hogs to get enough hogs into the
-      // group. Note that just as in [schedule()], we may need to do this twice
-      // since there are three groups in total. Thus, the for loop spins for
-      // [kHogAgeNumGroups - 1] iterations.
-      if (!try_move_hogs_to_already_scheduled_group(hog_age,
-                                                    hogs_spent_by_this_account,
-                                                    block_height)) {
+  for (size_t i = 0; i < kNativeTokenAgeNumGroups - 1; i++) {
+    if (gas_limit >
+            from_xdr(native_token_age
+                         .num_native_tokens[kNativeTokenAgeGroupToSchedule]) &&
+        native_tokens_spent_by_this_account) {
+      // The [kNativeTokenAgeGroupToSchedule] group does not have enough native
+      // tokens to schedule the tx, so we cycle the native tokens to get enough
+      // native tokens into the group. Note that just as in [schedule()], we may
+      // need to do this twice since there are three groups in total. Thus, the
+      // for loop spins for [kNativeTokenAgeNumGroups - 1] iterations.
+      if (!try_move_native_tokens_to_already_scheduled_group(
+              native_token_age, native_tokens_spent_by_this_account,
+              block_height)) {
         return false;
       }
-      // [hogs_spent_by_this_account] is the hogs that have not yet been written
-      // back into the account's [HogAge] groups. Since we just added
-      // [hogs_spent_by_this_account] to the [kHogAgeGroupAlreadyScheduled]
-      // group, we set it to 0.
-      hogs_spent_by_this_account = 0;
+      // [native_tokens_spent_by_this_account] is the native tokens that have
+      // not yet been written back into the account's [NativeTokenAge] groups.
+      // Since we just added [native_tokens_spent_by_this_account] to the
+      // [kNativeTokenAgeGroupAlreadyScheduled] group, we set it to 0.
+      native_tokens_spent_by_this_account = 0;
     }
-    CHECK(hog_age_groups_have_valid_total(hog_age));
+    CHECK(native_token_age_groups_have_valid_total(native_token_age));
 
-    if (!cycle_if_needed(hog_age, gas_limit)) {
+    if (!cycle_if_needed(native_token_age, gas_limit)) {
       break;
     }
   }
 
-  // Deduct the hogs from the [kHogAgeGroupToSchedule] group and add them to
-  // [hogs_spent_by_this_account]. Later on in
-  // [apply_committed_block_hog_ages()], we move these hogs to the
-  // [kHogAgeGroupAlreadyScheduled] group.
-  uint128_t hogs_available = from_xdr(hog_age.num_hogs[kHogAgeGroupToSchedule]);
-  const auto gas_limit_hogs = static_cast<uint128_t>(gas_limit);
-  if (hogs_available < gas_limit_hogs ||
-      uint128_add_would_overflow(hogs_spent_by_this_account, gas_limit_hogs)) {
+  // Deduct the native tokens from the [kNativeTokenAgeGroupToSchedule] group
+  // and add them to [native_tokens_spent_by_this_account]. Later on in
+  // [apply_committed_block_native_token_ages()], we move these native tokens to
+  // the [kNativeTokenAgeGroupAlreadyScheduled] group.
+  uint128_t native_tokens_available = from_xdr(
+      native_token_age.num_native_tokens[kNativeTokenAgeGroupToSchedule]);
+  const auto gas_limit_native_tokens = static_cast<uint128_t>(gas_limit);
+  if (native_tokens_available < gas_limit_native_tokens ||
+      uint128_add_would_overflow(native_tokens_spent_by_this_account,
+                                 gas_limit_native_tokens)) {
     return false;
   }
-  hog_age.num_hogs[kHogAgeGroupToSchedule] =
-      to_xdr(hogs_available - gas_limit_hogs);
-  hogs_spent_by_this_account += gas_limit_hogs;
+  native_token_age.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+      to_xdr(native_tokens_available - gas_limit_native_tokens);
+  native_tokens_spent_by_this_account += gas_limit_native_tokens;
   return true;
 }
 
 x23::Async<void>
-Scheduler::process_transfers(const HogsTransferred &transfers)
+Scheduler::process_transfers(const BlockTransfers &transfers)
 {
-  // We use [scheduler_->pending_hog_age_update_lock_] to synchronize hog age
-  // updates with [MempoolDbRpc], which calls [scheduler_->process_transfers()].
-  // We want to ensure that on a block commit, we are able to apply the pending
-  // hog ages in the scheduler *before* the hog transfer deltas are received
-  // from hog_db. Otherwise, if the transfer deltas are applied first, it is
-  // possible that they will transfer hogs between accounts, and then when we
-  // apply the pending hog ages after, we may try to move hogs between scheduler
-  // groups for an account that no longer has any hogs.
-  x23::CoroGuard hog_age_cg;
-  co_await hog_age_cg(pending_hog_age_update_lock_);
+  // We use [scheduler_->pending_native_token_age_update_lock_] to synchronize
+  // native-token age updates with [MempoolDbRpc], which calls
+  // [scheduler_->process_transfers()]. We want to ensure that on a block
+  // commit, we are able to apply the pending native-token ages in the scheduler
+  // *before* the native-token transfer deltas are received from hog_db.
+  // Otherwise, if the transfer deltas are applied first, it is possible that
+  // they will transfer native tokens between accounts, and then when we apply
+  // the pending native-token ages after, we may try to move native tokens
+  // between scheduler groups for an account that no longer has any native
+  // tokens.
+  x23::CoroGuard native_token_age_cg;
+  co_await native_token_age_cg(pending_native_token_age_update_lock_);
 
-  // Careful! [read_average_hog_ages] itself calls [co_await], so we cannot
-  // hide its overhead by removing the [co_await] below, doing other work, and
-  // then calling [co_await] on the handle. We instead need to execute
-  // [read_average_hog_ages] on a separate thread.
-  const auto &[_, missing] = co_await read_average_hog_ages(transfers);
+  // Careful! [read_average_native_token_ages] itself calls [co_await], so we
+  // cannot hide its overhead by removing the [co_await] below, doing other
+  // work, and then calling [co_await] on the handle. We instead need to execute
+  // [read_average_native_token_ages] on a separate thread.
+  const auto &[_, missing] = co_await read_average_native_token_ages(transfers);
 
-  // A balance can be created without a pre-existing HogAge row. This is most
-  // visible during the genesis ceremony, where mint creates the first balance
-  // for each allocation recipient, but it is also the natural behavior for
-  // any account receiving HOGs for the first time. Seed those accounts with an
-  // empty HogAge; process_transfers_helper() below puts the received balance in
-  // the received group at this block's height.
+  // A balance can be created without a pre-existing NativeTokenAge row. This is
+  // most visible during the genesis ceremony, where mint creates the first
+  // balance for each allocation recipient, but it is also the natural behavior
+  // for any account receiving native tokens for the first time. Seed those
+  // accounts with an empty NativeTokenAge; process_transfers_helper() below
+  // puts the received balance in the received group at this block's height.
   std::unordered_map<ContractAddress, int128_t, SipHash24Hasher>
       missing_account_deltas;
   for (const Delta &delta : transfers.deltas) {
@@ -782,24 +1261,27 @@ Scheduler::process_transfers(const HogsTransferred &transfers)
     // Only one DB shard should report a delta for an account.
     CHECK(!missing_account_deltas.contains(delta.address));
     int128_t &total = missing_account_deltas[delta.address];
-    CHECK(!integer_add_overflow(total, from_xdr(delta.hog_delta), &total));
+    CHECK(!integer_add_overflow(total, from_xdr(delta.native_token_delta),
+                                &total));
   }
   for (const ContractAddress &account : missing) {
     const auto delta_it = missing_account_deltas.find(account);
     CHECK(delta_it != missing_account_deltas.end());
     CHECK_GT(delta_it->second, static_cast<int128_t>(0));
     auto [account_state, lock] = accounts_[account];
-    account_state.hog_age.address = account;
+    account_state.native_token_age.address = account;
   }
 
   const std::vector<ChunkRange> chunks =
       make_chunks(transfers.deltas.size(), available_parallelism());
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
-    handles.push_back([](ChunkRange chunk, const HogsTransferred *transfers,
+    handles.push_back([](ChunkRange chunk, const BlockTransfers *transfers,
                          Scheduler *scheduler) noexcept -> x23::Async<void> {
       co_await default_coropoll().pool_.bg();
       for (size_t delta_idx = chunk.start; delta_idx < chunk.end; delta_idx++) {
@@ -819,14 +1301,15 @@ Scheduler::erase_ready_account(const ContractAddress &account)
 {
   // This is very slow: it is O(NlogN) to remove [account], so if we want to
   // remove N accounts, it is O(N^2 * logN) total. We need to do a linear search
-  // because we do not know what the hog age is in the [AccountKey].
+  // because we do not know what the native-token age is in the [AccountKey].
   //
   // Once performance data shows that this method is a bottleneck, we should
   // update it to be faster. I would imagine we could create a helper map that
-  // maps each account to the hog age in the [AccountKey] for that account. We
-  // could then look up the hog age in that map in O(1) time, and then remove
-  // the account from [ready_accounts_] in O(logN) time, for a total of O(1 +
-  // logN) = O(logN) time. For N accounts, this is O(NlogN) time.
+  // maps each account to the native-token age in the [AccountKey] for that
+  // account. We could then look up the native-token age in that map in O(1)
+  // time, and then remove the account from [ready_accounts_] in O(logN) time,
+  // for a total of O(1 + logN) = O(logN) time. For N accounts, this is O(NlogN)
+  // time.
   for (auto it = ready_accounts_.begin(); it != ready_accounts_.end(); it++) {
     if (it->account == account) {
       ready_accounts_.erase(it);
@@ -841,7 +1324,7 @@ Scheduler::account_excluded_from_block(const ContractAddress &account) const
   return pending_nomination_.accounts_excluded_from_block.contains(account);
 }
 
-void
+x23::Async<void>
 Scheduler::refresh_accounts_excluded_from_block()
 {
   // We do not check that [pending_nomination.block_id] is nonzero here because
@@ -850,13 +1333,13 @@ Scheduler::refresh_accounts_excluded_from_block()
   for (const ContractAddress &account :
        pending_nomination_.accounts_excluded_from_block) {
     erase_ready_account(account);
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
 }
 
-void
+x23::Async<void>
 Scheduler::refresh_ready_accounts(
     const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts)
 {
@@ -869,13 +1352,13 @@ Scheduler::refresh_ready_accounts(
     if (account_excluded_from_block(account)) {
       continue;
     }
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       ready_accounts_.insert(get_account_key(account));
     }
   }
 }
 
-bool
+x23::Async<bool>
 Scheduler::account_is_ready(const ContractAddress &account,
                             bool remove_expired_txs)
 {
@@ -890,16 +1373,21 @@ Scheduler::account_is_ready(const ContractAddress &account,
   if (remove_expired_txs) {
     for (auto it = txs.begin(); it != lower_it; it++) {
       const TransactionHash &tx_hash = it->first.tx_hash;
-      CHECK_EQ(txs_.remove(tx_hash), 1UL);
+      co_await record_transaction_outcome(
+          tx_hash, SchedulerTransactionStatus::SchedulerTransactionDropped,
+          current_block(),
+          SchedulerTransactionErrorSource::SchedulerTransactionErrorScheduler,
+          static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+      erase_cached_tx(tx_hash);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
     size_ -= to_remove;
     txs.erase(txs.begin(), lower_it);
   }
-  return ret;
+  co_return ret;
 }
 
-void
+x23::Async<void>
 Scheduler::cycle_accounts_during_schedule_helper(
     const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,
     const TxKey &lower_bound)
@@ -923,14 +1411,15 @@ Scheduler::cycle_accounts_during_schedule_helper(
     }
 
     cycle_if_needed(account, gas_limit);
-    if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+    if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
       CHECK(ready_accounts_.insert(get_account_key(account)).second);
     }
   }
 }
 
-void
+x23::Async<void>
 Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
+                    SignedTransactionHashBatch &signed_tx_hashes,
                     x23::XdrVec<SignedTransaction> &txs)
 {
   size_t num_scheduled = 0;
@@ -951,7 +1440,8 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
   while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
     if (account_it == ready_accounts_.end()) {
       ready_accounts_.clear();
-      cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+      co_await cycle_accounts_during_schedule_helper(removed_accounts,
+                                                     lower_bound);
       removed_accounts.clear();
       account_it = ready_accounts_.begin();
       if (ready_accounts_.empty()) {
@@ -965,12 +1455,12 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
     const AccountKey account_key = *account_it;
     const ContractAddress account = account_key.account;
     auto [account_state, account_lock] = get_account_state(account);
-    HogAge *hog_ages =
-        get_hog_age_from_pending_nomination_create_if_needed(*account_state,
-                                                             account);
+    NativeTokenAge *native_token_ages =
+        get_native_token_age_from_pending_nomination_create_if_needed(
+            *account_state, account);
     std::map<TxKey, std::shared_ptr<TxValue>> &txs_to_schedule =
         account_state->txs;
-    uint128_t hogs_spent_by_account = 0;
+    uint128_t native_tokens_spent_by_account = 0;
     while (num_scheduled < num_txs && size_.load(std::memory_order_relaxed)) {
       auto it = txs_to_schedule.lower_bound(lower_bound);
       if (it != txs_to_schedule.begin()) {
@@ -978,7 +1468,17 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         for (auto it_remove = txs_to_schedule.begin(); it_remove != it;
              it_remove++) {
           const TransactionHash &tx_hash = it_remove->first.tx_hash;
-          CHECK_EQ(txs_.remove(tx_hash), 1UL);
+          co_await record_transaction_outcome(
+              tx_hash,
+              /*status=*/
+              SchedulerTransactionStatus::SchedulerTransactionDropped,
+              current_block(),
+              /*error_source=*/
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              /*error_code=*/
+              static_cast<int32_t>(SchedulerErrorCode::SchedulerErrorExpired));
+          erase_cached_tx(tx_hash);
         }
         size_t to_remove = std::distance(txs_to_schedule.begin(), it);
         size_ -= to_remove;
@@ -991,14 +1491,15 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
       }
       const TransactionHash &tx_hash = it->first.tx_hash;
       SignedTransaction &tx = it->second->tx;
-      const uint128_t hogs_available =
-          from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]);
-      if (tx.tx.invocation.gas_limit <= hogs_available) {
-        hog_ages->num_hogs[kHogAgeGroupToSchedule] =
-            to_xdr(hogs_available - tx.tx.invocation.gas_limit);
-        hogs_spent_by_account += tx.tx.invocation.gas_limit;
+      const uint128_t native_tokens_available = from_xdr(
+          native_token_ages->num_native_tokens[kNativeTokenAgeGroupToSchedule]);
+      if (tx.tx.invocation.gas_limit <= native_tokens_available) {
+        native_token_ages->num_native_tokens[kNativeTokenAgeGroupToSchedule] =
+            to_xdr(native_tokens_available - tx.tx.invocation.gas_limit);
+        native_tokens_spent_by_account += tx.tx.invocation.gas_limit;
 
         tx_hashes.push_back(tx_hash);
+        signed_tx_hashes.push_back(it->second->signed_tx_hash);
         txs.push_back(tx);
 
         // We are deleting [it] here, so do not access [tx_hash] or [tx]
@@ -1008,34 +1509,58 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         size_.fetch_sub(1, std::memory_order_relaxed);
       }
       else {
-        const uint128_t all_hogs_available =
-            hogs_spent_by_account +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled]) +
-            from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived]);
-        if (tx.tx.invocation.gas_limit > all_hogs_available) {
+        const uint128_t all_native_tokens_available =
+            native_tokens_spent_by_account +
+            from_xdr(native_token_ages
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]) +
+            from_xdr(
+                native_token_ages
+                    ->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]) +
+            from_xdr(native_token_ages
+                         ->num_native_tokens[kNativeTokenAgeGroupReceived]);
+        if (tx.tx.invocation.gas_limit > all_native_tokens_available) {
           info("scheduler: discarding tx {} for account {}: gas_limit {} "
-               "exceeds all hogs available {} (to_schedule {}, "
+               "exceeds all native tokens available {} (to_schedule {}, "
                "already_scheduled {}, received {}, spent_this_block {})",
                show_byte_array(tx_hash), show_byte_array(account),
                static_cast<double>(tx.tx.invocation.gas_limit),
-               static_cast<double>(all_hogs_available),
+               static_cast<double>(all_native_tokens_available),
+               static_cast<double>(from_xdr(
+                   native_token_ages
+                       ->num_native_tokens[kNativeTokenAgeGroupToSchedule])),
                static_cast<double>(
-                   from_xdr(hog_ages->num_hogs[kHogAgeGroupToSchedule])),
-               static_cast<double>(
-                   from_xdr(hog_ages->num_hogs[kHogAgeGroupAlreadyScheduled])),
-               static_cast<double>(
-                   from_xdr(hog_ages->num_hogs[kHogAgeGroupReceived])),
-               static_cast<double>(hogs_spent_by_account));
+                   from_xdr(native_token_ages->num_native_tokens
+                                [kNativeTokenAgeGroupAlreadyScheduled])),
+               static_cast<double>(from_xdr(
+                   native_token_ages
+                       ->num_native_tokens[kNativeTokenAgeGroupReceived])),
+               static_cast<double>(native_tokens_spent_by_account));
 
-          // This account does not have enough hogs across all three of its
-          // groups to schedule the tx, so we discard the tx.
-          // We want to discourage accounts from submitting txs that cannot be
-          // executed, so exclude the account from being scheduled for the
-          // remainder of the block. Note that if any txs for the account are
-          // already included in the block, those txs will still be executed.
+          // This account does not have enough native tokens across all three of
+          // its groups to schedule the tx, so we discard the tx. We want to
+          // discourage accounts from submitting txs that cannot be executed, so
+          // exclude the account from being scheduled for the remainder of the
+          // block. Note that if any txs for the account are already included in
+          // the block, those txs will still be executed.
           //
           // TODO(jhumphri): Do we want to penalize the account more severely?
+          // -----
+          // Keep the account locked until the cache entry is gone, so a
+          // concurrent resubmit cannot restore only the runqueue entry. The
+          // runqueue's shared_ptr keeps [tx] alive while the cache entry is
+          // removed.
+          co_await record_transaction_outcome(
+              tx_hash,
+              /*status=*/
+              SchedulerTransactionStatus::SchedulerTransactionDropped,
+              current_block(),
+              /*error_source=*/
+              SchedulerTransactionErrorSource::
+                  SchedulerTransactionErrorScheduler,
+              /*error_code=*/
+              static_cast<int32_t>(
+                  SchedulerErrorCode::SchedulerErrorInsufficientNativeTokens));
+          erase_cached_tx(tx_hash);
           it = txs_to_schedule.erase(it);
           size_.fetch_sub(1, std::memory_order_relaxed);
 
@@ -1052,9 +1577,9 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
           }
         }
         else {
-          // The account has enough hogs in total to run this tx, but the
-          // account is going to have to be cycled once or twice. For now, we
-          // just skip over this account and revisit it once it has been
+          // The account has enough native tokens in total to run this tx, but
+          // the account is going to have to be cycled once or twice. For now,
+          // we just skip over this account and revisit it once it has been
           // cycled.
           CHECK(!accounts_excluded_from_block.contains(account));
           CHECK(removed_accounts.insert(account).second);
@@ -1063,22 +1588,22 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
         break;
       }
     }
-    if (hogs_spent_by_account) {
-      // Credit the hogs back to the [kHogAgeGroupAlreadyScheduled] group for
-      // this account.
-      CHECK(try_move_hogs_to_already_scheduled_group(*hog_ages,
-                                                     hogs_spent_by_account,
-                                                     current_block() + 1));
+    if (native_tokens_spent_by_account) {
+      // Credit the native tokens back to the
+      // [kNativeTokenAgeGroupAlreadyScheduled] group for this account.
+      CHECK(try_move_native_tokens_to_already_scheduled_group(
+          *native_token_ages, native_tokens_spent_by_account,
+          current_block() + 1));
     }
   }
   // Add [removed_accounts] back to [ready_accounts_] for each account that is
   // still ready.
   ready_accounts_.erase(ready_accounts_.begin(), account_it);
-  cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
+  co_await cycle_accounts_during_schedule_helper(removed_accounts, lower_bound);
 
   if (!pending_nomination_.block_id) {
     for (const ContractAddress &account : accounts_excluded_from_block) {
-      if (account_is_ready(account, /*remove_expired_txs=*/false)) {
+      if (co_await account_is_ready(account, /*remove_expired_txs=*/false)) {
         CHECK(ready_accounts_.insert(get_account_key(account)).second);
       }
     }
@@ -1093,7 +1618,6 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   co_await default_coropoll().pool_.bg();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
-  accounts.clear();
 
   ElapsedTimer timer;
 
@@ -1103,8 +1627,13 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
 
-  x23::CoroGuard cg;
+  InstrumentedCoroGuard cg(
+      MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
+      MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
   co_await cg(global_lock_);
+  // [accounts] is static and therefore used by multiple threads, so we wait to
+  // call [clear()] on it until after we have acquired the lock.
+  accounts.clear();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
@@ -1124,12 +1653,17 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // the same txs to the mempool again, resulting in the txs being
             // added back onto the runqueue. Thus, we need to check if the txs
             // are on the runqueue and remove them. We cannot skip this step and
-            // just remove txs from [txs_], even if the *nominated* block is
+            // just remove txs from the cache, even if the *nominated* block is
             // being committed rather than a *validated* block.
-            auto [tx_value_ptr, txs_lock] = scheduler.txs_.find(tx_hash);
-            CHECK_PTR(tx_value_ptr);
+            std::shared_ptr<TxValue> tx_value;
+            {
+              const auto [tx_value_ptr, txs_lock] =
+                  scheduler.txs_by_body_.find(tx_hash);
+              CHECK_PTR(tx_value_ptr);
+              tx_value = *tx_value_ptr;
+            }
 
-            const SignedTransaction &tx = (*tx_value_ptr)->tx;
+            const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
                                    tx.tx.uniquifier.block_expiry_height,
@@ -1147,11 +1681,10 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              // Keep the account locked until the cache entry is gone, so a
+              // concurrent resubmit cannot restore only the runqueue entry.
+              scheduler.erase_cached_tx(tx_hash);
             }
-
-            // Careful! We remove the tx from [txs_] at the bottom here because
-            // once we remove it, the references above become invalidated.
-            CHECK_EQ(scheduler.txs_.remove(tx_hash, txs_lock), 1UL);
           }
 
           co_return num_removed_from_runqueue;
@@ -1166,17 +1699,36 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
     x23::Async<size_t> &handle = handles[i];
     total_removed_from_runqueue += co_await handle;
   }
-  accounts.for_each([this](const std::pair<ContractAddress, char> &kv) {
-    const ContractAddress &account = kv.first;
-    if (!account_is_ready(account, /*remove_expired_txs=*/true)) {
-      CHECK_EQ(ready_accounts_.erase(get_account_key(account)), 1UL);
+
+  // We need to [co_await] for each account in [accounts]. However,
+  // [accounts.for_each()] does not support asynchronous callbacks, so we need
+  // to add the accounts to [affected_accounts] and then do the [co_await] in a
+  // normal for loop below.
+  x23::Vec<ContractAddress> affected_accounts;
+  accounts.for_each(
+      [&affected_accounts](const std::pair<ContractAddress, char> &kv) {
+        affected_accounts.push_back(kv.first);
+      });
+  for (const ContractAddress &account : affected_accounts) {
+    if (!co_await account_is_ready(account, /*remove_expired_txs=*/true)) {
+      // We do not CHECK that the account is removed from [ready_accounts_]
+      // because the account may not be currently in [ready_accounts_]. For
+      // example, if a tx is submitted that the contract does not have enough
+      // native tokens for, the contract is removed from [ready_accounts_]. If
+      // other txs for that contract are committed in this block (maybe the
+      // contract had enough native tokens for some of the txs but not all of
+      // them), then the line below will not remove [account] from
+      // [ready_accounts_] because the contract is already not in
+      // [ready_accounts_].
+      ready_accounts_.erase(get_account_key(account));
     }
-  });
+  }
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
   MempoolMetrics::instance().last_scheduler_remove_duration_ms.record(
       mempool_duration_ms(c));
+  MempoolMetrics::instance().scheduler_remove_duration_seconds.record(c);
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }

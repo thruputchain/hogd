@@ -19,8 +19,10 @@ EventCursorPayload
 make_payload(IterationOrder order, BlockHeight block, std::uint8_t tx_fill,
              std::uint32_t seq)
 {
-  EventCursorPayload p;
+  EventCursorPayload p{};
   p.schema_version = cursor::kCursorVersion;
+  p.method = HistoryCursorMethod::CursorEvents;
+  std::ranges::fill(p.query_hash, 0xCD);
   p.order = order;
   p.block_height = block;
   std::ranges::fill(p.tx_hash, tx_fill);
@@ -85,6 +87,43 @@ TEST(EventCursorTest, VersionMismatchRejected)
   encoded[2] = static_cast<char>(0xFF);
   encoded[3] = static_cast<char>(0xFF);
   EXPECT_FALSE(cursor::decode(encoded).has_value());
+}
+
+TEST(EventCursorTest, ActualVersionTwoCursorRejected)
+{
+  // v2 XDR: version(4), order(4), height(8), tx hash(32), sequence(4),
+  // max height(8). This is the complete old layout, without v3's identity.
+  std::string old_cursor(60, '\0');
+  old_cursor[3] = 2;
+  old_cursor[15] = 10;
+  std::fill(old_cursor.begin() + 16, old_cursor.begin() + 48, '\x01');
+  old_cursor[59] = 10;
+  EXPECT_FALSE(cursor::decode(old_cursor));
+}
+
+TEST(EventCursorTest,
+     OldVersionUnknownMethodOrderAndTransactionSequenceRejected)
+{
+  auto payload =
+      make_payload(IterationOrder::IterationOrderAscending, 10, 0x01, 0);
+  auto old_version = cursor::encode(payload);
+  old_version[3] = 2;
+  EXPECT_FALSE(cursor::decode(old_version));
+  payload.method = static_cast<HistoryCursorMethod>(99);
+  EXPECT_FALSE(cursor::decode(cursor::encode(payload)));
+  payload.method = HistoryCursorMethod::CursorEvents;
+  payload.order = static_cast<IterationOrder>(99);
+  EXPECT_FALSE(cursor::decode(cursor::encode(payload)));
+  payload.order = IterationOrder::IterationOrderAscending;
+  payload.sequence_number = 1;
+  for (const auto method : {HistoryCursorMethod::CursorTransactions,
+                            HistoryCursorMethod::CursorAddressTransactions}) {
+    payload.method = method;
+    EXPECT_FALSE(cursor::decode(cursor::encode(payload)));
+    payload.sequence_number = 0;
+    EXPECT_TRUE(cursor::decode(cursor::encode(payload)));
+    payload.sequence_number = 1;
+  }
 }
 
 TEST(EventCursorTest, NegativeOrInconsistentHeightsRejected)

@@ -34,7 +34,7 @@ public:
 
   ExecutorMempoolRpc() = default;
 
-  void init(IntroExecResult &&exec_result, size_t n_exec_threads)
+  void init(IntroExecResult &&exec_result)
   {
     if (exec_result.exec_id >= std::numeric_limits<uint16_t>::max())
         [[unlikely]] {
@@ -49,9 +49,7 @@ public:
         EventServerProxy::make_from_exec_result(exec_result.event));
     executor_states_ =
         std::make_unique<ExecutorStateManager>(std::move(db_proxy),
-                                               std::move(event_server_proxy),
-                                               n_exec_threads);
-    info("ExecutorMempoolRpc: initialized with {} threads", n_exec_threads);
+                                               std::move(event_server_proxy));
     ready_flag_ = true;
   }
 
@@ -122,12 +120,12 @@ private:
   // value means there is no usable context (not initialized, not found, or a
   // mode mismatch); an error means a late event-server error surfaced while
   // releasing during a mode-mismatch cleanup and must be propagated.
-  x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
+  [[nodiscard]] x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
   try_get_context(BlockID block_id, ExecutionMode mode);
   // Releases the caller's reference. If this was the last reference, runs the
   // deferred gc and returns its result so a late event-server error can be
   // folded into the in-flight transaction's result.
-  x23::MaybeAsync<SystemStatus<void>>
+  [[nodiscard]] x23::MaybeAsync<SystemStatus<void>>
   release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
   struct TxIDAllocator {

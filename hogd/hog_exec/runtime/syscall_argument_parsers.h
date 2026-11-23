@@ -101,10 +101,23 @@ check_memory_range(uint64_t memory_len, uint64_t base, uint64_t len)
   return (base_end <= memory_len);
 }
 
+// Reconstruct a by-reference syscall input by copying its bytes out of
+// (possibly unaligned) guest memory. This is the sole primitive the const
+// check_user_argument paths below use to decode an input aggregate, and it
+// copies exactly sizeof(T) bytes -- so the decode is host-layout-independent
+// only when T has no padding. Padding bytes make sizeof(T), and therefore the
+// number of bytes the ABI range-checks and reads, depend on the host's chosen
+// aggregate layout, so the same artifact and guest memory could be accepted or
+// rejected differently across conforming hosts (issue #3854). Name any gap as a
+// `reserved` field (see CopyableInvokeInputs in invoke_args.x); WritableOutput
+// enforces the symmetric no-padding property on syscall outputs.
 template<typename T>
 T
 read_unaligned(const void *ptr)
 {
+  static_assert(std::has_unique_object_representations_v<T>,
+                "syscall input types must not have padding bytes: name the "
+                "gaps as reserved fields (see invoke_args.x / ffi_types.h)");
   T value{};
   std::memcpy(&value, ptr, sizeof(T));
   return value;
@@ -116,7 +129,7 @@ WritableOutput<T>
 check_user_argument(AliasGuard &guard, std::span<std::byte> contract_memory,
                     uint64_t user_offset)
 {
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_output(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return WritableOutput<T>();
   }
@@ -132,7 +145,7 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
     // nullptr
     return WritableOutput<T>();
   }
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_output(user_offset, sizeof(T));
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
   auto *ptr = reinterpret_cast<void *>(user_offset);
   return WritableOutput<T>(ptr);
@@ -145,7 +158,7 @@ check_user_argument(AliasGuard &guard,
                     std::span<const std::byte> contract_memory,
                     uint64_t user_offset)
 {
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_input(user_offset, sizeof(T));
   if (!check_memory_range(contract_memory.size(), user_offset, sizeof(T))) {
     return std::nullopt;
   }
@@ -163,19 +176,33 @@ check_user_argument_mock(AliasGuard &guard, uint64_t user_offset)
     std::optional<T> result = std::nullopt;
     return result;
   }
-  guard.check_and_register(user_offset, sizeof(T));
+  guard.check_and_register_input(user_offset, sizeof(T));
   // NOLINTBEGIN(performance-no-int-to-ptr)
   return read_unaligned<std::remove_cvref_t<T>>(
       reinterpret_cast<void *>(user_offset));
   // NOLINTEND(performance-no-int-to-ptr)
 }
 
+// A span the syscall writes into.
 inline std::optional<std::span<std::byte>>
-check_user_span_argument(AliasGuard &guard,
-                         std::span<std::byte> contract_memory,
-                         uint64_t user_offset, uint64_t user_len)
+check_user_output_span_argument(AliasGuard &guard,
+                                std::span<std::byte> contract_memory,
+                                uint64_t user_offset, uint64_t user_len)
 {
-  guard.check_and_register(user_offset, user_len);
+  guard.check_and_register_output(user_offset, user_len);
+  if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
+    return std::nullopt;
+  }
+  return contract_memory.subspan(user_offset, user_len);
+}
+
+// A span the syscall only reads.
+inline std::optional<std::span<const std::byte>>
+check_user_input_span_argument(AliasGuard &guard,
+                               std::span<const std::byte> contract_memory,
+                               uint64_t user_offset, uint64_t user_len)
+{
+  guard.check_and_register_input(user_offset, user_len);
   if (!check_memory_range(contract_memory.size(), user_offset, user_len)) {
     return std::nullopt;
   }

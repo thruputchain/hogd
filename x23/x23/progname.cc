@@ -5,6 +5,7 @@
 #include <ranges>
 #include <string>
 #include <string_view>
+#include <system_error>
 
 #include <unistd.h>
 
@@ -40,7 +41,8 @@ find_exe(std::filesystem::path prog)
     if (dir.empty())
       dir = ".";
     fs::path exe = dir / prog;
-    if (::access(exe.c_str(), X_OK) == 0)
+    std::error_code ec;
+    if (::access(exe.c_str(), X_OK) == 0 && fs::is_regular_file(exe, ec))
       return exe;
   }
   return prog; // not found

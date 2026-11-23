@@ -1,4 +1,4 @@
-use sdk::*;
+use thruput_sdk::*;
 
 /// A contract-shaped faucet user for the bootstrap-loop scenario: a pubkey
 /// account funds itself from the airdrop faucet, deploys this contract
@@ -9,5 +9,5 @@ use sdk::*;
 pub trait FaucetCaller {
     /// Claim `amount` from the airdrop faucet at `faucet` (normally the
     /// genesis-root address). The minted tokens credit this contract.
-    fn claim_from(faucet: &ContractAddress, amount: u128);
+    fn claim_from(faucet: &ContractAddress, amount: i128);
 }

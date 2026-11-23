@@ -14,7 +14,7 @@ struct RuntimeManifestPointer {
   std::string readiness_payload;
 };
 
-std::string format_hex_hash(SHA256Hash const &hash);
+std::string format_manifest_hash(SHA256Hash const &hash);
 
 RuntimeManifestPointer
 write_hog_devnode_runtime_manifest(HogDevnodeNode const &node,

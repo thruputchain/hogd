@@ -14,10 +14,18 @@ namespace hogd
 // schema lives here, NOT in protocol/, precisely to keep that
 // invariant.
 //
-// Bump `version` any time fields change shape; consumers must
+// Bump `schema_version` any time fields change shape; consumers must
 // reject cursors with an unknown version.
+enum HistoryCursorMethod {
+  CursorEvents = 0,
+  CursorTransactions = 1,
+  CursorAddressTransactions = 2
+};
+
 struct EventCursorPayload {
   unsigned int schema_version;
+  HistoryCursorMethod method;
+  SHA256Hash query_hash;
   IterationOrder order;
   BlockHeight block_height;
   SHA256Hash tx_hash;

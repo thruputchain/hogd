@@ -1,7 +1,6 @@
 #include <gtest/gtest.h>
 
 #include <cassert>
-#include <cstdint>
 #include <memory>
 #include <unordered_map>
 #include <utility>
@@ -9,23 +8,27 @@
 #include "exec_result.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "model_checker/async.h"
 #include "model_checker/work_queue.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
+#include "syscall.hh"
+#include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -54,25 +57,27 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
         0,
         [](NativeSyscallContext &ctx, int64_t set_amount,
-           int64_t add_amount) -> InvokeStatus<void> {
-          auto r = ctx.handler().set_nnint(kKey, set_amount, add_amount,
-                                           std::to_underlying(
-                                               StorageDeltaFlags::None));
-          if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+           int64_t add_amount) -> x23::Async<InvokeStatus<void>> {
+          const int128_t set_value = set_amount;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_value, int128_t{add_amount});
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     // reset contract state
     builder.add<NativeContractBuilder::kDefaultSerializationFormat>(
-        1, [](NativeSyscallContext &ctx) -> InvokeStatus<void> {
-          auto r = ctx.handler().set_nnint(kKey, 35, 0,
-                                           std::to_underlying(
-                                               StorageDeltaFlags::None));
-          if (!r.has_value() || !r.value().has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          const int128_t set_value = 35;
+          auto r = co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+              kKey, &set_value, int128_t{0});
+          if (!r.has_value() ||
+              r.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
 
     auto native_contract = builder.build();
@@ -108,15 +113,15 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                     .invocation =
                         Invocation{.invoked_address = ContractAddress{},
                                    .entrypoint = entrypoint_from_method_id(1),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}}}},
         *context);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     if (!res.is_root_success()) {
       ADD_FAILURE() << "root invoke for reset transaction failed";
       return false;
     }
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     if (commit_res != ExecResult::ExecResultOK) {
       ADD_FAILURE() << "try_commit_transaction error for reset transaction";
       return false;
@@ -154,14 +159,14 @@ TEST_F(InterleavingTest, DISABLED_NNIntAddInterleavings)
                                 Invocation{.invoked_address = ContractAddress{},
                                            .entrypoint =
                                                entrypoint_from_method_id(0),
-                                           .gas_limit = UINT64_MAX,
+                                           .gas_limit = kDefaultMaxTxGas,
                                            .calldata = *calldata}}},
                 *context);
-            auto res = handler.root_invoke();
+            auto res = handler.root_invoke()();
             if (!res.is_root_success()) {
               panic("root invoke failed");
             }
-            auto commit_res = handler.try_commit_transaction();
+            auto commit_res = handler.try_commit_transaction()();
             if (commit_res != ExecResult::ExecResultOK &&
                 commit_res != ExecResult::ExecResultTxNonDeterministicError) {
               panic("try_commit_transaction error");

@@ -42,8 +42,9 @@ public:
   void add(x23::BufView element) { apply(element, false); }
   void remove(x23::BufView element) { apply(element, true); }
 
-  // Piecewise overloads: hash [key + type_byte + value] without requiring a
-  // contiguous buffer.
+  // Piecewise overloads: hash the element [key_len + key + type_byte + value]
+  // (the key length frames the key/value boundary; see apply_pieces) without
+  // requiring a contiguous buffer.
   void add(x23::BufView key, uint8_t type, x23::BufView value)
   {
     apply_pieces(key, type, value, false);
@@ -101,6 +102,19 @@ private:
   {
     blake3_hasher hasher;
     blake3_hasher_init(&hasher);
+    // Frame the element with the key length so key || type || value is an
+    // injective encoding. Without it the key/value boundary is ambiguous: a
+    // data-directory attacker could shift an on-disk ItemHeader's
+    // key_len/value_len boundary (the RAMDB WAL CRC is unkeyed and
+    // recomputable), leave key || type || value unchanged, and so preserve this
+    // consensus hash while installing a row under a non-canonical key that a
+    // later canonical-key access misses -- diverging the StorageLongHash
+    // (#3912). A fixed-width length prefix makes the boundary unambiguous, so
+    // any such shift changes the hash. Native little-endian is asserted above,
+    // so the integer's object representation is already the canonical byte
+    // order.
+    const uint64_t key_len = key.size();
+    blake3_hasher_update(&hasher, &key_len, sizeof(key_len));
     blake3_hasher_update(&hasher, key.data(), key.size());
     blake3_hasher_update(&hasher, &type, 1);
     blake3_hasher_update(&hasher, value.data(), value.size());

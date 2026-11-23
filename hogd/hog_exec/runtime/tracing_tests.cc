@@ -10,23 +10,25 @@
 #include <utility>
 #include <vector>
 
+#include "auth_token.hh"
 #include "built_contracts/contract_loader.h"
 #include "built_contracts/fibonacci_call.h"
 #include "built_contracts/no_syscall_test.h"
 #include "built_contracts/sha256_wrapper.h"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -37,6 +39,8 @@
 #include "transaction.hh"
 #include "transaction_trace.hh"
 #include "types.hh"
+#include "x23/async.h"
+#include "x23/serialize.h"
 #include "x23/vec.h"
 
 namespace hogd {
@@ -47,8 +51,7 @@ class TracingTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   TracingTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -78,9 +81,9 @@ TEST_F(TracingTest, Sha256Repeated)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -143,12 +146,12 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
   {
     auto handler = make_new_system_call_handler(
         Transaction{.invocation = caller_client.make_invocation<u8"initialize">(
-                        UINT64_MAX, fibonacci_addr),
+                        kDefaultMaxTxGas, fibonacci_addr),
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
-    auto commit_res = handler.try_commit_transaction();
+    auto commit_res = handler.try_commit_transaction()();
     ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
     advance_block();
   }
@@ -162,9 +165,9 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -208,10 +211,10 @@ TEST_F(TracingTest, FibonacciNestedInvocation)
                 .body.syscall_number(),
             SyscallNo::kReturn);
 
-  // Gas accounting: child frame gas_limit == parent gas at invoke point
-  // (some contracts might set <, but this contract delegates the full amount)
+  // This contract delegates its full remaining budget, after the parent
+  // reserves the invoke crossing charge.
   ASSERT_EQ(child_trace.invocation.gas_limit,
-            invoke_syscall->gas_remaining_at_start);
+            invoke_syscall->gas_remaining_at_start - kSyscallBaseCost);
 }
 
 TEST_F(TracingTest, NoSyscallTest)
@@ -231,9 +234,9 @@ TEST_F(TracingTest, NoSyscallTest)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -269,9 +272,9 @@ TEST_F(TracingTest, NoSyscallStatsDoNotCorruptCounters)
                   .uniquifier = make_new_uniquifier()},
       *runtime_context_);
   handler.enable_transaction_stats();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto *stats = handler.get_transaction_stats();
@@ -289,25 +292,26 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
   auto target_addr = make_contract_address(1); // No deployment
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    Calldata calldata{};
-    CopyableInvokeInputs inputs{
-        .entrypoint_id = 0,
-        .gas_limit = UINT64_MAX,
-        .flags = 0,
-    };
-    auto r = ctx.syscall<SyscallNo::kInvoke>(target_addr,
-                                             std::as_bytes(std::span(calldata)),
-                                             std::span<uint32_t>{}, inputs,
-                                             CopyableInvokeOutputs{});
+  fns.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        Calldata calldata{};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            target_addr, std::as_bytes(std::span(calldata)),
+            std::span<uint32_t>{}, inputs, CopyableInvokeOutputs{});
 
-    if (!r.has_value() ||
-        r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-      ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    return {};
-  });
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -324,14 +328,14 @@ TEST_F(TracingTest, NestedInvokeDeploymentNotFound)
       Transaction{.invocation =
                       Invocation{.invoked_address = contract_0_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -369,17 +373,18 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
 
   // Callee contract: method 0 returns a deterministic error
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_callee;
-  fns_callee.emplace(
-      0, [](NativeSyscallContext & /*unused*/) noexcept -> InvokeStatus<void> {
-        return InvokeError{InvokeErrorCode::Deterministic};
-      });
+  fns_callee.emplace(0,
+                     [](NativeSyscallContext & /*unused*/)
+                         -> x23::Async<InvokeStatus<void>> {
+                       co_return InvokeError{InvokeErrorCode::Deterministic};
+                     });
   auto callee_contract =
       std::make_unique<NativeContract>(std::move(fns_callee));
 
   // Caller contract: method 0 invokes callee method 0
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
   fns_caller.emplace(
-      0, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         Calldata calldata{};
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
@@ -387,19 +392,17 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
             .flags = 0,
         };
         CopyableInvokeOutputs outputs{};
-        auto r =
-            ctx.syscall<SyscallNo::kInvoke>(callee_addr,
-                                            std::as_bytes(std::span(calldata)),
-                                            std::span<uint32_t>{}, inputs,
-                                            outputs);
+        auto r = co_await ctx.syscall<SyscallNo::kInvoke>(
+            callee_addr, std::as_bytes(std::span(calldata)),
+            std::span<uint32_t>{}, inputs, outputs);
 
         if (!r.has_value() ||
             r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
             outputs.frame_status != InvocationFrameStatusCode::Fault) {
           ADD_FAILURE() << "Expected child frame to fault";
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -423,14 +426,14 @@ TEST_F(TracingTest, NestedInvokeDeterministicError)
       Transaction{.invocation =
                       Invocation{.invoked_address = caller_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
@@ -480,42 +483,48 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_writer;
     fns_writer.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
           auto key = make_storage_key("test");
-          auto [res, _gas] = syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(calldata)),
-              std::to_underlying(StorageDeltaFlags::ExclusiveLock));
+          auto res = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(calldata)));
           if (!res.has_value() ||
               res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Failed to set bytestring";
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          auto flags_res = co_await ctx.syscall<SyscallNo::kSetStorageFlags>(
+              key, StorageDeltaFlagSet{
+                       std::to_underlying(StorageDeltaFlags::ExclusiveLock)});
+          if (!flags_res.has_value() ||
+              flags_res.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            ADD_FAILURE() << "Failed to set storage flags";
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
         });
     auto contract_writer =
         std::make_unique<NativeContract>(std::move(fns_writer));
 
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_caller;
-    fns_caller.emplace(
-        0,
-        [addr_writer](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          Calldata args = {'t', 'e', 's', 't'};
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = 0,
-              .gas_limit = UINT64_MAX,
-              .flags = std::to_underlying(InvokeFlag::TryInvoke),
-          };
-          [[maybe_unused]] auto r =
-              ctx.syscall<SyscallNo::kInvoke>(addr_writer,
-                                              std::as_bytes(std::span(args)),
-                                              std::span<uint32_t>{}, inputs,
-                                              CopyableInvokeOutputs{});
+    fns_caller.emplace(0,
+                       [addr_writer](NativeSyscallContext &ctx)
+                           -> x23::Async<InvokeStatus<void>> {
+                         Calldata args = {'t', 'e', 's', 't'};
+                         CopyableInvokeInputs inputs{
+                             .entrypoint_id = 0,
+                             .gas_limit = UINT64_MAX,
+                             .flags = std::to_underlying(InvokeFlag::TryInvoke),
+                         };
+                         [[maybe_unused]] auto r =
+                             co_await ctx.syscall<SyscallNo::kInvoke>(
+                                 addr_writer, std::as_bytes(std::span(args)),
+                                 std::span<uint32_t>{}, inputs,
+                                 CopyableInvokeOutputs{});
 
-          return {};
-        });
+                         co_return InvokeStatus<void>{};
+                       });
     auto contract_caller =
         std::make_unique<NativeContract>(std::move(fns_caller));
 
@@ -540,12 +549,12 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
       Transaction{.invocation =
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *context);
 
-  auto res1 = handler1.root_invoke();
+  auto res1 = handler1.root_invoke()();
   ASSERT_TRUE(res1.is_root_success());
   // Don't commit — keeps the exclusive lock held
 
@@ -554,13 +563,13 @@ TEST_F(TracingTest, TryInvokeLockAcquireFailure)
       Transaction{.invocation =
                       Invocation{.invoked_address = addr_caller,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *context);
   handler2.enable_tracing();
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
   auto const *trace = handler2.get_trace();
@@ -611,19 +620,21 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
   auto contract_addr = make_contract_address(0);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    StorageKeyContractData key{};
-    std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
-    auto r = ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
-        key, std::span<const std::byte>(oversized));
-    if (!r.has_value() ||
-        r.value() != SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-      ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput for "
-                       "oversized RCQ entry";
-      return InvokeError{InvokeErrorCode::Deterministic};
-    }
-    return {};
-  });
+  fns.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        StorageKeyContractData key{};
+        std::array<std::byte, kQueueEntryMaxLen + 1> oversized{};
+        auto r = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+            key, std::span<const std::byte>(oversized));
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          ADD_FAILURE() << "Expected kSyscallErrorCodeInvalidSyscallInput for "
+                           "oversized RCQ entry";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract = std::make_unique<NativeContract>(std::move(fns));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -640,12 +651,12 @@ TEST_F(TracingTest, RcqInsertOversizedEntryWithTracing)
       Transaction{.invocation =
                       Invocation{.invoked_address = contract_addr,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 }
 
@@ -661,15 +672,14 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // Child: return a 9-byte buffer to its parent.
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         std::array<std::byte, 9> ret_buf{};
         std::memcpy(ret_buf.data(), "RETURNED!", 9);
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{ret_buf},
-                                            false,
-                                            std::span<const std::byte>{});
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{ret_buf}, false,
+            std::span<const std::byte>{});
         EXPECT_FALSE(ret.has_value()); // Return yields a non-recoverable status
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
 
@@ -679,33 +689,30 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   fns_caller.emplace(
       0,
       [kChildAddress](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         CopyableInvokeInputs inputs{
             .entrypoint_id = 0,
             .gas_limit = UINT64_MAX,
             .flags = 0,
         };
         CopyableInvokeOutputs outputs{};
-        auto invoke_res =
-            ctx.syscall<SyscallNo::kInvoke>(kChildAddress,
-                                            std::span<const std::byte>{},
-                                            std::span<uint32_t const>{}, inputs,
-                                            outputs);
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{}, inputs, outputs);
         EXPECT_TRUE(invoke_res.has_value());
         EXPECT_EQ(invoke_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
 
         RuntimeMemoryLength return_written_len = 0;
-        RuntimeMemoryLength ids_written_len = 0;
-        auto get_res =
-            ctx.syscall<SyscallNo::kGetReturnedBuffer>(std::span<std::byte>{},
-                                                       return_written_len,
-                                                       std::span<std::byte>{},
-                                                       ids_written_len);
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
+        auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::span<std::byte>{}, return_written_len,
+            returned_auth_token_start, returned_auth_token_count);
         EXPECT_TRUE(get_res.has_value());
         EXPECT_EQ(get_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
         // Full length reported even though the contract's buffer was empty.
         EXPECT_EQ(return_written_len, 9U);
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto caller_contract =
       std::make_unique<NativeContract>(std::move(fns_caller));
@@ -731,14 +738,14 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
       Transaction{.invocation =
                       Invocation{.invoked_address = kCallerAddress,
                                  .entrypoint = entrypoint_from_method_id(0),
-                                 .gas_limit = UINT64_MAX,
+                                 .gas_limit = kDefaultMaxTxGas,
                                  .calldata = {}},
                   .uniquifier = make_new_uniquifier()},
       *runtime_context);
   handler.enable_tracing();
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  ASSERT_EQ(handler.try_commit_transaction(), ExecResult::ExecResultOK);
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 
   auto const *trace = handler.get_trace();
   ASSERT_NE(trace, nullptr);
@@ -761,6 +768,144 @@ TEST_F(TracingTest, GetReturnedBufferTracesFullBufferDespiteShortOutput)
   // output buffer was empty (old behavior recorded an empty buffer here).
   ASSERT_EQ(traced_buffer.size(), 9U);
   EXPECT_EQ(std::memcmp(traced_buffer.data(), "RETURNED!", 9), 0);
+}
+
+// The trace records the auth token ranges GetCalldata and GetReturnedBuffer
+// report, not just their buffers. The caller mints ids 0..2, keeps 0 and
+// forwards 1 and 2, so the child sees a count of 2; the child returns both,
+// and they join the caller under its next ids, 3..4.
+TEST_F(TracingTest, AuthTokenRangesAreTraced)
+{
+  constexpr ContractAddress kCallerAddress = make_contract_address(0);
+  constexpr ContractAddress kChildAddress = make_contract_address(1);
+
+  // Child: read the forwarded token count, then return both tokens.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
+  fns_child.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        std::array<std::byte, 1> calldata_buf{};
+        RuntimeMemoryLength written_len = 0;
+        uint32_t auth_token_count = 0;
+        auto get_res = co_await ctx.syscall<SyscallNo::kGetCalldata>(
+            std::span<std::byte>{calldata_buf}, written_len, auth_token_count);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(auth_token_count, 2U);
+
+        std::array<uint32_t, 2> returned_ids{0, 1};
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, false,
+            std::as_bytes(std::span<const uint32_t>{returned_ids}));
+        EXPECT_FALSE(ret.has_value()); // Return yields a non-recoverable status
+        co_return InvokeStatus<void>{};
+      });
+  auto child_contract = std::make_unique<NativeContract>(std::move(fns_child));
+
+  // Caller: mint three tokens, forward the last two, read the returned range.
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_caller;
+  fns_caller.emplace(
+      0,
+      [kChildAddress](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        AuthTokenNode node{.consumer_address = kChildAddress,
+                           .payload = x23::serialize(42U),
+                           .child_nodes = {}};
+        auto serialized = x23::serialize(node);
+        for (uint32_t expected_id = 0; expected_id < 3; ++expected_id) {
+          uint32_t token_id = 0;
+          auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              BlockHeight{1000},
+              std::span<const std::byte>{reinterpret_cast<const std::byte *>(
+                                             serialized.data()),
+                                         serialized.size()},
+              token_id);
+          EXPECT_TRUE(mint_res.has_value());
+          EXPECT_EQ(token_id, expected_id);
+        }
+
+        std::array<uint32_t, 2> forwarded{1, 2};
+        CopyableInvokeInputs inputs{
+            .entrypoint_id = 0,
+            .gas_limit = UINT64_MAX,
+            .flags = 0,
+        };
+        CopyableInvokeOutputs outputs{};
+        auto invoke_res = co_await ctx.syscall<SyscallNo::kInvoke>(
+            kChildAddress, std::span<const std::byte>{},
+            std::span<uint32_t const>{forwarded}, inputs, outputs);
+        EXPECT_TRUE(invoke_res.has_value());
+        EXPECT_EQ(outputs.returned_auth_token_count, 2U);
+
+        RuntimeMemoryLength return_written_len = 0;
+        uint32_t returned_auth_token_start = 0;
+        uint32_t returned_auth_token_count = 0;
+        auto get_res = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+            std::span<std::byte>{}, return_written_len,
+            returned_auth_token_start, returned_auth_token_count);
+        EXPECT_TRUE(get_res.has_value());
+        EXPECT_EQ(returned_auth_token_start, 3U);
+        EXPECT_EQ(returned_auth_token_count, 2U);
+        co_return InvokeStatus<void>{};
+      });
+  auto caller_contract =
+      std::make_unique<NativeContract>(std::move(fns_caller));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(caller_contract));
+  contract_map.emplace(1, std::move(child_contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto caller_xdr = make_native_contract(0);
+  write_contract(caller_xdr);
+  write_deployment(kCallerAddress, caller_xdr);
+  auto child_xdr = make_native_contract(1);
+  write_contract(child_xdr);
+  write_deployment(kChildAddress, child_xdr);
+  setup_grant_storage_token(kCallerAddress, replay_cache_cost_charged(1));
+
+  auto handler = make_new_system_call_handler(
+      Transaction{.invocation =
+                      Invocation{.invoked_address = kCallerAddress,
+                                 .entrypoint = entrypoint_from_method_id(0),
+                                 .gas_limit = kDefaultMaxTxGas,
+                                 .calldata = {}},
+                  .uniquifier = make_new_uniquifier()},
+      *runtime_context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  auto const *trace = handler.get_trace();
+  ASSERT_NE(trace, nullptr);
+
+  const SyscallTrace *invoke = nullptr;
+  const SyscallTrace *grb = nullptr;
+  for (auto const &sc : trace->system_calls) {
+    if (sc.body.syscall_number() == SyscallNo::kInvoke) {
+      invoke = &sc;
+    }
+    else if (sc.body.syscall_number() == SyscallNo::kGetReturnedBuffer) {
+      grb = &sc;
+    }
+  }
+  ASSERT_NE(invoke, nullptr);
+  ASSERT_NE(grb, nullptr);
+
+  // The child's GetCalldata records the forwarded count.
+  auto const &invoke_trace = invoke->body.invoke();
+  ASSERT_NE(invoke_trace.outputs, nullptr);
+  ASSERT_NE(invoke_trace.outputs->child_trace, nullptr);
+  auto const &child_calls = invoke_trace.outputs->child_trace->system_calls;
+  ASSERT_FALSE(child_calls.empty());
+  ASSERT_EQ(child_calls[0].body.syscall_number(), SyscallNo::kGetCalldata);
+  auto const &get_calldata_trace = child_calls[0].body.get_calldata();
+  ASSERT_NE(get_calldata_trace.outputs, nullptr);
+  EXPECT_EQ(get_calldata_trace.outputs->auth_token_count, 2U);
+
+  // The caller's GetReturnedBuffer records the range the returns took.
+  auto const &grb_trace = grb->body.get_returned_buffer();
+  ASSERT_NE(grb_trace.outputs, nullptr);
+  EXPECT_EQ(grb_trace.outputs->returned_auth_token_start, 3U);
+  EXPECT_EQ(grb_trace.outputs->returned_auth_token_count, 2U);
 }
 
 namespace {
@@ -875,7 +1020,7 @@ TEST_F(TracingTest, Rv32SyscallAtExactlyExhaustedGasIsOutOfGas)
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     handler.enable_tracing();
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
     ASSERT_TRUE(res.is_root_success());
 
     auto const *trace = handler.get_trace();
@@ -907,7 +1052,7 @@ TEST_F(TracingTest, Rv32SyscallAtExactlyExhaustedGasIsOutOfGas)
                     .uniquifier = make_new_uniquifier()},
         *runtime_context_);
     handler.enable_tracing();
-    auto res = handler.root_invoke();
+    auto res = handler.root_invoke()();
 
     // Whatever else happened, the frame must not have completed: the budget
     // stops exactly at this syscall.

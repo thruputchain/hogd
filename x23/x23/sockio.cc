@@ -188,54 +188,84 @@ stcplisten(std::uint16_t port, int backlog)
   return lfd;
 }
 
+namespace {
+
+std::expected<UniqueFd, Errno>
+try_stcplisten(const sockaddr_storage &bind_addr, int backlog)
+{
+  UniqueFd lfd = cloexec_stream_socket(bind_addr.ss_family);
+  if (!lfd)
+    return Errno{};
+
+  int opt = 1;
+  switch (bind_addr.ss_family) {
+  case AF_INET:
+    break;
+  case AF_INET6:
+    if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
+      return Errno{};
+    break;
+  default:
+    return Errno(EINVAL);
+  }
+  if (get_port(bind_addr) &&
+      setsockopt(lfd.get(), SOL_SOCKET, SO_REUSEADDR, &opt, sizeof(opt)) < 0)
+    return Errno{};
+
+  if (bind(lfd.get(), reinterpret_cast<const sockaddr *>(&bind_addr),
+           sockaddr_len(bind_addr)) < 0 ||
+      listen(lfd.get(), backlog) < 0)
+    return Errno{};
+  return lfd;
+}
+
+} // namespace
+
 UniqueFd
 stcplisten(const sockaddr_storage &bind_addr, int backlog)
 {
-  UniqueFd lfd(socket(bind_addr.ss_family, SOCK_STREAM, 0));
+  std::expected<UniqueFd, Errno> lfd = try_stcplisten(bind_addr, backlog);
   if (!lfd)
-    Errno{}.raise("socket({}, SOCK_STREAM, 0)", bind_addr.ss_family);
-  set_cloexec(lfd);
+    lfd.error().raise("listen on {}", HostPort(bind_addr));
+  return std::move(*lfd);
+}
 
-  switch (bind_addr.ss_family) {
-  case AF_INET:
-    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
-    break;
-  case AF_INET6:
-  {
-    int opt = 1;
-    if (setsockopt(lfd.get(), IPPROTO_IPV6, IPV6_V6ONLY, &opt, sizeof(opt)) < 0)
-      Errno{}.raise("IPV6_V6ONLY");
-    enable_reuseaddr_if_needed(lfd, get_port(bind_addr));
-    break;
-  }
-  default:
-    Errno(EINVAL).raise("Invalid address family {} for TCP listener",
-                        bind_addr.ss_family);
-  }
-
-  if (bind(lfd.get(), reinterpret_cast<const sockaddr *>(&bind_addr),
-           sockaddr_len(bind_addr)) < 0)
-    Errno{}.raise("bind({})", HostPort(bind_addr));
-
-  if (listen(lfd.get(), backlog) < 0)
-    Errno{}.raise("listen");
+std::expected<UniqueFd, Errno>
+try_tcplisten(const sockaddr_storage &bind_addr, int backlog)
+{
+  std::expected<UniqueFd, Errno> lfd = try_stcplisten(bind_addr, backlog);
+  if (lfd)
+    set_nonblock(*lfd);
   return lfd;
 }
 
 UniqueFd
+cloexec_stream_socket(int family)
+{
+#ifdef SOCK_CLOEXEC
+  return UniqueFd(socket(family, SOCK_STREAM | SOCK_CLOEXEC, 0));
+#else  // !SOCK_CLOEXEC
+  UniqueFd fd(socket(family, SOCK_STREAM, 0));
+  if (fd)
+    set_cloexec(fd);
+  return fd;
+#endif // !SOCK_CLOEXEC
+}
+
+std::expected<UniqueFd, Errno>
 tcpconnect(const sockaddr_storage &ss, std::function<void(int)> prep_fd)
 {
   extern bool in_thread_pool();
   x23assert(!in_thread_pool());
 
-  UniqueFd fd(socket(ss.ss_family, SOCK_STREAM, 0));
+  UniqueFd fd(cloexec_stream_socket(ss.ss_family));
   if (!fd)
-    Errno{}.raise("socket({}, SOCK_STREAM, 0)", ss.ss_family);
+    return Errno{};
   if (prep_fd)
     prep_fd(fd.get());
   if (connect(fd.get(), reinterpret_cast<const sockaddr *>(&ss),
               sockaddr_len(ss)) == -1)
-    Errno{}.raise("connect({})", HostPort(ss));
+    return Errno{};
   return fd;
 }
 

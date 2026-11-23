@@ -24,6 +24,7 @@
 #include "hogd/hog_mempool/rpc_from_event.h"
 #include "hogd/hog_mempool/rpc_from_exec.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
+#include "hogd/hog_mempool/shared.h"
 #include "hogd/http/http.h"
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
@@ -48,6 +49,9 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // We finish setting descriptions for all metrics *before* we start the HTTP
   // server. The HTTP server reads the descriptions, so we want to avoid a race.
+  // instance() is otherwise lazy on the first RPC, which would hide
+  // resident_bytes on an idle mempool.
+  MempoolMetrics::instance();
   HttpServer metrics_server;
   add_health_metrics_routes(metrics_server);
   const uint16_t actual_metrics_port =
@@ -56,10 +60,10 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
 
   // Wait for the db shards to connect.
   RpcServer<MempoolDbRpc> db;
-  // HogDb sends one block-wide HogsTransferred RPC with the bulk cap (see
-  // hog_db.cc create_sched_db_client); a committed block's aggregated balance
-  // deltas can exceed x23's 16 MiB default, so the receiver must match it or
-  // the record is rejected at the framing layer before dispatch.
+  // HogDb sends one block-wide NativeTokensTransferred RPC with the bulk cap
+  // (see hog_db.cc create_sched_db_client); a committed block's aggregated
+  // balance deltas can exceed x23's 16 MiB default, so the receiver must match
+  // it or the record is rejected at the framing layer before dispatch.
   db->max_message_size_ = kBulkRpcMaxMessageSize;
   uint16_t actual_db_port =
       db.start_server(make_bind_host_port(bind_ip, db_port));
@@ -147,7 +151,7 @@ print_usage(char *argv[])
 {
   std::println(
       "usage: {} --bind-ip <ip> --num-db-shards <n> --num-exec-shards <n> "
-      "--network-hash <64 hex digits> [--db-port <port>] [--event-port <port>] "
+      "--network-hash <base58> [--db-port <port>] [--event-port <port>] "
       "[--executor-port <port>] [--auth-port <port>] "
       "[--coordinator-port <port>] [--gateway-port <port>] "
       "[--metrics-port <port>] [-h|--help] [--version]",

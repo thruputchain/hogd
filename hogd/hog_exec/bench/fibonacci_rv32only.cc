@@ -17,13 +17,14 @@
 #include "contract.hh"
 #include "exec_result.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/worker_pool.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/precompiles/context.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/metrics.h"
 #include "hogd/init.h"
@@ -94,12 +95,12 @@ run_gas_correlation_experiment(BenchmarkState &bs, int num_txs, uint32_t nfib)
             .tx =
                 Transaction{.invocation =
                                 fib_client.make_invocation<u8"slow_fibonacci">(
-                                    UINT64_MAX, nfib),
+                                    kDefaultMaxTxGas, nfib),
                             .uniquifier = CommonBenchState::bench_uniquifier(
                                 base_height, static_cast<uint64_t>(i))}};
         auto handler =
             bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-        auto r = handler.root_invoke();
+        auto r = handler.root_invoke()();
         if (!r.is_root_success()) {
           panic("Failed to invoke transaction");
         }
@@ -154,36 +155,37 @@ run_bench_rep(BenchmarkState &bs, int num_txs, uint32_t nfib,
     const auto tx = SignedTransaction{
         .tx = Transaction{
             .invocation =
-                fib_client.make_invocation<u8"slow_fibonacci">(UINT64_MAX,
+                fib_client.make_invocation<u8"slow_fibonacci">(kDefaultMaxTxGas,
                                                                nfib)}};
 
     for (int i = 0; i < num_exec_threads; i++) {
       int offset = i * ntx_per_thread;
       int cur_count = std::min(ntx_per_thread, num_txs - offset);
 
-      futures.emplace_back(exec_pool.submit([&bs, &tx, do_commit, offset,
-                                             cur_count, base_height]() -> void {
-        auto runtime_context = make_hog_exec_context();
-        // Copy the invocation once per thread; only the uniquifier varies, so
-        // we don't re-encode calldata inside the timed loop.
-        auto local_tx = tx;
-        for (int j = 0; j < cur_count; j++) {
-          int k = offset + j;
-          local_tx.tx.uniquifier =
-              CommonBenchState::bench_uniquifier(base_height,
-                                                 static_cast<uint64_t>(k));
-          auto handler = bs.make_handler(local_tx, k, *runtime_context);
-          if (!handler.root_invoke().is_root_success()) {
-            error("Failed to invoke transaction");
-            panic("Failed to invoke transaction");
-          }
-          if (do_commit) {
-            if (handler.try_commit_transaction() != ExecResult::ExecResultOK) {
-              panic("failed to perform commit operation");
+      futures.emplace_back(exec_pool.submit(
+          [&bs, &tx, do_commit, offset, cur_count, base_height]() -> void {
+            auto runtime_context = make_hog_exec_context();
+            // Copy the invocation once per thread; only the uniquifier varies,
+            // so we don't re-encode calldata inside the timed loop.
+            auto local_tx = tx;
+            for (int j = 0; j < cur_count; j++) {
+              int k = offset + j;
+              local_tx.tx.uniquifier =
+                  CommonBenchState::bench_uniquifier(base_height,
+                                                     static_cast<uint64_t>(k));
+              auto handler = bs.make_handler(local_tx, k, *runtime_context);
+              if (!handler.root_invoke()().is_root_success()) {
+                error("Failed to invoke transaction");
+                panic("Failed to invoke transaction");
+              }
+              if (do_commit) {
+                if (handler.try_commit_transaction()() !=
+                    ExecResult::ExecResultOK) {
+                  panic("failed to perform commit operation");
+                }
+              }
             }
-          }
-        }
-      }));
+          }));
     }
     for (auto &f : futures) {
       f.wait();

@@ -255,7 +255,7 @@ CoroPoll::tcpconnect(const sockaddr *sa, socklen_t len SLOC_ARG)
 {
   if (stop_requested())
     co_return Errno{EBADF};
-  UniqueFd fd{socket(sa->sa_family, SOCK_STREAM, 0)};
+  UniqueFd fd{cloexec_stream_socket(sa->sa_family)};
   if (!fd)
     co_return Errno{};
   auto res = co_await connect(fd, sa, len X23_IFTRACE(, SLOC_VAR));

@@ -1,26 +1,33 @@
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 
+#include <algorithm>
 #include <cassert>
 #include <cstddef>
+#include <expected>
 #include <memory>
 #include <optional>
 #include <span>
+#include <tuple>
 #include <utility>
 #include <vector>
 
 #include "built_contracts/default_wallet.h"
 #include "built_contracts/default_wallet.hh"
+#include "built_contracts/itc_erc20.h"
 #include "contract.hh"
+#include "ffi_enums.hh"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/ffi_helpers.h"
 #include "hogd/hog_exec/components/ffi_types.h"
-#include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/runtime/contract_trait_client.h"
+#include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -30,8 +37,10 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/serialize_cxs.h"
 #include "x23/vec.h"
+#include "x23/x23.h"
 
 namespace hogd {
 
@@ -39,6 +48,8 @@ namespace {
 
 using default_wallet::WalletCall;
 using default_wallet::WalletError;
+using default_wallet::WalletTokenRef;
+using default_wallet::WalletTokenRefKind;
 
 // Result types (and the WalletError exception selector inside them) come
 // straight from the generated trait in built_contracts/default_wallet.h.
@@ -55,76 +66,241 @@ using WalletException = result_exception<execute_result_t>::type;
 using wallet_bytes_vec_t = execute_result_t::ok_type;
 using wallet_bytes_t = wallet_bytes_vec_t::value_type;
 
+using wallet_mints_t =
+    std::tuple_element_t<0, wallet_meta::args_t<u8"execute">>;
+
 // Reference constants (implementation.rs).
 constexpr size_t kMaxCalls = 16;
-constexpr size_t kMaxReturnDataBytes = kMaxReturnBufferLen; // 1024
+// Mirrors implementation.rs, which compiles its own limit in, so this
+// follows that contract rather than kConfigParamMaxReturnBufferLen.
+constexpr size_t kMaxReturnDataBytes = 1024;
 
 // Mirrors require_root_invocation(): GetMsgSender must fail with exactly
 // IsRootTransaction. Returns whether this is a root invocation; host-level
 // errors propagate.
-InvokeStatus<bool>
+x23::Async<InvokeStatus<bool>>
 is_root_invocation(NativeSyscallContext &ctx)
 {
   ContractAddress sender{};
-  auto r = ctx.syscall<SyscallNo::kGetMsgSender>(sender);
+  auto r = co_await ctx.syscall<SyscallNo::kGetMsgSender>(sender);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
-  return *r == SyscallErrorCode::kSyscallErrorCodeIsRootTransaction;
+  co_return *r == SyscallErrorCode::kSyscallErrorCodeIsRootTransaction;
 }
 
 // Mirrors require_pubkey_signature_auth(): the auth claim must be a
 // kPubkeySignature whose derived address equals the current address.
 // Any syscall error code, other claim type, or mismatch -> false
 // (InvalidAuthClaim in the caller); host-level errors propagate.
-InvokeStatus<bool>
+x23::Async<InvokeStatus<bool>>
 has_valid_pubkey_auth(NativeSyscallContext &ctx)
 {
   generated::AuthClaim ffi_claim{};
-  auto r = ctx.syscall<SyscallNo::kGetAuthClaim>(ffi_claim);
+  auto r = co_await ctx.syscall<SyscallNo::kGetAuthClaim>(ffi_claim);
   if (!r.has_value()) {
-    return NativeContractBuilder::host_fn_error_conversion(r.error());
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
   }
   if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-    return false;
+    co_return false;
   }
   if (ffi_claim.tag() != generated::AuthClaim::AuthClaim_kPubkeySignature) {
-    return false;
+    co_return false;
   }
   auto preimage = FFIHelperType<generated::PubkeyAccountPreimage>::to_cpp(
       ffi_claim.k_pubkey_signature.pubkey_preimage);
   if (!preimage) {
-    return false;
+    co_return false;
   }
   auto derived = pubkey_auth_address(*preimage);
   if (!derived) {
-    return false;
+    co_return false;
   }
-  return *derived == ctx.handler().get_current_address();
+  co_return *derived == ctx.handler().get_current_address();
 }
 
 // Shared auth preamble; nullopt = auth passed, otherwise the WalletError to
 // revert with. Host-level errors propagate.
-InvokeStatus<std::optional<WalletError>>
+x23::Async<InvokeStatus<std::optional<WalletError>>>
 check_root_pubkey_auth(NativeSyscallContext &ctx)
 {
-  auto root = is_root_invocation(ctx);
+  auto root = co_await is_root_invocation(ctx);
   if (!root.has_value()) {
-    return root.error();
+    co_return root.error();
   }
   // Root-only reachability is enforced by resolution: the wallet has no
   // deployment row, its contract hash is banned from kDeployContract, and
   // resolve_runtime only falls back to it on an empty frame stack. A nested
   // wallet frame is handler-level invariant breakage.
   CHECK(*root);
-  auto auth = has_valid_pubkey_auth(ctx);
+  auto auth = co_await has_valid_pubkey_auth(ctx);
   if (!auth.has_value()) {
-    return auth.error();
+    co_return auth.error();
   }
   if (!*auth) {
-    return std::optional{WalletError::InvalidAuthClaim};
+    co_return std::optional{WalletError::InvalidAuthClaim};
   }
-  return std::optional<WalletError>{};
+  co_return std::optional<WalletError>{};
+}
+
+using child_result_t = Result<std::vector<uint8_t>, WalletException>;
+
+// Execute and deployment initialization share child-frame status handling.
+// `auth_tokens` go to the child; `returned_tokens`, if given, gets the ids of
+// the tokens it returned (only when it returns).
+x23::Async<InvokeStatus<child_result_t>>
+invoke_child(NativeSyscallContext &ctx, ContractAddress const &target,
+             ContractEntrypointID const &entrypoint, uint64_t gas_limit,
+             wallet_bytes_t const &calldata,
+             std::span<uint32_t> auth_tokens = {},
+             AuthTokenIdRange *returned_tokens = nullptr)
+{
+  CopyableInvokeInputs inputs{
+      .entrypoint_id = sdk_method_id(entrypoint),
+      .gas_limit = gas_limit,
+      .flags = std::to_underlying(InvokeFlag::None),
+  };
+  CopyableInvokeOutputs outputs{};
+  auto inv = co_await ctx.syscall<SyscallNo::kInvoke>(
+      target, std::as_bytes(std::span(calldata)), auth_tokens, inputs, outputs);
+  if (!inv.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(inv.error());
+  }
+  if (*inv != SyscallErrorCode::kSyscallErrorCodeNone) {
+    // Rejected before a child frame ran: sdk contract_call Err(_).
+    co_return child_result_t::make_err(
+        WalletException{WalletError::CallFaulted});
+  }
+  if (outputs.frame_status != InvocationFrameStatusCode::Return &&
+      outputs.frame_status != InvocationFrameStatusCode::Abort) {
+    // Fault or unexpected status: sdk contract_call Err(Fault).
+    co_return child_result_t::make_err(
+        WalletException{WalletError::CallFaulted});
+  }
+
+  // Fetch the child's return or abort payload as the SDK does.
+  std::vector<uint8_t> return_buf(outputs.return_buffer_len);
+  RuntimeMemoryLength return_written = 0;
+  uint32_t returned_auth_token_start = 0;
+  uint32_t returned_auth_token_count = 0;
+  auto get = co_await ctx.syscall<SyscallNo::kGetReturnedBuffer>(
+      std::as_writable_bytes(std::span(return_buf)), return_written,
+      returned_auth_token_start, returned_auth_token_count);
+  if (!get.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(get.error());
+  }
+  // A fetch error or short write maps to CallFaulted, matching the SDK.
+  if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
+      return_written != return_buf.size()) {
+    co_return child_result_t::make_err(
+        WalletException{WalletError::CallFaulted});
+  }
+
+  if (outputs.frame_status == InvocationFrameStatusCode::Abort) {
+    // SDK RawExceptionRef only requires a CXS u64 selector; its body is
+    // opaque. Preserve the entire wire buffer, including unknown exceptions.
+    uint64_t selector = 0;
+    if (!x23::deserialize_cxs_from(&selector, x23::BufViewEnd{return_buf})) {
+      co_return child_result_t::make_err(
+          WalletException{WalletError::CallAborted});
+    }
+    co_return child_result_t::make_err(child_result_t::err_type::from_raw_abort(
+        ReturnBuffer(return_buf.begin(), return_buf.end())));
+  }
+
+  if (returned_tokens != nullptr) {
+    *returned_tokens = {.start = returned_auth_token_start,
+                        .count = returned_auth_token_count};
+  }
+  co_return child_result_t::make_ok(std::move(return_buf));
+}
+
+// Mirrors BatchTokens: the auth tokens a batch holds, by where each came
+// from.
+class BatchTokens {
+public:
+  void add_minted(uint32_t token_id) { minted_.push_back(token_id); }
+  void add_returned(AuthTokenIdRange tokens) { returned_.push_back(tokens); }
+
+  // Resolves `token` to the id of a token the wallet still holds and marks it
+  // forwarded, or returns the WalletError the reference throws.
+  std::expected<uint32_t, WalletError> take(WalletTokenRef const &token)
+  {
+    std::optional<uint32_t> token_id;
+    // Decoding admits no other kind.
+    switch (token.kind()) {
+    case WalletTokenRefKind::Minted:
+      if (token.minted() < minted_.size()) {
+        token_id = minted_[token.minted()];
+      }
+      break;
+    case WalletTokenRefKind::Returned:
+    {
+      // Only completed calls have an entry, so a reference to the current or
+      // a later call finds nothing.
+      auto const &[call, index] = token.returned();
+      if (call < returned_.size() && index < returned_[call].count) {
+        // Cannot overflow: the runtime assigned the whole range.
+        token_id = returned_[call].start + index;
+      }
+      break;
+    }
+    }
+    if (!token_id) {
+      return std::unexpected{WalletError::InvalidTokenRef};
+    }
+    if (std::ranges::contains(forwarded_, *token_id)) {
+      return std::unexpected{WalletError::TokenAlreadyForwarded};
+    }
+    forwarded_.push_back(*token_id);
+    return *token_id;
+  }
+
+private:
+  std::vector<uint32_t> minted_;
+  // Per completed call, the ids of the tokens it returned.
+  std::vector<AuthTokenIdRange> returned_;
+  // Every id forwarded so far. A successful call takes the tokens it was
+  // forwarded and a failed one ends the batch, so none can go out twice.
+  std::vector<uint32_t> forwarded_;
+};
+
+// Mirrors thruput_sdk::block::get_block_height(): the height, or the syscall
+// exception the SDK throws in its place.
+x23::Async<InvokeStatus<std::expected<BlockHeight, LibraryException>>>
+get_block_height(NativeSyscallContext &ctx)
+{
+  using result_t = std::expected<BlockHeight, LibraryException>;
+  BlockHeight height{};
+  auto r = co_await ctx.syscall<SyscallNo::kGetBlockHeight>(height);
+  if (!r.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return result_t{std::unexpected{
+        NativeContractBuilder::syscall_exception(SyscallNo::kGetBlockHeight,
+                                                 *r)}};
+  }
+  co_return result_t{height};
+}
+
+x23::Async<InvokeStatus<deploy_result_t>>
+deploy_contract(NativeSyscallContext &ctx, SHA256Hash const &nonce,
+                SHA256Hash const &contract_hash)
+{
+  ContractAddress deployed{};
+  auto r =
+      co_await ctx.syscall<SyscallNo::kDeployContract>(nonce, contract_hash,
+                                                       deployed);
+  if (!r.has_value()) {
+    co_return NativeContractBuilder::host_fn_error_conversion(r.error());
+  }
+  if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+    co_return deploy_result_t::make_err(
+        NativeContractBuilder::syscall_exception(SyscallNo::kDeployContract,
+                                                 *r));
+  }
+  co_return deploy_result_t::make_ok(deployed);
 }
 
 } // namespace
@@ -136,26 +312,55 @@ make_native_default_wallet_contract()
 
   builder.add<default_wallet::DefaultWallet, u8"execute">(
       // The builder decays this lambda to a function pointer and deduces the
-      // deserialized argument tuple from its parameter types, so `calls` must
-      // be taken by value (a reference would not satisfy serializes_like).
-      // NOLINTNEXTLINE(performance-unnecessary-value-param)
-      [](NativeSyscallContext &ctx, x23::Vec<WalletCall, 4294967295> calls)
-          -> InvokeStatus<execute_result_t> {
-        auto auth_err = check_root_pubkey_auth(ctx);
+      // deserialized argument tuple from its parameter types, so the arguments
+      // must be taken by value (a reference would not satisfy
+      // serializes_like).
+      // NOLINTBEGIN(performance-unnecessary-value-param)
+      [](NativeSyscallContext &ctx, wallet_mints_t mints,
+         x23::Vec<WalletCall, 4294967295> calls)
+          -> x23::Async<InvokeStatus<execute_result_t>> {
+        // NOLINTEND(performance-unnecessary-value-param)
+        auto auth_err = co_await check_root_pubkey_auth(ctx);
         if (!auth_err.has_value()) {
-          return auth_err.error();
+          co_return auth_err.error();
         }
         if (auth_err->has_value()) {
-          return execute_result_t::make_err(WalletException{**auth_err});
+          co_return execute_result_t::make_err(WalletException{**auth_err});
         }
 
         if (calls.empty()) {
-          return execute_result_t::make_err(
+          co_return execute_result_t::make_err(
               WalletException{WalletError::EmptyCallList});
         }
         if (calls.size() > kMaxCalls) {
-          return execute_result_t::make_err(
+          co_return execute_result_t::make_err(
               WalletException{WalletError::TooManyCalls});
+        }
+
+        // Minted before any call runs, so no callee's behavior can change
+        // which token a Minted reference names.
+        auto expiry = co_await get_block_height(ctx);
+        if (!expiry.has_value()) {
+          co_return expiry.error();
+        }
+        if (!expiry->has_value()) {
+          co_return execute_result_t::make_err(std::move(expiry->error()));
+        }
+        BatchTokens tokens;
+        for (auto const &node : mints) {
+          uint32_t token_id = 0;
+          auto r = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              **expiry, std::as_bytes(std::span(node)), token_id);
+          if (!r.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                r.error());
+          }
+          if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return execute_result_t::make_err(
+                NativeContractBuilder::syscall_exception(
+                    SyscallNo::kMintAuthToken, *r));
+          }
+          tokens.add_minted(token_id);
         }
 
         // Running CXS size of the eventual Vec<WalletBytes> return: the
@@ -168,65 +373,35 @@ make_native_default_wallet_contract()
             x23::cxs_size(static_cast<uint32_t>(calls.size()));
 
         for (auto const &call : calls) {
-          CopyableInvokeInputs inputs{
-              .entrypoint_id = sdk_method_id(call.entrypoint),
-              .gas_limit = call.gas_limit,
-              .flags = std::to_underlying(InvokeFlag::None),
-          };
-          CopyableInvokeOutputs outputs{};
-          auto inv = ctx.syscall<SyscallNo::kInvoke>(
-              call.target, std::as_bytes(std::span(call.calldata)),
-              /*auth tokens*/ std::span<uint32_t>{}, inputs, outputs);
-          if (!inv.has_value()) {
-            return NativeContractBuilder::host_fn_error_conversion(inv.error());
-          }
-          if (*inv != SyscallErrorCode::kSyscallErrorCodeNone) {
-            // Rejected before a child frame ran: sdk contract_call Err(_).
-            return execute_result_t::make_err(
-                WalletException{WalletError::CallFaulted});
-          }
-          if (outputs.frame_status != InvocationFrameStatusCode::Return &&
-              outputs.frame_status != InvocationFrameStatusCode::Abort) {
-            // Fault or unexpected status: sdk contract_call Err(Fault).
-            return execute_result_t::make_err(
-                WalletException{WalletError::CallFaulted});
+          std::vector<uint32_t> auth_tokens;
+          auth_tokens.reserve(call.tokens.size());
+          for (auto const &token : call.tokens) {
+            auto taken = tokens.take(token);
+            if (!taken.has_value()) {
+              co_return execute_result_t::make_err(
+                  WalletException{taken.error()});
+            }
+            auth_tokens.push_back(*taken);
           }
 
-          // Fetch the child's payload — return or abort bytes — as the
-          // sdk's fetch_frame_payload does for both outcomes. The wallet
-          // forwards no auth tokens and drops any returned ids, so pass an
-          // empty auth span (the host accepts zero-length spans).
-          std::vector<uint8_t> return_buf(outputs.return_buffer_len);
-          RuntimeMemoryLength return_written = 0;
-          RuntimeMemoryLength auth_written = 0;
-          auto get = ctx.syscall<SyscallNo::kGetReturnedBuffer>(
-              std::as_writable_bytes(std::span(return_buf)), return_written,
-              std::span<std::byte>{}, auth_written);
-          if (!get.has_value()) {
-            return NativeContractBuilder::host_fn_error_conversion(get.error());
+          AuthTokenIdRange returned_tokens;
+          auto child = co_await invoke_child(ctx, call.target, call.entrypoint,
+                                             call.gas_limit, call.calldata,
+                                             auth_tokens, &returned_tokens);
+          if (!child.has_value()) {
+            co_return child.error();
           }
-          // Unreachable with a correct host (after a Return/Abort frame the
-          // payload exists and the syscall succeeds), but the sdk maps a
-          // fetch failure — error code or short write (checked_returned_len)
-          // — to CallFaulted; mirror it exactly.
-          if (*get != SyscallErrorCode::kSyscallErrorCodeNone ||
-              return_written != return_buf.size()) {
-            return execute_result_t::make_err(
-                WalletException{WalletError::CallFaulted});
+          if (!child->is_ok()) {
+            co_return execute_result_t::make_err(child->err());
           }
-
-          if (outputs.frame_status == InvocationFrameStatusCode::Abort) {
-            // sdk contract_call: payload fetched (and here dropped), then
-            // the abort is reported.
-            return execute_result_t::make_err(
-                WalletException{WalletError::CallAborted});
-          }
+          tokens.add_returned(returned_tokens);
+          auto const &return_buf = child->ok();
 
           encoded_return_data_len +=
               x23::cxs_size(static_cast<uint32_t>(return_buf.size())) +
               return_buf.size();
           if (encoded_return_data_len > kMaxReturnDataBytes) {
-            return execute_result_t::make_err(
+            co_return execute_result_t::make_err(
                 WalletException{WalletError::ReturnDataTooLarge});
           }
 
@@ -235,38 +410,79 @@ make_native_default_wallet_contract()
           returns.push_back(std::move(item));
         }
 
-        return execute_result_t::make_ok(std::move(returns));
+        co_return execute_result_t::make_ok(std::move(returns));
       });
 
   builder.add<default_wallet::DefaultWallet, u8"deploy">(
-      [](NativeSyscallContext &ctx, SHA256Hash nonce,
-         SHA256Hash contract_hash) -> InvokeStatus<deploy_result_t> {
-        auto auth_err = check_root_pubkey_auth(ctx);
+      // The builder requires owned arguments for its deserialized tuple.
+      // NOLINTNEXTLINE(performance-unnecessary-value-param)
+      [](NativeSyscallContext &ctx, SHA256Hash nonce, SHA256Hash contract_hash,
+         std::tuple<int64_t, uint64_t> amount,
+         x23::Ptr<default_wallet::WalletInitCall> initializer)
+          -> x23::Async<InvokeStatus<deploy_result_t>> {
+        auto auth_err = co_await check_root_pubkey_auth(ctx);
         if (!auth_err.has_value()) {
-          return auth_err.error();
+          co_return auth_err.error();
         }
         if (auth_err->has_value()) {
-          return deploy_result_t::make_err(WalletException{**auth_err});
+          co_return deploy_result_t::make_err(WalletException{**auth_err});
         }
 
-        ContractAddress deployed{};
-        auto r = ctx.syscall<SyscallNo::kDeployContract>(nonce, contract_hash,
-                                                         deployed);
-        if (!r.has_value()) {
-          return NativeContractBuilder::host_fn_error_conversion(r.error());
+        if (amount != std::tuple<int64_t, uint64_t>{}) {
+          ContractAddress target{};
+          auto r = co_await ctx.syscall<SyscallNo::kGetDeployAddress>(
+              static_cast<ContractAddress const *>(nullptr), nonce,
+              contract_hash, target);
+          if (!r.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                r.error());
+          }
+          if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return deploy_result_t::make_err(
+                NativeContractBuilder::syscall_exception(
+                    SyscallNo::kGetDeployAddress, *r));
+          }
+          // Invoke the ordinary token contract to preserve validation, caller
+          // identity and events. Both effects remain inside the wallet root
+          // frame.
+          ContractTraitClient<itc_erc20::ERC20> token(
+              kNativeTokenContractAddress);
+          auto transfer =
+              co_await token.invoke_opt<u8"transfer">(ctx, target, amount);
+          if (!transfer.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                transfer.error());
+          }
+          if (!transfer->has_value() || !transfer->value().has_value()) {
+            co_return deploy_result_t::make_err(
+                WalletException{WalletError::CallFaulted});
+          }
+          if (!transfer->value()->is_ok()) {
+            auto abort = transfer->value()->err().serialize();
+            if (!abort) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+            co_return deploy_result_t::make_err(
+                deploy_result_t::err_type::from_raw_abort(std::move(*abort)));
+          }
         }
-        if (*r != SyscallErrorCode::kSyscallErrorCodeNone) {
-          // The sdk's deploy_contract syscall_throw()s on error — a library
-          // abort encoding LibraryExn::Syscall{kDeployContract, errno}, not a
-          // WalletError and not a frame fault.
-          LibraryExn exn(LibraryExnKind::kLibraryExnSyscall);
-          exn.syscall_exn() = SyscallExn{
-              .call_number = SyscallNo::kDeployContract,
-              .err_number = static_cast<SysErr>(*r),
-          };
-          return deploy_result_t::make_err(LibraryException{std::move(exn)});
+        auto deployed = co_await deploy_contract(ctx, nonce, contract_hash);
+        if (!deployed.has_value() || !deployed->is_ok()) {
+          co_return deployed;
         }
-        return deploy_result_t::make_ok(deployed);
+        if (initializer) {
+          auto child = co_await invoke_child(ctx, deployed->ok(),
+                                             initializer->entrypoint,
+                                             initializer->gas_limit,
+                                             initializer->calldata);
+          if (!child.has_value()) {
+            co_return child.error();
+          }
+          if (!child->is_ok()) {
+            co_return deploy_result_t::make_err(child->err());
+          }
+        }
+        co_return deployed;
       });
 
   assert(builder.check_methods<default_wallet::DefaultWallet>());

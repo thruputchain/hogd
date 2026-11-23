@@ -15,6 +15,7 @@
 
 #include <gtest/gtest.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <memory>
 #include <span>
@@ -24,9 +25,11 @@
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/precompiles/native_contract_builder.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
@@ -34,8 +37,10 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
+#include "syscall.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 
 namespace hogd {
 
@@ -47,8 +52,7 @@ class RcqObservationOnFaultTest : public ::testing::Test,
 public:
   RcqObservationOnFaultTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override
@@ -66,32 +70,34 @@ public:
   static std::unique_ptr<NativeContext> make_ctx()
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto const &cd = ctx.handler().get_calldata();
-                  auto key = make_storage_key("rcq0");
-                  for (uint8_t val : cd) {
-                    auto res = ctx.handler().retrocausal_queue_insert(
-                        key, std::as_bytes(std::span(&val, 1)));
-                    if (!res.has_value()) {
-                      return res.error().to_invoke_error();
-                    }
-                  }
-                  return {};
-                });
-    fns.emplace(1,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  auto key = make_storage_key("rcq0");
-                  // Peek records an observation of a concurrent entry...
-                  auto peek =
-                      ctx.handler().retrocausal_queue_consume(key,
-                                                              /*peek=*/true);
-                  if (!peek.has_value()) {
-                    return peek.error().to_invoke_error();
-                  }
-                  // ...and then the transaction deterministically faults.
-                  return InvokeError{InvokeErrorCode::Deterministic};
-                });
+    fns.emplace(
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto const &cd = ctx.handler().get_calldata();
+          auto key = make_storage_key("rcq0");
+          for (uint8_t val : cd) {
+            auto res = co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                key, std::as_bytes(std::span(&val, 1)));
+            if (!res.has_value()) {
+              co_return NativeContractBuilder::host_fn_error_conversion(
+                  res.error());
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto key = make_storage_key("rcq0");
+          // Peek records an observation of a concurrent entry...
+          RuntimeMemoryLength entry_len = 0;
+          auto peek = co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+              key, /*peek=*/true, std::span<std::byte>{}, entry_len);
+          if (!peek.has_value()) {
+            co_return NativeContractBuilder::host_fn_error_conversion(
+                peek.error());
+          }
+          // ...and then the transaction deterministically faults.
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        });
 
     std::unordered_map<int32_t, std::unique_ptr<NativeContract>> cmap;
     cmap.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -105,7 +111,7 @@ public:
         .invocation =
             Invocation{.invoked_address = kAddr,
                        .entrypoint = entrypoint_from_method_id(method),
-                       .gas_limit = UINT64_MAX,
+                       .gas_limit = kDefaultMaxTxGas,
                        .calldata = Calldata(calldata.begin(), calldata.end())},
         .uniquifier =
             Uniquifier{.block_expiry_height = INT64_MAX, .nonce = nonce}};
@@ -125,16 +131,16 @@ TEST_F(RcqObservationOnFaultTest, HonestObservationOnFaultClosesBlock)
   NondeterministicProposalData observe_p;
   {
     auto h_ins = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(h_ins.root_invoke().is_root_success());
-    insert_p = h_ins.get_proposal_data();
-    ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
+    insert_p = h_ins.extract_proposal_data();
+    ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler(tx_observe_fault, *ctx);
-    ASSERT_FALSE(h_obs.root_invoke().is_root_success());
-    observe_p = h_obs.get_proposal_data();
+    ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
+    observe_p = h_obs.extract_proposal_data();
     // The faulting tx is still included (deterministic error), having recorded
     // its observation.
-    ASSERT_EQ(h_obs.try_commit_transaction(),
+    ASSERT_EQ(h_obs.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }
 
@@ -145,13 +151,13 @@ TEST_F(RcqObservationOnFaultTest, HonestObservationOnFaultClosesBlock)
   {
     auto h_ins =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(h_ins.root_invoke().is_root_success());
-    ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
+    ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler_validation(tx_observe_fault, *ctx,
                                                          observe_p);
-    ASSERT_FALSE(h_obs.root_invoke().is_root_success());
-    ASSERT_EQ(h_obs.try_commit_transaction(),
+    ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
+    ASSERT_EQ(h_obs.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }
 
@@ -174,14 +180,14 @@ TEST_F(RcqObservationOnFaultTest, ForgedObservationOnFaultRejectedAtBlockClose)
   NondeterministicProposalData observe_p;
   {
     auto h_ins = make_new_system_call_handler(tx_insert, *ctx);
-    ASSERT_TRUE(h_ins.root_invoke().is_root_success());
-    insert_p = h_ins.get_proposal_data();
-    ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
+    insert_p = h_ins.extract_proposal_data();
+    ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler(tx_observe_fault, *ctx);
-    ASSERT_FALSE(h_obs.root_invoke().is_root_success());
-    observe_p = h_obs.get_proposal_data();
-    ASSERT_EQ(h_obs.try_commit_transaction(),
+    ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
+    observe_p = h_obs.extract_proposal_data();
+    ASSERT_EQ(h_obs.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }
 
@@ -196,15 +202,15 @@ TEST_F(RcqObservationOnFaultTest, ForgedObservationOnFaultRejectedAtBlockClose)
   {
     auto h_ins =
         make_new_system_call_handler_validation(tx_insert, *ctx, insert_p);
-    ASSERT_TRUE(h_ins.root_invoke().is_root_success());
-    ASSERT_EQ(h_ins.try_commit_transaction(), ExecResult::ExecResultOK);
+    ASSERT_TRUE(h_ins.root_invoke()().is_root_success());
+    ASSERT_EQ(h_ins.try_commit_transaction()(), ExecResult::ExecResultOK);
 
     auto h_obs = make_new_system_call_handler_validation(tx_observe_fault, *ctx,
                                                          observe_p);
-    ASSERT_FALSE(h_obs.root_invoke().is_root_success());
+    ASSERT_FALSE(h_obs.root_invoke()().is_root_success());
     // The forged observation delta reaches HogDb on the fault path; it cannot
     // be reconciled ({99} was never inserted), so block close rejects it.
-    ASSERT_EQ(h_obs.try_commit_transaction(),
+    ASSERT_EQ(h_obs.try_commit_transaction()(),
               ExecResult::ExecResultTxDeterministicError);
   }
 

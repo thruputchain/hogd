@@ -50,7 +50,7 @@ MeasurementPoint::relative_mad() const
 }
 
 RunOutcome
-run_once(ThreadedMachine &machine, HaltHost &host)
+run_once(ThreadedMachine &machine, Host &host)
 {
   machine.reset(kGasLimit);
   const auto start = std::chrono::steady_clock::now();
@@ -64,11 +64,10 @@ run_once(ThreadedMachine &machine, HaltHost &host)
 }
 
 uint32_t
-tune_trip_count(const ThreadedMachinePreInstantiation &program,
+tune_trip_count(const ThreadedMachinePreInstantiation &program, Host &host,
                 uint32_t seed_trip_count, double target_ns)
 {
   ThreadedMachine machine(program, kGasLimit);
-  HaltHost host;
   // Two runs: the first pays for cold slot array and memory image, the second
   // is the number worth extrapolating from.
   (void)run_once(machine, host);
@@ -82,7 +81,7 @@ tune_trip_count(const ThreadedMachinePreInstantiation &program,
 }
 
 void
-measure_interleaved(std::span<MeasurementPoint> points,
+measure_interleaved(std::span<MeasurementPoint> points, Host &host,
                     const MeasureConfig &config)
 {
   std::vector<ThreadedMachine> machines;
@@ -90,7 +89,6 @@ measure_interleaved(std::span<MeasurementPoint> points,
   for (const MeasurementPoint &point : points) {
     machines.emplace_back(*point.program, kGasLimit);
   }
-  HaltHost host;
 
   for (uint32_t warmup = 0; warmup < config.warmup_runs; ++warmup) {
     for (size_t i = 0; i < points.size(); ++i) {
@@ -99,6 +97,7 @@ measure_interleaved(std::span<MeasurementPoint> points,
   }
 
   for (MeasurementPoint &point : points) {
+    point.ran_clean = true;
     point.samples.clear();
     point.samples.reserve(config.repeats);
   }
@@ -108,7 +107,9 @@ measure_interleaved(std::span<MeasurementPoint> points,
       // A kernel that trapped or ran out of gas did a different amount of work
       // than its siblings; keep the sample out and mark the point so the
       // reporter can drop the whole sweep rather than fit a mixed line.
-      if (outcome.result != StepResult::kHalted) {
+      if (outcome.result != StepResult::kHalted ||
+          (points[i].expected_gas != 0 &&
+           outcome.gas_consumed != points[i].expected_gas)) {
         points[i].ran_clean = false;
         continue;
       }

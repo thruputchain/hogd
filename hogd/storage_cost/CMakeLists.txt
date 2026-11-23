@@ -24,4 +24,4 @@ target_link_libraries(
   hogd
   GTest::gtest_main
 )
-gtest_discover_tests(storage_cost_test)
+hogd_discover_tests(storage_cost_test)

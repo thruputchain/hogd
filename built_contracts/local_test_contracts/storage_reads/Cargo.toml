@@ -1,0 +1,21 @@
+[package]
+name = "storage_reads"
+version = "0.1.0"
+edition = "2021"
+
+[dependencies]
+thruput-sdk = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["thruput-sdk/dev"]
+logging = ["thruput-sdk/logging"]
+
+[[bin]]
+name = "storage_reads"
+path = "src/main.rs"
+required-features = ["entrypoints"]

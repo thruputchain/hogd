@@ -1,0 +1,36 @@
+[package]
+name = "itc_erc20_permit"
+description = "itc_erc20 plus the ERC20Permit and ERC165 interfaces: the RV32 reference for the native token's permit and ERC-165 surfaces"
+version.workspace = true
+authors.workspace = true
+license.workspace = true
+publish.workspace = true
+repository.workspace = true
+homepage.workspace = true
+keywords.workspace = true
+categories.workspace = true
+edition.workspace = true
+
+[dependencies]
+thruput-sdk = { workspace = true }
+thruput-erc20-if = { workspace = true }
+thruput-erc20-permit-if = { workspace = true }
+thruput-erc165-if = { workspace = true }
+
+[lib]
+crate-type = ["rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = [
+    "thruput-sdk/dev",
+    "thruput-erc20-if/dev",
+    "thruput-erc20-permit-if/dev",
+    "thruput-erc165-if/dev",
+]
+
+[[bin]]
+name = "itc_erc20_permit"
+path = "src/main.rs"
+required-features = ["entrypoints"]

@@ -17,6 +17,7 @@
 
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
+#include "hogd/base/log.h"
 #include "hogd/metrics/metrics.h"
 #include "hogd/ramdb/db_status.h"
 #include "hogd/ramdb/loglet.h"
@@ -81,12 +82,10 @@ public:
   // written to disk.
   size_t bytes_buffered()
   {
-    size_t bytes_in;
-    {
-      std::scoped_lock guard(to_disk_lock_);
-      bytes_in = bytes_in_;
-    }
-    return bytes_in - bytes_out_.load(std::memory_order_acquire);
+    // Read both under the lock: bytes enter bytes_in_ before the writer can
+    // dequeue them, so the written total cannot pass the queued total here.
+    std::scoped_lock guard(to_disk_lock_);
+    return bytes_in_ - bytes_out_.load(std::memory_order_acquire);
   }
 
   // print_stats prints disk usage statistics.
@@ -148,6 +147,15 @@ private:
   // used to wake commit().
   std::condition_variable commit_cv_;
 
+  // True while sync() runs; ScopedDiskWrite CHECKs it is clear after
+  // acquiring its head lock, in release builds too, since an overlapping
+  // write corrupts the WAL undetectably (#3397). Together with the try_lock
+  // CHECK in sync()'s head drain this covers every overlap: a writer that
+  // locks its head first fails the drain's try_lock, and one that locks
+  // after the drain sees the flag through the head mutex's happens-before,
+  // so relaxed loads suffice.
+  std::atomic<bool> sync_active_{false};
+
   // loglets that are currently being filled with changes to log to disk
   // (called "heads"). Items are sharded across the vector based on their
   // hash. When a head is full, it is added to the to_disk_ queue.
@@ -187,7 +195,14 @@ class ScopedDiskWrite {
 public:
   ScopedDiskWrite(DiskWriter &w, size_t hash)
     : w_(w), head_(w.get_head(hash)), ul_(head_.lock)
-  {}
+  {
+    // Checked under the head lock: if sync() already drained this head, its
+    // unlock happens-before this acquisition, so the load must see true. A
+    // check before the lock would leave a gap — a writer paused between
+    // checking and locking evades both this and the drain's try_lock CHECK.
+    // No write may overlap sync(); see sync_active_.
+    CHECK(!w_.sync_active_.load(std::memory_order_relaxed));
+  }
   ~ScopedDiskWrite() = default;
 
   // Disable move and copy.

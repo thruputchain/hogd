@@ -1,12 +1,7 @@
 find_package(OpenSSL REQUIRED)
 
-# Portable RV32IM ISA core: instruction decode + execute, the register/memory
-# model, and the Host boundary. This target intentionally has NO hogd link
-# dependencies (no OpenSSL, no artifact/consensus layer, no runtime symbols) so
-# it can be driven standalone by an external differential oracle (Sail/Spike).
-# Keep it that way: anything needing OpenSSL, the artifact format, or hogd
-# runtime symbols belongs in rv32_vm below, not here. rv32_isa_core_test
-# mechanically enforces the boundary by linking only this target.
+# Standalone decode and canonical execution, without artifact or runtime link
+# dependencies. rv32_isa_core_test checks this boundary by linking only the core.
 add_library(
   rv32_isa_core
   machine.cc
@@ -19,9 +14,7 @@ target_include_directories(
   ${CMAKE_SOURCE_DIR}
 )
 
-# Artifact container plus consensus digest/validation layered on top of the
-# portable core. v4 moves method dispatch into the guest, so there is no
-# host-side dispatch table.
+# Artifact parsing and validation over the portable core.
 add_library(
   rv32_vm
   artifact.cc
@@ -31,11 +24,12 @@ target_include_directories(
   rv32_vm
   PUBLIC
   ${CMAKE_SOURCE_DIR}
+  ${CMAKE_BINARY_DIR}
 )
 
-# x23 is for CHECK() in artifact.cc (hogd/base/log.h -> x23::panic): a digest
-# that cannot be computed must stop the node, not become an artifact-level
-# error. The dependency-narrow rule above binds rv32_isa_core, not this target.
+add_dependencies(rv32_vm generate_crypto_ffi_h)
+
+# x23 supplies CHECK(): a failed digest computation must stop the node.
 target_link_libraries(
   rv32_vm
   PUBLIC
@@ -75,10 +69,7 @@ add_dependencies(
   rv32_syscall_xdr_hh
 )
 
-# Links ONLY the portable core (no rv32_vm, no OpenSSL, no hogd runtime). Doubles
-# as a smoke test for standalone decode/execute and as the mechanical guardrail
-# for the core's hogd-free boundary: if the ISA core starts referencing a hogd
-# symbol, this executable fails to link.
+# Standalone execution and link-dependency check.
 add_executable(
   rv32_isa_core_test
   rv32_isa_core_test.cc
@@ -90,7 +81,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
+hogd_discover_tests(rv32_isa_core_test TEST_PREFIX rv32.isa_core.)
 
 # Differential-testing substrate (arch_trace.h). Also core-only: it must stay
 # linkable against an external oracle harness with no hogd dependencies.
@@ -105,7 +96,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
+hogd_discover_tests(rv32_arch_trace_test TEST_PREFIX rv32.arch_trace.)
 
 # External-oracle differential harness (oracle.h + spec_model.h). Core-only for
 # the same reason: the Oracle interface must stay linkable against an external
@@ -121,7 +112,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
+hogd_discover_tests(rv32_oracle_test TEST_PREFIX rv32.oracle.)
 
 # External-oracle differential test (spike_oracle.h). Core-only; drives the real
 # Spike (riscv-isa-sim) as a subprocess located via RV32_ORACLE_BIN and SKIPS
@@ -137,7 +128,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_spike_oracle_test TEST_PREFIX rv32.spike_oracle.)
+hogd_discover_tests(rv32_spike_oracle_test TEST_PREFIX rv32.spike_oracle.)
 
 add_executable(
   rv32_vm_test
@@ -150,7 +141,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
+hogd_discover_tests(rv32_vm_test TEST_PREFIX rv32.)
 
 add_executable(
   rv32_conformance_test
@@ -163,7 +154,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_conformance_test
   TEST_PREFIX rv32.conformance.
   NO_PRETTY_VALUES
@@ -180,7 +171,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_borrowed_conformance_test
   TEST_PREFIX rv32.borrowed.
   NO_PRETTY_VALUES
@@ -197,18 +188,15 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_spec_model_crosscheck_test
   TEST_PREFIX rv32.crosscheck.
   NO_PRETTY_VALUES
 )
 
-# Direct-threaded experimental interpreter (header-only threaded_*.h, requires a
-# musttail attribute: clang, or GCC >= 15). Core-only: links rv32_isa_core ONLY
-# because the differential test constructs the canonical Machine to diff
-# against. Built unconditionally -- a toolchain without musttail hits the
-# #error in musttail.h and fails the build, which is intended: the supported
-# compilers all provide it, and a silent skip would hide a broken toolchain.
+# Differential tests for the production threaded interpreter. Links the
+# canonical Machine through rv32_isa_core. Requires musttail (Clang or GCC 15+);
+# musttail.h rejects unsupported compilers.
 add_executable(
   rv32_threaded_test
   rv32_threaded_test.cc
@@ -220,7 +208,7 @@ target_link_libraries(
   rv32_isa_core
   GTest::gtest
 )
-gtest_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
+hogd_discover_tests(rv32_threaded_test TEST_PREFIX rv32.threaded.)
 
 add_executable(
   rv32_unsupported_profile_test
@@ -233,7 +221,7 @@ target_link_libraries(
   rv32_vm
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_unsupported_profile_test
   TEST_PREFIX rv32.unsupported.
   NO_PRETTY_VALUES
@@ -262,7 +250,7 @@ add_dependencies(
   rv32_syscall_bridge_test
   rv32_syscall_xdr_hh
 )
-gtest_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
+hogd_discover_tests(rv32_syscall_bridge_test TEST_PREFIX rv32.bridge.)
 
 add_library(rv32_runtime_objects OBJECT
   rv32_contract.cc
@@ -280,19 +268,21 @@ target_include_directories(
   ${CMAKE_BINARY_DIR}/hogd/xdr
 )
 
-# Compile the production rv32 objects with LTO so the final node link (the
-# exec/bench targets already set INTERPROCEDURAL_OPTIMIZATION on themselves)
-# can optimize across the interpreter/translation/syscall-bridge boundary.
-# Without this, only rv32_vm_bench measured the interpreter under LTO while the
-# node ran it without -- benchmark numbers didn't reflect production codegen.
-#
-# Gate on every optimized single-config build type, not the exact string
-# "Release": RelWithDebInfo and MinSizeRel are optimized too, so the old
-# exact-match silently dropped LTO for them (the very "production codegen" the
-# comment above promises). check_ipo_supported() at the top level already
-# guarantees IPO is available. Multi-config generators (Xcode/VS) leave
-# CMAKE_BUILD_TYPE empty and are not covered here -- the benchmarks use
-# single-config Make/Ninja.
+# rv32_contract.cc is the node's only translation unit that instantiates the
+# threaded interpreter's dispatch chain: ThreadedMachinePreInstantiation::create
+# bakes the handlers, start() and resume_from_ecall() enter them. The handlers
+# are header templates, so another node TU calling those would emit its own copy
+# under the global flags, and the link would keep whichever copy it saw first.
+target_compile_options(
+  rv32_runtime_objects
+  PRIVATE
+  ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
+)
+
+# LTO lets the final node link optimize across the interpreter, translation,
+# and syscall bridge, matching benchmark code generation. Top-level IPO checks
+# establish compiler support. This covers optimized single-config builds;
+# multi-config generators leave CMAKE_BUILD_TYPE empty and are not covered.
 if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
   set(HOGD_RV32_ENABLE_LTO TRUE)
 endif()
@@ -326,6 +316,13 @@ if(BUILD_BENCHMARKS)
     ${CMAKE_BINARY_DIR}
   )
 
+  # Measure the interpreter as the node builds it (see rv32_runtime_objects).
+  target_compile_options(
+    rv32_vm_bench
+    PRIVATE
+    ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS}
+  )
+
   if(HOGD_RV32_ENABLE_LTO)
     set_property(TARGET rv32_vm_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
   endif()
@@ -353,7 +350,9 @@ if(BUILD_FUZZERS)
     rv32_vm_fuzz
     PUBLIC
     ${CMAKE_SOURCE_DIR}
+    ${CMAKE_BINARY_DIR}
   )
+  add_dependencies(rv32_vm_fuzz generate_crypto_ffi_h)
   target_link_libraries(
     rv32_vm_fuzz
     PUBLIC
@@ -374,6 +373,16 @@ if(BUILD_FUZZERS)
   )
   target_link_libraries(rv32_fuzz_common_test rv32_isa_core GTest::gtest)
   target_include_directories(rv32_fuzz_common_test PRIVATE ${CMAKE_SOURCE_DIR})
+
+  add_executable(
+    rv32_fuzz_artifact_test
+    EXCLUDE_FROM_ALL
+    fuzz/fuzz_artifact.cc
+    fuzz/fuzz_artifact_test.cc
+    rv32_vm_test_main.cc
+  )
+  target_link_libraries(rv32_fuzz_artifact_test rv32_vm GTest::gtest)
+  target_include_directories(rv32_fuzz_artifact_test PRIVATE ${CMAKE_SOURCE_DIR})
 
   add_executable(
     rv32_fuzz_engine_diff

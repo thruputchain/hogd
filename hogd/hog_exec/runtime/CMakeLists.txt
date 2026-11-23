@@ -11,6 +11,7 @@ add_subdirectory(view)
 add_subdirectory(item)
 add_subdirectory(anomalies)
 add_subdirectory(direct_rpc_tests)
+add_subdirectory(syscall_tests)
 add_subdirectory(rv32)
 add_subdirectory(tracing)
 
@@ -20,6 +21,7 @@ add_library(runtime_objects OBJECT
   native_runtime.cc
   metrics.cc
   multiplexed_context.cc
+  native_syscall_context.cc
   runtime.cc
   syscall_auth.cc
   syscall_block_data.cc
@@ -31,10 +33,11 @@ add_library(runtime_objects OBJECT
   syscall_handler.cc
   syscall_invoke.cc
   syscall_log.cc
+  syscall_math.cc
   syscall_nnint.cc
   syscall_rcq.cc
   syscall_stats.cc
-  transaction_stats.cc
+  syscall_storage_flags.cc
 )
 
 if(CMAKE_CXX_COMPILER_ID STREQUAL "Clang" OR CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
@@ -64,7 +67,6 @@ target_link_libraries(
   runtime_test_lib
   runtime
   runtime_test_util # TODO(geoff): remove this if we replace with proper event server connection
-  db_interface
   hog_db
   GTest::gtest
 )
@@ -75,8 +77,8 @@ add_library(runtime_test_objects OBJECT
   balance_cost_tracking_test.cc
   block_cancel_tests.cc
   contract_result_preset_handling_test.cc
-  contract_trait_test.cc
   cross_call_tests.cc
+  execution_limits_test.cc
   cross_contract_revert_test.cc
   cross_invoke_depth_test.cc
   delete_recreate_tests.cc
@@ -85,26 +87,24 @@ add_library(runtime_test_objects OBJECT
   deserialize_test.cc
   empty_test.cc
   erc20_parity_test.cc
+  erc165_probe_test.cc
+  erc20_permit_parity_test.cc
   event_test.cc
   faucet_scenario_test.cc
   fibonacci_test.cc
-  sha256_incremental_test.cc
   interleaving_tests.cc
   invocation_frame_test.cc
   invoke_error_handling_test.cc
+  invoke_malformed_tokens_rv32_test.cc
   invoke_tx_leak_test.cc
   manual_revert_comprehensive_test.cc
+  payload_limit_test.cc
   manual_revert_rv32_test.cc
   manual_revert_caller_rv32_test.cc
-  return_fault_test_rv32_test.cc
-  nnint_output_fault_test_rv32_test.cc
-  output_alias_test_rv32_test.cc
   native_contract_test.cc
   native_token_allowance_test.cc
-  nnint_add_test.cc
   tx_failure_report_test.cc
   propose_validate_roundtrip_test.cc
-  nnint_get_test.cc
   rcq_delete_test.cc
   rcq_doctored_proposal_data_test.cc
   rcq_interleaving_tests.cc
@@ -118,15 +118,6 @@ add_library(runtime_test_objects OBJECT
   selective_deployment_test.cc
   serialize_roundtrip_test.cc
   sha2_in_contract_test.cc
-  syscall_auth_config_test.cc
-  syscall_auth_token_test.cc
-  syscall_block_data_test.cc
-  syscall_buffer_test.cc
-  syscall_entry_outer_tests.cc
-  syscall_error_handling_tests.cc
-  syscall_misc_tests.cc
-  syscall_parse_hardening_rv32_test.cc
-  syscall_parse_tests.cc
   tracing_tests.cc
   try_invoke_test.cc
   tx_context_tests.cc
@@ -180,7 +171,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -188,7 +178,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(runtime_test)
+hogd_discover_tests(runtime_test)
 
 # Standalone binary (no run_hog_exec_tests / init_hog_exec_metrics in main) so the
 # uninitialized-metrics guard in launch_log_worker can be tested.
@@ -202,7 +192,7 @@ target_link_libraries(
   runtime
   GTest::gtest
 )
-gtest_discover_tests(hog_exec_metrics_test)
+hogd_discover_tests(hog_exec_metrics_test)
 
 add_executable(
   rv32_syscall_entry_bridge_test
@@ -217,7 +207,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -225,8 +214,71 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_syscall_entry_bridge_test
+hogd_discover_tests(rv32_syscall_entry_bridge_test
                      TEST_PREFIX rv32.entry.)
+
+if(BUILD_BENCHMARKS)
+  # Syscall cost on the production entry path.
+  #
+  # A separate binary from the rv32 gas calibration on purpose. That harness
+  # links only rv32_isa_core so a calibration can run on a candidate validator
+  # without configuring the node build, which is exactly what it cannot do for
+  # a syscall: syscall_entry needs the protocol XDR, the DB proxy and the
+  # snapshot cache. Splitting them keeps the calibration portable and lets this
+  # one link whatever a real syscall needs.
+  #
+  # The link set is rv32_syscall_entry_bridge_test's, minus GTest and plus
+  # Google Benchmark. Deliberately not a minimized set: this benchmark stands
+  # up a SystemCallHandler behind the same in-process snapshot server and event
+  # aggregator that test does, and that test's dependency list is the one known
+  # to close over them.
+  add_executable(
+    rv32_syscall_entry_bench
+    rv32/rv32_syscall_entry_bench.cc
+  )
+
+  target_link_libraries(
+    rv32_syscall_entry_bench
+    mldsa_signer
+    precompiles
+    rv32_syscall_bridge
+    runtime
+    runtime_test_lib
+    runtime_test_util
+    hog_db
+    storage_cost
+    model_checker
+    contract_loader
+    genesis
+    rv32_gas_calibration
+    benchmark::benchmark
+  )
+
+  target_include_directories(
+    rv32_syscall_entry_bench
+    PRIVATE
+    ${CMAKE_BINARY_DIR}
+    ${CMAKE_BINARY_DIR}/hogd/xdr
+  )
+
+
+  # rv32_gas_calibration is linked for provenance.h alone: the engine
+  # fingerprint and the build identity, recorded in the same form the gas
+  # calibration records them. That is what lets rv32_syscall_report.py join a
+  # syscall run to an opcode calibration and refuse the join when the two
+  # describe different engines or different hosts -- a syscall priced in gas
+  # units taken from another machine's baseline is not priced at all.
+  #
+  # Optimized with LTO across the interpreter and the syscall bridge, matching
+  # how the node is built. A syscall measured through a non-LTO build is a
+  # different syscall.
+  set_property(TARGET rv32_syscall_entry_bench
+               PROPERTY INTERPROCEDURAL_OPTIMIZATION TRUE)
+
+  # Same for the interpreter's codegen options (see rv32_runtime_objects).
+  target_compile_options(rv32_syscall_entry_bench PRIVATE
+    ${HOGD_RV32_INTERPRETER_COMPILE_OPTIONS})
+endif()
 
 add_executable(
   rv32_runtime_context_test
@@ -254,6 +306,7 @@ add_custom_command(
     "${CMAKE_CURRENT_BINARY_DIR}/rv32-itc-smoke"
   DEPENDS
     ${CMAKE_SOURCE_DIR}/built_contracts/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/thruput-tools-version
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.lock
     ${CMAKE_SOURCE_DIR}/built_contracts/Cargo.toml
     ${CMAKE_SOURCE_DIR}/built_contracts/integration_test_contracts/rv32_smoke_counter/Cargo.toml
@@ -283,7 +336,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -291,7 +343,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_runtime_context_test
+hogd_discover_tests(rv32_runtime_context_test
                      TEST_PREFIX rv32.runtime.)
 
 add_executable(
@@ -308,7 +360,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -316,7 +367,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(
+hogd_discover_tests(
   rv32_upstream_artifact_test
   TEST_PREFIX rv32.upstream.
   NO_PRETTY_VALUES
@@ -335,7 +386,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -343,7 +393,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
+hogd_discover_tests(rv32_contract_test TEST_PREFIX rv32.contract.)
 
 add_dependencies(
   rv32_contract_test
@@ -351,9 +401,8 @@ add_dependencies(
   all_contract_headers # for built_contracts/fibonacci.h
 )
 
-# Offline analysis tool (not part of the main build): dynamic instruction-pair
-# histogram for the rv32 interpreter. Traces real contracts to find fusion
-# candidates. Same dependency set as rv32_contract_test.
+# Trace contracts on the canonical interpreter to report instruction-pair
+# histograms for fusion analysis. Shares rv32_contract_test's dependencies.
 add_executable(
   rv32_pair_histogram_test
   rv32/rv32_pair_histogram_test.cc
@@ -367,7 +416,6 @@ target_link_libraries(
   runtime
   runtime_test_lib
   runtime_test_util
-  db_interface
   hog_db
   storage_cost
   model_checker
@@ -375,7 +423,7 @@ target_link_libraries(
   genesis
   GTest::gtest
 )
-gtest_discover_tests(rv32_pair_histogram_test TEST_PREFIX rv32.pairhist.)
+hogd_discover_tests(rv32_pair_histogram_test TEST_PREFIX rv32.pairhist.)
 
 add_dependencies(
   rv32_pair_histogram_test

@@ -1,5 +1,6 @@
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 
+#include <exception>
 #include <utility>
 
 #include "db_conflict.hh"
@@ -15,7 +16,6 @@
 #include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/sockio.h"
-#include "x23/vec.h"
 
 namespace hogd {
 
@@ -90,14 +90,16 @@ EventServerProxy::emit_event(BlockID block_id, TransactionID tx_id,
   try {
     r = co_await client_.eventexecutor_emit_event(block_id, tx_id, tx_event_log,
                                                   proposed_tx);
-  } catch (x23::XdrException const &e) {
-    // The RPC client can throw (an over-cap payload throws XdrBadInput; a
-    // failed call throws XdrCallFailed) instead of returning a status; on this
-    // detached event coroutine an uncaught throw would terminate the executor
-    // (#2857). Catch the XDR base so no RPC-layer throw escapes; anything else
-    // (e.g. bad_alloc) is a genuine bug and still terminates.
-    error("Unrecoverable: event emission threw before an RPC status: {}",
-          e.what());
+  } catch (std::exception const &e) {
+    // Contain any throw (RPC error or bad_alloc): on this detached coroutine an
+    // uncaught throw would terminate the executor (#2857). The diagnostic can
+    // itself throw under memory pressure, so guard it too.
+    try {
+      error("Unrecoverable: event emission threw before an RPC status: {}",
+            e.what());
+    } catch (...) {
+      report_dropped_log("event emission failure diagnostic");
+    }
     co_return SystemStatus<void>{SystemError{SystemErrorCode::Unrecoverable}};
   }
   if (r != RPCError::kRPCNone) {
@@ -127,13 +129,14 @@ PerTransactionEventServerProxy::emit_events(
                                                     tx_event_log, proposed_tx);
 }
 
-x23::Async<void>
+x23::Detached
 EventServerProxy::report_tx_failure(TransactionHash tx_hash,
                                     TxFailureDiagnostic diag)
 {
-  // Copy the client up front (before the first co_await, so it happens while
-  // the caller still owns the proxy): a fire-and-forget send then owns its own
-  // refcounted ClientRef and can safely outlive this proxy. Unlike
+  // Copy the client up front (the body runs synchronously in the caller until
+  // the first co_await, so this happens while the caller still owns the
+  // proxy): the detached send then owns its own refcounted ClientRef and can
+  // safely outlive this proxy. Unlike
   // emit_events, nothing drains these at finish_block, so the send must not
   // depend on `this`.
   client_t client = client_;
@@ -144,12 +147,15 @@ EventServerProxy::report_tx_failure(TransactionHash tx_hash,
     if (r != RPCError::kRPCNone) {
       warn("tx-failure report dropped by event server: {}", r);
     }
-  } catch (x23::XdrException const &e) {
-    // Best-effort: the RPC client can throw (XdrBadInput / XdrCallFailed)
-    // instead of returning a status; swallow the RPC-layer throw so it never
-    // escapes. Anything else (e.g. bad_alloc) is a genuine bug and still
-    // terminates -- matching emit_event's #2857 containment above.
-    warn("tx-failure report send failed: {}", e.what());
+  } catch (std::exception const &e) {
+    // Best-effort: contain any throw so nothing escapes this detached coroutine
+    // (#2857), matching emit_event above. The diagnostic is guarded because it
+    // too can throw under memory pressure.
+    try {
+      warn("tx-failure report send failed: {}", e.what());
+    } catch (...) {
+      report_dropped_log("tx-failure report send failure diagnostic");
+    }
   }
   co_return;
 }

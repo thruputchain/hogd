@@ -79,7 +79,7 @@ target_include_directories(
   PRIVATE
   ${CMAKE_BINARY_DIR}
 )
-gtest_discover_tests(hog_event_test)
+hogd_discover_tests(hog_event_test)
 
 add_executable(
   hog_event_server_bench

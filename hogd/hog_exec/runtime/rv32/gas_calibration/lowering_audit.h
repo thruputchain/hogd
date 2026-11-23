@@ -25,15 +25,7 @@ struct ThreadedMachinePreInstantiationTestPeer {
 
 namespace hogd::rv32::gas_calibration {
 
-// What the production lowering actually built for a kernel.
-//
-// This exists because the measurement is only as good as the assumption that
-// each body slot lowers to one dispatch of the instruction we think we put
-// there. The threaded lowering fuses nine instruction patterns and splits runs
-// that exceed kMaxRunGas, either of which silently changes the work per slot
-// and would show up as a plausible-looking but wrong cost. The harness checks
-// rather than assumes, and refuses to report a slope from a kernel whose
-// lowering does not match its source.
+// Checks that timed body slots retain the intended handlers and run layout.
 struct LoweringAudit {
   size_t body_slots = 0;
   // Body slots whose baked handler differs from the handler the same encoded
@@ -56,7 +48,7 @@ struct LoweringAudit {
   [[nodiscard]] bool clean() const { return rewritten_slots == 0; }
 };
 
-// Lowers `code` (untraced, exactly as production would) and compares each of
+// Lowers `code` without tracing and compares each of
 // the `body_slots` slots starting at `body_start_index` against an isolated
 // lowering of the same encoded word.
 //

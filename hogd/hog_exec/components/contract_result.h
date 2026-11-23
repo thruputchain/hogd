@@ -1,8 +1,10 @@
 #pragma once
 
+#include <array>
 #include <bit>
 #include <concepts>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <span>
 #include <string_view>
@@ -11,7 +13,6 @@
 #include <utility>
 #include <variant>
 
-#include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/components/library_exception.hh"
@@ -22,31 +23,33 @@
 
 namespace hogd {
 
-// The C++ mirror of the SDK's `Signed<T>` auth token (spec kind
-// `signed_token`). A `Signed<T>` contributes *no bytes* to the serialized
-// payload -- its u32 handle travels out-of-band on the auth-token channel, and
-// the guest fills it in from the handles the host supplies -- so the mirror is
-// an empty marker rather than a uint32_t. (Specs before sdk_rs 0.18 described
-// `Signed<T>` as a bare u32, which was wrong on the wire.)
-//
-// Deliberately has no serializer: no C++ test invokes an entrypoint carrying
-// one yet, and a zero-byte codec should be written against a real caller.
-struct SignedToken {};
+// The C++ mirror of the SDK's `Signed<T>` (spec kind `signed_token`): an XDR
+// struct with no fields, since its handle travels out-of-band. `handle` is not
+// on the wire: decoding leaves it kUnassigned and NativeContractBuilder fills
+// it in declaration order.
+struct SignedToken {
+  static constexpr uint32_t kUnassigned = UINT32_MAX;
+  uint32_t handle = kUnassigned;
+
+  bool operator==(SignedToken const &) const noexcept = default;
+};
 
 template<typename T, uint64_t Selector> struct ContractException {
   constexpr static uint64_t kSelector = Selector;
   T exn;
 };
 
+// Preimage bytes must be the SDK's UTF-8 encoding regardless of the ordinary
+// execution character set, so the arguments and separators are u8 literals.
 inline uint64_t
-calculate_selector(std::string_view major_version, std::string_view crate,
-                   std::string_view type_name)
+calculate_selector(std::u8string_view major_version, std::u8string_view crate,
+                   std::u8string_view type_name)
 {
   x23::Buf buf;
   buf.append_range(major_version);
-  buf.append_range(std::string_view("::"));
+  buf.append_range(std::u8string_view(u8"::"));
   buf.append_range(crate);
-  buf.append_range(std::string_view("::"));
+  buf.append_range(std::u8string_view(u8"::"));
   buf.append_range(type_name);
   auto hash = sha256(buf);
   // First 8 digest bytes as big-endian u64 (matches contract SDK).
@@ -68,13 +71,14 @@ template<typename... T> struct ContractErrorType {
 public:
   ContractErrorType(ReturnBuffer &&abort_buffer)
   {
-    CHECK_EQ(kLibraryExceptionSelector,
-             calculate_selector("1", "sdk", "LibraryExn"));
+    // Dispatch uses the fixed `kLibraryExceptionSelector` constant directly;
+    // it is validated against `calculate_selector` in contract_result_test.cc,
+    // not recomputed here (which would depend on the execution charset).
     uint64_t selector = 0;
     auto used_bytes =
         x23::deserialize_cxs_from(&selector, x23::BufViewEnd{abort_buffer});
     if (!used_bytes) {
-      variant_ = ParseFailureType{std::move(abort_buffer)};
+      variant_ = RawAbortType{std::move(abort_buffer)};
       return;
     }
 
@@ -85,7 +89,7 @@ public:
         this->template try_dispatch_exceptions<LibraryException, T...>(
             selector, body_span);
     if (!matched) {
-      variant_ = ParseFailureType{std::move(abort_buffer)};
+      variant_ = RawAbortType{std::move(abort_buffer)};
     }
   }
 
@@ -97,9 +101,11 @@ public:
   {}
 
 private:
-  struct ParseFailureType {
+  struct RawAbortType {
     ReturnBuffer abort_buffer;
   };
+
+  explicit ContractErrorType(RawAbortType raw) : variant_(std::move(raw)) {}
 
   // `U` is `ContractException<Exn, Sel>` with `kSelector` and `exn`.
   //
@@ -137,13 +143,20 @@ private:
   }
 
 public:
+  // Forward an exception without decoding and re-encoding its body. Wallets
+  // use this after validating the selector, matching SDK RawExceptionRef.
+  static ContractErrorType from_raw_abort(ReturnBuffer abort_buffer)
+  {
+    return ContractErrorType(RawAbortType{std::move(abort_buffer)});
+  }
+
   // Re-serialize to (u64 selector, CXS body) format.
   x23::CxsStatus<ReturnBuffer> serialize() const
   {
     return std::visit(
         [](auto const &v) -> x23::CxsStatus<ReturnBuffer> {
           using V = std::remove_cvref_t<decltype(v)>;
-          if constexpr (std::is_same_v<V, ParseFailureType>) {
+          if constexpr (std::is_same_v<V, RawAbortType>) {
             return v.abort_buffer;
           }
           else {
@@ -157,7 +170,7 @@ public:
         variant_);
   }
 
-  std::variant<LibraryException, ParseFailureType, T...> variant_;
+  std::variant<LibraryException, RawAbortType, T...> variant_;
 };
 
 // Parse and work with result types returned by contract methods.
@@ -206,3 +219,17 @@ concept is_contract_result_type = requires {
 static_assert(is_contract_result_type<Result<void>>);
 
 } // namespace hogd
+
+// A SignedToken is an XDR struct with no fields, so both XDR and CXS encode it
+// as zero bytes; x23 reads the field list from tuple_size.
+template<>
+struct std::tuple_size<hogd::SignedToken>
+  : std::integral_constant<std::size_t, 0> {};
+
+// NOLINTBEGIN(readability-identifier-naming)
+template<> struct x23::xdr_meta<hogd::SignedToken> {
+  static constexpr x23::XdrCategory category = x23::XdrCategory::kStruct;
+  static constexpr const char *type_name = "SignedToken";
+  static constexpr std::array<std::string_view, 0> field_names{};
+};
+// NOLINTEND(readability-identifier-naming)

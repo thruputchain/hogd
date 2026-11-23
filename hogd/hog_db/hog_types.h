@@ -1,4 +1,4 @@
-// hogd_types.h - defines the basic data types used in the HOG blockchain.
+// hogd_types.h - defines the basic data types used by hogd.
 
 #pragma once
 
@@ -43,7 +43,7 @@ struct InvokeTxKey {
   };
 };
 
-// storage_cost returns the cost in hogs for storage.
+// storage_cost returns the cost in native tokens for storage.
 //
 // WARNING: This does not necessarily reflect the real storage cost. It can't
 // easily be changed because it is part of the blockchain model.
@@ -97,7 +97,7 @@ make_address(std::integral auto val)
 
 // This is a superset of the StorageKeyTypes.
 // Every StorageKeyType belongs to an Address,
-// but some ItemTypes, like wasm code, do not.
+// but some ItemTypes, like contract code, do not.
 enum class ItemKeyType {
   kItemKeyTypeContractData = 0,
   kItemKeyTypeFreeNativeTokenBalance = 1,

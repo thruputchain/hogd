@@ -1,12 +1,20 @@
 #include <gtest/gtest.h>
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <chrono>
+#include <mutex>
 #include <optional>
+#include <set>
 #include <thread>
+#include <vector>
 
 #include "address_auth.hh"
+#include "auth_claim.hh"
 #include "auth_rpc.hh"
+#include "hogd/auth_claim/signature_preimage.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/auth_server_test_framework.h"
 #include "transaction.hh"
 #include "types.hh"
@@ -18,11 +26,18 @@
 #include <utility>
 
 #include "auth_card.hh"
+#include "hogd/base/chunked_vector.h"
+#include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_auth/auth_server.h"
 #include "hogd/hog_auth/dbauth_client.h"
+#include "hogd/hog_auth/status.h"
+#include "integration.hh"
+#include "network.hh"
 #include "rpc_types.hh"
+#include "x23/serialize.h"
+#include "x23/sockio.h"
 #include "x23/x23.h"
 
 namespace hogd {
@@ -56,6 +71,46 @@ TEST_F(AuthServerTest, BasicLookup)
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, height);
   ASSERT_TRUE(result.value()->second.has_value());
+}
+
+// The AuthDB1 handler applies a height once every chunk of its run is in,
+// whatever order the chunks arrive in. The run carries auth data the database
+// never held, so the lookup can only be served from the cache the run filled:
+// a handler that applied the empty chunk alone and dropped the other as stale
+// would fall through to the database's version.
+TEST_F(AuthServerTest, ChunkedKeyChangesApplyOnceTheRunIsComplete)
+{
+  ContractAddress address = make_test_address(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().increment_height(); // now at height 2
+  const BlockHeight height = mock_db().get_current_height();
+  ASSERT_EQ(height, 2);
+
+  KeyChangeBatch changes;
+  x23::Ptr<AddressAuthData> run_auth_data;
+  run_auth_data.emplace(make_test_auth_data(2));
+  changes.push_back(
+      KeyChange{.address = address, .auth_data = std::move(run_auth_data)});
+
+  AuthDBRpc rpc;
+  rpc.set_auth_server(auth_server());
+  // The empty second chunk arrives first; the run completes on the first.
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{
+      .height = height, .chunk_index = 1, .chunk_count = 2, .changes = {}})();
+  rpc.authdb_forward_key_changes_chunk(KeyChangeChunk{.height = height,
+                                                      .chunk_index = 0,
+                                                      .chunk_count = 2,
+                                                      .changes = changes})();
+
+  auto result = auth_server().lookup_auth_data(height, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, height);
+  ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_NE(result.value()->second->public_keys[2], nullptr);
+  EXPECT_EQ(result.value()->second->public_keys[1], nullptr);
 }
 
 // Test lookup of non-existent auth data
@@ -176,6 +231,122 @@ TEST_F(AuthServerTest, StaleBlockHeight)
   ASSERT_NE(result.value(), nullptr);
   EXPECT_EQ(result.value()->first, 2);
   ASSERT_FALSE(result.value()->second.has_value());
+}
+
+// try_cached_auth_data() answers only where lookup_auth_data() would return a
+// cache hit without waiting, and returns nullptr everywhere else.
+TEST_F(AuthServerTest, TryCachedAuthDataMatchesLookupCacheHits)
+{
+  ContractAddress address = make_test_address(6);
+  AddressAuthData auth_data = make_test_auth_data(1);
+
+  // Before the first block the server has no height, so nothing is cached.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+
+  mock_db().increment_height(); // height 1
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+
+  // Not cached until a lookup reads it from the db.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+  auto looked_up = auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(looked_up.has_value());
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), *looked_up);
+
+  // A height the server has not reached needs lookup_auth_data() to wait.
+  EXPECT_EQ(auth_server().try_cached_auth_data(2, address), nullptr);
+
+  mock_db().increment_height(); // height 2
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  // The height-2 key change replaced the entry, so height 1 is stale: no
+  // answer here, and lookup_auth_data() reports it.
+  EXPECT_EQ(auth_server().try_cached_auth_data(1, address), nullptr);
+  auto stale = auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(stale.has_value());
+  EXPECT_EQ(stale.error(), AuthErrorCode::kAuthStaleBlockHeight);
+
+  AuthCacheEntry cached = auth_server().try_cached_auth_data(2, address);
+  ASSERT_NE(cached, nullptr);
+  EXPECT_EQ(cached->first, 2);
+  ASSERT_TRUE(cached->second.has_value());
+  EXPECT_EQ(*cached->second, auth_data);
+}
+
+TEST_F(AuthServerTest, StaleHeightUsesUnchangedCachedAuthData)
+{
+  ContractAddress address = make_test_address(5);
+  AddressAuthData auth_data = make_test_auth_data(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, auth_data);
+  mock_db().increment_height(); // height 2
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
+  ASSERT_TRUE(result.has_value());
+  ASSERT_NE(result.value(), nullptr);
+  EXPECT_EQ(result.value()->first, 1);
+  ASSERT_TRUE(result.value()->second.has_value());
+  EXPECT_EQ(result.value()->second.value(), auth_data);
+}
+
+TEST_F(AuthServerTest, StaleHeightRejectsDeletedCachedAuthData)
+{
+  ContractAddress address = make_test_address(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().increment_height(); // height 2
+  mock_db().delete_address(address);
+  mock_db().compute_key_changes_for_current_height();
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
+}
+
+TEST_F(AuthServerTest, StaleHeightRejectsChangedCachedAuthData)
+{
+  ContractAddress address = make_test_address(1);
+
+  mock_db().increment_height(); // height 1
+  mock_db().set(address, make_test_auth_data(1));
+  mock_db().increment_height(); // height 2
+  mock_db().set(address, make_test_auth_data(2));
+  mock_db().compute_key_changes_for_current_height();
+
+  auth_server().register_auth_data_updates(1,
+                                           mock_db().get_key_changes_at_height(
+                                               1))();
+  auth_server().register_auth_data_updates(2,
+                                           mock_db().get_key_changes_at_height(
+                                               2))();
+
+  AuthStatus<AuthCacheEntry> result =
+      auth_server().lookup_auth_data(1, address)();
+  ASSERT_FALSE(result.has_value());
+  EXPECT_EQ(result.error(), AuthErrorCode::kAuthStaleBlockHeight);
 }
 
 TEST_F(AuthServerTest, QueriesDelayed)
@@ -454,26 +625,134 @@ class RecordingMempoolAuthRpc {
 public:
   using rpc_service = MempoolAuth1;
 
-  static x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  x23::Async<IntroAuthResult> mempoolauth_intro_auth(AuthCard /*card*/)
+  {
+    intro_calls_.fetch_add(1);
+    co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
+  }
+
+  static x23::Async<IntroAuthResult>
+  mempoolauth_get_auth_info(ProtocolCommit /*protocol*/)
   {
     co_return IntroAuthResult(IntroAuthOutcome::kSuccess);
   }
 
-  x23::Async<void> mempoolauth_auth_data_changed(BlockHeight height,
-                                                 KeyChangeBatch key_changes)
+  x23::Async<void> mempoolauth_auth_data_changed_chunk(KeyChangeChunk chunk)
   {
-    height_ = height;
-    batch_size_ = key_changes.size();
+    std::scoped_lock lock(mutex_);
+    chunks_.push_back(std::move(chunk));
     co_return;
   }
 
-  std::optional<BlockHeight> height_;
-  std::optional<size_t> batch_size_;
+  // The chunks received so far, in arrival order.
+  std::vector<KeyChangeChunk> chunks() const
+  {
+    std::scoped_lock lock(mutex_);
+    return chunks_;
+  }
+
+  int intro_calls() const { return intro_calls_.load(); }
+
+private:
+  mutable std::mutex mutex_;
+  std::vector<KeyChangeChunk> chunks_;
+  std::atomic<int> intro_calls_ = 0;
 };
 
 static_assert(is_MempoolAuth1<RecordingMempoolAuthRpc *, x23::Async>);
 
+// The changes the mempool received for [height], in chunk order.
+KeyChangeBatch
+changes_received(const RecordingMempoolAuthRpc &mempool, BlockHeight height)
+{
+  std::vector<KeyChangeChunk> chunks = mempool.chunks();
+  std::erase_if(chunks, [height](const KeyChangeChunk &chunk) {
+    return chunk.height != height;
+  });
+  std::ranges::sort(chunks, {}, &KeyChangeChunk::chunk_index);
+  KeyChangeBatch changes;
+  for (const KeyChangeChunk &chunk : chunks) {
+    for (const KeyChange &change : chunk.changes) {
+      changes.push_back(change);
+    }
+  }
+  return changes;
+}
+
 } // namespace
+
+// The mempool starts serving the coordinator once auth registers, so auth
+// registers only after its db intro has returned. Registering first would let
+// a block commit before the subscription, and that block's changes would never
+// reach the mempool (issue #1927).
+TEST_F(AuthServerTest, RegistersWithMempoolOnlyAfterDbIntro)
+{
+  RpcServer<BlockingIntroDBAuthRpc> db_server;
+  const uint16_t db_port = db_server.start_server(0);
+  dbauth_client_t dbauth_client =
+      make_dbauth_client(std::format("localhost:{}", db_port))().value();
+  AuthServer race_auth_server(std::move(dbauth_client), NetworkHash{}, 16);
+
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t mempool_port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", mempool_port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  race_auth_server.set_mempool_client(std::move(*client));
+
+  std::jthread subscribe_thread([&] {
+    IntroAuthResult intro =
+        race_auth_server.subscribe_and_register(AuthCard{})();
+    EXPECT_EQ(intro.outcome(), IntroAuthOutcome::kSuccess);
+  });
+  db_server->impl()->wait_for_intro();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 0);
+
+  db_server->impl()->release_intro(1);
+  subscribe_thread.join();
+  EXPECT_EQ(mempool->impl()->intro_calls(), 1);
+}
+
+TEST_F(AuthServerTest, ForwardsChunkedKeyChangesWithoutChangingTheirContents)
+{
+  RpcServer<RecordingMempoolAuthRpc> mempool;
+  const uint16_t port = mempool.start_server(0);
+  x23::HostPort host_port;
+  ASSERT_TRUE(host_port.parse(std::format("localhost:{}", port)));
+  auto client = make_rpc_client<MempoolAuth1>(host_port)();
+  ASSERT_TRUE(client.has_value());
+  auth_server().set_mempool_client(std::move(*client));
+
+  AddressAuthData auth_data = make_test_auth_data(1);
+  auth_data.public_keys[1]->key = PublicKey(CryptographicScheme::MlDsa65);
+  auth_data.public_keys[1]->key.mldsa65()->fill(0x5a);
+  KeyChangeBatch expected;
+  expected.push_back(
+      KeyChange{.address = make_test_address(1),
+                .auth_data = x23::Ptr<AddressAuthData>(auth_data)});
+  expected.push_back(
+      KeyChange{.address = make_test_address(2), .auth_data = nullptr});
+
+  std::vector<KeyChangeBatch> chunks;
+  chunks.push_back({expected[0]});
+  chunks.emplace_back();
+  chunks.push_back({expected[1]});
+  auth_server().register_auth_data_updates(0, ChunkedVector<KeyChangeBatch>(
+                                                  std::move(chunks)))();
+
+  EXPECT_EQ(changes_received(*mempool->impl(), 0), expected);
+  auto cached = auth_server().lookup_auth_data(0, expected[0].address)();
+  ASSERT_TRUE(cached.has_value());
+  EXPECT_EQ(cached.value()->second, auth_data);
+
+  // An empty height is still forwarded, as one chunk with no changes.
+  auth_server().register_auth_data_updates(1, KeyChangeBatch{})();
+  const std::vector<KeyChangeChunk> received = mempool->impl()->chunks();
+  ASSERT_EQ(received.size(), 2U);
+  EXPECT_EQ(received.back().height, 1);
+  EXPECT_TRUE(received.back().changes.empty());
+}
 
 // Regression test for #1448: lookup_auth_data waiters stranded when
 // subscribe_to_auth_data_changes stores the initial height without broadcast.
@@ -510,6 +789,43 @@ TEST_F(AuthServerTest, SubscribeBroadcastWakesLookupWaiters)
   EXPECT_TRUE(lookup_finished.load());
 
   lookup_thread.join();
+}
+
+// The forward to the mempool is a run of KeyChangeChunk records under the
+// chunk bound that together carry every change of the height.
+TEST_F(AuthServerTest, ForwardsAHeightToTheMempoolAsARunOfChunks)
+{
+  RpcServer<SimpleDBAuthRpc> db_server(/*intro_height=*/0);
+  const uint16_t db_port = db_server.start_server(0);
+  RpcServer<RecordingMempoolAuthRpc> mempool_server;
+  const uint16_t mempool_port = mempool_server.start_server(0);
+  AuthServer auth_server(
+      make_dbauth_client(std::format("localhost:{}", db_port))().value(),
+      NetworkHash{}, 16, /*max_key_changes_per_chunk=*/2);
+  x23::HostPort mempool_host{"127.0.0.1", mempool_port};
+  auth_server.set_mempool_client(
+      make_rpc_client<MempoolAuth1>(mempool_host)().value());
+
+  KeyChangeBatch key_changes;
+  for (uint8_t i = 1; i <= 5; i++) {
+    key_changes.push_back(
+        KeyChange{.address = make_test_address(i), .auth_data = {}});
+  }
+  auth_server.register_auth_data_updates(1, key_changes)();
+
+  const std::vector<KeyChangeChunk> chunks = mempool_server.impl()->chunks();
+  ASSERT_EQ(chunks.size(), 3U);
+  std::set<uint32_t> indices;
+  size_t changes = 0;
+  for (const KeyChangeChunk &chunk : chunks) {
+    EXPECT_EQ(chunk.height, 1);
+    EXPECT_EQ(chunk.chunk_count, 3U);
+    EXPECT_LE(chunk.changes.size(), 2U);
+    indices.insert(chunk.chunk_index);
+    changes += chunk.changes.size();
+  }
+  EXPECT_EQ(indices, (std::set<uint32_t>{0, 1, 2}));
+  EXPECT_EQ(changes, 5U);
 }
 
 TEST_F(AuthServerTest, CacheEntryLifetimeSurvivesReplacement)
@@ -559,6 +875,70 @@ TEST_F(AuthServerTest, VerifyTransactionsBasicSmoke)
 
   auto results = auth_server().verify_transactions(0, std::span(&stx, 1))();
   ASSERT_EQ(results.size(), 1);
+}
+
+// A wrapper over kMaxBytesSignedTransaction fails authentication before any
+// signature work (#3844). The two txs differ only in calldata padding.
+TEST_F(AuthServerTest, VerifyTransactionsRejectsOverCapWrapper)
+{
+  const ContractAddress address = make_test_address(51);
+  auto [raw_pk, raw_sk] = ed25519_keygen();
+  PublicKey pk(CryptographicScheme::Ed25519);
+  pk.ed25519() = raw_pk;
+  SecretKey sk(CryptographicScheme::Ed25519);
+  sk.ed25519() = raw_sk;
+
+  AddressAuthData auth_data{};
+  auth_data.public_keys[0] = x23::Ptr<PublicKeyConfig>(
+      new PublicKeyConfig{.key = pk, .max_weight = 100});
+  auth_data.required_weight = 1;
+  mock_db().set(address, auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+
+  auto sign = [&](const Transaction &tx) {
+    SignedTransaction stx{.tx = tx};
+    DecoratedSignature sig;
+    sig.public_key_id = 0;
+    sig.signature = Signature(CryptographicScheme::Ed25519);
+    sig.signature.ed25519() =
+        ed25519_sign(sk.ed25519(),
+                     transaction_signature_preimage(kNetworkHash, tx))
+            .value();
+    stx.signatures.push_back(sig);
+    return stx;
+  };
+
+  Transaction tx{};
+  tx.invocation.invoked_address = address;
+  AuthClaim claim(AuthClaimType::kSourceAddressAuthData);
+  claim.source_address_claim().allowed_keys = 1;
+  claim.source_address_claim().required_weight = 1;
+  tx.auth_claim = claim;
+
+  const size_t base = x23::xdr_size(sign(tx));
+  ASSERT_LE(base, kMaxBytesSignedTransaction);
+  tx.invocation.calldata.resize(kMaxBytesSignedTransaction - base, 0);
+  const SignedTransaction at_cap = sign(tx);
+  ASSERT_EQ(x23::xdr_size(at_cap), kMaxBytesSignedTransaction);
+
+  tx.invocation.calldata.resize(tx.invocation.calldata.size() + 4, 0);
+  const SignedTransaction over_cap = sign(tx);
+  ASSERT_GT(x23::xdr_size(over_cap), kMaxBytesSignedTransaction);
+
+  std::array<SignedTransaction, 2> stxs{at_cap, over_cap};
+  auto results = auth_server().verify_transactions(0, std::span(stxs))();
+  ASSERT_EQ(results.size(), 2);
+  EXPECT_EQ(results[0], AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(results[1], AuthErrorCode::kAuthFailed);
+
+  // The batch path applies the same gate.
+  EXPECT_EQ(auth_server().verify_batch(0, {at_cap})(),
+            AuthErrorCode::kAuthSuccess);
+  EXPECT_EQ(auth_server().verify_batch(0, {at_cap, over_cap})(),
+            AuthErrorCode::kAuthFailed);
 }
 
 TEST_F(AuthServerTest, VerifyTransactionsSurvivesConcurrentCacheReplacement)

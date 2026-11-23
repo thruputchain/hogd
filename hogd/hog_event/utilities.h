@@ -29,7 +29,7 @@ TxEmittedEvent make_tx_emitted_event(ContractAddress const &contract_address,
 // This matches the on-the-wire encoding produced by the SDK's
 // `#[derive(Event)]` (signature topic + raw 32-byte address topics + a
 // CXS-encoded payload), so native contracts emit events that are byte-identical
-// to the canonical wasm contracts.
+// to the canonical RV32 contracts.
 [[nodiscard]] x23::CxsStatus<x23::Buf>
 make_event_from_cxs_struct(Topic const &signature,
                            x23::is_xdr_struct auto const &t)

@@ -2,7 +2,6 @@
 
 #include <cassert>
 #include <cstddef>
-#include <memory>
 #include <type_traits>
 #include <unordered_map>
 #include <unordered_set>
@@ -19,8 +18,7 @@ public:
   using value_type = Contract;
   using hash_set_t = std::unordered_set<SHA256Hash, SipHash24Hasher>;
   using contract_map_t =
-      std::unordered_map<SHA256Hash, std::unique_ptr<const Contract>,
-                         SipHash24Hasher>;
+      std::unordered_map<SHA256Hash, const Contract *, SipHash24Hasher>;
 
   // NOLINTNEXTLINE(readability-identifier-naming)
   class const_iterator {

@@ -1,6 +1,7 @@
 #include "hogd/hog_auth/dbauth_client.h"
 
 #include <optional>
+#include <utility>
 
 #include "address_auth.hh"
 #include "auth_card.hh"
@@ -19,7 +20,8 @@ DBAuthClient::lookup_auth_data(BlockHeight height, ContractAddress address)
 
   switch (res.error()) {
   case DBAuthError::kDBAuthSuccess:
-    co_return AuthStatus<std::optional<AddressAuthData>>{res.auth_data()};
+    co_return AuthStatus<std::optional<AddressAuthData>>{
+        std::move(res.auth_data())};
   case DBAuthError::kDBAuthNotFound:
     co_return AuthStatus<std::optional<AddressAuthData>>{std::nullopt};
   case DBAuthError::kDBAuthStaleBlockHeight:

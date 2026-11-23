@@ -1,8 +1,8 @@
 #!/usr/bin/env bash
 
 # A readiness wait that says what was supposed to be listening. Intended to be
-# sourced by a benchmark script that has [CONTROL_LOG_RECORDS], [hog_ip] and
-# [remote_run] in scope.
+# sourced by a benchmark script that has [CONTROL_LOG_RECORDS], [hog_ip],
+# [remote_run] and [ci_panic_report_program] in scope.
 #
 # [control_cli start] returns as soon as a process is spawned, so a process that
 # dies during startup is not reported by its launch. The run fails minutes later
@@ -83,6 +83,31 @@ replay_control_log() {
   echo "===== last $READINESS_LOG_TAIL_LINES lines of $label on $host ====="
   printf -v quoted_paths '%q %q' "$stdout_path" "$stderr_path"
   remote_run "$host" "tail -n $READINESS_LOG_TAIL_LINES $quoted_paths" || true
+  replay_panic_report "$host" "$label" "$stderr_path"
+}
+
+# Replays the x23 panic report in one process's stderr, if it has one.
+#
+# A process that panics prints its report and then dumps every live file
+# descriptor and every thread before aborting, so on anything busy the tail
+# above is all dump and no reason: the run reports a SIGABRT and nothing about
+# what tripped it. Ask the host for the report by name as well. Best effort for
+# the same reason as the tail, and silent when there is no panic, so a process
+# that died some other way reads exactly as it did before.
+replay_panic_report() {
+  local host=$1
+  local label=$2
+  local stderr_path=$3
+  local quoted_path report
+
+  printf -v quoted_path '%q' "$stderr_path"
+  report=$(remote_run "$host" \
+    "$(ci_panic_report_program "$quoted_path" "$CI_PANIC_REPORT_LINES")" \
+    2>/dev/null) || true
+  [ -n "$report" ] || return 0
+
+  echo "===== panic report from $label on $host ====="
+  printf '%s\n' "$report"
 }
 
 # Replays the logs of a process by the label it was launched under. Used when a

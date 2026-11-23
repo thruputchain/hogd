@@ -204,10 +204,10 @@ run_event_bench(const std::string &exec_server_addr,
     exec_clients.push_back(connect_to_event_exec_server(exec_server_addr));
   }
 
-  auto total_start_time = x23::fastclock::get_ns();
+  auto total_start_time = x23::fastclock::now();
 
   // Open block
-  auto open_start = x23::fastclock::get_ns();
+  auto open_start = x23::fastclock::now();
   auto res = event_sched_client.eventsched_open_block(block_number)();
   if (res != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to open block");
@@ -216,11 +216,11 @@ run_event_bench(const std::string &exec_server_addr,
   if (res2 != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to open executor event handle");
   }
-  auto open_end = x23::fastclock::get_ns();
-  double open_time = open_end - open_start;
+  auto open_end = x23::fastclock::now();
+  double open_time = (open_end - open_start).count();
 
   // Send events
-  auto send_start = x23::fastclock::get_ns();
+  auto send_start = x23::fastclock::now();
 
   std::atomic<size_t> event_offset = 0;
   std::atomic<size_t> n_total_coros = n_coros_per_connection * n_connections;
@@ -236,12 +236,12 @@ run_event_bench(const std::string &exec_server_addr,
     async();
   }
 
-  auto send_end = x23::fastclock::get_ns();
-  double send_time = send_end - send_start;
+  auto send_end = x23::fastclock::now();
+  double send_time = (send_end - send_start).count();
   double events_per_sec = num_events * 1'000'000'000.0 / send_time;
 
   // Close block
-  auto close_start = x23::fastclock::get_ns();
+  auto close_start = x23::fastclock::now();
   // We use [block_number] as the height as well.
   auto res1 = exec_clients[0].eventexecutor_close_block(block_number)();
   if (res1 != RPCError::kRPCNone) {
@@ -252,11 +252,11 @@ run_event_bench(const std::string &exec_server_addr,
   if (close_res.error() != RPCError::kRPCNone) {
     throw std::runtime_error("Failed to close block");
   }
-  auto close_end = x23::fastclock::get_ns();
-  double close_time = close_end - close_start;
+  auto close_end = x23::fastclock::now();
+  double close_time = (close_end - close_start).count();
 
-  auto total_end_time = x23::fastclock::get_ns();
-  double total_time = total_end_time - total_start_time;
+  auto total_end_time = x23::fastclock::now();
+  double total_time = (total_end_time - total_start_time).count();
   double total_events_per_sec = num_events * 1'000'000'000.0 / total_time;
 
   std::println(

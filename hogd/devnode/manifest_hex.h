@@ -9,11 +9,11 @@
 #include <span>
 #include <string>
 
-#include "contract.hh"
 #include "hogd/base/string.h"
 
 namespace hogd {
 
+// Hex helpers for binary-reference assertions in hosted bootstrap tests.
 inline std::string
 hex_string(std::span<const std::byte> bytes)
 {
@@ -25,12 +25,6 @@ inline std::string
 hex_string(std::array<std::uint8_t, N> const &bytes)
 {
   return hex_string(std::as_bytes(std::span(bytes)));
-}
-
-inline std::string
-entrypoint_hex(ContractEntrypointID const &entrypoint)
-{
-  return hex_string(std::as_bytes(std::span(entrypoint)));
 }
 
 } // namespace hogd

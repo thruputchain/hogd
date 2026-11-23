@@ -3,6 +3,7 @@
 
 extern "C" {
 #ifdef __APPLE__
+#include <mach/mach.h>
 #include <stdlib.h>
 #endif // defined(__APPLE__)
 #ifdef __linux__
@@ -92,6 +93,39 @@ read_process_stats()
   }
 #else  // defined(__linux__)
   return Errno(ENOENT);
+#endif // defined(__linux__)
+}
+
+// Linux reads the rss page count from /proc/self/stat and scales it by the page
+// size. macOS asks the kernel for this task's resident_size via task_info().
+// Any failure, or another platform, returns 0, which callers treat as "not
+// reported" rather than a real size.
+size_t
+resident_memory_bytes()
+{
+#ifdef __linux__
+  ErrnoStatus<ProcessStats> stats = read_process_stats();
+  if (!stats) {
+    return 0;
+  }
+  const auto page_size = static_cast<int64_t>(sysconf(_SC_PAGE_SIZE));
+  if (page_size <= 0) {
+    return 0;
+  }
+  // read_process_stats() reports rss as a page count.
+  return (*stats).rss * static_cast<size_t>(page_size);
+#elifdef __APPLE__
+  mach_task_basic_info info{};
+  mach_msg_type_number_t count = MACH_TASK_BASIC_INFO_COUNT;
+  const kern_return_t status =
+      task_info(mach_task_self(), MACH_TASK_BASIC_INFO,
+                reinterpret_cast<task_info_t>(&info), &count);
+  if (status != KERN_SUCCESS) {
+    return 0;
+  }
+  return static_cast<size_t>(info.resident_size);
+#else  // defined(__linux__)
+  return 0;
 #endif // defined(__linux__)
 }
 

@@ -1,21 +1,6 @@
-// RV32 gas calibration harness.
-//
-// Measures what the production engine (ThreadedMachine, tracing off) actually
-// costs per instruction, so the gas schedule in program.h can be set from
-// measurement instead of guessed. See README.md for the method and for how to
-// read the output.
-//
-// The estimator is a controlled contrast, not a regression over workloads.
-// Every kernel in a sweep has the same body slot count, the same code size, the
-// same trip count, the same register plan, and the same body boundaries; the
-// only difference is how many body slots hold the target instruction instead of
-// the filler. Fitting time against that count gives ns-per-instruction directly
-// as a slope, with all fixed overhead in the intercept. There is no design
-// matrix to condition and nothing for the opcodes to be collinear with, which
-// is the failure mode of fitting a cost table to a corpus of mixed programs:
-// in real code opcode counts move together, so the fit is free to trade one
-// opcode's cost against another's and lands on coefficients that fit the
-// corpus without meaning anything per-opcode.
+// Time the untraced ThreadedMachine using saturated instruction bodies,
+// substitution diagnostics, synthetic ECALLs, and mixed validation workloads.
+// See README.md for estimators, gas units, and measurement limits.
 
 #include <algorithm>
 #include <cmath>
@@ -30,6 +15,7 @@
 #include <memory>
 #include <print>
 #include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <utility>
@@ -39,7 +25,9 @@
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/lowering_audit.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/measure.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/provenance.h"
+#include "hogd/hog_exec/runtime/rv32/gas_calibration/syscall_kernel.h"
 #include "hogd/hog_exec/runtime/rv32/gas_calibration/workloads.h"
+#include "hogd/hog_exec/runtime/rv32/host.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
@@ -47,11 +35,8 @@ namespace hogd::rv32::gas_calibration {
 namespace {
 
 struct Options {
-  // A wide body is the cheapest precision there is. The slope's standard error
-  // falls with the spread of the target count, so doubling the body halves the
-  // uncertainty at the same wall time -- far better value than more repeats,
-  // which only average timer jitter and leave the per-kernel layout bias that
-  // actually dominates the residual.
+  // A wider target-count range improves the substitution fit's ability to
+  // resolve costs above between-kernel layout bias.
   uint32_t body_slots = 512;
   uint32_t repeats = 9;
   uint32_t warmup_runs = 2;
@@ -62,14 +47,16 @@ struct Options {
   // Escape hatch for working on the harness itself, never for a calibration
   // whose numbers anyone will act on.
   bool allow_nonproduction = false;
-  // Distinct target placements measured at each target count. Two phases do
-  // identical work, so spreading each point over several of them averages out
-  // per-kernel layout bias instead of baking one kernel's luck into the slope.
+  // Vary layout at each target count to sample systematic placement bias.
   uint32_t placements = 5;
+  // Include synthetic ECALL crossings alongside the opcode measurements.
+  bool syscalls = true;
+  bool syscalls_only = false;
 };
 
 // One measured (op, context) cell.
 struct SweepResult {
+  bool jump_kernel = false;
   std::string op;
   std::string context;
   std::string working_set;
@@ -210,6 +197,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
           const std::string &branch_mode)
 {
   SweepResult result;
+  // Opcode kernels make no host call: their single ecall is the terminal one.
+  HaltHost halt_host;
   result.is_pair = base.pair != PairKind::kNone;
   result.op = result.is_pair ? pair_name(base.pair) : op_name(base.target);
   result.context = result.is_pair ? "pair" : context_name(base.context);
@@ -238,8 +227,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     return result;
   }
 
-  const uint32_t trip_count =
-      tune_trip_count(*sweep->programs.back(), 64, options.target_ns);
+  const uint32_t trip_count = tune_trip_count(*sweep->programs.back(),
+                                              halt_host, 64, options.target_ns);
   sweep = build_sweep(base, counts, trip_count, options.placements);
   if (!sweep.has_value()) {
     result.rejected_because = "kernel not representable at the tuned trip "
@@ -248,15 +237,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
     return result;
   }
 
-  // Audit every kernel in the sweep, not just the densest. A fit is a
-  // statement about the difference between these specific programs, so a
-  // fusion or run split in any one of them corrupts the slope -- and the
-  // handler lookups are cached, so checking all of them costs little.
-  //
-  // After the rebuild, and at the trip count the measured kernels were built
-  // with. This used to run before the sweep was rebuilt at the tuned trip
-  // count, so the verdict described programs that were then discarded and the
-  // ones actually timed went unchecked.
+  // Audit the rebuilt kernels at their measured trip count. Fusion or run
+  // splits in any point would invalidate the substitution fit.
   KernelSpec audited = base;
   audited.trip_count = trip_count;
   for (size_t i = 0; i < sweep->kernels.size(); ++i) {
@@ -298,8 +280,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
          .program = sweep->programs[i].get(),
          .trip_count = trip_count});
   }
-  measure_interleaved(points, {.repeats = options.repeats,
-                               .warmup_runs = options.warmup_runs});
+  measure_interleaved(points, halt_host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
 
   for (const MeasurementPoint &point : points) {
     if (!point.ran_clean) {
@@ -322,17 +305,9 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
       (static_cast<double>(slots_per_target(base)) * filler_ns) +
       result.fit.slope;
 
-  // An absolute upper bound, the fallback for a cell that cannot be saturated.
-  //
-  // The densest kernel runs `target_slots` targets and some fillers per
-  // iteration, so
-  //
-  //     T = n_target * c_target + n_filler * c_filler + loop overhead
-  //
-  // and every term is non-negative, so T / n_target bounds c_target from above
-  // -- no subtraction, no fit, no way to come out negative. It reads up to ~2x
-  // high with the body half targets, and tightens as the target gets more
-  // expensive, which is the right way round.
+  // Fallback: divide the densest kernel's time by its target count. Filler and
+  // loop overhead remain attributed to targets, so this is a loose bound on
+  // their cost in this kernel, without subtracting noisy timings.
   const uint32_t densest = sweep->target_counts.back();
   if (densest > 0) {
     std::vector<double> dense_samples;
@@ -360,14 +335,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
   {
     KernelSpec sat = base;
     sat.saturated = true;
-    // A body of one repeated instruction is precisely the shape a fusion rule
-    // matches, so for a single target lower it with fusion off and measure the
-    // unfused cost directly. That is also the cost the schedule charges:
-    // fusion is a saving the engine may or may not get, and worst-case pricing
-    // cannot assume it.
-    //
-    // A pair row is the opposite -- auipc;jalr exists to measure the fused
-    // form -- so those keep it on.
+    // Disable fusion for single targets so the estimate does not depend on
+    // fusion savings. Pair rows retain fusion where it is part of the workload.
     const bool sat_fuse = base.pair != PairKind::kNone;
     sat.body_slots = options.body_slots;
     sat.target_slots = max_target_slots(options.body_slots, sat);
@@ -386,7 +355,8 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
         result.saturated_note = "saturated probe would not instantiate";
       }
       else {
-        sat.trip_count = tune_trip_count(*seed, 64, options.target_ns);
+        sat.trip_count =
+            tune_trip_count(*seed, halt_host, 64, options.target_ns);
         auto kernel = build_kernel(sat);
         if (!kernel.has_value()) {
           result.saturated_note = "saturated kernel not representable at the "
@@ -434,20 +404,16 @@ run_sweep(const KernelSpec &base, const Options &options, double filler_ns,
                    .x = 0.0,
                    .program = &*program,
                    .trip_count = sat.trip_count}};
-              measure_interleaved(one, {.repeats = options.repeats,
-                                        .warmup_runs = options.warmup_runs});
+              measure_interleaved(one, halt_host,
+                                  {.repeats = options.repeats,
+                                   .warmup_runs = options.warmup_runs});
               if (!one[0].ran_clean) {
                 result.saturated_note = "saturated kernel did not halt cleanly";
               }
               else {
-                // Substitutions placed, not instructions retired. Units: a
-                // pair's cost is quoted per pair, matching the ceiling it is
-                // compared against. Direction: the iteration also runs two
-                // boundary fillers and three loop instructions, and spreading
-                // their time across those averages the target down, which is
-                // the one direction worst-case pricing cannot tolerate.
-                // Attributing all of it to the targets makes this an upper
-                // bound, loose by about 1% at these body sizes.
+                // Divide by target units: instructions for singles, pairs for
+                // pairs. Attribute boundary and loop overhead to targets
+                // rather than diluting the estimate with filler counts.
                 result.ns_saturated =
                     one[0].median() / static_cast<double>(kernel->target_units);
               }
@@ -491,6 +457,7 @@ BaselineResult
 run_baseline(const Options &options)
 {
   BaselineResult baseline;
+  HaltHost halt_host;
   const std::vector<uint32_t> body_sizes =
       options.quick ? std::vector<uint32_t>{64, 160, 256}
                     : std::vector<uint32_t>{64, 112, 160, 208, 256};
@@ -521,7 +488,7 @@ run_baseline(const Options &options)
   }
 
   const uint32_t trip_count =
-      tune_trip_count(*programs.back(), 64, options.target_ns);
+      tune_trip_count(*programs.back(), halt_host, 64, options.target_ns);
   std::vector<MeasurementPoint> points;
   points.reserve(programs.size());
   for (size_t i = 0; i < programs.size(); ++i) {
@@ -557,8 +524,9 @@ run_baseline(const Options &options)
     points[i].trip_count = trip_count;
   }
 
-  measure_interleaved(points, {.repeats = options.repeats,
-                               .warmup_runs = options.warmup_runs});
+  measure_interleaved(points, halt_host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
   for (const MeasurementPoint &point : points) {
     if (!point.ran_clean) {
       return baseline;
@@ -572,13 +540,12 @@ run_baseline(const Options &options)
   return baseline;
 }
 
-// Two identical all-filler kernels measured under different labels inside one
-// interleaved schedule. Their medians should agree; whatever they differ by is
-// the floor below which this host cannot resolve a cost difference at all.
-// Every slope smaller than this is noise wearing a number.
+// Compare identical kernels under different labels as a timing-noise
+// diagnostic. The reporter uses fit residuals to assess substitution slopes.
 double
 measure_noise_floor(const Options &options)
 {
+  HaltHost halt_host;
   KernelSpec spec;
   spec.target = Op::kAdd;
   spec.target_slots = 0;
@@ -595,7 +562,8 @@ measure_noise_floor(const Options &options)
   if (!seed.has_value()) {
     return 0.0;
   }
-  const uint32_t trip_count = tune_trip_count(*seed, 64, options.target_ns);
+  const uint32_t trip_count =
+      tune_trip_count(*seed, halt_host, 64, options.target_ns);
   spec.trip_count = trip_count;
   kernel = build_kernel(spec);
   if (!kernel.has_value()) {
@@ -623,8 +591,9 @@ measure_noise_floor(const Options &options)
                                            .x = 1.0,
                                            .program = programs[1].get(),
                                            .trip_count = trip_count}};
-  measure_interleaved(points, {.repeats = options.repeats,
-                               .warmup_runs = options.warmup_runs});
+  measure_interleaved(points, halt_host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
   const double a = points[0].median();
   const double b = points[1].median();
   if (a <= 0.0) {
@@ -632,6 +601,238 @@ measure_noise_floor(const Options &options)
   }
   // Reported per instruction, so it is directly comparable to a slope.
   return std::abs(a - b) / static_cast<double>(options.body_slots);
+}
+
+// One measured syscall-seam shape.
+//
+// The unit is a host call, not an instruction: what is being priced is the
+// crossing, and a crossing is not divisible into instructions the way a body
+// of ALU ops is.
+struct SyscallSweepResult {
+  std::string shape;
+  std::string models;
+  uint32_t guest_slots_per_call = 0;
+  uint32_t output_bytes = 0;
+  // Calls in the saturated body, the denominator its timing divides by.
+  uint32_t calls_per_iteration = 0;
+  // Instruction gas per call group. The synthetic host charges no host gas;
+  // production syscalls pay additional costs from gas_cost_table.h.
+  uint64_t scheduled_gas_per_call = 0;
+  // Primary: absolute ns per call of a body made entirely of call groups. A
+  // level, not a contrast, for the reason the README gives at length.
+  double ns_per_call = 0.0;
+  // Diagnostic: the sweep's slope with the filler it displaced added back. It
+  // answers a different question than ns_per_call -- what one more call costs
+  // in a body that is mostly not calls -- and the two are expected to differ,
+  // because the saturated body makes every ecall its own straight-line run
+  // while the sparse one amortizes enter_run over the filler between them.
+  double ns_per_call_marginal = 0.0;
+  LinearFit fit;
+  double worst_relative_mad = 0.0;
+  LoweringAudit audit;
+  size_t measured_points = 0;
+  bool usable = false;
+  std::string rejected_because;
+};
+
+// Kernels for one seam sweep, kept alive together: the pre-instantiations
+// borrow nothing from the kernel, but the kernel carries the call count and the
+// scheduled gas the checks below compare against.
+struct SyscallKernels {
+  std::vector<SyscallKernel> kernels;
+  std::vector<std::unique_ptr<ThreadedMachinePreInstantiation>> programs;
+};
+
+// Call-group counts for a seam sweep. No non-adjacency cap: ecall is a run
+// barrier that matches no fusion rule in either position, so adjacent groups
+// cannot create or destroy a fusion the way adjacent ALU ops can. The body can
+// be filled.
+std::vector<uint32_t>
+syscall_sweep_counts(uint32_t body_slots, bool quick, SyscallShape shape)
+{
+  const uint32_t cap = max_call_groups(body_slots, shape);
+  if (quick) {
+    return {0, cap / 2, cap};
+  }
+  return {0, cap / 5, (2 * cap) / 5, (3 * cap) / 5, (4 * cap) / 5, cap};
+}
+
+SyscallSweepResult
+run_syscall_sweep(SyscallShape shape, const Options &options, double filler_ns)
+{
+  SyscallSweepResult result;
+  result.shape = syscall_shape_name(shape);
+  result.models = syscall_shape_models(shape);
+  result.guest_slots_per_call = syscall_shape_slots(shape);
+  result.output_bytes = syscall_shape_output_bytes(shape);
+  result.scheduled_gas_per_call =
+      scheduled_gas_for(Op::kEcall) +
+      ((result.guest_slots_per_call - 1) * scheduled_gas_for(Op::kAddi));
+
+  const std::vector<uint32_t> counts =
+      syscall_sweep_counts(options.body_slots, options.quick, shape);
+
+  const auto build =
+      [&](uint32_t trip_count) -> std::expected<SyscallKernels, KernelError> {
+    SyscallKernels built;
+    for (const uint32_t groups : counts) {
+      SyscallKernelSpec spec;
+      spec.shape = shape;
+      spec.body_slots = options.body_slots;
+      spec.call_groups = groups;
+      spec.trip_count = trip_count;
+      auto kernel = build_syscall_kernel(spec);
+      if (!kernel.has_value()) {
+        return std::unexpected(kernel.error());
+      }
+      auto program =
+          ThreadedMachinePreInstantiation::create(kernel->code,
+                                                  kernel->initial_memory, 0,
+                                                  kernel->memory_bytes,
+                                                  /*trace=*/false);
+      if (!program.has_value()) {
+        return std::unexpected(KernelError::kUndecodable);
+      }
+      built.kernels.push_back(std::move(*kernel));
+      built.programs.push_back(
+          std::make_unique<ThreadedMachinePreInstantiation>(
+              std::move(*program)));
+    }
+    return built;
+  };
+
+  auto seeded = build(64);
+  if (!seeded.has_value()) {
+    result.rejected_because =
+        "kernel not representable: " + kernel_error_name(seeded.error());
+    return result;
+  }
+  SyscallDispatchHost tuning_host(shape);
+  const uint32_t trip_count =
+      tune_trip_count(*seeded->programs.back(), tuning_host, 64,
+                      options.target_ns);
+  auto built = build(trip_count);
+  if (!built.has_value()) {
+    result.rejected_because = "kernel not representable at the tuned trip "
+                              "count: " +
+                              kernel_error_name(built.error());
+    return result;
+  }
+  const std::vector<SyscallKernel> &kernels = built->kernels;
+  const auto &programs = built->programs;
+
+  // The seam's audit, and it checks something the opcode audit cannot say for
+  // it: that the body really is divided into one run per call. `body_runs`
+  // counts barriers, so a body of N call groups must lower to N + 1 runs. If a
+  // group failed to place, or an addi fused into its neighbour, or a slot did
+  // not lower to an ecall at all, this is where it shows -- before any timing
+  // is quoted against a call count that was never executed.
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    const LoweringAudit audit =
+        audit_body(kernels[i].code, kernels[i].initial_memory,
+                   kernels[i].memory_bytes,
+                   kernels[i].body_start_pc / kInstructionBytes,
+                   options.body_slots);
+    if (i == kernels.size() - 1) {
+      result.audit = audit;
+    }
+    if (!audit.clean()) {
+      result.audit = audit;
+      result.rejected_because =
+          "lowering rewrote " + std::to_string(audit.rewritten_slots) +
+          " body slot(s) of the " + std::to_string(counts[i]) +
+          "-call kernel (first at " +
+          std::to_string(audit.first_rewritten_slot) + ")";
+      return result;
+    }
+    const size_t expected_runs = counts[i] + 1;
+    if (audit.body_runs != expected_runs) {
+      result.audit = audit;
+      result.rejected_because =
+          "body lowered to " + std::to_string(audit.body_runs) +
+          " runs, expected " + std::to_string(expected_runs) + " for " +
+          std::to_string(counts[i]) + " calls";
+      return result;
+    }
+  }
+
+  // Untimed verification: run each kernel once under a fresh host and check it
+  // made exactly the calls it was built to make, and that no bounds-checked
+  // write through an out pointer faulted. A faulted write does less work than a
+  // real one, and a miscounted body would be timed against the wrong
+  // denominator -- neither leaves anything else to notice it by.
+  for (size_t i = 0; i < kernels.size(); ++i) {
+    SyscallDispatchHost verifier(shape);
+    ThreadedMachine machine(*programs[i], kGasLimit);
+    const RunOutcome outcome = run_once(machine, verifier);
+    if (outcome.result != StepResult::kHalted) {
+      result.rejected_because = "verification run did not halt cleanly";
+      return result;
+    }
+    if (verifier.calls() != kernels[i].expected_host_calls) {
+      result.rejected_because = "made " + std::to_string(verifier.calls()) +
+                                " host calls, kernel "
+                                "says " +
+                                std::to_string(kernels[i].expected_host_calls);
+      return result;
+    }
+    if (verifier.faulted()) {
+      result.rejected_because = "a bounds-checked write through an out pointer "
+                                "faulted; the host did less work than the "
+                                "shape claims";
+      return result;
+    }
+  }
+
+  std::vector<MeasurementPoint> points;
+  points.reserve(programs.size());
+  for (size_t i = 0; i < programs.size(); ++i) {
+    points.push_back({.label = result.shape + "/" + std::to_string(counts[i]),
+                      .x = static_cast<double>(counts[i]),
+                      .program = programs[i].get(),
+                      .trip_count = trip_count});
+  }
+  SyscallDispatchHost host(shape);
+  measure_interleaved(points, host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
+  for (const MeasurementPoint &point : points) {
+    if (!point.ran_clean) {
+      result.rejected_because = "kernel did not halt cleanly";
+      return result;
+    }
+    result.worst_relative_mad =
+        std::max(result.worst_relative_mad, point.relative_mad());
+  }
+  if (host.faulted()) {
+    result.rejected_because = "an out-pointer write faulted during measurement";
+    return result;
+  }
+
+  result.fit = fit_line(points);
+  result.measured_points = points.size();
+  result.calls_per_iteration = counts.back();
+  // A call group displaces guest_slots_per_call filler slots, so that many
+  // filler costs come back to turn the slope into an absolute number -- the
+  // same accounting run_sweep does for a pair, for the same reason.
+  result.ns_per_call_marginal =
+      (static_cast<double>(result.guest_slots_per_call) * filler_ns) +
+      result.fit.slope;
+  if (result.calls_per_iteration > 0) {
+    // The saturated body's iteration time over its call count. Two filler
+    // slots (the fixed boundaries) and three loop-control instructions are in
+    // that time and belong to no call; at 512 slots they are under half a
+    // percent of it, which is an order of magnitude below the spread between
+    // the shapes and two below the gate's tolerance. Subtracting them would
+    // reintroduce the contrast this estimator exists to avoid.
+    result.ns_per_call = points.back().median() /
+                         static_cast<double>(result.calls_per_iteration);
+  }
+  result.usable = result.ns_per_call > 0.0;
+  if (!result.usable) {
+    result.rejected_because = "saturated body produced no usable timing";
+  }
+  return result;
 }
 
 struct SweepPlan {
@@ -662,6 +863,10 @@ plan_sweeps(const Options &options)
     base.target = op;
     base.body_slots = options.body_slots;
 
+    if (op == Op::kJal || op == Op::kJalr) {
+      // These use dedicated control-flow kernels, not body-slot substitutions.
+      continue;
+    }
     if (is_branch_target(op)) {
       // Not-taken and taken are different amounts of engine work: both end the
       // run, but the taken path also resolves a target and re-enters there.
@@ -674,8 +879,8 @@ plan_sweeps(const Options &options)
       continue;
     }
     if (is_memory_target(op)) {
-      // Guest memory is capped at 64 KiB, so these two working sets bracket
-      // every cache state a guest can put the engine in.
+      // Compare localized and spread accesses within default-size memory.
+      // Larger configured memories need separate coverage.
       KernelSpec hot = base;
       hot.working_set = WorkingSet::kL1Region;
       plans.push_back({hot, ""});
@@ -747,14 +952,136 @@ plan_sweeps(const Options &options)
   return plans;
 }
 
+std::vector<JumpSpec>
+plan_jumps(const Options &options)
+{
+  std::vector<JumpSpec> plans;
+  for (const Op op : {Op::kJal, Op::kJalr}) {
+    if (!options.only_op.empty() && options.only_op != op_name(op)) {
+      continue;
+    }
+    for (const auto layout : {JumpLayout::kSequential, JumpLayout::kReverse,
+                              JumpLayout::kShuffled}) {
+      for (const uint32_t seed : {1U, 42U, 12345U}) {
+        if (layout != JumpLayout::kShuffled && seed != 1) {
+          continue;
+        }
+        const auto add = [&](OperandContext context, uint32_t nodes,
+                             uint32_t stride) {
+          plans.push_back({.target = op,
+                           .context = context,
+                           .layout = layout,
+                           .nodes = nodes,
+                           .stride_words = stride,
+                           .seed = seed});
+        };
+        // Equal layouts and footprints for the direct/fixed-base/link-chain
+        // comparison. The chain's 12-bit immediate limits its footprint.
+        for (const auto context :
+             {OperandContext::kIndependent, OperandContext::kNoLink,
+              OperandContext::kChain}) {
+          if (op == Op::kJal && context == OperandContext::kChain) {
+            continue;
+          }
+          add(context, 64, 1);
+          add(context, 480, 1);
+          add(context, 64, 7);
+        }
+        if (op == Op::kJalr) {
+          add(OperandContext::kTargetChase, 64, 1);
+        }
+        if (!options.quick) {
+          if (op == Op::kJal) {
+            add(OperandContext::kIndependent, 4096, 1);
+            add(OperandContext::kNoLink, 512, 16);
+          }
+          else {
+            // Same jalr PC, changing target at every visit. Includes dependent
+            // loads and pad-return jumps; report the entire cost per dispatch
+            // as an upper bound rather than subtracting a guessed load cost.
+            add(OperandContext::kTargetChase, 4096, 1);
+            add(OperandContext::kTargetChase, 512, 16);
+          }
+        }
+      }
+    }
+  }
+  return plans;
+}
+
+SweepResult
+run_jump_sweep(JumpSpec spec, const Options &options)
+{
+  SweepResult result;
+  result.jump_kernel = true;
+  result.op = op_name(spec.target);
+  result.context = jump_context_name(spec);
+  result.working_set = "none";
+  result.magnitude = "default";
+  result.scheduled_gas = scheduled_gas_for(spec.target);
+  result.saturated_note =
+      spec.context == OperandContext::kTargetChase
+          ? "sequence validation: 2 LW + JALR + JAL per dispatch, including "
+            "loop/setup overhead; excluded from individual opcode pricing"
+          : "absolute jump-chain bound, including loop setup/control; "
+            "excluded from normalization";
+  HaltHost host;
+  auto kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("jump kernel: " +
+                             kernel_error_name(kernel.error()));
+  }
+  const auto lower = [](const Kernel &k) {
+    return ThreadedMachinePreInstantiation::create(k.code, k.initial_memory, 0,
+                                                   k.memory_bytes, false,
+                                                   kMaxRunGas, false);
+  };
+  auto seed = lower(kernel->kernel);
+  if (!seed) {
+    throw std::runtime_error("jump probe did not lower");
+  }
+  spec.trip_count =
+      tune_trip_count(*seed, host, spec.trip_count, options.target_ns);
+  kernel = build_jump_kernel(spec);
+  if (!kernel) {
+    throw std::runtime_error("tuned jump kernel did not build");
+  }
+  auto program = lower(kernel->kernel);
+  if (!program) {
+    throw std::runtime_error("tuned jump kernel did not lower");
+  }
+  std::vector<MeasurementPoint> points{
+      {.label = result.op + "/" + result.context,
+       .x = 0.0,
+       .program = &*program,
+       .trip_count = spec.trip_count,
+       .expected_gas = kernel->kernel.scheduled_gas}};
+  measure_interleaved(points, host,
+                      {.repeats = options.repeats,
+                       .warmup_runs = options.warmup_runs});
+  const auto &point = points.front();
+  if (!point.ran_clean || point.samples.size() != options.repeats ||
+      point.samples.size() < 3 || !std::isfinite(point.median()) ||
+      point.median() <= 0) {
+    throw std::runtime_error("invalid jump measurement: " + result.context);
+  }
+  result.ns_upper_bound = point.median() / kernel->kernel.target_units;
+  result.ns_per_instruction = result.ns_upper_bound;
+  result.worst_relative_mad = point.relative_mad();
+  result.measured_points = point.samples.size();
+  result.usable = true;
+  return result;
+}
+
 void
 emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
           const BaselineResult &baseline, double noise_floor,
           const std::vector<SweepResult> &sweeps,
+          const std::vector<SyscallSweepResult> &syscalls,
           const std::vector<WorkloadResult> &workloads)
 {
   std::println(out, "{{");
-  std::println(out, R"(  "schema": "rv32-gas-calibration/1",)");
+  std::println(out, R"(  "schema": "rv32-gas-calibration/2",)");
   std::println(out, R"(  "engine": "ThreadedMachine",)");
   std::println(out, R"(  "traced": false,)");
   std::println(
@@ -796,7 +1123,8 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
     const SweepResult &sweep = sweeps[i];
     std::println(
         out,
-        "    {{\"op\": \"{}\", \"context\": \"{}\", \"working_set\": \"{}\", "
+        "    {{\"jump_kernel\": {}, \"op\": \"{}\", \"context\": \"{}\", "
+        "\"working_set\": \"{}\", "
         "\"magnitude\": \"{}\", \"branch_mode\": \"{}\", \"pair\": {}, "
         "\"pair_ops\": {}, \"ns_upper_bound\": {:.6f}, "
         "\"ns_saturated\": {:.6f}, \"saturated_note\": \"{}\", "
@@ -806,17 +1134,46 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "\"slope_stderr_ns\": {:.6f}, \"points\": {}, \"ns_per_instruction\": "
         "{:.6f}, \"worst_relative_mad\": {:.6f}, \"body_runs\": {}, "
         "\"max_run_gas_seen\": {}}}{}",
-        escape_json(sweep.op), escape_json(sweep.context),
-        escape_json(sweep.working_set), escape_json(sweep.magnitude),
-        escape_json(sweep.branch_mode), sweep.is_pair ? "true" : "false",
-        json_string_array(sweep.pair_ops), sweep.ns_upper_bound,
-        sweep.ns_saturated, escape_json(sweep.saturated_note),
-        sweep.scheduled_gas, sweep.usable ? "true" : "false",
-        escape_json(sweep.rejected_because), sweep.fit.slope,
-        sweep.fit.theil_sen_slope, sweep.fit.r_squared, sweep.fit.slope_stderr,
-        sweep.measured_points, sweep.ns_per_instruction,
+        sweep.jump_kernel ? "true" : "false", escape_json(sweep.op),
+        escape_json(sweep.context), escape_json(sweep.working_set),
+        escape_json(sweep.magnitude), escape_json(sweep.branch_mode),
+        sweep.is_pair ? "true" : "false", json_string_array(sweep.pair_ops),
+        sweep.ns_upper_bound, sweep.ns_saturated,
+        escape_json(sweep.saturated_note), sweep.scheduled_gas,
+        sweep.usable ? "true" : "false", escape_json(sweep.rejected_because),
+        sweep.fit.slope, sweep.fit.theil_sen_slope, sweep.fit.r_squared,
+        sweep.fit.slope_stderr, sweep.measured_points, sweep.ns_per_instruction,
         sweep.worst_relative_mad, sweep.audit.body_runs,
         sweep.audit.max_run_gas_seen, i + 1 == sweeps.size() ? "" : ",");
+  }
+  std::println(out, "  ],");
+
+  // Emitted whether or not any shape was measured, so a consumer can tell
+  // "this run skipped the seam" from "this run predates the seam" by the
+  // schema version rather than by an absent key.
+  std::println(out, R"(  "syscalls": [)");
+  for (size_t i = 0; i < syscalls.size(); ++i) {
+    const SyscallSweepResult &row = syscalls[i];
+    std::println(out,
+                 "    {{\"shape\": \"{}\", \"models\": \"{}\", "
+                 "\"guest_slots_per_call\": {}, \"output_bytes\": {}, "
+                 "\"calls_per_iteration\": {}, \"scheduled_gas_per_call\": {}, "
+                 "\"ns_per_call\": {:.6f}, \"ns_per_call_marginal\": {:.6f}, "
+                 "\"slope_ns\": {:.6f}, \"theil_sen_ns\": {:.6f}, "
+                 "\"r_squared\": {:.6f}, \"slope_stderr_ns\": {:.6f}, "
+                 "\"points\": {}, \"worst_relative_mad\": {:.6f}, "
+                 "\"body_runs\": {}, \"usable\": {}, "
+                 "\"rejected_because\": \"{}\"}}{}",
+                 escape_json(row.shape), escape_json(row.models),
+                 row.guest_slots_per_call, row.output_bytes,
+                 row.calls_per_iteration, row.scheduled_gas_per_call,
+                 row.ns_per_call, row.ns_per_call_marginal, row.fit.slope,
+                 row.fit.theil_sen_slope, row.fit.r_squared,
+                 row.fit.slope_stderr, row.measured_points,
+                 row.worst_relative_mad, row.audit.body_runs,
+                 row.usable ? "true" : "false",
+                 escape_json(row.rejected_because),
+                 i + 1 == syscalls.size() ? "" : ",");
   }
   std::println(out, "  ],");
 
@@ -828,11 +1185,12 @@ emit_json(std::FILE *out, const Options &options, const Provenance &provenance,
         "    {{\"name\": \"{}\", \"ns_per_iteration\": {:.6f}, "
         "\"scheduled_gas_per_iteration\": {}, \"instructions_per_iteration\": "
         "{}, \"ns_per_gas\": {:.6f}, \"relative_mad\": {:.6f}, "
+        "\"samples\": {}, \"ran_clean\": true, "
         "\"fused_slots\": {}, \"shape\": \"{}\", \"op_counts\": {{",
         escape_json(workload.name), workload.ns_per_iteration,
         workload.scheduled_gas_per_iteration,
         workload.instructions_per_iteration, workload.ns_per_gas,
-        workload.relative_mad, workload.fused_slots,
+        workload.relative_mad, workload.samples, workload.fused_slots,
         escape_json(workload.shape));
     bool first = true;
     for (const auto &[op, count] : workload.op_counts) {
@@ -885,12 +1243,19 @@ main_impl(int argc, char **argv)
     else if (arg.starts_with("--op=")) {
       options.only_op = argv[i] + 5;
     }
+    else if (arg == "--no-syscalls") {
+      options.syscalls = false;
+    }
+    else if (arg == "--syscalls-only") {
+      options.syscalls_only = true;
+    }
     else if (arg == "--help" || arg == "-h") {
       std::println(
           stderr,
           "usage: rv32_gas_calibrate [--quick] [--repeats=N] [--body-slots=N]\n"
           "                          [--target-ns=F] [--op=NAME] "
           "[--placements=N]\n"
+          "                          [--no-syscalls] [--syscalls-only]\n"
           "                          [--out=PATH] [--allow-nonproduction]\n"
           "       rv32_gas_calibrate --fingerprint");
       return 0;
@@ -940,7 +1305,8 @@ main_impl(int argc, char **argv)
     return 1;
   }
 
-  const std::vector<SweepPlan> plans = plan_sweeps(options);
+  const std::vector<SweepPlan> plans =
+      options.syscalls_only ? std::vector<SweepPlan>{} : plan_sweeps(options);
   std::vector<SweepResult> sweeps;
   sweeps.reserve(plans.size());
   for (size_t i = 0; i < plans.size(); ++i) {
@@ -974,10 +1340,58 @@ main_impl(int argc, char **argv)
     }
   }
 
+  if (!options.syscalls_only) {
+    for (const JumpSpec &spec : plan_jumps(options)) {
+      std::println(stderr, "jump {} {}", op_name(spec.target),
+                   jump_context_name(spec));
+      sweeps.push_back(run_jump_sweep(spec, options));
+      if (spec.context == OperandContext::kTargetChase) {
+        std::println(stderr, "  {:.4f} ns/sequence (2 LW + JALR + JAL)",
+                     sweeps.back().ns_upper_bound);
+        std::println(stderr, "  includes loop/setup overhead");
+      }
+      else {
+        std::println(stderr, "  {:.4f} ns/jump (absolute upper bound)",
+                     sweeps.back().ns_upper_bound);
+      }
+    }
+  }
+
+  std::vector<SyscallSweepResult> syscalls;
+  if (options.syscalls) {
+    std::println(stderr, "measuring syscall dispatch (the ecall seam; the "
+                         "production syscall path is not linked here)...");
+    syscalls.reserve(kAllSyscallShapes.size());
+    for (size_t i = 0; i < kAllSyscallShapes.size(); ++i) {
+      const SyscallShape shape = kAllSyscallShapes[i];
+      std::println(stderr, "[{}/{}] syscall {}", i + 1,
+                   kAllSyscallShapes.size(), syscall_shape_name(shape));
+      syscalls.push_back(
+          run_syscall_sweep(shape, options, baseline.ns_per_filler));
+      const SyscallSweepResult &row = syscalls.back();
+      if (row.usable) {
+        // Against the filler baseline, which is what this driver has in hand.
+        // rv32_gas_report.py normalizes by the median saturated opcode cell
+        // instead -- the divisor the reference guards use -- so the two
+        // multiples differ by design. Say which one this is.
+        std::println(stderr,
+                     "        {:.4f} ns/call ({:.2f}x the filler baseline; "
+                     "marginal {:.4f})",
+                     row.ns_per_call, row.ns_per_call / baseline.ns_per_filler,
+                     row.ns_per_call_marginal);
+      }
+      else {
+        std::println(stderr, "        rejected: {}", row.rejected_because);
+      }
+    }
+  }
+
   std::println(stderr, "measuring validation workloads...");
   const std::vector<WorkloadResult> workloads =
-      measure_workloads(options.repeats, options.warmup_runs,
-                        options.target_ns);
+      options.syscalls_only
+          ? std::vector<WorkloadResult>{}
+          : measure_workloads(options.repeats, options.warmup_runs,
+                              options.target_ns);
 
   std::FILE *out = stdout;
   if (!options.out_path.empty()) {
@@ -987,7 +1401,8 @@ main_impl(int argc, char **argv)
       return 1;
     }
   }
-  emit_json(out, options, provenance, baseline, noise_floor, sweeps, workloads);
+  emit_json(out, options, provenance, baseline, noise_floor, sweeps, syscalls,
+            workloads);
   if (out != stdout) {
     std::fclose(out);
     std::println(stderr, "wrote {}", options.out_path);

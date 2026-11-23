@@ -5,6 +5,7 @@
 #include <cassert>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <expected>
 #include <format>
 #include <limits>
@@ -16,7 +17,6 @@
 #include <string>
 #include <string_view>
 #include <utility>
-#include <variant>
 
 #include "contract.hh"
 #include "db_sched.hh"
@@ -24,13 +24,12 @@
 #include "event_rpc.hh"
 #include "genesis.hh"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/rpc_message_size.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h" // IWYU pragma: keep
 #include "hogd/crypto/crypto.h"
-#include "hogd/db_interface/block_manager.h"
-#include "hogd/db_interface/db_executor_server.h"
-#include "hogd/db_interface/db_sched_server.h"
 #include "hogd/genesis/genesis_configuration.h"
 #include "hogd/hog_db/block_id_manager.h"
 #include "hogd/hog_db/hog_db_dao.h"
@@ -43,10 +42,9 @@
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/hog_db_wrapper.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
+#include "hogd/hog_exec/runtime/test_util/wire_item.h"
 #include "hogd/hog_mempool/config_hash.h"
-#include "hogd/mockdb/in_memory_database.h"
 #include "hogd/storage_cost/storage_cost_model.h"
-#include "hogd/storage_item/storage_item_wrapper.h"
 #include "hogd/version.h"
 #include "precompiles.hh"
 #include "rpc_types.hh"
@@ -73,88 +71,6 @@ PrintTo(const T &value, ::std::ostream *os) // NOLINT
 {
   *os << x23::show(value);
 }
-
-enum class TestDB : int8_t {
-  kMockInMemory = 0,
-  kHogDb = 1,
-};
-
-class MockDBWrapper {
-public:
-  MockDBWrapper()
-  {
-    db_sched_server_.start_server(/*port=*/0);
-    db_executor_server_.start_server(/*port=*/0);
-  }
-
-  uint16_t exec_port() { return db_executor_server_.port(); }
-  uint16_t coord_port() { return db_sched_server_.port(); }
-
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> item)
-  {
-    in_memory_db_.write_item(addrkey, std::move(item));
-  }
-
-  void write_contract(ContractAddress const &addr,
-                      std::shared_ptr<const Contract> const &contract)
-  {
-    in_memory_db_.write_contract(addr, contract);
-  }
-
-  void write_deployment(ContractAddress const &addr,
-                        DeployedContractHash const &deployment,
-                        StorageCostModel const *cost_model)
-  {
-    in_memory_db_.write_item(
-        AddressAndKey{.address = addr,
-                      .key = StorageKey(StorageKeyType::Metadata)},
-        std::make_shared<const StorageItemWrapper>(deployment, cost_model));
-  }
-
-  void grant_storage_token(ContractAddress const &address, int128_t amount)
-  {
-    assert(amount >= 0);
-    assert(amount <= int128_t{kHogDivisibility} * int128_t{kTotalHogSupply});
-
-    AddressAndKey addrkey = {.address = address,
-                             .key = StorageKey(
-                                 StorageKeyType::FreeNativeTokenBalance)};
-
-    write_item(addrkey, std::make_shared<const StorageItemWrapper>(
-                            amount, get_default_cost_model()));
-  }
-
-  static std::map<ContractAddress, int128_t>
-  get_hogs_transferred(BlockHeight /*unused*/)
-  {
-    // unimplemented
-    error("get_hogs_transferred in MockDB: unimplemented");
-    return std::map<ContractAddress, int128_t>();
-  }
-
-  const StorageCostModel *get_default_cost_model() const
-  {
-    return block_manager_.get_cost_model();
-  }
-
-  // For testing only: removes a previously-written contract record from the
-  // in-memory store so subsequent lookups see it as absent. Call before any
-  // test that exercises the "wallet record missing" code path, and only after
-  // genesis has run (to avoid losing the cost model or other genesis state).
-  void erase_contract_by_hash(SHA256Hash const &hash)
-  {
-    in_memory_db_.erase_contract(hash);
-  }
-
-private:
-  InMemoryDatabase in_memory_db_ = InMemoryDatabase();
-  BlockManager block_manager_ = BlockManager(0, &in_memory_db_);
-
-  DbExecutorServer db_executor_server_ = DbExecutorServer(&block_manager_);
-
-  DbSchedServer db_sched_server_ = DbSchedServer(&block_manager_);
-};
 
 class CoordWrapper {
 public:
@@ -253,21 +169,27 @@ private:
 // Common setup utilities for testing native contracts.
 class NativeContractTestFramework {
 public:
+  // [db_max_message_size] caps this framework's executor->db client; see
+  // DatabaseProxy. [db_heap_bytes] sizes a kHogDb ramdb heap; see
+  // HogdbWrapper.
   NativeContractTestFramework(
       bool log = false,
       BlockExecutionMode mode = BlockExecutionMode::kBlockExecutionModeProposal,
-      TestDB test_db = TestDB::kMockInMemory, bool empty_genesis = true,
+      bool empty_genesis = true,
       std::optional<StorageCostModelXdr> const &genesis_cost_model =
           std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
-    : db_wrapper_(make_db_wrapper(test_db))
+      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt,
+      size_t db_max_message_size = kBulkRpcMaxMessageSize,
+      std::optional<size_t> db_heap_bytes = std::nullopt)
+    : db_wrapper_(db_heap_bytes.value_or(HogdbWrapper::kDefaultHeapSize))
   {
     bool logging_enabled = log || do_logging_env();
     if (logging_enabled) {
       enable_logging();
     }
     BlockIDStateManager::throw_on_error_ = true;
-    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config);
+    initialize(mode, empty_genesis, genesis_cost_model, genesis_network_config,
+               db_max_message_size);
     if (logging_enabled) {
       HogexecMetrics::launch_log_worker();
     }
@@ -284,21 +206,6 @@ public:
   }
 
   void enable_logging();
-
-  static std::variant<MockDBWrapper, HogdbWrapper>
-  make_db_wrapper(TestDB test_db)
-  {
-    switch (test_db) {
-    case TestDB::kMockInMemory:
-      return std::variant<MockDBWrapper, HogdbWrapper>(
-          std::in_place_type<MockDBWrapper>);
-    case TestDB::kHogDb:
-      return std::variant<MockDBWrapper, HogdbWrapper>(
-          std::in_place_type<HogdbWrapper>);
-    default:
-      panic("make_db_wrapper: invalid test_db {}", static_cast<int>(test_db));
-    }
-  }
 
   ~NativeContractTestFramework()
   {
@@ -348,29 +255,51 @@ public:
   {
     return make_new_system_call_handler(tx.tx, runtime_context, identifier);
   }
-  SystemCallHandler
-  make_new_system_call_handler(Transaction const &tx,
-                               RuntimeContext &runtime_context,
-                               EphemeralTxIdentifier *identifier = nullptr)
+  // Loads the current block's db tip into the snapshot cache if it is not
+  // loaded yet. Handler and view paths read tip-derived values, so they load
+  // here rather than at block open, which must cost no rpc (see
+  // get_block_execution_context()). Off-pool, so completing it here is legal.
+  void ensure_db_tip_loaded()
   {
     assert(storage_snapshot_cache_);
+    if (storage_snapshot_cache_->has_db_tip()) {
+      return;
+    }
+    auto res = storage_snapshot_cache_->load_db_tip()();
+    if (!res.has_value()) [[unlikely]] {
+      panic("ensure_db_tip_loaded: failed to load db tip: {}", res.error());
+    }
+  }
+
+  // Both helpers take the tx by value and keep it alive in handler_txs_: the
+  // handler borrows tx.contracts_to_deploy for its whole lifetime, so a
+  // caller-supplied temporary must be owned by the framework, not borrowed
+  // from the call expression.
+  SystemCallHandler
+  make_new_system_call_handler(Transaction tx, RuntimeContext &runtime_context,
+                               EphemeralTxIdentifier *identifier = nullptr)
+  {
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
     if (identifier) {
       identifier->block_id = block_number_;
       identifier->tx_id = txid;
     }
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ProposalModeCtor{}, runtime_context);
   }
 
   SystemCallHandler make_new_system_call_handler_validation(
-      Transaction const &tx, RuntimeContext &runtime_context,
+      Transaction tx, RuntimeContext &runtime_context,
       NondeterministicProposalData proposal_data)
   {
+    ensure_db_tip_loaded();
     auto txid = allocate_txid();
-    return SystemCallHandler(tx, *storage_snapshot_cache_,
+    handler_txs_.push_back(std::move(tx));
+    return SystemCallHandler(handler_txs_.back(), *storage_snapshot_cache_,
                              make_new_per_tx_db_proxy(txid),
                              make_new_per_tx_event_server_proxy(txid),
                              ValidationModeCtor{std::move(proposal_data)},
@@ -387,14 +316,14 @@ public:
   std::optional<WireStorageItem>
   lookup_storage_item_from_db(AddressAndKey const &addrkey)
   {
-    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey);
+    auto r = db_proxy_->get_snapshot_item(block_number_, addrkey)();
     CHECK(r.has_value());
     return *r;
   }
 
   std::optional<Contract> lookup_contract_from_db(SHA256Hash const &hash)
   {
-    auto r = db_proxy_->get_contract(block_number_, hash);
+    auto r = db_proxy_->get_contract(block_number_, hash)();
     CHECK(r.has_value());
     return std::move(*r);
   }
@@ -402,7 +331,7 @@ public:
   std::optional<DeployedContractHash>
   lookup_deployment_from_db(ContractAddress const &addr)
   {
-    auto r = db_proxy_->get_deployment(block_number_, addr);
+    auto r = db_proxy_->get_deployment(block_number_, addr)();
     CHECK(r.has_value());
     return *r;
   }
@@ -484,16 +413,11 @@ public:
                       .nonce = next_uniquifier_nonce_++};
   }
 
-  // The native-token storage cost actually charged by THIS backend for
-  // consuming `count` uniquifiers into the replay cache. MockInMemory drops
-  // ConsumeUniquifier deltas (charging nothing); HogDb charges the real cost.
-  // Use this to top up a grant so an exact invoked-address balance assertion
-  // holds unchanged on both backends.
-  int128_t replay_cache_cost_charged(uint32_t count) const
+  // The native-token storage cost charged for consuming `count` uniquifiers
+  // into the replay cache. Use this to top up a grant so an exact
+  // invoked-address balance assertion holds.
+  static int128_t replay_cache_cost_charged(uint32_t count)
   {
-    if (std::holds_alternative<MockDBWrapper>(db_wrapper_)) {
-      return 0;
-    }
     return get_default_cost_model()->get_replay_cache_cost(count);
   }
 
@@ -543,8 +467,7 @@ public:
 
   void setup_grant_storage_token(ContractAddress const &address,
                                  int128_t amount);
-  void write_item(AddressAndKey const &addrkey,
-                  std::shared_ptr<const StorageItemWrapper> item);
+  void write_item(AddressAndKey const &addrkey, WireStorageItem const &item);
   void write_contract(std::shared_ptr<const Contract> const &contract);
 
   void write_deployment(ContractAddress const &addr,
@@ -579,7 +502,8 @@ public:
     if (tx_id == std::numeric_limits<TransactionID>::max()) {
       tx_id = allocate_txid();
     }
-    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id);
+    return PerTransactionDatabaseProxy(*db_proxy_, block_number_, tx_id,
+                                       network_config_params_);
   }
 
   // Only for use in tests if precise control over rpcs is needed
@@ -588,7 +512,7 @@ public:
 
   DbTip get_db_tip() const
   {
-    auto r = db_proxy_->get_db_tip(block_number_);
+    auto r = db_proxy_->get_db_tip(block_number_, committed_height_ + 1)();
     CHECK(r.has_value());
     return *r;
   }
@@ -622,11 +546,7 @@ public:
 
   auto &get_coord_client() { return coord_wrapper_->client(); }
 
-  uint16_t get_db_exec_port()
-  {
-    return std::visit([](auto &db_wrapper) { return db_wrapper.exec_port(); },
-                      db_wrapper_);
-  }
+  uint16_t get_db_exec_port() { return db_wrapper_.exec_port(); }
 
   uint16_t get_event_exec_port() { return event_server_wrapper_.exec_port(); }
 
@@ -672,31 +592,14 @@ public:
     return event_server_wrapper_.get_events(tx_id.block_id, tx_id.tx_id);
   }
 
-  std::map<ContractAddress, int128_t> get_hogs_transferred(BlockHeight height)
+  std::map<ContractAddress, int128_t>
+  get_native_tokens_transferred(BlockHeight height)
   {
-    return std::visit(
-        [&](auto &db_wrapper) {
-          return db_wrapper.get_hogs_transferred(height);
-        },
-        db_wrapper_);
+    return db_wrapper_.get_native_tokens_transferred(height);
   }
 
-  // For testing only: erases a contract record from the in-memory store
-  // (kMockInMemory only) so subsequent lookups treat it as absent. Must be
-  // called BEFORE any transaction runs (so the snapshot cache has not yet
-  // cached the entry). Use to simulate an absent wallet record without
-  // skipping genesis (which is needed for the cost model and block state).
-  void erase_contract_from_mock_db(SHA256Hash const &hash)
-  {
-    std::get<MockDBWrapper>(db_wrapper_).erase_contract_by_hash(hash);
-  }
-
-  // Only valid when test_db == kHogDb. Returns the underlying HogDb DAO
-  // for direct storage inspection in tests.
-  HogDbDAO &get_hog_db_dao()
-  {
-    return std::get<HogdbWrapper>(db_wrapper_).get_db();
-  }
+  // Returns the underlying HogDb DAO for direct storage inspection in tests.
+  HogDbDAO &get_hog_db_dao() { return db_wrapper_.get_db(); }
 
 private:
   void write_deployment(ContractAddress const &addr,
@@ -722,21 +625,16 @@ private:
   void open_event_block(BlockID block_id);
   void close_event_block(BlockID block_id);
 
-  void initialize(
-      BlockExecutionMode mode, bool empty_genesis,
-      std::optional<StorageCostModelXdr> const &genesis_cost_model =
-          std::nullopt,
-      std::optional<NetworkConfig> const &genesis_network_config = std::nullopt)
+  void initialize(BlockExecutionMode mode, bool empty_genesis,
+                  std::optional<StorageCostModelXdr> const &genesis_cost_model,
+                  std::optional<NetworkConfig> const &genesis_network_config,
+                  size_t db_max_message_size)
   {
-    uint16_t exec_port =
-        std::visit([&](auto &db_wrapper) { return db_wrapper.exec_port(); },
-                   db_wrapper_);
-    uint16_t coord_port =
-        std::visit([&](auto &db_wrapper) { return db_wrapper.coord_port(); },
-                   db_wrapper_);
+    uint16_t exec_port = db_wrapper_.exec_port();
+    uint16_t coord_port = db_wrapper_.coord_port();
 
-    db_proxy_ = std::make_unique<DatabaseProxy>(
-        LocalMockDB{.read_port_number_ = exec_port});
+    const LocalMockDB mock_db{.read_port_number_ = exec_port};
+    db_proxy_ = std::make_unique<DatabaseProxy>(mock_db, db_max_message_size);
     coord_wrapper_ = std::make_unique<CoordWrapper>(coord_port);
     event_sched_wrapper_ =
         std::make_unique<EventSchedWrapper>(event_server_wrapper_.sched_port());
@@ -762,6 +660,8 @@ private:
       genesis_value.proposal_header.block_height = 0;
       genesis_value.proposal_header.config_hash =
           compute_config_hash(genesis_configuration);
+      network_config_params_ =
+          NetworkConfigParams(genesis_configuration.network_config.v0());
       auto r = coord_wrapper_->client().dbsched_load_genesis_configuration(
           genesis_configuration, genesis_value);
       if (r != DbSchedResult::DbSchedResultOK) {
@@ -778,6 +678,8 @@ private:
   uint64_t next_uniquifier_nonce_ = 0;
   BlockID block_number_ = 0;
   BlockID dbtip_block_id_ = 0;
+  // The genesis configuration, for the proxies this framework makes.
+  NetworkConfigParams network_config_params_;
   // Genesis commits at 0. Only try_advance_block() commits, so discard_block()
   // and reject_block() move block_number_ on without moving this.
   BlockHeight committed_height_ = 0;
@@ -792,21 +694,13 @@ private:
 
   std::shared_ptr<StorageSnapshotCache> storage_snapshot_cache_;
 
-  std::variant<MockDBWrapper, HogdbWrapper> db_wrapper_;
-  std::unique_ptr<Logger> previous_logger_ = nullptr;
-};
+  // Owns every transaction handed to make_new_system_call_handler*: the
+  // handlers borrow tx.contracts_to_deploy for their whole lifetime. A deque
+  // so growth never moves entries a live handler still references.
+  std::deque<Transaction> handler_txs_;
 
-inline std::string
-test_db_to_string(const ::testing::TestParamInfo<TestDB> info)
-{
-  switch (info.param) {
-  case TestDB::kMockInMemory:
-    return "MockInMemory";
-  case TestDB::kHogDb:
-    return "HogDb";
-  default:
-    return "unknown";
-  }
+  HogdbWrapper db_wrapper_;
+  std::unique_ptr<Logger> previous_logger_ = nullptr;
 };
 
 } // namespace hogd

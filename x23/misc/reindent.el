@@ -1,4 +1,4 @@
-;; reindent.el — batch reindent
+;;; reindent.el --- Batch reindent -*- lexical-binding: t; -*-
 
 ;; Where this file lives
 (defvar reindent-dir (file-name-directory (or load-file-name buffer-file-name)))

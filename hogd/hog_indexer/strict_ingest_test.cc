@@ -3,7 +3,9 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <array>
 #include <atomic>
+#include <cstdint>
 #include <filesystem>
 #include <future>
 #include <latch>
@@ -11,21 +13,31 @@
 #include <optional>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
 #include <rocksdb/options.h>
+#include <rocksdb/perf_context.h>
+#include <rocksdb/perf_level.h>
+#include <span>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <utility>
 #include <vector>
 
+#include "block_query_internal.hh"
 #include "consensus.hh"
 #include "event.hh"
+#include "event_cursor_internal.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/test.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_indexer/db.h"
+#include "hogd/hog_indexer/event_cursor.h"
 #include "hogd/hog_indexer/key_format.h"
+#include "hogd/hog_indexer/recent_tx_failure_cache.h"
+#include "hogd/hog_indexer/rpc_from_block_explorer.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/xdr/indexer_payload_validation.h"
 #include "hogd/xdr/protocol_token.h"
@@ -67,7 +79,7 @@ make_origin(std::string_view protocol = "hogp/test",
 ProposedTransaction
 make_body(uint64_t nonce, uint8_t address_fill)
 {
-  ProposedTransaction body;
+  ProposedTransaction body{};
   body.signed_tx.tx.uniquifier.nonce = nonce;
   std::ranges::fill(body.signed_tx.tx.invocation.invoked_address, address_fill);
   body.nondeterministic_proposal_data.nondeterministic_bit_count =
@@ -78,10 +90,10 @@ make_body(uint64_t nonce, uint8_t address_fill)
 TxEventLog
 make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 {
-  TxEventLog log;
+  TxEventLog log{};
   log.tx_hash = sha256(body.signed_tx.tx);
   if (emitter_fill) {
-    TxEmittedEvent event;
+    TxEmittedEvent event{};
     std::ranges::fill(event.contract_address, *emitter_fill);
     event.serialized_event.push_back(*emitter_fill);
     log.events.push_back(std::move(event));
@@ -92,36 +104,37 @@ make_log(const ProposedTransaction &body, std::optional<uint8_t> emitter_fill)
 ProposalTxs
 make_proposal_txs(const ProposedTransactionBatch &canonical_bodies)
 {
-  x23::XdrVec<TransactionHash> hashes;
+  SignedTransactionHashBatch signed_hashes;
   x23::XdrVec<NondeterministicProposalData> nondeterministic_data;
   for (const ProposedTransaction &body : canonical_bodies) {
-    hashes.push_back(sha256(body.signed_tx.tx));
+    signed_hashes.push_back(sha256(body.signed_tx));
     nondeterministic_data.push_back(body.nondeterministic_proposal_data);
   }
   ProposalTxs proposal;
-  proposal.hash = t_to_parallel_batch(hashes)();
+  proposal.signed_hash = t_to_parallel_batch(signed_hashes)();
   proposal.nondeterministic_data = t_to_parallel_batch(nondeterministic_data)();
   return proposal;
 }
 
 IndexerCommittedBlock
 make_block(BlockHeight height, ConsensusValueHash prev_hash,
-           ProposedTransactionBatch bodies = {})
+           ProposedTransactionBatch bodies = {}, TxEventLogBatch logs = {})
 {
   const ProposedTransactionBatch canonical_bodies = bodies;
-  TxEventLogBatch logs;
-  for (size_t i = 0; i < bodies.size(); ++i) {
-    logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
-                                              : std::nullopt));
+  if (logs.empty()) {
+    for (size_t i = 0; i < bodies.size(); ++i) {
+      logs.push_back(make_log(bodies[i], i == 0 ? std::optional<uint8_t>(0xA0)
+                                                : std::nullopt));
+    }
   }
   ProposalTxs proposal = make_proposal_txs(canonical_bodies);
-  ConsensusValue value;
+  ConsensusValue value{};
   value.prev_hash = prev_hash;
   value.proposal_header.block_height = height;
   value.proposal_header.block_timepoint = 1000 + height;
   value.proposal_header.events_hash =
       compute_indexer_outbox_event_root(logs, bodies);
-  auto txs_root = compute_indexer_proposal_txs_root(proposal)();
+  auto txs_root = compute_indexer_txs_root(canonical_bodies);
   EXPECT_TRUE(txs_root.has_value()) << txs_root.error();
   value.proposal_header.txs_hash = *txs_root;
   value.proposal_txs_hash = proposal_txs_compatibility_hash(proposal);
@@ -145,7 +158,7 @@ refresh_identity(IndexerCommittedBlock &block)
 void
 overwrite_column_family(const std::filesystem::path &path,
                         std::string_view column_family, std::string_view key,
-                        std::string_view value)
+                        std::optional<std::string_view> value)
 {
   rocksdb::Options options;
   std::vector<std::string> names;
@@ -166,10 +179,12 @@ overwrite_column_family(const std::filesystem::path &path,
     return handle->GetName() == column_family;
   });
   ASSERT_NE(selected, handles.end());
-  ASSERT_TRUE(raw->Put(rocksdb::WriteOptions(), *selected,
-                       rocksdb::Slice(key.data(), key.size()),
-                       rocksdb::Slice(value.data(), value.size()))
-                  .ok());
+  const rocksdb::Slice key_slice(key.data(), key.size());
+  auto status =
+      value ? raw->Put(rocksdb::WriteOptions(), *selected, key_slice,
+                       rocksdb::Slice(value->data(), value->size()))
+            : raw->Delete(rocksdb::WriteOptions(), *selected, key_slice);
+  ASSERT_TRUE(status.ok());
   for (rocksdb::ColumnFamilyHandle *handle : handles) {
     ASSERT_TRUE(raw->DestroyColumnFamilyHandle(handle).ok());
   }
@@ -320,6 +335,22 @@ TEST_F(StrictIndexerTest, TransitionReopensBeforeFirstNewProtocolBlock)
   IndexerCommittedBlock second = make_block(2, first.identity.consensus_hash);
   EXPECT_EQ(reopened->apply_committed_block(second_origin, second)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto historical = reopened->get_block_by_height(1);
+  ASSERT_TRUE(historical);
+  if (const auto &value = *historical; value.has_value()) {
+    EXPECT_EQ(sha256(*value), first.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "historical block is missing after protocol transition";
+  }
+  auto current = reopened->get_block_by_height(2);
+  ASSERT_TRUE(current);
+  if (const auto &value = *current; value.has_value()) {
+    EXPECT_EQ(sha256(*value), second.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "current block is missing after protocol transition";
+  }
 }
 
 TEST_F(StrictIndexerTest, DifferentOriginCannotSupersedeUnusedEpochAcrossReopen)
@@ -454,7 +485,12 @@ TEST_F(StrictIndexerTest, DuplicateLedgerAndFutureGapWriteNothing)
             IndexerBlockApplyOutcome::IndexerBlockContentConflict);
 }
 
-TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
+// Content binding -- the bodies and event logs against the header's roots --
+// is established by the event server when it publishes the record, not
+// recomputed here. Ingest rejects only what it can see locally: a block that
+// does not chain, one that is not the block its identity names, or batches
+// that do not pair up.
+TEST_F(StrictIndexerTest, RejectsPrevHashIdentityAndPairingConflicts)
 {
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
@@ -479,28 +515,13 @@ TEST_F(StrictIndexerTest, RejectsPrevBodyEventRootAndDigestConflicts)
   refresh_identity(negative);
   expect_conflict(negative);
 
-  IndexerCommittedBlock body_conflict = valid;
-  body_conflict.payload.tx_bodies[0].signed_tx.tx.uniquifier.nonce++;
-  refresh_identity(body_conflict);
-  expect_conflict(body_conflict);
+  IndexerCommittedBlock misnamed = valid;
+  misnamed.identity.consensus_hash[0] ^= 1;
+  expect_conflict(misnamed);
 
-  IndexerCommittedBlock event_conflict = valid;
-  event_conflict.payload.event_logs[0].tx_hash[0] ^= 1;
-  event_conflict.payload.consensus_value.proposal_header.events_hash =
-      compute_indexer_outbox_event_root(event_conflict.payload.event_logs,
-                                        event_conflict.payload.tx_bodies);
-  refresh_identity(event_conflict);
-  expect_conflict(event_conflict);
-
-  IndexerCommittedBlock root = valid;
-  root.payload.consensus_value.proposal_header.events_hash[0] ^= 1;
-  refresh_identity(root);
-  expect_conflict(root);
-
-  IndexerCommittedBlock txs_root = valid;
-  txs_root.payload.consensus_value.proposal_header.txs_hash[0] ^= 1;
-  refresh_identity(txs_root);
-  expect_conflict(txs_root);
+  IndexerCommittedBlock unpaired = valid;
+  unpaired.payload.tx_bodies.push_back(body);
+  expect_conflict(unpaired);
 }
 
 TEST_F(StrictIndexerTest, ReopenRestoresExactProgressAndRejectsCorruption)
@@ -760,6 +781,17 @@ TEST_F(StrictIndexerTest, AtomicBatchNeverMakesOnePointRowVisibleAlone)
     if (db_->get_tx_record(last_hash).has_value()) {
       EXPECT_TRUE(db_->get_tx_record(first_hash).has_value());
       EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 1);
+      auto metadata = db_->get_block_by_height(1);
+      EXPECT_TRUE(metadata && *metadata);
+      BlockTransactionQuery query{};
+      query.height = 1;
+      query.order = IterationOrder::IterationOrderAscending;
+      auto page = db_->get_transactions_by_block(query);
+      EXPECT_TRUE(page.has_value());
+      if (page) {
+        EXPECT_EQ(page->refs.size(), 50);
+        EXPECT_FALSE(page->cursor.empty());
+      }
     }
   }
   writer.join();
@@ -773,11 +805,27 @@ TEST_F(StrictIndexerTest,
   IndexerOutboxOrigin origin = make_origin();
   ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
-  ProposedTransaction first = make_body(900, 0x90);
-  ProposedTransaction second = make_body(901, 0x91);
-  IndexerCommittedBlock block =
-      make_block(1, origin.first_prev_hash,
-                 ProposedTransactionBatch{first, second});
+  constexpr size_t kTransactionCount = 256;
+  constexpr std::array<uint8_t, 4> kEmitterFills{0xA0, 0xA1, 0xA0, 0xB0};
+  ProposedTransactionBatch bodies;
+  TxEventLogBatch logs;
+  // Exercise ordered puts past the 128-transaction threshold. Every
+  // transaction emits twice from the first address and once from each other
+  // address, and the last emitting address is never a root invocation.
+  for (size_t i = 0; i < kTransactionCount; ++i) {
+    bodies.push_back(make_body(900 + i, static_cast<uint8_t>(0xA0 + (i % 8))));
+    auto log = make_log(bodies.back(), std::nullopt);
+    for (size_t seq = 0; seq < kEmitterFills.size(); ++seq) {
+      TxEmittedEvent event{};
+      std::ranges::fill(event.contract_address, kEmitterFills[seq]);
+      event.serialized_event.push_back(static_cast<uint8_t>(i));
+      event.serialized_event.push_back(static_cast<uint8_t>(seq));
+      log.events.push_back(std::move(event));
+    }
+    logs.push_back(std::move(log));
+  }
+  const IndexerCommittedBlock block =
+      make_block(1, origin.first_prev_hash, std::move(bodies), std::move(logs));
   ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
             IndexerBlockApplyOutcome::IndexerBlockApplied);
 
@@ -785,15 +833,1060 @@ TEST_F(StrictIndexerTest,
   db_.reset();
   auto reopened = IndexDB::open(path_);
   ASSERT_TRUE(reopened.has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(first.signed_tx.tx)).has_value());
-  EXPECT_TRUE(reopened->get_tx_record(sha256(second.signed_tx.tx)).has_value());
+  std::vector<TransactionHash> hashes;
+  for (size_t i = 0; i < block.payload.tx_bodies.size(); ++i) {
+    const auto &body = block.payload.tx_bodies[i];
+    const auto &event_log = block.payload.event_logs[i];
+    hashes.push_back(event_log.tx_hash);
+    auto stored = reopened->get_tx_record(event_log.tx_hash);
+    ASSERT_TRUE(stored);
+    EXPECT_EQ(stored->height, 1);
+    EXPECT_EQ(stored->tx, body);
+    EXPECT_EQ(stored->events, event_log);
+  }
+  std::ranges::sort(hashes);
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  std::vector<TransactionHash> page_hashes;
+  do {
+    auto page = reopened->get_transactions_by_block(query);
+    ASSERT_TRUE(page);
+    ASSERT_FALSE(page->refs.empty());
+    for (const auto &ref : page->refs) {
+      page_hashes.push_back(ref.tx_hash);
+    }
+    query.cursor = page->cursor;
+    ASSERT_LE(page_hashes.size(), hashes.size());
+  } while (!query.cursor.empty());
+  EXPECT_EQ(page_hashes, hashes);
+
+  const auto emitting_address = [](uint8_t fill) {
+    ContractAddress address{};
+    std::ranges::fill(address, fill);
+    return address;
+  };
+  const std::array addresses{emitting_address(0xA0), emitting_address(0xA1),
+                             emitting_address(0xB0)};
+  for (const auto &address : addresses) {
+    std::vector<IdentifiedEvent> expected_events;
+    for (const auto &log : block.payload.event_logs) {
+      for (uint32_t seq = 0; seq < log.events.size(); ++seq) {
+        if (const auto &event = log.events[seq];
+            event.contract_address == address) {
+          expected_events.push_back(IdentifiedEvent{
+              .tx_hash = log.tx_hash,
+              .block_height = 1,
+              .sequence_number = seq,
+              .emitted_event = event,
+          });
+        }
+      }
+    }
+    std::ranges::sort(expected_events, {}, [](const auto &event) {
+      return std::tie(event.tx_hash, event.sequence_number);
+    });
+    ASSERT_EQ(expected_events.size(),
+              kTransactionCount * (address == addresses.front() ? 2 : 1));
+
+    EventQuery event_query{};
+    event_query.order = IterationOrder::IterationOrderAscending;
+    event_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    event_query.limit = 67;
+    event_query.filters.push_back(
+        EventFilter{.contract_addresses = {address}, .topics = {}});
+    size_t event_index = 0;
+    do {
+      const auto page = reopened->get_events(event_query);
+      ASSERT_TRUE(page);
+      ASSERT_FALSE(page->events.empty());
+      for (const auto &event : page->events) {
+        ASSERT_LT(event_index, expected_events.size());
+        EXPECT_EQ(event, expected_events[event_index++]);
+      }
+      event_query.cursor = page->cursor;
+    } while (!event_query.cursor.empty());
+    EXPECT_EQ(event_index, expected_events.size());
+
+    std::vector<TransactionHash> root_hashes;
+    for (size_t i = 0; i < block.payload.tx_bodies.size(); ++i) {
+      const auto &tx = block.payload.tx_bodies[i].signed_tx.tx;
+      if (tx.invocation.invoked_address == address) {
+        root_hashes.push_back(block.payload.event_logs[i].tx_hash);
+      }
+    }
+    EXPECT_EQ(root_hashes.size(),
+              address == addresses.back() ? 0 : kTransactionCount / 8);
+    std::ranges::sort(root_hashes);
+    AddressTransactionQuery address_query{};
+    address_query.address = address;
+    address_query.order = IterationOrder::IterationOrderAscending;
+    address_query.anchor.kind(BlockAnchorKind::AnchorAtBeginning);
+    address_query.limit = 11;
+    std::vector<TransactionHash> address_hashes;
+    do {
+      const auto page = reopened->get_transactions_by_address(address_query);
+      ASSERT_TRUE(page);
+      for (const auto &ref : page->refs) {
+        EXPECT_EQ(ref.height, 1);
+        address_hashes.push_back(ref.tx_hash);
+      }
+      ASSERT_LE(address_hashes.size(), root_hashes.size());
+      ASSERT_TRUE(page->cursor.empty() || !page->refs.empty());
+      address_query.cursor = page->cursor;
+    } while (!address_query.cursor.empty());
+    EXPECT_EQ(address_hashes, root_hashes);
+  }
   IndexerProgress progress = reopened->durable_progress();
   ASSERT_EQ(progress.state(), IndexerProgressState::IndexerProgressInitialized);
   EXPECT_EQ(progress.initialized().contiguous_height, 1);
   EXPECT_EQ(progress.initialized().last_consensus_hash,
             block.identity.consensus_hash);
-  EXPECT_EQ(progress.initialized().last_consensus_hash,
-            block.identity.consensus_hash);
+}
+
+TEST_F(StrictIndexerTest, BlockQueriesRequireCompleteHistory)
+{
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  auto pending = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(pending);
+  EXPECT_EQ(pending.error().code(), IndexerErrorCode::kQueryNotReady);
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  EXPECT_FALSE(db_->get_block_by_height(1));
+
+  const auto block = make_block(1, origin.first_prev_hash);
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto found = db_->get_block_by_height(1);
+  ASSERT_TRUE(found);
+  const auto &value = *found;
+  if (value) {
+    EXPECT_EQ(sha256(*value), block.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "committed block metadata is missing";
+  }
+  auto empty = db_->get_transactions_by_block(query);
+  ASSERT_TRUE(empty);
+  EXPECT_TRUE(empty->refs.empty());
+  EXPECT_TRUE(empty->cursor.empty());
+  EXPECT_EQ(empty->oldest_block, 1);
+  EXPECT_EQ(empty->latest_block, 1);
+  for (const int64_t height : std::array<int64_t, 4>{-1, 0, 2, INT64_MAX}) {
+    auto missing = db_->get_block_by_height(height);
+    ASSERT_TRUE(missing);
+    EXPECT_FALSE(*missing);
+    query.height = height;
+    auto page = db_->get_transactions_by_block(query);
+    ASSERT_TRUE(page);
+    EXPECT_TRUE(page->refs.empty());
+    EXPECT_EQ(page->oldest_block, 1);
+  }
+
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*db_, failures);
+  EXPECT_EQ(rpc.get_block_by_height(1)().outcome(),
+            BlockLookupOutcome::BlockFound);
+  EXPECT_EQ(rpc.get_block_by_height(0)().outcome(),
+            BlockLookupOutcome::BlockNotFound);
+}
+
+TEST_F(StrictIndexerTest, BlockPagesResumeAcrossRestartAndChainAdvance)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ProposedTransactionBatch bodies;
+  std::vector<TransactionHash> expected;
+  for (uint64_t i = 0; i < 205; ++i) {
+    bodies.push_back(make_body(i, static_cast<uint8_t>(i)));
+    expected.push_back(sha256(bodies.back().signed_tx.tx));
+  }
+  std::ranges::sort(expected);
+  const auto block = make_block(1, origin.first_prev_hash, bodies);
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    BlockTransactionQuery query{};
+    query.height = 1;
+    query.order = order;
+    query.limit = 0;
+    auto first = db_->get_transactions_by_block(query);
+    ASSERT_TRUE(first);
+    ASSERT_EQ(first->refs.size(), 50);
+    ASSERT_FALSE(first->cursor.empty());
+    std::vector<TransactionHash> observed;
+    for (const auto &ref : first->refs) {
+      observed.push_back(ref.tx_hash);
+    }
+    query.cursor = first->cursor;
+    // A cursor carries its original order, regardless of the request field.
+    query.order = order == IterationOrder::IterationOrderAscending
+                      ? IterationOrder::IterationOrderDescending
+                      : IterationOrder::IterationOrderAscending;
+    query.limit = 17;
+    db_.reset();
+    auto reopened = IndexDB::open(path_);
+    ASSERT_TRUE(reopened);
+    db_ = std::make_unique<IndexDB>(std::move(*reopened));
+    const auto later =
+        make_block(2, block.identity.consensus_hash,
+                   ProposedTransactionBatch{make_body(9999, 0xCC)});
+    const auto applied = db_->apply_committed_block(origin, later)().outcome();
+    EXPECT_TRUE(applied == IndexerBlockApplyOutcome::IndexerBlockApplied ||
+                applied == IndexerBlockApplyOutcome::IndexerBlockDuplicate);
+    for (unsigned pages = 0; !query.cursor.empty() && pages < 20; ++pages) {
+      auto page = db_->get_transactions_by_block(query);
+      ASSERT_TRUE(page);
+      EXPECT_LE(page->refs.size(), query.limit);
+      EXPECT_EQ(page->latest_block, 2);
+      for (const auto &ref : page->refs) {
+        EXPECT_EQ(ref.height, 1);
+        observed.push_back(ref.tx_hash);
+        auto receipt = db_->get_tx_record(ref.tx_hash);
+        ASSERT_TRUE(receipt);
+        EXPECT_EQ(receipt->height, 1);
+      }
+      query.cursor = page->cursor;
+    }
+    EXPECT_TRUE(query.cursor.empty());
+    auto ordered = expected;
+    if (order == IterationOrder::IterationOrderDescending) {
+      std::ranges::reverse(ordered);
+    }
+    EXPECT_EQ(observed, ordered);
+    query.cursor.clear();
+    query.limit = UINT32_MAX;
+    auto capped = db_->get_transactions_by_block(query);
+    ASSERT_TRUE(capped);
+    EXPECT_EQ(capped->refs.size(), 200);
+  }
+  EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockDuplicate);
+}
+
+TEST_F(StrictIndexerTest, BlockPageIteratorWorkIgnoresUnrelatedHistory)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  auto previous = origin.first_prev_hash;
+  for (int64_t height = 1; height <= 3; ++height) {
+    ProposedTransactionBatch bodies;
+    const uint64_t count = height == 2 ? 4 : 1024;
+    for (uint64_t i = 0; i < count; ++i) {
+      bodies.push_back(make_body((static_cast<uint64_t>(height) * 10000) + i,
+                                 static_cast<uint8_t>(height)));
+    }
+    const auto block = make_block(height, previous, bodies);
+    ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockApplied);
+    previous = block.identity.consensus_hash;
+  }
+
+  struct RestorePerfLevel {
+    rocksdb::PerfLevel previous = rocksdb::GetPerfLevel();
+    ~RestorePerfLevel() { rocksdb::SetPerfLevel(previous); }
+  } restore;
+  rocksdb::SetPerfLevel(rocksdb::PerfLevel::kEnableCount);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    BlockTransactionQuery query{};
+    query.height = 2;
+    query.order = order;
+    query.limit = 1;
+    for (unsigned i = 0; i < 4; ++i) {
+      auto *perf = rocksdb::get_perf_context();
+      perf->Reset();
+      const auto page = db_->get_transactions_by_block(query);
+      const auto iterator_steps =
+          perf->iter_seek_count + perf->iter_next_count + perf->iter_prev_count;
+      ASSERT_TRUE(page);
+      ASSERT_EQ(page->refs.size(), 1);
+      EXPECT_EQ(page->refs.front().height, 2);
+      // Count iterator movement, not elapsed time. A page seeks to its row or
+      // anchor and advances only to its row and lookahead. Scanning either
+      // adjacent block's 1024 references would exceed this fixed budget.
+      EXPECT_GT(iterator_steps, 0);
+      EXPECT_LE(iterator_steps, 3);
+      query.cursor = page->cursor;
+      EXPECT_EQ(query.cursor.empty(), i == 3);
+    }
+  }
+}
+
+TEST_F(StrictIndexerTest, ContinuationWaitsForReplacementIndexToCatchUp)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto first = make_block(1, origin.first_prev_hash);
+  const auto second =
+      make_block(2, first.identity.consensus_hash,
+                 ProposedTransactionBatch{make_body(1, 1), make_body(2, 2)});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_EQ(db_->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  BlockTransactionQuery query{};
+  query.height = 2;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.limit = 1;
+  auto page = db_->get_transactions_by_block(query);
+  ASSERT_TRUE(page && !page->cursor.empty());
+  auto replacement = IndexDB::make_new(path_.parent_path() / "replacement");
+  ASSERT_TRUE(replacement);
+  ASSERT_EQ(replacement->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  ASSERT_EQ(replacement->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto initial = replacement->get_transactions_by_block(query);
+  ASSERT_TRUE(initial);
+  EXPECT_TRUE(initial->refs.empty());
+  query.cursor = page->cursor;
+  auto waiting = replacement->get_transactions_by_block(query);
+  ASSERT_FALSE(waiting);
+  EXPECT_EQ(waiting.error().code(), IndexerErrorCode::kHistoryUnavailable);
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*replacement, failures);
+  EXPECT_EQ(rpc.get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryHistoryUnavailable);
+  ASSERT_EQ(replacement->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  auto resumed = replacement->get_transactions_by_block(query);
+  ASSERT_TRUE(resumed);
+  EXPECT_EQ(resumed->refs.size(), 1);
+  EXPECT_TRUE(resumed->cursor.empty());
+}
+
+TEST_F(StrictIndexerTest, BlockCursorCannotChangeHeightOrBlockIdentity)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto block =
+      make_block(1, origin.first_prev_hash,
+                 ProposedTransactionBatch{make_body(1, 1), make_body(2, 2)});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  const auto second = make_block(2, block.identity.consensus_hash);
+  ASSERT_EQ(db_->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  query.limit = 1;
+  auto first = db_->get_transactions_by_block(query);
+  ASSERT_TRUE(first && !first->cursor.empty());
+  EventQuery foreign_events{};
+  foreign_events.filters.push_back(
+      EventFilter{.contract_addresses = {ContractAddress{}}, .topics = {}});
+  foreign_events.cursor = first->cursor;
+  TransactionQuery foreign_transactions{};
+  foreign_transactions.cursor = first->cursor;
+  AddressTransactionQuery foreign_address{};
+  foreign_address.cursor = first->cursor;
+  const auto events_result = db_->get_events(foreign_events);
+  ASSERT_FALSE(events_result);
+  EXPECT_EQ(events_result.error().code(), IndexerErrorCode::kInvalidCursor);
+  const auto transactions_result = db_->get_transactions(foreign_transactions);
+  ASSERT_FALSE(transactions_result);
+  EXPECT_EQ(transactions_result.error().code(),
+            IndexerErrorCode::kInvalidCursor);
+  const auto address_result = db_->get_transactions_by_address(foreign_address);
+  ASSERT_FALSE(address_result);
+  EXPECT_EQ(address_result.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor = first->cursor;
+  query.height = 2;
+  auto wrong_height = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(wrong_height);
+  EXPECT_EQ(wrong_height.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.height = 1;
+  query.cursor.back() ^= 0xFF;
+  auto missing_resume_key = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(missing_resume_key);
+  EXPECT_EQ(missing_resume_key.error().code(),
+            IndexerErrorCode::kInvalidCursor);
+  query.cursor = first->cursor;
+  BlockQueryCursor decoded;
+  x23::deserialize(&decoded,
+                   x23::BufView(query.cursor.data(), query.cursor.size()));
+  for (const BlockHeight height : {0, -1}) {
+    SCOPED_TRACE(height);
+    auto impossible = decoded;
+    impossible.height = height;
+    const auto bytes = x23::serialize(impossible);
+    query.height = height;
+    query.cursor.clear();
+    query.cursor.append_range(
+        std::span<const uint8_t>(bytes.data(), bytes.size()));
+    auto invalid_height = db_->get_transactions_by_block(query);
+    ASSERT_FALSE(invalid_height);
+    EXPECT_EQ(invalid_height.error().code(), IndexerErrorCode::kInvalidCursor);
+  }
+  query.height = 1;
+  decoded.block_hash[0] ^= 0xFF;
+  auto encoded = x23::serialize(decoded);
+  query.cursor.clear();
+  query.cursor.append_range(
+      std::span<const uint8_t>(encoded.data(), encoded.size()));
+  auto reset = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(reset);
+  EXPECT_EQ(reset.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor = first->cursor;
+  x23::deserialize(&decoded,
+                   x23::BufView(query.cursor.data(), query.cursor.size()));
+  decoded.order = static_cast<IterationOrder>(2);
+  encoded = x23::serialize(decoded);
+  query.cursor.clear();
+  query.cursor.append_range(
+      std::span<const uint8_t>(encoded.data(), encoded.size()));
+  auto wrong_order = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(wrong_order);
+  EXPECT_EQ(wrong_order.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor = first->cursor;
+  query.cursor.front() ^= 0xFF;
+  auto wrong_format = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(wrong_format);
+  EXPECT_EQ(wrong_format.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor.resize(1);
+  auto truncated = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(truncated);
+  EXPECT_EQ(truncated.error().code(), IndexerErrorCode::kInvalidCursor);
+  query.cursor.resize(257);
+  auto oversized = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(oversized);
+  EXPECT_EQ(oversized.error().code(), IndexerErrorCode::kInvalidCursor);
+  EventCursorPayload event_cursor{};
+  event_cursor.method = HistoryCursorMethod::CursorEvents;
+  event_cursor.query_hash = cursor::event_query_hash(foreign_events.filters);
+  event_cursor.order = IterationOrder::IterationOrderAscending;
+  event_cursor.block_height = 1;
+  event_cursor.max_block_height = 2;
+  const auto foreign = cursor::encode(event_cursor);
+  query.cursor.clear();
+  query.cursor.append_range(std::span<const uint8_t>(
+      reinterpret_cast<const uint8_t *>(foreign.data()), foreign.size()));
+  auto cross_query = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(cross_query);
+  EXPECT_EQ(cross_query.error().code(), IndexerErrorCode::kInvalidCursor);
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*db_, failures);
+  EXPECT_EQ(rpc.get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryInvalidCursor);
+}
+
+// Corrupt an already committed projection, then query through the public RPC
+// adapter. A valid row on either side of block 2 must not escape as a partial
+// success when hydration reaches the damaged row.
+TEST_F(StrictIndexerTest, HistoryPagesFailClosedOnStoredRecordCorruption)
+{
+  enum class Damage {
+    kMissing,
+    kShort,
+    kUndecodable,
+    kExcessiveEvents,
+    kLogHash,
+    kBodyHash,
+    kHeight,
+    kNegativeHeight,
+    kSequence,
+    kEmitter,
+    kTopicCount,
+    kTopicBytes
+  };
+  for (const auto damage :
+       {Damage::kMissing, Damage::kShort, Damage::kUndecodable,
+        Damage::kExcessiveEvents, Damage::kLogHash, Damage::kBodyHash,
+        Damage::kHeight, Damage::kNegativeHeight, Damage::kSequence,
+        Damage::kEmitter, Damage::kTopicCount, Damage::kTopicBytes}) {
+    SCOPED_TRACE(static_cast<int>(damage));
+    db_.reset();
+    const auto test_path =
+        path_.parent_path() /
+        std::format("record-damage-{}", static_cast<int>(damage));
+    auto opened = IndexDB::make_new(test_path);
+    ASSERT_TRUE(opened);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    const auto origin = make_origin();
+    ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+              IndexerEpochOutcome::IndexerEpochInitialized);
+    auto previous = origin.first_prev_hash;
+    for (BlockHeight height = 1; height <= 3; ++height) {
+      const auto block =
+          make_block(height, previous,
+                     ProposedTransactionBatch{make_body(height, 0xA0)});
+      ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+                IndexerBlockApplyOutcome::IndexerBlockApplied);
+      previous = block.identity.consensus_hash;
+    }
+    auto body = make_body(2, 0xA0);
+    const auto hash = sha256(body.signed_tx.tx);
+    auto log = make_log(body, 0xA0);
+    BlockHeight stored_height = 2;
+    switch (damage) {
+    case Damage::kLogHash:
+      log.tx_hash[0] ^= 1;
+      break;
+    case Damage::kBodyHash:
+      ++body.signed_tx.tx.uniquifier.nonce;
+      break;
+    case Damage::kHeight:
+      stored_height = 1;
+      break;
+    case Damage::kNegativeHeight:
+      stored_height = -1;
+      break;
+    case Damage::kSequence:
+      log.events.clear();
+      break;
+    case Damage::kEmitter:
+      log.events[0].contract_address[0] ^= 1;
+      break;
+    case Damage::kTopicCount:
+      log.events[0].num_topics = kMaxTopics + 1;
+      break;
+    case Damage::kTopicBytes:
+      log.events[0].num_topics = 1;
+      break;
+    default:
+      break;
+    }
+    std::string stored(reinterpret_cast<const char *>(&stored_height),
+                       sizeof(stored_height));
+    const auto encoded_body = x23::serialize(body);
+    auto encoded_log = x23::serialize(log);
+    if (damage == Damage::kExcessiveEvents) {
+      auto empty_log = log;
+      empty_log.events.clear();
+      const auto count_offset =
+          x23::serialize(empty_log).size() - sizeof(uint32_t);
+      const auto count = x23::serialize(uint32_t{kMaxEventsPerTransaction + 1});
+      std::ranges::copy(count, encoded_log.begin() + count_offset);
+      TxEventLog decoded;
+      EXPECT_THROW(x23::deserialize(&decoded, encoded_log),
+                   x23::XdrLengthError);
+    }
+    stored.append(reinterpret_cast<const char *>(encoded_body.data()),
+                  encoded_body.size());
+    stored.append(reinterpret_cast<const char *>(encoded_log.data()),
+                  encoded_log.size());
+    if (damage == Damage::kShort)
+      stored = "short";
+    if (damage == Damage::kUndecodable)
+      stored.resize(sizeof(BlockHeight) + 1);
+    std::string key;
+    IndexerKeyFormat::make_tx_key(key, hash);
+    db_.reset();
+    overwrite_column_family(test_path, IndexerKeyFormat::kTxIndexColumnFamily,
+                            key,
+                            damage == Damage::kMissing
+                                ? std::nullopt
+                                : std::optional<std::string_view>(stored));
+    opened = IndexDB::open(test_path);
+    ASSERT_TRUE(opened);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    RecentTxFailureCache failures;
+    IndexerBlockExplorerRpc rpc(*db_, failures);
+    ContractAddress address{};
+    std::ranges::fill(address, 0xA0);
+    for (const auto order : {IterationOrder::IterationOrderAscending,
+                             IterationOrder::IterationOrderDescending}) {
+      SCOPED_TRACE(static_cast<int>(order));
+      const BlockAnchor anchor(order == IterationOrder::IterationOrderAscending
+                                   ? BlockAnchorKind::AnchorAtBeginning
+                                   : BlockAnchorKind::AnchorAtEnd);
+      EventQuery events{};
+      events.order = order;
+      events.anchor = anchor;
+      events.filters.push_back(
+          EventFilter{.contract_addresses = {address}, .topics = {}});
+      // Topic corruption must fail even when the requested topic cannot match.
+      if (damage == Damage::kTopicCount || damage == Damage::kTopicBytes) {
+        Topic topic{};
+        std::ranges::fill(topic, 0xEE);
+        events.filters[0].topics.topic0.push_back(topic);
+      }
+      if (damage != Damage::kBodyHash) {
+        EXPECT_EQ(rpc.get_events(events)().outcome(),
+                  IndexerQueryOutcome::IndexerQueryInternalFailure);
+        // A budget cut before the damaged candidate can return a cursor,
+        // but resuming into corruption must fail without a partial page or a
+        // replacement cursor, even when the topic filter cannot match.
+        const auto first = db_->get_events(events, 1);
+        ASSERT_TRUE(first);
+        ASSERT_FALSE(first->cursor.empty());
+        auto resumed = events;
+        resumed.cursor = first->cursor;
+        const auto failed = db_->get_events(resumed, 1);
+        ASSERT_FALSE(failed);
+        EXPECT_EQ(failed.error().code(), IndexerErrorCode::kInternal);
+        const auto partial = db_->get_events(events, 2);
+        ASSERT_FALSE(partial);
+        EXPECT_EQ(partial.error().code(), IndexerErrorCode::kInternal);
+      }
+      else {
+        // Event-only legacy ingestion has no body; event reads depend on the
+        // receipt identity and emitter projection, not the transaction body.
+        const auto event_page = rpc.get_events(events)();
+        ASSERT_EQ(event_page.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+        EXPECT_EQ(event_page.page().events.size(), 3);
+      }
+      const bool common_damage =
+          damage == Damage::kMissing || damage == Damage::kShort ||
+          damage == Damage::kUndecodable ||
+          damage == Damage::kExcessiveEvents || damage == Damage::kLogHash ||
+          damage == Damage::kBodyHash || damage == Damage::kHeight ||
+          damage == Damage::kNegativeHeight;
+      if (common_damage) {
+        AddressTransactionQuery root{};
+        root.address = address;
+        root.order = order;
+        root.anchor = anchor;
+        EXPECT_EQ(rpc.get_transactions_by_address(root)().outcome(),
+                  IndexerQueryOutcome::IndexerQueryInternalFailure);
+      }
+      // The full-chain scan has no secondary reference for a deleted row or
+      // another authoritative height. Those guarantees need a projection join.
+      if ((common_damage && damage != Damage::kMissing &&
+           damage != Damage::kHeight) ||
+          damage == Damage::kTopicCount || damage == Damage::kTopicBytes) {
+        TransactionQuery transactions{};
+        transactions.order = order;
+        transactions.anchor = anchor;
+        EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+                  IndexerQueryOutcome::IndexerQueryInternalFailure);
+        if (damage != Damage::kShort && damage != Damage::kNegativeHeight) {
+          // Only the requested page is hydrated. A later damaged payload
+          // cannot prevent the intact first page from being read.
+          transactions.limit = 1;
+          const auto first = rpc.get_transactions(transactions)();
+          ASSERT_EQ(first.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+          ASSERT_EQ(first.page().transactions.size(), 1);
+          EXPECT_EQ(first.page().transactions[0].height,
+                    order == IterationOrder::IterationOrderAscending ? 1 : 3);
+          ASSERT_FALSE(first.page().cursor.empty());
+          transactions.cursor = first.page().cursor;
+          EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+                    IndexerQueryOutcome::IndexerQueryInternalFailure);
+        }
+      }
+    }
+  }
+}
+
+TEST_F(StrictIndexerTest, HistoryContractKeysMustBeWellFormedAndMatchRootBody)
+{
+  for (const int damage : {0, 1, 2, 3, 4}) {
+    SCOPED_TRACE(damage);
+    const bool malformed = damage == 1 || damage == 4;
+    const bool nonzero_root_sequence = damage == 2;
+    db_.reset();
+    const auto test_path =
+        path_.parent_path() / std::format("key-damage-{}", damage);
+    auto opened = IndexDB::make_new(test_path);
+    ASSERT_TRUE(opened);
+    const auto origin = make_origin();
+    ASSERT_EQ(opened->initialize_epoch(origin).outcome(),
+              IndexerEpochOutcome::IndexerEpochInitialized);
+    const auto body = make_body(1, 0xA0);
+    const auto block =
+        make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+    ASSERT_EQ(opened->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockApplied);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    db_.reset();
+    ContractAddress address{};
+    std::ranges::fill(address, damage == 0 ? 0xB0 : 0xA0);
+    for (const auto kind :
+         {IndexerKeyFormat::kEvent, IndexerKeyFormat::kRootTx}) {
+      if (!malformed && damage != 3 && kind == IndexerKeyFormat::kEvent) {
+        continue;
+      }
+      std::string key;
+      if (damage == 4) {
+        // A bare height prefix sorts before its valid full keys. An initial
+        // seek to a full zero-suffix key would silently skip this corruption.
+        IndexerKeyFormat::make_contract_key_prefix(key, address, kind, 1);
+      }
+      else {
+        IndexerKeyFormat::make_contract_key(key, address, kind, 1,
+                                            sha256(body.signed_tx.tx),
+                                            nonzero_root_sequence ? 1 : 0);
+        if (malformed) {
+          key.push_back('x');
+        }
+      }
+      overwrite_column_family(test_path,
+                              IndexerKeyFormat::kContractIndexColumnFamily, key,
+                              damage == 3 ? "unexpected value" : "");
+    }
+    opened = IndexDB::open(test_path);
+    ASSERT_TRUE(opened);
+    RecentTxFailureCache failures;
+    IndexerBlockExplorerRpc rpc(*opened, failures);
+    for (const auto order : {IterationOrder::IterationOrderAscending,
+                             IterationOrder::IterationOrderDescending}) {
+      SCOPED_TRACE(static_cast<int>(order));
+      BlockAnchor anchor(order == IterationOrder::IterationOrderAscending
+                             ? BlockAnchorKind::AnchorAtBeginning
+                             : BlockAnchorKind::AnchorAtEnd);
+      if (damage == 4) {
+        anchor = BlockAnchor(BlockAnchorKind::AnchorAtHeight);
+        anchor.height() = 1;
+      }
+      AddressTransactionQuery root{};
+      root.address = address;
+      root.order = order;
+      root.anchor = anchor;
+      root.limit = 1;
+      EXPECT_EQ(rpc.get_transactions_by_address(root)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInternalFailure);
+      if (malformed || damage == 3) {
+        EventQuery events{};
+        events.order = order;
+        events.anchor = anchor;
+        events.limit = 1;
+        events.filters.push_back(
+            EventFilter{.contract_addresses = {address}, .topics = {}});
+        EXPECT_EQ(rpc.get_events(events)().outcome(),
+                  IndexerQueryOutcome::IndexerQueryInternalFailure);
+      }
+    }
+  }
+}
+
+TEST_F(StrictIndexerTest,
+       HistoryContinuationMembershipAndStoredDamageStayDistinct)
+{
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    SCOPED_TRACE(static_cast<int>(order));
+    db_.reset();
+    const auto test_path =
+        path_.parent_path() / std::format("resume-{}", static_cast<int>(order));
+    auto opened = IndexDB::make_new(test_path);
+    ASSERT_TRUE(opened);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    const auto origin = make_origin();
+    ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+              IndexerEpochOutcome::IndexerEpochInitialized);
+    auto previous = origin.first_prev_hash;
+    for (BlockHeight height = 1; height <= 2; ++height) {
+      const auto block =
+          make_block(height, previous,
+                     ProposedTransactionBatch{make_body(height, 0xA0)});
+      ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+                IndexerBlockApplyOutcome::IndexerBlockApplied);
+      previous = block.identity.consensus_hash;
+    }
+    const BlockAnchor anchor(order == IterationOrder::IterationOrderAscending
+                                 ? BlockAnchorKind::AnchorAtBeginning
+                                 : BlockAnchorKind::AnchorAtEnd);
+    ContractAddress address{};
+    std::ranges::fill(address, 0xA0);
+    EventQuery events{};
+    events.order = order;
+    events.anchor = anchor;
+    events.limit = 1;
+    events.filters.push_back(
+        EventFilter{.contract_addresses = {address}, .topics = {}});
+    TransactionQuery transactions{};
+    transactions.order = order;
+    transactions.anchor = anchor;
+    transactions.limit = 1;
+    AddressTransactionQuery root{};
+    root.address = address;
+    root.order = order;
+    root.anchor = anchor;
+    root.limit = 1;
+    const auto event_page = db_->get_events(events);
+    const auto transaction_page = db_->get_transactions(transactions);
+    const auto root_page = db_->get_transactions_by_address(root);
+    ASSERT_TRUE(event_page);
+    ASSERT_TRUE(transaction_page);
+    ASSERT_TRUE(root_page);
+    ASSERT_FALSE(event_page->cursor.empty());
+    ASSERT_FALSE(transaction_page->cursor.empty());
+    ASSERT_FALSE(root_page->cursor.empty());
+    events.cursor = event_page->cursor;
+    transactions.cursor = transaction_page->cursor;
+    root.cursor = root_page->cursor;
+    const auto forge_absent_hash = [](PaginationCursor value) {
+      auto payload = cursor::decode(
+          std::string_view(reinterpret_cast<const char *>(value.data()),
+                           value.size()));
+      EXPECT_TRUE(payload);
+      if (!payload) {
+        return PaginationCursor{};
+      }
+      payload->tx_hash[0] ^= 1;
+      const auto encoded = cursor::encode(*payload);
+      value.clear();
+      value.append_range(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+      return value;
+    };
+    auto forged_events = events;
+    forged_events.cursor = forge_absent_hash(events.cursor);
+    auto forged_transactions = transactions;
+    forged_transactions.cursor = forge_absent_hash(transactions.cursor);
+    auto forged_root = root;
+    forged_root.cursor = forge_absent_hash(root.cursor);
+    RecentTxFailureCache failures;
+    {
+      IndexerBlockExplorerRpc rpc(*db_, failures);
+      EXPECT_EQ(rpc.get_events(forged_events)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      EXPECT_EQ(rpc.get_transactions(forged_transactions)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      auto wrong_height = transactions;
+      auto wrong_position =
+          cursor::decode(std::string_view(reinterpret_cast<const char *>(
+                                              wrong_height.cursor.data()),
+                                          wrong_height.cursor.size()));
+      if (!wrong_position) {
+        ADD_FAILURE() << "Could not decode transaction cursor";
+        return;
+      }
+      wrong_position->block_height = wrong_position->block_height == 1 ? 2 : 1;
+      const auto wrong_encoding = cursor::encode(*wrong_position);
+      wrong_height.cursor.clear();
+      wrong_height.cursor.append_range(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(wrong_encoding.data()),
+          wrong_encoding.size()));
+      EXPECT_EQ(rpc.get_transactions(wrong_height)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      EXPECT_EQ(rpc.get_transactions_by_address(forged_root)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInvalidCursor);
+      // A bounded scan may resume from its last validated candidate even
+      // when that event did not match the topic filter.
+      auto filtered = events;
+      Topic unmatched{};
+      std::ranges::fill(unmatched, 0xEE);
+      filtered.filters[0].topics.topic0.push_back(unmatched);
+      auto candidate =
+          cursor::decode(std::string_view(reinterpret_cast<const char *>(
+                                              filtered.cursor.data()),
+                                          filtered.cursor.size()));
+      if (!candidate) {
+        ADD_FAILURE() << "Could not decode event cursor";
+        return;
+      }
+      candidate->query_hash = cursor::event_query_hash(filtered.filters);
+      const auto encoded = cursor::encode(*candidate);
+      filtered.cursor.clear();
+      filtered.cursor.append_range(std::span<const uint8_t>(
+          reinterpret_cast<const uint8_t *>(encoded.data()), encoded.size()));
+      const auto filtered_page = rpc.get_events(filtered)();
+      ASSERT_EQ(filtered_page.outcome(), IndexerQueryOutcome::IndexerQueryOk);
+      EXPECT_TRUE(filtered_page.page().events.empty());
+      EXPECT_TRUE(filtered_page.page().cursor.empty());
+    }
+    const auto resume_hash = event_page->events[0].tx_hash;
+    std::string tx_key;
+    IndexerKeyFormat::make_tx_key(tx_key, resume_hash);
+    db_.reset();
+    overwrite_column_family(test_path, IndexerKeyFormat::kTxIndexColumnFamily,
+                            tx_key, "damaged");
+    opened = IndexDB::open(test_path);
+    ASSERT_TRUE(opened);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    {
+      IndexerBlockExplorerRpc rpc(*db_, failures);
+      EXPECT_EQ(rpc.get_events(events)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInternalFailure);
+      EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInternalFailure);
+      EXPECT_EQ(rpc.get_transactions_by_address(root)().outcome(),
+                IndexerQueryOutcome::IndexerQueryInternalFailure);
+    }
+    db_.reset();
+    overwrite_column_family(test_path, IndexerKeyFormat::kTxIndexColumnFamily,
+                            tx_key, std::nullopt);
+    opened = IndexDB::open(test_path);
+    ASSERT_TRUE(opened);
+    db_ = std::make_unique<IndexDB>(std::move(*opened));
+    IndexerBlockExplorerRpc rpc(*db_, failures);
+    // Event/root references still prove that their hydration row is missing.
+    EXPECT_EQ(rpc.get_events(events)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInternalFailure);
+    EXPECT_EQ(rpc.get_transactions_by_address(root)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInternalFailure);
+    EXPECT_EQ(rpc.get_transactions(transactions)().outcome(),
+              IndexerQueryOutcome::IndexerQueryInvalidCursor);
+  }
+}
+
+TEST_F(StrictIndexerTest, BlockQueryCorruptionIsNotAnEmptyResult)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto body = make_body(1, 1);
+  const auto block =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+  overwrite_default_metadata(
+      path_, IndexerKeyFormat::make_block_ref_key(1, sha256(body.signed_tx.tx)),
+      "bad ordinal");
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened);
+  db_ = std::make_unique<IndexDB>(std::move(*reopened));
+  BlockTransactionQuery query{};
+  query.height = 1;
+  query.order = IterationOrder::IterationOrderAscending;
+  auto page = db_->get_transactions_by_block(query);
+  ASSERT_FALSE(page);
+  EXPECT_EQ(page.error().code(), IndexerErrorCode::kInternal);
+  RecentTxFailureCache failures;
+  IndexerBlockExplorerRpc rpc(*db_, failures);
+  EXPECT_EQ(rpc.get_transactions_by_block(query)().outcome(),
+            IndexerQueryOutcome::IndexerQueryInternalFailure);
+
+  db_.reset();
+  overwrite_default_metadata(path_,
+                             IndexerKeyFormat::make_block_query_key(
+                                 IndexerKeyFormat::kBlockQueryRecordPrefix, 1),
+                             "bad metadata");
+  reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened);
+  db_ = std::make_unique<IndexDB>(std::move(*reopened));
+  auto metadata = db_->get_block_by_height(1);
+  ASSERT_FALSE(metadata);
+  EXPECT_EQ(metadata.error().code(), IndexerErrorCode::kInternal);
+  IndexerBlockExplorerRpc broken_rpc(*db_, failures);
+  EXPECT_THROW(broken_rpc.get_block_by_height(1)(), std::runtime_error);
+}
+
+TEST_F(StrictIndexerTest, BlockQueryFormatChangeRequiresExplicitRebuild)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto block = make_block(1, origin.first_prev_hash);
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+  overwrite_default_metadata(path_, IndexerKeyFormat::kBlockQueryFormatKey,
+                             "another format or protocol");
+  auto incompatible = IndexDB::open(path_);
+  ASSERT_FALSE(incompatible);
+  EXPECT_EQ(incompatible.error().code(), IndexerErrorCode::kMigrationRequired);
+}
+
+TEST_F(StrictIndexerTest, OldStrictIndexRemainsAvailableWhileSourceCanReplay)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto block = make_block(1, origin.first_prev_hash,
+                                ProposedTransactionBatch{make_body(1, 1)});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+  // Model a pre-feature strict database: its existing progress cannot prove
+  // that block-query metadata and refs have ever been populated.
+  overwrite_column_family(path_, rocksdb::kDefaultColumnFamilyName,
+                          IndexerKeyFormat::kBlockQueryFormatKey, std::nullopt);
+  auto old = IndexDB::open(path_);
+  ASSERT_TRUE(old);
+  ASSERT_TRUE(old->latest_block());
+  EXPECT_EQ(*old->latest_block(), 1);
+  auto unavailable = old->get_block_by_height(1);
+  ASSERT_FALSE(unavailable);
+  EXPECT_EQ(unavailable.error().code(), IndexerErrorCode::kQueryNotReady);
+  const auto next = make_block(2, block.identity.consensus_hash);
+  EXPECT_EQ(old->apply_committed_block(origin, next)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_TRUE(old->latest_block());
+  EXPECT_EQ(*old->latest_block(), 2);
+  unavailable = old->get_block_by_height(2);
+  ASSERT_FALSE(unavailable);
+  EXPECT_EQ(unavailable.error().code(), IndexerErrorCode::kQueryNotReady);
+  const auto rebuilt_path = path_.parent_path() / "rebuilt";
+  {
+    auto rebuilt = IndexDB::make_new(rebuilt_path);
+    ASSERT_TRUE(rebuilt);
+    EXPECT_EQ(rebuilt->initialize_epoch(origin).outcome(),
+              IndexerEpochOutcome::IndexerEpochInitialized);
+    EXPECT_EQ(rebuilt->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockApplied);
+  }
+  auto rebuilt = IndexDB::open(rebuilt_path);
+  ASSERT_TRUE(rebuilt);
+  EXPECT_EQ(rebuilt->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockDuplicate);
+  auto metadata = rebuilt->get_block_by_height(1);
+  ASSERT_TRUE(metadata);
+  const auto &value = *metadata;
+  if (value) {
+    EXPECT_EQ(sha256(*value), block.identity.consensus_hash);
+  }
+  else {
+    FAIL() << "rebuilt block metadata is missing";
+  }
+  EXPECT_TRUE(std::filesystem::exists(path_ / "CURRENT"));
+}
+
+TEST_F(StrictIndexerTest, MissingBlockReferencesCannotLookLikeAnEmptyBlock)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto body = make_body(1, 1);
+  const auto block =
+      make_block(1, origin.first_prev_hash, ProposedTransactionBatch{body});
+  ASSERT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  db_.reset();
+  overwrite_column_family(
+      path_, rocksdb::kDefaultColumnFamilyName,
+      IndexerKeyFormat::make_block_ref_key(1, sha256(body.signed_tx.tx)),
+      std::nullopt);
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened);
+  for (const auto order : {IterationOrder::IterationOrderAscending,
+                           IterationOrder::IterationOrderDescending}) {
+    BlockTransactionQuery query{};
+    query.height = 1;
+    query.order = order;
+    auto page = reopened->get_transactions_by_block(query);
+    ASSERT_FALSE(page);
+    EXPECT_EQ(page.error().code(), IndexerErrorCode::kInternal);
+  }
+}
+
+TEST_F(StrictIndexerTest, DuplicateHashesCannotCommitPartialBlockProjection)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  for (const size_t count : {size_t{1}, size_t{256}}) {
+    ProposedTransactionBatch bodies;
+    for (size_t i = 0; i < count; ++i) {
+      bodies.push_back(make_body(i + 1, 1));
+    }
+    auto block = make_block(1, origin.first_prev_hash, std::move(bodies));
+    // Both small and ordered batches must reject duplicate hashes before
+    // publishing rows or a new watermark.
+    const auto body = block.payload.tx_bodies.front();
+    const auto event = block.payload.event_logs.front();
+    block.payload.tx_bodies.push_back(body);
+    block.payload.event_logs.push_back(event);
+    EXPECT_EQ(db_->apply_committed_block(origin, block)().outcome(),
+              IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+    EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
+    EXPECT_FALSE(db_->get_tx_record(event.tx_hash));
+    EXPECT_FALSE(db_->get_block_by_height(1));
+  }
 }
 
 } // namespace

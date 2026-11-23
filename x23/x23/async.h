@@ -999,7 +999,11 @@ template<typename T, typename E> struct ExpectAwait {
     h.promise().return_value(std::unexpected(r_.error()));
     return emulate_final_suspend(h);
   }
-  T await_resume() { return std::move(*r_); }
+  T await_resume()
+  {
+    if constexpr (!std::is_void_v<T>)
+      return std::move(*r_);
+  }
 };
 
 } // namespace detail

@@ -11,6 +11,7 @@
 #include <variant>
 
 #include "db_conflict.hh"
+#include "hogd/base/cleanup.h"
 #include "hogd/base/compiler.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -26,8 +27,8 @@
 #include "hogd/hog_db/item_lock/pointer_lock.h"
 #include "hogd/hog_db/item_lock/replay_cache_lock.h"
 #include "hogd/hog_db/status.h"
-#include "retrocausal_queue.hh"
 #include "x23/testlock.h"
+#include "x23/vec.h"
 
 namespace hogd {
 
@@ -60,7 +61,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   }
 
   if (lock_state == kFinalizedPermamentExclusiveLock) {
-    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+    return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
   }
   CHECK_EQ(lock_state, kUncommitted);
 
@@ -70,7 +71,7 @@ ItemLock::try_atomic_change_lock(const ItemChange *before,
   // finalized while we were waiting.
   lock_state = lock_state_.load(std::memory_order_acquire);
   if (lock_state == kFinalizedPermamentExclusiveLock) {
-    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+    return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
   }
   if (lock_state == kFinalized) {
     lock.unlock();
@@ -212,7 +213,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
   CHECK(before == nullptr || (!before->is_exclusive()));
 
   if (after != nullptr && after->is_exclusive()) {
-    return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+    return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
   }
 
   auto local_cost = std::visit(
@@ -236,7 +237,7 @@ ItemLock::handle_try_atomic_from_finalized(const ItemChange *before,
           if (after != nullptr) {
             after_inner = after->get_inner<change_type>();
             if (after_inner == nullptr) {
-              return ctx.conflict(DbConflictCode::kDbConflictTypeMismatch);
+              return ctx.conflict(DbConflictCode::TypeMismatch);
             }
           }
           return lock.try_atomic_change_lock(before_inner, after_inner, ctx);
@@ -319,14 +320,14 @@ ItemLock::handle_try_atomic_from_pending(
     if (before == nullptr && pending_refcount_ > 0) {
       // we do not have a lock, and some other transaction already has a ref on
       // this lock. Cannot acquire in exclusive mode
-      return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+      return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
     }
 
     if (before != nullptr && pending_refcount_ > 1) {
       CHECK(!before->is_exclusive());
       // we have a lock, but some other transaction already has a ref on this
       // lock. Cannot acquire in exclusive mode
-      return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+      return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
     }
 
     CHECK((before == nullptr && pending_refcount_ == 0) ||
@@ -368,7 +369,7 @@ ItemLock::handle_try_atomic_from_pending(
           panic("bad pendingstate");
         }
         else if constexpr (std::is_same_v<lock_t, ExclusiveLock>) {
-          return ctx.conflict(DbConflictCode::kDbConflictExclusiveLock);
+          return ctx.conflict(DbConflictCode::ExclusiveLockDenied);
         }
         else {
           using change_type = typename lock_t::change_type;
@@ -383,7 +384,7 @@ ItemLock::handle_try_atomic_from_pending(
           if (after != nullptr) {
             after_inner = after->get_inner<change_type>();
             if (after_inner == nullptr) {
-              return ctx.conflict(DbConflictCode::kDbConflictTypeMismatch);
+              return ctx.conflict(DbConflictCode::TypeMismatch);
             }
           }
 
@@ -407,6 +408,15 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
                                           const LockContext &ctx,
                                           std::unique_lock<x23::TestLock> &ul)
 {
+  // A first admission installs the lock before taking a reference. Undo the
+  // install on any exit that leaves no reference, error return or throw, so
+  // a same-key retry does not find a half-built lock (#3000).
+  Defer undo_install{[&] {
+    if (pending_refcount_ == 0) {
+      reset_lock_contents(ul);
+    }
+  }};
+
   if (pending_refcount_ == 0) {
     CHECK(std::holds_alternative<std::monostate>(lock_contents_));
     CHECK_PTR(after);
@@ -414,16 +424,9 @@ ItemLock::handle_uncommitted_try_new_lock(const ItemChange *after,
   }
 
   auto res = handle_try_atomic_from_pending(nullptr, after, ctx, ul);
-
-  if (!res.has_value()) {
-    // failed to acquire lock
-    if (pending_refcount_ == 0) {
-      reset_lock_contents(ul);
-    }
-    return res;
+  if (res.has_value()) {
+    pending_refcount_++;
   }
-
-  pending_refcount_++;
   return res;
 }
 
@@ -483,7 +486,22 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
 
   if (after->is_balance()) {
     CHECK(snapshot_type_ == kItemLockCacheDataBalance);
-    lock_contents_.emplace<BalanceLock>(balance_base_);
+    // balance_base_ holds the snapshot balance, or INT128_MIN when the balance
+    // is missing (see set_snapshot_data). Balances are always nonnegative, so
+    // decode it back to a real optional here: any nonnegative value is a
+    // present balance, and the only valid negative value is the sentinel.
+    // Decoding explicitly keeps the sentinel from reaching BalanceLock through
+    // an implicit int128_t -> optional conversion, which would present a
+    // missing balance as a real INT128_MIN base and grant near-unlimited add
+    // capacity (#3809).
+    std::optional<int128_t> snapshot_balance;
+    if (balance_base_ >= 0) {
+      snapshot_balance = balance_base_;
+    }
+    else {
+      CHECK(balance_base_ == std::numeric_limits<int128_t>::min());
+    }
+    lock_contents_.emplace<BalanceLock>(snapshot_balance);
     return;
   }
 
@@ -493,10 +511,11 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_create_contract()) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
-    lock_contents_.emplace<NewContractLock>(
-        after->to_new_contract().value().new_contract());
-    // NOLINTEND(bugprone-unchecked-optional-access)
+    // Read the change in place: to_new_contract() would copy the whole
+    // contract into an optional before NewContractLock copies it again.
+    auto const *new_contract = after->get_inner<NewContractData>();
+    CHECK_PTR(new_contract);
+    lock_contents_.emplace<NewContractLock>(new_contract->new_contract());
     return;
   }
 
@@ -509,10 +528,12 @@ ItemLock::prepare_lock_contents(const ItemChange *after,
   }
 
   if (after->is_auth_data()) {
-    // NOLINTBEGIN(bugprone-unchecked-optional-access)
+    // Read the change in place: to_auth_data() would copy the whole auth
+    // table into an optional before AuthLock copies its base again.
+    auto const *auth_data = after->get_inner<PointerItem<AuthDataItem>>();
+    CHECK_PTR(auth_data);
     lock_contents_.emplace<PointerLock<AuthLock>>(
-        after->to_auth_data()->base_auth_data());
-    // NOLINTEND(bugprone-unchecked-optional-access)
+        (*auth_data)->base_auth_data(), (*auth_data)->row_exists());
     return;
   }
 
@@ -540,7 +561,7 @@ ItemLock::reset_lock_contents(std::unique_lock<x23::TestLock> const &ul)
   lock_contents_ = std::monostate{};
 }
 
-std::optional<QueueEntry>
+std::optional<x23::BufView>
 ItemLock::get_concurrent_entry(uint32_t index) const
 {
   auto lock_state = lock_state_.load(std::memory_order_acquire);
@@ -549,7 +570,7 @@ ItemLock::get_concurrent_entry(uint32_t index) const
   }
 
   return std::visit(
-      [index](auto const &lock) -> std::optional<QueueEntry> {
+      [index](auto const &lock) -> std::optional<x23::BufView> {
         using lock_t = std::decay_t<decltype(lock)>;
         if constexpr (std::is_same_v<lock_t,
                                      PointerLock<RetrocausalQueueLock>>) {

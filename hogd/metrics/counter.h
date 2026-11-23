@@ -1,10 +1,10 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <format>
 #include <sstream>
 #include <string>
-#include <sys/types.h>
 #include <type_traits>
 #include <utility>
 #include <variant>
@@ -21,46 +21,47 @@ enum class CounterStorage {
 };
 
 struct CounterImpl : Metric {
-  using Sample = std::variant<std::atomic<ssize_t>, PerThreadCounter<ssize_t>>;
+  using Sample =
+      std::variant<std::atomic<uint64_t>, PerThreadCounter<uint64_t>>;
 
   CounterImpl(std::string description, CounterStorage storage)
     : Metric(std::move(description))
   {
     switch (storage) {
     case CounterStorage::kAtomic:
-      sample_.template emplace<std::atomic<ssize_t>>(0);
+      sample_.template emplace<std::atomic<uint64_t>>(0);
       return;
     case CounterStorage::kPerThread:
-      sample_.template emplace<PerThreadCounter<ssize_t>>();
+      sample_.template emplace<PerThreadCounter<uint64_t>>();
       return;
     }
     CHECK(false);
   }
 
-  void increment(size_t delta)
+  void increment(uint64_t delta)
   {
     std::visit(
         [delta](auto &sample) {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+          if constexpr (std::is_same_v<T, std::atomic<uint64_t>>) {
             sample.fetch_add(delta, std::memory_order_relaxed);
           }
-          else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
+          else if constexpr (std::is_same_v<T, PerThreadCounter<uint64_t>>) {
             sample.inc(delta);
           }
         },
         sample_);
   }
 
-  ssize_t value()
+  uint64_t value()
   {
     return std::visit(
-        [](auto &sample) -> ssize_t {
+        [](auto &sample) -> uint64_t {
           using T = std::decay_t<decltype(sample)>;
-          if constexpr (std::is_same_v<T, std::atomic<ssize_t>>) {
+          if constexpr (std::is_same_v<T, std::atomic<uint64_t>>) {
             return sample.load(std::memory_order_relaxed);
           }
-          else if constexpr (std::is_same_v<T, PerThreadCounter<ssize_t>>) {
+          else if constexpr (std::is_same_v<T, PerThreadCounter<uint64_t>>) {
             return sample.get();
           }
         },
@@ -87,8 +88,8 @@ class Counter : public MetricHandle<CounterImpl> {
 public:
   Counter() = default;
 
-  void increment(size_t delta = 1) { metric().increment(delta); }
-  ssize_t value() { return metric().value(); }
+  void increment(uint64_t delta = 1) { metric().increment(delta); }
+  uint64_t value() { return metric().value(); }
 
 private:
   explicit Counter(CounterImpl *metric) : MetricHandle(metric) {}

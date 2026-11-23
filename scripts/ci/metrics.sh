@@ -23,9 +23,8 @@ trap 'cleanup "$?"' EXIT
 trap 'cleanup 130' INT TERM
 
 echo 'make sure bench servers are running'
-for host in "${BENCH_HOSTS[@]}"; do
-  ci_wait_port "$host" "${CI_CONTROL_PORT}"
-done
+ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
+  "${BENCH_HOSTS[@]}"
 
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh

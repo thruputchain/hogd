@@ -27,7 +27,7 @@ target_include_directories(contract_loader PRIVATE
 add_custom_target(all_contract_headers)
 add_custom_target(all_riscv_contracts)
 
-# Tell CMake to clean the cargo/groundhog intermediate build directory.
+# Tell CMake to clean the cargo/thruput intermediate build directory.
 set_property(DIRECTORY APPEND PROPERTY ADDITIONAL_CLEAN_FILES
   "${CMAKE_CURRENT_BINARY_DIR}/cargo-target"
 )
@@ -60,7 +60,7 @@ add_custom_command(
 )
 add_custom_target(build_roundtrip_rs DEPENDS ${roundtrip_rs_stamp})
 
-# Build all RV32 contracts via build_risc.sh (groundhog-cli)
+# Build all RV32 contracts via build_risc.sh (thruput-cli)
 # Usage: add_riscv_builds(SPEC_CONTRACTS d1/c1 d2/c2 ... RAW_CONTRACTS d3/c3 ...)
 # Contracts are named by their crate directory relative to this directory
 # (e.g. integration_test_contracts/fibonacci, local_test_contracts/foo); the
@@ -74,6 +74,8 @@ function(add_riscv_builds)
   cmake_parse_arguments(ARG "" "" "SPEC_CONTRACTS;RAW_CONTRACTS" ${ARGN})
 
   set(common_depends
+    ${CMAKE_CURRENT_SOURCE_DIR}/build_risc.sh
+    ${CMAKE_SOURCE_DIR}/scripts/thruput-tools-version
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.lock
     ${CMAKE_CURRENT_SOURCE_DIR}/Cargo.toml
     ${roundtrip_rs_stamp})
@@ -188,7 +190,7 @@ target_link_libraries(contract_loader_test
   GTest::gtest_main
 )
 add_dependencies(contract_loader_test all_riscv_contracts all_riscvs_built)
-gtest_discover_tests(contract_loader_test)
+hogd_discover_tests(contract_loader_test)
 
 # Build the contracts for RV32 (each gets a [[bin]] wrapper + .rv32a). The
 # SPEC_CONTRACTS also produce <name>_spec.json, consumed by the header/XDR
@@ -207,7 +209,6 @@ add_riscv_builds(
     integration_test_contracts/fibonacci
     integration_test_contracts/fibonacci_call
     integration_test_contracts/default_wallet
-    integration_test_contracts/dev_wallet
     integration_test_contracts/deploy_and_transfer
     integration_test_contracts/genesis_root
     integration_test_contracts/read_only_test
@@ -236,7 +237,13 @@ add_riscv_builds(
     local_test_contracts/airdrop_faucet
     local_test_contracts/auth_weight_test
     local_test_contracts/drip_faucet
+    local_test_contracts/erc165_probe
     local_test_contracts/faucet_caller
+    local_test_contracts/input_alias_test
+    local_test_contracts/invoke_malformed_tokens_test
+    local_test_contracts/itc_erc20_permit
+    local_test_contracts/math_syscall_test
+    local_test_contracts/storage_reads
     local_test_contracts/tx_context_test
   RAW_CONTRACTS
     integration_test_contracts/hash_bug
@@ -247,6 +254,7 @@ add_types_xdr(default_wallet)
 add_types_xdr(drip_faucet)
 add_types_xdr(genesis_root)
 add_types_xdr(itc_erc20)
+add_types_xdr(itc_erc20_permit)
 add_types_xdr(manual_revert_test)
 add_types_xdr(simple_wallet)
 add_types_xdr(txs_roundtrip)
@@ -258,6 +266,7 @@ add_xdr(default_wallet_hh ./default_wallet.x)
 add_xdr(drip_faucet_hh ./drip_faucet.x)
 add_xdr(genesis_root_hh ./genesis_root.x)
 add_xdr(itc_erc20_hh ./itc_erc20.x)
+add_xdr(itc_erc20_permit_hh ./itc_erc20_permit.x)
 add_xdr(manual_revert_test_hh ./manual_revert_test.x)
 add_xdr(simple_wallet_hh ./simple_wallet.x)
 add_xdr(txs_roundtrip_hh ./txs_roundtrip.x)
@@ -269,6 +278,7 @@ add_dependencies(build_default_wallet_hh all_riscvs_built)
 add_dependencies(build_drip_faucet_hh all_riscvs_built)
 add_dependencies(build_genesis_root_hh all_riscvs_built)
 add_dependencies(build_itc_erc20_hh all_riscvs_built)
+add_dependencies(build_itc_erc20_permit_hh all_riscvs_built)
 add_dependencies(build_manual_revert_test_hh all_riscvs_built)
 add_dependencies(build_simple_wallet_hh all_riscvs_built)
 add_dependencies(build_txs_roundtrip_hh all_riscvs_built)
@@ -284,7 +294,6 @@ add_contract_header(fibonacci_call)
 add_contract_header(cxs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/cxs_roundtrip.hh")
 add_contract_header(txs_roundtrip "${CURRENT_RELATIVE_SOURCE_DIR}/txs_roundtrip.hh")
 add_contract_header(default_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/default_wallet.hh")
-add_contract_header(dev_wallet)
 add_contract_header(deploy_and_transfer)
 add_contract_header(genesis_root "${CURRENT_RELATIVE_SOURCE_DIR}/genesis_root.hh")
 add_contract_header(read_only_test)
@@ -294,6 +303,7 @@ add_contract_header(sha256_wrapper)
 add_contract_header(simple_wallet "${CURRENT_RELATIVE_SOURCE_DIR}/simple_wallet.hh")
 add_contract_header(simple_wallet_authclaim)
 add_contract_header(itc_erc20 "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20.hh")
+add_contract_header(itc_erc20_permit "${CURRENT_RELATIVE_SOURCE_DIR}/itc_erc20_permit.hh")
 add_contract_header(authclaim_test)
 add_contract_header(htlc)
 add_contract_header(payment_channel "${CURRENT_RELATIVE_SOURCE_DIR}/payment_channel.hh")
@@ -310,13 +320,19 @@ add_contract_header(view_gateway_test)
 add_contract_header(airdrop_faucet)
 add_contract_header(auth_weight_test)
 add_contract_header(drip_faucet "${CURRENT_RELATIVE_SOURCE_DIR}/drip_faucet.hh")
+add_contract_header(erc165_probe)
 add_contract_header(faucet_caller)
+add_contract_header(input_alias_test)
+add_contract_header(invoke_malformed_tokens_test)
+add_contract_header(math_syscall_test)
+add_contract_header(storage_reads)
 add_contract_header(tx_context_test)
 
 add_dependencies(default_wallet_header default_wallet_hh)
 add_dependencies(drip_faucet_header drip_faucet_hh)
 add_dependencies(genesis_root_header genesis_root_hh)
 add_dependencies(itc_erc20_header itc_erc20_hh)
+add_dependencies(itc_erc20_permit_header itc_erc20_permit_hh)
 add_dependencies(payment_channel_header payment_channel_hh)
 add_dependencies(cxs_roundtrip_header cxs_roundtrip_hh)
 add_dependencies(txs_roundtrip_header txs_roundtrip_hh)

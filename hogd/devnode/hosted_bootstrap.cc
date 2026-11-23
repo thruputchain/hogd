@@ -1,4 +1,5 @@
-#include <charconv>
+#include "hogd/base/base58.h"
+
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
@@ -9,7 +10,6 @@
 #include <print>
 #include <string>
 #include <string_view>
-#include <system_error>
 #include <utility>
 #include <vector>
 
@@ -18,7 +18,6 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_hash.h"
 #include "hogd/devnode/bootstrap_accounts.h"
-#include "hogd/devnode/dev_wallet_profile.h"
 #include "hogd/devnode/hosted_bootstrap_generator.h"
 #include "hogd/devnode/manifest_parse.h"
 #include "hogd/init.h"
@@ -39,27 +38,13 @@ struct GenerateOptions {
 hogd::Ed25519PublicKey
 parse_faucet_public_key(std::string_view value, char *argv[])
 {
-  if (value.starts_with("0x")) {
-    value.remove_prefix(2);
-  }
-  if (value.size() != 64) {
-    hogd::arg_error("Invalid faucet public key: expected 32-byte hex value",
+  const auto public_key = hogd::decode_base58_fixed<32>(value);
+  if (!public_key) {
+    hogd::arg_error("Invalid faucet public key: expected base58 encoding of "
+                    "exactly 32 bytes",
                     argv, usage);
   }
-
-  hogd::Ed25519PublicKey public_key{};
-  for (std::size_t i = 0; i < public_key.size(); ++i) {
-    unsigned int byte = 0;
-    const char *first = value.data() + (i * 2);
-    const char *last = first + 2;
-    auto [ptr, error] = std::from_chars(first, last, byte, 16);
-    if (error != std::errc{} || ptr != last) {
-      hogd::arg_error("Invalid faucet public key: expected 32-byte hex value",
-                      argv, usage);
-    }
-    public_key[i] = static_cast<std::uint8_t>(byte);
-  }
-  return public_key;
+  return *public_key;
 }
 
 void
@@ -70,16 +55,14 @@ print_usage(FILE *stream, char *argv[])
 Generate hosted devnet bootstrap genesis and metadata without starting services.
 
 Options:
-  --network-hash <hex>           32-byte network hash [default: all zeroes]
-  --dev-wallet-profile <name>    Built-in dev wallet profile
-                                 [default: hog-devnode-default]
-  --dev-accounts <count>         Deterministic dev accounts to bootstrap
+  --network-hash <base58>        32-byte network hash [default: all zeroes]
+  --dev-accounts <count>         Native dev accounts to fund (16 total with faucet)
                                  [default: 10]
   --dev-account-seed <seed>      Seed phrase for deterministic dev accounts
-                                 [default: groundhog-dev-accounts]
+                                 [default: thruput-dev-accounts]
   --dev-account-tokens <tokens>  Initial storage-token balance per dev account
                                  [default: 1000000000]
-  --faucet-public-key <hex>      Dedicated faucet Ed25519 public key
+  --faucet-public-key <base58>   Dedicated faucet Ed25519 public key
   --faucet-tokens <tokens>       Initial storage-token balance for the faucet
   --genesis-out <path>           Output JSON-XDR genesis configuration
   --metadata-out <path>          Output hosted bootstrap metadata
@@ -137,21 +120,11 @@ parse_generate_args(int argc, char *argv[])
       std::optional<hogd::NetworkHash> network_hash =
           hogd::parse_network_hash(argv[++i]);
       if (!network_hash) {
-        hogd::arg_error(
-            "Invalid network hash: expected exactly 64 hexadecimal characters",
-            argv, usage);
-      }
-      options.config.network_hash = *network_hash;
-      continue;
-    }
-    if (arg == "--dev-wallet-profile" && i + 1 < argc) {
-      options.config.bootstrap_config.dev_wallet_profile = argv[++i];
-      if (options.config.bootstrap_config.dev_wallet_profile.empty()) {
-        hogd::arg_error("Invalid dev wallet profile: profile must not be empty",
+        hogd::arg_error("Invalid network hash: expected base58 encoding of "
+                        "exactly 32 bytes",
                         argv, usage);
       }
-      hogd::resolve_dev_wallet_profile(
-          options.config.bootstrap_config.dev_wallet_profile);
+      options.config.network_hash = *network_hash;
       continue;
     }
     if (arg == "--dev-accounts" && i + 1 < argc) {

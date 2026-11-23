@@ -7,6 +7,7 @@
 #include <optional>
 #include <span>
 #include <utility>
+#include <variant>
 #include <vector>
 
 #include "address_auth.hh"
@@ -24,6 +25,8 @@ namespace hogd {
 enum class GenesisCeremonyError {
   kNegativeDistribution,
   kSupplyExceeded,
+  // Too many distinct wallet artifacts among the accounts funded together.
+  kTooManyDistinctContracts,
 };
 
 constexpr static ContractAddress
@@ -41,6 +44,9 @@ make_precompile_address(GenesisContractAddresses addr_enum)
 
 class GenesisConfigurationBuilder {
 public:
+  // Fund an address directly, without deploying code or installing auth data.
+  void add_account_allocation(ContractAddress const &address, int128_t amount);
+
   void add_distribution(std::shared_ptr<const Contract> const &contract,
                         SHA256Hash const &nonce,
                         ContractEntrypointID entrypoint, Calldata calldata,
@@ -54,8 +60,8 @@ public:
                              Contract const &root_contract,
                              NetworkConfig const &network_config) const;
 
-  // Build the stock distributor root's single height-1 invocation. The
-  // transaction creates and funds all economic state and deploys every entry.
+  // Build the stock distributor root's height-1 invocations. Together they
+  // fund every allocation and deploy each fixture in one atomic ceremony.
   std::expected<std::vector<SignedTransaction>, GenesisCeremonyError>
   try_make_genesis_ceremony_transactions(
       StorageCostModel const &cost_model) const;
@@ -73,13 +79,17 @@ public:
   }
 
 private:
-  struct Entry {
+  struct Deployment {
     SHA256Hash initial_nonce;
     SHA256Hash contract_hash;
     ContractEntrypointID entrypoint;
     Calldata calldata;
-    int128_t amount;
     std::shared_ptr<const Contract> deployed_contract;
+  };
+
+  struct Entry {
+    std::variant<ContractAddress, Deployment> target;
+    int128_t amount;
   };
 
   std::vector<Entry> entries_;

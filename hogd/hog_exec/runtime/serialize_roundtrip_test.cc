@@ -1,6 +1,7 @@
 #include <gtest/gtest.h>
 
-#include <cstdint>
+#include <bit>
+#include <concepts>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -17,9 +18,11 @@
 #include "ffi_enums.hh"
 #include "hogd/base/cpputil.h"
 #include "hogd/base/log.h"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -27,212 +30,235 @@
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/vec.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-multiple-inheritance,misc-use-internal-linkage)
-class SerializeRoundtripTest : public ::testing::TestWithParam<TestDB>,
+class SerializeRoundtripTest : public ::testing::Test,
                                public NativeContractTestFramework {
 public:
   SerializeRoundtripTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
   void SetUp() override
   {
     std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-    fns.emplace(0,
-                [this](
-                    NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  ::cxs_test::Foo foo{0xABCD};
-                  roundtrip_test<u8"roundtrip_foo">(foo, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  return {};
-                });
-    fns.emplace(1,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
-                  roundtrip_test<u8"roundtrip_senum">(senum, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
-    fns.emplace(2,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
-                  sunion.pos() = 5;
-                  roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  sunion.d(static_cast<::cxs_test::senum>(0)); // default case
-                  roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  sunion.d(
-                      static_cast<::cxs_test::senum>(1000)); // default case
-                  roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  return {};
-                });
-    fns.emplace(3,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  int32_t value = -1;
-                  roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  value = 1;
-                  roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  value = 0;
-                  roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  value = std::numeric_limits<int32_t>::max();
-                  roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  value = std::numeric_limits<int32_t>::min();
-                  roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  return {};
-                });
     fns.emplace(
-        4, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [this](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          ::cxs_test::Foo foo{0xABCD};
+          co_await roundtrip_test<u8"roundtrip_foo">(foo, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        1, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          ::cxs_test::senum senum{::cxs_test::senum::SE_POSITIVE};
+          co_await roundtrip_test<u8"roundtrip_senum">(senum, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        2, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          ::cxs_test::sunion sunion{::cxs_test::senum::SE_POSITIVE};
+          sunion.pos() = 5;
+          co_await roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          sunion.d(static_cast<::cxs_test::senum>(0)); // default case
+          co_await roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          sunion.d(static_cast<::cxs_test::senum>(1000)); // default case
+          co_await roundtrip_test<u8"roundtrip_sunion">(sunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        3, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          int32_t value = -1;
+          co_await roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = 1;
+          co_await roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = 0;
+          co_await roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = std::numeric_limits<int32_t>::max();
+          co_await roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          value = std::numeric_limits<int32_t>::min();
+          co_await roundtrip_test<u8"roundtrip_i32">(value, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        4, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           bool success = false;
           ::cxs_test::sunion_no_void sunion{::cxs_test::senum::SE_NEGATIVE};
           sunion.neg() = true;
-          roundtrip_test<u8"roundtrip_sunion_no_void">(sunion, ctx, success);
+          co_await roundtrip_test<u8"roundtrip_sunion_no_void">(sunion, ctx,
+                                                                success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
-    fns.emplace(5,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  ::cxs_test::uunion uunion(1);
-                  uunion.one() = true;
-                  roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  uunion.d(2);
-                  uunion.two() = true;
-                  roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-                  uunion.d(4);
-                  uunion.four() = "hello";
-                  roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  return {};
-                });
     fns.emplace(
-        6, [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        5, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          ::cxs_test::uunion uunion(1);
+          uunion.one() = true;
+          co_await roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uunion.d(2);
+          uunion.two() = true;
+          co_await roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          uunion.d(4);
+          uunion.four() = "hello";
+          co_await roundtrip_test<u8"roundtrip_uunion">(uunion, ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          co_return InvokeStatus<void>{};
+        });
+    fns.emplace(
+        6, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           bool success = false;
           ::cxs_test::uunion_bool uunion_bool{true};
           uunion_bool.one() = false;
-          roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx, success);
+          co_await roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx,
+                                                             success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           uunion_bool.d(false);
           uunion_bool.two() = true;
-          roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx, success);
+          co_await roundtrip_test<u8"roundtrip_uunion_bool">(uunion_bool, ctx,
+                                                             success);
           if (!success) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
-    fns.emplace(7,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  ::cxs_test::test_recursive test_recursive;
+    fns.emplace(
+        7, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          ::cxs_test::test_recursive test_recursive;
 
-                  // empty
-                  test_recursive.elem = "hello";
-                  roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
-                                                               ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          // empty
+          test_recursive.elem = "hello";
+          co_await roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
+                                                                ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  // with a box ptr
-                  test_recursive.next.emplace();
-                  test_recursive.next->elem = "world";
-                  roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
-                                                               ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          // with a box ptr
+          test_recursive.next.emplace();
+          test_recursive.next->elem = "world";
+          co_await roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
+                                                                ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  // with some elements in a vec
-                  test_recursive.nextvec.emplace_back();
-                  test_recursive.nextvec.emplace_back();
-                  test_recursive.nextvec.back().elem = "goodbye";
-                  roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
-                                                               ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          // with some elements in a vec
+          test_recursive.nextvec.emplace_back();
+          test_recursive.nextvec.emplace_back();
+          test_recursive.nextvec.back().elem = "goodbye";
+          co_await roundtrip_test<u8"roundtrip_test_recursive">(test_recursive,
+                                                                ctx, success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  return {};
-                });
+          co_return InvokeStatus<void>{};
+        });
     // Methods 8, 9, 10 removed: Error, ContractError, StorageError types
     // were removed/restructured in SDK Exceptions PR (#101).
-    fns.emplace(11,
-                [&](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  bool success = false;
-                  x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
-                  roundtrip_test<u8"roundtrip_opaque_vector">(vec, ctx,
+    fns.emplace(
+        11, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          x23::Vec<uint8_t> vec = {1, 2, 3, 4, 5};
+          co_await roundtrip_test<u8"roundtrip_opaque_vector">(vec, ctx,
+                                                               success);
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+
+          co_await roundtrip_test<u8"roundtrip_opaque_slice">(vec, ctx,
                                                               success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+          if (!success) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
 
-                  roundtrip_test<u8"roundtrip_opaque_slice">(vec, ctx, success);
-                  if (!success) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
-
-                  return {};
-                });
+          co_return InvokeStatus<void>{};
+        });
+    // CXS floats are raw little-endian bytes, not compressed integers; the
+    // Rust contract would misread any other encoding.
+    fns.emplace(
+        12, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          bool success = false;
+          using fl = std::numeric_limits<float>;
+          using dl = std::numeric_limits<double>;
+          for (auto [f, d] : {std::pair{0.0F, 0.0}, std::pair{-0.0F, -0.0},
+                              std::pair{1.0F, 1.0}, std::pair{-2.5F, -2.5},
+                              std::pair{fl::max(), dl::max()},
+                              std::pair{fl::lowest(), dl::lowest()},
+                              std::pair{fl::denorm_min(), dl::denorm_min()},
+                              std::pair{fl::infinity(), -dl::infinity()}}) {
+            ::cxs_test::Floats floats{.f = f, .d = d};
+            co_await roundtrip_test<u8"roundtrip_floats">(floats, ctx, success);
+            if (!success) {
+              co_return InvokeError{InvokeErrorCode::Deterministic};
+            }
+          }
+          co_return InvokeStatus<void>{};
+        });
     std::unique_ptr<NativeContract> native_contract =
         std::make_unique<NativeContract>(std::move(fns));
 
@@ -282,34 +308,64 @@ protected:
     return res.value().value().value();
   };
 
+  // Floats compare by bits, since -0.0 == 0.0.
+  template<typename T> static void expect_same(T const &got, T const &want)
+  {
+    if constexpr (std::same_as<T, ::cxs_test::Floats>) {
+      EXPECT_EQ(std::bit_cast<uint32_t>(got.f),
+                std::bit_cast<uint32_t>(want.f));
+      EXPECT_EQ(std::bit_cast<uint64_t>(got.d),
+                std::bit_cast<uint64_t>(want.d));
+    }
+    else {
+      EXPECT_EQ(got, want);
+    }
+  }
+
   // NOLINTBEGIN(bugprone-unchecked-optional-access)
+  // Coroutine, so gtest's ASSERT_* (which expand to a bare `return`) cannot be
+  // used here; failures report via EXPECT_* and bail out leaving `success`
+  // false, which is what the caller checks.
   template<StringLiteral MethodName, typename T>
-  void roundtrip_test(T const &value, NativeSyscallContext &ctx, bool &success)
+  x23::Async<void> roundtrip_test(T const &value, NativeSyscallContext &ctx,
+                                  bool &success)
   {
     success = false;
     {
       // CXS
       auto calldata = Serializer<SerializationFormat::kCxs>::serialize(value);
-      ASSERT_TRUE(calldata.has_value());
-      auto res = cxs_client_.invoke_opt<MethodName>(ctx, *calldata);
+      if (!calldata.has_value()) {
+        ADD_FAILURE() << "serialize failed";
+        co_return;
+      }
+      auto res = co_await cxs_client_.invoke_opt<MethodName>(ctx, *calldata);
       auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kCxs>::deserialize<T>(
               std::as_bytes(std::span(return_buf)));
-      ASSERT_TRUE(roundtrip_value.has_value());
-      ASSERT_EQ(roundtrip_value.value(), value);
+      if (!roundtrip_value.has_value()) {
+        ADD_FAILURE() << "deserialize failed";
+        co_return;
+      }
+      expect_same(roundtrip_value.value(), value);
     }
     {
       // TXS
       auto calldata = Serializer<SerializationFormat::kTxs>::serialize(value);
-      ASSERT_TRUE(calldata.has_value());
-      auto res = txs_client_.invoke_opt<MethodName>(ctx, *calldata);
+      if (!calldata.has_value()) {
+        ADD_FAILURE() << "serialize failed";
+        co_return;
+      }
+      auto res = co_await txs_client_.invoke_opt<MethodName>(ctx, *calldata);
       auto return_buf = check_result(res);
       auto roundtrip_value =
           Serializer<SerializationFormat::kTxs>::deserialize<T>(
               std::as_bytes(std::span(return_buf)));
-      ASSERT_TRUE(roundtrip_value.has_value());
-      ASSERT_EQ(roundtrip_value.value(), value);
+      if (!roundtrip_value.has_value()) {
+        ADD_FAILURE() << "deserialize failed";
+        co_return;
+      }
+      expect_same(roundtrip_value.value(), value);
     }
     success = true;
   }
@@ -324,7 +380,7 @@ protected:
 };
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
-TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripFoo)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -332,17 +388,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripFoo)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(0),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSenum)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -350,17 +406,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSenum)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(1),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -368,17 +424,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(2),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripI32)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -386,17 +442,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripI32)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(3),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -404,17 +460,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripSunionNoVoid)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(4),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripUunion)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -422,17 +478,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunion)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(5),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripUunionBool)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -440,17 +496,17 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripUunionBool)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(6),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -458,20 +514,20 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripTestRecursive)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(7),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
 // Tests for Error, ContractError, and StorageError roundtrips were removed.
 // These types were deleted in the SDK Exceptions PR.
 
-TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
+TEST_F(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
 {
   auto handler = make_new_system_call_handler(
       SignedTransaction{
@@ -479,13 +535,31 @@ TEST_P(SerializeRoundtripTest, SerializeRoundtripOpaqueVector)
                                 Invocation{
                                     .invoked_address = native_contract_addr_,
                                     .entrypoint = entrypoint_from_method_id(11),
-                                    .gas_limit = UINT64_MAX,
+                                    .gas_limit = kDefaultMaxTxGas,
                                     .calldata = {}},
                             .uniquifier = make_new_uniquifier()}},
       *multiplexed_context_);
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
-  auto commit_res = handler.try_commit_transaction();
+  auto commit_res = handler.try_commit_transaction()();
+  ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
+}
+
+TEST_F(SerializeRoundtripTest, SerializeRoundtripFloats)
+{
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx = Transaction{.invocation =
+                                Invocation{
+                                    .invoked_address = native_contract_addr_,
+                                    .entrypoint = entrypoint_from_method_id(12),
+                                    .gas_limit = kDefaultMaxTxGas,
+                                    .calldata = {}},
+                            .uniquifier = make_new_uniquifier()}},
+      *multiplexed_context_);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  auto commit_res = handler.try_commit_transaction()();
   ASSERT_EQ(commit_res, ExecResult::ExecResultOK);
 }
 
@@ -518,9 +592,5 @@ TEST(FormatConversion, CxsSignToUnsignedRoundtrip)
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
-INSTANTIATE_TEST_SUITE_P(TestDBs, SerializeRoundtripTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

@@ -7,24 +7,23 @@
 #include <memory>
 #include <optional>
 #include <span>
-#include <tuple>
 #include <unordered_map>
 #include <utility>
 #include <vector>
 
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -34,18 +33,19 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/format.h"
 
 namespace hogd {
 // NOLINTBEGIN(bugprone-exception-escape)
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
-class DeleteRecreateTest : public ::testing::TestWithParam<TestDB>,
+class DeleteRecreateTest : public ::testing::Test,
                            public NativeContractTestFramework {
 public:
   DeleteRecreateTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal, GetParam())
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
 protected:
@@ -54,7 +54,7 @@ protected:
 
 // NOLINTBEGIN(bugprone-unchecked-optional-access)
 
-TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
+TEST_F(DeleteRecreateTest, DeleteRecreateBytestring)
 {
   // Storage contract: 0 = read-empty then write bytestring; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -67,60 +67,60 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Read the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength len = 0;
-          auto [status, _g1] = syscall_BytestringGet_inner(
-              ctx.handler(), key, std::as_writable_bytes(std::span(buf)), len);
+          auto status = co_await ctx.syscall<SyscallNo::kBytestringGet>(
+              key, std::as_writable_bytes(std::span(buf)), len);
           if (!status.has_value()) {
             ADD_FAILURE() << "Failed to get bytestring: " << status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
             ADD_FAILURE() << "Expected storage key to be empty, but got: "
                           << x23::show(status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // Write a bytestring to the storage key
           Bytestring bytestring = make_bytestring("hello");
-          auto [write_status, _g2] = syscall_BytestringSet_inner(
-              ctx.handler(), key, std::as_bytes(std::span(bytestring)),
-              std::to_underlying(StorageDeltaFlags::None));
+          auto write_status = co_await ctx.syscall<SyscallNo::kBytestringSet>(
+              key, std::as_bytes(std::span(bytestring)));
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write bytestring: "
                           << write_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected write to succeed, but got: "
                           << x23::show(write_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          auto delete_status =
+              co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (delete_status.value() !=
               SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected delete to succeed, but got: "
                           << x23::show(delete_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_storage =
         std::make_unique<NativeContract>(std::move(fns_storage));
@@ -128,59 +128,59 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r0 = [&]() {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   ctx.handler().get_calldata(),
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -207,16 +207,16 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -232,7 +232,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateBytestring)
   ASSERT_EQ(read_res.value().bytestring(), expect);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
+TEST_F(DeleteRecreateTest, DeleteRecreateNNInt)
 {
   // Storage contract: 0 = read-empty then write nnint; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -245,62 +245,61 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Read the storage key, expecting it to be empty
           int128_t current_set = 0;
           bool current_set_opt = false;
           int128_t current_add = 0;
-          auto status =
-              ctx.syscall<SyscallNo::kNonnegativeIntGet>(key, true, current_set,
-                                                         current_set_opt,
-                                                         current_add);
+          auto status = co_await ctx.syscall<SyscallNo::kNonnegativeIntGet>(
+              key, true, current_set, current_set_opt, current_add);
           if (!status.has_value()) {
             ADD_FAILURE() << "Failed to get nnint: " << status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeStorageKeyNotExist) {
             ADD_FAILURE() << "Expected storage key to be empty, but got: "
                           << x23::show(status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // Write a nonnegative integer to the storage key
           int128_t set_value = 42;
-          auto [write_status, _g2] = syscall_NonnegativeIntSetAdd_inner(
-              ctx.handler(), key, &set_value, 0,
-              std::to_underlying(StorageDeltaFlags::None));
+          auto write_status =
+              co_await ctx.syscall<SyscallNo::kNonnegativeIntSetAdd>(
+                  key, &set_value, int128_t{0});
           if (!write_status.has_value()) {
             ADD_FAILURE() << "Failed to write nnint: " << write_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (write_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected write to succeed, but got: "
                           << x23::show(write_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          auto delete_status =
+              co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (delete_status.value() !=
               SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected delete to succeed, but got: "
                           << x23::show(delete_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_storage =
         std::make_unique<NativeContract>(std::move(fns_storage));
@@ -308,59 +307,59 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r0 = [&]() {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   ctx.handler().get_calldata(),
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -387,16 +386,16 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -413,7 +412,7 @@ TEST_P(DeleteRecreateTest, DeleteRecreateNNInt)
   ASSERT_EQ(from_xdr(nnint_item), 42);
 }
 
-TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
+TEST_F(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
 {
   // Storage contract: 0 = consume-empty then insert; 1 = delete key.
   // Orchestrator: invokes storage 0, then 1, then 0 again (no self-reentrance).
@@ -426,61 +425,64 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_storage;
     fns_storage.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Consume from the storage key, expecting it to be empty
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength written_len = 0;
-          auto [status, _g1] = syscall_RetrocausalQueueConsume_inner(
-              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len);
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  key, false, std::as_writable_bytes(std::span(buf)),
+                  written_len);
           if (!status.has_value()) {
             ADD_FAILURE() << "Failed to consume from queue: " << status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
             ADD_FAILURE() << "Expected queue to be empty, but got: "
                           << x23::show(status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           // Insert an item into the queue
           QueueEntry entry = make_bytestring("item");
-          auto [insert_status, _g2] = syscall_RetrocausalQueueInsert_inner(
-              ctx.handler(), key, std::as_bytes(std::span(entry)));
+          auto insert_status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                  key, std::as_bytes(std::span(entry)));
           if (!insert_status.has_value()) {
             ADD_FAILURE() << "Failed to insert into queue: "
                           << insert_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (insert_status.value() !=
               SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected insert to succeed, but got: "
                           << x23::show(insert_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     fns_storage.emplace(
-        1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           // Delete the storage key
-          auto delete_status = ctx.syscall<SyscallNo::kDeleteObject>(key, 0);
+          auto delete_status =
+              co_await ctx.syscall<SyscallNo::kDeleteObject>(key);
           if (!delete_status.has_value()) {
             ADD_FAILURE() << "Failed to delete object: "
                           << delete_status.error();
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (delete_status.value() !=
               SyscallErrorCode::kSyscallErrorCodeNone) {
             ADD_FAILURE() << "Expected delete to succeed, but got: "
                           << x23::show(delete_status.value());
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_storage =
         std::make_unique<NativeContract>(std::move(fns_storage));
@@ -488,59 +490,59 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_orchestrator;
     fns_orchestrator.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-          auto r0 = [&]() {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+          auto r0 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   ctx.handler().get_calldata(),
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, ctx.handler().get_calldata(),
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r0.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r1 = [&]() {
+          auto r1 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 1,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r1.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          auto r2 = [&]() {
+          auto r2 =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = static_cast<GasAmount>(UINT64_MAX),
                 .flags = std::to_underlying(InvokeFlag::None),
             };
             CopyableInvokeOutputs outputs{};
-            return ctx.syscall<SyscallNo::kInvoke>(kAddressStorage,
-                                                   std::span<const std::byte>{},
-                                                   std::span<uint32_t>{},
-                                                   inputs, outputs);
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                kAddressStorage, std::span<const std::byte>{},
+                std::span<uint32_t>{}, inputs, outputs);
           }();
 
           if (!r2.has_value()) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -567,16 +569,16 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressOrchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -598,28 +600,30 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_verify;
     fns_verify.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto key = make_storage_key("test");
           std::vector<std::byte> buf(1024);
           RuntimeMemoryLength written_len = 0;
           // First consume should succeed
-          auto [status1, _g1] = syscall_RetrocausalQueueConsume_inner(
-              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len);
+          auto status1 =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  key, false, std::as_writable_bytes(std::span(buf)),
+                  written_len);
           if (!status1.has_value() ||
               status1.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           // Second consume should fail (queue empty)
-          auto [status2, _g2] = syscall_RetrocausalQueueConsume_inner(
-              ctx.handler(), key, false, std::as_writable_bytes(std::span(buf)),
-              written_len);
+          auto status2 =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueueConsume>(
+                  key, false, std::as_writable_bytes(std::span(buf)),
+                  written_len);
           if (!status2.has_value() ||
               status2.value() !=
                   SyscallErrorCode::kSyscallErrorCodeNoRetrocausalQueueEntry) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_0 =
         std::make_unique<NativeContract>(std::move(fns_verify));
@@ -634,23 +638,18 @@ TEST_P(DeleteRecreateTest, DeleteRecreateRetrocausalQueue)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = kAddressStorage,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto verify_handler =
       make_new_system_call_handler(verify_handler_tx, *verify_context);
 
-  auto verify_res = verify_handler.root_invoke();
+  auto verify_res = verify_handler.root_invoke()();
   ASSERT_TRUE(verify_res.is_root_success());
 }
 
 // NOLINTEND(bugprone-unchecked-optional-access)
-
-INSTANTIATE_TEST_SUITE_P(TestDBs, DeleteRecreateTest,
-                         ::testing::Values(TestDB::kMockInMemory,
-                                           TestDB::kHogDb),
-                         test_db_to_string);
 
 // NOLINTEND(bugprone-exception-escape)
 } // namespace hogd

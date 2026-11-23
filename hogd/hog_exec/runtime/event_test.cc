@@ -11,16 +11,17 @@
 #include "event.hh"
 #include "exec_result.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
+#include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/syscall_inner.h"
 #include "invoke_args.hh"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
@@ -29,6 +30,7 @@
 #include "syscall_error.hh"
 #include "transaction.hh"
 #include "types.hh"
+#include "x23/async.h"
 #include "x23/cpumap.h"
 #include "x23/vec.h"
 
@@ -40,8 +42,7 @@ class EventTest : public ::testing::Test, public NativeContractTestFramework {
 public:
   EventTest()
     : NativeContractTestFramework(
-          false, BlockExecutionMode::kBlockExecutionModeProposal,
-          TestDB::kHogDb)
+          false, BlockExecutionMode::kBlockExecutionModeProposal)
   {}
 
   void SetUp() override {}
@@ -73,43 +74,43 @@ TEST_F(EventTest, EventSuccess)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_emitter;
   fns_emitter.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "test 0 topics";
 
-        auto status = ctx.syscall<SyscallNo::kLogEvent>(
+        auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             std::as_bytes(std::span(event_data)));
         if (!status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
 
         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   fns_emitter.emplace(
-      1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "test 1 topic";
 
         SHA256Hash topic = sha256(std::string("topic"));
 
-        auto status = ctx.syscall<SyscallNo::kLogEvent>(
+        auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
             &topic, static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             std::as_bytes(std::span(event_data)));
         if (!status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
 
         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_emitter =
       std::make_unique<NativeContract>(std::move(fns_emitter));
@@ -118,52 +119,53 @@ TEST_F(EventTest, EventSuccess)
       fns_orchestrator;
   fns_orchestrator.emplace(
       0,
-      [addr_emitter](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-        auto status = [&]() {
+      [addr_emitter](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto status =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_emitter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_emitter, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto gas = GasAmount{0};
         if (!status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
 
         if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto status2 = [&]() {
+        auto status2 =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 1,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_emitter,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_emitter, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         [[maybe_unused]] auto gas2 = GasAmount{0};
         if (!status2.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
 
         if (status2.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         if (!ctx.consume_gas(gas + gas2)) {
-          return InvokeError{InvokeErrorCode::OutOfGas};
+          co_return InvokeError{InvokeErrorCode::OutOfGas};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_orchestrator =
       std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -190,17 +192,17 @@ TEST_F(EventTest, EventSuccess)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -211,6 +213,8 @@ TEST_F(EventTest, EventSuccess)
   auto tx_event_log = get_tx_event_log(tx_id)();
   ASSERT_TRUE(tx_event_log.has_value());
   ASSERT_EQ(tx_event_log.value().events.size(), 2);
+  // The log commits to the gas the root result reported.
+  EXPECT_EQ(tx_event_log->gas_consumed, res.gas_consumed_);
   ASSERT_EQ(tx_event_log.value().events[0].contract_address, addr_emitter);
   ASSERT_EQ(tx_event_log.value().events[1].contract_address, addr_emitter);
 
@@ -232,7 +236,7 @@ TEST_F(EventTest, BadEventInputs)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         SHA256Hash topic0 = sha256(std::string("topic"));
         SHA256Hash topic1 = sha256(std::string("topic"));
         SHA256Hash topic2 = sha256(std::string("topic"));
@@ -241,50 +245,51 @@ TEST_F(EventTest, BadEventInputs)
         too_long_event.resize(kMaxEventLength + 1);
 
         {
-          auto [status, gas] =
-              syscall_LogEvent_inner(ctx.handler(), nullptr, &topic1, nullptr,
-                                     std::as_bytes(std::span(
-                                         "test bad topic organization")));
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<Topic const *>(nullptr), &topic1,
+              static_cast<Topic const *>(nullptr),
+              std::as_bytes(std::span("test bad topic organization")));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         {
-          auto [status, gas] =
-              syscall_LogEvent_inner(ctx.handler(), &topic0, nullptr, &topic2,
-                                     std::as_bytes(std::span(
-                                         "test bad topic organization")));
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              &topic0, static_cast<Topic const *>(nullptr), &topic2,
+              std::as_bytes(std::span("test bad topic organization")));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         {
-          auto [status, gas] =
-              syscall_LogEvent_inner(ctx.handler(), nullptr, nullptr, nullptr,
-                                     std::as_bytes(std::span(too_long_event)));
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<Topic const *>(nullptr),
+              static_cast<Topic const *>(nullptr),
+              static_cast<Topic const *>(nullptr),
+              std::as_bytes(std::span(too_long_event)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
@@ -307,17 +312,17 @@ TEST_F(EventTest, BadEventInputs)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -335,43 +340,44 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
   fns_0.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         SHA256Hash topic = sha256(std::string("topic"));
 
         x23::Vec<uint8_t> max_event_data;
         max_event_data.resize(kMaxEventLength - topic.size());
 
         {
-          auto [status, gas] =
-              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
-                                     std::as_bytes(std::span(max_event_data)));
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              &topic, static_cast<Topic const *>(nullptr),
+              static_cast<Topic const *>(nullptr),
+              std::as_bytes(std::span(max_event_data)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
         x23::Vec<uint8_t> too_long_event_data;
         too_long_event_data.resize(max_event_data.size() + 1);
         {
-          auto [status, gas] =
-              syscall_LogEvent_inner(ctx.handler(), &topic, nullptr, nullptr,
-                                     std::as_bytes(
-                                         std::span(too_long_event_data)));
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              &topic, static_cast<Topic const *>(nullptr),
+              static_cast<Topic const *>(nullptr),
+              std::as_bytes(std::span(too_long_event_data)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() !=
               SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
@@ -392,17 +398,17 @@ TEST_F(EventTest, EventLengthIncludesTopics)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -420,40 +426,39 @@ TEST_F(EventTest, EventLengthIncludesTopics)
 TEST_F(EventTest, EventCountPerTransactionLimit)
 {
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
-  fns_0.emplace(0,
-                [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-                  const std::string event_data = "event-count-limit";
+  fns_0.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        const std::string event_data = "event-count-limit";
 
-                  for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
-                    auto status = ctx.syscall<SyscallNo::kLogEvent>(
-                        static_cast<SHA256Hash const *>(nullptr),
-                        static_cast<SHA256Hash const *>(nullptr),
-                        static_cast<SHA256Hash const *>(nullptr),
-                        std::as_bytes(std::span(event_data)));
-                    if (!status.has_value()) {
-                      return InvokeError{InvokeErrorCode::Unrecoverable};
-                    }
-                    if (status.value() !=
-                        SyscallErrorCode::kSyscallErrorCodeNone) {
-                      return InvokeError{InvokeErrorCode::Deterministic};
-                    }
-                  }
+        for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
 
-                  auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
-                      static_cast<SHA256Hash const *>(nullptr),
-                      static_cast<SHA256Hash const *>(nullptr),
-                      static_cast<SHA256Hash const *>(nullptr),
-                      std::as_bytes(std::span(event_data)));
-                  if (!overflow_status.has_value()) {
-                    return InvokeError{InvokeErrorCode::Unrecoverable};
-                  }
-                  if (overflow_status.value() !=
-                      SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-                    return InvokeError{InvokeErrorCode::Deterministic};
-                  }
+        auto overflow_status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            static_cast<SHA256Hash const *>(nullptr),
+            std::as_bytes(std::span(event_data)));
+        if (!overflow_status.has_value()) {
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
+        }
+        if (overflow_status.value() !=
+            SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
 
-                  return {};
-                });
+        co_return InvokeStatus<void>{};
+      });
   auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -473,17 +478,119 @@ TEST_F(EventTest, EventCountPerTransactionLimit)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = contract_0_addr,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
+  ASSERT_EQ(r, ExecResult::ExecResultOK);
+  ASSERT_TRUE(
+      handler.emit_events(ExecResult::ExecResultOK,
+                          ProposedTransaction{.signed_tx = handler_tx})());
+
+  advance_block();
+
+  auto tx_event_log = get_tx_event_log(tx_id)();
+  ASSERT_TRUE(tx_event_log.has_value());
+  ASSERT_EQ(tx_event_log->events.size(), kMaxEventsPerTransaction);
+}
+
+// A rejected LogEvent is billed only the syscall crossing, however large its
+// payload: both an oversized event and a max-size event past the
+// per-transaction count cap cost exactly kSyscallBaseCost (issue #3058).
+TEST_F(EventTest, RejectedLogEventCostsOnlySyscallBase)
+{
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_0;
+  fns_0.emplace(
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        const std::string event_data = "event-count-limit";
+        x23::Vec<uint8_t> oversize_event_data;
+        oversize_event_data.resize(kMaxEventLength + 1);
+        x23::Vec<uint8_t> max_event_data;
+        max_event_data.resize(kMaxEventLength);
+
+        auto expect_rejected_at_base_cost = [&](std::span<const std::byte> data)
+            -> x23::Async<InvokeStatus<void>> {
+          auto gas_before = ctx.total_gas_consumed();
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr), data);
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() !=
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+              ctx.total_gas_consumed() - gas_before != kSyscallBaseCost) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+          co_return InvokeStatus<void>{};
+        };
+
+        if (!(co_await expect_rejected_at_base_cost(
+                  std::as_bytes(std::span(oversize_event_data))))
+                 .has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              static_cast<SHA256Hash const *>(nullptr),
+              std::as_bytes(std::span(event_data)));
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+
+        if (!(co_await expect_rejected_at_base_cost(
+                  std::as_bytes(std::span(max_event_data))))
+                 .has_value()) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        co_return InvokeStatus<void>{};
+      });
+  auto native_contract_0 = std::make_unique<NativeContract>(std::move(fns_0));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(native_contract_0));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_0 = make_native_contract(0);
+  write_contract(contract_0);
+  auto contract_0_addr = make_contract_address(0xFF);
+  write_deployment(contract_0_addr, contract_0);
+  setup_grant_storage_token(contract_0_addr, 1'000'000'000);
+
+  EphemeralTxIdentifier tx_id;
+
+  auto handler_tx = SignedTransaction{
+      .tx = Transaction{
+          .invocation = Invocation{.invoked_address = contract_0_addr,
+                                   .entrypoint = entrypoint_from_method_id(0),
+                                   .gas_limit = kDefaultMaxTxGas,
+                                   .calldata = {}},
+          .uniquifier = make_new_uniquifier(),
+      }};
+  auto handler =
+      make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
+
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -507,37 +614,37 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_child;
   fns_child.emplace(
-      0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "child-event-count-limit";
 
         for (uint32_t i = 0; i < kChildEventCount; ++i) {
-          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               std::as_bytes(std::span(event_data)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
-        auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+        auto overflow_status = co_await ctx.syscall<SyscallNo::kLogEvent>(
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             std::as_bytes(std::span(event_data)));
         if (!overflow_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (overflow_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_child =
       std::make_unique<NativeContract>(std::move(fns_child));
@@ -545,42 +652,43 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
   fns_parent.emplace(
       0,
-      [addr_child](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+      [addr_child](
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "parent-event-count-limit";
 
         for (uint32_t i = 0; i < kParentEventCount; ++i) {
-          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               std::as_bytes(std::span(event_data)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
         }
 
-        auto invoke_status = [&]() {
+        auto invoke_status =
+            co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          return ctx.syscall<SyscallNo::kInvoke>(addr_child,
-                                                 std::span<const std::byte>{},
-                                                 std::span<uint32_t>{}, inputs,
-                                                 CopyableInvokeOutputs{});
+          co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_child, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, CopyableInvokeOutputs{});
         }();
         if (!invoke_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (invoke_status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_parent =
       std::make_unique<NativeContract>(std::move(fns_parent));
@@ -606,17 +714,17 @@ TEST_F(EventTest, EventCountPerTransactionLimitIncludesChildFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -664,46 +772,45 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
   fns_child.emplace(
       0,
       [&accepted_event_materializations](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "reverted-child-event";
 
         for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
-          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               std::as_bytes(std::span(event_data)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           ++accepted_event_materializations;
         }
 
         // The cap still binds *within* a reverting frame: a child gets one
         // allowance at a time, never two.
-        auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+        auto overflow_status = co_await ctx.syscall<SyscallNo::kLogEvent>(
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             std::as_bytes(std::span(event_data)));
         if (!overflow_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (overflow_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{}, true,
-                                            std::span<const std::byte>{});
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, true, std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_child =
       std::make_unique<NativeContract>(std::move(fns_child));
@@ -712,7 +819,7 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
   fns_parent.emplace(
       0,
       [addr_child, &frame_statuses](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         for (auto &frame_status : frame_statuses) {
           CopyableInvokeOutputs outputs{};
           CopyableInvokeInputs inputs{
@@ -720,22 +827,20 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto status =
-              ctx.syscall<SyscallNo::kInvoke>(addr_child,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              outputs);
+          auto status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr_child, std::span<const std::byte>{}, std::span<uint32_t>{},
+              inputs, outputs);
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
           // A child frame ran, so Invoke reports None; the manual revert
           // surfaces as frame_status == Abort.
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
           frame_status = outputs.frame_status;
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
   auto native_contract_parent =
       std::make_unique<NativeContract>(std::move(fns_parent));
@@ -761,14 +866,14 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   // Every reverted child saw a fresh, full allowance.
@@ -778,7 +883,7 @@ TEST_F(EventTest, ManuallyRevertedChildFramesEachGetFullEventAllowance)
     ASSERT_EQ(frame_status, InvocationFrameStatusCode::Abort);
   }
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -812,20 +917,20 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
 
   auto fill_allowance = [](NativeSyscallContext &ctx,
                            std::string const &event_data,
-                           uint32_t &accepted) -> bool {
+                           uint32_t &accepted) -> x23::Async<bool> {
     for (uint32_t i = 0; i < kMaxEventsPerTransaction; ++i) {
-      auto status = ctx.syscall<SyscallNo::kLogEvent>(
+      auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
           static_cast<SHA256Hash const *>(nullptr),
           static_cast<SHA256Hash const *>(nullptr),
           static_cast<SHA256Hash const *>(nullptr),
           std::as_bytes(std::span(event_data)));
       if (!status.has_value() ||
           status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-        return false;
+        co_return false;
       }
       ++accepted;
     }
-    return true;
+    co_return true;
   };
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
@@ -833,18 +938,18 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   fns_revert_child.emplace(
       0,
       [&accepted_event_materializations, fill_allowance](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "reverted-child";
-        if (!fill_allowance(ctx, event_data, accepted_event_materializations)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!co_await fill_allowance(ctx, event_data,
+                                     accepted_event_materializations)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        auto ret =
-            ctx.syscall<SyscallNo::kReturn>(std::span<const std::byte>{}, true,
-                                            std::span<const std::byte>{});
+        auto ret = co_await ctx.syscall<SyscallNo::kReturn>(
+            std::span<const std::byte>{}, true, std::span<const std::byte>{});
         if (ret.has_value() || ret.error().code() != HostFnErrorCode::Return) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t>
@@ -852,13 +957,14 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   fns_fault_child.emplace(
       0,
       [&accepted_event_materializations, fill_allowance](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         const std::string event_data = "faulted-child";
-        if (!fill_allowance(ctx, event_data, accepted_event_materializations)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!co_await fill_allowance(ctx, event_data,
+                                     accepted_event_materializations)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
         // Fault after the emissions: commit_failed_child_frame drops them.
-        return InvokeError{InvokeErrorCode::Deterministic};
+        co_return InvokeError{InvokeErrorCode::Deterministic};
       });
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns_parent;
@@ -866,56 +972,55 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
       0,
       [addr_revert_child, addr_fault_child, &accepted_event_materializations,
        &revert_child_status, &fault_child_status, fill_allowance](
-          NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+          NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
         auto invoke_child =
             [&ctx](ContractAddress const &addr,
-                   InvocationFrameStatusCode &status_out) -> bool {
+                   InvocationFrameStatusCode &status_out) -> x23::Async<bool> {
           CopyableInvokeOutputs outputs{};
           CopyableInvokeInputs inputs{
               .entrypoint_id = 0,
               .gas_limit = UINT64_MAX,
               .flags = std::to_underlying(InvokeFlag::None),
           };
-          auto status =
-              ctx.syscall<SyscallNo::kInvoke>(addr,
-                                              std::span<const std::byte>{},
-                                              std::span<uint32_t>{}, inputs,
-                                              outputs);
+          auto status = co_await ctx.syscall<SyscallNo::kInvoke>(
+              addr, std::span<const std::byte>{}, std::span<uint32_t>{}, inputs,
+              outputs);
           if (!status.has_value() ||
               status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return false;
+            co_return false;
           }
           status_out = outputs.frame_status;
-          return true;
+          co_return true;
         };
 
-        if (!invoke_child(addr_revert_child, revert_child_status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!co_await invoke_child(addr_revert_child, revert_child_status)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
-        if (!invoke_child(addr_fault_child, fault_child_status)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!co_await invoke_child(addr_fault_child, fault_child_status)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
         // The parent's own allowance is untouched by either discarded child.
         const std::string event_data = "parent-committed";
-        if (!fill_allowance(ctx, event_data, accepted_event_materializations)) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+        if (!co_await fill_allowance(ctx, event_data,
+                                     accepted_event_materializations)) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        auto overflow_status = ctx.syscall<SyscallNo::kLogEvent>(
+        auto overflow_status = co_await ctx.syscall<SyscallNo::kLogEvent>(
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             static_cast<SHA256Hash const *>(nullptr),
             std::as_bytes(std::span(event_data)));
         if (!overflow_status.has_value()) {
-          return InvokeError{InvokeErrorCode::Unrecoverable};
+          co_return InvokeError{InvokeErrorCode::Unrecoverable};
         }
         if (overflow_status.value() !=
             SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        return {};
+        co_return InvokeStatus<void>{};
       });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
@@ -942,14 +1047,14 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_parent,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler =
       make_new_system_call_handler(handler_tx, *runtime_context, &tx_id);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
   ASSERT_EQ(revert_child_status, InvocationFrameStatusCode::Abort);
@@ -958,7 +1063,7 @@ TEST_F(EventTest, DiscardedChildEventsDoNotConsumeCommittedEventAllowance)
   // survives into the log.
   ASSERT_EQ(accepted_event_materializations, 3 * kMaxEventsPerTransaction);
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1002,23 +1107,23 @@ TEST_F(EventTest, EventWithRevertingFrames)
     std::unordered_map<Runtime::MethodID, NativeContract::function_t>
         fns_emitter;
     fns_emitter.emplace(
-        0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+        0, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           auto const &calldata = ctx.handler().get_calldata();
 
-          auto status = ctx.syscall<SyscallNo::kLogEvent>(
+          auto status = co_await ctx.syscall<SyscallNo::kLogEvent>(
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               static_cast<SHA256Hash const *>(nullptr),
               std::as_bytes(std::span(calldata)));
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_emitter =
         std::make_unique<NativeContract>(std::move(fns_emitter));
@@ -1028,36 +1133,36 @@ TEST_F(EventTest, EventWithRevertingFrames)
     fns_manual_revert.emplace(
         0,
         [addr_emitter](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::string test_data = "method1_event";
           Calldata calldata(test_data.begin(), test_data.end());
 
-          auto status = [&]() {
+          auto status =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_emitter, calldata, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           [[maybe_unused]] auto gas = GasAmount{0};
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           if (!ctx.consume_gas(gas)) {
-            return InvokeError{InvokeErrorCode::OutOfGas};
+            co_return InvokeError{InvokeErrorCode::OutOfGas};
           }
 
           ctx.handler().set_return_buffer(ReturnBuffer{}, true);
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_manual_revert =
         std::make_unique<NativeContract>(std::move(fns_manual_revert));
@@ -1067,35 +1172,35 @@ TEST_F(EventTest, EventWithRevertingFrames)
     fns_deterministic.emplace(
         0,
         [addr_emitter](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           std::string test_data = "method2_event";
           Calldata calldata(test_data.begin(), test_data.end());
 
-          auto status = [&]() {
+          auto status =
+              co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
             CopyableInvokeInputs inputs{
                 .entrypoint_id = 0,
                 .gas_limit = UINT64_MAX,
                 .flags = std::to_underlying(InvokeFlag::None),
             };
-            return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
-                                                   std::span<uint32_t>{},
-                                                   inputs,
-                                                   CopyableInvokeOutputs{});
+            co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                addr_emitter, calldata, std::span<uint32_t>{}, inputs,
+                CopyableInvokeOutputs{});
           }();
           [[maybe_unused]] auto gas = GasAmount{0};
           if (!status.has_value()) {
-            return InvokeError{InvokeErrorCode::Unrecoverable};
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
           }
 
           if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-            return InvokeError{InvokeErrorCode::Deterministic};
+            co_return InvokeError{InvokeErrorCode::Deterministic};
           }
 
           if (!ctx.consume_gas(gas)) {
-            return InvokeError{InvokeErrorCode::OutOfGas};
+            co_return InvokeError{InvokeErrorCode::OutOfGas};
           }
 
-          return InvokeError{InvokeErrorCode::Deterministic};
+          co_return InvokeError{InvokeErrorCode::Deterministic};
         });
     auto native_contract_deterministic =
         std::make_unique<NativeContract>(std::move(fns_deterministic));
@@ -1105,66 +1210,67 @@ TEST_F(EventTest, EventWithRevertingFrames)
     fns_orchestrator.emplace(
         0,
         [addr_emitter, addr_manual_revert, addr_deterministic](
-            NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
+            NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
           {
             std::string test_data = "first_event";
             Calldata calldata(test_data.begin(), test_data.end());
 
-            auto status = [&]() {
+            auto status =
+                co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
                   .gas_limit = UINT64_MAX,
                   .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
-                                                     std::span<uint32_t>{},
-                                                     inputs,
-                                                     CopyableInvokeOutputs{});
+              co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, calldata, std::span<uint32_t>{}, inputs,
+                  CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
-              return InvokeError{InvokeErrorCode::Unrecoverable};
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (!ctx.consume_gas(gas)) {
-              return InvokeError{InvokeErrorCode::OutOfGas};
+              co_return InvokeError{InvokeErrorCode::OutOfGas};
             }
           }
 
           {
             CopyableInvokeOutputs status_outputs{};
-            auto status = [&]() {
+            auto status =
+                co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
                   .gas_limit = UINT64_MAX,
                   .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(
+              co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                   addr_manual_revert, std::span<const std::byte>{},
                   std::span<uint32_t>{}, inputs, status_outputs);
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
-              return InvokeError{InvokeErrorCode::Unrecoverable};
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
             // A child frame ran, so Invoke returns None; the manual revert is
             // reported via frame_status == Abort.
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (status_outputs.frame_status !=
                 InvocationFrameStatusCode::Abort) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (!ctx.consume_gas(gas)) {
-              return InvokeError{InvokeErrorCode::OutOfGas};
+              co_return InvokeError{InvokeErrorCode::OutOfGas};
             }
           }
 
@@ -1172,61 +1278,62 @@ TEST_F(EventTest, EventWithRevertingFrames)
             std::string test_data = "second_event";
             Calldata calldata(test_data.begin(), test_data.end());
 
-            auto status = [&]() {
+            auto status =
+                co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
                   .gas_limit = UINT64_MAX,
                   .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
-                                                     std::span<uint32_t>{},
-                                                     inputs,
-                                                     CopyableInvokeOutputs{});
+              co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, calldata, std::span<uint32_t>{}, inputs,
+                  CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
-              return InvokeError{InvokeErrorCode::Unrecoverable};
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (!ctx.consume_gas(gas)) {
-              return InvokeError{InvokeErrorCode::OutOfGas};
+              co_return InvokeError{InvokeErrorCode::OutOfGas};
             }
           }
 
           {
             CopyableInvokeOutputs status_outputs{};
-            auto status = [&]() {
+            auto status =
+                co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
                   .gas_limit = UINT64_MAX,
                   .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(
+              co_return co_await ctx.syscall<SyscallNo::kInvoke>(
                   addr_deterministic, std::span<const std::byte>{},
                   std::span<uint32_t>{}, inputs, status_outputs);
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
-              return InvokeError{InvokeErrorCode::Unrecoverable};
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
             // A child frame ran, so Invoke returns None; the trap / out-of-gas
             // is reported via frame_status == Fault.
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (status_outputs.frame_status !=
                 InvocationFrameStatusCode::Fault) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (!ctx.consume_gas(gas)) {
-              return InvokeError{InvokeErrorCode::OutOfGas};
+              co_return InvokeError{InvokeErrorCode::OutOfGas};
             }
           }
 
@@ -1234,32 +1341,32 @@ TEST_F(EventTest, EventWithRevertingFrames)
             std::string test_data = "third_event";
             Calldata calldata(test_data.begin(), test_data.end());
 
-            auto status = [&]() {
+            auto status =
+                co_await [&]() -> x23::Async<HostFnStatus<SyscallErrorCode>> {
               CopyableInvokeInputs inputs{
                   .entrypoint_id = 0,
                   .gas_limit = UINT64_MAX,
                   .flags = std::to_underlying(InvokeFlag::None),
               };
-              return ctx.syscall<SyscallNo::kInvoke>(addr_emitter, calldata,
-                                                     std::span<uint32_t>{},
-                                                     inputs,
-                                                     CopyableInvokeOutputs{});
+              co_return co_await ctx.syscall<SyscallNo::kInvoke>(
+                  addr_emitter, calldata, std::span<uint32_t>{}, inputs,
+                  CopyableInvokeOutputs{});
             }();
             [[maybe_unused]] auto gas = GasAmount{0};
             if (!status.has_value()) {
-              return InvokeError{InvokeErrorCode::Unrecoverable};
+              co_return InvokeError{InvokeErrorCode::Unrecoverable};
             }
 
             if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone) {
-              return InvokeError{InvokeErrorCode::Deterministic};
+              co_return InvokeError{InvokeErrorCode::Deterministic};
             }
 
             if (!ctx.consume_gas(gas)) {
-              return InvokeError{InvokeErrorCode::OutOfGas};
+              co_return InvokeError{InvokeErrorCode::OutOfGas};
             }
           }
 
-          return {};
+          co_return InvokeStatus<void>{};
         });
     auto native_contract_orchestrator =
         std::make_unique<NativeContract>(std::move(fns_orchestrator));
@@ -1290,16 +1397,16 @@ TEST_F(EventTest, EventWithRevertingFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_orchestrator,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler = make_new_system_call_handler(handler_tx, *context, &tx_id_1);
 
-  auto res = handler.root_invoke();
+  auto res = handler.root_invoke()();
   ASSERT_TRUE(res.is_root_success());
 
-  auto r = handler.try_commit_transaction();
+  auto r = handler.try_commit_transaction()();
   ASSERT_EQ(r, ExecResult::ExecResultOK);
   ASSERT_TRUE(
       handler.emit_events(ExecResult::ExecResultOK,
@@ -1311,16 +1418,16 @@ TEST_F(EventTest, EventWithRevertingFrames)
       .tx = Transaction{
           .invocation = Invocation{.invoked_address = addr_manual_revert,
                                    .entrypoint = entrypoint_from_method_id(0),
-                                   .gas_limit = UINT64_MAX,
+                                   .gas_limit = kDefaultMaxTxGas,
                                    .calldata = {}},
           .uniquifier = make_new_uniquifier(),
       }};
   auto handler2 = make_new_system_call_handler(handler2_tx, *context, &tx_id_2);
 
-  auto res2 = handler2.root_invoke();
+  auto res2 = handler2.root_invoke()();
   ASSERT_TRUE(res2.is_root_success());
 
-  auto r2 = handler2.try_commit_transaction();
+  auto r2 = handler2.try_commit_transaction()();
   ASSERT_EQ(r2, ExecResult::ExecResultTxRootFrameReverted);
   ASSERT_TRUE(
       handler2.emit_events(ExecResult::ExecResultTxRootFrameReverted,
@@ -1391,7 +1498,7 @@ make_validation_proposal_event_rpc_tx(NativeContractTestFramework &fw,
       .invocation =
           Invocation{.invoked_address = kValidationProposalEventRpcAddress,
                      .entrypoint = entrypoint_from_method_id(method_id),
-                     .gas_limit = UINT64_MAX,
+                     .gas_limit = kDefaultMaxTxGas,
                      .calldata = {}},
       .uniquifier = fw.make_new_uniquifier(),
   };
@@ -1403,37 +1510,42 @@ TEST(EventRpcValidationProposalData,
      OversizedConsumedProposalDataFailStopsInsteadOfCrashing)
 {
   NativeContractTestFramework fw(
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+      false, BlockExecutionMode::kBlockExecutionModeProposal);
 
   std::unordered_map<Runtime::MethodID, NativeContract::function_t> fns;
-  fns.emplace(0, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
-      QueueEntry entry;
-      entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
-      auto status = ctx.handler().retrocausal_queue_insert(
-          make_validation_proposal_observation_key(i),
-          std::as_bytes(std::span(entry.data(), entry.size())));
-      if (!status.has_value()) {
-        return InvokeError{InvokeErrorCode::Unrecoverable};
-      }
-    }
-    return {};
-  });
-  fns.emplace(1, [](NativeSyscallContext &ctx) noexcept -> InvokeStatus<void> {
-    for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
-      RuntimeMemoryLength len = 0;
-      auto status = ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
-          make_validation_proposal_observation_key(i), len);
-      if (!status.has_value()) {
-        return InvokeError{InvokeErrorCode::Unrecoverable};
-      }
-      if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
-          len != kQueueEntryMaxLen) {
-        return InvokeError{InvokeErrorCode::Deterministic};
-      }
-    }
-    return {};
-  });
+  fns.emplace(0,
+              [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+                for (size_t i = 0; i < kValidationProposalObservationCount;
+                     ++i) {
+                  QueueEntry entry;
+                  entry.resize(kQueueEntryMaxLen, static_cast<uint8_t>(i));
+                  auto status =
+                      co_await ctx.syscall<SyscallNo::kRetrocausalQueueInsert>(
+                          make_validation_proposal_observation_key(i),
+                          std::as_bytes(std::span(entry.data(), entry.size())));
+                  if (!status.has_value()) {
+                    co_return InvokeError{InvokeErrorCode::Unrecoverable};
+                  }
+                }
+                co_return InvokeStatus<void>{};
+              });
+  fns.emplace(
+      1, [](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        for (size_t i = 0; i < kValidationProposalObservationCount; ++i) {
+          RuntimeMemoryLength len = 0;
+          auto status =
+              co_await ctx.syscall<SyscallNo::kRetrocausalQueuePeekLen>(
+                  make_validation_proposal_observation_key(i), len);
+          if (!status.has_value()) {
+            co_return InvokeError{InvokeErrorCode::Unrecoverable};
+          }
+          if (status.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+              len != kQueueEntryMaxLen) {
+            co_return InvokeError{InvokeErrorCode::Deterministic};
+          }
+        }
+        co_return InvokeStatus<void>{};
+      });
 
   std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
   contract_map.emplace(0, std::make_unique<NativeContract>(std::move(fns)));
@@ -1452,20 +1564,20 @@ TEST(EventRpcValidationProposalData,
   NondeterministicProposalData consume_proposal_data;
   {
     auto insert_handler = fw.make_new_system_call_handler(insert_tx, *context);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-    insert_proposal_data = insert_handler.get_proposal_data();
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+    insert_proposal_data = insert_handler.extract_proposal_data();
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
 
     auto consume_handler =
         fw.make_new_system_call_handler(consume_tx, *context);
-    ASSERT_TRUE(consume_handler.root_invoke().is_root_success());
-    consume_proposal_data = consume_handler.get_proposal_data();
+    ASSERT_TRUE(consume_handler.root_invoke()().is_root_success());
+    consume_proposal_data = consume_handler.extract_proposal_data();
     ASSERT_EQ(consume_proposal_data.nondeterministic_bit_count,
               kValidationProposalObservationCount);
     ASSERT_EQ(consume_proposal_data.observed_queue_entry_sequence.size(),
               kValidationProposalObservationCount);
-    ASSERT_EQ(consume_handler.try_commit_transaction(),
+    ASSERT_EQ(consume_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -1475,8 +1587,8 @@ TEST(EventRpcValidationProposalData,
     auto insert_handler =
         fw.make_new_system_call_handler_validation(insert_tx, *context,
                                                    insert_proposal_data);
-    ASSERT_TRUE(insert_handler.root_invoke().is_root_success());
-    ASSERT_EQ(insert_handler.try_commit_transaction(),
+    ASSERT_TRUE(insert_handler.root_invoke()().is_root_success());
+    ASSERT_EQ(insert_handler.try_commit_transaction()(),
               ExecResult::ExecResultOK);
   }
 
@@ -1488,14 +1600,15 @@ TEST(EventRpcValidationProposalData,
       x23::HostPort{"localhost", fw.get_event_exec_port()}, *x23::llc_map,
       kValidationProposalEventRpcCap);
 
+  fw.ensure_db_tip_loaded();
   SystemCallHandler consume_validation_handler(
       consume_tx, *fw.get_storage_snapshot_cache(),
       fw.make_new_per_tx_db_proxy(1001),
       PerTransactionEventServerProxy(*capped_event_proxy, fw.get_block_number(),
                                      1001),
       ValidationModeCtor{consume_proposal_data}, *context);
-  ASSERT_TRUE(consume_validation_handler.root_invoke().is_root_success());
-  ASSERT_EQ(consume_validation_handler.try_commit_transaction(),
+  ASSERT_TRUE(consume_validation_handler.root_invoke()().is_root_success());
+  ASSERT_EQ(consume_validation_handler.try_commit_transaction()(),
             ExecResult::ExecResultOK);
 
   ProposedTransaction proposed_tx{
@@ -1521,7 +1634,7 @@ TEST(EventRpcValidationProposalData,
 TEST(EventServerProxyMapping, BadBlockIdIsAbandonAndDoubleEmitIsUnrecoverable)
 {
   NativeContractTestFramework fw(
-      false, BlockExecutionMode::kBlockExecutionModeProposal, TestDB::kHogDb);
+      false, BlockExecutionMode::kBlockExecutionModeProposal);
 
   EventServerProxy proxy(x23::HostPort{"localhost", fw.get_event_exec_port()});
 

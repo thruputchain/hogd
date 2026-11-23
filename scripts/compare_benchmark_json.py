@@ -7,7 +7,7 @@ import sys
 from json import JSONDecodeError
 
 
-DEFAULT_COUNTER_PREFIXES = ("gas", "rv32.")
+DEFAULT_COUNTER_PREFIXES = ("gas", "rv32.", "call_")
 TIME_UNIT_TO_NS = {
     "ns": 1.0,
     "us": 1_000.0,

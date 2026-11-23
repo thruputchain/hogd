@@ -147,7 +147,7 @@ TEST(WideIntegralTest, IsZero)
   EXPECT_TRUE(a.is_zero());
 
   // A round trip that leaves int128 range in the middle still lands exactly on
-  // zero -- this is what the HOG conservation invariant relies on.
+  // zero -- this is what the native-token conservation invariant relies on.
   constexpr int128_t kMax = std::numeric_limits<int128_t>::max();
   a -= kMax;
   EXPECT_FALSE(a.is_zero());

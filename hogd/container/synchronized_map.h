@@ -185,12 +185,12 @@ public:
     return &it->second;
   }
 
-  std::pair<T *, std::unique_lock<lock_type>> find_or_insert(const Key &k,
-                                                             const T &obj)
+  std::tuple<T *, std::unique_lock<lock_type>, bool>
+  find_or_insert(const Key &k, const T &obj)
   {
     auto [map, ul] = get_bucket(k);
-    auto [it, _] = map.insert({k, obj});
-    return {&it->second, std::move(ul)};
+    auto [it, inserted] = map.insert({k, obj});
+    return {&it->second, std::move(ul), inserted};
   }
 
   std::pair<T *, std::unique_lock<lock_type>> insert_or_assign(const Key &k,

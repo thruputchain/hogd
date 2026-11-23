@@ -11,16 +11,10 @@
 #include "hogd/hog_exec/runtime/rv32/test_corpus.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
 
-// External-oracle differential test (C3): runs a corpus through both our
-// in-tree oracles and the real Spike (riscv-isa-sim) reference simulator,
-// asserting the architectural trajectories agree. Spike is located via
-// RV32_ORACLE_BIN; the test SKIPS when it is unset/missing, so default builds
-// and CI are unaffected (opt-in / out-of-default-CI posture). Linked against
-// rv32_isa_core ONLY.
-//
-// The accepted subset is defined by spike_supported() in spike_oracle.h, which
-// is the single source of truth. Code maps to Spike at a constant pc offset;
-// data lives at its true address in a region above the device window.
+// Compare architectural traces against Spike (riscv-isa-sim). Requires
+// RV32_ORACLE_BIN; missing configuration skips the external comparison.
+// spike_supported() defines the accepted subset. Code uses a constant PC
+// offset in Spike; data retains its address above the device window.
 
 namespace hogd::rv32 {
 namespace {

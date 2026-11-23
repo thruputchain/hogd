@@ -126,8 +126,12 @@ inline std::string
 get_tmp_dir()
 {
   // use TMPDIR environment variable, of /tmp if not found.
-  if (char *tmp = getenv("TMPDIR"); tmp != nullptr)
-    return std::string(tmp);
+  if (char *tmp = getenv("TMPDIR"); tmp != nullptr && *tmp != '\0') {
+    std::string dir(tmp);
+    if (dir.back() != '/')
+      dir.push_back('/');
+    return dir;
+  }
   return "/tmp/";
 }
 
@@ -601,9 +605,9 @@ BufferedWriter::write_slowpath(std::span<const std::byte> src)
       continue;
     }
 
-    // append to the buffer
+    // append to the buffer with one range insert, not one push_back per byte
     size_t n = std::min(src.size(), buf_.capacity() - buf_.size());
-    std::copy_n(src.begin(), n, std::back_inserter(buf_));
+    buf_.insert(buf_.end(), src.begin(), src.begin() + n);
     bytes_written += n;
     src = src.subspan(n);
 
