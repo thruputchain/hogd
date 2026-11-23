@@ -1,6 +1,7 @@
 #pragma once
 
 #include <atomic>
+#include <chrono>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -51,9 +52,9 @@ public:
   x23::Async<ExecProposeBatchResult>
   propose_transaction_batch(SignedTransactionBatch signed_txs,
                             TransactionID first_tx_id);
-  x23::Async<ExecValidateBatchResult>
-  validate_transaction_batch(ProposedTransactionBatch proposed_txs,
-                             TransactionID first_tx_id);
+  x23::Async<ExecValidateBatchResult> validate_transaction_batch(
+      ProposedTransactionBatch proposed_txs, TransactionID first_tx_id,
+      std::chrono::steady_clock::time_point *worker_resume = nullptr);
 
   x23::Async<ExecProposeResult> propose_transaction(SignedTransaction signed_tx,
                                                     TransactionID tx_id);

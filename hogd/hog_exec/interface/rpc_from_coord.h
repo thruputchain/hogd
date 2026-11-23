@@ -34,6 +34,8 @@ public:
 
   ExecutorMempoolRpc() = default;
 
+  void enable_validation_timing(uint16_t bound_port);
+
   void init(IntroExecResult &&exec_result)
   {
     if (exec_result.exec_id >= std::numeric_limits<uint16_t>::max())
@@ -106,6 +108,8 @@ public:
   void await_shutdown_request() { shutdown_flag_.wait(false); }
 
 private:
+  uint16_t validation_timing_port_ = 0;
+
   // Allocates a contiguous block of transaction IDs.
   // Returns the first transaction ID in the block
   // (so i.e. the allocated ids are [first_id, first_id + count - 1] inclusive)

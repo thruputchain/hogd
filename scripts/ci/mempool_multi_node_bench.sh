@@ -566,14 +566,30 @@ for node in "${NODE_IDS[@]}"; do
   wait_control_log_line "node${node}_event" 'event initialization complete.'
 done
 
+start_executor() {
+  local node=$1 slot=$2 cores=$3 port=$4 http_port=$5
+  local host=${HOG_EXEC_HOSTS[$node]}
+  local coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
+  local bind_ip
+  bind_ip="$(hog_ip "$host")"
+  local label="node${node}_hog_exec_slot_${slot}"
+  local cmd=("$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip"
+    --mempool-port "$port" --metrics-port "$http_port")
+  if [[ $two_cohort_diagnostics == 1 &&
+    ($GIT_BRANCH == codex/nightly-two-cohort-validation-batch10 ||
+    $GIT_BRANCH == codex/nightly-two-cohort-validation-batch64) ]]; then
+    local dump_dir="/workspace/.ci/dumps/two-cohort/node${node}-${host}-executor"
+    cmd=(env "HOGD_EXEC_VALIDATION_TIMING=$dump_dir/validation-port-${port}.tsv"
+      /usr/bin/bash -ec 'mkdir -m 700 -p -- "${HOGD_EXEC_VALIDATION_TIMING%/*}"; exec "$@"' bash
+      "${cmd[@]}")
+  fi
+  control_start_with_ulimit "$host" "$label" "$cores" "${cmd[@]}"
+}
+
 echo 'launch hog-exec shards'
 for node in "${NODE_IDS[@]}"; do
-  coordinator_addr="$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EXECUTOR_PORT"
-  bind_ip="$(hog_ip "${HOG_EXEC_HOSTS[$node]}")"
-  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_a" "$SLOT_A_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --mempool-port "$HOG_EXEC_SLOT_A_PORT" --metrics-port "$HOG_EXEC_SLOT_A_HTTP_PORT"
-  control_start_with_ulimit "${HOG_EXEC_HOSTS[$node]}" "node${node}_hog_exec_slot_b" "$SLOT_B_CPUS" \
-    "$HOG_EXEC_BINARY" --coordinator-addr "$coordinator_addr" --bind-ip "$bind_ip" --mempool-port "$HOG_EXEC_SLOT_B_PORT" --metrics-port "$HOG_EXEC_SLOT_B_HTTP_PORT"
+  start_executor "$node" a "$SLOT_A_CPUS" "$HOG_EXEC_SLOT_A_PORT" "$HOG_EXEC_SLOT_A_HTTP_PORT"
+  start_executor "$node" b "$SLOT_B_CPUS" "$HOG_EXEC_SLOT_B_PORT" "$HOG_EXEC_SLOT_B_HTTP_PORT"
 done
 
 # query_proc_status reports the most recently launched process on a control

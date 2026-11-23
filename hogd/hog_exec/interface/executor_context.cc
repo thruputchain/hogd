@@ -82,7 +82,8 @@ ExecutorContext::propose_transaction_batch(SignedTransactionBatch signed_txs,
 
 x23::Async<ExecValidateBatchResult>
 ExecutorContext::validate_transaction_batch(
-    ProposedTransactionBatch proposed_txs, TransactionID first_tx_id)
+    ProposedTransactionBatch proposed_txs, TransactionID first_tx_id,
+    std::chrono::steady_clock::time_point *worker_resume)
 {
   assert(mode_ == ExecutionMode::kValidating);
   // Get off the RPC reader before executing.  x23's reader coroutine calls
@@ -92,6 +93,9 @@ ExecutorContext::validate_transaction_batch(
   // not have this problem because it submitted to a DispatchPool and parked on
   // the result, which returned to the reader immediately.
   co_await default_threadpool().bg();
+  if (worker_resume != nullptr) [[unlikely]] {
+    *worker_resume = std::chrono::steady_clock::now();
+  }
   ExecValidateBatchResult batch_res;
   batch_res.reserve(proposed_txs.size());
   for (size_t i = 0; i < proposed_txs.size(); i++) {

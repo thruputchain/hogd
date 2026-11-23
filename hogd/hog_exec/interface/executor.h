@@ -60,6 +60,7 @@ public:
             make_bind_host_port(bind_ip, executor_port), coordinator_sockaddr);
     // Connects to the database and performs initialization of the executor.
     server_->impl()->init(std::move(exec_result));
+    server_->impl()->enable_validation_timing(executor_port);
 
     // init() has published all state the RPC handlers read; it is now safe to
     // begin serving RPCs to the coordinator.
