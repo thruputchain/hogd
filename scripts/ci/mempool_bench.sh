@@ -14,6 +14,7 @@ WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
 event_tmpfs_active=0
+coordinator_tmpfs_active=0
 
 event_tmpfs_peer() {
   python3 /opt/hog-ci/peer.py hog9 "
@@ -25,6 +26,17 @@ event_tmpfs_peer() {
        \$(findmnt -n -o TARGET -T "\$path") == /bench-single-node-event ]]
     $1
   "
+}
+
+coordinator_tmpfs_peer() {
+  timeout --kill-after=3s 30s python3 /opt/hog-ci/peer.py hog4 '
+    set -euo pipefail
+    path=/bench-coordinator/single-node
+    [[ -d $path && ! -L $path && -O $path && -w $path ]]
+    [[ $(realpath -e -- "$path") == "$path" && $(stat -c %a -- "$path") == 700 ]]
+    [[ $(findmnt -n -o FSTYPE -T "$path") == tmpfs &&
+       $(findmnt -n -o TARGET -T "$path") == /bench-coordinator ]]
+  '"$1" </dev/null
 }
 
 kill_stale_processes() {
@@ -45,6 +57,20 @@ cleanup() {
          df -Pk -- /bench-single-node-event
        ' > "${HOG_DUMP_DIR:?}/storage-single-node-event-final.txt"; then
       echo 'Could not reclaim the isolated Event scratch before later suites' >&2
+      if [[ $exit_code == 0 ]]; then
+        exit_code=1
+      fi
+    fi
+  fi
+  if [[ $coordinator_tmpfs_active == 1 ]]; then
+    if ! timeout --kill-after=3s 30s "$CONTROL_CLI" hog4 "$CI_CONTROL_PORT" stop_checked ||
+       ! coordinator_tmpfs_peer '
+         df -Pk -- "$path"
+         rm -rf --one-file-system -- "$path"
+         [[ ! -e $path && ! -L $path ]]
+         df -Pk -- /bench-coordinator
+       ' > "${HOG_DUMP_DIR:?}/storage-single-node-final.txt"; then
+      echo 'Could not reclaim the isolated coordinator scratch before later suites' >&2
       if [[ $exit_code == 0 ]]; then
         exit_code=1
       fi
@@ -155,15 +181,9 @@ if [[ -n ${HOGD_CI_COORDINATOR_DATA_DIR:-} ]]; then
      ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
      ${CI_MEMPOOL_METRIC_NAME:-nightly_integration_mempool} == nightly_integration_mempool &&
      $HOGD_CI_COORDINATOR_DATA_DIR == /bench-coordinator/single-node ]]
-  python3 /opt/hog-ci/peer.py hog4 '
-    set -euo pipefail
-    path=/bench-coordinator/single-node
-    [[ -d $path && ! -L $path && -O $path && -w $path ]]
-    [[ $(realpath -e -- "$path") == "$path" && $(stat -c %a -- "$path") == 700 ]]
-    [[ $(findmnt -n -o FSTYPE -T "$path") == tmpfs &&
-       $(findmnt -n -o TARGET -T "$path") == /bench-coordinator ]]
-    [[ -z $(ls -A -- "$path") ]]
-  '
+  : "${HOG_DUMP_DIR:?}"
+  coordinator_tmpfs_peer '[[ -z $(ls -A -- "$path") ]]'
+  coordinator_tmpfs_active=1
   coordinator_data_dir=$HOGD_CI_COORDINATOR_DATA_DIR
 fi
 
@@ -223,13 +243,6 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
   $CONTROL_CLI hog4 "$CI_CONTROL_PORT" wait
   coordinator_status=$?
   set -e
-fi
-
-# Record final usage after the timer with the coordinator mount still present.
-if [[ -n ${HOGD_CI_COORDINATOR_DATA_DIR:-} ]]; then
-  python3 /opt/hog-ci/peer.py hog4 'df -Pk -- /bench-coordinator/single-node' \
-    > "${HOG_DUMP_DIR:?}/storage-single-node-final.txt" ||
-    echo 'Could not sample final coordinator tmpfs usage' >&2
 fi
 
 echo 'copy coordinator output from hog4'
