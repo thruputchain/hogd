@@ -61,7 +61,8 @@ if [[ ${AUTH_BENCH_PLACE_COLD_CASES:-} == 1 &&
       ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ) &&
       ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
       -z ${AUTH_BENCH_ARGS:-}${AUTH_BENCH_FILTER:-}${AUTH_BENCH_MIN_TIME:-} &&
-      -z ${AUTH_BENCH_REPETITIONS:-}${DEFAULT_THREADPOOL_SIZE:-} ]]; then
+      -z ${AUTH_BENCH_REPETITIONS:-}${DEFAULT_THREADPOOL_SIZE:-} &&
+      ! -v DEFAULT_THREADPOOL_SIZE_hog_auth_bench ]]; then
   timeout --signal=KILL "${AUTH_BENCH_TIMEOUT:-600}" \
     python3 "$ROOT_DIR/scripts/ci/auth_bench_placement.py" "$BENCH" "$JSON" \
     "${args[@]}"
