@@ -36,6 +36,14 @@ Use full, repeated runs for schedule proposals. Filtered runs are useful for
 investigating a case, but do not provide the common normalizer or full coverage.
 Syscall price proposals require a gas calibration from the same host and engine.
 
+The calibration, syscall benchmark and openssl cross-check run pinned to CPU 0
+(`taskset -c 0`) with ASLR off (`setarch "$(uname -m)" -R`), and exit with an
+error when either is unavailable rather than measuring without it. Docker's
+default seccomp profile refuses `setarch -R`; a container needs a profile that
+allows `personality(ADDR_NO_RANDOMIZE)`. `RV32_ALLOW_UNPINNED=1` measures anyway,
+with a warning, for exploration only: those numbers are not comparable with a
+reference or with history.
+
 ## Instruction measurements
 
 For each opcode and operand context, the primary estimate is the time of a

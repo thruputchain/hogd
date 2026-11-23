@@ -325,9 +325,9 @@ public:
   template<size_t N = std::dynamic_extent>
   ErrnoStatus<size_t> write(std::span<const std::byte, N> src)
   {
-    // fast path: copy to buffer.
+    // fast path: append the range to avoid one push_back per byte.
     if (src.size() < buf_.capacity() - buf_.size()) {
-      std::copy(src.begin(), src.end(), std::back_inserter(buf_));
+      buf_.insert(buf_.end(), src.begin(), src.end());
       return src.size();
     }
 

@@ -180,7 +180,8 @@ TEST_F(MlDsa65VerifySignatureTest, RunsOutOfGasBeforeVerifying)
 }
 
 // Pins the calibrated price: with the shared syscall base, each length bills
-// at least what RV32 Gas Calibration run 39809791818 measured on hog10.
+// at least what RV32 Gas Calibration run 39809791818 measured on hog10. The
+// billed column carries today's 60-gas base; the price was set against 50.
 TEST(MlDsa65VerifySignaturePriceTest, CoversTheCalibratedMeasurement)
 {
   EXPECT_EQ(kVerifySignatureMlDsa65BaseCost, 46592U);
@@ -191,9 +192,9 @@ TEST(MlDsa65VerifySignaturePriceTest, CoversTheCalibratedMeasurement)
     uint64_t measured;
   };
   for (const Point point :
-       {Point{.message_len = 0, .billed = 46802, .measured = 46802},
-        Point{.message_len = 64, .billed = 46802, .measured = 46734},
-        Point{.message_len = 1024, .billed = 48082, .measured = 48071}}) {
+       {Point{.message_len = 0, .billed = 46812, .measured = 46802},
+        Point{.message_len = 64, .billed = 46812, .measured = 46734},
+        Point{.message_len = 1024, .billed = 48092, .measured = 48071}}) {
     SCOPED_TRACE(::testing::Message() << "len=" << point.message_len);
     const uint64_t billed =
         kSyscallBaseCost + GasCost::verify_signature_mldsa65(point.message_len);
