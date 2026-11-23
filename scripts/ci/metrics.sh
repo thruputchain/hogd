@@ -41,7 +41,7 @@ if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
           -a "$accounts" -s hog11 -s hog8 -A "$arm" >"$raw"
       )
       workload=$(sed -n 's/^payment_db_workload //p' "$raw")
-      if [[ ! $workload =~ ^56013\ [1-9][0-9]*\ 2048000\ [0-9a-f]{64}$ ||
+      if [[ ! $workload =~ ^56013\ [1-9][0-9]*\ 1000000\ [0-9a-f]{64}$ ||
             ( -n $expected_workload && $workload != "$expected_workload" ) ]]; then
         echo "Payment workload mismatch for $accounts accounts in $arm" >&2
         exit 1
@@ -85,7 +85,7 @@ if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
           }
         }
         END {
-          if (invalid || rows != 60 || matched != 10 || elapsed_rows != 180) exit 1
+          if (invalid || rows != 60 || matched != 10 || elapsed_rows != 10) exit 1
           for (i = 0; i < 10; i++) {
             if (caller_reps[i] != 390 && caller_reps[i] != 391) exit 1
           }

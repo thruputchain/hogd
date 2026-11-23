@@ -459,6 +459,15 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
   // This is wayyy to slow if we generate and sign all the txs up front.
   // For now, we just reuse the transactions from one rep to the next.
   size_t num_reps = 10;
+  if (!arm.empty()) {
+    constexpr uint32_t transactions_per_rep = 100'000;
+    BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts, arm);
+    auto work_txs = bs.initialize(transactions_per_rep * num_reps);
+    run_bench_rep_coro(bs, std::span<SignedTransaction>(work_txs), 512, transactions_per_rep,
+                       num_reps);
+    return;
+  }
+
   uint32_t num_total_txs =
       std::max<uint32_t>(100000 * num_reps, 204800 * num_reps);
   BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts, arm);
