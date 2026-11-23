@@ -62,9 +62,10 @@ mul_div_round_up(uint128_t n, BlockHeight d, uint128_t t)
   const auto divided =
       limbs_mul_div_rem<2>(limbs_from_u128(n), limbs_from_u128(wide_d),
                            limbs_from_u128(t));
-  // Not empty: t is not zero.
+  // Not empty: t is not zero. operator* rather than value(), which can throw.
+  CHECK(divided.has_value());
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
-  const LimbsMulDivRem<2> &result = divided.value();
+  const LimbsMulDivRem<2> &result = *divided;
   return static_cast<BlockHeight>(result.quotient_lo[0]) +
          (result.remainder != Limbs<2>{} ? 1 : 0);
 }
