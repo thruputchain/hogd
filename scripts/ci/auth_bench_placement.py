@@ -12,7 +12,7 @@ from tempfile import TemporaryDirectory
 
 COLD_CASES = {
     f"verify_cold/batch:{batch}/txs_per_account:{txs}/real_time": batch // txs
-    for batch in (64, 4096)
+    for batch in (64, 512, 4096)
     for txs in (1, 4)
 }
 AGGREGATES = {"mean", "median", "stddev", "cv"}
