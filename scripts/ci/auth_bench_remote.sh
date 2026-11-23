@@ -40,13 +40,16 @@ if [[ -n $pin_warm_batch64 ]]; then
   [[ $pin_warm_batch64 == 1 && ${HOGD_CI_CONTAINER:-} == 1 &&
     ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]
 elif [[ $COMMAND == start && ( ${GIT_BRANCH:-} == main ||
-      ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ) &&
+      ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ||
+      ${GIT_BRANCH:-} == codex/auth-cold-placement-control ) &&
   ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
   ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
   ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]; then
-  # Use the qualified placement only for stock hosted Combined Metrics.
+  # Both qualification arms retain the existing warm placement.
   pin_warm_batch64=1
-  place_cold_cases=1
+  if [[ $GIT_BRANCH != codex/auth-cold-placement-control ]]; then
+    place_cold_cases=1
+  fi
 fi
 if [[ $place_cold_cases == 1 ]]; then
   auth_command=(/usr/bin/env AUTH_BENCH_PIN_WARM_BATCH64=1

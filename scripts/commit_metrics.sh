@@ -2,7 +2,9 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
-  if [[ ${GIT_BRANCH:-} == codex/auth-cold-placement-canary &&
+  if [[ ( ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ||
+          ${GIT_BRANCH:-} == codex/auth-cold-placement-control ) &&
+        ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
         ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
     exit 0
   fi
