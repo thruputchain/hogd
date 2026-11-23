@@ -97,9 +97,16 @@ public:
   // synchronous RocksDB WriteBatch durability point.
   IndexerProgress durable_progress() const;
   IndexerEpochResult initialize_epoch(const IndexerOutboxOrigin &origin);
+  struct ApplyPhaseTimings {
+    int64_t shape_validation_ns = -1;
+    int64_t prepare_write_ns = -1;
+    int64_t sync_write_ns = -1;
+  };
+
   x23::Async<IndexerBlockApplyResult>
   apply_committed_block(IndexerOutboxOrigin origin,
-                        IndexerCommittedBlock block);
+                        IndexerCommittedBlock block,
+                        ApplyPhaseTimings *timings = nullptr);
 
   // Everything stored in the tx_index for one transaction.
   struct TxRecord {
@@ -233,7 +240,8 @@ private:
 
   IndexerBlockApplyResult
   apply_validated_committed_block(const IndexerOutboxOrigin &origin,
-                                  const IndexerCommittedBlock &block);
+                                  const IndexerCommittedBlock &block,
+                                  ApplyPhaseTimings *timings);
 
   IndexerStatus<void> initialize_progress_from_db();
   static std::string block_query_format();

@@ -6,6 +6,7 @@
 #include <condition_variable>
 #include <cstddef>
 #include <cstdint>
+#include <fstream>
 #include <future>
 #include <map>
 #include <mutex>
@@ -21,6 +22,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/base/rpc_server.h"
 #include "hogd/base/types.h"
+#include "hogd/hog_indexer/phase_diagnostic.h"
 #include "hogd/version.h"
 #include "indexer.hh"
 #include "x23/fastclock.h"
@@ -68,13 +70,25 @@ public:
 
   // Fails loudly: a probe that silently measured nothing would publish an
   // empty metric that reads exactly like "latency is fine".
-  explicit IndexerLatencyProbe(const std::string &indexer_addr)
-    : client_(connect(indexer_addr))
+  explicit IndexerLatencyProbe(const std::string &indexer_addr,
+                               bool diagnostic = false)
+    : client_(connect(indexer_addr)), diagnostic_(diagnostic)
   {
     const IndexerBlockExplorerIntroOutcome intro =
         client_.indexer_block_explorer_intro(version::kHogdProtocol())();
     if (intro != IndexerBlockExplorerIntroOutcome::IntroSuccess) {
       panic("indexer latency probe: intro rejected ({})", intro);
+    }
+    if (diagnostic_) {
+      indexer_phase::open(evidence_, "indexer-phase-driver.tsv");
+      evidence_ << "workload\tevent=hog7\tdb=hog8\tindexer=hog4\t"
+                   "executor_launch_order=hog5,hog11,hog6\taccounts=100\t"
+                   "connections_per_executor=10\tcoros_per_connection=100\t"
+                   "batch_size=10\ttxs_per_work_height=1000000\twork_heights=5\n"
+                   "height\tcommit_offset_ns\tpending_after_commit\t"
+                   "observed_offset_ns\twatermark\tpending_at_observation\n"
+                << std::flush;
+      origin_ = x23::fastclock::now();
     }
     poller_ = std::jthread([this](const std::stop_token &stop) { poll(stop); });
   }
@@ -94,6 +108,13 @@ public:
   {
     const std::lock_guard g(mtx_);
     pending_.emplace(height, commit);
+    if (diagnostic_) {
+      if (phases_.size() >= 7) {
+        panic("indexer phase diagnostic recorded unexpected additional height");
+      }
+      phases_.emplace(height, PhaseRow{.commit_ns = (commit - origin_).count(),
+                                       .pending_at_commit = pending_.size()});
+    }
   }
 
   // Blocks until the indexer's watermark covers every recorded height.
@@ -142,6 +163,15 @@ public:
       const std::lock_guard g(mtx_);
       samples = observed_;
       missed = pending_.size();
+      if (diagnostic_) {
+        for (const auto &[height, row] : phases_) {
+          evidence_ << height << '\t' << row.commit_ns << '\t'
+                    << row.pending_at_commit << '\t' << row.observed_ns
+                    << '\t' << row.watermark << '\t'
+                    << row.pending_at_observation << '\n';
+        }
+        evidence_.flush();
+      }
       for (const auto &[height, latency_ns] : per_height_) {
         std::println("indexer_latency_block: label={} height={} latency_ns={}",
                      label, height, latency_ns);
@@ -240,6 +270,12 @@ private:
           const int64_t latency_ns = (now - it->second).count();
           observed_.push_back(latency_ns);
           per_height_.emplace(it->first, latency_ns);
+          if (diagnostic_) {
+            auto &row = phases_.at(it->first);
+            row.observed_ns = (now - origin_).count();
+            row.watermark = watermark;
+            row.pending_at_observation = pending_.size();
+          }
           it = pending_.erase(it);
           observed_any = true;
         }
@@ -281,6 +317,20 @@ private:
   }
 
   indexer_block_explorer_client_t client_;
+
+  struct PhaseRow {
+    int64_t commit_ns;
+    size_t pending_at_commit;
+    int64_t observed_ns = -1;
+    BlockHeight watermark = -1;
+    size_t pending_at_observation = 0;
+  };
+
+  bool diagnostic_;
+  std::ofstream evidence_;
+  x23::fastclock::time_point origin_{};
+  std::map<BlockHeight, PhaseRow> phases_;
+
 
   std::mutex mtx_;
   std::condition_variable drained_;

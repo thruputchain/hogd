@@ -1294,7 +1294,8 @@ IndexDB::initialize_epoch(const IndexerOutboxOrigin &origin)
 
 x23::Async<IndexerBlockApplyResult>
 IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
-                               IndexerCommittedBlock block)
+                               IndexerCommittedBlock block,
+                               ApplyPhaseTimings *timings)
 {
   {
     std::lock_guard g(ingest_mutex_);
@@ -1314,11 +1315,18 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
     apply_validation_test_hook_();
   }
   try {
-    if (auto valid = check_committed_block_shape(block); !valid) {
+    const auto validation_start =
+        timings ? x23::fastclock::now() : x23::fastclock::time_point{};
+    auto valid = check_committed_block_shape(block);
+    if (timings) {
+      timings->shape_validation_ns =
+          (x23::fastclock::now() - validation_start).count();
+    }
+    if (!valid) {
       co_return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict, valid.error());
     }
-    co_return apply_validated_committed_block(origin, block);
+    co_return apply_validated_committed_block(origin, block, timings);
   } catch (const std::exception &e) {
     error("failed to validate/apply committed indexer block: {}", e.what());
     co_return apply_failure(
@@ -1329,8 +1337,11 @@ IndexDB::apply_committed_block(IndexerOutboxOrigin origin,
 
 IndexerBlockApplyResult
 IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
-                                         const IndexerCommittedBlock &block)
+                                         const IndexerCommittedBlock &block,
+                                         ApplyPhaseTimings *timings)
 {
+  const auto prepare_start =
+      timings ? x23::fastclock::now() : x23::fastclock::time_point{};
   std::lock_guard g(ingest_mutex_);
   if (!is_open()) {
     return apply_failure(IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
@@ -1505,7 +1516,13 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
 
     rocksdb::WriteOptions options;
     options.sync = true;
+    const auto write_start =
+        timings ? x23::fastclock::now() : x23::fastclock::time_point{};
     const rocksdb::Status status = db_->Write(options, &batch);
+    if (timings) {
+      timings->sync_write_ns = (x23::fastclock::now() - write_start).count();
+      timings->prepare_write_ns = (write_start - prepare_start).count();
+    }
     if (!status.ok()) {
       error("failed to atomically apply committed indexer block {}: {}", height,
             status.ToString());

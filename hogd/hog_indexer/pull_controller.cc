@@ -6,6 +6,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <exception>
+#include <fstream>
 #include <mutex>
 #include <optional>
 #include <stop_token>
@@ -17,6 +18,7 @@
 #include "hogd/base/rpc_client.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/metrics.h"
+#include "hogd/hog_indexer/phase_diagnostic.h"
 #include "hogd/hog_indexer/recent_tx_failure_cache.h"
 #include "hogd/hog_indexer/status.h"
 #include "hogd/metrics/health.h"
@@ -165,6 +167,21 @@ IndexerPullController::pull_tx_failures(event_indexer_client_t &client)
 void
 IndexerPullController::run(const std::stop_token &stop)
 {
+  const bool diagnostic = indexer_phase::enabled("hog4");
+  std::ofstream evidence;
+  size_t block_rows = 0;
+  size_t other_rows = 0;
+  // Bound repeated startup/idle responses independently of work records.
+  constexpr size_t kMaxBlockRows = 16;
+  constexpr size_t kMaxOtherRows = 32;
+  if (diagnostic) {
+    indexer_phase::open(evidence, "indexer-phase-ingest.tsv");
+    evidence << "request_state\trequest_height\tpull_outcome\tpull_ns\t"
+                "pulled_height\tevent_logs\tapply_outcome\tapply_ns\t"
+                "shape_validation_ns\tprepare_write_ns\tsync_write_ns\n"
+             << std::flush;
+  }
+
   while (!stop.stop_requested()) {
     std::optional<event_indexer_client_t> client;
     {
@@ -219,10 +236,32 @@ IndexerPullController::run(const std::stop_token &stop)
             IndexerProgress(IndexerProgressState::IndexerProgressCaughtUp);
         request.progress.initialized() = requested_progress.initialized();
       }
+      const auto pull_start =
+          diagnostic ? x23::fastclock::now() : x23::fastclock::time_point{};
       EventIndexerPullResult result =
           client->event_indexer_pull_next(request)();
+      const auto pull_ns =
+          diagnostic ? (x23::fastclock::now() - pull_start).count() : 0;
+
       if (stop.stop_requested()) {
         return;
+      }
+
+      const auto write_pull = [&]() {
+        const auto state = request.progress.state();
+        const auto height = state == IndexerProgressState::IndexerProgressInitialized ||
+                                    state == IndexerProgressState::IndexerProgressCaughtUp
+                                ? request.progress.initialized().contiguous_height
+                                : BlockHeight{-1};
+        evidence << static_cast<int>(state) << '\t' << height << '\t'
+                 << static_cast<int>(result.outcome()) << '\t' << pull_ns;
+      };
+      if (diagnostic && result.outcome() !=
+                            EventIndexerPullOutcome::EventIndexerPullBlock &&
+          other_rows < kMaxOtherRows) {
+        ++other_rows;
+        write_pull();
+        evidence << "\t-1\t-1\t-1\t-1\t-1\t-1\t-1\n" << std::flush;
       }
 
       switch (result.outcome()) {
@@ -239,9 +278,21 @@ IndexerPullController::run(const std::stop_token &stop)
         const std::size_t pulled_event_logs =
             pulled.block.payload.event_logs.size();
         const auto apply_start = x23::fastclock::now();
+        IndexDB::ApplyPhaseTimings timings;
         IndexerBlockApplyResult applied =
-            db_.apply_committed_block(pulled.origin, std::move(pulled.block))();
+            db_.apply_committed_block(pulled.origin, std::move(pulled.block),
+                                      diagnostic ? &timings : nullptr)();
         const auto apply_end = x23::fastclock::now();
+        if (diagnostic && block_rows < kMaxBlockRows) {
+          ++block_rows;
+          write_pull();
+          evidence << '\t' << pulled_height << '\t' << pulled_event_logs
+                   << '\t' << static_cast<int>(applied.outcome()) << '\t'
+                   << (apply_end - apply_start).count() << '\t'
+                   << timings.shape_validation_ns << '\t'
+                   << timings.prepare_write_ns << '\t'
+                   << timings.sync_write_ns << '\n' << std::flush;
+        }
         if (applied.outcome() !=
                 IndexerBlockApplyOutcome::IndexerBlockApplied &&
             applied.outcome() !=

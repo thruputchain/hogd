@@ -22,6 +22,7 @@
 #include "hogd/hog_exec/bench/indexer_latency_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
+#include "hogd/hog_indexer/phase_diagnostic.h"
 #include "hogd/init.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
@@ -155,11 +156,13 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
                     unsigned int num_accounts,
                     unsigned int n_connections_per_executor,
                     unsigned int n_coros_per_connection,
-                    unsigned int batch_size, unsigned int num_txs_per_block)
+                    unsigned int batch_size, unsigned int num_txs_per_block,
+                    bool diagnostic = false)
 {
   MultiexecCluster cluster(server_addrs);
 
-  IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr());
+  IndexerLatencyProbe indexer_probe(cluster.indexer_block_explorer_addr(),
+                                    diagnostic);
 
   auto &event_sched_client = cluster.event_sched_client();
   auto &db_sched_client = cluster.db_sched_client();
@@ -268,12 +271,16 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // so the backlog standing here outlives the run by many seconds and the
   // drain bounds the indexer going quiet rather than the total wait. A stall
   // is reported as [unobserved] rather than silently shrinking the sample.
-  if (!indexer_probe.drain()) {
+  const bool drained = indexer_probe.drain();
+  if (!drained) {
     warn("indexer latency probe: indexer stopped draining committed heights");
   }
   indexer_probe.stop();
   indexer_probe.report(
       std::format("nexec={},batch={}", cluster.num_executors(), batch_size));
+  if (diagnostic && !drained) {
+    panic("indexer phase diagnostic did not observe every committed height");
+  }
 }
 
 } // namespace
@@ -320,6 +327,33 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   }
 
   const int account_count = num_accounts.value();
+  if (hogd::indexer_phase::enabled("hog10")) {
+    if (account_count != 100 || optind != argc) {
+      hogd::panic("indexer phase diagnostic requires the exact MultiExec workload");
+    }
+    const std::vector<std::string> one{"hog7", "hog8", "hog4", "hog5"};
+    const std::vector<std::string> two{"hog7", "hog8", "hog4", "hog11",
+                                       "hog5"};
+    const std::vector<std::string> three{"hog7", "hog8", "hog4", "hog11",
+                                         "hog6", "hog5"};
+    if (server_addrs == one || server_addrs == two) {
+      std::println("indexer phase diagnostic skips {} executor topology",
+                   server_addrs.size() - 3);
+      return 0;
+    }
+    if (server_addrs != three) {
+      hogd::panic("indexer phase diagnostic requires the trusted role order");
+    }
+    // Match Combined Metrics' existing control launch order. Executors still
+    // register asynchronously, and their normal card ordering is preserved.
+    const std::vector<std::string> combined_order{"hog7", "hog8", "hog4",
+                                                  "hog5", "hog11", "hog6"};
+    hogd::run_multiexec_bench(combined_order, account_count, 10, 100, 10,
+                              1'000'000, /*diagnostic=*/true);
+    std::fflush(stdout);
+    return 0;
+  }
+
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 1, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 5, 1'000'000);
   hogd::run_multiexec_bench(server_addrs, account_count, 10, 100, 10,
