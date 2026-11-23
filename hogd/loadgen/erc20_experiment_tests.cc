@@ -2,16 +2,20 @@
 
 #include <memory>
 #include <optional>
+#include <print>
 #include <set>
 
 #include "exec_result.hh"
+#include "hogd/base/string.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/test_main.h"
 #include "hogd/loadgen/erc20_basic_auth_experiment.h"
 #include "hogd/loadgen/erc20_experiment.h"
+#include "hogd/loadgen/loadgen_server.h"
 #include "hogd/loadgen/status.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -171,6 +175,48 @@ TEST_F(ERC20ExperimentTest, BasicAuthGenesisIsStableAcrossRegeneration)
             result2.value().genesis_ceremony_txs);
   EXPECT_EQ(result1.value().initialization_txs,
             result2.value().initialization_txs);
+}
+
+TEST(ERC20SeededCorpus, FixedSeedRecreatesSetupAndOrderedWork)
+{
+  constexpr uint32_t seed = 0x620c1f42;
+  ExperimentConfig config(ExperimentType::kExperimentTypeERC20Payments);
+  config.erc20_payments() = {.num_addresses = 100};
+  LoadgenRpc a(seed), b(seed), different(seed + 1);
+  const auto setup_a = a.generate_experiment(config)();
+  const auto setup_b = b.generate_experiment(config)();
+  const auto setup_different = different.generate_experiment(config)();
+  ASSERT_EQ(setup_a.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  ASSERT_EQ(setup_b.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  ASSERT_EQ(setup_different.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  EXPECT_EQ(setup_a.success(), setup_b.success());
+  EXPECT_EQ(setup_a.success(), setup_different.success());
+
+  const auto work_a =
+      a.extend_experiment(setup_a.success().context_id, 1025, 1'000'000)();
+  const auto work_b =
+      b.extend_experiment(setup_b.success().context_id, 1025, 1'000'000)();
+  const auto work_different =
+      different.extend_experiment(setup_different.success().context_id, 1025,
+                                  1'000'000)();
+  ASSERT_EQ(work_a.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  ASSERT_EQ(work_b.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  ASSERT_EQ(work_different.error(), LoadgenRPCError::kLoadgenRPCErrorOK);
+  SignedTransactionBatch decoded_a, decoded_b, decoded_different;
+  parallel_batch_to_t(work_a.success().work_txs, decoded_a, kNoBatchSizeLimit)();
+  parallel_batch_to_t(work_b.success().work_txs, decoded_b, kNoBatchSizeLimit)();
+  parallel_batch_to_t(work_different.success().work_txs, decoded_different,
+                      kNoBatchSizeLimit)();
+  ASSERT_EQ(decoded_a.size(), 1025);
+  EXPECT_EQ(decoded_a, decoded_b);
+  EXPECT_NE(decoded_a, decoded_different);
+  SHA256Hasher hasher;
+  for (const auto &tx : decoded_a) {
+    hasher.update(x23::serialize(tx));
+  }
+  const auto digest = hasher.finalize();
+  std::println("seeded_ordered_corpus_sha256={}",
+               encode_hex(std::as_bytes(std::span(digest))));
 }
 
 TEST_F(ERC20ExperimentTest, DISABLED_ManyAccounts)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cstdint>
 #include <cstdlib>
 #include <filesystem>
 #include <fstream>
@@ -18,12 +19,20 @@ env(const char *name)
   return value ? value : "";
 }
 
+inline constexpr uint32_t kCorpusSeed = 0x620c1f42;
+
+inline bool
+ordered()
+{
+  return env("GIT_BRANCH") == "codex/indexer-sorted-probe";
+}
+
 inline bool
 requested()
 {
   const auto branch = env("GIT_BRANCH");
   return branch == "codex/indexer-rocks-phases" ||
-         branch == "codex/indexer-sorted-probe";
+         ordered();
 }
 
 inline bool
@@ -51,7 +60,7 @@ open(std::ofstream &output, std::string_view filename)
   }
   output.exceptions(std::ios::badbit | std::ios::failbit);
   output.open(directory / filename, std::ios::out | std::ios::noreplace);
-  output << "indexer_phase_v2\t" << version::kHogdGitHash << '\t'
+  output << "indexer_phase_v3\t" << version::kHogdGitHash << '\t'
          << env("GIT_BRANCH") << '\t' << env("HOG_XID") << '\t'
          << env("HOG_HOST") << '\n' << std::flush;
 }

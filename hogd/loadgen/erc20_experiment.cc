@@ -196,7 +196,11 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
   x23::Vec<SignedTransaction> work_txs;
   work_txs.resize(num_txs);
 
-  size_t nthread = WorkerPool::get_default_pool().worker_count();
+  // Logical chunks for a seeded corpus must not depend on the host's
+  // worker pool size. The same pool still executes the generated chunks.
+  const size_t nthread =
+      corpus_seed_ ? std::min(kSeededCorpusShards, std::max(size_t{1}, num_txs))
+                   : WorkerPool::get_default_pool().worker_count();
 
   size_t batch_size = num_txs / nthread;
   if (num_txs % nthread != 0) {
@@ -223,9 +227,15 @@ ERC20ExperimentState::extend_experiment(uint64_t num_txs,
     }
 
     futures.emplace_back(WorkerPool::get_default_pool().submit(
-        [this, &work_txs, start, end, expiry_height]() {
-          std::random_device rd;
-          std::mt19937 gen(rd());
+        [this, &work_txs, i, start, end, expiry_height]() {
+          auto gen = [&] {
+            if (corpus_seed_) {
+              std::seed_seq seed{*corpus_seed_, static_cast<uint32_t>(i)};
+              return std::mt19937(seed);
+            }
+            std::random_device rd;
+            return std::mt19937(rd());
+          }();
 
           std::uniform_int_distribution<size_t> dist(1, config_.num_addresses);
 

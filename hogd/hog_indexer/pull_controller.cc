@@ -9,6 +9,7 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
+#include <span>
 #include <stop_token>
 #include <string>
 #include <thread>
@@ -16,6 +17,7 @@
 
 #include "hogd/base/log.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/string.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/hog_indexer/metrics.h"
 #include "hogd/hog_indexer/phase_diagnostic.h"
@@ -168,8 +170,7 @@ void
 IndexerPullController::run(const std::stop_token &stop)
 {
   const bool diagnostic = indexer_phase::enabled("hog4");
-  const bool sort_batch =
-      diagnostic && indexer_phase::env("GIT_BRANCH") == "codex/indexer-sorted-probe";
+  const bool sort_batch = diagnostic && indexer_phase::ordered();
   std::ofstream evidence;
   size_t block_rows = 0;
   size_t other_rows = 0;
@@ -185,7 +186,7 @@ IndexerPullController::run(const std::stop_token &stop)
     for (const auto name : IndexDB::kRocksWriteColumns) {
       evidence << '\t' << name;
     }
-    evidence << '\n' << std::flush;
+    evidence << "\tconsensus_sha256\tevents_root\n" << std::flush;
   }
 
   while (!stop.stop_requested()) {
@@ -274,7 +275,6 @@ IndexerPullController::run(const std::stop_token &stop)
             evidence << "\t-1";
           }
         }
-        evidence << '\n' << std::flush;
       };
       if (diagnostic && result.outcome() !=
                             EventIndexerPullOutcome::EventIndexerPullBlock &&
@@ -283,6 +283,7 @@ IndexerPullController::run(const std::stop_token &stop)
         write_pull();
         evidence << "\t-1\t-1\t-1\t-1\t-1\t-1\t-1";
         write_rocks({});
+        evidence << "\t-\t-\n" << std::flush;
       }
 
       switch (result.outcome()) {
@@ -296,6 +297,8 @@ IndexerPullController::run(const std::stop_token &stop)
             pulled.block.payload.consensus_value.proposal_header.block_height;
         const IndexerCommittedBlockIdentity pulled_identity =
             pulled.block.identity;
+        const auto events_root =
+            pulled.block.payload.consensus_value.proposal_header.events_hash;
         const std::size_t pulled_event_logs =
             pulled.block.payload.event_logs.size();
         const auto apply_start = x23::fastclock::now();
@@ -315,6 +318,9 @@ IndexerPullController::run(const std::stop_token &stop)
                    << timings.prepare_write_ns << '\t'
                    << timings.sync_write_ns;
           write_rocks(timings);
+          evidence << '\t' << encode_hex(std::as_bytes(std::span(pulled_identity.consensus_hash)))
+                   << '\t' << encode_hex(std::as_bytes(std::span(events_root)))
+                   << '\n' << std::flush;
         }
         if (applied.outcome() !=
                 IndexerBlockApplyOutcome::IndexerBlockApplied &&

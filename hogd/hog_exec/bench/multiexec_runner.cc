@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <format>
+#include <fstream>
 #include <optional>
 #include <print>
 #include <span>
@@ -16,14 +17,17 @@
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/indexer_latency_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
 #include "hogd/hog_exec/bench/multiexec_cluster.h"
 #include "hogd/hog_indexer/phase_diagnostic.h"
 #include "hogd/init.h"
+#include "hogd/loadgen/erc20_experiment.h"
 #include "hogd/loadgen/loadgen_server.h"
 #include "loadgen.hh"
 #include "rpc_types.hh"
@@ -177,7 +181,8 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
       .network_hash = {},
   };
 
-  LoadgenRpc loadgen;
+  LoadgenRpc loadgen =
+      diagnostic ? LoadgenRpc(indexer_phase::kCorpusSeed) : LoadgenRpc();
   auto loadgen_result = loadgen.generate_experiment(config)();
   if (loadgen_result.error() != LoadgenRPCError::kLoadgenRPCErrorOK) {
     panic("Failed to generate loadgen experiment");
@@ -232,6 +237,30 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   // already-expired height.
   CHECK_GE(work_txs.size(), CommonBenchState::kBenchUniquifiersPerHeight);
   const BlockID work_base = current_block_number;
+  if (diagnostic) {
+    // Hash the generated transactions in queue order, before the five
+    // measured trials. The common num_txs/height inputs and rewrite rule
+    // below determine the submitted uniquifiers from this corpus.
+    SHA256Hasher hasher;
+    for (const auto &tx : work_txs) {
+      hasher.update(x23::serialize(tx));
+    }
+    const auto work_hash = hasher.finalize();
+    const auto setup_hash = sha256(x23::serialize(
+        genesis_configuration, loadgen_result.success().genesis_ceremony_txs,
+        loadgen_result.success().initialization_txs));
+    std::ofstream evidence;
+    indexer_phase::open(evidence, "indexer-phase-corpus.tsv");
+    evidence << "arm\tseed\tlogical_shards\twork_base\ttxs_per_height\t"
+                "setup_sha256\tordered_corpus_sha256\tuniquifier_rule\n"
+             << (indexer_phase::ordered() ? "sorted" : "stock") << '\t'
+             << indexer_phase::kCorpusSeed << '\t'
+             << ERC20ExperimentState::kSeededCorpusShards << '\t' << work_base
+             << '\t' << work_txs.size() << '\t'
+             << encode_hex(std::as_bytes(std::span(setup_hash))) << '\t'
+             << encode_hex(std::as_bytes(std::span(work_hash)))
+             << "\tbench_uniquifier_v1\n" << std::flush;
+  }
   for (size_t i = 0; i < 5; i++) {
     for (size_t j = 0; j < work_txs.size(); j++) {
       work_txs[j].tx.uniquifier =

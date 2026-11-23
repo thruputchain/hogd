@@ -1,7 +1,9 @@
 #pragma once
 
 #include <atomic>
+#include <cstdint>
 #include <memory>
+#include <optional>
 #include <type_traits>
 #include <unordered_map>
 
@@ -18,6 +20,12 @@ namespace hogd {
 class LoadgenRpc {
 public:
   using rpc_service = LoadgenInterfaceV1;
+
+  LoadgenRpc() = default;
+
+  // In-process benchmark configuration only. The RPC interface does not
+  // provide a seed and keeps the normal random corpus.
+  explicit LoadgenRpc(uint32_t erc20_seed) : erc20_seed_(erc20_seed) {}
 
   // We set the RPC max message size to the largest value x23 supports because
   // the loadgen transfers a lot of data via individual RPC calls.  This is the
@@ -40,6 +48,7 @@ private:
       std::unordered_map<LoadgenContextID, std::shared_ptr<ExperimentState>>>
       experiment_states_;
   std::atomic<uint64_t> context_id_counter_;
+  std::optional<uint32_t> erc20_seed_;
 };
 
 static_assert(is_LoadgenInterfaceV1<LoadgenRpc *, x23::Async>);

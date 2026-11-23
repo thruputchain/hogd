@@ -21,7 +21,7 @@ LoadgenRpc::generate_experiment(ExperimentConfig config)
   case ExperimentType::kExperimentTypeERC20Payments:
   {
     auto state =
-        std::make_shared<ERC20ExperimentState>(config.erc20_payments());
+        std::make_shared<ERC20ExperimentState>(config.erc20_payments(), erc20_seed_);
     auto res = co_await state->generate_experiment();
     if (!res) {
       co_return LoadgenResult(res.error().code());

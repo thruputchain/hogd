@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <cstddef>
+#include <cstdint>
+#include <optional>
 #include <vector>
 
 #include "hogd/base/types.h"
@@ -14,7 +17,12 @@ namespace hogd {
 
 class ERC20ExperimentState : public ExperimentState {
 public:
-  ERC20ExperimentState(const ERC20PaymentsConfig &config) : config_(config) {}
+  static constexpr size_t kSeededCorpusShards = 64;
+
+  explicit ERC20ExperimentState(const ERC20PaymentsConfig &config,
+                                std::optional<uint32_t> corpus_seed = {})
+    : config_(config), corpus_seed_(corpus_seed)
+  {}
 
   x23::Async<LoadgenStatus<LoadgenSuccessResult>> generate_experiment();
 
@@ -25,6 +33,7 @@ public:
 
 private:
   ERC20PaymentsConfig config_;
+  std::optional<uint32_t> corpus_seed_;
 
   bool check_config_valid() const { return config_.num_addresses >= 2; }
 
