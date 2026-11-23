@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -120,18 +122,36 @@ struct WriteNativeTokenAgeRecord {
 
 } // namespace
 
+size_t
+Scheduler::num_dirty_native_token_ages()
+{
+  size_t count = 0;
+  accounts_.for_each([&count](const auto &p) {
+    if (p.second.native_token_age_dirty) {
+      count++;
+    }
+  });
+  return count;
+}
+
 x23::Async<void>
-Scheduler::write_all_average_native_token_ages_to_db()
+Scheduler::write_dirty_native_token_ages_to_db()
 {
   co_await default_coropoll().pool_.bg();
 
+  // Each bucket of [accounts_] is locked only while its dirty ages are copied
+  // out and their marks cleared. An age that changes again after its copy is
+  // marked again and goes out with the next write.
   PerThread<NativeTokenAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const NativeTokenAge &age = p.second.native_token_age;
-        CHECK_EQ(p.first, age.address);
-        ages_by_thread->push_back(age);
-      });
+  accounts_.for_each_parallel([&](auto &p) {
+    AccountState &account_state = p.second;
+    if (!account_state.native_token_age_dirty) {
+      return;
+    }
+    CHECK_EQ(p.first, account_state.native_token_age.address);
+    account_state.native_token_age_dirty = false;
+    ages_by_thread->push_back(account_state.native_token_age);
+  });
 
   // Each thread's batch is a part of the run; the records are serialized
   // straight from the parts, so no batch is joined into one.
@@ -139,13 +159,37 @@ Scheduler::write_all_average_native_token_ages_to_db()
   {
     auto ul = ages_by_thread.lock_threads();
     ages_by_thread.for_each(ul, [&parts](NativeTokenAgeBatch &per_thread_ages) {
-      parts.push_back(std::move(per_thread_ages));
+      if (!per_thread_ages.empty()) {
+        parts.push_back(std::move(per_thread_ages));
+      }
     });
   }
+  if (parts.empty()) {
+    co_return;
+  }
+  // A failed write is fatal, so the marks cleared above are never silently
+  // lost.
   ChunkRunSender sender(parts, max_native_token_ages_per_record_,
                         WriteNativeTokenAgeRecord{.client =
                                                       db_sched_client_.get()});
   co_await sender.send();
+}
+
+void
+Scheduler::native_token_age_writer_loop(const std::stop_token &stop,
+                                        std::chrono::milliseconds interval)
+{
+  while (true) {
+    {
+      std::unique_lock lock(native_token_age_writer_mutex_);
+      native_token_age_writer_cv_.wait_for(lock, stop, interval,
+                                           [] { return false; });
+    }
+    if (stop.stop_requested()) {
+      return;
+    }
+    write_dirty_native_token_ages_to_db()();
+  }
 }
 
 std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
@@ -180,7 +224,12 @@ Scheduler::commit_pending_nomination(BlockID block_id)
   for (const auto &[account, native_token_age] :
        pending_nomination_.native_token_ages) {
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
   }
   co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
   co_await refresh_accounts_excluded_from_block();
@@ -286,7 +335,12 @@ Scheduler::apply_committed_block_native_token_ages(
     }
 
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
     touched_accounts.insert(account);
   }
   co_await refresh_ready_accounts(touched_accounts);
@@ -448,6 +502,9 @@ Scheduler::get_native_token_age_from_pending_nomination_create_if_needed(
     AccountState &account_state, const ContractAddress &account)
 {
   if (!pending_nomination_.block_id) {
+    // The caller may change the cached age directly, e.g. by cycling groups in
+    // [add_txs()], so it must be written back to hog_db.
+    account_state.native_token_age_dirty = true;
     return &account_state.native_token_age;
   }
 
@@ -1047,7 +1104,11 @@ Scheduler::process_transfers_helper(const Delta &delta,
   CHECK_NE(num_received, static_cast<int128_t>(0));
 
   const ContractAddress &account = delta.address;
-  auto [averages, lock] = get_cached_native_token_age(account);
+  auto [account_state, lock] = get_account_state(account);
+  CHECK_EQ(account_state->native_token_age.address, account);
+  // Every delta is nonzero (CHECKed above), so it changes the account's age.
+  account_state->native_token_age_dirty = true;
+  const NativeTokenAge *averages = &account_state->native_token_age;
   NativeTokenAge new_averages = *averages;
 
   uint128_t received_native_tokens =

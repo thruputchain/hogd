@@ -2,11 +2,15 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
+#include <condition_variable>
 #include <list>
 #include <map>
 #include <memory>
 #include <mutex>
 #include <set>
+#include <stop_token>
+#include <thread>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -38,14 +42,33 @@ public:
   // written. A NativeTokenAge is 104 bytes on the wire, so a record stays near
   // 7 MiB, under x23's 16 MiB default record cap, whichever way it travels.
   static constexpr size_t kMaxNativeTokenAgesPerRecord = size_t{1} << 16;
+  // How often the background writer sends changed native-token ages to
+  // hog_db. Each write carries only the accounts whose cached [NativeTokenAge]
+  // changed since the last one, so repeated updates to a busy account coalesce
+  // into one row write. The rows are not consensus state and hog_db reconciles
+  // them against balances at startup, so a row may lag the cache (#4384).
+  static constexpr std::chrono::milliseconds
+      kDefaultNativeTokenAgeWriteInterval{1000};
 
   Scheduler(BlockHeight current_block,
-            std::shared_ptr<db_sched_client_t> db_sched_client)
+            std::shared_ptr<db_sched_client_t> db_sched_client,
+            std::chrono::milliseconds native_token_age_write_interval =
+                kDefaultNativeTokenAgeWriteInterval)
     : current_block_(current_block),
       db_sched_client_(std::move(db_sched_client))
-  {}
+  {
+    CHECK_GT(native_token_age_write_interval.count(), 0);
+    native_token_age_writer_ = std::jthread(
+        [this, native_token_age_write_interval](const std::stop_token &stop) {
+          native_token_age_writer_loop(stop, native_token_age_write_interval);
+        });
+  }
 
-  ~Scheduler() { wait_for_pending_detached_coroutines(); }
+  ~Scheduler()
+  {
+    stop_native_token_age_writer();
+    wait_for_pending_detached_coroutines();
+  }
 
   // Which submission path a batch for [add_txs()] came from, which decides
   // what happens to a submission whose body is already cached under a
@@ -62,6 +85,8 @@ public:
 
   x23::Async<void> shut_down()
   {
+    // The writer sends RPCs to hog_db, so stop it before hog_db goes away.
+    stop_native_token_age_writer();
     wait_for_pending_detached_coroutines();
     co_return;
   }
@@ -229,7 +254,22 @@ public:
   std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
   get_cached_native_token_age(const ContractAddress &address);
 
-  x23::Async<void> write_all_average_native_token_ages_to_db();
+  // Writes the native-token ages of the accounts marked dirty since the last
+  // write and clears those marks. Sends nothing when no account is dirty. The
+  // background writer calls this; tests may call it directly.
+  x23::Async<void> write_dirty_native_token_ages_to_db();
+
+  // Stops the background writer and waits for a write in progress to finish.
+  // Idempotent. Tests call it to drive writes themselves.
+  void stop_native_token_age_writer()
+  {
+    if (native_token_age_writer_.joinable()) {
+      native_token_age_writer_.request_stop();
+      native_token_age_writer_.join();
+    }
+  }
+
+  size_t num_dirty_native_token_ages();
 
   // Bounds the native-token ages per DbSched1 record read or written;
   // production keeps the default.
@@ -392,6 +432,9 @@ private:
 
   struct AccountState {
     NativeTokenAge native_token_age{};
+    // Set, under the account lock, whenever [native_token_age] changes; the
+    // background writer clears it when it copies the age out for hog_db.
+    bool native_token_age_dirty = false;
     std::map<TxKey, std::shared_ptr<TxValue>> txs;
   };
 
@@ -539,6 +582,16 @@ private:
   size_t max_native_token_ages_per_record_ = kMaxNativeTokenAgesPerRecord;
 
   std::atomic<ssize_t> pending_detached_coroutines_ = 0;
+
+  void native_token_age_writer_loop(const std::stop_token &stop,
+                                    std::chrono::milliseconds interval);
+
+  // Wakes every write interval to send changed ages to hog_db, off every
+  // scheduling path. Declared last so that it stops before any member it uses
+  // is destroyed.
+  std::mutex native_token_age_writer_mutex_;
+  std::condition_variable_any native_token_age_writer_cv_;
+  std::jthread native_token_age_writer_;
 };
 
 } // namespace hogd
