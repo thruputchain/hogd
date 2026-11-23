@@ -35,6 +35,11 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" \
   "${BENCH_HOSTS[@]}"
 
+if [[ ${GIT_BRANCH:-} == codex/multiexec-event-capacity ]]; then
+  bash "$(dirname "$0")/multiexec_event_capacity.sh" "$BUILD_DIR"
+  exit
+fi
+
 MULTIEXEC_RUNNER=("./$BUILD_DIR/hogd/hog_exec/bench/multiexec_runner")
 if [[ ${HOGD_MULTIEXEC_EVENT_ROOT+x} ]]; then
   if [[ ${HOGD_CI_CONTAINER:-} != 1 ||

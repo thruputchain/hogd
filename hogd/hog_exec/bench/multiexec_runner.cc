@@ -17,8 +17,10 @@
 #include "exec_sched.hh"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
 #include "hogd/hog_exec/bench/indexer_latency_probe.h"
 #include "hogd/hog_exec/bench/mock_scheduler.h"
@@ -217,6 +219,18 @@ run_multiexec_bench(const std::vector<std::string> &server_addrs,
   parallel_batch_to_t(work_txs_raw.success().work_txs, work_txs,
                       kNoBatchSizeLimit)();
   CHECK_EQ(work_txs.size(), num_txs_per_block);
+
+  const char *branch = std::getenv("GIT_BRANCH");
+  if (branch && std::string_view(branch) == "codex/multiexec-event-capacity" &&
+      event_work_dir.starts_with("/bench-event/multiexec-capacity.")) {
+    SHA256Hasher hasher;
+    for (const auto &tx : work_txs) {
+      hasher.update(x23::serialize(tx));
+    }
+    auto hash = hasher.finalize();
+    std::println("multiexec_capacity_workload_sha256={}",
+                 encode_hex(std::as_bytes(std::span(hash))));
+  }
 
   // The same work txs are replayed across every trial, so each must carry a
   // fresh uniquifier (HogDb now rejects a re-consumed one). The signature
