@@ -28,6 +28,7 @@
 #include "hogd/base/perthread.h"
 #include "hogd/base/time.h"
 #include "hogd/base/types.h"
+#include "hogd/base/wide_math.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/container/synchronized_map.h"
 #include "hogd/crypto/crypto.h"
@@ -48,33 +49,20 @@ namespace hogd {
 
 namespace {
 
-// Returns ceil(n * d / t) for 0 < t and n <= t. The product n * d can need
-// up to 192 bits, so this does binary long multiplication over the bits of d,
-// keeping the running product as q * t + r with r < t.
+// Returns ceil(n * d / t) for 0 < t and n <= t, which is at most d. Falls
+// back to wide_math only in the rare case that n * d overflows uint128_t.
 BlockHeight
 mul_div_round_up(uint128_t n, BlockHeight d, uint128_t t)
 {
-  BlockHeight q = 0;
-  uint128_t r = 0;
-  // Adds x <= t to r, carrying into q. Never overflows since r < t.
-  auto add = [&](uint128_t x) {
-    if (r >= t - x) {
-      r -= t - x;
-      ++q;
-    }
-    else {
-      r += x;
-    }
-  };
-  for (int bit = std::numeric_limits<BlockHeight>::digits - 1; bit >= 0;
-       --bit) {
-    q *= 2;
-    add(r);
-    if ((d >> bit) & 1) {
-      add(n);
-    }
+  const auto [product, overflow] = overflowing_mul(n, uint128_t{d});
+  if (!overflow) [[likely]] {
+    return static_cast<BlockHeight>((product / t) + (product % t != 0 ? 1 : 0));
   }
-  return q + (r != 0 ? 1 : 0);
+  const auto wide = limbs_mul_div_rem<2>(limbs_from_u128(n), limbs_from_u128(d),
+                                         limbs_from_u128(t));
+  CHECK(wide.has_value());
+  return static_cast<BlockHeight>(wide->quotient_lo[0]) +
+         (wide->remainder != Limbs<2>{} ? 1 : 0);
 }
 
 BlockHeight
