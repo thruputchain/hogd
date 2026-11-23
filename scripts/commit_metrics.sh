@@ -2,7 +2,8 @@
 set -e
 
 if [[ ${GIT_BRANCH:-} == codex/combined-native-single-replay ||
-      ${GIT_BRANCH:-} == codex/combined-native-multi-replay ]]; then
+      ${GIT_BRANCH:-} == codex/combined-native-multi-replay ||
+      ${GIT_BRANCH:-} == codex/combined-native-multi-validation-phases ]]; then
   . "$(dirname "$0")/ci/combined_native_single_replay.sh"
   native_single_check || native_multi_check
   exit 0

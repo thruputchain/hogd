@@ -1,6 +1,7 @@
 #include "hogd/hog_mempool/rpc_from_coord.h"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <cassert>
 #include <chrono>
@@ -17,6 +18,7 @@
 #include <span>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <utility>
 #include <vector>
@@ -2392,6 +2394,20 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
                                                      Proposal proposal)
 {
   IngestionInterval ingestion_interval("validate", false);
+  using PhaseClock = std::chrono::steady_clock;
+  static const bool validation_phases = [] {
+    const auto matches = [](const char *key, std::string_view value) {
+      const char *actual = std::getenv(key);
+      return actual && actual == value;
+    };
+    return matches("HOGD_HISTORICAL_VALIDATION_PHASES", "1") &&
+           matches("HOGD_CI_CONTAINER", "1") &&
+           matches("HOGD_CI_OFFLINE", "1") &&
+           matches("GIT_BRANCH", "codex/combined-native-multi-validation-phases") &&
+           (matches("HOG_HOST", "hog7") || matches("HOG_HOST", "hog11"));
+  }();
+  const auto handler_start =
+      validation_phases ? PhaseClock::now() : PhaseClock::time_point{};
   if (!ready()) {
     co_return SchedulerValidationResult(
         SchedulerValidationOutcome::SchedulerValidationTooLateToValidate);
@@ -2917,6 +2933,49 @@ MempoolCoordinatorRpc::schedulercoord_validate_block(BlockID parent_id,
   co_await validation_dag.run();
   co_await decrement_num_validations_in_progress();
   validation_outcome = dag_outcome;
+  if (validation_phases &&
+      dag_outcome == SchedulerValidationOutcome::SchedulerValidationOK &&
+      validation_tx_count == 1'000'000) {
+    const auto handler_end = PhaseClock::now();
+    static std::atomic<unsigned> samples{0};
+    const unsigned sample = samples.fetch_add(1, std::memory_order_relaxed);
+    if (sample == 128) {
+      info("HISTORICAL_VALIDATE_SERVER_LIMIT max=128");
+    }
+    if (sample < 128) {
+      const auto to_ns = [](PhaseClock::duration d) {
+        return std::chrono::duration_cast<std::chrono::nanoseconds>(d).count();
+      };
+      std::array<int64_t, 7> durations{};
+      constexpr std::array<std::string_view, 7> names{
+          "decode nomination batches", "prepare and validate chunks",
+          "close validation snapshot", "close event block",
+          "build validation result", "check closed validation block",
+          "compute proposal txs hash"};
+      const auto nodes = validation_dag.stats();
+      auto first = handler_end;
+      for (const auto &node : nodes) {
+        if (!node.finished || node.finished_at < node.started_at) {
+          continue;
+        }
+        first = std::min(first, node.started_at);
+        for (size_t i = 0; i < names.size(); ++i) {
+          if (node.name == names[i]) {
+            durations[i] = to_ns(node.finished_at - node.started_at);
+          }
+        }
+      }
+      info("HISTORICAL_VALIDATE_SERVER height={} block={} txs={} "
+           "handler_ns={} before_dag_ns={} decode_ns={} chunks_ns={} "
+           "db_close_ns={} event_close_ns={} result_ns={} "
+           "check_closed_ns={} proposal_hash_ns={}",
+           proposal.header.block_height, result.block().block_id,
+           validation_tx_count, to_ns(handler_end - handler_start),
+           to_ns(first - handler_start), durations[0], durations[1],
+           durations[2], durations[3], durations[4], durations[5],
+           durations[6]);
+    }
+  }
   if (!validation_dag.ok() && validation_dag.failure().exception) {
     std::rethrow_exception(validation_dag.failure().exception);
   }

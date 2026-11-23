@@ -4,7 +4,12 @@ native_single_selected() {
 }
 
 native_multi_selected() {
-  [[ ${GIT_BRANCH:-} == codex/combined-native-multi-replay ]]
+  [[ ${GIT_BRANCH:-} == codex/combined-native-multi-replay ]] ||
+    native_multi_validation_selected
+}
+
+native_multi_validation_selected() {
+  [[ ${GIT_BRANCH:-} == codex/combined-native-multi-validation-phases ]]
 }
 
 native_replay_check_host() {
@@ -83,6 +88,14 @@ print(image)
         strings "release/$binary" | grep -Fx "$protocol" >/dev/null
         ;;
       esac
+      if native_multi_validation_selected; then
+        case $binary in
+        chuckd.dev)
+          strings "release/$binary" | grep -F 'HISTORICAL_VALIDATE_CLIENT height=' >/dev/null ;;
+        hogd/hog_mempool/hog-mempool)
+          strings "release/$binary" | grep -F 'HISTORICAL_VALIDATE_SERVER height=' >/dev/null ;;
+        esac
+      fi
       sha=$(sha256sum "release/$binary")
       printf 'host=%s run=%s path=release/%s source=%s protocol=%s protocol_tree=%s thruput_go=%s chuckd=%s image=%s workspace=ext4 sha256=%s\n' \
         "$HOG_HOST" "$HOG_XID" "$binary" "$GIT_COMMIT" "$protocol" "$protocol_tree" "$go_commit" "$chuckd" "$image" "${sha%% *}"

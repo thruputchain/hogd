@@ -322,6 +322,16 @@ cleanup() {
         echo "Could not capture stopped multi-node coordinator node $node" >&2
         exit_code=1
       fi
+      if native_multi_validation_selected; then
+        printf -v command 'python3 -I /workspace/scripts/ci/historical-validation/archive.py client %d %q' "$node" "$stderr_path"
+        if ! native_single_peer "${CHUCKD_HOSTS[$node]}" "$command"; then exit_code=1; fi
+        if ! stderr_path=$(get_record_stderr_path "node${node}_mempool"); then
+          exit_code=1
+          continue
+        fi
+        printf -v command 'if ps -eo comm= | grep -qxF hog-mempool; then exit 1; fi; python3 -I /workspace/scripts/ci/historical-validation/archive.py server %d %q' "$node" "$stderr_path"
+        if ! native_single_peer "${MEMPOOL_HOSTS[$node]}" "$command"; then exit_code=1; fi
+      fi
     done
   fi
   exit "$exit_code"

@@ -13,6 +13,10 @@ if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   done
   export CARGO_NET_OFFLINE=true GOPROXY=off GOSUMDB=off GOTOOLCHAIN=local
   export HOGD_SCCACHE_REMOTE=0
+  if [[ ${GIT_BRANCH:-} == codex/combined-native-multi-validation-phases ]]; then
+    source ./scripts/ci/historical-validation/overlay.sh || return 2
+    historical_validation_prepare || return $?
+  fi
   printf 'GCC_CC=%q\nGCC_CXX=%q\n' "${HOGD_CI_GCC_CC:-gcc-15}" "${HOGD_CI_GCC_CXX:-g++-15}" >./scripts/conf.sh
   return 0
 fi

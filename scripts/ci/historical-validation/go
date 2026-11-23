@@ -1,0 +1,12 @@
+#!/usr/bin/env bash
+set -euo pipefail
+if [[ ${1:-} == build && $(pwd -P) == /workspace/thruput-go/chuckd/chuckd ]]; then
+  source /workspace/scripts/ci/historical-validation/overlay.sh
+  historical_validation_verify_sources
+  overlay=/workspace/.ci/historical-validation-overlay/overlay.json
+  [[ $(realpath -e "$overlay") == "$overlay" ]]
+  historical_validation_overlay_json | cmp -s -- - "$overlay"
+  shift
+  exec /usr/bin/go build -overlay="$overlay" "$@"
+fi
+exec /usr/bin/go "$@"
