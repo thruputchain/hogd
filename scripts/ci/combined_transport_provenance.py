@@ -80,6 +80,61 @@ def mounts_at(pid):
     return mounts
 
 
+def cgroup_limits(pid):
+    """Resolve v2 membership against the observed task's namespace mount."""
+    try:
+        membership = next(line[3:] for line in bounded_read(pid / "cgroup").decode().splitlines()
+                          if line.startswith("0::/"))
+        path = Path(membership)
+        if ".." in path.parts:
+            return {"status": "outside_visible_cgroup_namespace"}
+        for line in bounded_read(pid / "mountinfo").decode().splitlines():
+            before, sep, after = line.partition(" - ")
+            fields = before.split()
+            if not sep or not after.startswith("cgroup2 ") or len(fields) < 5:
+                continue
+            root, mount = map(Path, fields[3:5])
+            if any(chr(92) in str(item) for item in (root, mount)) or not path.is_relative_to(root):
+                continue
+            resolved = pid / "root" / mount.relative_to("/") / path.relative_to(root)
+            limits = {}
+            for key in ("cpu.max", "cpuset.cpus.effective", "cpuset.mems.effective", "memory.max"):
+                try:
+                    limits[key] = bounded_read(resolved / key, 4096).decode().strip()
+                except OSError:
+                    continue
+            return {"status": "observed" if limits else "unreadable", "membership": membership,
+                    "mount_root": str(root), "mount_point": str(mount), "limits": limits}
+    except (OSError, RuntimeError, ValueError, StopIteration):
+        pass
+    return {"status": "unavailable"}
+
+
+def start_ticks(pid):
+    return int(bounded_read(pid / "stat").decode().rpartition(") ")[2].split()[19])
+
+
+def task_snapshot(pid):
+    limit = 256
+    try:
+        tasks = list(islice((pid / "task").iterdir(), limit + 1))
+    except OSError:
+        return {"status": "unavailable"}
+    masks = Counter()
+    for task in tasks[:limit]:
+        try:
+            fields = placement(task)
+            if len(fields) == 2:
+                masks[fields["Cpus_allowed_list"], fields["Mems_allowed_list"]] += 1
+        except (OSError, ValueError):
+            continue
+    readable = sum(masks.values())
+    return {"status": "snapshot", "sampled": readable, "enumerated_lower_bound": len(tasks),
+            "partial": readable != len(tasks),
+            "distinct": [{"cpus_allowed": cpus, "mems_allowed": mems, "count": count}
+                         for (cpus, mems), count in sorted(masks.items())]}
+
+
 def actual_storage(pid, workspace, mounts):
     observed = {}
     try:
@@ -123,7 +178,7 @@ def binary_identity(stat):
     return [stat.st_dev, stat.st_ino, stat.st_size, stat.st_mtime_ns]
 
 
-def process_rows(proc, workspace, manifest, roles, seen):
+def process_rows(proc, workspace, manifest, roles, seen, first_seen=None):
     paths = {workspace / "release" / PROGRAMS[key]: key for key in roles}
     pids = list(islice((path for path in proc.iterdir() if path.name.isdecimal()), 1025))
     if len(pids) > 1024:
@@ -137,22 +192,33 @@ def process_rows(proc, workspace, manifest, roles, seen):
             stat = (pid / "exe").stat()
             if binary_identity(stat) != manifest["binary"][key]["identity"]:
                 continue
-            life = int(bounded_read(pid / "stat").decode().rpartition(") ")[2].split()[19])
+            life = start_ticks(pid)
             tid = (pid.name, life)
             if tid in seen:
                 continue
             fields = placement(pid)
             if len(fields) != 2:
                 continue
+            threads = {"status": "unobserved"}
+            if first_seen is not None:
+                now = time.monotonic()
+                if len(first_seen) >= 128 and tid not in first_seen:
+                    continue
+                if now - first_seen.setdefault(tid, now) < 3:
+                    continue
+                threads = task_snapshot(pid)
             mounts = mounts_at(pid)
             same_cgroup = bounded_read(pid / "cgroup") == bounded_read(proc / "self/cgroup")
-            if binary_identity((pid / "exe").stat()) != binary_identity(stat):
+            cgroup = cgroup_limits(pid)
+            storage = actual_storage(pid, workspace, mounts)
+            if (binary_identity((pid / "exe").stat()) != binary_identity(stat)
+                or start_ticks(pid) != life):
                 continue
             seen.add(tid)
             yield {"role": key, "pid": int(pid.name), "start_ticks": life, "allow": fields,
-                   "same_as_observer_cgroup": same_cgroup,
+                   "same_as_observer_cgroup": same_cgroup, "cgroup": cgroup, "task_masks": threads,
                    "workspace_fstype": mount_type(workspace, mounts),
-                   "storage_fstype": actual_storage(pid, workspace, mounts)}
+                   "storage_fstype": storage}
         except (OSError, IndexError, ValueError):
             continue
 
@@ -176,13 +242,9 @@ def initialize(workspace, host):
             cache[key] = rest.partition("=")[2]
     if cache.get("CMAKE_BUILD_TYPE") != "Release":
         raise ValueError("expected existing stock Release build")
-    cgroup = {}
-    for key in ("cpu.max", "cpuset.cpus.effective", "cpuset.mems.effective", "memory.max"):
-        path = Path("/sys/fs/cgroup") / key
-        if path.is_file():
-            cgroup[key] = bounded_read(path, 4096).decode().strip()
-    return {"binary": binaries, "cmake": cache, "cgroup": cgroup,
-            "observer_allow": placement(Path("/proc/self"))}
+    observer = Path("/proc/self")
+    return {"binary": binaries, "cmake": cache, "cgroup": cgroup_limits(observer),
+            "observer_allow": placement(observer)}
 
 
 def main():
@@ -199,7 +261,7 @@ def main():
         or not re.fullmatch(r"[a-f0-9]{40}", args.source)):
         parser.error("expected isolated Combined provenance scope")
     out = workspace / ".ci/dumps/combined-transport-provenance"
-    out.mkdir(mode=0o700, exist_ok=True)
+    out.mkdir(mode=0o700, parents=True, exist_ok=True)
     coordination = workspace / ".ci/combined-transport-provenance"
     coordination.mkdir(mode=0o700, exist_ok=True)
     receipt = out / "host.json"
@@ -218,20 +280,28 @@ def main():
     if any(manifest.get(key) != value for key, value in metadata.items()):
         parser.error("host manifest does not match this run")
     seen = set()
+    first_seen = {}
     deadline = time.monotonic() + 1800
+    started_cpu = time.process_time_ns()
+    max_scan_ns = 0
     stop = coordination / f"{args.stage}.stop"
     roles = ROLES[args.stage][args.host]
     observed = Counter()
     with (out / f"{args.stage}.jsonl").open("x", buffering=1) as stream:
-        print(json.dumps(metadata | {"stage": args.stage}), file=stream)
+        print(json.dumps(metadata | {"stage": args.stage, "mask_scope": "bounded_task_snapshot_after_3s",
+                                     "pinning_and_cpu_residency": "unobserved"}), file=stream)
         (coordination / f"{args.stage}.ready").touch(exist_ok=False)
         while time.monotonic() < deadline and not stop.exists() and len(seen) < 64:
-            for row in process_rows(Path("/proc"), workspace, manifest, roles, seen):
+            scan_start = time.monotonic_ns()
+            for row in process_rows(Path("/proc"), workspace, manifest, roles, seen, first_seen):
                 observed[row["role"]] += 1
                 print(json.dumps(row), file=stream)
+            max_scan_ns = max(max_scan_ns, time.monotonic_ns() - scan_start)
             time.sleep(1)
         print(json.dumps({"sampled_processes": len(seen), "stopped_by_controller": stop.exists(),
-                          "missing_instances": dict(Counter(roles) - observed)}),
+                          "missing_instances": dict(Counter(roles) - observed),
+                          "observer_cpu_ns": time.process_time_ns() - started_cpu,
+                          "max_scan_wall_ns": max_scan_ns}),
               file=stream)
 
 
