@@ -44,6 +44,12 @@ ci_describe_exit_status() {
   fi
 }
 
+ci_auth_cold64_controller() {
+  [[ ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics &&
+     ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+     ${HOG_HOST:-} == hog10 ]]
+}
+
 # Runs one benchmark step, streaming its output as before and also capturing it
 # to [$CI_BENCH_LOG_DIR/<name>.log]. Records the failure instead of propagating
 # it, so a caller that runs several steps back to back keeps going and can
@@ -57,6 +63,13 @@ ci_describe_exit_status() {
 ci_run_bench_step() {
   local name=$1
   shift
+  if ci_auth_cold64_controller; then
+    case "$name" in
+      auth_bench_start|auth_bench) ;;
+      *) return 0 ;;
+    esac
+  fi
+
   local status=0
   local restore_errexit=""
 
@@ -422,6 +435,30 @@ ci_control_shutdown_hosts() {
   local control_port=$2
   local host
   shift 2
+
+  # The Auth-only Combined run skips the suites that wait for these builds.
+  # Do not drop this exact early group from the schedule before checking release.
+  if ci_auth_cold64_controller &&
+     [[ $# == 3 && $1 == hog4 && $2 == hog5 && $3 == hog6 ]]; then
+    local pid status=0
+    local -a pids=()
+    for host in "$@"; do
+      (
+        CI_WAIT_CONTROL_TIMEOUT_SEC=${CI_WAIT_CONTROL_TIMEOUT_SEC:-600} \
+          ci_wait_control_server "$control_cli" "$host" "$control_port" || exit 1
+        if ! timeout "$CI_WAIT_CONTROL_PROBE_SEC" \
+          "$control_cli" "$host" "$control_port" shutdown; then
+          echo "Failed to shut down the early Auth-only Combined host $host" >&2
+          exit 1
+        fi
+      ) &
+      pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do
+      wait "$pid" || status=1
+    done
+    return "$status"
+  fi
 
   for host in "$@"; do
     "$control_cli" "$host" "$control_port" shutdown || true
