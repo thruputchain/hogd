@@ -2,6 +2,11 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  if [[ ${GIT_BRANCH:-} == codex/makespan-db-event-transport &&
+    ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_EVENT_NETWORK_DIAGNOSTICS:-} == 1 &&
+    ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-event-bench-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+    exit 0
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested

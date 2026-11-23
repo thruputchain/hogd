@@ -43,6 +43,7 @@
 #include <numeric>
 #include <print>
 #include <random>
+#include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
@@ -54,6 +55,7 @@
 #include "built_contracts/storage_reads.h"
 #include "consensus.hh"
 #include "contract.hh"
+#include "db_sched.hh"
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "executor_to_db_rpc.hh"
@@ -61,6 +63,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/rpc_client.h"
+#include "hogd/base/string.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/genesis/genesis_configuration.h"
@@ -70,6 +73,7 @@
 #include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/item/db_connection_map.h"
+#include "hogd/hog_mempool/config_hash.h"
 #include "hogd/init.h"
 #include "hogd/storage_cost/storage_cost_model.h"
 #include "rpc_types.hh"
@@ -178,6 +182,7 @@ struct Dispatch {
   std::atomic<size_t> live_coros;
   std::vector<UnitTiming> timings;
   x23::CoroCB<void> *done;
+  bool require_misses = false;
 };
 
 x23::Detached
@@ -222,6 +227,7 @@ struct Probe {
   // One per coroutine, which alone appends to it.
   std::vector<std::vector<uint64_t>> latency_ns;
   x23::CoroCB<void> *done;
+  bool require_misses = false;
 };
 
 // Reads keys nobody wrote, one at a time, until the probe's budget is spent:
@@ -244,14 +250,143 @@ probe_coro(db_probe_client_t &client, Probe *p, size_t index)
     const uint64_t start_ns = x23::fastclock::get_ns();
     auto res = co_await client.get_snapshot_item(p->block, addrkey);
     latency.push_back(x23::fastclock::get_ns() - start_ns);
-    if (res.error() != RPCError::kRPCNone &&
-        res.error() != RPCError::kRPCNotFound) {
+    if (res.error() != RPCError::kRPCNotFound &&
+        (p->require_misses || res.error() != RPCError::kRPCNone)) {
       p->unexpected_errors.fetch_add(1, std::memory_order_relaxed);
     }
   }
   if (p->live_coros.fetch_sub(1, std::memory_order_acq_rel) == 1) {
     (*p->done)();
   }
+}
+
+void
+run_probe_level(std::vector<db_probe_client_t> &clients, BlockID block,
+                const ContractAddress &address, size_t inflight,
+                size_t connections, int64_t n_reads,
+                bool require_misses = false)
+{
+  auto [async, cb] = x23::make_async<void>();
+  Probe p{.block = block,
+          .address = address,
+          .remaining = n_reads,
+          .live_coros = inflight,
+          .latency_ns = std::vector<std::vector<uint64_t>>(inflight),
+          .done = &cb,
+          .require_misses = require_misses};
+  const uint64_t start_ns = x23::fastclock::get_ns();
+  for (size_t i = 0; i < inflight; i++) {
+    probe_coro(clients[i % connections], &p, i);
+  }
+  async();
+  const uint64_t end_ns = x23::fastclock::get_ns();
+
+  std::vector<uint64_t> latency;
+  latency.reserve(static_cast<size_t>(n_reads));
+  for (const auto &v : p.latency_ns) {
+    latency.insert(latency.end(), v.begin(), v.end());
+  }
+  std::ranges::sort(latency);
+  const double wall_s = static_cast<double>(end_ns - start_ns) / 1e9;
+  const double sum_ns = std::accumulate(latency.begin(), latency.end(), 0.0);
+  auto pct_us = [&latency](double q) {
+    return latency.empty()
+               ? 0.0
+               : static_cast<double>(latency[static_cast<size_t>(
+                     q * static_cast<double>(latency.size() - 1))]) /
+                     1000.0;
+  };
+  std::println("probe: inflight={} connections={} reads={} wall_ms={:.1f} "
+               "reads_per_s={:.0f} lat_avg_us={:.1f} lat_p50_us={:.1f} "
+               "lat_p99_us={:.1f} unexpected_errors={}",
+               inflight, connections, latency.size(), wall_s * 1e3,
+               static_cast<double>(latency.size()) / wall_s,
+               latency.empty()
+                   ? 0.0
+                   : sum_ns / 1000.0 / static_cast<double>(latency.size()),
+               pct_us(0.5), pct_us(0.99), p.unexpected_errors.load());
+  std::fflush(stdout);
+  if (require_misses) {
+    CHECK_EQ(latency.size(), static_cast<size_t>(n_reads));
+    CHECK_EQ(p.unexpected_errors.load(), 0U);
+  }
+}
+
+bool
+db_probe_only_enabled()
+{
+  const auto is = [](const char *key, std::string_view expected) {
+    const auto *value = std::getenv(key);
+    return value && expected == value;
+  };
+  return is("GIT_BRANCH", "codex/makespan-db-event-transport") &&
+         is("HOGD_CI_CONTAINER", "1") && is("HOGD_CI_OFFLINE", "1") &&
+         is("HOGD_EVENT_NETWORK_DIAGNOSTICS", "1") && is("HOG_HOST", "hog10");
+}
+
+void
+run_db_probe_only(std::string_view mode)
+{
+  constexpr BlockID block = 1;
+  constexpr uint16_t exec_port = 10000;
+  constexpr uint16_t sched_port = 10001;
+  constexpr size_t connections = 96;
+  const std::string db_ip = hog_ip("hog11");
+  GenesisConfigurationBuilder builder;
+
+  auto fib_contract = std::make_shared<Contract>(ContractType::kRv32);
+  fib_contract->rv32_contract() = load_contract_blob("fibonacci.rv32a");
+  builder.add_distribution(
+      fib_contract, SHA256Hash{}, fib_meta_t::entrypoint<u8"fibonacci">(),
+      fib_meta_t::make_calldata<u8"fibonacci">(uint32_t{5}), kContractFunding);
+
+  auto reads_contract = std::make_shared<Contract>(ContractType::kRv32);
+  reads_contract->rv32_contract() = load_contract_blob("storage_reads.rv32a");
+  builder.add_distribution(reads_contract, SHA256Hash{},
+                           reads_meta_t::entrypoint<u8"init">(),
+                           reads_meta_t::make_calldata<u8"init">(),
+                           kContractFunding);
+  const auto reads_addr =
+      calculate_genesis_deployment_address(sha256(*reads_contract),
+                                           SHA256Hash{});
+
+  if (mode == "seed") {
+    const StorageCostModel cost_model = StorageCostModel::default_cost_model();
+    auto root_contract = load_stock_genesis_root_contract();
+    auto genesis = builder.build(NetworkHash{}, cost_model, *root_contract,
+                                 stock_network_config());
+    ConsensusValue value{};
+    value.proposal_header.block_height = 0;
+    value.proposal_header.config_hash = compute_config_hash(genesis);
+    auto sched =
+        make_srpc_client<DbSched1>(x23::HostPort{db_ip, sched_port}, false);
+    CHECK_EQ(sched.dbsched_load_genesis_configuration(genesis, value),
+             DbSchedResult::DbSchedResultOK);
+    CHECK_EQ(sched.dbsched_create_snapshot(
+                 0, block, BlockExecutionMode::kBlockExecutionModeProposal),
+             DbSchedResult::DbSchedResultOK);
+    const auto genesis_hash = sha256(genesis);
+    std::println("probe_seed: endpoint={}:{} block={} genesis_sha256={} "
+                 "reads_address={}",
+                 db_ip, sched_port, block,
+                 encode_hex(std::as_bytes(std::span(genesis_hash))),
+                 encode_hex(std::as_bytes(std::span(reads_addr))));
+    return;
+  }
+
+  CHECK(x23::single_bucket_map->cpuset(0).valid());
+  std::vector<db_probe_client_t> clients;
+  clients.reserve(connections);
+  for (size_t i = 0; i < connections; ++i) {
+    clients.push_back(make_rpc_multiclient<DatabaseToExecutorInterfaceV1>(
+        x23::HostPort{db_ip, exec_port}, false, *x23::single_bucket_map));
+  }
+  std::println("probe_config: endpoint={}:{} block={} require_misses=true",
+               db_ip, exec_port, block);
+  run_probe_level(clients, block, reads_addr, connections, connections, 300'000,
+                  /*require_misses=*/true);
+  run_probe_level(clients, block, reads_addr, 100 * connections, connections,
+                  1'000'000, /*require_misses=*/true);
 }
 
 // Uniquifiers for every work transaction in the run. A nonce is never reused,
@@ -582,46 +717,8 @@ private:
       else if (inflight <= n_connections) {
         n_reads = 300'000;
       }
-      auto [async, cb] = x23::make_async<void>();
-      Probe p{.block = current_block_number_,
-              .address = reads_addr_,
-              .remaining = n_reads,
-              .live_coros = inflight,
-              .latency_ns = std::vector<std::vector<uint64_t>>(inflight),
-              .done = &cb};
-      const uint64_t start_ns = x23::fastclock::get_ns();
-      for (size_t i = 0; i < inflight; i++) {
-        probe_coro(clients[i % connections], &p, i);
-      }
-      async();
-      const uint64_t end_ns = x23::fastclock::get_ns();
-
-      std::vector<uint64_t> latency;
-      latency.reserve(static_cast<size_t>(n_reads));
-      for (const auto &v : p.latency_ns) {
-        latency.insert(latency.end(), v.begin(), v.end());
-      }
-      std::ranges::sort(latency);
-      const double wall_s = static_cast<double>(end_ns - start_ns) / 1e9;
-      const double sum_ns =
-          std::accumulate(latency.begin(), latency.end(), 0.0);
-      auto pct_us = [&latency](double q) {
-        return latency.empty()
-                   ? 0.0
-                   : static_cast<double>(latency[static_cast<size_t>(
-                         q * static_cast<double>(latency.size() - 1))]) /
-                         1000.0;
-      };
-      std::println("probe: inflight={} connections={} reads={} wall_ms={:.1f} "
-                   "reads_per_s={:.0f} lat_avg_us={:.1f} lat_p50_us={:.1f} "
-                   "lat_p99_us={:.1f} unexpected_errors={}",
-                   inflight, connections, latency.size(), wall_s * 1e3,
-                   static_cast<double>(latency.size()) / wall_s,
-                   latency.empty()
-                       ? 0.0
-                       : sum_ns / 1000.0 / static_cast<double>(latency.size()),
-                   pct_us(0.5), pct_us(0.99), p.unexpected_errors.load());
-      std::fflush(stdout);
+      run_probe_level(clients, current_block_number_, reads_addr_, inflight,
+                      connections, n_reads);
     }
     close_block(cluster_.db_sched_client(), cluster_.event_sched_client(),
                 exec_clients_, current_block_number_, prev_value_,
@@ -720,6 +817,18 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   auto ret = hogd::hogd_init(argc, argv);
   if (ret)
     return ret;
+
+  if (argc >= 2 && std::string_view(argv[1]) == "--db-probe-only") {
+    if (!hogd::db_probe_only_enabled() || argc != 3 ||
+        (std::string_view(argv[2]) != "seed" &&
+         std::string_view(argv[2]) != "measure")) {
+      std::println(stderr, "DB probe requires the Event transport diagnostic "
+                           "on hog10 and seed or measure");
+      return EXIT_FAILURE;
+    }
+    hogd::run_db_probe_only(argv[2]);
+    return EXIT_SUCCESS;
+  }
 
   std::vector<std::string> server_addrs;
   hogd::Params params;

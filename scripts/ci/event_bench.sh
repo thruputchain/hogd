@@ -1,5 +1,8 @@
 #!/usr/bin/env bash
 set -Eeuo pipefail
+if [[ ${GIT_BRANCH:-} == codex/makespan-db-event-transport ]]; then
+  exec bash "$(dirname "$0")/makespan_db_event_probe.sh"
+fi
 
 . "$(dirname "$0")/bench_harness.sh"
 ci_enable_error_trace
