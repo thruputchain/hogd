@@ -45,8 +45,8 @@ ci_describe_exit_status() {
 }
 
 ci_auth_cold_placement_canary_controller() {
-  [[ ( ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ||
-        ${GIT_BRANCH:-} == codex/auth-cold-placement-control ) &&
+  [[ ( ${GIT_BRANCH:-} == codex/auth-cold-all-placement-canary ||
+        ${GIT_BRANCH:-} == codex/auth-cold-all-placement-control ) &&
      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
      ${HOG_HOST:-} == hog10 ]]
