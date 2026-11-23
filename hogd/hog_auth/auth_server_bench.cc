@@ -537,7 +537,7 @@ report_cpu(benchmark::State &state, size_t txs, const CpuStopwatch &stopwatch)
 }
 
 #ifdef __linux__
-bool pin_warm_batch64 = false;
+bool g_pin_warm_batch64 = false;
 
 std::vector<pid_t>
 auth_bench_threads()
@@ -651,7 +651,7 @@ configure_warm_batch_affinity()
   };
   if (option == std::string_view("1") && matches("HOGD_CI_CONTAINER", "1") &&
       matches("HOGD_CI_OFFLINE", "1") && matches("HOG_HOST", "hog9")) {
-    pin_warm_batch64 = true;
+    g_pin_warm_batch64 = true;
     return true;
   }
 #endif
@@ -668,7 +668,7 @@ bm_verify_warm(benchmark::State &state, size_t batch_size, size_t parallelism)
 {
 #ifdef __linux__
   std::optional<WarmBatchAffinity> affinity;
-  if (pin_warm_batch64 && batch_size == 64 &&
+  if (g_pin_warm_batch64 && batch_size == 64 &&
       (parallelism == 1 || parallelism == 2)) {
     affinity.emplace();
     state.SetLabel("affinity=round-robin");
