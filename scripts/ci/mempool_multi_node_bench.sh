@@ -39,6 +39,27 @@ HOG_DB_HOSTS=(hog7 hog11)
 MEMPOOL_HOSTS=(hog7 hog11)
 NODE_HOST_GROUPS=("hog4 hog5 hog6 hog7" "hog8 hog9 hog10 hog11")
 
+validation_batch_canary=
+case "${GIT_BRANCH:-}" in
+  codex/multinode-validation-legacy) validation_batch_canary=legacy ;;
+  codex/multinode-validation-bounded64) validation_batch_canary=bounded64 ;;
+esac
+if [[ -n $validation_batch_canary ]]; then
+  if [[ ${HOGD_CI_CONTAINER:-} != 1 || ${HOGD_CI_OFFLINE:-} != 1 ||
+        ${HOG_HOST:-} != hog10 || $WORK_DIR != ci_work_dir/ ||
+        ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-} != 0 ||
+        ! ${HOG_XID:-} =~ ^hogd-e2e-payment-multi-node-[0-9]+-[0-9]+$ ||
+        ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} != 0 ]]; then
+    echo 'Validation batching canary requires standalone ordinary offline Hog Multi-Node Payment' >&2
+    exit 2
+  fi
+  validation_batch_artifacts="${HOG_DUMP_DIR:?}/validation-batch-canary"
+  mkdir -m 700 -- "$validation_batch_artifacts"
+  printf 'source=%s\nbranch=%s\nrun=%s\nselected_mode=%s\n' \
+    "$GIT_commit" "$GIT_BRANCH" "$HOG_XID" "$validation_batch_canary" \
+    > "$validation_batch_artifacts/mode.txt"
+fi
+
 LOADGEN_BINARY="$BUILD_ROOT/hogd/loadgen/loadgen_server"
 CHUCKD_BINARY="$BUILD_ROOT/chuckd.dev"
 SCPD_BINARY="$BUILD_ROOT/scpd.dev"
@@ -256,17 +277,60 @@ write_coordinator_output() {
 
   tmp_node0=$(mktemp)
   tmp_node1=$(mktemp)
-  copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0"
-  copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"
+  if [[ -n $validation_batch_canary ]]; then
+    if ! copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0" ||
+       ! copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1" ||
+       [[ ! -s $tmp_node0 || ! -s $tmp_node1 ]]; then
+      rm -f -- "$tmp_node0" "$tmp_node1"
+      return 1
+    fi
+  else
+    copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0"
+    copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"
+  fi
   echo "writing both outputs to $REPO_ROOT/coordinator_output.txt"
   cat "$tmp_node0" "$tmp_node1" >"$REPO_ROOT/coordinator_output.txt"
   rm -f "$tmp_node0" "$tmp_node1"
   COORDINATOR_OUTPUT_WRITTEN=1
 }
 
+capture_validation_batch_canary() {
+  local node path excerpt rc=0
+  if write_coordinator_output && [[ -s "$REPO_ROOT/coordinator_output.txt" ]]; then
+    cp -- "$REPO_ROOT/coordinator_output.txt" "$validation_batch_artifacts/coordinator_output.txt" || rc=1
+  else
+    echo 'Missing normal coordinator report for validation batching canary' >&2
+    rc=1
+  fi
+  local settings='validation RPC batching: max_transactions=64 target_record_bytes=16777216'
+  for node in "${NODE_IDS[@]}"; do
+    if ! path=$(get_record_stderr_path "node${node}_mempool") ||
+       ! excerpt=$(remote_run "${MEMPOOL_HOSTS[$node]}" \
+         "LC_ALL=C grep -aEm 8 'git commit hash:|validation RPC batching:' $(printf '%q' "$path")"); then
+      echo "Missing mempool startup evidence for node $node" >&2
+      rc=1
+      continue
+    fi
+    printf '%s\n' "$excerpt" > "$validation_batch_artifacts/node$node-startup.txt" || rc=1
+    if [[ $excerpt != *"git commit hash: $GIT_commit"* ]] ||
+       [[ $validation_batch_canary == bounded64 && $excerpt != *"$settings"* ]] ||
+       [[ $validation_batch_canary == legacy && $excerpt == *'validation RPC batching:'* ]]; then
+      echo "Unexpected mempool startup mode or revision for node $node" >&2
+      rc=1
+    fi
+  done
+  return "$rc"
+}
+
 publish_results() {
   if [[ $PUBLISHED_RESULTS -eq 1 ]]; then
     return 0
+  fi
+
+  if [[ -n $validation_batch_canary ]]; then
+    PUBLISHED_RESULTS=1
+    capture_validation_batch_canary
+    return
   fi
 
   if [[ ${#CONTROL_LOG_RECORDS[@]} -eq 0 ]]; then
@@ -381,7 +445,8 @@ node1_mempool_cmd=(
   --metrics-port "$MEMPOOL_HTTP_PORT"
 )
 
-if [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+if [[ $validation_batch_canary != legacy &&
+      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog10 && $WORK_DIR == ci_work_dir/ &&
       ${HOG_E2E_PAYMENT_MULTI_NODE_ASAN:-0} == 0 &&
       ${HOG_XID:-} =~ ^hogd-(combined-metrics|e2e-payment-multi-node)-[0-9]+-[0-9]+$ ]]; then
