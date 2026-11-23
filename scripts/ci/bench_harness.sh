@@ -434,6 +434,31 @@ ci_control_shutdown_hosts() {
   local host
   shift 2
 
+  # The focused replay skips exec_scaling, which normally waits for these
+  # control servers. This call precedes removal of the trio from the
+  # controller's active host list, so allow it only after checked shutdown.
+  if combined_native_replay_selected &&
+    [[ $# == 3 && $1 == hog4 && $2 == hog5 && $3 == hog6 ]]; then
+    combined_native_replay_check || return
+    local pid status=0
+    local -a pids=()
+    for host in "$@"; do
+      (
+        CI_WAIT_CONTROL_TIMEOUT_SEC=600 \
+          ci_wait_control_server "$control_cli" "$host" "$control_port" || exit 1
+        if ! timeout --kill-after=2s 10s "$control_cli" "$host" "$control_port" shutdown; then
+          echo "Combined native-source replay: failed to shut down early host $host" >&2
+          exit 1
+        fi
+      ) &
+      pids+=("$!")
+    done
+    for pid in "${pids[@]}"; do
+      wait "$pid" || status=1
+    done
+    return "$status"
+  fi
+
   for host in "$@"; do
     "$control_cli" "$host" "$control_port" shutdown || true
   done
