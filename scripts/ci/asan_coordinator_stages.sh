@@ -1,12 +1,19 @@
 #!/usr/bin/env bash
 # Bounded INFO collection over the trusted standalone ASAN run-local broker.
 
+ci_asan_coordinator_branch() {
+  case ${GIT_BRANCH:-} in
+  codex/asan-mempool-coordinator-stages | codex/asan-chuckd-propose-timing) return 0 ;;
+  *) return 1 ;;
+  esac
+}
+
 ci_asan_coordinator_selected() {
-  [[ ${GIT_BRANCH:-} == codex/asan-mempool-coordinator-stages &&
-    ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-    ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-mempool-bench-[1-9][0-9]*-[1-9][0-9]*$ &&
-    ${CI_MEMPOOL_METRIC_NAME:-} == nightly_integration_mempool_asan &&
-    ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ ]]
+  ci_asan_coordinator_branch &&
+    [[ ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+      ${HOG_HOST:-} == hog10 && ${HOG_XID:-} =~ ^hogd-mempool-bench-[1-9][0-9]*-[1-9][0-9]*$ &&
+      ${CI_MEMPOOL_METRIC_NAME:-} == nightly_integration_mempool_asan &&
+      ${GIT_COMMIT:-} =~ ^[0-9a-f]{40}$ ]]
 }
 
 ci_asan_coordinator_log_path() {

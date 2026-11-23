@@ -1,0 +1,17 @@
+--- a/sub/baton/baton/propose.go
++++ b/sub/baton/baton/propose.go
+@@ -66,0 +67 @@
++	callerStart := time.Now()
+@@ -67,0 +69 @@
++	callerEnd := time.Now()
+@@ -118,0 +121,4 @@
++	var localDuration time.Duration
++	if numTxs == 1_000_000 {
++		localDuration = time.Since(callerEnd)
++	}
+@@ -119,0 +126,5 @@
++	if numTxs == 1_000_000 {
++		liblog.Infof(ctx, "CHUCKD_PROPOSE_TIMING height=%d block_id=%d tx_count=%d value=%s rpc_ns=%d local_ns=%d",
++			height, proposedBlock.Block_id, numTxs, protoutil.ValueDisplay(value),
++			callerEnd.Sub(callerStart).Nanoseconds(), localDuration.Nanoseconds())
++	}

@@ -2,6 +2,8 @@
 
 #include <atomic>
 #include <chrono>
+#include <cstddef>
+#include <cstdint>
 #include <optional>
 #include <string_view>
 #include <utility>
@@ -83,11 +85,27 @@ public:
   ~IngestionInterval()
   {
     if (enabled_)
-      info("INGESTION_INTERVAL phase={} start_ns={} end_ns={} unix_start_ns={}",
-           phase_, start_, now(), unix_start_);
+      report(now());
+  }
+
+protected:
+  void report_identified(uint64_t height, uint64_t block_id, size_t tx_count)
+  {
+    const int64_t end = now();
+    report(end);
+    enabled_ = false;
+    info("MEMPOOL_BLOCK_INTERVAL phase={} height={} block_id={} tx_count={} "
+         "start_ns={} end_ns={}",
+         phase_, height, block_id, tx_count, start_, end);
   }
 
 private:
+  void report(int64_t end) const
+  {
+    info("INGESTION_INTERVAL phase={} start_ns={} end_ns={} unix_start_ns={}",
+         phase_, start_, end, unix_start_);
+  }
+
   static int64_t now()
   {
     return std::chrono::duration_cast<std::chrono::nanoseconds>(
@@ -98,5 +116,32 @@ private:
   bool enabled_ = true;
   int64_t start_ = 0;
   int64_t unix_start_ = 0;
+};
+// Identified intervals are opt-in and only report successful full-size blocks.
+class MempoolBlockInterval : public IngestionInterval {
+public:
+  explicit MempoolBlockInterval(std::string_view phase)
+    : IngestionInterval(phase)
+  {}
+
+  void identify(uint64_t height, uint64_t block_id, size_t tx_count)
+  {
+    if (tx_count == 1'000'000)
+      block_.emplace(height, block_id, tx_count);
+  }
+
+  ~MempoolBlockInterval()
+  {
+    if (block_)
+      report_identified(block_->height, block_->id, block_->tx_count);
+  }
+
+private:
+  struct Block {
+    uint64_t height;
+    uint64_t id;
+    size_t tx_count;
+  };
+  std::optional<Block> block_;
 };
 } // namespace hogd

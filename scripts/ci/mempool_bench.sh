@@ -7,8 +7,8 @@ set -Eeuo pipefail
 ci_enable_error_trace
 
 asan_coordinator_diagnostic=
-if [[ ${GIT_BRANCH:-} == codex/asan-mempool-coordinator-stages ]]; then
-  . "$(dirname "$0")/asan_coordinator_stages.sh"
+source "$(dirname "$0")/asan_coordinator_stages.sh"
+if ci_asan_coordinator_branch; then
   if ! ci_asan_coordinator_selected ||
     [[ ${HOG_DUMP_DIR:-} != /workspace/.ci/dumps || $(git rev-parse HEAD) != "$GIT_COMMIT" ]]; then
     echo 'ASAN coordinator diagnostic requires the exact offline standalone mempool benchmark on hog10' >&2
@@ -149,6 +149,10 @@ start_coordinator() {
 
 if [[ -n $asan_coordinator_diagnostic ]]; then
   mkdir -m 700 "$asan_coordinator_diagnostic"
+  if [[ $GIT_BRANCH == codex/asan-chuckd-propose-timing ]]; then
+    timeout -k 5 240 python3 /opt/hog-ci/peer.py hog4 \
+      'bash /workspace/scripts/ci/asan_chuckd_propose.sh' </dev/null >"$asan_coordinator_diagnostic/chuckd-build.txt"
+  fi
   coordinator_launch=$(start_coordinator)
   printf '%s\n' "$coordinator_launch"
   coordinator_stdout=$(ci_asan_coordinator_log_path stdout "$coordinator_launch")
@@ -167,8 +171,12 @@ $CONTROL_CLI hog9 $CI_CONTROL_PORT expect_running
 $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
+mempool_env=()
+if [[ ${GIT_BRANCH:-} == codex/asan-chuckd-propose-timing ]]; then
+  mempool_env=(env HOGD_ASAN_MEMPOOL_BLOCK_TIMINGS=1)
+fi
 set +e
-timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
+"${mempool_env[@]}" timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 11111111111111111111111111111112 \
@@ -222,6 +230,13 @@ cat coordinator_output.txt
 if [[ -n $asan_coordinator_diagnostic ]]; then
   ci_asan_coordinator_collect stderr "$coordinator_stderr" "$asan_coordinator_diagnostic/info.json" \
     "$asan_coordinator_diagnostic/capture-failure.txt"
+  if [[ $GIT_BRANCH == codex/asan-chuckd-propose-timing ]]; then
+    python3 -c 'import json,sys; sys.exit(not json.load(sys.stdin).get("matched_committed_proposal_timings"))' \
+      <"$asan_coordinator_diagnostic/info.json" || {
+      echo 'No proposal caller timing matched a committed one-million-transaction block.' >&2
+      exit 1
+    }
+  fi
   full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
     <"$asan_coordinator_diagnostic/info.json")
   printf 'source=%s\nbranch=%s\nrun=%s\nmode=standalone-asan\ncoordinator=hog4\nstdout_full=%s\ninfo_full=%s\n' \

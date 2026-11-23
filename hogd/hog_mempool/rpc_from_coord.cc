@@ -1657,11 +1657,21 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   co_return result;
 }
 
+static bool
+asan_mempool_block_timings_enabled()
+{
+  static const bool enabled = [] {
+    const char *value = std::getenv("HOGD_ASAN_MEMPOOL_BLOCK_TIMINGS");
+    return value && std::string_view(value) == "1";
+  }();
+  return enabled;
+}
+
 x23::Async<SchedulerProposalResult>
 MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
                                                     ProposalContext context)
 {
-  IngestionInterval ingestion_interval("propose", false);
+  MempoolBlockInterval ingestion_interval("propose");
   while (!ready()) {
     co_await ready_waiters_.wait(false);
   }
@@ -1900,6 +1910,12 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
       .value = std::move(value),
       .default_wallet = last_committed_block_.default_wallet,
       .network_config = last_committed_block_.network_config};
+  if (asan_mempool_block_timings_enabled()) {
+    ingestion_interval.identify(
+        proposal.header.block_height,
+        nominated_block_cache_.proposal_result.proposed_block().block_id,
+        nomination_telemetry.nominated_tx_count);
+  }
   debug("schedulercoord_nominate ret");
   co_return nominated_block_cache_.proposal_result;
 }
@@ -2945,7 +2961,7 @@ x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block(
     BlockID block_id, ConsensusValue expected_value)
 {
-  IngestionInterval ingestion_interval("commit", false);
+  MempoolBlockInterval ingestion_interval("commit");
   if (!ready()) {
     co_return SchedulerCommitOutcome::SchedulerCommitBlockNotFound;
   }
@@ -2954,14 +2970,21 @@ MempoolCoordinatorRpc::schedulercoord_commit_block(
     // ceremony, not through the ordinary coordinator commit RPC.
     co_return SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
   }
-  co_return co_await schedulercoord_commit_block_impl(block_id,
-                                                      std::move(
-                                                          expected_value));
+  const bool identify = asan_mempool_block_timings_enabled();
+  const auto height = expected_value.proposal_header.block_height;
+  size_t tx_count = 0;
+  const auto outcome =
+      co_await schedulercoord_commit_block_impl(block_id,
+                                                std::move(expected_value),
+                                                identify ? &tx_count : nullptr);
+  if (identify && outcome == SchedulerCommitOutcome::SchedulerCommitOK)
+    ingestion_interval.identify(height, block_id, tx_count);
+  co_return outcome;
 }
 
 x23::Async<SchedulerCommitOutcome>
 MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
-    BlockID block_id, ConsensusValue expected_value)
+    BlockID block_id, ConsensusValue expected_value, size_t *observed_tx_count)
 {
   MempoolMetrics::instance().commit_attempt_count.increment();
 
@@ -3463,6 +3486,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
+        if (observed_tx_count)
+          *observed_tx_count = committed_tx_count;
         fatal_commit_cleanup.disarm();
         co_return;
       });

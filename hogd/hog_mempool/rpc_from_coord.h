@@ -725,7 +725,8 @@ private:
 
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block_impl(BlockID block_id,
-                                   ConsensusValue expected_value);
+                                   ConsensusValue expected_value,
+                                   size_t *observed_tx_count = nullptr);
 
   // Returns [SchedulerValidationOK], [SchedulerValidationInvalid], or
   // [SchedulerValidationExecutorFailed] when an executor could not run a tx.

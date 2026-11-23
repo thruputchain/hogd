@@ -36,7 +36,13 @@ WAITS = {
     "finished": re.compile(r"finished waiting for catchup to pre-persist: value " + VALUE),
     "not_needed": re.compile(r"catchup need not wait for pre-persist: value " + VALUE),
 }
+TIMING = re.compile(
+    r"CHUCKD_PROPOSE_TIMING height=([1-9][0-9]{0,19}) block_id=([0-9]{1,20}) "
+    r"tx_count=1000000 value=([a-f0-9]{12}) rpc_ns=([1-9][0-9]{0,11}) "
+    r"local_ns=([1-9][0-9]{0,11})(?=\s|$)"
+)
 MARKERS = (
+    "CHUCKD_PROPOSE_TIMING",
     "NOMINATING:", "NOMINATED:", "waiting for pre-persisting of catchup block:",
     "received externalization for slot ", "committing: height ",
     "waiting for persisting of catchup block:", "COMMITTED:",
@@ -96,6 +102,8 @@ def reduce_stderr(lines):
     completions = defaultdict(list)
     heights = defaultdict(set)
     matched = Counter()
+    proposal_timings = {}
+    block_ids = set()
     for raw in lines:
         if not any(marker in raw for marker in MARKERS):
             continue
@@ -103,6 +111,24 @@ def reduce_stderr(lines):
         clock = STAMP.match(line)
         if not clock or not raw.endswith("\n"):
             raise ValueError("malformed or truncated coordinator INFO record")
+        if "CHUCKD_PROPOSE_TIMING" in line:
+            timing = TIMING.search(line)
+            if timing is None:
+                raise ValueError("malformed Chuckd proposal timing")
+            height, block_id, value, rpc_ns, local_ns = timing.groups()
+            height, block_id, rpc_ns, local_ns = map(int, (height, block_id, rpc_ns, local_ns))
+            key = height, value
+            if max(height, block_id) >= 2**64 or key in proposal_timings or (
+                height, block_id
+            ) in block_ids:
+                raise ValueError("invalid or duplicate Chuckd proposal timing identity")
+            block_ids.add((height, block_id))
+            proposal_timings[key] = {
+                "block_id": block_id, "rpc_ns": rpc_ns, "local_ns": local_ns,
+            }
+            if len(proposal_timings) > 1_000:
+                raise ValueError("too many Chuckd proposal timings")
+            continue
         for kind, pattern in EVENTS.items():
             event = pattern.search(line)
             if not event:
@@ -141,6 +167,7 @@ def reduce_stderr(lines):
     waiting = Counter()
     coverage = Counter()
     blocks = []
+    joined_timings = set()
     for (height, value), events in sorted(full.items()):
         times = {
             kind: items[0][0] for kind, items in events.items()
@@ -150,6 +177,10 @@ def reduce_stderr(lines):
         row = {"height": height, "value_prefix": value, "transactions": 1_000_000,
                "present_unique_info": sorted(times), "phase_ms": {}}
         blocks.append(row)
+        key = height, value
+        if key in proposal_timings and "nomination_start" in times and heights[value] == {height}:
+            row["proposal_timing"] = proposal_timings[key]
+            joined_timings.add(key)
         # Completion logs carry only the displayed hash. Infer a height only
         # when unique and before any next persistence or externalization event.
         if "prepersist_wait" in times and heights[value] == {height}:
@@ -175,7 +206,7 @@ def reduce_stderr(lines):
             result.update(p50_ms=median(values), p90_ms=values[ceil(.9 * len(values)) - 1])
         return result
 
-    return {
+    result = {
         "full_committed_blocks": len(full),
         "matched_info_records": matched,
         "full_blocks_with_unique_markers": coverage,
@@ -192,6 +223,17 @@ def reduce_stderr(lines):
                        "Catchup-persist wait to commit-done includes the scheduler commit RPC. "
                        "No cross-host timestamp subtraction or unkeyed stdout/mempool block join.",
     }
+
+    if proposal_timings:
+        result.update(
+            matched_committed_proposal_timings=len(joined_timings),
+            unjoined_proposal_timings=[
+                dict(height=height, value_prefix=value, **timing)
+                for (height, value), timing in sorted(proposal_timings.items())
+                if (height, value) not in joined_timings
+            ],
+        )
+    return result
 
 
 def snapshot_lines(stream, size):
