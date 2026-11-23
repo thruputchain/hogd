@@ -17,6 +17,8 @@
 #include "hogd/hog_event/utilities.h"
 #include "hogd/hog_indexer/db.h"
 #include "hogd/init.h"
+#include "hogd/xdr/indexer_payload_validation.h"
+#include "hogd/xdr/protocol_token.h"
 #include "types.hh"
 #include "x23/fastclock.h"
 #include "x23/vec.h"
@@ -84,6 +86,53 @@ generate_contract_addresses(size_t num_accounts)
   return addresses;
 }
 
+int
+bench_committed_blocks(IndexDB &db, int count, size_t transactions,
+                       size_t events,
+                       std::span<const ContractAddress> addresses)
+{
+  IndexerOutboxOrigin origin{};
+  origin.protocol = protocol_from_text("hogp/bench");
+  origin.first_height = 1;
+  origin.first_prev_hash = sha256("bench genesis"sv);
+  if (db.initialize_epoch(origin).outcome() !=
+      IndexerEpochOutcome::IndexerEpochInitialized) {
+    std::println(stderr, "Failed to initialize epoch");
+    return 1;
+  }
+  auto parent = origin.first_prev_hash;
+  for (int n = 0; n < count; ++n) {
+    IndexerCommittedBlock block{};
+    auto &payload = block.payload;
+    payload.format_version = kIndexerOutboxFormatVersion;
+    payload.consensus_value.prev_hash = parent;
+    payload.consensus_value.proposal_header.block_height = n + 1;
+    for (size_t i = 0; i < transactions; ++i) {
+      auto id = n * transactions + i;
+      ProposedTransaction body{};
+      body.signed_tx.tx.uniquifier.nonce = id;
+      body.signed_tx.tx.invocation.invoked_address =
+          addresses[i % addresses.size()];
+      auto log = create_fake_event_log(id, events, addresses);
+      log.tx_hash = sha256(body.signed_tx.tx);
+      payload.event_logs.push_back(std::move(log));
+      payload.tx_bodies.push_back(std::move(body));
+    }
+    block.identity.consensus_hash = sha256(payload.consensus_value);
+    parent = block.identity.consensus_hash;
+    const auto start = x23::fastclock::now();
+    auto result = db.apply_committed_block(origin, std::move(block))();
+    const auto elapsed = x23::fastclock::now() - start;
+    if (result.outcome() != IndexerBlockApplyOutcome::IndexerBlockApplied) {
+      std::println(stderr, "Committed apply failed at height {}", n + 1);
+      return 1;
+    }
+    std::println("Block {} apply: {:.3f} ms", n + 1,
+                 elapsed.count() / 1'000'000.0);
+  }
+  return 0;
+}
+
 [[noreturn]] void
 usage(const char *progname, int exit_code = EXIT_FAILURE)
 {
@@ -95,6 +144,7 @@ usage(const char *progname, int exit_code = EXIT_FAILURE)
   std::println(stderr, "  -b <num>      Number of blocks (default: 10)");
   std::println(stderr, "  -t <num>      Transactions per block (default: 100)");
   std::println(stderr, "  -h            Show this help message");
+  std::println(stderr, "  -c            Benchmark committed block apply");
   exit(exit_code);
 }
 
@@ -115,12 +165,16 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   size_t num_events_per_tx = 3; // Match event server bench default
   int num_blocks = 10;
   size_t txs_per_block = 100;
+  bool committed = false;
 
   // Parse command line arguments
   int opt;
   // NOLINTBEGIN(misc-include-cleaner)
-  while ((opt = getopt(argc, argv, "d:a:e:b:t:h")) != -1) {
+  while ((opt = getopt(argc, argv, "d:a:e:b:t:hc")) != -1) {
     switch (opt) {
+    case 'c':
+      committed = true;
+      break;
     case 'd':
       db_path = optarg;
       break;
@@ -181,6 +235,14 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     return 1;
   }
   hogd::IndexDB db = std::move(*db_result);
+  if (committed) {
+    if (contract_addresses.empty()) {
+      std::println(stderr, "Committed apply requires at least one account");
+      return 1;
+    }
+    return hogd::bench_committed_blocks(db, num_blocks, txs_per_block,
+                                        num_events_per_tx, contract_addresses);
+  }
 
   // Generate all event logs
   std::println("Generating event data...");
