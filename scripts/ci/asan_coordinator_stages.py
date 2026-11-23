@@ -96,8 +96,59 @@ def proposal_reply_stats(line):
     }
 
 
+RECEIVE_FIELDS = (
+    "xid", "client_port", "server_port", "payload_bytes", "reads",
+    "first_capacity", "last_capacity", "growth_after_first", "relocated_after_first",
+    "tcp_before", "tcp_after", "rx_bytes_before", "rx_bytes_after",
+    "rtt_before_us", "rtt_after_us", "rcv_space_before", "rcv_space_after",
+    "rcv_wnd_before_available", "rcv_wnd_after_available", "rcv_wnd_before",
+    "rcv_wnd_after", "local_outbound_retrans_before", "local_outbound_retrans_after",
+)
+RECEIVE_BOOLS = {"tcp_before", "tcp_after", "rcv_wnd_before_available", "rcv_wnd_after_available"}
+RECEIVE_MARKER = "CHUCKD_PROPOSAL_RECEIVE"
+RECEIVE = re.compile(
+    r"(?:^| )" + RECEIVE_MARKER + " "
+    + " ".join(field + ("=(true|false)" if field in RECEIVE_BOOLS else "=([0-9]{1,20})")
+               for field in RECEIVE_FIELDS)
+    + r"\n$"
+)
+
+
+def proposal_receive(line):
+    match = RECEIVE.search(line)
+    if not match:
+        raise ValueError("malformed large scheduler reply receive receipt")
+    row = {
+        key: (value == "true" if key in RECEIVE_BOOLS else int(value))
+        for key, value in zip(RECEIVE_FIELDS, match.groups(), strict=True)
+    }
+    if not (
+        0 < row["xid"] < 2**32
+        and 0 < min(row["client_port"], row["server_port"])
+        and max(row["client_port"], row["server_port"]) < 2**16
+        and 128 * 2**20 <= row["payload_bytes"] <= 10**9
+        and 1 <= row["reads"] <= row["payload_bytes"]
+        and 0 < row["first_capacity"] <= row["last_capacity"] < 2**31
+        and row["payload_bytes"] <= row["last_capacity"]
+        and row["growth_after_first"] < row["reads"]
+        and row["relocated_after_first"] < 2**32
+    ):
+        raise ValueError("large scheduler reply receive fields exceed bounds")
+    for phase in ("before", "after"):
+        valid = row["tcp_" + phase]
+        window = row[f"rcv_wnd_{phase}_available"]
+        for name in ("rx_bytes_" + phase, "rtt_" + phase + "_us", "rcv_space_" + phase,
+                     "rcv_wnd_" + phase, "local_outbound_retrans_" + phase):
+            bits = 64 if name.startswith("rx_bytes") else 32
+            if row[name] >= 2**bits or (not valid and row[name]):
+                raise ValueError("invalid or unavailable receiver TCP_INFO value")
+        if (window and not valid) or (not window and row[f"rcv_wnd_{phase}"]):
+            raise ValueError("inconsistent receiver window availability")
+    return row
+
+
 MARKERS = (
-    "CHUCKD_PROPOSE_TIMING",
+    "CHUCKD_PROPOSE_TIMING", RECEIVE_MARKER,
     "NOMINATING:", "NOMINATED:", "waiting for pre-persisting of catchup block:",
     "received externalization for slot ", "committing: height ",
     "waiting for persisting of catchup block:", "COMMITTED:",
@@ -160,6 +211,7 @@ def reduce_stderr(lines):
     proposal_timings = {}
     block_ids = set()
     reply_stats = {}
+    large_receipts = {}
     for raw in lines:
         if PROPOSAL_REPLY_MARKER in raw and ", CLIENT, REPLY, " in raw:
             receipt = proposal_reply_stats(ANSI.sub("", raw))
@@ -174,6 +226,13 @@ def reduce_stderr(lines):
         clock = STAMP.match(line)
         if not clock or not raw.endswith("\n"):
             raise ValueError("malformed or truncated coordinator INFO record")
+        if RECEIVE_MARKER in line:
+            receipt = proposal_receive(line)
+            key = receipt["xid"], receipt["client_port"], receipt["server_port"]
+            if key in large_receipts or len(large_receipts) >= 1_000:
+                raise ValueError("duplicate or excessive large scheduler reply receives")
+            large_receipts[key] = receipt
+            continue
         if "CHUCKD_PROPOSE_TIMING" in line:
             timing = TIMING.search(line)
             if timing is None:
@@ -298,6 +357,8 @@ def reduce_stderr(lines):
         )
     if reply_stats:
         result["proposal_reply_stats"] = list(reply_stats.values())
+    if large_receipts:
+        result["proposal_receive"] = list(large_receipts.values())
     return result
 
 

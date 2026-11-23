@@ -1,0 +1,140 @@
+--- a/sub/sched/schedcoord.go
++++ b/sub/sched/schedcoord.go
+@@ -4,0 +5 @@
++	"encoding/binary"
+@@ -5,0 +7,2 @@
++	"syscall"
++	"unsafe"
+@@ -8,0 +12 @@
++	"github.com/thruputchain/lib-go/liblog"
+@@ -12,0 +17 @@
++	"golang.org/x/sys/unix"
+@@ -33,0 +39,3 @@
++	if tcp, ok := sock.(*net.TCPConn); ok {
++		sock = &proposalReceiveConn{TCPConn: tcp, ctx: ctx}
++	}
+@@ -44,0 +53,124 @@
++}
++
++// Diagnostic for the pinned scheduler's single-fragment RPC replies. Read
++// returns the original bytes and errors. If framing assumptions fail, disable
++// diagnostics on this connection while leaving the actual transport in charge.
++type proposalReceiveConn struct {
++	*net.TCPConn
++	ctx      context.Context
++	disabled bool
++	frame    proposalReceiveFrame
++}
++
++const proposalReceiveMin = 128 << 20
++
++type proposalReceiveFrame struct {
++	size, read, reads, capFirst, capacity, growth, relocated int
++	xid                                                      [4]byte
++	before                                                   proposalReceiveTCP
++}
++
++type proposalReceiveTCP struct {
++	valid                               bool
++	haveWindow                          bool
++	bytesReceived                       uint64
++	rtt, space, window, outboundRetrans uint32
++}
++
++func proposalTCPInfo(sock syscall.Conn) proposalReceiveTCP {
++	raw, err := sock.SyscallConn()
++	if err != nil {
++		return proposalReceiveTCP{}
++	}
++	var result proposalReceiveTCP
++	if err := raw.Control(func(fd uintptr) {
++		var info unix.TCPInfo
++		size := uint32(unsafe.Sizeof(info))
++		_, _, errno := syscall.Syscall6(unix.SYS_GETSOCKOPT, fd, unix.IPPROTO_TCP,
++			unix.TCP_INFO, uintptr(unsafe.Pointer(&info)), uintptr(unsafe.Pointer(&size)), 0)
++		if errno != 0 || uintptr(size) < unsafe.Offsetof(info.Bytes_received)+unsafe.Sizeof(info.Bytes_received) {
++			return
++		}
++		result = proposalReceiveTCP{
++			valid: true, haveWindow: uintptr(size) >= unsafe.Offsetof(info.Rcv_wnd)+unsafe.Sizeof(info.Rcv_wnd),
++			bytesReceived: info.Bytes_received, rtt: info.Rtt, space: info.Rcv_space,
++			window: info.Rcv_wnd, outboundRetrans: info.Total_retrans,
++		}
++	}); err != nil {
++		return proposalReceiveTCP{}
++	}
++	return result
++}
++
++func (c *proposalReceiveConn) Read(p []byte) (int, error) {
++	n, err := c.TCPConn.Read(p)
++	if c.disabled {
++		return n, err
++	}
++	f := &c.frame
++	if f.size == 0 {
++		if err != nil || len(p) != 4 || n != 4 {
++			c.disabled = true
++			return n, err
++		}
++		marker := binary.BigEndian.Uint32(p)
++		size := int(marker & 0x7fffffff)
++		if marker>>31 != 1 || size > netutil.MaxMessageSize {
++			c.disabled = true
++			return n, err
++		}
++		if size >= proposalReceiveMin {
++			f.before = proposalTCPInfo(c.TCPConn)
++		}
++		f.size = size
++		return n, err
++	}
++	if n > f.size-f.read || err != nil {
++		c.disabled = true
++		return n, err
++	}
++	if f.size >= proposalReceiveMin {
++		f.observe(p[:n], cap(p))
++	}
++	f.read += n
++	if f.read == f.size {
++		if f.size >= proposalReceiveMin {
++			c.report()
++		}
++		*f = proposalReceiveFrame{}
++	}
++	return n, err
++}
++
++func (f *proposalReceiveFrame) observe(p []byte, capAvailable int) {
++	// GoXDR passes a reset bytes.Buffer to io.CopyN. Its LimitedReader
++	// narrows the slice length but preserves its backing capacity.
++	capacity := f.read + capAvailable
++	if f.reads == 0 {
++		f.capFirst = capacity
++	} else if capacity != f.capacity {
++		f.growth++
++		f.relocated += f.read
++	}
++	f.capacity = capacity
++	f.reads++
++	if f.read < len(f.xid) {
++		copy(f.xid[f.read:], p)
++	}
++}
++
++func (c *proposalReceiveConn) report() {
++	f := c.frame
++	client, clientOK := c.LocalAddr().(*net.TCPAddr)
++	server, serverOK := c.RemoteAddr().(*net.TCPAddr)
++	if !clientOK || !serverOK {
++		return
++	}
++	after := proposalTCPInfo(c.TCPConn)
++	liblog.Infof(c.ctx,
++		"CHUCKD_PROPOSAL_RECEIVE xid=%d client_port=%d server_port=%d payload_bytes=%d reads=%d first_capacity=%d last_capacity=%d growth_after_first=%d relocated_after_first=%d "+
++			"tcp_before=%t tcp_after=%t rx_bytes_before=%d rx_bytes_after=%d rtt_before_us=%d rtt_after_us=%d rcv_space_before=%d rcv_space_after=%d "+
++			"rcv_wnd_before_available=%t rcv_wnd_after_available=%t rcv_wnd_before=%d rcv_wnd_after=%d local_outbound_retrans_before=%d local_outbound_retrans_after=%d",
++		binary.BigEndian.Uint32(f.xid[:]), client.Port, server.Port, f.size, f.reads, f.capFirst, f.capacity, f.growth, f.relocated,
++		f.before.valid, after.valid, f.before.bytesReceived, after.bytesReceived, f.before.rtt, after.rtt, f.before.space, after.space,
++		f.before.haveWindow, after.haveWindow, f.before.window, after.window, f.before.outboundRetrans, after.outboundRetrans)

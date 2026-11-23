@@ -19,7 +19,7 @@ if ci_asan_coordinator_branch; then
   asan_coordinator_diagnostic="$HOG_DUMP_DIR/asan-coordinator-stages"
   case $GIT_BRANCH in
   codex/asan-chuckd-propose-timing) asan_proposal_timings=1 ;;
-  codex/asan-chuckd-rpc-breakdown)
+  codex/asan-chuckd-rpc-breakdown | codex/asan-chuckd-proposal-receive)
     asan_proposal_timings=1
     coordinator_stats=(--rpc-log-stats)
     ;;
@@ -253,6 +253,13 @@ if [[ -n $asan_coordinator_diagnostic ]]; then
     python3 "$(dirname "$0")/asan_coordinator_stages.py" check-reply-stats \
       "$(hog_ip hog4)" "$(hog_ip hog10)" "$MEMPOOL_COORDINATOR_PORT" \
       <"$asan_coordinator_diagnostic/info.json"
+  fi
+  if [[ $GIT_BRANCH == codex/asan-chuckd-proposal-receive ]]; then
+    python3 -c 'import json, sys; sys.exit(not json.load(sys.stdin).get("proposal_receive"))' \
+      <"$asan_coordinator_diagnostic/info.json" || {
+      echo 'No large scheduler reply receive receipts were collected.' >&2
+      exit 1
+    }
   fi
   full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
     <"$asan_coordinator_diagnostic/info.json")
