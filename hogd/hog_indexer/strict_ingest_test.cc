@@ -7,6 +7,7 @@
 #include <atomic>
 #include <cstdint>
 #include <filesystem>
+#include <fstream>
 #include <future>
 #include <latch>
 #include <memory>
@@ -196,6 +197,8 @@ overwrite_default_metadata(const std::filesystem::path &path,
   overwrite_column_family(path, rocksdb::kDefaultColumnFamilyName, key, value);
 }
 
+} // namespace
+
 class StrictIndexerTest : public ::testing::Test {
 protected:
   void SetUp() override
@@ -210,7 +213,66 @@ protected:
   TmpDir dir_;
   std::filesystem::path path_;
   std::unique_ptr<IndexDB> db_;
+
+  rocksdb::DB &storage() { return *db_->db_; }
+  rocksdb::ColumnFamilyHandle *tx_cf() { return db_->tx_cf_handle_; }
 };
+
+namespace {
+
+TEST_F(StrictIndexerTest, DuplicateLookupPreservesFirstFailureInBlockOrder)
+{
+  const auto origin = make_origin();
+  ASSERT_EQ(db_->initialize_epoch(origin).outcome(),
+            IndexerEpochOutcome::IndexerEpochInitialized);
+  const auto damaged = make_body(1, 1);
+  const auto intact = make_body(2, 2);
+  const auto first = make_block(1, origin.first_prev_hash, {damaged});
+  ASSERT_EQ(db_->apply_committed_block(origin, first)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+  ASSERT_TRUE(storage().Flush(rocksdb::FlushOptions(), tx_cf()).ok());
+  rocksdb::ColumnFamilyMetaData metadata;
+  storage().GetColumnFamilyMetaData(tx_cf(), &metadata);
+  std::filesystem::path table;
+  for (const auto &level : metadata.levels) {
+    for (const auto &file : level.files) {
+      ASSERT_TRUE(table.empty());
+      table = path_ / file.relative_filename;
+    }
+  }
+  ASSERT_FALSE(table.empty());
+  const auto second = make_block(2, first.identity.consensus_hash, {intact});
+  ASSERT_EQ(db_->apply_committed_block(origin, second)().outcome(),
+            IndexerBlockApplyOutcome::IndexerBlockApplied);
+
+  // Damage the first (and only) tx data block, leaving its filter and
+  // index intact. Looking up this hash must surface the checksum failure.
+  {
+    std::fstream file(table, std::ios::binary | std::ios::in | std::ios::out);
+    char byte{};
+    ASSERT_TRUE(file.read(&byte, 1));
+    file.seekp(0);
+    byte ^= 1;
+    ASSERT_TRUE(file.write(&byte, 1));
+  }
+  for (bool damaged_first : {true, false}) {
+    const auto block =
+        make_block(3, second.identity.consensus_hash,
+                   damaged_first ? ProposedTransactionBatch{damaged, intact}
+                                 : ProposedTransactionBatch{intact, damaged});
+    const auto result = db_->apply_committed_block(origin, block)();
+    ASSERT_EQ(result.outcome(),
+              damaged_first
+                  ? IndexerBlockApplyOutcome::IndexerBlockInternalFailure
+                  : IndexerBlockApplyOutcome::IndexerBlockContentConflict);
+    EXPECT_EQ(
+        std::string_view(result.diagnostic()),
+        damaged_first
+            ? "failed to inspect transaction index"
+            : "committed transaction hash already exists at another height");
+    EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 2);
+  }
+}
 
 TEST_F(StrictIndexerTest, FreshOriginExactRepeatAndBoundaryTransition)
 {

@@ -103,6 +103,10 @@ public:
   static constexpr size_t kContractKeyPrefixSize = 32 + 1 + 8;
 
   // Build a transaction index key into the provided buffer
+  static std::string_view tx_key_view(const SHA256Hash &hash)
+  {
+    return {reinterpret_cast<const char *>(hash.data()), hash.size()};
+  }
   static void make_tx_key(std::string &key, SHA256Hash const &tx_hash);
 
   // Build a contract index key prefix into the provided buffer

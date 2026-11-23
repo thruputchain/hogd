@@ -441,6 +441,57 @@ make_tx_value(BlockHeight block_height, const ProposedTransaction &body,
   return value;
 }
 
+struct IndexedHash {
+  TransactionHash hash;
+  size_t input_index;
+};
+
+// Bound pinned values and lookup scratch even for very large blocks.
+std::optional<IndexerBlockApplyResult>
+check_transaction_keys(rocksdb::DB &db, rocksdb::ColumnFamilyHandle *cf,
+                       std::span<const IndexedHash> sorted)
+{
+  constexpr size_t kChunkSize = 1024;
+  const size_t capacity = std::min(kChunkSize, sorted.size());
+  std::vector<rocksdb::Slice> keys(capacity);
+  std::vector<rocksdb::PinnableSlice> values(capacity);
+  std::vector<rocksdb::Status> statuses(capacity);
+  rocksdb::ReadOptions options;
+  options.async_io = true;
+  options.optimize_multiget_for_io = true;
+  const size_t count = sorted.size();
+  size_t first_failure = count;
+  rocksdb::Status failure;
+  while (!sorted.empty()) {
+    const auto chunk = sorted.first(std::min(capacity, sorted.size()));
+    for (size_t i = 0; i < chunk.size(); ++i) {
+      keys[i] = IndexerKeyFormat::tx_key_view(chunk[i].hash);
+    }
+    db.MultiGet(options, cf, chunk.size(), keys.data(), values.data(),
+                statuses.data(), true);
+    for (size_t i = 0; i < chunk.size(); ++i) {
+      // Preserve the serial loop's choice among found keys and read errors.
+      if (!statuses[i].IsNotFound() && chunk[i].input_index < first_failure) {
+        first_failure = chunk[i].input_index;
+        failure = statuses[i];
+      }
+      values[i].Reset();
+    }
+    sorted = sorted.subspan(chunk.size());
+  }
+  if (!failure.ok()) {
+    error("failed to check existing transaction row: {}", failure.ToString());
+    return apply_failure(IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+                         "failed to inspect transaction index");
+  }
+  if (first_failure < count) {
+    return apply_failure(
+        IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+        "committed transaction hash already exists at another height");
+  }
+  return std::nullopt;
+}
+
 IndexerStatus<bool>
 column_family_has_rows(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *handle)
 {
@@ -1413,28 +1464,21 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
 
     const auto &events = block.payload.event_logs;
     const auto &bodies = block.payload.tx_bodies;
+    std::vector<IndexedHash> hashes;
+    hashes.reserve(events.size());
+    for (size_t i = 0; i < events.size(); ++i) {
+      hashes.push_back({events[i].tx_hash, i});
+    }
+    std::ranges::sort(hashes, {}, &IndexedHash::hash);
+    if (auto failure = check_transaction_keys(*db_, tx_cf_handle_, hashes)) {
+      return std::move(*failure);
+    }
     rocksdb::WriteBatch batch;
     std::string key;
     for (size_t i = 0; i < events.size(); ++i) {
       const TxEventLog &event_log = events[i];
       const ProposedTransaction &body = bodies[i];
       IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
-
-      std::string existing;
-      const rocksdb::Status existing_status =
-          db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key, &existing);
-      if (!existing_status.IsNotFound()) {
-        if (!existing_status.ok()) {
-          error("failed to check existing transaction row: {}",
-                existing_status.ToString());
-          return apply_failure(
-              IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
-              "failed to inspect transaction index");
-        }
-        return apply_failure(
-            IndexerBlockApplyOutcome::IndexerBlockContentConflict,
-            "committed transaction hash already exists at another height");
-      }
 
       batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
       uint32_t sequence_number = 0;
@@ -1462,13 +1506,8 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
               rocksdb::Slice(reinterpret_cast<const char *>(
                                  record_bytes.data()),
                              record_bytes.size()));
-    std::vector<TransactionHash> hashes;
-    hashes.reserve(events.size());
-    for (const auto &event : events) {
-      hashes.push_back(event.tx_hash);
-    }
-    std::ranges::sort(hashes);
-    if (std::ranges::adjacent_find(hashes) != hashes.end()) {
+    if (std::ranges::adjacent_find(hashes, {}, &IndexedHash::hash) !=
+        hashes.end()) {
       return apply_failure(
           IndexerBlockApplyOutcome::IndexerBlockContentConflict,
           "committed block repeats a transaction hash");
@@ -1476,7 +1515,7 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     for (size_t i = 0; i < hashes.size(); ++i) {
       const uint64_t ordinal = std::byteswap(static_cast<uint64_t>(i));
       batch.Put(db_->DefaultColumnFamily(),
-                IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
+                IndexerKeyFormat::make_block_ref_key(height, hashes[i].hash),
                 rocksdb::Slice(reinterpret_cast<const char *>(&ordinal),
                                sizeof(ordinal)));
     }

@@ -222,6 +222,7 @@ public:
 
 private:
   friend class IndexDBTest;
+  friend class StrictIndexerTest;
 
   IndexDB() = default;
   IndexDB(rocksdb::DB *db, rocksdb::ColumnFamilyHandle *tx_cf,

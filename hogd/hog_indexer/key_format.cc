@@ -56,10 +56,7 @@ IndexerKeyFormat::make_epoch_history_meta_key(const ProtocolCommit &protocol)
 void
 IndexerKeyFormat::make_tx_key(std::string &key, SHA256Hash const &tx_hash)
 {
-  key.clear();
-  key.reserve(kTxKeySize);
-  // Append tx_hash
-  key.append(reinterpret_cast<const char *>(tx_hash.data()), 32);
+  key.assign(tx_key_view(tx_hash));
 }
 
 void
