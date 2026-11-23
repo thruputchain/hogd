@@ -1436,11 +1436,16 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
       const auto &event_log = events[i];
       uint32_t sequence = 0;
       for (const auto &event : event_log.events) {
-        visit(ContractRow{&event.contract_address, &event_log.tx_hash,
-                          IndexerKeyFormat::kEvent, sequence++});
+        visit(ContractRow{.address = &event.contract_address,
+                          .hash = &event_log.tx_hash,
+                          .kind = IndexerKeyFormat::kEvent,
+                          .sequence = sequence++});
       }
-      visit(ContractRow{&bodies[i].signed_tx.tx.invocation.invoked_address,
-                        &event_log.tx_hash, IndexerKeyFormat::kRootTx, 0});
+      visit(ContractRow{.address =
+                            &bodies[i].signed_tx.tx.invocation.invoked_address,
+                        .hash = &event_log.tx_hash,
+                        .kind = IndexerKeyFormat::kRootTx,
+                        .sequence = 0});
     };
     // Keep point lookups in input order so conflicts with stored rows take
     // precedence over duplicate hashes within the candidate block.
@@ -1472,7 +1477,7 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     }
 
     std::vector<size_t> ordered_txs(events.size());
-    std::iota(ordered_txs.begin(), ordered_txs.end(), size_t{0});
+    std::ranges::iota(ordered_txs, size_t{0});
     const auto tx_hash = [&](size_t i) -> const TransactionHash & {
       return events[i].tx_hash;
     };
@@ -1536,8 +1541,8 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     for (size_t i = 0; i < ordered_txs.size(); ++i) {
       const uint64_t ordinal = std::byteswap(static_cast<uint64_t>(i));
       batch.Put(db_->DefaultColumnFamily(),
-                IndexerKeyFormat::make_block_ref_key(
-                    height, tx_hash(ordered_txs[i])),
+                IndexerKeyFormat::make_block_ref_key(height,
+                                                     tx_hash(ordered_txs[i])),
                 rocksdb::Slice(reinterpret_cast<const char *>(&ordinal),
                                sizeof(ordinal)));
     }
