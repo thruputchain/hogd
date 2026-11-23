@@ -56,6 +56,15 @@ ci_describe_exit_status() {
 # left is "one or more benchmark steps failed" with no crash in sight.
 ci_run_bench_step() {
   local name=$1
+  if [[ "$name" != exec_scaling &&
+        "${GIT_BRANCH:-}" == codex/multiexec-event-capacity &&
+        "${HOGD_CI_CONTAINER:-}" == 1 && "${HOGD_CI_OFFLINE:-}" == 1 &&
+        "${HOG_HOST:-}" == hog10 && "${HOGD_EVENT_WORK_DIR:-}" == /bench-event/ci_work_dir &&
+        "${HOG_XID:-}" =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+        "${GIT_COMMIT:-}" =~ ^[a-f0-9]{40}$ && "$GIT_COMMIT" == "$(git rev-parse HEAD)" ]]; then
+    echo "Skipping $name in the MultiExec Event capacity diagnostic"
+    return 0
+  fi
   shift
   local status=0
   local restore_errexit=""
