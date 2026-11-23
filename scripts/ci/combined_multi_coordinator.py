@@ -195,25 +195,34 @@ def summarize_single(events):
             result["status"] = "ambiguous"
         elif all(len(kinds[x]) == 1 for x in stages):
             offsets = {x: kinds[x][0]["offset_ns"] for x in stages}
-            # The observation named NOMINATED may follow externalization on a
-            # separate callback. Keep the raw offsets but never report overlapping
-            # or reversed intervals as an additive decomposition.
-            ordered = ("nomination_start", "prepersist_start", "nomination_end",
+            # NOMINATED follows DisseminateBasis in the proposal goroutine,
+            # independently of the externalization callback and commit.
+            result["local_offsets_ns"] = offsets
+            result["nomination_callback_order"] = {
+                phase: ("before" if offsets["nomination_end"] < offsets[phase]
+                        else "after" if offsets["nomination_end"] > offsets[phase]
+                        else "same_timestamp")
+                for phase in ("externalized", "persist_start", "committed")
+            }
+            ordered = ("nomination_start", "prepersist_start",
                        "externalized", "persist_start", "committed")
-            if [offsets[x] for x in ordered] == sorted(offsets.values()):
+            steps = [offsets[phase] for phase in ordered]
+            if steps != sorted(steps) or offsets["nomination_end"] < offsets["prepersist_start"]:
+                result["status"] = "out_of_order_or_overlapping"
+            elif any(kinds[phase][0]["tx_count"] != 1_000_000
+                     for phase in ("nomination_start", "nomination_end")):
+                result["status"] = "ambiguous"
+            else:
                 finishes = kinds["prepersist_wait_done"] + kinds["prepersist_no_wait"]
-                start, end = offsets["prepersist_start"], offsets["nomination_end"]
-                hits = [r for r in finishes if start <= r["offset_ns"] <= end]
+                start = offsets["prepersist_start"]
+                end = min(offsets["nomination_end"], offsets["externalized"])
+                hits = [row for row in finishes if start <= row["offset_ns"] <= end]
                 if len(hits) == 1:
                     result.update(status="joined_observed_info",
                                   prepersist_wait_outcome=hits[0]["kind"],
                                   prepersist_wait_end_ns=hits[0]["offset_ns"])
                 elif hits:
                     result["status"] = "ambiguous"
-                result["local_offsets_ns"] = offsets
-            else:
-                result["status"] = "out_of_order_or_overlapping"
-                result["local_offsets_ns"] = offsets
         joins.append(result)
     return joins
 
