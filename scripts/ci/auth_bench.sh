@@ -57,7 +57,8 @@ args+=("${extra_args[@]}")
 
 if [[ ${AUTH_BENCH_PLACE_COLD_CASES:-} == 1 &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
-      ${HOG_HOST:-} == hog9 && ${GIT_BRANCH:-} == main &&
+      ${HOG_HOST:-} == hog9 && ( ${GIT_BRANCH:-} == main ||
+      ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ) &&
       ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
       -z ${AUTH_BENCH_ARGS:-}${AUTH_BENCH_FILTER:-}${AUTH_BENCH_MIN_TIME:-} &&
       -z ${AUTH_BENCH_REPETITIONS:-}${DEFAULT_THREADPOOL_SIZE:-} ]]; then

@@ -39,7 +39,8 @@ place_cold_cases=0
 if [[ -n $pin_warm_batch64 ]]; then
   [[ $pin_warm_batch64 == 1 && ${HOGD_CI_CONTAINER:-} == 1 &&
     ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]
-elif [[ $COMMAND == start && ${GIT_BRANCH:-} == main &&
+elif [[ $COMMAND == start && ( ${GIT_BRANCH:-} == main ||
+      ${GIT_BRANCH:-} == codex/auth-cold-placement-canary ) &&
   ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
   ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
   ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]; then
