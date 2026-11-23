@@ -35,11 +35,17 @@ if [[ ! -x "$BENCH" ]]; then
 fi
 
 mkdir -p "$OUT_DIR"
-if [[ ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics &&
+stock_min_time=1s
+if [[ ( ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics ||
+        ${GIT_BRANCH:-} == codex/auth-cold-adaptive-diagnostics ) &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog9 ]]; then
+  diagnostic_min_time=64x
+  if [[ $GIT_BRANCH == codex/auth-cold-adaptive-diagnostics ]]; then
+    diagnostic_min_time=$stock_min_time
+  fi
   exec python3 "$ROOT_DIR/scripts/ci/auth_cold64_capacity_diagnostics.py" \
-    "$BENCH" "$OUT_DIR" "${HOG_DUMP_DIR:?}"
+    "$BENCH" "$OUT_DIR" "${HOG_DUMP_DIR:?}" "$diagnostic_min_time"
 fi
 JSON="$OUT_DIR/auth_bench.json"
 SUMMARY="$OUT_DIR/auth_bench.md"
@@ -50,7 +56,7 @@ if [[ -n "${AUTH_BENCH_ARGS:-}" ]]; then
 fi
 
 args=(
-  --benchmark_min_time="${AUTH_BENCH_MIN_TIME:-1s}"
+  --benchmark_min_time="${AUTH_BENCH_MIN_TIME:-$stock_min_time}"
   --benchmark_repetitions="${AUTH_BENCH_REPETITIONS:-3}"
   --benchmark_report_aggregates_only=true
   --benchmark_out="$JSON"

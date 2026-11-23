@@ -2,7 +2,8 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
-  if [[ ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics &&
+  if [[ ( ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics ||
+       ${GIT_BRANCH:-} == codex/auth-cold-adaptive-diagnostics ) &&
         ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
     exit 0
   fi

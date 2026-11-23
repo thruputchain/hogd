@@ -45,7 +45,8 @@ ci_describe_exit_status() {
 }
 
 ci_auth_cold64_controller() {
-  [[ ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics &&
+  [[ ( ${GIT_BRANCH:-} == codex/auth-cold64-capacity-diagnostics ||
+       ${GIT_BRANCH:-} == codex/auth-cold-adaptive-diagnostics ) &&
      ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
      ${HOG_HOST:-} == hog10 ]]
 }
