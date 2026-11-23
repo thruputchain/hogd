@@ -192,7 +192,12 @@ fi
 
 echo 'copy coordinator output from hog4'
 if [[ -n $asan_coordinator_diagnostic ]]; then
-  ci_asan_coordinator_reduce stdout "$coordinator_stdout" >coordinator_output.txt
+  ci_asan_coordinator_collect stdout "$coordinator_stdout" coordinator_output.txt \
+    "$asan_coordinator_diagnostic/capture-failure.txt"
+  cp -- coordinator_output.txt "$asan_coordinator_diagnostic/blocks.txt"
+  full_stdout=$(grep -c ', Num txs in block, 1000000,' coordinator_output.txt)
+  printf 'source=%s\nbranch=%s\nrun=%s\nmode=standalone-asan\ncoordinator=hog4\nstdout_full=%s\n' \
+    "$GIT_COMMIT" "$GIT_BRANCH" "$HOG_XID" "$full_stdout" >"$asan_coordinator_diagnostic/stdout-provenance.txt"
 else
   # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
   scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
@@ -215,13 +220,13 @@ echo 'coordinator benchmark results'
 cat coordinator_output.txt
 
 if [[ -n $asan_coordinator_diagnostic ]]; then
-  ci_asan_coordinator_reduce stderr "$coordinator_stderr" >"$asan_coordinator_diagnostic/info.json"
-  cp -- coordinator_output.txt "$asan_coordinator_diagnostic/blocks.txt"
-  full_stdout=$(grep -c ', Num txs in block, 1000000,' coordinator_output.txt)
+  ci_asan_coordinator_collect stderr "$coordinator_stderr" "$asan_coordinator_diagnostic/info.json" \
+    "$asan_coordinator_diagnostic/capture-failure.txt"
   full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
     <"$asan_coordinator_diagnostic/info.json")
   printf 'source=%s\nbranch=%s\nrun=%s\nmode=standalone-asan\ncoordinator=hog4\nstdout_full=%s\ninfo_full=%s\n' \
     "$GIT_COMMIT" "$GIT_BRANCH" "$HOG_XID" "$full_stdout" "$full_info" >"$asan_coordinator_diagnostic/provenance.txt"
+  rm -- "$asan_coordinator_diagnostic/stdout-provenance.txt"
   exit 0
 fi
 

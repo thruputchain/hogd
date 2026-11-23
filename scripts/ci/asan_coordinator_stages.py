@@ -97,9 +97,9 @@ def reduce_stderr(lines):
     heights = defaultdict(set)
     matched = Counter()
     for raw in lines:
-        line = ANSI.sub("", raw)
-        if not any(marker in line for marker in MARKERS):
+        if not any(marker in raw for marker in MARKERS):
             continue
+        line = ANSI.sub("", raw)
         clock = STAMP.match(line)
         if not clock or not raw.endswith("\n"):
             raise ValueError("malformed or truncated coordinator INFO record")
@@ -194,13 +194,30 @@ def reduce_stderr(lines):
     }
 
 
+def snapshot_lines(stream, size):
+    max_line = 1 << 20
+    while size:
+        line = stream.readline(min(size, max_line + 1))
+        if not line:
+            raise ValueError("typed log shrank during collection")
+        if len(line) > max_line:
+            raise ValueError("typed log line exceeds one MiB")
+        size -= len(line)
+        yield line.decode("utf-8", errors="replace")
+
+
 if __name__ == "__main__":
     try:
-        if sys.argv[1:] == ["stdout"]:
-            print(normalize_stdout(sys.stdin), end="")
-        elif sys.argv[1:] == ["stderr"]:
-            print(json.dumps(reduce_stderr(sys.stdin), indent=2))
+        if len(sys.argv) != 3 or sys.argv[1] not in ("stdout", "stderr"):
+            raise ValueError("expected stdout or stderr and snapshot size")
+        stream, size = sys.argv[1], int(sys.argv[2])
+        limit = (1 if stream == "stdout" else 256) << 20
+        if not 0 < size <= limit:
+            raise ValueError("typed log snapshot size is outside bounds")
+        lines = snapshot_lines(sys.stdin.buffer, size)
+        if stream == "stdout":
+            print(normalize_stdout(lines), end="")
         else:
-            raise ValueError("expected stdout or stderr")
+            print(json.dumps(reduce_stderr(lines), indent=2))
     except ValueError as error:
         sys.exit(f"ASAN coordinator diagnostic: {error}")
