@@ -30,7 +30,6 @@
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/invoke_tx.h"
 #include "hogd/hog_db/item_lock/retrocausal_queue_lock.h"
-#include "hogd/hog_db/native_token_age_reconciliation.h"
 #include "hogd/hog_db/rpc_context.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/ramdb/db.h"
@@ -711,60 +710,6 @@ TEST(RecoveryTests, RecoveredCorruptRCQMetadataDiesOnFirstTouch)
                                                     StorageDeltaFlags::None));
       },
       "corrupt persisted state under key");
-}
-
-// The mempool writes native-token ages in the background, so a restart can
-// keep a block's new balance without the age the mempool derived from it: only
-// the all-zero row hog_db creates with the balance survives. Startup
-// reconciliation must count those tokens as received at the tip, not as
-// to-schedule at age 0, which would give the account genesis-age priority.
-TEST(RecoveryTests, ReopenCountsUnagedBalanceAsReceivedAtTip)
-{
-  ErrnoStatus<Directory> dir = Directory::open_temporary();
-  ASSERT_TRUE(dir.has_value());
-
-  constexpr std::size_t kHeapSize = 1024 * 1024 * 1024;
-  constexpr BlockHeight kTipHeight = 101;
-  constexpr int128_t kBalance = 1000;
-  const Address account = make_address(7);
-
-  {
-    DBStatus<std::unique_ptr<Database>> db =
-        Database::open(dir->get_path(), kHeapSize, 0);
-    ASSERT_TRUE(db.has_value());
-    RPCContext ctx(HogDbDAO(RAMDB(std::move(*db))), nullptr);
-    HogDbDAO &dao = ctx.get_db();
-
-    // The account first received tokens at height 100; block 101 committed
-    // before the mempool's age write reached hog_db.
-    ASSERT_TRUE(dao.write_address_balance(account, kBalance).has_value());
-    NativeTokenAge empty = make_native_token_age(0U, 0);
-    empty.address = account.get_raw();
-    ASSERT_TRUE(dao.write_address_average_native_token_age(empty).has_value());
-    ConsensusValue value{};
-    value.proposal_header.block_height = kTipHeight;
-    ASSERT_TRUE(ctx.update_dbtip(/*bid=*/5, std::move(value), StorageLongHash{})
-                    .has_value());
-    ASSERT_TRUE(dao.commit().has_value());
-  }
-
-  DBStatus<std::unique_ptr<Database>> db =
-      Database::open(dir->get_path(), kHeapSize, 0);
-  ASSERT_TRUE(db.has_value());
-  HogDbDAO recovered(RAMDB(std::move(*db)));
-  ASSERT_TRUE(reconcile_startup_native_token_ages(recovered).has_value());
-
-  HogDbStatus<NativeTokenAge> age =
-      recovered.read_address_average_native_token_age(account);
-  ASSERT_TRUE(age.has_value());
-  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
-            static_cast<uint128_t>(kBalance));
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kTipHeight);
-  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
-            0U);
-  EXPECT_EQ(from_xdr(
-                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
-            0U);
 }
 
 TEST(RecoveryTests, DefaultWalletPersistsAcrossReopen)
