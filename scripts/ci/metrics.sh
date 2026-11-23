@@ -26,6 +26,15 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
+if combined_native_replay_selected; then
+  combined_native_replay_check
+  combined_native_replay_binary_receipts
+  for host in hog8 hog11; do
+    timeout --kill-after=2s 30s python3 /opt/hog-ci/peer.py "$host" \
+      'source scripts/ci/combined_native_replay.sh; combined_native_replay_binary_receipts' </dev/null
+  done
+fi
+
 echo 'clone metrics history' # This is idempotent
 ./scripts/clone_metrics_history.sh
 
