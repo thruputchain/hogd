@@ -2,6 +2,13 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  if [[ ${GIT_BRANCH:-} == codex/asan-mempool-coordinator-stages &&
+    ${METRICS_COMMIT_REPO:-} == hogd-mempool-bench ]]; then
+    source "$(dirname "$0")/ci/asan_coordinator_stages.sh"
+    if ci_asan_coordinator_selected; then
+      exit 0
+    fi
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested

@@ -6,6 +6,17 @@ set -Eeuo pipefail
 . "$(dirname "$0")/../hog-ip.sh"
 ci_enable_error_trace
 
+asan_coordinator_diagnostic=
+if [[ ${GIT_BRANCH:-} == codex/asan-mempool-coordinator-stages ]]; then
+  . "$(dirname "$0")/asan_coordinator_stages.sh"
+  if ! ci_asan_coordinator_selected ||
+    [[ ${HOG_DUMP_DIR:-} != /workspace/.ci/dumps || $(git rev-parse HEAD) != "$GIT_COMMIT" ]]; then
+    echo 'ASAN coordinator diagnostic requires the exact offline standalone mempool benchmark on hog10' >&2
+    exit 1
+  fi
+  asan_coordinator_diagnostic="$HOG_DUMP_DIR/asan-coordinator-stages"
+fi
+
 BENCH_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog11)
 STALE_PROCESS_HOSTS=(hog4 hog5 hog6 hog7 hog8 hog9 hog10 hog11)
 STALE_PROCESSES="loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev"
@@ -110,29 +121,41 @@ echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
 
 echo 'launch coordinator and scp'
-$CONTROL_CLI hog4 $CI_CONTROL_PORT start \
-  chuckd.dev \
-  -l info \
-  --stack \
-  --config ./scripts/config-chuckd.json \
-  --instance 970c9b \
-  --seed 1410441218572558875 \
-  --metrics :2223 \
-  bench coordinator_loadgen \
-  --skip 20 \
-  --in-addr "$(hog_ip hog4)":7888 \
-  --debug-port 5500 \
-  --num-accts 10000 \
-  --txs-per-block 1000000 \
-  --num-blocks 1000 \
-  --network-hash 11111111111111111111111111111112 \
-  --storage-dir $WORK_DIR/chuckd-storage \
-  --out-addr :50000 \
-  --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
-  --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
-  --scpd-path ./$BUILD_DIR/scpd.dev \
-  --scp-handle-addr 127.0.0.1:3300 \
-  --scp-control-addr 127.0.0.1:4400
+start_coordinator() {
+  $CONTROL_CLI hog4 $CI_CONTROL_PORT start \
+    chuckd.dev \
+    -l info \
+    --stack \
+    --config ./scripts/config-chuckd.json \
+    --instance 970c9b \
+    --seed 1410441218572558875 \
+    --metrics :2223 \
+    bench coordinator_loadgen \
+    --skip 20 \
+    --in-addr "$(hog_ip hog4)":7888 \
+    --debug-port 5500 \
+    --num-accts 10000 \
+    --txs-per-block 1000000 \
+    --num-blocks 1000 \
+    --network-hash 11111111111111111111111111111112 \
+    --storage-dir $WORK_DIR/chuckd-storage \
+    --out-addr :50000 \
+    --loadgen-addr "$(hog_ip hog7)":$LOADGEN_PORT \
+    --sched-addr "$(hog_ip hog10)":$MEMPOOL_COORDINATOR_PORT \
+    --scpd-path ./$BUILD_DIR/scpd.dev \
+    --scp-handle-addr 127.0.0.1:3300 \
+    --scp-control-addr 127.0.0.1:4400
+}
+
+if [[ -n $asan_coordinator_diagnostic ]]; then
+  mkdir -m 700 "$asan_coordinator_diagnostic"
+  coordinator_launch=$(start_coordinator)
+  printf '%s\n' "$coordinator_launch"
+  coordinator_stdout=$(ci_asan_coordinator_log_path stdout "$coordinator_launch")
+  coordinator_stderr=$(ci_asan_coordinator_log_path stderr "$coordinator_launch")
+else
+  start_coordinator
+fi
 
 echo 'make sure procs are running'
 $CONTROL_CLI hog4 $CI_CONTROL_PORT expect_running
@@ -168,8 +191,12 @@ if ! $CONTROL_CLI hog4 "$CI_CONTROL_PORT" expect_running; then
 fi
 
 echo 'copy coordinator output from hog4'
-# We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
-scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+if [[ -n $asan_coordinator_diagnostic ]]; then
+  ci_asan_coordinator_reduce stdout "$coordinator_stdout" >coordinator_output.txt
+else
+  # We grab the file with the prefix [hogd_stdout] that has the newest timestamp.
+  scp hog4:"$(ssh -n hog4 'ls -1t /tmp/hogd_stdout* | head -n 1')" ./coordinator_output.txt
+fi
 
 if [[ $mempool_status -ne 0 && $mempool_status -ne 124 ]]; then
   # 124 is [timeout] reaping a mempool that outlived the load, which is the
@@ -186,6 +213,17 @@ fi
 
 echo 'coordinator benchmark results'
 cat coordinator_output.txt
+
+if [[ -n $asan_coordinator_diagnostic ]]; then
+  ci_asan_coordinator_reduce stderr "$coordinator_stderr" >"$asan_coordinator_diagnostic/info.json"
+  cp -- coordinator_output.txt "$asan_coordinator_diagnostic/blocks.txt"
+  full_stdout=$(grep -c ', Num txs in block, 1000000,' coordinator_output.txt)
+  full_info=$(python3 -c 'import json,sys; print(json.load(sys.stdin)["full_committed_blocks"])' \
+    <"$asan_coordinator_diagnostic/info.json")
+  printf 'source=%s\nbranch=%s\nrun=%s\nmode=standalone-asan\ncoordinator=hog4\nstdout_full=%s\ninfo_full=%s\n' \
+    "$GIT_COMMIT" "$GIT_BRANCH" "$HOG_XID" "$full_stdout" "$full_info" >"$asan_coordinator_diagnostic/provenance.txt"
+  exit 0
+fi
 
 echo 'clone metrics history # This is idempotent'
 ./scripts/clone_metrics_history.sh
