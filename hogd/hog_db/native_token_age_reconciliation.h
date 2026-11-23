@@ -1,8 +1,8 @@
 #pragma once
 
-#include "hogd/base/types.h"
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/status.h"
+#include "types.hh"
 
 namespace hogd {
 
