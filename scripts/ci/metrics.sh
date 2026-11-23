@@ -26,7 +26,7 @@ echo 'make sure bench servers are running'
 ci_wait_control_server_hosts "$CONTROL_CLI" "${CI_CONTROL_PORT}" \
   "${BENCH_HOSTS[@]}"
 
-if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
+if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
       ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
       ${HOG_HOST:-} == hog10 ]]; then
   output="${HOG_DUMP_DIR:?}/payment-phases"
@@ -37,6 +37,7 @@ if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
     # TSV columns: accounts, repetition, phase, sample count, p50 ns, p90 ns.
     awk -v phases="$output/payments-$accounts.tsv" \
         -v elapsed="$output/payments-$accounts.elapsed" \
+        -v callers="$output/payments-$accounts.db-caller.tsv" \
         -v accounts="$accounts" '
       /^payment_phase / {
         if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
@@ -49,6 +50,17 @@ if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
         rows++
         next
       }
+      /^payment_db_caller / {
+        if (NF != 7 || $2 != accounts || $3 !~ /^[0-9]$/ ||
+            $4 !~ /^[0-9]+$/ || $5 !~ /^[0-9]+$/ || $5 % 256 ||
+            $6 !~ /^[0-9]+$/ || $7 !~ /^[0-9]+$/ ||
+            caller_seen[$4, $5]++) {
+          invalid = 1
+        }
+        print $2 "\t" $3 "\t" $4 "\t" $5 "\t" $6 "\t" $7 > callers
+        caller_reps[$3]++
+        next
+      }
       /^time taken: / {
         print > elapsed
         elapsed_rows++
@@ -56,7 +68,12 @@ if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
           matched++
         }
       }
-      END { if (invalid || rows != 60 || matched != 10 || elapsed_rows != 180) exit 1 }
+      END {
+        if (invalid || rows != 60 || matched != 10 || elapsed_rows != 180) exit 1
+        for (i = 0; i < 10; i++) {
+          if (caller_reps[i] != 390 && caller_reps[i] != 391) exit 1
+        }
+      }
     ' "$raw" || { echo "Incomplete payment phase results for $accounts accounts" >&2; exit 1; }
     rm -- "$raw"
   done

@@ -2,7 +2,7 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
-  if [[ ${GIT_BRANCH:-} == codex/payments-commit-diagnostics &&
+  if [[ ${GIT_BRANCH:-} == codex/payments-db-service-diagnostics &&
         ${HOGD_CI_CONTAINER:-} == 1 && ${HOG_HOST:-} == hog10 ]]; then
     exit 0
   fi

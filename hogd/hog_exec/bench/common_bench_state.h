@@ -100,7 +100,7 @@ local_hog_ip()
 class CommonBenchState {
 public:
   CommonBenchState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                   uint16_t coord_port)
+                   uint16_t coord_port, uint32_t payment_db_accounts = 0)
     : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
       coord_port_(coord_port)
   {
@@ -121,7 +121,7 @@ public:
 
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
-    start_db_server();
+    start_db_server(payment_db_accounts);
     event_card_ = start_event_server(event_server_port);
     connect_coord();
     connect_exec();
@@ -253,13 +253,17 @@ private:
         .shards = {ShardCard{.address_for_exec = server_addrport.c_str()}}}));
   }
 
-  void start_db_server()
+  void start_db_server(uint32_t payment_db_accounts)
   {
     CHECK_PTR(hog_db_handle_.get());
-
+    std::vector<std::string> args{"-e", std::to_string(exec_port_), "-c",
+                                  std::to_string(coord_port_)};
+    if (payment_db_accounts != 0) {
+      args.emplace_back("-D");
+      args.push_back(std::to_string(payment_db_accounts));
+    }
     hog_db_handle_->ci_client.start_server("hogd/hog_exec/bench/bench_server",
-                                           {"-e", std::to_string(exec_port_),
-                                            "-c", std::to_string(coord_port_)});
+                                           args);
   }
 
   EventCard start_event_server(uint16_t event_server_port)

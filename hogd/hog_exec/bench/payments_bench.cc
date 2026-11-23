@@ -20,6 +20,7 @@
 #include "hogd/base/worker_pool.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/hog_exec/bench/common_bench_state.h"
+#include "hogd/hog_exec/bench/payment_db_timing.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/precompiles/context.h"
 #include "hogd/hog_exec/runtime/metrics.h"
@@ -37,7 +38,13 @@ namespace {
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port, uint32_t num_accounts)
-    : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
+    : CommonBenchState(server_addrs, exec_port, coord_port,
+                       server_addrs.size() == 2 && server_addrs[0] == "hog11" &&
+                               server_addrs[1] == "hog8" &&
+                               (num_accounts == 2 || num_accounts == 10) &&
+                               payment_db_timing_enabled("hog10")
+                           ? num_accounts
+                           : 0),
       num_accounts_(num_accounts)
   {}
 
@@ -184,24 +191,18 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 
 constexpr uint32_t kPaymentPhaseSampleStride = 256;
 
-bool
-payment_phase_diagnostic()
-{
-  const auto matches = [](const char *name, std::string_view expected) {
-    const char *value = std::getenv(name);
-    return value && value == expected;
-  };
-  return matches("GIT_BRANCH", "codex/payments-commit-diagnostics") &&
-         matches("HOGD_CI_CONTAINER", "1") && matches("HOGD_CI_OFFLINE", "1") &&
-         matches("HOG_HOST", "hog10");
-}
-
 struct PaymentPhaseSample {
   int64_t invoke_ns{};
   int64_t commit_ns{};
   int64_t frame_lock_ns{};
   int64_t db_commit_ns{};
   int64_t commit_remaining_ns{};
+};
+
+struct PaymentDbCallerSample {
+  TransactionID tx;
+  int64_t frame_lock_ns;
+  int64_t db_commit_ns;
 };
 
 using PaymentClock = std::chrono::steady_clock;
@@ -252,7 +253,7 @@ run_bench_rep_coro(BenchmarkState &bs,
   const bool record_phases =
       concurrency == 512 && num_txs_per_rep == 100'000 &&
       (bs.num_accounts_ == 2 || bs.num_accounts_ == 10) &&
-      payment_phase_diagnostic();
+      payment_db_timing_enabled("hog10");
   for (size_t nrep = 0U; nrep < num_reps; nrep++) {
     info("bench rep {} for {} txs (accts {}) on {} coros", nrep,
          num_txs_per_rep, bs.num_accounts_, concurrency);
@@ -264,6 +265,8 @@ run_bench_rep_coro(BenchmarkState &bs,
         record_phases ? (num_txs_per_rep + kPaymentPhaseSampleStride - 1) /
                             kPaymentPhaseSampleStride
                       : 0);
+    std::vector<PaymentDbCallerSample> db_samples(phase_samples.size());
+    std::atomic<size_t> db_sample_count = 0;
     const auto base_height = bs.block_height();
     auto start_time = std::chrono::steady_clock::now();
 
@@ -279,7 +282,9 @@ run_bench_rep_coro(BenchmarkState &bs,
          std::atomic<uint32_t> &next_tx, std::atomic<int> &live,
          std::atomic<bool> &all_done, std::atomic<uint64_t> &pending_events,
          std::atomic<bool> &events_done,
-         std::span<PaymentPhaseSample> phase_samples) -> x23::Detached {
+         std::span<PaymentPhaseSample> phase_samples,
+         std::span<PaymentDbCallerSample> db_samples,
+         std::atomic<size_t> &db_sample_count) -> x23::Detached {
         co_await default_threadpool().bg();
         auto runtime_context = make_hog_exec_context();
         for (;;) {
@@ -291,8 +296,10 @@ run_bench_rep_coro(BenchmarkState &bs,
               CommonBenchState::bench_uniquifier(base_height, k);
           auto const &tx = work_txs[k];
 
-          auto handler =
-              bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
+          const TransactionID txid = bs.allocate_txid();
+          auto handler = bs.make_handler(tx, txid, *runtime_context);
+          const bool join_db =
+              !db_samples.empty() && txid % kPaymentDbSampleStride == 0;
           PaymentPhaseSample *sample = nullptr;
           PaymentClock::time_point phase_start;
           if (!phase_samples.empty() && k % kPaymentPhaseSampleStride == 0) {
@@ -312,7 +319,7 @@ run_bench_rep_coro(BenchmarkState &bs,
           }
           SystemCallHandler::CommitPhaseTiming commit_timing;
           const auto commit_result = co_await handler.try_commit_transaction(
-              sample ? &commit_timing : nullptr);
+              (sample || join_db) ? &commit_timing : nullptr);
           if (sample) {
             sample->commit_ns = elapsed_ns(phase_start);
           }
@@ -327,6 +334,13 @@ run_bench_rep_coro(BenchmarkState &bs,
                                           sample->frame_lock_ns -
                                           sample->db_commit_ns;
             CHECK(sample->commit_remaining_ns >= 0);
+          }
+          if (join_db) {
+            const size_t index =
+                db_sample_count.fetch_add(1, std::memory_order_relaxed);
+            CHECK(index < db_samples.size());
+            db_samples[index] = {txid, commit_timing.frame_lock_ns,
+                                 commit_timing.db_commit_ns};
           }
           handler.emit_events(ExecResult::ExecResultOK,
                               ProposedTransaction{.signed_tx = tx})(
@@ -349,9 +363,9 @@ run_bench_rep_coro(BenchmarkState &bs,
           all_done.notify_one();
         }
       }(bs, work_txs, num_txs_per_rep, base_height, next_tx, live, all_done,
-                                                      pending_events,
-                                                      events_done,
-                                                      phase_samples);
+                                               pending_events, events_done,
+                                               phase_samples, db_samples,
+                                               db_sample_count);
     }
 
     all_done.wait(false, std::memory_order_acquire);
@@ -400,6 +414,12 @@ run_bench_rep_coro(BenchmarkState &bs,
                      phase_percentile(phase_samples, member, 50),
                      phase_percentile(phase_samples, member, 90));
       }
+    }
+    for (const auto &sample :
+         std::span(db_samples).first(db_sample_count.load())) {
+      std::println("payment_db_caller {} {} {} {} {} {}", bs.num_accounts_,
+                   nrep, base_height, sample.tx, sample.frame_lock_ns,
+                   sample.db_commit_ns);
     }
     bs.clear_uniquifiers(num_txs_per_rep);
   }
