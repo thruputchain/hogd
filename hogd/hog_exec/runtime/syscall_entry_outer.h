@@ -426,7 +426,7 @@ translate_syscall_body_exception(std::tuple<Args...> &args) noexcept
 }
 
 template<is_syscall_meta SyscallMeta, typename Args, size_t... Is>
-MaybeAsyncSyscallInnerResult
+SyscallBodyResult<SyscallMeta>
 run_syscall_body(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
                  bool alias_check_passed, Args &args,
                  std::index_sequence<Is...> /*unused*/) noexcept
@@ -539,7 +539,7 @@ run_syscall_body(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
   // reestablished immediately around the catch.
   auto res = [&]<size_t... ExtraArgs>(
                  std::index_sequence<ExtraArgs...> /*unused*/) noexcept
-      -> MaybeAsyncSyscallInnerResult {
+      -> SyscallBodyResult<SyscallMeta> {
     try {
       return SyscallMeta::kInnerFunc(
           std::get<ExtraArgs>(extra_args)...,
@@ -709,15 +709,12 @@ finish_syscall(SyscallInnerResult body_result, SystemCallHandler &handler,
 // creating the coroutine can throw, and that has to be translated exactly once,
 // in a place nobody has to remember.
 template<is_syscall_meta SyscallMeta, typename Args>
-x23::Async<SyscallResult>
+MaybeAsyncSyscallResult
 wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
-                       const GasAmount gas_remaining, SyscallNo syscall_no,
-                       Args args)
+                       const GasAmount gas_remaining, Args args)
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
-
-  handler.start_syscall_trace(syscall_no, gas_remaining);
 
   auto body = run_syscall_body<SyscallMeta>(
       handler, WrappedGasAmount{gas_remaining}, alias_check_passed, args,
@@ -743,6 +740,23 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
                                   WrappedGasAmount{gas_remaining}, args));
 }
 
+template<is_syscall_meta SyscallMeta, typename Args>
+SyscallResult
+wrap_after_parse_direct(bool alias_check_passed, SystemCallHandler &handler,
+                        const GasAmount gas_remaining, Args args)
+{
+  using syscall_t =
+      SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
+
+  auto body = run_syscall_body<SyscallMeta>(
+      handler, WrappedGasAmount{gas_remaining}, alias_check_passed, args,
+      std::make_index_sequence<syscall_t::kNumArgs>{});
+
+  return std::move(finish_syscall<SyscallMeta>(body, handler,
+                                               WrappedGasAmount{gas_remaining},
+                                               args));
+}
+
 // Creates the coroutine and translates a failed frame allocation, which x23's
 // promises turn into a throw. Two of the three callers do not go through
 // wrap_outer(), so this cannot live at a call site.
@@ -757,9 +771,18 @@ wrap_after_parse(bool alias_check_passed, SystemCallHandler &handler,
                  Args &&args) noexcept
 {
   try {
-    return wrap_after_parse_async<SyscallMeta>(alias_check_passed, handler,
-                                               gas_remaining, syscall_no,
-                                               std::forward<Args>(args));
+    handler.start_syscall_trace(syscall_no, gas_remaining);
+
+    if constexpr (!kSyscallBodyIsDirect<SyscallMeta>) {
+      return wrap_after_parse_async<SyscallMeta>(alias_check_passed, handler,
+                                                 gas_remaining,
+                                                 std::forward<Args>(args));
+    }
+    else {
+      return wrap_after_parse_direct<SyscallMeta>(alias_check_passed, handler,
+                                                  gas_remaining,
+                                                  std::forward<Args>(args));
+    }
   } catch (std::exception const &e) {
     try {
       error("unrecoverable: syscall {} frame allocation failed: {}", syscall_no,
