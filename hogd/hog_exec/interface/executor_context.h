@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -9,6 +8,7 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
+#include "hogd/base/drain_counter.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -71,7 +71,9 @@ public:
     return std::move(snapshot_cache_);
   }
 
-  // Block until all event calls have returned.
+  // Suspends until every event call spawned so far has returned, then yields
+  // the event error recorded for the block, if any.  The last event call to
+  // return resumes the caller inline (see DrainCounter).  One caller at a time.
   x23::Async<std::optional<SystemErrorCode>> await_event_return();
 
 private:
@@ -98,6 +100,9 @@ private:
                                  ExecResult exec_res,
                                  ProposedTransaction proposed_tx);
 
+  // Records [error], if any, and retires one event call.  May resume the
+  // await_event_return() caller inline, which may destroy *this before this
+  // returns.
   void log_event_return(SystemStatus<void> error);
 
   const ExecutionMode mode_;
@@ -108,7 +113,7 @@ private:
 
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;
-  std::atomic<uint32_t> pending_event_calls_ = 0;
+  DrainCounter pending_event_calls_;
 };
 
 } // namespace hogd

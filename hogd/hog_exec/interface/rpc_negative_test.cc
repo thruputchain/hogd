@@ -1,5 +1,6 @@
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <cstdint>
 #include <format>
 #include <future>
@@ -1109,6 +1110,55 @@ TEST_F(RpcNegativeTest, TestFinishBlockSurfacesEventEmitFailure)
   auto finish_result = client_.executorsched_finish_block(block_id);
   EXPECT_NE(finish_result, ExecResult::ExecResultOK);
   EXPECT_EQ(finish_result, ExecResult::ExecResultSystemError);
+}
+
+// finish_block is the executor's drain barrier: it must not answer while an
+// included transaction's event RPC is still in flight, and it must answer once
+// that RPC returns. The last returning emit resumes the parked finish_block, so
+// a lost wakeup in that handoff shows up here as a timeout.
+TEST_F(RpcNegativeTest, TestFinishBlockWaitsForInFlightEventEmits)
+{
+  init_executor();
+
+  BlockID block_id = 3006;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(block_id);
+  open_event_block(block_id);
+
+  // Hold every emit at the event server, then include a transaction (it emits;
+  // see TestFinishBlockSurfacesEventEmitFailure).
+  event_wrapper_.block_emit_events();
+  x23::Defer unblock([&] { event_wrapper_.unblock_emit_events(); });
+  auto tx = make_tx_with_expiry(1'000'000);
+  auto propose_result =
+      client_.executorsched_propose_transaction(block_id,
+                                                SignedTransaction{.tx = tx});
+  ASSERT_EQ(propose_result.result(),
+            ExecResult::ExecResultTxDeterministicError);
+
+  auto finish_client = make_srpc_multiclient<ExecutorSched1>(
+      x23::HostPort{"localhost", server_port_}, false);
+  auto finish_future = std::async(std::launch::async, [&] {
+    return finish_client.executorsched_finish_block(block_id);
+  });
+
+  EXPECT_EQ(finish_future.wait_for(std::chrono::milliseconds(200)),
+            std::future_status::timeout)
+      << "finish_block answered with an event emit still in flight";
+
+  event_wrapper_.unblock_emit_events();
+  ASSERT_EQ(finish_future.wait_for(std::chrono::seconds(30)),
+            std::future_status::ready)
+      << "finish_block was not resumed when the last event emit returned";
+  EXPECT_EQ(finish_future.get(), ExecResult::ExecResultOK);
+
+  // The emit landed before the executor closed its handle on the block.
+  auto events = event_wrapper_.get_events_by_hash(block_id, sha256(tx))();
+  EXPECT_TRUE(events.has_value());
+  EXPECT_EQ(event_client_.eventsched_close_block(block_id, block_id).error(),
+            RPCError::kRPCNone);
 }
 
 // Genesis load with a consensus value carrying a height other than the genesis
