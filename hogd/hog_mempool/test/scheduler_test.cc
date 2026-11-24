@@ -2,6 +2,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstring>
 #include <latch>
 #include <limits>
@@ -18,6 +19,7 @@
 #include "hogd/base/types.h"
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_db/status.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/rpc_from_coord.h"
 #include "hogd/hog_mempool/rpc_from_gateway.h"
@@ -106,6 +108,7 @@ TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
   // Genesis transfer processing updates and persists the same cached ages.
   server.mempool_coord_rpc().wait_for_transfer_data(/*expected_height=*/1)();
   std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
   scheduler->set_max_native_token_ages_per_record(3);
 
   x23::XdrVec<ContractAddress> accounts;
@@ -117,12 +120,22 @@ TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
   EXPECT_EQ(read.found.size(), accounts.size());
   EXPECT_TRUE(read.missing.empty());
 
+  // A distinct transfer to each account gives each a distinct age to write.
+  DeltaChunk deltas;
   for (size_t i = 0; i < accounts.size(); i++) {
-    auto [age, lock] = scheduler->get_cached_native_token_age(accounts[i]);
-    age->average_ages[kNativeTokenAgeGroupToSchedule] =
-        static_cast<BlockHeight>(100 + i);
+    deltas.push_back(Delta{.address = accounts[i],
+                           .native_token_delta =
+                               to_xdr(static_cast<int128_t>(i + 1) * 1000)});
   }
-  scheduler->write_all_average_native_token_ages_to_db()();
+  scheduler->process_transfers(
+      one_chunk_transfer(/*block=*/7, std::move(deltas)))();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), accounts.size());
+  std::vector<NativeTokenAge> written;
+  for (const ContractAddress &account : accounts) {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    written.push_back(*age);
+  }
+  scheduler->write_dirty_native_token_ages_to_db()();
 
   // Reading again replaces the cached ages with what the database holds.
   const Scheduler::ReadAverageNativeTokenAgesResult reread =
@@ -131,8 +144,7 @@ TEST(Scheduler, NativeTokenAgesOverTheRecordBoundRoundTrip)
   for (size_t i = 0; i < accounts.size(); i++) {
     const auto [age, lock] =
         scheduler->get_cached_native_token_age(accounts[i]);
-    EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule],
-              static_cast<BlockHeight>(100 + i));
+    EXPECT_EQ(*age, written[i]);
   }
 }
 
@@ -1432,6 +1444,187 @@ TEST(Scheduler, ProcessTransfersCreatesNativeTokenAgeForFirstTimeRecipient)
   EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(5'000'000'000));
   EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kBlock);
+}
+
+TEST(Scheduler, WriteDirtyNativeTokenAgesWritesOnlyChangedAccounts)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &changed = MempoolTestInfra::kAccountAddresses[0];
+  const ContractAddress &unchanged = MempoolTestInfra::kAccountAddresses[1];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  // Reading ages from hog_db caches them but leaves them clean.
+  scheduler->write_dirty_native_token_ages_to_db()();
+  scheduler->read_average_native_token_ages({changed, unchanged})();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  // Change [unchanged]'s row behind the scheduler's back. A write of every
+  // cached account would overwrite it with the cached value.
+  server.set_native_tokens(unchanged, kNativeTokenAgeGroupReceived, /*age=*/3,
+                           /*num_native_tokens=*/7);
+
+  scheduler->process_transfers(one_chunk_transfer(
+      kBlock, {Delta{.address = changed,
+                     .native_token_delta =
+                         to_xdr(static_cast<int128_t>(5'000'000'000))}}))();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  HogDbStatus<NativeTokenAge> changed_row =
+      server.read_address_average_native_token_age(changed);
+  ASSERT_TRUE(changed_row.has_value());
+  {
+    const auto [cached, lock] = scheduler->get_cached_native_token_age(changed);
+    EXPECT_EQ(*changed_row, *cached);
+  }
+  EXPECT_EQ(from_xdr(
+                changed_row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+  EXPECT_EQ(changed_row->average_ages[kNativeTokenAgeGroupReceived], kBlock);
+
+  HogDbStatus<NativeTokenAge> unchanged_row =
+      server.read_address_average_native_token_age(unchanged);
+  ASSERT_TRUE(unchanged_row.has_value());
+  EXPECT_EQ(from_xdr(
+                unchanged_row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(7));
+  EXPECT_EQ(unchanged_row->average_ages[kNativeTokenAgeGroupReceived], 3);
+}
+
+TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesMarksAccountDirty)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+  fib_client_t fib_client(account);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, 1);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  scheduler->read_average_native_token_ages({account})();
+  scheduler->write_dirty_native_token_ages_to_db()();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  scheduler->apply_committed_block_native_token_ages({txs[0]},
+                                                     /*block_height=*/1)();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  const auto [cached, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(*row, *cached);
+}
+
+// An age that changes after a write has copied it is marked again, and the
+// next write stores the newer age rather than leaving the older one in hog_db.
+// The copy and the flag clear happen under the account's bucket lock, which
+// every age change also takes, so "after the copy" is the only interleaving
+// besides "before the copy".
+TEST(Scheduler, NativeTokenAgeChangedAfterWriteGoesOutInNextWrite)
+{
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->stop_native_token_age_writer();
+
+  auto transfer_at = [&](BlockHeight block, int128_t amount) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block,
+        {Delta{.address = account, .native_token_delta = to_xdr(amount)}}))();
+  };
+  auto cached_age = [&] {
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return *age;
+  };
+
+  transfer_at(/*block=*/5, 1'000);
+  const NativeTokenAge first = cached_age();
+  scheduler->write_dirty_native_token_ages_to_db()();
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+
+  transfer_at(/*block=*/9, 2'000);
+  const NativeTokenAge second = cached_age();
+  ASSERT_NE(second, first);
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 1UL);
+
+  scheduler->write_dirty_native_token_ages_to_db()();
+  EXPECT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  EXPECT_EQ(*row, second);
+}
+
+// The background writer sends a changed age to hog_db on its own, without
+// any caller asking for a write.
+TEST(Scheduler, BackgroundWriterWritesChangedNativeTokenAges)
+{
+  constexpr BlockHeight kBlock = 5;
+  const ContractAddress &account = MempoolTestInfra::kAccountAddresses[0];
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  scheduler->process_transfers(one_chunk_transfer(
+      kBlock, {Delta{.address = account,
+                     .native_token_delta =
+                         to_xdr(static_cast<int128_t>(5'000'000'000))}}))();
+
+  // Several write intervals, so a slow machine does not fail the test.
+  const auto deadline = std::chrono::steady_clock::now() +
+                        (10 * Scheduler::kDefaultNativeTokenAgeWriteInterval);
+  while (scheduler->num_dirty_native_token_ages() != 0 &&
+         std::chrono::steady_clock::now() < deadline) {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+  }
+  ASSERT_EQ(scheduler->num_dirty_native_token_ages(), 0UL);
+  // The writer clears a mark before sending the age; stopping it waits out a
+  // write in progress, so hog_db holds the age once this returns.
+  scheduler->stop_native_token_age_writer();
+
+  HogDbStatus<NativeTokenAge> row =
+      server.read_address_average_native_token_age(account);
+  ASSERT_TRUE(row.has_value());
+  const auto [cached, lock] = scheduler->get_cached_native_token_age(account);
+  EXPECT_EQ(*row, *cached);
+  EXPECT_EQ(from_xdr(row->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(5'000'000'000));
+}
+
+TEST(Scheduler, ProcessTransfersAveragesHugeBalancesWithoutOverflow)
+{
+  // Total supply stays below INT128_MAX, but token-times-age sums such as
+  // 2^125 * 4 + 2^125 * 7 = 11 * 2^125 would wrap uint128_t.
+  constexpr uint128_t kAmount = static_cast<uint128_t>(1) << 125;
+  const ContractAddress account = make_account_address(99);
+
+  MempoolTestInfra server;
+  std::shared_ptr<Scheduler> scheduler = server.mempool_coord_rpc().scheduler();
+
+  const auto transfer_at = [&](BlockHeight block) {
+    scheduler->process_transfers(one_chunk_transfer(
+        block, {Delta{.address = account,
+                      .native_token_delta =
+                          to_xdr(static_cast<int128_t>(kAmount))}}))();
+    const auto [age, lock] = scheduler->get_cached_native_token_age(account);
+    return age->average_ages[kNativeTokenAgeGroupReceived];
+  };
+
+  EXPECT_EQ(transfer_at(4), 4UL);
+  // Equal halves at ages 4 and 7 average to 5.5, which rounds up to 6.
+  EXPECT_EQ(transfer_at(7), 6UL);
+  // 2^126 tokens at age 6 plus 2^125 at age 6 + 2^62 weight the newer tokens
+  // 1:3, so the average is 6 + 2^62 / 3, which rounds up.
+  constexpr BlockHeight kFar = static_cast<BlockHeight>(1) << 62;
+  EXPECT_EQ(transfer_at(6 + kFar), 6 + ((kFar + 2) / 3));
 }
 
 TEST(Scheduler, ApplyCommittedBlockNativeTokenAgesUpdatesLiveState)

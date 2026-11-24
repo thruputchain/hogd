@@ -32,7 +32,7 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/domain_separators.h"
 #include "hogd/genesis/genesis_configuration.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -831,8 +831,8 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
        .entrypoint = inner.entrypoint,
        .gas_limit = 1'000'000,
        .calldata = inner.calldata}};
-  wallet_query.invocation =
-      wallet.make_invocation<u8"execute">(10'000'000, calls);
+  wallet_query.invocation = wallet.make_invocation<u8"execute">(
+      10'000'000, x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls);
   EXPECT_EQ(
       gateway.viewgateway_view(wallet_query)().payload().output.status_code(),
       InvocationFrameStatusCode::Return);
@@ -852,7 +852,8 @@ TEST_F(ViewGatewayBatchTest, PreservesClaimsForOrdinaryAndWalletInvocations)
   calls[0].target = address;
   calls[0].entrypoint = default_claim.invocation.entrypoint;
   calls[0].calldata = default_claim.invocation.calldata;
-  nested.invocation = wallet.make_invocation<u8"execute">(10'000'000, calls);
+  nested.invocation = wallet.make_invocation<u8"execute">(
+      10'000'000, x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls);
   const auto nested_result = gateway.viewgateway_view(nested)();
   ASSERT_EQ(nested_result.payload().output.status_code(),
             InvocationFrameStatusCode::Abort);

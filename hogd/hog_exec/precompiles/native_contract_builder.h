@@ -17,12 +17,12 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/library_exception.hh"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "transaction.hh"
@@ -206,8 +206,14 @@ public:
 
   // Charged before decoding a frame's calldata, at or above what RV32 glue pays
   // to decode the same argument (#4236). add() rejects dense-vector arguments.
-  constexpr static GasAmount kDecodeBaseGas = 600;
-  constexpr static GasAmount kDecodeByteGas = 8;
+  // What the RV32 glue pays includes the syscall base for each billed syscall
+  // it makes before rejecting the calldata, and this charge has no such part,
+  // so it is raised by hand when the syscall base rises. It was 750 when that
+  // base was 50. At 60 the RV32 wallet spends 1230 gas rejecting a 46-byte
+  // call, 20 more than 750 + 10 * 46, so this must be at least 770. 800 leaves
+  // 30 over.
+  constexpr static GasAmount kDecodeBaseGas = 800;
+  constexpr static GasAmount kDecodeByteGas = 10;
 
   static constexpr GasAmount decode_gas(size_t calldata_len)
   {

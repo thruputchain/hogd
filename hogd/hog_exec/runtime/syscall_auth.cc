@@ -37,7 +37,7 @@ static_assert(std::max(sizeof(Ed25519PublicKey), sizeof(MlDsa65PublicKey)) *
                   kMaxSigners <=
               kBigItemThreshold);
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_ChangePublicKeyRegistration_inner(
     SystemCallHandler &syscall_handler, uint32_t input_key_index,
     const int32_t *optional_input_key_scheme,
@@ -107,42 +107,43 @@ syscall_ChangePublicKeyRegistration_inner(
   }();
 
   if (!new_key) {
-    co_return SyscallInnerResult{new_key.error().code(), WrappedGasAmount{0}};
+    return SyscallInnerResult{new_key.error().code(), WrappedGasAmount{0}};
   }
 
-  auto status = co_await syscall_handler.change_public_key_registration(
-      input_key_index, std::move(*new_key));
+  auto status =
+      syscall_handler.change_public_key_registration(input_key_index,
+                                                     std::move(*new_key));
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
   }
   auto &registration_status = *status;
   if (!registration_status) {
-    co_return SyscallInnerResult{registration_status.error().code(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{registration_status.error().code(),
+                              WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{0}};
 }
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_WriteAddressRequiredWeight_inner(SystemCallHandler &syscall_handler,
                                          Weight input_required_weight)
 {
-  auto status = co_await syscall_handler.set_address_required_weight(
-      input_required_weight);
+  auto status =
+      syscall_handler.set_address_required_weight(input_required_weight);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
   }
   auto &weight_status = *status;
   if (!weight_status) {
-    co_return SyscallInnerResult{weight_status.error().code(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{weight_status.error().code(),
+                              WrappedGasAmount{0}};
   }
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{0}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{0}};
 }
 
 std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>

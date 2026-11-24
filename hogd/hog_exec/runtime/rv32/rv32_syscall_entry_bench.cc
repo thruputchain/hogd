@@ -18,6 +18,7 @@
 #include <vector>
 
 #include "db_conflict.hh"
+#include "hogd/base/bits.h"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
@@ -141,6 +142,112 @@ constexpr uint32_t kBytestringWrittenLenAddress =
 static_assert(kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength) <=
                   kInputAddress,
               "bytestring arguments must not run into the payload buffer");
+
+// U256Sqrt operands, above the bytestring block. The routine's time moves
+// with the value, so three are measured and the price covers the dearest: a
+// small one, the largest, and a hash. Zero would return before any work.
+constexpr uint32_t kU256RegionAddress = kBytestringRegionAddress + 0x60;
+static_assert(kU256RegionAddress >=
+                  kBytestringWrittenLenAddress + sizeof(RuntimeMemoryLength),
+              "U256 operands must not overlap the bytestring block");
+constexpr uint32_t kU256SmallAddress = kU256RegionAddress;
+constexpr uint32_t kU256OnesAddress = kU256RegionAddress + 0x20;
+constexpr uint32_t kU256MixedAddress = kU256RegionAddress + 0x40;
+static_assert(sizeof(U256Le) == 32);
+static_assert(kU256MixedAddress + sizeof(U256Le) <= kInputAddress,
+              "U256 operands must not run into the hashing input");
+
+// MulDivRem operands and results, in the room between the two output pointers.
+//
+// A division's time moves with how many limbs the divisor has, and with two
+// branches that follow the operands: the test that takes one off a digit's
+// estimate, and the add-back. So each width is measured at every divisor
+// length. From two limbs up the operands were found by search, and take one
+// off the estimate twice for nearly every digit; AddBack's add the divisor
+// back for four digits of five. The Limbs1 and Mixed operands are SHA-256
+// output, bits that follow no pattern. The price covers the dearest row.
+struct MulDivRemRow {
+  std::string_view name;
+  SyscallNo syscall;
+  // 64-bit limbs, least significant first. A 128-bit row uses the low two.
+  std::array<uint64_t, 4> a;
+  std::array<uint64_t, 4> b;
+  std::array<uint64_t, 4> divisor;
+};
+
+constexpr std::array<MulDivRemRow, 9> kMulDivRemRows = {{
+    {.name = "U256MulDivRemLimbs1",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {0x5ce29d936b98978a, 0x114c52c0886df2e4, 0xe9b170cdd3ae528d,
+           0x096290eecbf2d545},
+     .b = {0xabeead39c6949bd1, 0xffcb3adf4e32a886, 0xae3e5a21a5dc2b88,
+           0x0dc67306e3b909df},
+     .divisor = {0x1b560fb9cbfd55b1, 0, 0, 0}},
+    {.name = "U256MulDivRemLimbs2",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {0xfffffffffffffffe, 0x8000000000000000, 0x8000000000000000,
+           0x8000000000000000},
+     .b = {0x00000000ffffffff, 2, 1, 0xfffffffffffffffe},
+     .divisor = {0x00000000ffffffff, 2, 0, 0}},
+    {.name = "U256MulDivRemLimbs3",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {0x00000000ffffffff, 1, 0xe8ea0ff0ba84880e, 0xbbac448e01611c15},
+     .b = {0x8000000000000000, 0, 0x7fffffffffffffff, 0xfffffffffffffffe},
+     .divisor = {0xffffffffffffffff, 0x00000000ffffffff, 1, 0}},
+    {.name = "U256MulDivRemLimbs4",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {1, 0xfffffffffffffffe, 0xc1ba6a26af1f249f, 0xfffffffffffffffe},
+     .b = {0xcaf97bdc90737abd, 0xf7013f3608eacd67, 0xffffffffffffffff,
+           0xfffffffffffffffe},
+     .divisor = {0x8000000000000001, 0xfffffffffffffffe, 0x00000000ffffffff,
+                 1}},
+    {.name = "U256MulDivRemAddBack",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {0x7ffffffffffffffe, 0xffffffffffffffff, 2, 0x8000000000000000},
+     .b = {0, 0xffffffffffffffff, 0xfffffffffffffffe, 0x8000000000000000},
+     .divisor = {0x7fffffffffffffff, 0xffffffffffffffff, 2,
+                 0x8000000000000000}},
+    {.name = "U256MulDivRemMixed",
+     .syscall = SyscallNo::kU256MulDivRem,
+     .a = {0x5ce29d936b98978a, 0x114c52c0886df2e4, 0xe9b170cdd3ae528d,
+           0x096290eecbf2d545},
+     .b = {0xabeead39c6949bd1, 0xffcb3adf4e32a886, 0xae3e5a21a5dc2b88,
+           0x0dc67306e3b909df},
+     .divisor = {0x1b560fb9cbfd55b1, 0xae74dffb78dd1c14, 0xc092243df3e8a35c,
+                 0xb6852a8de045d4e6}},
+    {.name = "U128MulDivRemLimbs1",
+     .syscall = SyscallNo::kU128MulDivRem,
+     .a = {0x5ce29d936b98978a, 0x114c52c0886df2e4, 0, 0},
+     .b = {0xabeead39c6949bd1, 0xffcb3adf4e32a886, 0, 0},
+     .divisor = {0x1b560fb9cbfd55b1, 0, 0, 0}},
+    {.name = "U128MulDivRemLimbs2",
+     .syscall = SyscallNo::kU128MulDivRem,
+     .a = {0x7fffffffffffffff, 0xffffffffffffffff, 0, 0},
+     .b = {0x8000000000000000, 0xfffffffffffffffe, 0, 0},
+     .divisor = {0xfffffffffffffffe, 0x0000000100000000, 0, 0}},
+    {.name = "U128MulDivRemMixed",
+     .syscall = SyscallNo::kU128MulDivRem,
+     .a = {0x5ce29d936b98978a, 0x114c52c0886df2e4, 0, 0},
+     .b = {0xabeead39c6949bd1, 0xffcb3adf4e32a886, 0, 0},
+     .divisor = {0x1b560fb9cbfd55b1, 0xae74dffb78dd1c14, 0, 0}},
+}};
+
+constexpr uint32_t kMulDivRemRegionAddress = kOutputAddressA + 0x40;
+// The three results, shared by every row.
+constexpr uint32_t kMulDivRemQuotientLoAddress = kMulDivRemRegionAddress;
+constexpr uint32_t kMulDivRemQuotientHiAddress = kMulDivRemRegionAddress + 0x20;
+constexpr uint32_t kMulDivRemRemainderAddress = kMulDivRemRegionAddress + 0x40;
+
+// A row's three operands, a then b then the divisor, 32 bytes apart.
+constexpr uint32_t
+mul_div_rem_operand_address(size_t row, size_t operand)
+{
+  return kMulDivRemRegionAddress + 0x60 +
+         (static_cast<uint32_t>((3 * row) + operand) * 0x20);
+}
+static_assert(mul_div_rem_operand_address(kMulDivRemRows.size(), 0) <=
+                  kOutputAddressB,
+              "MulDivRem operands must not run into the second output");
 
 // The value a Set writes and the buffer a Get fills, both at the hashing
 // input's address: no row issues a hash and a bytestring call, and the region
@@ -614,6 +721,39 @@ stateless_calls()
   };
 }
 
+// U256Sqrt at the three values make_guest_memory places. No storage and no
+// frame state: what these cost beyond the crossing is the arithmetic.
+std::vector<SyscallCall>
+u256_sqrt_calls()
+{
+  return {
+      make_call("U256SqrtSmall", SyscallNo::kU256Sqrt,
+                {kU256SmallAddress, kOutputAddressA}),
+      make_call("U256SqrtOnes", SyscallNo::kU256Sqrt,
+                {kU256OnesAddress, kOutputAddressA}),
+      make_call("U256SqrtMixed", SyscallNo::kU256Sqrt,
+                {kU256MixedAddress, kOutputAddressA}),
+  };
+}
+
+// The MulDivRem rows, on the operands make_guest_memory places. Like
+// U256Sqrt's, what they cost beyond the crossing is the arithmetic.
+std::vector<SyscallCall>
+mul_div_rem_calls()
+{
+  std::vector<SyscallCall> calls;
+  calls.reserve(kMulDivRemRows.size());
+  for (size_t row = 0; row < kMulDivRemRows.size(); ++row) {
+    calls.push_back(make_call(
+        std::string(kMulDivRemRows[row].name), kMulDivRemRows[row].syscall,
+        {mul_div_rem_operand_address(row, 0),
+         mul_div_rem_operand_address(row, 1),
+         mul_div_rem_operand_address(row, 2), kMulDivRemQuotientLoAddress,
+         kMulDivRemQuotientHiAddress, kMulDivRemRemainderAddress}));
+  }
+  return calls;
+}
+
 // Sweep SHA256 input size to check the compression-block cost model.
 SyscallCall
 sha256_call(uint32_t bytes)
@@ -870,6 +1010,27 @@ make_guest_memory()
               sizeof(kNNIntSetValue));
   std::memcpy(memory.data() + kNNIntAddValueAddress, &kNNIntAddValue,
               sizeof(kNNIntAddValue));
+
+  // The U256Sqrt operands. The mixed one is a hash, so that its bits follow
+  // no pattern.
+  memory[kU256SmallAddress] = 3;
+  std::fill_n(memory.begin() + kU256OnesAddress, sizeof(U256Le), 0xff);
+  std::ranges::copy(sha256(std::string_view("U256Sqrt")),
+                    memory.begin() + kU256MixedAddress);
+
+  // The MulDivRem operands, each limb least significant byte first.
+  for (size_t row = 0; row < kMulDivRemRows.size(); ++row) {
+    const MulDivRemRow &operands = kMulDivRemRows[row];
+    size_t operand = 0;
+    for (const auto &limbs : {operands.a, operands.b, operands.divisor}) {
+      uint8_t *at = memory.data() + mul_div_rem_operand_address(row, operand++);
+      for (const uint64_t limb : limbs) {
+        const uint64_t stored = cpu_to_le(limb);
+        std::memcpy(at, &stored, sizeof(stored));
+        at += sizeof(stored);
+      }
+    }
+  }
   return memory;
 }
 
@@ -1659,6 +1820,18 @@ register_benchmarks()
                                bm_ristretto255_msm, 257U, uint8_t{0},
                                MsmInvalid::OverLimit);
   for (const SyscallCall &call : stateless_calls()) {
+    benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
+                                 bm_syscall_entry, call);
+    benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,
+                                 call);
+  }
+  for (const SyscallCall &call : u256_sqrt_calls()) {
+    benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
+                                 bm_syscall_entry, call);
+    benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,
+                                 call);
+  }
+  for (const SyscallCall &call : mul_div_rem_calls()) {
     benchmark::RegisterBenchmark(("entry/" + call.name).c_str(),
                                  bm_syscall_entry, call);
     benchmark::RegisterBenchmark(("vm/" + call.name).c_str(), bm_syscall_vm,

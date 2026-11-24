@@ -12,12 +12,14 @@
 #include <format>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <optional>
 #include <rocksdb/version.h>
 #include <span>
 #include <string>
 #include <string_view>
 #include <system_error>
+#include <tuple>
 #include <utility>
 #include <vector>
 
@@ -1413,11 +1415,42 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
 
     const auto &events = block.payload.event_logs;
     const auto &bodies = block.payload.tx_bodies;
+    // Keep small batches in input order. On large blocks, increasing keys
+    // let RocksDB's skiplist reuse its previous insertion position.
+    constexpr size_t kMinOrderedTransactions = 128;
+    const bool order_puts = events.size() >= kMinOrderedTransactions;
     rocksdb::WriteBatch batch;
     std::string key;
+    struct ContractRow {
+      const ContractAddress *address;
+      const TransactionHash *hash;
+      IndexerKeyFormat::RecordKind kind;
+      uint32_t sequence;
+    };
+    const auto put_contract = [&](const ContractRow &row) {
+      IndexerKeyFormat::make_contract_key(key, *row.address, row.kind, height,
+                                          *row.hash, row.sequence);
+      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+    };
+    const auto visit_contract_rows = [&](size_t i, const auto &visit) {
+      const auto &event_log = events[i];
+      uint32_t sequence = 0;
+      for (const auto &event : event_log.events) {
+        visit(ContractRow{.address = &event.contract_address,
+                          .hash = &event_log.tx_hash,
+                          .kind = IndexerKeyFormat::kEvent,
+                          .sequence = sequence++});
+      }
+      visit(ContractRow{.address =
+                            &bodies[i].signed_tx.tx.invocation.invoked_address,
+                        .hash = &event_log.tx_hash,
+                        .kind = IndexerKeyFormat::kRootTx,
+                        .sequence = 0});
+    };
+    // Keep point lookups in input order so conflicts with stored rows take
+    // precedence over duplicate hashes within the candidate block.
     for (size_t i = 0; i < events.size(); ++i) {
       const TxEventLog &event_log = events[i];
-      const ProposedTransaction &body = bodies[i];
       IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
 
       std::string existing;
@@ -1436,19 +1469,62 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
             "committed transaction hash already exists at another height");
       }
 
-      batch.Put(tx_cf_handle_, key, make_tx_value(height, body, event_log));
-      uint32_t sequence_number = 0;
-      for (const TxEmittedEvent &emitted_event : event_log.events) {
-        IndexerKeyFormat::make_contract_key(key, emitted_event.contract_address,
-                                            IndexerKeyFormat::kEvent, height,
-                                            event_log.tx_hash,
-                                            sequence_number++);
-        batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+      if (!order_puts) {
+        batch.Put(tx_cf_handle_, key,
+                  make_tx_value(height, bodies[i], event_log));
+        visit_contract_rows(i, put_contract);
       }
-      IndexerKeyFormat::make_contract_key(
-          key, body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, event_log.tx_hash, 0);
-      batch.Put(contract_cf_handle_, key, rocksdb::Slice());
+    }
+
+    std::vector<size_t> ordered_txs(events.size());
+    std::ranges::iota(ordered_txs, size_t{0});
+    const auto tx_hash = [&](size_t i) -> const TransactionHash & {
+      return events[i].tx_hash;
+    };
+    std::ranges::sort(ordered_txs, {}, tx_hash);
+    if (std::ranges::adjacent_find(ordered_txs, {}, tx_hash) !=
+        ordered_txs.end()) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block repeats a transaction hash");
+    }
+
+    if (order_puts) {
+      // These rows use distinct keys. Only their order inside the same
+      // atomic batch changes; per-transaction event sequence is preserved.
+      std::vector<ContractRow> contract_rows;
+      size_t row_count = events.size(); // One root record per transaction.
+      if (row_count > contract_rows.max_size()) {
+        return apply_failure(
+            IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+            "committed block has too many index rows");
+      }
+      for (const auto &event_log : events) {
+        if (event_log.events.size() > contract_rows.max_size() - row_count) {
+          return apply_failure(
+              IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
+              "committed block has too many index rows");
+        }
+        row_count += event_log.events.size();
+      }
+      contract_rows.reserve(row_count);
+      for (size_t i : ordered_txs) {
+        const auto &event_log = events[i];
+        IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
+        batch.Put(tx_cf_handle_, key,
+                  make_tx_value(height, bodies[i], event_log));
+        visit_contract_rows(i, [&](ContractRow row) {
+          contract_rows.push_back(row);
+        });
+      }
+      // Address, kind, constant height, hash, and big-endian sequence are
+      // precisely the bytewise components of make_contract_key.
+      std::ranges::sort(contract_rows, {}, [](const ContractRow &row) {
+        return std::tie(*row.address, row.kind, *row.hash, row.sequence);
+      });
+      for (const auto &row : contract_rows) {
+        put_contract(row);
+      }
     }
 
     // The query projection is committed with rows and progress. It copies
@@ -1462,21 +1538,11 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
               rocksdb::Slice(reinterpret_cast<const char *>(
                                  record_bytes.data()),
                              record_bytes.size()));
-    std::vector<TransactionHash> hashes;
-    hashes.reserve(events.size());
-    for (const auto &event : events) {
-      hashes.push_back(event.tx_hash);
-    }
-    std::ranges::sort(hashes);
-    if (std::ranges::adjacent_find(hashes) != hashes.end()) {
-      return apply_failure(
-          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
-          "committed block repeats a transaction hash");
-    }
-    for (size_t i = 0; i < hashes.size(); ++i) {
+    for (size_t i = 0; i < ordered_txs.size(); ++i) {
       const uint64_t ordinal = std::byteswap(static_cast<uint64_t>(i));
       batch.Put(db_->DefaultColumnFamily(),
-                IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
+                IndexerKeyFormat::make_block_ref_key(height,
+                                                     tx_hash(ordered_txs[i])),
                 rocksdb::Slice(reinterpret_cast<const char *>(&ordinal),
                                sizeof(ordinal)));
     }

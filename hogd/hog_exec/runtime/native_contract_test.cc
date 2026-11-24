@@ -17,15 +17,15 @@
 #include <vector>
 
 #include "contract.hh"
-#include "event.hh"
 #include "ffi_enums.hh"
 #include "hogd/base/network_config_params.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/execution_mode.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/precompiles/native_contract_builder.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -33,7 +33,6 @@
 #include "hogd/hog_exec/runtime/native_runtime.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "hogd/hog_exec/runtime/test_util/test_event_aggregator.h"
@@ -1198,8 +1197,8 @@ TEST_F(NativeContractTest, BytestringGetReportsFullLengthOnShortBuffer)
   ASSERT_TRUE(res.is_root_success());
 }
 
-// Overlapping native syscall args fault before the body runs; disjoint ones
-// do not.
+// A native syscall output that overlaps another argument faults before the
+// body runs; inputs that overlap each other, and disjoint arguments, do not.
 TEST_F(NativeContractTest, SyscallArgumentsAreAliasChecked)
 {
   NativeContractBuilder builder;
@@ -1221,14 +1220,37 @@ TEST_F(NativeContractTest, SyscallArgumentsAreAliasChecked)
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 
-        // Two inputs at the same address, nothing written.
-        Topic topic{};
-        const Topic *topic_ptr = &topic;
-        const Topic *no_topic = nullptr;
-        auto in_in = co_await ctx.syscall<SyscallNo::kLogEvent>(
-            topic_ptr, no_topic, topic_ptr, std::span<const std::byte>{});
-        if (!is_code(in_in, SyscallErrorCode::kSyscallErrorCodeFault)) {
-          ADD_FAILURE() << "two inputs at one address did not fault";
+        // Two outputs at the same address.
+        uint32_t calldata_len = 0;
+        auto out_out =
+            co_await ctx.syscall<SyscallNo::kGetCalldataLen>(calldata_len,
+                                                             calldata_len);
+        if (!is_code(out_out, SyscallErrorCode::kSyscallErrorCodeFault)) {
+          ADD_FAILURE() << "two outputs at one address did not fault";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+
+        // Two inputs at the same address are fine, and read the same as two
+        // inputs holding the same bytes apart: neither is written.
+        const SHA256Hash salt = sha256(std::span<const std::byte>(message));
+        const SHA256Hash salt_copy = salt;
+        const ContractAddress *no_caller = nullptr;
+        ContractAddress shared{};
+        ContractAddress apart{};
+        auto in_in =
+            co_await ctx.syscall<SyscallNo::kGetDeployAddress>(no_caller, salt,
+                                                               salt, shared);
+        auto in_apart =
+            co_await ctx.syscall<SyscallNo::kGetDeployAddress>(no_caller, salt,
+                                                               salt_copy,
+                                                               apart);
+        if (!is_code(in_in, SyscallErrorCode::kSyscallErrorCodeNone) ||
+            !is_code(in_apart, SyscallErrorCode::kSyscallErrorCodeNone)) {
+          ADD_FAILURE() << "two inputs at one address were rejected";
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        if (shared != apart || shared == ContractAddress{}) {
+          ADD_FAILURE() << "a shared input was read differently";
           co_return InvokeError{InvokeErrorCode::Deterministic};
         }
 

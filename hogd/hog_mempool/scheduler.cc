@@ -4,6 +4,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -12,6 +13,7 @@
 #include <mutex>
 #include <set>
 #include <span>
+#include <stop_token>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>
@@ -19,6 +21,7 @@
 
 #include "db_sched.hh"
 #include "hogd/base/arc.h"
+#include "hogd/base/average_age.h"
 #include "hogd/base/chunk_items.h"
 #include "hogd/base/chunk_position.h"
 #include "hogd/base/chunk_run_sender.h"
@@ -48,21 +51,6 @@
 namespace hogd {
 
 namespace {
-
-BlockHeight
-compute_average_age(uint128_t num_native_tokens_a, BlockHeight age_a,
-                    uint128_t num_native_tokens_b, BlockHeight age_b)
-{
-  uint128_t numerator =
-      (num_native_tokens_a * age_a) + (num_native_tokens_b * age_b);
-  uint128_t denominator = num_native_tokens_a + num_native_tokens_b;
-  CHECK_GT(denominator, 0UL);
-  // When doing division, we introduce imprecision into our calculations. Thus,
-  // we always round the result up to avoid benefitting the account. This helps
-  // to ensure that users are not incentivized to waste network storage or
-  // compute, such as by spreading native tokens among multiple accounts.
-  return (numerator / denominator) + ((numerator % denominator) ? 1 : 0);
-}
 
 bool
 uint128_add_would_overflow(uint128_t a, uint128_t b)
@@ -112,9 +100,9 @@ try_move_native_tokens_to_already_scheduled_group(
         block_height;
   }
   else {
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     native_token_ages.average_ages[kNativeTokenAgeGroupAlreadyScheduled] =
-        compute_average_age(num_native_tokens, block_height,
+        AverageAge::compute(num_native_tokens, block_height,
                             current_already_scheduled, already_scheduled_age);
   }
   return true;
@@ -135,18 +123,36 @@ struct WriteNativeTokenAgeRecord {
 
 } // namespace
 
+size_t
+Scheduler::num_dirty_native_token_ages()
+{
+  size_t count = 0;
+  accounts_.for_each([&count](const auto &p) {
+    if (p.second.native_token_age_dirty) {
+      count++;
+    }
+  });
+  return count;
+}
+
 x23::Async<void>
-Scheduler::write_all_average_native_token_ages_to_db()
+Scheduler::write_dirty_native_token_ages_to_db()
 {
   co_await default_coropoll().pool_.bg();
 
+  // Each bucket of [accounts_] is locked only while its dirty ages are copied
+  // out and their marks cleared. An age that changes again after its copy is
+  // marked again and goes out with the next write.
   PerThread<NativeTokenAgeBatch> ages_by_thread;
-  accounts_.for_each_parallel(
-      [&](const std::pair<ContractAddress, AccountState> &p) {
-        const NativeTokenAge &age = p.second.native_token_age;
-        CHECK_EQ(p.first, age.address);
-        ages_by_thread->push_back(age);
-      });
+  accounts_.for_each_parallel([&](auto &p) {
+    AccountState &account_state = p.second;
+    if (!account_state.native_token_age_dirty) {
+      return;
+    }
+    CHECK_EQ(p.first, account_state.native_token_age.address);
+    account_state.native_token_age_dirty = false;
+    ages_by_thread->push_back(account_state.native_token_age);
+  });
 
   // Each thread's batch is a part of the run; the records are serialized
   // straight from the parts, so no batch is joined into one.
@@ -154,13 +160,37 @@ Scheduler::write_all_average_native_token_ages_to_db()
   {
     auto ul = ages_by_thread.lock_threads();
     ages_by_thread.for_each(ul, [&parts](NativeTokenAgeBatch &per_thread_ages) {
-      parts.push_back(std::move(per_thread_ages));
+      if (!per_thread_ages.empty()) {
+        parts.push_back(std::move(per_thread_ages));
+      }
     });
   }
+  if (parts.empty()) {
+    co_return;
+  }
+  // A failed write is fatal, so the marks cleared above are never silently
+  // lost.
   ChunkRunSender sender(parts, max_native_token_ages_per_record_,
                         WriteNativeTokenAgeRecord{.client =
                                                       db_sched_client_.get()});
   co_await sender.send();
+}
+
+void
+Scheduler::native_token_age_writer_loop(const std::stop_token &stop,
+                                        std::chrono::milliseconds interval)
+{
+  while (true) {
+    {
+      std::unique_lock lock(native_token_age_writer_mutex_);
+      native_token_age_writer_cv_.wait_for(lock, stop, interval,
+                                           [] { return false; });
+    }
+    if (stop.stop_requested()) {
+      return;
+    }
+    write_dirty_native_token_ages_to_db()();
+  }
 }
 
 std::pair<NativeTokenAge *, std::unique_lock<std::mutex>>
@@ -195,7 +225,12 @@ Scheduler::commit_pending_nomination(BlockID block_id)
   for (const auto &[account, native_token_age] :
        pending_nomination_.native_token_ages) {
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
   }
   co_await refresh_ready_accounts(pending_nomination_.touched_accounts);
   co_await refresh_accounts_excluded_from_block();
@@ -302,7 +337,12 @@ Scheduler::apply_committed_block_native_token_ages(
     }
 
     auto [account_state, lock] = get_account_state(account);
-    account_state->native_token_age = native_token_age;
+    // The age can come back unchanged, e.g. when every queued tx of the
+    // account expired; there is nothing new to write then.
+    if (account_state->native_token_age != native_token_age) {
+      account_state->native_token_age = native_token_age;
+      account_state->native_token_age_dirty = true;
+    }
     touched_accounts.insert(account);
   }
   co_await refresh_ready_accounts(touched_accounts);
@@ -464,6 +504,9 @@ Scheduler::get_native_token_age_from_pending_nomination_create_if_needed(
     AccountState &account_state, const ContractAddress &account)
 {
   if (!pending_nomination_.block_id) {
+    // The caller may change the cached age directly, e.g. by cycling groups in
+    // [add_txs()], so it must be written back to hog_db.
+    account_state.native_token_age_dirty = true;
     return &account_state.native_token_age;
   }
 
@@ -971,7 +1014,7 @@ Scheduler::cycle_if_needed(NativeTokenAge &native_token_age,
     already_scheduled_average_older = (already_scheduled_age < to_schedule_age);
     combined_averages_older =
         (received > 0) &&
-        (compute_average_age(already_scheduled, already_scheduled_age, received,
+        (AverageAge::compute(already_scheduled, already_scheduled_age, received,
                              received_age) < to_schedule_age);
   }
   else {
@@ -1022,9 +1065,9 @@ Scheduler::cycle_groups(NativeTokenAge &current_averages)
   new_averages.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
       to_xdr(to_schedule_native_tokens + already_scheduled_native_tokens);
   if (to_schedule_native_tokens) {
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     new_averages.average_ages[kNativeTokenAgeGroupToSchedule] =
-        compute_average_age(to_schedule_native_tokens, to_schedule_age,
+        AverageAge::compute(to_schedule_native_tokens, to_schedule_age,
                             already_scheduled_native_tokens,
                             already_scheduled_age);
   }
@@ -1062,7 +1105,11 @@ Scheduler::process_transfers_helper(const Delta &delta,
   CHECK_NE(num_received, static_cast<int128_t>(0));
 
   const ContractAddress &account = delta.address;
-  auto [averages, lock] = get_cached_native_token_age(account);
+  auto [account_state, lock] = get_account_state(account);
+  CHECK_EQ(account_state->native_token_age.address, account);
+  // Every delta is nonzero (CHECKed above), so it changes the account's age.
+  account_state->native_token_age_dirty = true;
+  const NativeTokenAge *averages = &account_state->native_token_age;
   NativeTokenAge new_averages = *averages;
 
   uint128_t received_native_tokens =
@@ -1072,12 +1119,12 @@ Scheduler::process_transfers_helper(const Delta &delta,
   if (num_received > 0) {
     new_averages.num_native_tokens[kNativeTokenAgeGroupReceived] =
         to_xdr(received_native_tokens + num_received);
-    // See comment above for [compute_average_age()].
+    // See [AverageAge::compute()].
     //
-    // Note that [compute_average_age()] will never divide by 0 because we
+    // Note that [AverageAge::compute()] will never divide by 0 because we
     // check that [num_received] is not 0.
     new_averages.average_ages[kNativeTokenAgeGroupReceived] =
-        compute_average_age(received_native_tokens, received_age, num_received,
+        AverageAge::compute(received_native_tokens, received_age, num_received,
                             block_height);
   }
   else {

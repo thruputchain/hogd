@@ -23,8 +23,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/ffi_types.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/item/deployed_contract.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
@@ -712,12 +712,12 @@ TEST_F(SyscallOutputTraceTest, Sha256CopyForkTraceIsExact)
 // term, or SHA256Copy could go back to charging nothing, and that test would
 // still pass. Here it fails.
 //
-// Charges, crossing included, at kSyscallBaseCost = 50:
+// Charges, crossing included, at kSyscallBaseCost = 60:
 //
-//   SHA256("")                22 + 50   one padding block, no per-call base
-//   SHA256Update(0, "", reset) 26 + 50  creates a stream, compresses nothing
-//   SHA256Copy(0 -> 1)        26 + 50   clones a stream, compresses nothing
-//   SHA256Finalize(1)         22 + 50   the padding block; erases, so no
+//   SHA256("")                22 + 60   one padding block, no per-call base
+//   SHA256Update(0, "", reset) 26 + 60  creates a stream, compresses nothing
+//   SHA256Copy(0 -> 1)        26 + 60   clones a stream, compresses nothing
+//   SHA256Finalize(1)         22 + 60   the padding block; erases, so no
 //                                       stream cost
 TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
 {
@@ -772,21 +772,21 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
   {
     SyscallTraceBody body(SyscallNo::kSHA256);
     body.sha256().outputs = SyscallSHA256Outputs{.hash = hash_empty};
-    const auto [start, end] = charge(72);
+    const auto [start, end] = charge(82);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Update);
     body.sha256_update().inputs.index = 0;
     body.sha256_update().inputs.reset = true;
-    const auto [start, end] = charge(76);
+    const auto [start, end] = charge(86);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kSHA256Copy);
     body.sha256_copy().inputs.src_index = 0;
     body.sha256_copy().inputs.dst_index = 1;
-    const auto [start, end] = charge(76);
+    const auto [start, end] = charge(86);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
   {
@@ -794,7 +794,7 @@ TEST_F(SyscallOutputTraceTest, CryptoSyscallPricesAreLockedIn)
     body.sha256_finalize().inputs.index = 1;
     body.sha256_finalize().outputs =
         SyscallSHA256FinalizeOutputs{.hash = hash_empty};
-    const auto [start, end] = charge(72);
+    const auto [start, end] = charge(82);
     expected.push_back(make_entry(start, end, std::move(body), ok_status()));
   }
 
@@ -1038,6 +1038,204 @@ TEST_F(SyscallOutputTraceTest, RcqTracesRecordFullEntryAndPeekLen)
     body.retrocausal_queue_consume().outputs =
         SyscallRetrocausalQueueConsumeOutputs{.queue_entry = full_entry};
     expected.push_back(step_entry(gas, 0, std::move(body), ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// U256Sqrt records the value it read and the root it returned, and bills its
+// flat price on top of the crossing.
+TEST_F(SyscallOutputTraceTest, U256SqrtTraceIsExact)
+{
+  // 2^128, least significant byte first. Its square root is 2^64.
+  U256Le value{};
+  value[16] = 1;
+  constexpr uint128_t kRoot = uint128_t{1} << 64;
+
+  auto context = make_single_contract_context(
+      [value](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint128_t root = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kU256Sqrt>(value, root);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            root != kRoot) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU256Sqrt);
+    body.u256_sqrt().inputs.value = value;
+    body.u256_sqrt().outputs = SyscallU256SqrtOutputs{.root = to_xdr(kRoot)};
+    expected.push_back(
+        step_entry(gas, kU256SqrtCost, std::move(body), ok_status()));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// U256MulDivRem records its operands and its three results and bills its flat
+// price on top of the crossing. With a zero divisor it records the operands
+// and no results, leaves the outputs alone and bills the crossing only. The
+// example has a quotient that needs both halves:
+//   (2^255 + 2^64 + 5) * (2^65 + 1) = (2^256 + 2^191 + 2^65 + 11) * 2^64 + 5
+TEST_F(SyscallOutputTraceTest, U256MulDivRemTracesAreExact)
+{
+  // Least significant byte first.
+  U256Le a{};
+  a[0] = 5;
+  a[8] = 1;
+  a[31] = 0x80;
+  U256Le b{};
+  b[0] = 1;
+  b[8] = 2;
+  U256Le divisor{};
+  divisor[8] = 1;
+  U256Le quotient_lo{};
+  quotient_lo[0] = 11;
+  quotient_lo[8] = 2;
+  quotient_lo[23] = 0x80;
+  U256Le quotient_hi{};
+  quotient_hi[0] = 1;
+  U256Le remainder{};
+  remainder[0] = 5;
+  const U256Le zero{};
+
+  auto context = make_single_contract_context(
+      [=](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        U256Le lo{};
+        U256Le hi{};
+        U256Le rem{};
+        auto r = co_await ctx.syscall<SyscallNo::kU256MulDivRem>(a, b, divisor,
+                                                                 lo, hi, rem);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        r = co_await ctx.syscall<SyscallNo::kU256MulDivRem>(a, b, zero, lo, hi,
+                                                            rem);
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU256MulDivRem);
+    body.u256_mul_div_rem().inputs.a = a;
+    body.u256_mul_div_rem().inputs.b = b;
+    body.u256_mul_div_rem().inputs.divisor = divisor;
+    body.u256_mul_div_rem().outputs =
+        SyscallU256MulDivRemOutputs{.quotient_lo = quotient_lo,
+                                    .quotient_hi = quotient_hi,
+                                    .remainder = remainder};
+    expected.push_back(
+        step_entry(gas, kU256MulDivRemCost, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kU256MulDivRem);
+    body.u256_mul_div_rem().inputs.a = a;
+    body.u256_mul_div_rem().inputs.b = b;
+    body.u256_mul_div_rem().inputs.divisor = zero;
+    expected.push_back(step_entry(
+        gas, 0, std::move(body),
+        error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
+  }
+
+  ASSERT_NE(handler.get_trace(), nullptr);
+  ASSERT_EQ(handler.get_trace()->system_calls, expected)
+      << x23::show(handler.get_trace()->system_calls);
+
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
+// U128MulDivRem, the same at half the width:
+//   (2^127 + 2^64 + 5) * (2^65 + 1) = (2^128 + 2^65 + 2^63 + 11) * 2^64 + 5
+TEST_F(SyscallOutputTraceTest, U128MulDivRemTracesAreExact)
+{
+  const uint128_t a = (uint128_t{1} << 127) + (uint128_t{1} << 64) + 5;
+  const uint128_t b = (uint128_t{1} << 65) + 1;
+  const uint128_t divisor = uint128_t{1} << 64;
+  const uint128_t quotient_lo =
+      (uint128_t{1} << 65) + (uint128_t{1} << 63) + 11;
+  const uint128_t quotient_hi = 1;
+  const uint128_t remainder = 5;
+  const uint128_t zero = 0;
+
+  auto context = make_single_contract_context(
+      [=](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        uint128_t lo = 0;
+        uint128_t hi = 0;
+        uint128_t rem = 0;
+        auto r = co_await ctx.syscall<SyscallNo::kU128MulDivRem>(a, b, divisor,
+                                                                 lo, hi, rem);
+        if (!r.has_value() ||
+            r.value() != SyscallErrorCode::kSyscallErrorCodeNone ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        r = co_await ctx.syscall<SyscallNo::kU128MulDivRem>(a, b, zero, lo, hi,
+                                                            rem);
+        if (!r.has_value() ||
+            r.value() !=
+                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput ||
+            lo != quotient_lo || hi != quotient_hi || rem != remainder) {
+          co_return InvokeError{InvokeErrorCode::Deterministic};
+        }
+        co_return InvokeStatus<void>{};
+      });
+
+  auto handler = make_new_system_call_handler(make_tx(), *context);
+  handler.enable_tracing();
+  ASSERT_TRUE(handler.root_invoke()().is_root_success());
+
+  GasCursor gas{kGasLimit};
+  SyscallTraceVec expected;
+  {
+    SyscallTraceBody body(SyscallNo::kU128MulDivRem);
+    body.u128_mul_div_rem().inputs.a = to_xdr(a);
+    body.u128_mul_div_rem().inputs.b = to_xdr(b);
+    body.u128_mul_div_rem().inputs.divisor = to_xdr(divisor);
+    body.u128_mul_div_rem().outputs =
+        SyscallU128MulDivRemOutputs{.quotient_lo = to_xdr(quotient_lo),
+                                    .quotient_hi = to_xdr(quotient_hi),
+                                    .remainder = to_xdr(remainder)};
+    expected.push_back(
+        step_entry(gas, kU128MulDivRemCost, std::move(body), ok_status()));
+  }
+  {
+    SyscallTraceBody body(SyscallNo::kU128MulDivRem);
+    body.u128_mul_div_rem().inputs.a = to_xdr(a);
+    body.u128_mul_div_rem().inputs.b = to_xdr(b);
+    body.u128_mul_div_rem().inputs.divisor = to_xdr(zero);
+    expected.push_back(step_entry(
+        gas, 0, std::move(body),
+        error_status(SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput)));
   }
 
   ASSERT_NE(handler.get_trace(), nullptr);

@@ -78,15 +78,10 @@ fi
 
 # The same pinning the syscall benchmark uses. A cross-check run on different
 # cores, or with a different code layout, is comparing two hosts rather than two
-# implementations -- which is the one thing it exists to avoid.
-RUNNER=()
-if command -v taskset >/dev/null 2>&1; then
-  RUNNER=(taskset -c 0)
-fi
-if command -v setarch >/dev/null 2>&1 &&
-  setarch "$(uname -m)" -R true >/dev/null 2>&1; then
-  RUNNER+=(setarch "$(uname -m)" -R)
-fi
+# implementations -- which is the one thing it exists to avoid. Either one
+# missing is an error rather than a quieter run; see rv32_pin_runner.sh.
+source "$(dirname "${BASH_SOURCE[0]}")/rv32_pin_runner.sh"
+rv32_pin_runner
 
 # -mr is openssl's machine-readable mode: one +F line per algorithm carrying
 # the rates, rather than a table laid out for humans that has been reformatted

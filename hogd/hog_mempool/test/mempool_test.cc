@@ -52,7 +52,7 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_db/status.h"
 #include "hogd/hog_exec/common/limits.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_mempool/config_hash.h"
 #include "hogd/hog_mempool/registration.h"
@@ -184,12 +184,66 @@ TEST(Mempool, ProposalTxsCompatibilityHashGoldenVector)
   // Shared with chuckd's TestHashProposalTxsFastCompatibilityVector and the
   // coordinator's proposal_txs_hash_golden_vector.
   const ProposalTxsHash expected = {
-      0xac, 0x7e, 0x6e, 0x65, 0xe3, 0xf3, 0x6e, 0xc7, 0x88, 0x45, 0xdd,
-      0xf3, 0xf3, 0xd9, 0x5a, 0xcf, 0x99, 0xea, 0xdb, 0xbd, 0xbc, 0xfd,
-      0x39, 0x1e, 0x44, 0x23, 0x9a, 0x7d, 0xc4, 0xb5, 0x2c, 0x03,
+      0x55, 0x6a, 0xf4, 0x47, 0x8a, 0x82, 0xe4, 0x99, 0x1f, 0x0e, 0x59,
+      0x42, 0xaf, 0xce, 0x8b, 0x66, 0xe6, 0x83, 0x4c, 0xb4, 0xec, 0xf8,
+      0x82, 0x65, 0xd8, 0xac, 0xa7, 0x48, 0x5d, 0x2d, 0x3e, 0xa3,
   };
   EXPECT_EQ(proposal_txs_compatibility_hash(txs), expected);
   EXPECT_NE(sha256(txs), expected);
+}
+
+// Shared with chuckd's TestHashParallelBatchVectors and the coordinator's
+// hash_parallel_batch_golden_vectors. The last two have multi-byte counts.
+TEST(Mempool, ParallelBatchHashGoldenVectors)
+{
+  const SHA256Hash expected_empty = {
+      0xe9, 0xd1, 0xec, 0xea, 0x10, 0x86, 0x05, 0xd0, 0x61, 0xcb, 0x8d,
+      0xaf, 0xb3, 0x96, 0x2b, 0x43, 0xc9, 0xf9, 0x66, 0xd0, 0xe0, 0xb5,
+      0x6b, 0xb7, 0x6a, 0x4f, 0xb9, 0x0b, 0xb0, 0x02, 0xbf, 0x0d,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(ParallelBatch{}), expected_empty);
+
+  ParallelBatch multibyte{};
+  multibyte.segment_tokens = {63, 300, 70000};
+  multibyte.segment_bytes = {1, 2, 3};
+  multibyte.xdr = {1, 2, 3, 4, 5, 6};
+  const SHA256Hash expected_multibyte = {
+      0x51, 0xe3, 0x89, 0x59, 0x81, 0x61, 0x4d, 0x63, 0x5e, 0x2c, 0xed,
+      0xc6, 0x9a, 0xae, 0x85, 0xc4, 0xe1, 0x49, 0x06, 0x3d, 0x2b, 0x05,
+      0xb8, 0x95, 0x7c, 0xb2, 0x51, 0x00, 0x84, 0xe8, 0x68, 0x90,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(multibyte), expected_multibyte);
+
+  ParallelBatch many_segments{};
+  for (uint32_t i = 0; i < 64; ++i) {
+    many_segments.segment_tokens.push_back(i);
+    many_segments.segment_bytes.push_back(1);
+  }
+  many_segments.segment_bytes[0] = 300;
+  many_segments.segment_bytes[1] = 70000;
+  for (uint32_t j = 0; j < 70362; ++j)
+    many_segments.xdr.push_back(static_cast<uint8_t>(j % 251));
+  const SHA256Hash expected_many_segments = {
+      0x9f, 0xd6, 0xa1, 0x93, 0x8f, 0x57, 0x79, 0x4d, 0x14, 0x75, 0x83,
+      0x68, 0xf5, 0xa6, 0xe7, 0xbf, 0xcc, 0x82, 0x90, 0x05, 0x22, 0x31,
+      0x89, 0x1d, 0x20, 0xba, 0x9e, 0xc6, 0x90, 0xf3, 0x7a, 0x6d,
+  };
+  EXPECT_EQ(hash_parallel_batch_compatibility(many_segments),
+            expected_many_segments);
+}
+
+// The token counts are part of the preimage, though no segment hash reads them.
+TEST(Mempool, ParallelBatchHashBindsSegmentTokens)
+{
+  ParallelBatch batch{};
+  batch.segment_tokens = {2, 2};
+  batch.segment_bytes = {8, 8};
+  batch.xdr = {0, 0, 0, 1, 0, 0, 0, 2, 0, 0, 0, 3, 0, 0, 0, 4};
+  ParallelBatch recounted = batch;
+  recounted.segment_tokens = {1, 3};
+
+  EXPECT_NE(hash_parallel_batch_compatibility(batch),
+            hash_parallel_batch_compatibility(recounted));
 }
 
 // Swapping two segments reverses the transaction order and changes the hash.
@@ -2180,34 +2234,64 @@ TEST(Mempool, CommitRecordsBlockSizeHistograms)
   }
 }
 
+namespace {
+
+constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
+
+// A transaction that has the deploy_and_transfer contract at
+// [kDeployAndTransferAddress] deploy the fibonacci contract and send it
+// [amount], which gives the fibonacci contract its first balance.
+struct DeployAndTransferTx {
+  SignedTransaction tx;
+  ContractAddress deployed_address;
+};
+
+DeployAndTransferTx
+make_deploy_and_transfer_tx(uint128_t amount)
+{
+  const SHA256Hash deploy_nonce = make_test_nonce(1);
+  std::shared_ptr<Contract> fibonacci_contract =
+      load_rv32_contract("fibonacci.rv32a");
+  CHECK(fibonacci_contract != nullptr);
+  const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
+
+  deploy_and_transfer_client_t deploy_and_transfer_client(
+      kDeployAndTransferAddress);
+  return DeployAndTransferTx{
+      .tx =
+          SignedTransaction{
+              .tx =
+                  Transaction{
+                      .invocation =
+                          deploy_and_transfer_client
+                              .make_invocation<u8"deploy_and_transfer">(
+                                  /*gas_amount=*/5'000'000'000, deploy_nonce,
+                                  fibonacci_hash, make_amount(amount)),
+                      .uniquifier =
+                          {.block_expiry_height =
+                               std::numeric_limits<BlockHeight>::max(),
+                           .nonce = 1},
+                      .contracts_to_deploy = {*fibonacci_contract},
+                  }},
+      .deployed_address = sha256(
+          ContractDeploymentHashPreimage{.deployer_address =
+                                             kDeployAndTransferAddress,
+                                         .nonce = deploy_nonce,
+                                         .contract_hash = fibonacci_hash}),
+  };
+}
+
+} // namespace
+
 TEST(Mempool, NewlyDeployedContractNativeTokenCount)
 {
-  constexpr ContractAddress kDeployAndTransferAddress = make_account_address(7);
   constexpr uint128_t kTransferAmount = 100'000'000;
-  const SHA256Hash deploy_nonce = make_test_nonce(1);
   std::shared_ptr<Contract> fibonacci_contract =
       load_rv32_contract("fibonacci.rv32a");
   ASSERT_TRUE(fibonacci_contract);
   const SHA256Hash fibonacci_hash = sha256(*fibonacci_contract);
-  const ContractAddress deployed_address =
-      sha256(ContractDeploymentHashPreimage{.deployer_address =
-                                                kDeployAndTransferAddress,
-                                            .nonce = deploy_nonce,
-                                            .contract_hash = fibonacci_hash});
-
-  deploy_and_transfer_client_t deploy_and_transfer_client(
-      kDeployAndTransferAddress);
-  SignedTransaction tx{
-      .tx = Transaction{
-          .invocation = deploy_and_transfer_client
-                            .make_invocation<u8"deploy_and_transfer">(
-                                /*gas_amount=*/5'000'000'000, deploy_nonce,
-                                fibonacci_hash, make_amount(kTransferAmount)),
-          .uniquifier = {.block_expiry_height =
-                             std::numeric_limits<BlockHeight>::max(),
-                         .nonce = 1},
-          .contracts_to_deploy = {*fibonacci_contract},
-      }};
+  const auto [tx, deployed_address] =
+      make_deploy_and_transfer_tx(kTransferAmount);
 
   MempoolTestInfra server;
   server.deploy_built_contract_to_address(kDeployAndTransferAddress,
@@ -2280,6 +2364,89 @@ TEST(Mempool, NewlyDeployedContractNativeTokenCount)
   EXPECT_EQ(from_xdr(deployed_native_token_age
                          ->num_native_tokens[kNativeTokenAgeGroupReceived]),
             static_cast<uint128_t>(*deployed_address_balance));
+}
+
+// An age write becomes durable only with the next commit's sync, so a node that
+// stops right after first funding an account recovers an all-zero age row.
+// Reconciliation must credit the tokens as received at the recovered height.
+TEST(Mempool, RestartReconcilesUnwrittenNativeTokenAgeAsReceivedAtTip)
+{
+  TmpDir db_dir;
+  const auto [tx, deployed_address] =
+      make_deploy_and_transfer_tx(/*amount=*/100'000'000);
+
+  BlockHeight funded_height = -1;
+  NativeTokenAge age_before_restart{};
+  {
+    MempoolTestInfra server(
+        MempoolTestInfra::Options{.db_directory = db_dir.directory()});
+    server.deploy_built_contract_to_address(kDeployAndTransferAddress,
+                                            "deploy_and_transfer.rv32a");
+    server.mempool_coord_rpc().schedulercoord_submit_vetted(
+        ValidatorID{}, t_to_parallel_batch(SignedTransactionBatch{tx})())();
+
+    const SchedulerGetTipResult tip =
+        server.mempool_coord_rpc().schedcoord_get_tip()();
+    ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+    const SchedulerProposalResult proposal =
+        propose_block(server, tip.db_tip());
+    ASSERT_EQ(proposal.outcome(),
+              SchedulerProposalOutcome::SchedulerProposalOK);
+    ASSERT_EQ(commit_block(server, tip.db_tip(), proposal.proposed_block()),
+              SchedulerCommitOutcome::SchedulerCommitOK);
+    funded_height = proposal.proposed_block().proposal.header.block_height;
+
+    // The scheduler has applied the funding transfer to its cache: every
+    // token received at the funding height.
+    server.mempool_coord_rpc().wait_for_transfer_data(funded_height)();
+    auto [cached_age, lock] =
+        server.mempool_coord_rpc().scheduler()->get_cached_native_token_age(
+            deployed_address);
+    age_before_restart = *cached_age;
+    ASSERT_GT(from_xdr(age_before_restart
+                           .num_native_tokens[kNativeTokenAgeGroupReceived]),
+              0UL);
+    ASSERT_EQ(age_before_restart.average_ages[kNativeTokenAgeGroupReceived],
+              funded_height);
+  }
+
+  // Stopping commits nothing more, so the funding block is the recovered tip.
+  MempoolTestInfra restarted(
+      MempoolTestInfra::Options{.skip_genesis_block = true,
+                                .db_directory = db_dir.directory()});
+  const SchedulerGetTipResult tip =
+      restarted.mempool_coord_rpc().schedcoord_get_tip()();
+  ASSERT_EQ(tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  ASSERT_EQ(tip.db_tip().value.proposal_header.block_height, funded_height);
+
+  const HogDbStatus<int128_t> balance =
+      restarted.read_address_balance(deployed_address);
+  ASSERT_TRUE(balance.has_value());
+  EXPECT_GT(*balance, 0);
+  HogDbStatus<NativeTokenAge> recovered_age =
+      restarted.read_address_average_native_token_age(deployed_address);
+  ASSERT_TRUE(recovered_age.has_value());
+  for (size_t group = 0; group < kNativeTokenAgeNumGroups; ++group) {
+    ASSERT_EQ(from_xdr(recovered_age->num_native_tokens[group]), 0UL)
+        << "the age write survived the restart, so reconciliation has nothing "
+           "to recover";
+  }
+
+  // What hog-db's main and hog-devnode run before the scheduler reads a row.
+  ASSERT_TRUE(restarted.reconcile_native_token_ages_at_recovered_tip());
+
+  recovered_age =
+      restarted.read_address_average_native_token_age(deployed_address);
+  ASSERT_TRUE(recovered_age.has_value());
+  EXPECT_EQ(from_xdr(
+                recovered_age->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            static_cast<uint128_t>(*balance));
+  EXPECT_EQ(from_xdr(recovered_age
+                         ->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            0UL);
+  // The restart is invisible: the account recovers exactly the age the
+  // scheduler had cached before it.
+  EXPECT_EQ(*recovered_age, age_before_restart);
 }
 
 TEST(Mempool, CommitBlockNotFound)
@@ -2841,6 +3008,135 @@ TEST_F(MempoolValidationExecutorResultTest,
   EXPECT_EQ(validate(),
             SchedulerValidationOutcome::SchedulerValidationExecutorFailed);
   EXPECT_EQ(executor().validated_tx_count(), kNumBlockTxs);
+}
+
+namespace {
+
+// How [forge_nondeterministic_data] corrupts one transaction's
+// nondeterministic data. A peer controls this field outright, and either way
+// the executor's replay fails the transaction with
+// [ExecResultTxValidationFailure].
+enum class NondeterministicForgery {
+  // Claims more bits than it supplies, so the replay rejects the data before
+  // the transaction runs.
+  kMalformedBitCount,
+  // Supplies a bit the transaction never consumes, so the replay runs the
+  // transaction to completion and only then rejects it.
+  kUnconsumedBit,
+};
+
+// [proposal] with the nondeterministic data of its transaction at [index]
+// forged as [forgery].
+Proposal
+forge_nondeterministic_data(Proposal proposal, size_t index,
+                            NondeterministicForgery forgery)
+{
+  x23::XdrVec<NondeterministicProposalData> data;
+  CHECK(parallel_batch_to_t(proposal.transactions.nondeterministic_data, data,
+                            kNoBatchSizeLimit)());
+  CHECK_LT(index, data.size());
+  NondeterministicProposalData &forged = data[index];
+  switch (forgery) {
+  case NondeterministicForgery::kMalformedBitCount:
+    forged.nondeterministic_bit_count += 8;
+    break;
+  case NondeterministicForgery::kUnconsumedBit:
+    if (forged.nondeterministic_bit_count % 8 == 0) {
+      forged.nondeterministic_bits.push_back(0);
+    }
+    forged.nondeterministic_bit_count++;
+    break;
+  }
+  proposal.transactions.nondeterministic_data = t_to_parallel_batch(data)();
+  return proposal;
+}
+
+size_t
+proposal_tx_count(const Proposal &proposal)
+{
+  SignedTransactionHashBatch signed_tx_hashes;
+  CHECK(parallel_batch_to_t(proposal.transactions.signed_hash, signed_tx_hashes,
+                            kNoBatchSizeLimit)());
+  return signed_tx_hashes.size();
+}
+
+// Nominates [txs] on top of [db_tip] and returns the proposal, with [txs]
+// submitted again so that validating it finds every transaction, as a
+// validator sees a block that a peer nominated.
+Proposal
+nominate_for_validation(MempoolTestInfra &server, const DbTip &db_tip,
+                        const SignedTransactionBatch &txs)
+{
+  ValidatorID validator_id{};
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  SchedulerProposalResult res_nominate = propose_block(server, db_tip);
+  CHECK_EQ(res_nominate.outcome(),
+           SchedulerProposalOutcome::SchedulerProposalOK);
+  server.mempool_coord_rpc().schedulercoord_submit_vetted(validator_id,
+                                                          t_to_parallel_batch(
+                                                              txs)())();
+  return res_nominate.proposed_block().proposal;
+}
+
+DbTip
+current_tip(MempoolTestInfra &server)
+{
+  SchedulerGetTipResult get_tip =
+      server.mempool_coord_rpc().schedcoord_get_tip()();
+  CHECK_EQ(get_tip.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  return get_tip.db_tip();
+}
+
+// A peer forges one transaction's nondeterministic data in an otherwise
+// honest block. The executor fails that transaction while the rest of the
+// block executes and emits events, so the validation is cancelled with those
+// emissions in flight. The validator must vote the block down, release the
+// executor, event and snapshot handles the attempt took, and still validate
+// and commit the honest block at the same height.
+void
+expect_forged_block_rejected_then_honest_block_commits(
+    NondeterministicForgery forgery)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  const SignedTransactionBatch txs = generate_unsigned_txs(fib_client, kNumTxs);
+
+  MempoolTestInfra server;
+  const DbTip db_tip = current_tip(server);
+  const Proposal honest = nominate_for_validation(server, db_tip, txs);
+  // The forged transaction sits mid-block, past several executor chunks.
+  ASSERT_EQ(proposal_tx_count(honest), kNumTxs);
+  const Proposal forged =
+      forge_nondeterministic_data(honest, kNumTxs / 2, forgery);
+
+  SchedulerValidationResult res_forged =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               forged)();
+  EXPECT_EQ(res_forged.outcome(),
+            SchedulerValidationResult::SchedulerValidationInvalid);
+
+  SchedulerValidationResult res_honest =
+      server.mempool_coord_rpc().schedulercoord_validate_block(db_tip.id,
+                                                               honest)();
+  ASSERT_EQ(res_honest.outcome(),
+            SchedulerValidationResult::SchedulerValidationOK);
+  EXPECT_EQ(commit_block(server, res_honest.block().block_id, db_tip, honest),
+            SchedulerCommitOutcome::SchedulerCommitOK);
+}
+
+} // namespace
+
+TEST(Mempool, ValidateRejectsMalformedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kMalformedBitCount);
+}
+
+TEST(Mempool, ValidateRejectsUnconsumedNondeterministicDataThenCommitsHonest)
+{
+  expect_forged_block_rejected_then_honest_block_commits(
+      NondeterministicForgery::kUnconsumedBit);
 }
 
 TEST(Mempool, ValidateEmpty)

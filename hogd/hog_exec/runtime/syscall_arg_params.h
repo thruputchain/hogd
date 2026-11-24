@@ -227,7 +227,7 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
   parse(AliasGuard &guard, std::span<std::byte> contract_memory,
         uint32_t offset, uint32_t len)
   {
-    return check_user_span_argument(guard, contract_memory, offset, len);
+    return check_user_output_span_argument(guard, contract_memory, offset, len);
   }
 
   constexpr static std::optional<std::span<std::byte>>
@@ -238,7 +238,7 @@ template<> struct SyscallArgParams<std::span<std::byte>> {
       // write through it. Matches the input span below.
       return std::nullopt;
     }
-    guard.check_and_register(offset, len);
+    guard.check_and_register_output(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     auto *output_pointer = reinterpret_cast<std::byte *>(offset);
     return std::span<std::byte>{output_pointer, len};
@@ -267,7 +267,7 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
   parse(AliasGuard &guard, std::span<std::byte> contract_memory,
         uint32_t offset, uint32_t len)
   {
-    return check_user_span_argument(guard, contract_memory, offset, len);
+    return check_user_input_span_argument(guard, contract_memory, offset, len);
   }
 
   constexpr static std::optional<std::span<const std::byte>>
@@ -277,7 +277,7 @@ template<> struct SyscallArgParams<std::span<const std::byte>> {
       // nullptr with non-zero length is invalid in native exec
       return std::nullopt;
     }
-    guard.check_and_register(offset, len);
+    guard.check_and_register_input(offset, len);
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
     const auto *output_pointer = reinterpret_cast<const std::byte *>(offset);
     return std::span<const std::byte>{output_pointer, len};
@@ -395,8 +395,14 @@ struct SyscallArgParams<const T *> {
       return {.is_valid = true, .value = std::nullopt};
     }
 
-    return {.is_valid = true,
-            .value = check_user_argument_mock<const T>(guard, offset)};
+    // Only the sentinel means None. A null host pointer faults, as any other
+    // unreadable offset does on the rv32 path, where 0 is read as an address.
+    auto value = check_user_argument_mock<const T>(guard, offset);
+    if (!value.has_value()) {
+      return {.is_valid = false, .value = std::nullopt};
+    }
+
+    return {.is_valid = true, .value = std::move(value)};
   }
 
   constexpr static bool validate(OptionalInputParseResult const &arg)

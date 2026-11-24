@@ -27,6 +27,7 @@
 #include "hogd/hog_exec/components/auth_subtoken.h"
 #include "hogd/hog_exec/components/execution_mode.h"
 #include "hogd/hog_exec/components/new_contract_set.h"
+#include "hogd/hog_exec/components/transaction_stats.h"
 #include "hogd/hog_exec/runtime/event_server_proxy.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
@@ -35,7 +36,6 @@
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/rv32/stack_usage.h"
 #include "hogd/hog_exec/runtime/syscall_meta_concept.h"
-#include "hogd/hog_exec/runtime/transaction_stats.h"
 #include "invoke_flag.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
@@ -410,7 +410,7 @@ public:
   // The returned span is only valid until another storage item is accessed.
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<std::span<const uint8_t>>>>
   get_bytestring(StorageKeyContractData const &storage_key);
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   set_bytestring(StorageKeyContractData const &storage_key,
                  std::span<const std::byte> input_bytestring);
 
@@ -423,12 +423,12 @@ public:
       SystemStatus<StorageRead<std::pair<std::optional<int128_t>, int128_t>>>>
   get_nnint(StorageKeyContractData const &storage_key, bool load_from_snapshot);
 
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   set_nnint(StorageKeyContractData const &storage_key,
             std::optional<int128_t> set_value, const int128_t &add_value);
 
   // === Delete syscall ===
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   delete_object(StorageKeyContractData const &storage_key);
 
   // === Storage flags syscalls ===
@@ -463,11 +463,11 @@ public:
                               int128_t transfer_amount);
 
   // == Authentication syscalls ==
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   change_public_key_registration(uint32_t key_index,
                                  PublicKeyConfigOpt new_key);
 
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   set_address_required_weight(Weight required_weight);
 
   // Auth token syscalls

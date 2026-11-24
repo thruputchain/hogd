@@ -11,9 +11,13 @@
 #   needs_gas: (default false) inner body is handed the frame's remaining gas
 #              (WrappedGasAmount remaining_gas) to reserve variable,
 #              input-dependent costs.
-#   async:     (default false) inner body may suspend (reads/writes hog_db);
-#              its declaration returns MaybeAsyncSyscallInnerResult and body
-#              is a coroutine.
+#   async:     (default false) inner body may suspend: it reads something
+#              that may not be loaded yet, or runs a child frame. Its
+#              declaration returns MaybeAsyncSyscallInnerResult, its body is a
+#              coroutine, and every call to it allocates coroutine frames.
+#              Overwriting or deleting a key reads nothing (it changes the
+#              frame's tx-local item view), so those syscalls leave it unset;
+#              RetrocausalQueueInsert appends to the stored queue and sets it.
 syscalls:
   SHA256:
     needs_gas: true
@@ -30,6 +34,12 @@ syscalls:
     needs_gas: true
   Ristretto255Msm:
     needs_gas: true
+  U256Sqrt:
+    needs_gas: true
+  U256MulDivRem:
+    needs_gas: true
+  U128MulDivRem:
+    needs_gas: true
   Invoke:
     needs_gas: true
     # Invoke recurses into Runtime::invoke, so it suspends wherever the child
@@ -41,12 +51,7 @@ syscalls:
     async: true
   BytestringSet:
     needs_gas: true
-    async: true
   NonnegativeIntGet:
-    async: true
-  NonnegativeIntSetAdd:
-    async: true
-  DeleteObject:
     async: true
   RetrocausalQueueInsert:
     async: true
@@ -55,8 +60,4 @@ syscalls:
   RetrocausalQueuePeekLen:
     async: true
   DeployContract:
-    async: true
-  ChangePublicKeyRegistration:
-    async: true
-  WriteAddressRequiredWeight:
     async: true

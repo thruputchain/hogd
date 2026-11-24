@@ -68,7 +68,7 @@ syscall_NonnegativeIntGet_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{kStorageAccessCost + load_gas}};
 }
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
                                    const StorageKeyContractData &input_key,
                                    const int128_t *optional_input_set_value,
@@ -79,19 +79,19 @@ syscall_NonnegativeIntSetAdd_inner(SystemCallHandler &syscall_handler,
     set_value = *optional_input_set_value;
   }
   auto status =
-      co_await syscall_handler.set_nnint(input_key, set_value, input_add_value);
+      syscall_handler.set_nnint(input_key, set_value, input_add_value);
   if (!status.has_value()) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
   }
   if (!(*status).has_value()) {
     // Rejected writes pay the access too, as in the get above.
-    co_return SyscallInnerResult{(*status).error().code(),
-                                 WrappedGasAmount{kStorageAccessCost}};
+    return SyscallInnerResult{(*status).error().code(),
+                              WrappedGasAmount{kStorageAccessCost}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               WrappedGasAmount{kStorageAccessCost}};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            WrappedGasAmount{kStorageAccessCost}};
 }
 
 } // namespace hogd

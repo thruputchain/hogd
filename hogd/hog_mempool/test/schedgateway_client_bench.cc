@@ -42,7 +42,7 @@
 #include "hogd/devnode/block_driver.h"
 #include "hogd/devnode/bootstrap_accounts.h"
 #include "hogd/genesis/genesis_constants.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/init.h"
 #include "hogd/version.h"
 #include "indexer.hh"
@@ -251,7 +251,8 @@ make_transfer(const std::vector<Account> &accounts, size_t nonce,
       .invocation = {.invoked_address = sender.address,
                      .entrypoint = wallet::entrypoint<u8"execute">(),
                      .gas_limit = GasAmount{10'000'000},
-                     .calldata = wallet::make_calldata<u8"execute">(calls)},
+                     .calldata = wallet::make_calldata<u8"execute">(
+                         x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls)},
       .uniquifier = {.block_expiry_height = 10'000'000, .nonce = nonce},
       .auth_claim = claim,
   };

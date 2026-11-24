@@ -30,10 +30,10 @@
 #include "hogd/genesis/genesis_constants.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/contract_result.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/components/library_exception.hh"
 #include "hogd/hog_exec/precompiles/precompile_default_wallet.h"
 #include "hogd/hog_exec/precompiles/precompile_native_token.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
 #include "hogd/hog_exec/runtime/contract_trait_client.h"
 #include "hogd/hog_exec/runtime/multiplexed_context.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
@@ -234,7 +234,9 @@ protected:
     ContractTraitClient<default_wallet::DefaultWallet> client(
         account_address(preimage));
     return run_account_invocation_no_advance(
-        preimage, client.make_invocation<u8"execute">(kDefaultMaxTxGas, calls));
+        preimage, client.make_invocation<u8"execute">(
+                      kDefaultMaxTxGas,
+                      x23::Vec<x23::Vec<uint8_t, 4294967295>, 16>{}, calls));
   }
 
   TxOutcome run_execute_tx(PubkeyAccountPreimage const &preimage,

@@ -10,6 +10,7 @@
 #include <utility>
 
 #include "db_sched.hh"
+#include "hogd/base/average_age.h"
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/base/types.h"
@@ -18,6 +19,7 @@
 #include "hogd/hog_db/hog_db_dao.h"
 #include "hogd/hog_db/hog_types.h"
 #include "hogd/hog_db/status.h"
+#include "types.hh"
 
 namespace hogd {
 
@@ -53,7 +55,7 @@ is_prefixed_address_key(std::span<const std::byte> key, Prefix prefix)
 // would then accept the row as already reconciled and leave it in place. The
 // corruption would only surface much later, on an ordinary transfer into the
 // account, as a fatal denominator check inside the mempool scheduler's
-// compute_average_age() -- a different process, arbitrarily later, with
+// AverageAge::compute() -- a different process, arbitrarily later, with
 // nothing pointing back at the row. Detect it here instead, at startup, where
 // it can be reported against the address that carries it (#3683).
 std::optional<uint128_t>
@@ -87,6 +89,7 @@ HogDbStatus<void>
 reconcile_address_native_token_age_helper(const Address &address,
                                           const uint128_t balance,
                                           const NativeTokenAge &age,
+                                          const BlockHeight recovered_height,
                                           HogDbDAO &db)
 {
   const std::optional<uint128_t> summed = sum_native_tokens(age);
@@ -140,9 +143,16 @@ reconcile_address_native_token_age_helper(const Address &address,
       from_xdr(age.num_native_tokens[kNativeTokenAgeGroupReceived]);
 
   if (existing_total < balance) {
+    // Missing tokens are credited as received at the recovered height;
+    // crediting to-schedule would hand a newly funded account the genesis age.
     const uint128_t deficit = balance - existing_total;
-    new_age.num_native_tokens[kNativeTokenAgeGroupToSchedule] =
-        to_xdr(to_schedule_before + deficit);
+    // Cannot overflow: received_before + deficit <= balance.
+    new_age.num_native_tokens[kNativeTokenAgeGroupReceived] =
+        to_xdr(received_before + deficit);
+    new_age.average_ages[kNativeTokenAgeGroupReceived] =
+        AverageAge::compute(received_before,
+                            age.average_ages[kNativeTokenAgeGroupReceived],
+                            deficit, recovered_height);
   }
   else {
     uint128_t excess = existing_total - balance;
@@ -174,7 +184,8 @@ reconcile_address_native_token_age_helper(const Address &address,
 }
 
 HogDbStatus<void>
-reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
+reconcile_address_native_token_age(HogDbDAO &db, const Address &address,
+                                   const BlockHeight recovered_height)
 {
   HogDbStatus<int128_t> balance = db.read_address_balance(address);
   if (!balance.has_value()) {
@@ -200,14 +211,18 @@ reconcile_address_native_token_age(HogDbDAO &db, const Address &address)
     return age.error();
   }
 
-  return reconcile_address_native_token_age_helper(address, *balance, *age, db);
+  return reconcile_address_native_token_age_helper(address, *balance, *age,
+                                                   recovered_height, db);
 }
 
 } // namespace
 
 HogDbStatus<void>
-reconcile_startup_native_token_ages(HogDbDAO &db)
+reconcile_startup_native_token_ages(HogDbDAO &db,
+                                    const BlockHeight recovered_height)
 {
+  CHECK_GE(recovered_height, 0);
+
   // [ConcurrentSet<T>] requires [T] to be an unsigned integral type, which
   // [Address] is not. [ConcurrentMap<K, V>] places no constraints on [K], and
   // its inserts are lock-free, so the scan below can run fully parallel: the
@@ -226,15 +241,15 @@ reconcile_startup_native_token_ages(HogDbDAO &db)
   // Now reconcile.
   HogDbStatus<void> ret;
   std::mutex lock;
-  addresses.for_each_parallel(
-      [&ret, &lock, &db](std::pair<const Address &, char &> entry) {
-        HogDbStatus<void> status =
-            reconcile_address_native_token_age(db, entry.first);
-        if (!status.has_value()) {
-          std::lock_guard<std::mutex> guard(lock);
-          ret = status.error();
-        }
-      });
+  addresses.for_each_parallel([&ret, &lock, &db, recovered_height](
+                                  std::pair<const Address &, char &> entry) {
+    HogDbStatus<void> status =
+        reconcile_address_native_token_age(db, entry.first, recovered_height);
+    if (!status.has_value()) {
+      std::lock_guard<std::mutex> guard(lock);
+      ret = status.error();
+    }
+  });
 
   return ret;
 }

@@ -32,8 +32,8 @@ changing-target dependency and is superseded by dedicated jump graphs. It must
 not be used to validate current jump coverage. The current direct-jump price
 has a separate measurement recorded beside `kDirectJumpGas` in `program.h`.
 
-The committed `reference.txt` and `syscall_reference.txt` were regenerated from
-run `36165785461`, the nightly at `e2cc27c` (engine `df7566033138ebd2`, source
+The committed `reference.txt` and, at the time, `syscall_reference.txt` were
+regenerated from run `36165785461`, the nightly at `e2cc27c` (engine `df7566033138ebd2`, source
 digest `5222e3822b4ccec7`; JSON in `metrics_history`). The previous references,
 engine `d4697729c27d6dbd`, predate two changes: JAL from 1 to 3 gas (#4117) and
 the default code limit from 64 to 256 KiB (#4136). Reverting both reproduces the
@@ -57,6 +57,48 @@ A finer gas unit was considered: across eleven workloads, resolution 1 gave a
 remaining spread included fused code charged at independent opcode worst cases.
 Those results support retaining a simple unit; they are not an absolute runtime
 budget or a demonstrated bound across all guest programs.
+
+## Shared syscall base
+
+The shared host base is 60 gas, raised from 50 on 2026-11-22 for headroom; it
+was not re-measured. The 50 came from run `33469060485`, below. On hog10 (gas
+unit ~1.623 ns) the syscalls that only cross the boundary have since taken 74
+to 79 ns per call through the VM, 45 to 48 gas with the ECALL taken off, and
+GetCalldataLen 84 to 86 ns, which is over 50. Single rows also move with the
+bench process's memory layout, which the bench pins with `setarch -R`:
+vm/GetBlockHeight measured 100 to 104 ns in every run that contains #4834, and
+74.4 to 76.9 ns in reruns of the same binary started with a different stack or
+row set (run `45015245614`). 60 covers the usual layouts with about 20% to spare
+and does not cover that one.
+
+Those are the coroutine wrapper's numbers. Syscalls whose bodies return a plain
+result now run without a coroutine frame. Against run `45053917939`, main at
+`cfa6fe0` on the same evening, run `45053887638` measured those rows a median
+37.1 ns cheaper per call (51 rows under 3 us; 33 to 48 ns from the 10th to the
+90th percentile, about 48 ns for SHA256Update, and two crossings' worth for the
+Update+Finalize pairs): the stateless rows take 23.9 to 27.2 ns on the entry
+path and 40.7 to 43.4 ns through the VM, about 25 gas with the ECALL taken off.
+Rows whose bodies return a MaybeAsync, the bytestring, NNInt and frame rows, did
+not move: median -0.1 ns over 39 rows, the cheap ones within 2 ns on the entry
+path and vm/NNIntGet 5.6% dearer. The base was left at 60.
+
+After that run, five of those bodies were found never to wait and now return a
+plain result too: BytestringSet, NonnegativeIntSetAdd, DeleteObject,
+ChangePublicKeyRegistration and WriteAddressRequiredWeight. Each only writes the
+frame's tx-local item view. The BytestringSet and NNIntSetAdd rows (entry, vm
+and frame) have not been measured on the direct path; they should come out
+about one crossing's worth cheaper. The reads stay on the coroutine path, since
+a cold key misses into a database RPC.
+
+`syscall_reference.txt` was regenerated from run `45053887638` for that change.
+Its guards are multiples of the crossing, which fell 2.4x, so against the old
+file every row whose own work dominates read as a 2.4x regression while costing
+the same nanoseconds or fewer: 58 guards failed, none of them on a row that got
+dearer. The regeneration also adds the 14 frame-copy and 3 ML-DSA-65 rows that
+were waiting for one, 94 guards in all.
+
+The figures in the sections below are as recorded, at the base of their time:
+50 gas for every run listed here. Each bill they quote is 10 gas higher now.
 
 ## Hashing and signatures
 
@@ -106,9 +148,82 @@ ML-DSA-65 at 2.53-2.63x the time of ed25519, which this price removes.
 
 `rv32_syscall_report.py` keeps these rows out of the shared syscall numbers,
 prints them beside the ed25519 row of the same length, and in `--schedule`
-proposes the two ML-DSA constants from each run. Their guards enter
-`syscall_reference.txt` the next time it is regenerated with mode=reference;
-until then `--check` notes them as ungated.
+proposes the two ML-DSA constants from each run. Their guards entered
+`syscall_reference.txt` when it was regenerated from run `45053887638`.
+
+## Wide arithmetic
+
+U256Sqrt costs 60 gas on top of the shared syscall base. Run `44953108898`
+(hog10, AMD EPYC 9554, gas unit 1.6234 ns, hogd `e36ed56`, mode=reference)
+measured its three rows, here as the medians of nine repetitions:
+
+| Case | Entry ns | VM ns per call | Measured gas | Billed gas |
+|---|---:|---:|---:|---:|
+| U256SqrtSmall, the value 3 | 118.5 | 139.5 | 85 | 110 |
+| U256SqrtOnes, the largest value | 109.9 | 130.1 | 80 | 110 |
+| U256SqrtMixed, a SHA-256 digest | 120.7 | 142.8 | 87 | 110 |
+
+Measured and billed gas include the 50-gas shared base and exclude the ECALL
+instruction. Measured gas is the VM row, which has the crossing in it, rounded
+up. In the same run the syscalls that only cross the boundary took 56.2 to
+67.8 ns on the entry path. Through the VM three of them took 74.6 to 79.4 ns
+per call, and GetBlockHeight and GetCalldataLen 100.4 and 114.6.
+
+The dearest row leaves 37 above the base. Of the other 23, 15 are for what
+these rows cannot show. Each repeats one value, and the routine has a few
+branches that follow the value, which the branch predictor then learns. With
+values that varied from call to call the arithmetic alone took 14 to 23 ns
+longer, which is up to 15 gas at this unit. That figure is from a development
+machine, not from hog10. The last 8 are margin on top of it, to be safe.
+
+`syscall_reference.txt` guarded the three rows at 1.945, 1.803 and 1.981 times
+the crossing baseline, the ratios this run measured, so the check failed when
+one reached twice that; those three lines were added by hand. Regenerated from
+run `45053887638`, it guards them at 3.356, 2.920 and 3.363: multiples of the
+cheaper crossing described under "Shared syscall base".
+
+U256MulDivRem costs 110 gas and U128MulDivRem 70 on top of the shared syscall
+base. Run `45028088333` (hog10, AMD EPYC 9554, gas unit 1.6228 ns, hogd
+`8264316`, mode=reference) measured their rows, here as the medians of nine
+repetitions:
+
+| Case | Entry ns | VM ns per call | Measured gas | Billed gas |
+|---|---:|---:|---:|---:|
+| U256MulDivRemLimbs1, a one-limb divisor | 165.5 | 193.0 | 118 | 160 |
+| U256MulDivRemLimbs2, two limbs | 198.0 | 227.9 | 140 | 160 |
+| U256MulDivRemLimbs3, three limbs | 204.2 | 233.2 | 143 | 160 |
+| U256MulDivRemLimbs4, four limbs | 203.6 | 234.1 | 144 | 160 |
+| U256MulDivRemAddBack, four limbs | 207.6 | 236.7 | 145 | 160 |
+| U256MulDivRemMixed, four limbs | 197.1 | 227.9 | 140 | 160 |
+| U128MulDivRemLimbs1, a one-limb divisor | 128.0 | 170.8 | 105 | 120 |
+| U128MulDivRemLimbs2, two limbs | 139.7 | 178.9 | 110 | 120 |
+| U128MulDivRemMixed, two limbs | 136.1 | 177.0 | 109 | 120 |
+
+Measured and billed gas are counted as for U256Sqrt above. A limb is 64 bits.
+The division works out the quotient a limb at a time, and both how many of
+those digits there are and what each costs follow the divisor's length, so the
+rows cover every length. Two branches in it follow the operands: a test that
+takes one off a digit's estimate, up to twice, and an add-back when the
+estimate was still one too large. From two limbs up the Limbs rows use
+operands, found by search, that take one off the estimate twice for every
+digit or all but one, and AddBack's add the divisor back for four digits of
+five. The Limbs1 and Mixed operands are SHA-256 output. In the same run the
+syscalls that only cross the boundary took 58.2 to 68.1 ns on the entry path
+and 74.3 to 86.2 through the VM.
+
+The dearest rows leave 95 and 60 above the base, which was 50 for this run.
+Each row repeats one set of operands. With operands that varied from call to
+call the 256-bit arithmetic alone took up to 6 ns longer, which is 4 gas at
+this unit, and the 128-bit arithmetic no longer. That figure is from a
+development machine, not from hog10. The last 11 and 10 are margin, to be
+safe.
+
+`syscall_reference.txt` guarded the nine rows at the ratios this run measured,
+1.973 to 3.202 times its crossing baseline of 64.8 ns, added to that file by
+hand like U256Sqrt's. The regeneration from run `45053887638` for the cheaper
+crossing (see "Shared syscall base") predates these rows, so they are not gated
+until the file is regenerated from a run that measures them: their old ratios
+would fail against the new crossing without either syscall getting dearer.
 
 ## Storage
 
@@ -131,8 +246,9 @@ repetitions and reported means after changes #3771 and #3814:
 
 The 150-gas storage access charge folds warm access, an allowance for first
 touch, and prepaid child commit into each call. Together with the 50-gas shared
-host base it bills 200 host gas. This overcharges repeated warm touches but does
-not cover the measured first-touch tail at large frame occupancies:
+host base of the time it billed 200 host gas, 210 at today's 60. This
+overcharges repeated warm touches but does not cover the measured first-touch
+tail at large frame occupancies:
 
 | Keys at depth 1 | Loaded first touch, ns | No-load first touch, ns |
 |---|---:|---:|
@@ -148,9 +264,10 @@ Whether a transaction can reach the expensive tail depends on its gas budget;
 these measurements do not establish that the tail is unreachable.
 
 The local database miss measured about 55.2 microseconds with a recorded spread
-of 5.4 microseconds. The 37300-gas database charge includes that margin and brings
-a loaded cold NNInt read to 37500 host gas. The fixture uses a local socket;
-a remote database adds work absent from this measurement. Billing follows the
+of 5.4 microseconds. The 37300-gas database charge includes that margin and
+brought a loaded cold NNInt read to 37500 host gas with the 50-gas base, 37510
+at 60. The fixture uses a local socket; a remote database adds work absent from
+this measurement. Billing follows the
 transaction's first load, independently of whether the shared snapshot cache
 happens to contain the key.
 
