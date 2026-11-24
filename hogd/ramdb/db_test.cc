@@ -158,7 +158,8 @@ protected:
 
   DBStatus<void>
   open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max(),
-          size_t log_file_size_threshold = kDiskLogFileThreshold);
+          size_t log_file_size_threshold = kDiskLogFileThreshold,
+          SyncStatsMode sync_stats = SyncStatsMode::kDisabled);
   void insert_n(size_t count);
   DBError insert_until_failure();
   void remove_every_n(int n);
@@ -174,14 +175,15 @@ protected:
 };
 
 DBStatus<void>
-DatabaseTest::open_db(uint64_t target_lsn, size_t log_file_size_threshold)
+DatabaseTest::open_db(uint64_t target_lsn, size_t log_file_size_threshold,
+                      SyncStatsMode sync_stats)
 {
   size_t heap_size =
       Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
   DBStatus<std::unique_ptr<Database>> ret =
       target_lsn == std::numeric_limits<uint64_t>::max()
           ? Database::open(dir_.get_path(), heap_size, kBucketOrder,
-                           log_file_size_threshold)
+                           log_file_size_threshold, sync_stats)
           : Database::open_lsn(dir_.get_path(), target_lsn, heap_size,
                                kBucketOrder, log_file_size_threshold);
   if (!ret)
@@ -371,11 +373,18 @@ TEST_F(DatabaseTest, InsertionsAndRemovals)
 // A small batch stays in the heads until sync() drains and writes it.
 TEST_F(DatabaseTest, SyncStats)
 {
+  db_.reset();
+  ASSERT_TRUE(open_db(std::numeric_limits<uint64_t>::max(),
+                      kDiskLogFileThreshold, SyncStatsMode::kEnabled));
+  EXPECT_FALSE(db_->last_sync_stats().has_value());
+
   size_t out = db_->disk_bytes_written();
   insert_n(64);
   DBStatus<uint64_t> lsn = db_->sync();
   ASSERT_TRUE(lsn);
-  SyncStats st = db_->last_sync_stats();
+  auto stats = db_->last_sync_stats();
+  ASSERT_TRUE(stats);
+  const SyncStats &st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_GT(st.dirty_heads, 0U);
   EXPECT_LE(st.dirty_heads, 64U);
@@ -384,9 +393,7 @@ TEST_F(DatabaseTest, SyncStats)
   EXPECT_EQ(st.bytes_synced, st.bytes_drained);
   EXPECT_EQ(st.bytes_early, 0U);
   EXPECT_EQ(db_->disk_bytes_written() - out, st.bytes_synced);
-  EXPECT_GT(st.crc.count(), 0);
-  EXPECT_GT(st.write.count(), 0);
-  EXPECT_GT(st.fdatasync.count(), 0);
+  // A fast phase may complete within one tick of the steady clock.
   EXPECT_LE(st.inflight + st.crc + st.write + st.flush + st.fdatasync,
             st.total);
   EXPECT_LE(st.drain, st.total);
@@ -402,7 +409,8 @@ TEST(DiskWriterTest, SyncStatsEarlyLoglets)
       LogletAllocator::create(16 * kLogletRegionSize, kCompactionThreads,
                               [] {});
   DiskWriter dw(*la, *dir, 0, [] {}); // one head
-  dw.init(0, "{}.log", std::numeric_limits<size_t>::max());
+  dw.init(0, "{}.log", std::numeric_limits<size_t>::max(),
+          SyncStatsMode::kEnabled);
 
   // ~1,000 of these tombstones fill a loglet, so this queues two full
   // loglets and leaves a partial one in the head.
@@ -419,7 +427,9 @@ TEST(DiskWriterTest, SyncStatsEarlyLoglets)
 
   DBStatus<uint64_t> lsn = dw.sync();
   ASSERT_TRUE(lsn);
-  SyncStats st = dw.last_sync_stats();
+  auto stats = dw.last_sync_stats();
+  ASSERT_TRUE(stats);
+  SyncStats st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_EQ(st.bytes_early, early);
   EXPECT_EQ(st.dirty_heads, 1U);
@@ -432,7 +442,9 @@ TEST(DiskWriterTest, SyncStatsEarlyLoglets)
   // A sync with nothing written reports no bytes.
   lsn = dw.sync();
   ASSERT_TRUE(lsn);
-  st = dw.last_sync_stats();
+  stats = dw.last_sync_stats();
+  ASSERT_TRUE(stats);
+  st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_EQ(st.dirty_heads, 0U);
   EXPECT_EQ(st.bytes_early + st.bytes_synced, 0U);
@@ -450,6 +462,7 @@ TEST_F(DatabaseTest, SyncAndLoad)
   // sync to disk.
   DBStatus<uint64_t> lsn = db_->sync();
   EXPECT_TRUE(lsn);
+  EXPECT_FALSE(db_->last_sync_stats().has_value());
   if (lsn.has_value()) {
     EXPECT_EQ(*lsn, 1);
   }

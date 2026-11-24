@@ -58,11 +58,12 @@ DiskWriter::create_next_file()
 
 void
 DiskWriter::init(uint64_t lsn, std::string_view filename_format,
-                 size_t log_file_size_threshold)
+                 size_t log_file_size_threshold, SyncStatsMode sync_stats)
 {
   cur_lsn_ = synced_lsn_ = lsn;
   filename_format_ = filename_format;
   file_size_threshold_ = log_file_size_threshold;
+  collect_sync_stats_ = sync_stats == SyncStatsMode::kEnabled;
   writer_th_ = std::jthread(
       [this](const std::stop_token &stoken) { write_worker(stoken); });
 }
@@ -100,6 +101,10 @@ DiskWriter::write_worker(const std::stop_token &stoken)
   size_t bytes_written = 0;
   // stats of the sync in progress; published at its commit record.
   using clock = std::chrono::steady_clock;
+  const bool collect_sync_stats = collect_sync_stats_;
+  auto stats_now = [collect_sync_stats] {
+    return collect_sync_stats ? clock::now() : clock::time_point{};
+  };
   SyncStats st;
 
   while (true) {
@@ -137,14 +142,14 @@ DiskWriter::write_worker(const std::stop_token &stoken)
 
         // write the commit record and sync everything to disk. Flush and
         // sync are separate calls only so each can be timed.
-        clock::time_point c0 = clock::now();
+        clock::time_point c0 = stats_now();
         ErrnoStatus<void> commit_status =
             write_full(w, std::as_writable_bytes(std::span(commit_buf)))
                 .and_then([&w] { return w.flush(); });
-        clock::time_point c1 = clock::now();
+        clock::time_point c1 = stats_now();
         if (commit_status)
           commit_status = f->sync();
-        clock::time_point c2 = clock::now();
+        clock::time_point c2 = stats_now();
         if (!commit_status) [[unlikely]] {
           // Report the errno: without it an ENOSPC on the log directory is
           // indistinguishable from a hardware EIO, and the sync failure
@@ -159,13 +164,14 @@ DiskWriter::write_worker(const std::stop_token &stoken)
         {
           std::scoped_lock guard(to_disk_lock_);
           ++synced_lsn_;
-          // sync() adds its own fields and publishes them.
-          st.lsn = synced_lsn_;
-          st.flush = c1 - c0;
-          st.fdatasync = c2 - c1;
-          writer_stats_ = st;
-          st = {};
-          sync_begin_.store(0, std::memory_order_relaxed);
+          if (collect_sync_stats) {
+            // sync() adds its own fields and publishes them.
+            st.lsn = synced_lsn_;
+            st.flush = c1 - c0;
+            st.fdatasync = c2 - c1;
+            writer_stats_ = st;
+            st = {};
+          }
           // only one thread will be waiting for this LSN, but efficiency
           // doesn't matter here so it's simpler to wake them all.
           commit_cv_.notify_all();
@@ -193,33 +199,34 @@ DiskWriter::write_worker(const std::stop_token &stoken)
       }
 
       // Handle Change Records
-      clock::time_point t0 = clock::now();
+      clock::time_point t0 = stats_now();
       crc = crc32c_append(crc, ll->get_bytes());
-      clock::time_point t1 = clock::now();
+      clock::time_point t1 = stats_now();
       ErrnoStatus<void> ret = write_full(w, ll->get_bytes());
       if (!ret) [[unlikely]] {
         warn("couldn't write change record to disk: {}", ret.error());
         signal_ioerror();
         return;
       }
-      clock::time_point t2 = clock::now();
-
-      // Count the loglet before or after sync() started; see SyncStats.
       size_t n = ll->get_bytes().size();
-      clock::time_point begin{
-          clock::duration(sync_begin_.load(std::memory_order_relaxed))};
-      if (begin == clock::time_point{} || t2 <= begin) {
-        st.bytes_early += n;
-      }
-      else if (t0 < begin) {
-        st.bytes_early += n;
-        st.inflight += t2 - begin;
-      }
-      else {
-        st.bytes_synced += n;
-        ++st.loglets_synced;
-        st.crc += t1 - t0;
-        st.write += t2 - t1;
+      if (collect_sync_stats) {
+        // Count the loglet before or after sync() started.
+        clock::time_point t2 = clock::now();
+        clock::time_point begin{
+            clock::duration(sync_begin_.load(std::memory_order_relaxed))};
+        if (begin == clock::time_point{} || t2 <= begin) {
+          st.bytes_early += n;
+        }
+        else if (t0 < begin) {
+          st.bytes_early += n;
+          st.inflight += t2 - begin;
+        }
+        else {
+          st.bytes_synced += n;
+          ++st.loglets_synced;
+          st.crc += t1 - t0;
+          st.write += t2 - t1;
+        }
       }
 
       // Report progress in consuming buffer.
@@ -235,13 +242,15 @@ DBStatus<uint64_t>
 DiskWriter::sync()
 {
   using clock = std::chrono::steady_clock;
-  clock::time_point start = clock::now();
+  clock::time_point start =
+      collect_sync_stats_ ? clock::now() : clock::time_point{};
 
   // See sync_active_ in disk_writer.h.
   sync_active_.store(true, std::memory_order_relaxed);
   Defer sync_guard{[this] {
+    if (collect_sync_stats_)
+      sync_begin_.store(0, std::memory_order_relaxed);
     sync_active_.store(false, std::memory_order_relaxed);
-    sync_begin_.store(0, std::memory_order_relaxed);
   }};
 
   std::unique_lock ul(to_disk_lock_);
@@ -256,10 +265,11 @@ DiskWriter::sync()
     return DBError(DBCode::kNoMemory);
   }
 
-  // Start splitting the writer's work into before and after this sync only
-  // now, so a failed sync() does not charge work to the next one.
-  sync_begin_.store(clock::now().time_since_epoch().count(),
-                    std::memory_order_relaxed);
+  // Set the writer's timing cutoff after the queue reservation succeeds.
+  if (collect_sync_stats_) {
+    sync_begin_.store(clock::now().time_since_epoch().count(),
+                      std::memory_order_relaxed);
+  }
 
   // Ask write_worker() to write the partial loglets in all heads and then the
   // commit record. write_worker() may also still be writing full loglets
@@ -276,14 +286,18 @@ DiskWriter::sync()
     std::scoped_lock hl(std::adopt_lock, h.lock);
     if (!h.ll)
       continue;
-    ++dirty_heads;
-    bytes_drained += h.ll->get_bytes().size();
-    bytes_in_ += h.ll->get_bytes().size();
+    size_t bytes = h.ll->get_bytes().size();
+    if (collect_sync_stats_) {
+      ++dirty_heads;
+      bytes_drained += bytes;
+    }
+    bytes_in_ += bytes;
     to_disk_.emplace_back(std::move(h.ll));
   }
   to_disk_.emplace_back();
   worker_cv_.notify_one();
-  clock::time_point drained = clock::now();
+  clock::time_point drained =
+      collect_sync_stats_ ? clock::now() : clock::time_point{};
 
   // wait for the write_worker() to finish all pending writes before this LSN.
   uint64_t lsn = ++cur_lsn_;
@@ -293,13 +307,15 @@ DiskWriter::sync()
 
   // Publish the stats in one step, so last_sync_stats() never returns a
   // partial result.
-  SyncStats st = writer_stats_;
-  assert(st.lsn == lsn);
-  st.dirty_heads = dirty_heads;
-  st.bytes_drained = bytes_drained;
-  st.drain = drained - start;
-  st.total = clock::now() - start;
-  last_sync_stats_ = st;
+  if (collect_sync_stats_) {
+    SyncStats st = writer_stats_;
+    assert(st.lsn == lsn);
+    st.dirty_heads = dirty_heads;
+    st.bytes_drained = bytes_drained;
+    st.drain = drained - start;
+    st.total = clock::now() - start;
+    last_sync_stats_ = st;
+  }
   return lsn;
 }
 

@@ -8,6 +8,7 @@
 #include <cstddef>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <print>
 #include <ratio>
 #include <span>
@@ -77,7 +78,7 @@ public:
   // sync flushes and synchronizes all changes to disk.
   uint64_t sync();
   // last_sync_stats returns the stats of the last sync().
-  SyncStats last_sync_stats() { return db_->last_sync_stats(); }
+  SyncStats last_sync_stats() { return db_->last_sync_stats().value(); }
   // initializes the database with items (initial state for benchmarks).
   void prefill();
   // closes the DB and reloads all of its contents from disk.
@@ -196,7 +197,8 @@ Benchmark::sync_and_snapshot()
 }
 
 std::unique_ptr<Benchmark>
-make_benchmark(size_t n, int threads, size_t value_size)
+make_benchmark(size_t n, int threads, size_t value_size,
+               SyncStatsMode sync_stats = SyncStatsMode::kDisabled)
 {
   // delete the old database (if present).
   Directory dir(db_path);
@@ -220,7 +222,8 @@ make_benchmark(size_t n, int threads, size_t value_size)
 
   // create the database.
   DBStatus<std::unique_ptr<Database>> db =
-      Database::open(db_path, heap_size, bucket_order);
+      Database::open(db_path, heap_size, bucket_order, kDiskLogFileThreshold,
+                     sync_stats);
   if (!db)
     fail(db.error());
 
@@ -315,24 +318,24 @@ do_snapshot_ongoing_puts(int num, int cores, int value_size)
 }
 
 // do_blocks models a block loop: put num items on all available cores, then
-// sync, rounds times. It prints where each sync's time went (see SyncStats),
-// then the median of each column. Restrict cores with taskset.
+// sync, rounds times. It prints each sync's wall time and overlapping phase
+// timings, then the median of each column. Restrict cores with taskset.
 void
 do_blocks(int num, int value_size, int rounds)
 {
   int threads = static_cast<int>(available_parallelism());
   std::unique_ptr<Benchmark> benchmark =
-      make_benchmark(num, threads, value_size);
+      make_benchmark(num, threads, value_size, SyncStatsMode::kEnabled);
   benchmark->prefill();
 
   std::println("# threads {}, write heads {}, items/block {}, value size {}",
                threads, scalable_shard_size(kBaseWriteHeadOrder), num,
                value_size);
   std::println("round, put_ms, sync_ms, drain_ms, inflight_ms, crc_ms, "
-               "write_ms, flush_ms, fdatasync_ms, other_ms, dirty_heads, "
+               "write_ms, flush_ms, fdatasync_ms, dirty_heads, "
                "early_mib, synced_mib, loglets_synced");
 
-  constexpr size_t kCols = 13;
+  constexpr size_t kCols = 12;
   std::vector<std::array<double, kCols>> rows;
   rows.reserve(static_cast<size_t>(rounds));
   auto ms = [](std::chrono::nanoseconds d) {
@@ -351,9 +354,6 @@ do_blocks(int num, int value_size, int rounds)
     double put_s = measure([&benchmark] { benchmark->write_items(); });
     benchmark->sync();
     SyncStats st = benchmark->last_sync_stats();
-    std::chrono::nanoseconds other = st.total - st.drain - st.inflight -
-                                     st.crc - st.write - st.flush -
-                                     st.fdatasync;
     rows.push_back({
         put_s * 1e3,
         ms(st.total),
@@ -363,7 +363,6 @@ do_blocks(int num, int value_size, int rounds)
         ms(st.write),
         ms(st.flush),
         ms(st.fdatasync),
-        ms(other),
         static_cast<double>(st.dirty_heads),
         mib(st.bytes_early),
         mib(st.bytes_synced),
@@ -377,8 +376,8 @@ do_blocks(int num, int value_size, int rounds)
   for (size_t c = 0; c < kCols; ++c) {
     for (size_t r = 0; r < rows.size(); ++r)
       col[r] = rows[r][c];
-    std::ranges::nth_element(col, col.begin() + col.size() / 2);
-    median[c] = col.empty() ? 0 : col[col.size() / 2];
+    std::ranges::sort(col);
+    median[c] = std::midpoint(col[(col.size() - 1) / 2], col[col.size() / 2]);
   }
   print_row("median", median);
 }
@@ -441,9 +440,9 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
     int rounds = argc > 5 ? std::stoi(argv[5], nullptr, 0) : 20;
     // each put thread writes num / threads items, so num must divide evenly.
     int threads = static_cast<int>(hogd::available_parallelism());
-    if (num <= 0 || num % threads != 0 || rounds < 0) {
+    if (num <= 0 || num % threads != 0 || rounds <= 0) {
       std::println("blocks: num must be a positive multiple of {} (the "
-                   "available cores), rounds must be >= 0",
+                   "available cores), rounds must be positive",
                    threads);
       return 1;
     }
