@@ -137,8 +137,9 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
       db->impl(), auth->impl(), std::move(network_hash),
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_coordinator_port = start_coordinator_server(
-      coord, make_bind_host_port(bind_ip, coordinator_port));
+  uint16_t actual_coordinator_port =
+      start_coordinator_server(coord,
+                               make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
 

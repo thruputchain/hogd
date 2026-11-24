@@ -185,18 +185,18 @@ TEST(TcpListen, UnavailableStreamProtocolDoesNotPreventTcpFallback)
 #if defined(__linux__) && defined(IPPROTO_MPTCP)
 TEST(TcpListen, MultipathAcceptsOrdinaryTcp)
 {
-  auto listener = try_tcplisten(numeric_addr("127.0.0.1", 0), 5,
-                                IPPROTO_MPTCP);
-  if (!listener && (listener.error() == EPROTONOSUPPORT ||
-                    listener.error() == ENOPROTOOPT ||
-                    listener.error() == EOPNOTSUPP ||
-                    listener.error() == EACCES || listener.error() == EPERM))
+  auto listener = try_tcplisten(numeric_addr("127.0.0.1", 0), 5, IPPROTO_MPTCP);
+  if (!listener &&
+      (listener.error() == EPROTONOSUPPORT || listener.error() == ENOPROTOOPT ||
+       listener.error() == EOPNOTSUPP || listener.error() == EACCES ||
+       listener.error() == EPERM))
     GTEST_SKIP() << "MPTCP is unavailable";
   ASSERT_TRUE(listener);
   int protocol = 0;
   socklen_t len = sizeof(protocol);
   ASSERT_EQ(getsockopt(listener->get(), SOL_SOCKET, SO_PROTOCOL, &protocol,
-                       &len), 0);
+                       &len),
+            0);
   EXPECT_EQ(protocol, IPPROTO_MPTCP);
   EXPECT_NE(fcntl(listener->get(), F_GETFL) & O_NONBLOCK, 0);
   EXPECT_NE(fcntl(listener->get(), F_GETFD) & FD_CLOEXEC, 0);
@@ -207,11 +207,12 @@ TEST(TcpListen, MultipathAcceptsOrdinaryTcp)
   EXPECT_EQ(occupied.error(), EADDRINUSE);
 
   for (int client_protocol : {IPPROTO_TCP, IPPROTO_MPTCP}) {
-    UniqueFd client(socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC,
-                           client_protocol));
+    UniqueFd client(
+        socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, client_protocol));
     ASSERT_TRUE(client);
     ASSERT_EQ(connect(client.get(), reinterpret_cast<const sockaddr *>(&addr),
-                      sockaddr_len(addr)), 0);
+                      sockaddr_len(addr)),
+              0);
     pollfd ready{listener->get(), POLLIN, 0};
     ASSERT_EQ(poll(&ready, 1, 1000), 1);
     UniqueFd accepted(accept(listener->get(), nullptr, nullptr));
