@@ -82,6 +82,14 @@ Rows whose bodies return a MaybeAsync, the bytestring, NNInt and frame rows, did
 not move: median -0.1 ns over 39 rows, the cheap ones within 2 ns on the entry
 path and vm/NNIntGet 5.6% dearer. The base was left at 60.
 
+After that run, five of those bodies were found never to wait and now return a
+plain result too: BytestringSet, NonnegativeIntSetAdd, DeleteObject,
+ChangePublicKeyRegistration and WriteAddressRequiredWeight. Each only writes the
+frame's tx-local item view. The BytestringSet and NNIntSetAdd rows (entry, vm
+and frame) have not been measured on the direct path; they should come out
+about one crossing's worth cheaper. The reads stay on the coroutine path, since
+a cold key misses into a database RPC.
+
 `syscall_reference.txt` was regenerated from run `45053887638` for that change.
 Its guards are multiples of the crossing, which fell 2.4x, so against the old
 file every row whose own work dominates read as a 2.4x regression while costing

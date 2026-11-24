@@ -1087,6 +1087,11 @@ TEST_F(SyscallErrorHandlingTest, ThrowAfterSuspendTranslatedToUnrecoverable)
 // an Async might wait, and is awaited from a coroutine.
 static_assert(kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kGetBlockHeight>>);
 static_assert(kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kSHA256>>);
+// A write only changes the frame's item view, so it never waits; a read can
+// miss into the database.
+static_assert(kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kDeleteObject>>);
+static_assert(
+    kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kNonnegativeIntSetAdd>>);
 static_assert(
     !kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kNonnegativeIntGet>>);
 static_assert(!kSyscallBodyIsDirect<SyscallMeta<SyscallNo::kInvoke>>);
