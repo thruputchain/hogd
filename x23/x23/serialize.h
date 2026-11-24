@@ -559,8 +559,18 @@ serialize_to(Buf *bufp, const is_xdr_serializable auto &x)
 Buf
 serialize(const is_xdr_serializable auto &...x)
 {
+  // Size the buffer once up front.  Appending the arguments one at a
+  // time would reallocate and copy the buffer for each of them.
+  const size_t sizes[] = {xdr_size(x)..., 0UZ};
+  size_t total = 0;
+  for (size_t size : sizes)
+    total += size;
+
   Buf ret;
-  (serialize_to(&ret, x), ...);
+  ret.resize_uninitialized(total);
+  [[maybe_unused]] uint8_t *p = ret.data();
+  [[maybe_unused]] const size_t *sizep = sizes;
+  ((detail::Serializer{p}(x), p += *sizep++), ...);
   return ret;
 }
 
