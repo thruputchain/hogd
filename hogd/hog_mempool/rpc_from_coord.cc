@@ -3478,6 +3478,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           last_commit_started_ = commit_started_at;
         }
         last_commit_ = std::chrono::steady_clock::now();
+        // Last, so [schedcoord_get_tip()] reports the new tip only once the
+        // scheduler, health, and event tip all reflect it.
+        publish_tip();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
         fatal_commit_cleanup.disarm();
         co_return;
