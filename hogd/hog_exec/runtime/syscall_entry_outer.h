@@ -5,7 +5,6 @@
 #include <cassert>
 #include <concepts>
 #include <cstddef>
-#include <cstdio>
 #include <exception>
 #include <format>
 #include <optional>
@@ -42,91 +41,6 @@
 
 namespace hogd {
 
-// p1061r10 has structured bindings machinery implemented on
-// std::index_sequence, but that seems to not implemented at the moment. auto
-// [... arg_indices] = std::make_index_sequence<10>{} which p1061r10 suggests
-// should work, results in arg_indices being a pack of size 0, which is
-// incorrect.
-// We can probably get rid of this if the std library is fixed.
-
-template<size_t... Is> struct TupleIndexSequence {};
-
-template<size_t... Is>
-constexpr TupleIndexSequence<Is...>
-from_index_sequence(std::index_sequence<Is...> /*unused*/)
-{
-  return TupleIndexSequence<Is...>{};
-}
-
-template<size_t Idx, typename Seq> struct access_seq;
-
-template<size_t Idx, size_t I, size_t... Is> requires (Idx >= 1)
-struct access_seq<Idx, TupleIndexSequence<I, Is...>> {
-  constexpr static size_t kResult =
-      access_seq<Idx - 1, TupleIndexSequence<Is...>>::kResult;
-};
-
-template<size_t I, size_t... Is>
-struct access_seq<0, TupleIndexSequence<I, Is...>> {
-  constexpr static size_t kResult = I;
-};
-
-template<std::size_t I, std::size_t... Is>
-constexpr auto
-get(TupleIndexSequence<Is...> /*unused*/)
-{
-  //  return std::integral_constant<size_t, Is... [I]> {};
-  return std::integral_constant<
-      size_t, access_seq<I, TupleIndexSequence<Is...>>::kResult>{};
-}
-
-} // namespace hogd
-
-namespace std {
-
-template<size_t... Is>
-struct tuple_size<hogd::TupleIndexSequence<Is...>>
-  : std::integral_constant<size_t, sizeof...(Is)> {};
-
-template<size_t Idx, size_t... Is>
-struct tuple_element<Idx, hogd::TupleIndexSequence<Is...>> {
-
-  // using type = std::integral_constant<size_t, Is...[Idx]>;
-  using type = std::integral_constant<
-      size_t, hogd::access_seq<Idx, hogd::TupleIndexSequence<Is...>>::kResult>;
-};
-
-} // namespace std
-
-namespace hogd {
-
-// Helper to check if a syscall error code is in the allowed list for a syscall.
-// Used in debug builds to validate that syscalls only return documented errors.
-template<typename SyscallMeta>
-constexpr bool
-is_allowed_error_code(SyscallErrorCode code)
-{
-  // kSyscallErrorCodeNone is always allowed (success case)
-  // kSyscallErrorCodeFault is allowed as all syscalls can be given an invalid
-  // input
-  if (code == SyscallErrorCode::kSyscallErrorCodeNone ||
-      code == SyscallErrorCode::kSyscallErrorCodeFault) {
-    return true;
-  }
-
-  // Mutable syscalls always allow kSyscallErrorCodeInvalidSyscallInput:
-  // the read-only wrapper returns it when a mutable syscall is called in a
-  // read-only frame, regardless of what the inner syscall documents.
-  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
-    if (code == SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput) {
-      return true;
-    }
-  }
-
-  return std::ranges::any_of(SyscallMeta::kAllowedErrors,
-                             [code](auto allowed) { return code == allowed; });
-}
-
 // Creates an index sequence for a given set of args, denoting
 // at what indices (into the list of uint64_t syscall inputs)
 // does each logical syscall argument start.
@@ -141,15 +55,15 @@ constexpr auto
 make_offset_seqs_internal()
 {
   if constexpr (sizeof...(Args) == 0) {
-    return TupleIndexSequence<Base>{};
+    return std::index_sequence<Base>{};
   }
   else {
 
     // auto [... tail] =
     //    make_offset_seqs<Base + SyscallArgParams<Arg>::kNumInputs, Args...>();
-    // return TupleIndexSequence<Base, tail...>{};
-    return []<size_t... Tail>(TupleIndexSequence<Tail...> /*unused*/) {
-      return TupleIndexSequence<Base, Tail...>{};
+    // return std::index_sequence<Base, tail...>{};
+    return []<size_t... Tail>(std::index_sequence<Tail...> /*unused*/) {
+      return std::index_sequence<Base, Tail...>{};
     }(make_offset_seqs_internal<Base + SyscallArgParams<Arg>::kNumInputs,
                                 Args...>());
   }
@@ -160,7 +74,7 @@ constexpr auto
 make_offset_seqs()
 {
   if constexpr (sizeof...(Args) == 0) {
-    return TupleIndexSequence<>{};
+    return std::index_sequence<>{};
   }
   else {
     return make_offset_seqs_internal<Base, Args...>();
@@ -202,14 +116,14 @@ struct SyscallTypeParams {
   template<size_t I> requires (I < sizeof...(Args))
   constexpr static size_t offset_i()
   {
-    // Can ditch access_seq, and just get the following,
     // with structured bindings for parameter packs
 
     // auto [... offsets] = kArgOffsetIndices;
     // return offsets...[I];
 
-    return access_seq<
-        I, std::remove_const_t<decltype(kArgOffsetIndices)>>::kResult;
+    return []<size_t... Is>(std::index_sequence<Is...>) {
+      return std::array{Is...}[I];
+    }(kArgOffsetIndices);
   }
 };
 
@@ -280,10 +194,10 @@ parse(AliasGuard &guard, std::span<std::byte> contract_memory,
   // auto const& [... args] = tuple_args;
   // return arg_params::parse(contract_memory, (args...[Offset + Is])...);
 
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
+  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
     return arg_params::parse(guard, contract_memory,
                              (std::get<Offset + Is>(tuple_args))...);
-  }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
+  }(std::make_index_sequence<arg_params::kNumInputs>{});
 }
 
 template<typename T, uint32_t... Args>
@@ -304,10 +218,10 @@ parse_mock(AliasGuard &guard, Inputs const &tuple_args)
 {
   using arg_params = SyscallArgParams<ArgToParse>;
 
-  return [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) {
+  return [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) {
     return arg_params::parse_mock(guard,
                                   (std::get<Offset + Is>(tuple_args))...);
-  }(from_index_sequence(std::make_index_sequence<arg_params::kNumInputs>{}));
+  }(std::make_index_sequence<arg_params::kNumInputs>{});
 }
 
 constexpr static std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
@@ -489,10 +403,9 @@ disarm_outputs(std::tuple<Args...> &args)
 
 // Translates the in-flight exception into an Unrecoverable result. Call only
 // from inside a catch handler; the bare throw rethrows to classify.
-template<typename... Args>
+template<SyscallNo Syscall, typename... Args>
 SyscallInnerResult
-translate_syscall_body_exception(SyscallNo syscall_no,
-                                 std::tuple<Args...> &args) noexcept
+translate_syscall_body_exception(std::tuple<Args...> &args) noexcept
 {
   try {
     throw;
@@ -500,7 +413,7 @@ translate_syscall_body_exception(SyscallNo syscall_no,
     // The diagnostic itself allocates and could throw again (issue #3372);
     // report through the no-allocation fallback if it does.
     try {
-      error("unrecoverable: syscall {} body threw: {}", syscall_no, e.what());
+      error("unrecoverable: syscall {} body threw: {}", Syscall, e.what());
     } catch (...) {
       report_dropped_syscall_trace("syscall-body exception diagnostic");
     }
@@ -512,18 +425,258 @@ translate_syscall_body_exception(SyscallNo syscall_no,
                             WrappedGasAmount{0}};
 }
 
-namespace detail {
-
-inline GasAmount
-saturating_add(GasAmount a, GasAmount b)
+template<is_syscall_meta SyscallMeta, typename Args, size_t... Is>
+MaybeAsyncSyscallInnerResult
+run_syscall_body(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
+                 bool alias_check_passed, Args &args,
+                 std::index_sequence<Is...> /*unused*/) noexcept
 {
-  auto [val, of] = overflowing_add(a, b);
-  if (of) {
-    return UINT64_MAX;
+  using syscall_t =
+      SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
+  // check whether any loads failed
+  if (!(SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
+            std::get<Is>(args)) &&
+        ...)) {
+    if (auto *stats = handler.get_transaction_stats()) {
+      stats->syscall_fault_count++;
+    }
+    disarm_outputs(args);
+    return kFaultResult;
   }
-  return val;
+
+  // Check whether any inputs/outputs were aliased
+  if (!alias_check_passed) {
+    if (auto *stats = handler.get_transaction_stats()) {
+      stats->syscall_fault_count++;
+    }
+    try {
+      trace("Syscall {} faulted due to aliased memory regions",
+            SyscallMeta::kSyscallNo);
+    } catch (std::exception const &e) {
+      report_dropped_syscall_trace(e.what());
+    }
+    disarm_outputs(args);
+    return kFaultResult;
+  }
+
+  if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
+    if (handler.is_read_only()) {
+      try {
+        trace("Syscall {} is not read-only, but called in read-only mode",
+              SyscallMeta::kSyscallNo);
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
+      disarm_outputs(args);
+      return SyscallInnerResult{
+          HostFnStatus<SyscallErrorCode>{
+              SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
+          WrappedGasAmount{0}};
+    }
+  }
+
+  if (runtime_log_level(LogLevel::kTrace)) {
+    // Once the syscall inputs are parsed, we can print them in a formatted
+    // log message. Formatting allocates, so keep it best-effort: this runs in
+    // the noexcept syscall body and must not crash on allocation failure
+    // (issue #2562).
+    try {
+      trace("Syscall {} Input: {}", SyscallMeta::kSyscallNo,
+            make_syscall_input_message<SyscallMeta>(std::tuple{
+                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+                    std::get<Is>(args))...}));
+    } catch (std::exception const &e) {
+      report_dropped_syscall_trace(e.what());
+    }
+  }
+
+  if constexpr (SyscallMeta::kSyscallNo != kNoTracingSyscall) {
+    if (auto *trace_data =
+            handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
+      // Copying inputs into the XDR trace record allocates and can throw.
+      // Keep it best-effort rather than panicking: this runs in the noexcept
+      // syscall body, so a thrown std::bad_alloc would terminate an honest
+      // caller before the mock entrypoint's catch could translate it. Drop
+      // the trace inputs and continue (issue #2561).
+      try {
+        [&]<size_t... Inputs>(std::index_sequence<Inputs...> /*unused*/) {
+          set_syscall_trace_inputs(
+              trace_data->inputs,
+              std::tuple{
+                  SyscallArgParams<typename syscall_t::template arg_i<Inputs>>::
+                      deref(std::get<Inputs>(args))...});
+        }(std::make_index_sequence<
+            std::tuple_size_v<decltype(trace_data->inputs)>>{});
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
+    }
+  }
+
+  // Reserve the crossing before entering the body. An exhausted frame
+  // cannot run even a zero-cost body.
+  if (gas_remaining.get() <= kSyscallBaseCost) {
+    return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                              WrappedGasAmount{0}};
+  }
+
+  auto extra_args =
+      syscall_t::extra_args(handler, WrappedGasAmount{gas_remaining.get() -
+                                                      kSyscallBaseCost});
+
+  // Invoke the inner syscall
+  // template only required because we can't do auto [...handler] =
+  // handler_pack; yet.  This would be so much cleaner in c++26.
+  //
+  // The inner syscall bodies run arbitrary allocating storage/cache/frame
+  // logic against attacker-controlled inputs, so this is the exception
+  // boundary for all of them: anything that escapes (most commonly
+  // std::bad_alloc under memory pressure) is translated into a structured
+  // Unrecoverable result here instead of terminating hogexec (issue #3400
+  // and siblings). The inner bodies are deliberately not noexcept so the
+  // translation happens here instead of at their own boundary via
+  // std::terminate(); this lambda is noexcept so that boundary is
+  // reestablished immediately around the catch.
+  auto res = [&]<size_t... ExtraArgs>(
+                 std::index_sequence<ExtraArgs...> /*unused*/) noexcept
+      -> MaybeAsyncSyscallInnerResult {
+    try {
+      return SyscallMeta::kInnerFunc(
+          std::get<ExtraArgs>(extra_args)...,
+          SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
+              std::get<Is>(args))...);
+    } catch (...) {
+      return translate_syscall_body_exception<SyscallMeta::kSyscallNo>(args);
+    }
+  }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
+  return res;
+};
+
+template<is_syscall_meta SyscallMeta, typename Args>
+SyscallResult
+finish_syscall(SyscallInnerResult body_result, SystemCallHandler &handler,
+               WrappedGasAmount gas_remaining, Args &args)
+{
+  using syscall_t =
+      SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
+
+  auto [syscall_result, gas_consumed] = std::move(body_result);
+
+  auto saturating_add = [](GasAmount a, GasAmount b) {
+    auto [val, of] = overflowing_add(a, b);
+    if (of) {
+      return UINT64_MAX;
+    }
+    return val;
+  };
+
+  // Account for the reserved crossing on every path, including rejected calls
+  // and bodies that suspended or threw. Saturate to avoid wrapping the charge.
+  gas_consumed =
+      WrappedGasAmount{saturating_add(gas_consumed.get(), kSyscallBaseCost)};
+
+  if (runtime_log_level(LogLevel::kTrace)) {
+    // The inner syscall has already run and written its outputs; formatting
+    // them for the trace log allocates. Keep it best-effort so an allocation
+    // failure here does not abandon the gas accounting below after a
+    // successful side effect (issue #2562).
+    [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept {
+      try {
+        bool is_syscall_error =
+            !syscall_result.has_value() ||
+            (*syscall_result) != SyscallErrorCode::kSyscallErrorCodeNone;
+        trace("Syscall {} Output: {}", SyscallMeta::kSyscallNo,
+              is_syscall_error
+                  ? syscall_error_message(syscall_result)
+                  : make_syscall_output_message<SyscallMeta>(std::tuple{
+                        SyscallArgParams<typename syscall_t::template arg_i<
+                            Is>>::deref(std::get<Is>(args))...}));
+      } catch (std::exception const &e) {
+        report_dropped_syscall_trace(e.what());
+      }
+    }(std::make_index_sequence<syscall_t::kNumArgs>{});
+  }
+
+  if constexpr (is_debug_build()) {
+    // In debug builds, verify that the syscall only returns documented error
+    // codes. This helps catch cases where a syscall returns an error that isn't
+    // documented in syscalls.yaml.
+    if (syscall_result.has_value() &&
+        !SyscallAllowedErrors::is_allowed_error_code<SyscallMeta>(
+            *syscall_result)) {
+      panic("Syscall {} returned undocumented error code {}",
+            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+    }
+  }
+
+  // Here we perform gas accounting.  Errors that might be handled by a contract
+  // (via a parent frame) still need to have gas accounting performed.  Errors
+  // that fail the whole transaction cannot be accidentally turned into an out
+  // of gas error.
+  bool is_handleable_error = [&]() noexcept {
+    if (!syscall_result.has_value()) {
+      switch (syscall_result.error().code()) {
+      case HostFnErrorCode::Abandon:
+      case HostFnErrorCode::ValidationFailure:
+        return false;
+      case HostFnErrorCode::Unrecoverable:
+        try {
+          error("Unrecoverable: syscall_entry_outer got Unrecoverable");
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
+        }
+        return false;
+      case HostFnErrorCode::OutOfGas:
+      case HostFnErrorCode::Exit:
+      case HostFnErrorCode::Return:
+        return true;
+      case HostFnErrorCode::NoneOrRecoverable:
+        panic("unreachable");
+      }
+      panic("Unhandled HostFnErrorCode (invalid enum?)");
+    }
+    return true;
+  }();
+
+  syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
+    if (is_handleable_error) {
+      if (gas_consumed.get() >= gas_remaining.get()) {
+        return {HostFnError{HostFnErrorCode::OutOfGas}};
+      }
+    }
+
+    // The syscall_result.has_value() check means that we only
+    // override syscall_result (by returning Exit) in a subset
+    // of the cases covered by the is_handleable_error guard.
+    if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
+      // If the syscall cannot return to the guest environment but the syscall
+      // tried to return an error code, abort the entire call frame.
+      if (runtime_log_level(LogLevel::kTrace)) {
+        try {
+          trace("Syscall {} attempted to return an error code {} but cannot "
+                "return",
+                SyscallMeta::kSyscallNo, x23::show(*syscall_result));
+        } catch (std::exception const &e) {
+          report_dropped_syscall_trace(e.what());
+        }
+      }
+      return {HostFnError{HostFnErrorCode::Exit}};
+    }
+
+    if (syscall_result.has_value() &&
+        *syscall_result != SyscallErrorCode::kSyscallErrorCodeNone) {
+      disarm_outputs(args);
+    }
+    return syscall_result;
+  }();
+
+  GasAmount gas_remaining_at_end =
+      gas_remaining.get() > gas_consumed.get()
+          ? gas_remaining.get() - gas_consumed.get()
+          : 0;
+  handler.finish_syscall_trace(syscall_result, gas_remaining_at_end);
+  return SyscallResult{std::move(syscall_result), gas_consumed.get()};
 }
-} // namespace detail
 
 // report_dropped_syscall_trace() lives in syscall_types.h so the per-syscall
 // inner bodies (which also materialize optional XDR trace outputs and must not
@@ -564,131 +717,12 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
 {
   using syscall_t =
       SyscallTypes<std::remove_const_t<decltype(SyscallMeta::kInnerFunc)>>;
-  constexpr static SyscallNo kSyscall = SyscallMeta::kSyscallNo;
 
   handler.start_syscall_trace(syscall_no, gas_remaining);
 
-  // Wrapping the logic in a lambda so that no matter what, the checks at the
-  // end to consume gas and validate return state cannot be skipped.
-  auto body = [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
-      -> MaybeAsyncSyscallInnerResult {
-    // check whether any loads failed
-    if (!(SyscallArgParams<typename syscall_t::template arg_i<Is>>::validate(
-              std::get<Is>(args)) &&
-          ...)) {
-      if (auto *stats = handler.get_transaction_stats()) {
-        stats->syscall_fault_count++;
-      }
-      disarm_outputs(args);
-      return kFaultResult;
-    }
-
-    // Check whether any inputs/outputs were aliased
-    if (!alias_check_passed) {
-      if (auto *stats = handler.get_transaction_stats()) {
-        stats->syscall_fault_count++;
-      }
-      try {
-        trace("Syscall {} faulted due to aliased memory regions", kSyscall);
-      } catch (std::exception const &e) {
-        report_dropped_syscall_trace(e.what());
-      }
-      disarm_outputs(args);
-      return kFaultResult;
-    }
-
-    if constexpr (!SyscallMeta::kIsReadOnlySyscall) {
-      if (handler.is_read_only()) {
-        try {
-          trace("Syscall {} is not read-only, but called in read-only mode",
-                kSyscall);
-        } catch (std::exception const &e) {
-          report_dropped_syscall_trace(e.what());
-        }
-        disarm_outputs(args);
-        return SyscallInnerResult{
-            HostFnStatus<SyscallErrorCode>{
-                SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput},
-            WrappedGasAmount{0}};
-      }
-    }
-
-    if (runtime_log_level(LogLevel::kTrace)) {
-      // Once the syscall inputs are parsed, we can print them in a formatted
-      // log message. Formatting allocates, so keep it best-effort: this runs in
-      // the noexcept syscall body and must not crash on allocation failure
-      // (issue #2562).
-      try {
-        trace(
-            "Syscall {} Input: {}", kSyscall,
-            make_syscall_input_message<SyscallMeta>(std::tuple{
-                SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                    std::get<Is>(args))...}));
-      } catch (std::exception const &e) {
-        report_dropped_syscall_trace(e.what());
-      }
-    }
-
-    if constexpr (SyscallMeta::kSyscallNo != kNoTracingSyscall) {
-      if (auto *trace_data =
-              handler.get_syscall_trace_data<SyscallMeta::kSyscallNo>()) {
-        // Copying inputs into the XDR trace record allocates and can throw.
-        // Keep it best-effort rather than panicking: this runs in the noexcept
-        // syscall body, so a thrown std::bad_alloc would terminate an honest
-        // caller before the mock entrypoint's catch could translate it. Drop
-        // the trace inputs and continue (issue #2561).
-        try {
-          [&]<size_t... Inputs>(std::index_sequence<Inputs...> /*unused*/) {
-            set_syscall_trace_inputs(
-                trace_data->inputs,
-                std::tuple{SyscallArgParams<typename syscall_t::template arg_i<
-                    Inputs>>::deref(std::get<Inputs>(args))...});
-          }(std::make_index_sequence<
-              std::tuple_size_v<decltype(trace_data->inputs)>>{});
-        } catch (std::exception const &e) {
-          report_dropped_syscall_trace(e.what());
-        }
-      }
-    }
-
-    // Reserve the crossing before entering the body. An exhausted frame
-    // cannot run even a zero-cost body.
-    if (gas_remaining <= kSyscallBaseCost) {
-      return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
-                                WrappedGasAmount{0}};
-    }
-
-    auto extra_args =
-        syscall_t::extra_args(handler, WrappedGasAmount{gas_remaining -
-                                                        kSyscallBaseCost});
-
-    // Invoke the inner syscall
-    // template only required because we can't do auto [...handler] =
-    // handler_pack; yet.  This would be so much cleaner in c++26.
-    //
-    // The inner syscall bodies run arbitrary allocating storage/cache/frame
-    // logic against attacker-controlled inputs, so this is the exception
-    // boundary for all of them: anything that escapes (most commonly
-    // std::bad_alloc under memory pressure) is translated into a structured
-    // Unrecoverable result here instead of terminating hogexec (issue #3400
-    // and siblings). The inner bodies are deliberately not noexcept so the
-    // translation happens here instead of at their own boundary via
-    // std::terminate(); this lambda is noexcept so that boundary is
-    // reestablished immediately around the catch.
-    auto res = [&]<size_t... ExtraArgs>(
-                   std::index_sequence<ExtraArgs...> /*unused*/) noexcept
-        -> MaybeAsyncSyscallInnerResult {
-      try {
-        return SyscallMeta::kInnerFunc(
-            std::get<ExtraArgs>(extra_args)...,
-            SyscallArgParams<typename syscall_t::template arg_i<Is>>::deref(
-                std::get<Is>(args))...);
-      } catch (...) {
-        return translate_syscall_body_exception(kSyscall, args);
-      }
-    }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
-    return res;
-  }(std::make_index_sequence<syscall_t::kNumArgs>{});
+  auto body = run_syscall_body<SyscallMeta>(
+      handler, WrappedGasAmount{gas_remaining}, alias_check_passed, args,
+      std::make_index_sequence<syscall_t::kNumArgs>{});
 
   // A body that ran to completion is already here; one that had to wait
   // suspends us until it is done. Either way nothing may escape: a body that
@@ -701,117 +735,12 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
   try {
     body_result = co_await body;
   } catch (...) {
-    body_result = translate_syscall_body_exception(kSyscall, args);
+    body_result =
+        translate_syscall_body_exception<SyscallMeta::kSyscallNo>(args);
   }
 
-  auto [syscall_result, gas_consumed] = std::move(body_result);
-  // Account for the reserved crossing on every path, including rejected calls
-  // and bodies that suspended or threw. Saturate to avoid wrapping the charge.
-  gas_consumed = WrappedGasAmount{
-      detail::saturating_add(gas_consumed.get(), kSyscallBaseCost)};
-
-  if (runtime_log_level(LogLevel::kTrace)) {
-    // The inner syscall has already run and written its outputs; formatting
-    // them for the trace log allocates. Keep it best-effort so an allocation
-    // failure here does not abandon the gas accounting below after a
-    // successful side effect (issue #2562).
-    [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept {
-      try {
-        bool is_syscall_error =
-            !syscall_result.has_value() ||
-            (*syscall_result) != SyscallErrorCode::kSyscallErrorCodeNone;
-        trace("Syscall {} Output: {}", kSyscall,
-              is_syscall_error
-                  ? syscall_error_message(syscall_result)
-                  : make_syscall_output_message<SyscallMeta>(std::tuple{
-                        SyscallArgParams<typename syscall_t::template arg_i<
-                            Is>>::deref(std::get<Is>(args))...}));
-      } catch (std::exception const &e) {
-        report_dropped_syscall_trace(e.what());
-      }
-    }(std::make_index_sequence<syscall_t::kNumArgs>{});
-  }
-
-  if constexpr (is_debug_build()) {
-    // In debug builds, verify that the syscall only returns documented error
-    // codes. This helps catch cases where a syscall returns an error that isn't
-    // documented in syscalls.yaml.
-    if (syscall_result.has_value() &&
-        !is_allowed_error_code<SyscallMeta>(*syscall_result)) {
-      panic("Syscall {} returned undocumented error code {}",
-            SyscallMeta::kSyscallNo, x23::show(*syscall_result));
-    }
-  }
-
-  // Here we perform gas accounting.  Errors that might be handled by a contract
-  // (via a parent frame) still need to have gas accounting performed.  Errors
-  // that fail the whole transaction cannot be accidentally turned into an out
-  // of gas error.
-  bool is_handleable_error = [&]() noexcept {
-    if (!syscall_result.has_value()) {
-      switch (syscall_result.error().code()) {
-      case HostFnErrorCode::Abandon:
-      case HostFnErrorCode::ValidationFailure:
-        return false;
-      case HostFnErrorCode::Unrecoverable:
-        try {
-          error("Unrecoverable: syscall_entry_outer got Unrecoverable");
-        } catch (std::exception const &e) {
-          report_dropped_syscall_trace(e.what());
-        }
-        return false;
-      case HostFnErrorCode::OutOfGas:
-      case HostFnErrorCode::Exit:
-      case HostFnErrorCode::Return:
-        return true;
-      case HostFnErrorCode::NoneOrRecoverable:
-        panic("unreachable");
-      }
-      panic("Unhandled HostFnErrorCode (invalid enum?)");
-    }
-    return true;
-  }();
-
-  syscall_result = [&]() noexcept -> HostFnStatus<SyscallErrorCode> {
-    if (is_handleable_error) {
-      if (gas_consumed.get() >= gas_remaining) {
-        return {HostFnError{HostFnErrorCode::OutOfGas}};
-      }
-    }
-
-    // The syscall_result.has_value() check means that we only
-    // override syscall_result (by returning Exit) in a subset
-    // of the cases covered by the is_handleable_error guard.
-    if (!SyscallMeta::kCanReturn && syscall_result.has_value()) {
-      // If the syscall cannot return to the guest environment but the syscall
-      // tried to return an error code, abort the entire call frame.
-      if (runtime_log_level(LogLevel::kTrace)) {
-        try {
-          trace("Syscall {} attempted to return an error code {} but cannot "
-                "return",
-                SyscallMeta::kSyscallNo, x23::show(*syscall_result));
-        } catch (std::exception const &e) {
-          report_dropped_syscall_trace(e.what());
-        }
-      }
-      return {HostFnError{HostFnErrorCode::Exit}};
-    }
-
-    if (syscall_result.has_value() &&
-        *syscall_result != SyscallErrorCode::kSyscallErrorCodeNone) {
-      disarm_outputs(args);
-    }
-    return syscall_result;
-  }();
-
-  GasAmount gas_remaining_at_end = gas_remaining > gas_consumed.get()
-                                       ? gas_remaining - gas_consumed.get()
-                                       : 0;
-  handler.finish_syscall_trace(syscall_result, gas_remaining_at_end);
-
-  co_return SyscallResult{syscall_result,
-                          std::min<GasAmount>(gas_consumed.get(),
-                                              gas_remaining)};
+  co_return finish_syscall<SyscallMeta>(body_result, handler,
+                                        WrappedGasAmount{gas_remaining}, args);
 }
 
 // Creates the coroutine and translates a failed frame allocation, which x23's
@@ -868,7 +797,7 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
 
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
-  auto res = [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) noexcept
+  auto res = [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) noexcept
       -> MaybeAsyncSyscallResult {
     // Attempt to load syscall arguments from contract memory.
     AliasGuard guard;
@@ -882,7 +811,7 @@ wrap_outer(SystemCallHandler &handler, ExecutionContext context,
     return wrap_after_parse<SyscallMeta>(guard.check(), handler,
                                          context.gas_remaining, syscall_no,
                                          std::move(parsed_args));
-  }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+  }(std::make_index_sequence<syscall_t::kNumArgs>{});
 
   return res;
 }
