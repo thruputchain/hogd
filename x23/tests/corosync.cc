@@ -1,9 +1,11 @@
 #include <array>
 #include <atomic>
+#include <barrier>
 #include <coroutine>
 #include <memory>
 #include <semaphore>
 #include <stdexcept>
+#include <thread>
 #include <type_traits>
 #include <utility>
 #include <vector>
@@ -486,4 +488,219 @@ TEST(CoroLock, ConcurrentReturnHandoffs)
     EXPECT_EQ(count, 128 * 16);
     EXPECT_FALSE(lock.busy());
   }
+}
+
+namespace {
+
+// Starts a coroutine that waits for [d] to drain, then sets [resumed].
+void
+start_drain_waiter(CoroDrain &d, bool &resumed)
+{
+  [](CoroDrain &d, bool &resumed) -> Detached {
+    co_await d.wait_idle();
+    resumed = true;
+  }(d, resumed);
+}
+
+} // namespace
+
+TEST(CoroDrain, IdleDrainDoesNotSuspend)
+{
+  CoroDrain d;
+  bool resumed = false;
+  start_drain_waiter(d, resumed);
+  EXPECT_TRUE(resumed);
+  EXPECT_EQ(d.in_flight(), 0U);
+}
+
+TEST(CoroDrain, LastDoneResumesWaiterInline)
+{
+  CoroDrain d;
+  d.add();
+  d.add();
+  d.add();
+  bool resumed = false;
+  start_drain_waiter(d, resumed);
+  EXPECT_FALSE(resumed);
+  d.done();
+  d.done();
+  EXPECT_FALSE(resumed);
+  EXPECT_EQ(d.in_flight(), 1U);
+  d.done();
+  // Resumed by the done() call itself, before it returned.
+  EXPECT_TRUE(resumed);
+  EXPECT_EQ(d.in_flight(), 0U);
+}
+
+TEST(CoroDrain, OperationsAddedWhileWaitingAreAwaited)
+{
+  CoroDrain d;
+  d.add();
+  bool resumed = false;
+  start_drain_waiter(d, resumed);
+  d.add();
+  d.done();
+  EXPECT_FALSE(resumed);
+  d.done();
+  EXPECT_TRUE(resumed);
+}
+
+TEST(CoroDrain, WaitAgainAfterADrain)
+{
+  CoroDrain d;
+  for (int round = 0; round < 3; ++round) {
+    d.add();
+    bool resumed = false;
+    start_drain_waiter(d, resumed);
+    EXPECT_FALSE(resumed) << "round " << round;
+    d.done();
+    EXPECT_TRUE(resumed) << "round " << round;
+  }
+}
+
+TEST(CoroDrain, OperationsAfterADrainResumeNothing)
+{
+  CoroDrain d;
+  d.add();
+  bool resumed = false;
+  start_drain_waiter(d, resumed);
+  d.done();
+  ASSERT_TRUE(resumed);
+
+  // Stragglers that start and finish with no waiter parked.
+  d.add();
+  d.done();
+  d.add();
+  d.add();
+  d.done();
+  d.done();
+
+  bool resumed_again = false;
+  start_drain_waiter(d, resumed_again);
+  EXPECT_TRUE(resumed_again);
+}
+
+// The waiter may destroy the drain as soon as it resumes, while the
+// done() that resumed it is still on the stack.
+TEST(CoroDrain, WaiterMayDestroyDrainOnResume)
+{
+  auto *d = new CoroDrain;
+  d->add();
+  d->add();
+  bool destroyed = false;
+  [](CoroDrain *d, bool &destroyed) -> Detached {
+    co_await d->wait_idle();
+    delete d;
+    destroyed = true;
+  }(d, destroyed);
+  d->done();
+  EXPECT_FALSE(destroyed);
+  d->done();
+  EXPECT_TRUE(destroyed);
+}
+
+// Threads retire operations while the waiter parks before or races
+// with them.  The waiter frees the drain on resume, so a done() that
+// touched it after handing off, or a lost or doubled wakeup, shows up
+// here (most reliably under ASan or TSan).
+TEST(CoroDrain, ConcurrentDrainThenDestroy)
+{
+  constexpr int kIterations = 5000;
+  constexpr int kThreads = 4;
+  constexpr int kOpsPerThread = 32;
+
+  CoroDrain *current = nullptr;
+  bool stop = false;
+  std::barrier start_line(kThreads + 1);
+  std::vector<std::jthread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t)
+    threads.emplace_back([&] {
+      while (true) {
+        start_line.arrive_and_wait();
+        if (stop)
+          return;
+        CoroDrain *d = current;
+        for (int i = 0; i < kOpsPerThread; ++i)
+          d->done();
+      }
+    });
+
+  std::binary_semaphore resumed{0};
+  std::atomic<int> resumes{0};
+  auto start_waiter = [&](CoroDrain *d) {
+    [](CoroDrain *d, std::atomic<int> &resumes,
+       std::binary_semaphore &resumed) -> Detached {
+      co_await d->wait_idle();
+      EXPECT_EQ(d->in_flight(), 0U);
+      delete d;
+      resumes.fetch_add(1);
+      resumed.release();
+    }(d, resumes, resumed);
+  };
+
+  for (int iter = 0; iter < kIterations; ++iter) {
+    auto *d = new CoroDrain;
+    for (int i = 0; i < kThreads * kOpsPerThread; ++i)
+      d->add();
+    current = d;
+    if (iter % 2 == 0) {
+      start_waiter(d);
+      start_line.arrive_and_wait();
+    }
+    else {
+      start_line.arrive_and_wait();
+      start_waiter(d);
+    }
+    resumed.acquire();
+    ASSERT_EQ(resumes.load(), iter + 1);
+  }
+
+  stop = true;
+  start_line.arrive_and_wait();
+}
+
+// Operations keep starting and finishing, often from zero, while one
+// waiter repeatedly drains: the count goes back up after each wait
+// completes.  Every wait must still be woken, exactly once.
+TEST(CoroDrain, ConcurrentRepeatedWaitsWithStragglers)
+{
+  constexpr int kWaits = 5000;
+  constexpr int kThreads = 3;
+
+  CoroDrain d;
+  std::atomic<bool> stop{false};
+  std::vector<std::jthread> threads;
+  threads.reserve(kThreads);
+  for (int t = 0; t < kThreads; ++t)
+    threads.emplace_back([&d, &stop] {
+      while (!stop.load(std::memory_order_relaxed)) {
+        d.add();
+        d.add();
+        d.done();
+        d.done();
+      }
+    });
+
+  std::binary_semaphore resumed{0};
+  std::atomic<int> resumes{0};
+  for (int i = 0; i < kWaits; ++i) {
+    // Holding an operation of our own guarantees the waiter parks;
+    // releasing it races the stragglers to retire the last one.
+    d.add();
+    [](CoroDrain &d, std::atomic<int> &resumes,
+       std::binary_semaphore &resumed) -> Detached {
+      co_await d.wait_idle();
+      resumes.fetch_add(1);
+      resumed.release();
+    }(d, resumes, resumed);
+    ASSERT_EQ(resumes.load(), i);
+    d.done();
+    resumed.acquire();
+    ASSERT_EQ(resumes.load(), i + 1);
+  }
+
+  stop.store(true, std::memory_order_relaxed);
+  threads.clear();
+  EXPECT_EQ(d.in_flight(), 0U);
 }

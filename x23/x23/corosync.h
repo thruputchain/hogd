@@ -62,6 +62,7 @@
 #include <cassert>
 #include <concepts>
 #include <coroutine>
+#include <cstdint>
 #include <mutex>
 #include <type_traits>
 #include <utility>
@@ -751,5 +752,114 @@ private:
 // CoroFutex is used as a local inside coroutine frames — must not
 // exceed default new alignment or GCC bug #104177 will SIGSEGV.
 static_assert(alignof(CoroFutex<int>) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+
+// A CoroDrain counts operations in flight and lets one coroutine at a
+// time wait, without spinning or holding a thread, for the count to
+// reach zero:
+//
+//    CoroDrain drain;
+//
+//    drain.add();                 // an operation starts
+//    drain.done();                // it finishes (from any thread)
+//
+//    co_await drain.wait_idle();  // returns once nothing is in flight
+//
+// Operations may start while a waiter is parked and after a wait has
+// completed, and the count may pass through zero any number of times
+// with nobody waiting.  A wait completes when the count is observed at
+// zero, so it covers every operation started before then.
+//
+// The done() that retires the last operation fires the waiter's CoroCB
+// inline, on its own thread, the way an RPC reply resumes its client.
+// So call done() with no locks held, and touch nothing the waiter
+// might free (including the CoroDrain) after it returns.
+//
+// The count and a "waiter parked" bit share one atomic word, so that
+// done() claims the waiter in the same CAS that takes the count to
+// zero.  A done() that does not claim it touches nothing after its
+// CAS, and the waiter cannot run until the claiming done() fires its
+// CoroCB, which is what lets the waiter destroy the CoroDrain's owner
+// as soon as it resumes.  (With a separate count and callback slot,
+// the last done() would have to read the slot after its decrement,
+// racing a waiter that saw zero and moved on.)
+class CoroDrain {
+public:
+  CoroDrain() = default;
+  CoroDrain(const CoroDrain &) = delete;
+  ~CoroDrain()
+  {
+    // If this fails you destroyed a CoroDrain with a parked waiter
+    x23assert(!(state_.load(std::memory_order_relaxed) & kWaiting));
+  }
+
+  void add() noexcept
+  {
+    [[maybe_unused]] uint64_t old =
+        state_.fetch_add(1, std::memory_order_release);
+    x23assert((old & kCountMask) != kCountMask);
+  }
+
+  void done() noexcept
+  {
+    uint64_t cur = state_.load(std::memory_order_relaxed);
+    uint64_t next = 0;
+    do {
+      if (!(cur & kCountMask)) [[unlikely]]
+        panic("CoroDrain::done() without a matching add()");
+      next = cur == (kWaiting | 1) ? 0 : cur - 1;
+    } while (!state_.compare_exchange_weak(cur, next, std::memory_order_acq_rel,
+                                           std::memory_order_relaxed));
+    if (cur == (kWaiting | 1)) {
+      // We cleared kWaiting, so the parked waiter is ours alone to wake,
+      // and it stays parked (keeping waiter_ valid) until we do.
+      CoroCB<void> cb = waiter_;
+      cb();
+    }
+  }
+
+  // Operations in flight.  Only a snapshot unless nothing can add or
+  // retire one concurrently.
+  uint32_t in_flight() const noexcept
+  {
+    return state_.load(std::memory_order_acquire) & kCountMask;
+  }
+
+  // Completes once no operation is in flight.  The memory effects of
+  // every operation retired before then happen-before it returns.
+  Async<void> wait_idle();
+
+private:
+  static constexpr uint64_t kCountMask = 0xffff'ffff;
+  static constexpr uint64_t kWaiting = uint64_t{1} << 63;
+
+  std::atomic<uint64_t> state_{0};
+  // Set by the waiter before it publishes kWaiting (release), and read
+  // only by the done() whose acquire CAS clears kWaiting.
+  CoroCB<void> waiter_;
+};
+
+inline Async<void>
+CoroDrain::wait_idle()
+{
+  if (!(state_.load(std::memory_order_acquire) & kCountMask))
+    co_return;
+  auto [idle, cb] = make_async<void>();
+  waiter_ = cb;
+  uint64_t cur = state_.load(std::memory_order_acquire);
+  while (cur & kCountMask) {
+    x23assert(!(cur & kWaiting)); // one waiter at a time
+    if (state_.compare_exchange_weak(cur, cur | kWaiting,
+                                     std::memory_order_release,
+                                     std::memory_order_acquire)) {
+      // Parked.  The done() that retires the last operation fires cb,
+      // possibly before we get to the co_await.
+      co_await idle;
+      co_return;
+    }
+  }
+  // Drained since the first check.  Every CoroCB must be fired.
+  cb();
+  co_await idle;
+}
 
 } // namespace x23
