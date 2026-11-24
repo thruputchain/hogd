@@ -116,7 +116,7 @@ struct SyscallTypeParams {
   template<size_t I> requires (I < sizeof...(Args))
   constexpr static size_t offset_i()
   {
-    // with structured bindings for parameter packs
+    // with structured bindings for parameter packs (cpp26)
 
     // auto [... offsets] = kArgOffsetIndices;
     // return offsets...[I];
@@ -550,7 +550,7 @@ run_syscall_body(SystemCallHandler &handler, WrappedGasAmount gas_remaining,
     }
   }(std::make_index_sequence<std::tuple_size_v<decltype(extra_args)>>{});
   return res;
-};
+}
 
 template<is_syscall_meta SyscallMeta, typename Args>
 SyscallResult
@@ -672,7 +672,8 @@ finish_syscall(SyscallInnerResult body_result, SystemCallHandler &handler,
 
   GasAmount clamped_consume = std::min(gas_consumed.get(), gas_remaining.get());
 
-  handler.finish_syscall_trace(syscall_result, gas_remaining.get() - clamped_consume);
+  handler.finish_syscall_trace(syscall_result,
+                               gas_remaining.get() - clamped_consume);
   return SyscallResult{std::move(syscall_result), clamped_consume};
 }
 
@@ -737,8 +738,9 @@ wrap_after_parse_async(bool alias_check_passed, SystemCallHandler &handler,
         translate_syscall_body_exception<SyscallMeta::kSyscallNo>(args);
   }
 
-  co_return finish_syscall<SyscallMeta>(body_result, handler,
-                                        WrappedGasAmount{gas_remaining}, args);
+  co_return std::move(
+      finish_syscall<SyscallMeta>(body_result, handler,
+                                  WrappedGasAmount{gas_remaining}, args));
 }
 
 // Creates the coroutine and translates a failed frame allocation, which x23's
