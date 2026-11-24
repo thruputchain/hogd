@@ -28,9 +28,9 @@ namespace hogd {
  */
 
 // Every syscall pays this: the crossing itself -- ecall barrier, argument
-// parsing, alias guard, coroutine frame -- which is what the cheapest syscalls
-// almost entirely consist of. The ecall instruction already charges 1 gas, so
-// this is the remainder.
+// parsing, alias guard -- which is what the cheapest syscalls almost entirely
+// consist of. The ecall instruction already charges 1 gas, so this is the
+// remainder.
 //
 // 60 is a margin, not a measurement. 50 was measured (run 33469060485), but on
 // hog10 (gas unit ~1.623 ns) the crossing through the VM has since measured
@@ -40,6 +40,9 @@ namespace hogd {
 // ~62 gas, in every run since #4834, and 74.4-76.9 ns in reruns of the same
 // binary started slightly differently. 60 covers the crossing at its usual
 // layouts with ~20% to spare; it does not cover that worst layout.
+//
+// Measured with a coroutine frame per call; without one the stateless rows take
+// ~25 gas (MEASUREMENTS.md). The price was left at 60.
 constexpr static uint64_t kSyscallBaseCost = 60;
 
 // Per compression block, which is the unit SHA-256 works in. Charged across
