@@ -225,13 +225,9 @@ public:
   x23::Async<GenesisCeremonyResult>
   schedulercoord_commit_genesis_ceremony(GenesisCeremonyRequest request);
 
-  // Returns the db tip of the last committed block.
-  //
-  // Reads [published_tip_], never [commit_lock_]: the gateway health probe
-  // calls this every few seconds, and waiting out an in-flight commit made it
-  // take as long as the commit. During a commit this returns the previous
-  // tip, which is still the last committed one; a commit's reply is sent only
-  // after the new tip is published.
+  // Returns the db tip of the last committed block. Reads [published_tip_],
+  // not [commit_lock_], so a health probe never waits out a commit; during a
+  // commit this returns the previous (still last committed) tip.
   x23::Async<SchedulerGetTipResult> schedcoord_get_tip()
   {
     CHECK(initialized_.load(std::memory_order_acquire));
@@ -502,9 +498,7 @@ public:
 private:
   friend class MempoolValidationExecutorResultTest;
 
-  // Publishes [last_committed_block_] to [schedcoord_get_tip()]. Callers hold
-  // [commit_lock_] or run before initialization finishes, so the tip cannot
-  // change underneath the copy.
+  // Callers hold [commit_lock_] or run before init, so the copy is stable.
   void publish_tip()
   {
     auto tip = std::make_shared<const DbTip>(last_committed_block_);
@@ -512,7 +506,6 @@ private:
       std::lock_guard lock(published_tip_mutex_);
       published_tip_.swap(tip);
     }
-    // [tip] now holds the previous snapshot, released outside the lock.
   }
 
   std::shared_ptr<const DbTip> published_tip() const
@@ -910,10 +903,8 @@ private:
   PendingBlock nominated_block_cache_ = {};
   std::unordered_map<BlockID, PendingBlock> validated_block_cache_;
   DbTip last_committed_block_{};
-  // A copy of [last_committed_block_] for [schedcoord_get_tip()], which must
-  // not wait on [commit_lock_]. Republished by [publish_tip()] once a recovery,
-  // genesis load, or commit has finished applying the tip, so a reader never
-  // sees a tip the mempool has not fully applied. Null until [finish_init()].
+  // Snapshot of [last_committed_block_] for [schedcoord_get_tip()], published
+  // once each tip is fully applied. Null until [finish_init()].
   mutable std::mutex published_tip_mutex_;
   std::shared_ptr<const DbTip> published_tip_;
   x23::CoroFutex<int64_t> auth_data_height_{-1};
