@@ -481,13 +481,13 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   // references, optional pointers) legitimately carry full 64-bit host pointers
   // and the all-ones null sentinel, so they are excluded from this check.
   const bool value_slot_overflow =
-      [&]<size_t... Is>(TupleIndexSequence<Is...> /*unused*/) -> bool {
+      [&]<size_t... Is>(std::index_sequence<Is...> /*unused*/) -> bool {
     return (((std::integral<typename syscall_t::template arg_i<Is>> ||
               std::is_enum_v<typename syscall_t::template arg_i<Is>>) &&
              std::get<syscall_t::template offset_i<Is>()>(input_args) >
                  std::numeric_limits<uint32_t>::max()) ||
             ... || false);
-  }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+  }(std::make_index_sequence<syscall_t::kNumArgs>{});
   if (value_slot_overflow) {
     return unrecoverable_error();
   }
@@ -495,7 +495,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
   // Again, parameter packs as structured bindings gets rid of the annoying
   // lambda context
   return [&]<size_t... Is>(
-             TupleIndexSequence<Is...> /*unused*/) -> ForeignHostFnResult {
+             std::index_sequence<Is...> /*unused*/) -> ForeignHostFnResult {
     AliasGuard guard;
     // Attempt to load syscall arguments from regular machine, not contract)
     // memory.
@@ -517,7 +517,7 @@ mock_syscall_parser(SyscallNo syscall_no, uint64_t arg1, uint64_t arg2,
     gas_runtime->consume_gas(gas);
 
     return from_status(inner_res);
-  }(from_index_sequence(std::make_index_sequence<syscall_t::kNumArgs>{}));
+  }(std::make_index_sequence<syscall_t::kNumArgs>{});
 }
 
 } // namespace hogd
