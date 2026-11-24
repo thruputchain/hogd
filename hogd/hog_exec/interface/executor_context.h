@@ -8,7 +8,6 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/drain_counter.h"
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/execution_mode.h"
@@ -19,6 +18,7 @@
 #include "transaction.hh"
 #include "view.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -73,7 +73,8 @@ public:
 
   // Suspends until every event call spawned so far has returned, then yields
   // the event error recorded for the block, if any.  The last event call to
-  // return resumes the caller inline (see DrainCounter).  One caller at a time.
+  // return resumes the caller inline (see x23::CoroDrain).  One caller at a
+  // time.
   x23::Async<std::optional<SystemErrorCode>> await_event_return();
 
 private:
@@ -113,7 +114,7 @@ private:
 
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;
-  DrainCounter pending_event_calls_;
+  x23::CoroDrain pending_event_calls_;
 };
 
 } // namespace hogd
