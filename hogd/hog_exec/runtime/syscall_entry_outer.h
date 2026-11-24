@@ -670,12 +670,10 @@ finish_syscall(SyscallInnerResult body_result, SystemCallHandler &handler,
     return syscall_result;
   }();
 
-  GasAmount gas_remaining_at_end =
-      gas_remaining.get() > gas_consumed.get()
-          ? gas_remaining.get() - gas_consumed.get()
-          : 0;
-  handler.finish_syscall_trace(syscall_result, gas_remaining_at_end);
-  return SyscallResult{std::move(syscall_result), gas_consumed.get()};
+  GasAmount clamped_consume = std::min(gas_consumed.get(), gas_remaining.get());
+
+  handler.finish_syscall_trace(syscall_result, gas_remaining.get() - clamped_consume);
+  return SyscallResult{std::move(syscall_result), clamped_consume};
 }
 
 // report_dropped_syscall_trace() lives in syscall_types.h so the per-syscall

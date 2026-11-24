@@ -1,5 +1,6 @@
 #pragma once
 
+#include <algorithm>
 #include <concepts>
 #include <coroutine>
 #include <type_traits>
