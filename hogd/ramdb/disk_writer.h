@@ -29,14 +29,8 @@ namespace hogd {
 // forward declaration
 class ScopedDiskWrite;
 
-// SyncStats describes one completed sync(). Times are wall time. The
-// writer thread may also write full loglets before sync() starts; those bytes
-// are in bytes_early and are not on sync()'s critical path. A loglet counts by
-// when the writer started it: one it started before sync() is early even if it
-// finishes after. Work the writer does after sync() starts is split into the
-// fields below; the rest of total is lock handoff and wakeup latency. The
-// writer can work on queued loglets while sync() drains the heads, so drain
-// can overlap the writer fields.
+// SyncStats describes one completed sync(). Times are wall time; each field
+// is measured in sync() or on the writer thread, as marked.
 struct SyncStats {
   using ns = std::chrono::nanoseconds;
   // the LSN this sync() returned.
@@ -46,14 +40,15 @@ struct SyncStats {
   // bytes drained from the heads by sync().
   size_t bytes_drained{0};
   // bytes of loglets the writer started since the previous sync, before this
-  // one started.
+  // one started (even if they finished after). Not on sync()'s critical path.
   size_t bytes_early{0};
   // bytes the writer wrote after this sync started: bytes_drained plus full
   // loglets that were still queued.
   size_t bytes_synced{0};
   // loglets in bytes_synced.
   size_t loglets_synced{0};
-  // sync(): lock the heads and queue their partial loglets.
+  // sync(): lock the heads and queue their partial loglets. The writer may
+  // work on queued loglets meanwhile, so this can overlap the writer fields.
   ns drain{0};
   // writer: rest of a loglet that it was writing when sync() started.
   ns inflight{0};
@@ -66,7 +61,8 @@ struct SyncStats {
   ns flush{0};
   // writer: fdatasync().
   ns fdatasync{0};
-  // sync(): call to return.
+  // sync(): call to return. Time not in the writer fields is lock handoff and
+  // wakeup latency.
   ns total{0};
 };
 
