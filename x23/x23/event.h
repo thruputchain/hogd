@@ -283,9 +283,8 @@ public:
     return std::move(async);
   }
 
-  // Like read_wait(tok), but resumes whoever co_awaits a caller-owned
-  // Awaitable instead of returning an Async.  This avoids allocating
-  // a coroutine frame for each wait.  You must co_await a afterwards.
+  // Like read_wait(tok), but completes a caller-owned Awaitable
+  // instead of returning an Async.  The caller must co_await `a`.
   void read_wait(ReadToken fd, Awaitable<Errno> &a)
   {
     setcb(fd, false, {CoroCB<Errno>{a}, cpuid()});
@@ -554,18 +553,10 @@ public:
     Awaitable<Errno> wait_;
   };
 
-  // Read up to len bytes from fd into a buffer the caller manages,
-  // returning as soon as any bytes are available (0 means EOF).  This
-  // behaves like read(fd, out, len, false, true), flushing delayed
-  // writes before the coroutine goes to sleep, but must be awaited
-  // immediately and does not allocate: the awaiter lives in the
-  // calling coroutine's frame.  It also reads straight into buf
-  // without creating the file descriptor's 64KiB ReadBuffer, so is
-  // intended for callers that read large chunks and parse them in
-  // place.
-  //
-  // Can return EAGAIN after a spurious wakeup, in which case just
-  // call it again.
+  // Read up to len bytes into a caller-owned buffer, returning as
+  // soon as any are available (0 means EOF).  Flushes delayed writes
+  // like read() with sync set.  Must be awaited immediately, and may
+  // return EAGAIN on a spurious wakeup.
   [[nodiscard]] ReadSome read_some(BorrowedFd fd, void *buf, size_t len)
   {
     return ReadSome{*this, fd, buf, len};

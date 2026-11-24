@@ -112,6 +112,7 @@ std::string msg_show_stat(const rpc_msg &msg);
 // single-fragment record therefore cannot carry more than this many payload
 // bytes.
 constexpr inline size_t kMaxRecordPayloadSize = 0x7fffffffUZ;
+constexpr inline std::uint32_t kLastFragment = 0x8000'0000U;
 
 // Reject a message-size cap that a single-fragment record marker cannot
 // represent.  Checked once when a stream/client is created (not on the hot

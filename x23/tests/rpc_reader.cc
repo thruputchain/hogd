@@ -26,10 +26,7 @@ using namespace x23;
 
 namespace {
 
-using NullMeta = blank_rpc_v1::proc_meta<0>;
 using EchoMeta = blank_rpc_v1::proc_meta<1>;
-
-constexpr uint32_t kLastFragment = 0x8000'0000;
 
 struct EchoServer {
   using rpc_service = blank_rpc_v1;

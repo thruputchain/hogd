@@ -63,12 +63,6 @@ RpcStreamImpl::gen_call_xid(Awaitable<RecordRef> &a)
   }
 }
 
-namespace {
-
-constexpr std::uint32_t kLastFragment = 0x8000'0000;
-
-} // namespace
-
 void
 RecvBuf::make_room(size_t need)
 {
@@ -165,10 +159,7 @@ RpcStreamImpl::input(const RefPtr<RecvChunk> &chunk, BufView record,
   return true;
 }
 
-// Reads as many bytes as the kernel has into a chunk, then parses
-// every complete record in place.  Once the chunk is allocated, this
-// performs no memory allocation (and creates no coroutine frames) per
-// record or per read.
+// Reads into a chunk and parses every complete record in place.
 Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {

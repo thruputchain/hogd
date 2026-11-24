@@ -315,10 +315,8 @@ concept implements_async_rpc =
 
 namespace detail {
 
-// A reference-counted block of bytes read from a stream.  The reader
-// parses records in place and, for replies, hands the waiting client
-// a RecordRef that keeps the chunk alive, so that receiving a record
-// requires neither a copy nor a memory allocation.
+// Reference-counted block of received bytes.  Records are parsed in
+// place, and replies keep the chunk alive through a RecordRef.
 class RecvChunk : public RefCount {
 public:
   static constexpr bool kAllowRefPtrConversion = true;
@@ -373,10 +371,9 @@ private:
   BufView bytes_;
 };
 
-// The reader's input buffer.  Bytes [rpos_, wpos_) of the current
-// chunk have been received but not yet consumed.  Replies handed to
-// clients keep referencing the chunk, so bytes below wpos_ may only
-// be overwritten while the reader holds the sole reference.
+// Reader input buffer: bytes [rpos_, wpos_) are received but not yet
+// consumed.  Bytes below wpos_ may only be overwritten while the
+// reader holds the sole reference to the chunk.
 class RecvBuf {
 public:
   // Chunks are sized so that the whole allocation is 64KiB, unless a
@@ -401,10 +398,8 @@ public:
     return chunk_->data() + chunk_->capacity();
   }
 
-  // Arrange for space() >= need, where need is the number of bytes
-  // still missing from the record at rptr(), which must end up
-  // contiguous.  Reuses the current chunk whenever no reply still
-  // references it, so in the steady state this does not allocate.
+  // Ensure space() >= need, keeping the partial record at rptr()
+  // contiguous.  Reuses the chunk if no reply still references it.
   void make_room(size_t need);
 
 private:
