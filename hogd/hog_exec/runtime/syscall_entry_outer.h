@@ -690,27 +690,19 @@ finish_syscall(SyscallInnerResult body_result, SystemCallHandler &handler,
 // Passes in the syscall number so that tracing can handle invalid syscall
 // numbers.
 //
-// A syscall whose body returns its result directly (kSyscallBodyIsDirect) runs
-// in wrap_after_parse_direct(), with no coroutine and so no frame to allocate.
-// One whose body might wait -- on a database RPC, say -- runs in
-// wrap_after_parse_async(), a coroutine, so that the body can suspend there
-// instead of blocking the thread it runs on. Both are run_syscall_body() and
-// then finish_syscall(), so the checks and the accounting are one piece of code
-// whichever way the body comes back.
+// Both wrappers below are run_syscall_body() then finish_syscall(): a direct
+// body (kSyscallBodyIsDirect) in wrap_after_parse_direct(), with no coroutine,
+// and one that might wait in wrap_after_parse_async(). Callers go through
+// wrap_after_parse(), which picks.
 //
-// [args] is taken by value by both, so the wrapper owns it: on the coroutine
-// path it lives in the coroutine's frame. WritableOutput<T> stages a syscall's
-// output inside itself and flushes it to contract memory in its destructor, and
-// deref() hands the body a reference into the tuple, so the tuple has to stay
-// put for as long as a suspended body holds those references.
+// [args] is taken by value, so the wrapper owns it: deref() hands the body
+// references into the tuple and WritableOutput<T> flushes in its destructor, so
+// on the coroutine path the tuple lives in the frame for as long as a suspended
+// body holds those references.
 //
 // The alias guard arrives as the bool it would have been asked for: the caller
 // registers every parsed argument against it and this only needs the verdict,
 // so there is nothing to keep alive across a suspension.
-//
-// Callers go through wrap_after_parse() rather than calling either directly --
-// it picks between them, and what can escape them has to be translated exactly
-// once, in a place nobody has to remember.
 
 // For a body that returns its result directly. It has nothing to suspend on, so
 // run_syscall_body() comes back in MaybeAsync's value arm, and the whole call,
