@@ -1133,4 +1133,31 @@ TEST_F(SyscallErrorHandlingTest, DirectBodyReturnsInTheValueArm)
   auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
 }
 
+// A native contract's syscall takes the same path: one whose body never waits
+// has run, written its output and charged the context by the time syscall()
+// returns, and comes back in the value arm.
+TEST_F(SyscallErrorHandlingTest, NativeDirectSyscallReturnsInTheValueArm)
+{
+  auto context = make_hog_exec_context();
+  auto handler = make_new_system_call_handler(Transaction{}, *context);
+
+  ASSERT_TRUE(handler
+                  .start_frame(kPlaceholderInvocation,
+                               std::to_underlying(InvokeFlag::None),
+                               ValidatedAuthTokens{})
+                  .has_value());
+
+  NativeSyscallContext ctx(handler, 10000);
+  ContractAddress address{};
+  auto pending = ctx.syscall<SyscallNo::kGetCurrentAddress>(address);
+  ASSERT_TRUE(pending.has_value());
+  EXPECT_TRUE(address == handler.get_current_address());
+  EXPECT_EQ(ctx.total_gas_consumed(), kSyscallBaseCost);
+  auto status = pending();
+  ASSERT_TRUE(status.has_value());
+  ASSERT_EQ(*status, SyscallErrorCode::kSyscallErrorCodeNone);
+
+  auto _ = handler.finish_frame(InvokeStatus<void>{}, nullptr)();
+}
+
 } // namespace hogd

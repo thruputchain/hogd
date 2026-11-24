@@ -1,5 +1,6 @@
 #pragma once
 
+#include <cassert>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -14,10 +15,12 @@
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/components/alias_guard.h"
 #include "hogd/hog_exec/runtime/native_runtime.h"
+#include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_arg_params.h"
 #include "hogd/hog_exec/runtime/syscall_argument_parsers.h"
 #include "hogd/hog_exec/runtime/syscall_entry_outer.h"
 #include "hogd/hog_exec/runtime/syscall_meta.h"
+#include "hogd/hog_exec/runtime/syscall_meta_concept.h"
 #include "syscall.hh"
 #include "syscall_error.hh"
 #include "x23/async.h"
@@ -34,36 +37,46 @@ public:
     : handler_(h), initial_gas_amount_(gas_limit)
   {}
 
-  // A coroutine: the syscall it routes to may suspend on a database read, so
-  // native contract bodies await this rather than blocking a thread on it.
+  // For a native contract body to co_await. A syscall whose body never waits
+  // comes back in the value arm, already run, with no coroutine frame; one that
+  // might (storage reads, deploy, invoke) comes back as an Async.
   template<SyscallNo Syscall, typename... Args>
-  [[nodiscard]] x23::Async<HostFnStatus<SyscallErrorCode>>
+  [[nodiscard]] x23::MaybeAsync<HostFnStatus<SyscallErrorCode>>
   syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
-    using syscall_t =
-        SyscallTypes<std::remove_const_t<decltype(Meta::kInnerFunc)>>;
-    static_assert(sizeof...(Args) == syscall_t::kNumArgs);
+    if constexpr (kSyscallBodyIsDirect<Meta>) {
+      return direct_syscall<Syscall>(std::forward<Args>(args)...);
+    }
+    else {
+      AliasGuard guard;
+      auto parsed = parse_args<Syscall>(guard, std::forward<Args>(args)...);
+      return finish_awaited_syscall(
+          wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
+                                 Meta::kSyscallNo, std::move(parsed)));
+    }
+  }
 
+  // The same for a syscall whose body never waits, answered on the spot, so a
+  // helper that makes only these need not be a coroutine. Fails to compile for
+  // one that might wait.
+  template<SyscallNo Syscall, typename... Args>
+  requires kSyscallBodyIsDirect<SyscallMeta<Syscall>>
+  [[nodiscard]] HostFnStatus<SyscallErrorCode> direct_syscall(Args &&...args)
+  {
+    using Meta = SyscallMeta<Syscall>;
     AliasGuard guard;
-
-    auto parsed = [&]<size_t... Is>(std::index_sequence<Is...>) {
-      // Braced so the arguments register with the guard left to right, as
-      // the other two entry paths do.
-      return std::tuple{to_parsed<typename syscall_t::template arg_i<Is>>(
-          guard, std::forward<Args>(args))...};
-    }(std::make_index_sequence<sizeof...(Args)>{});
-
-    auto [res, gas_consumed] =
-        co_await wrap_after_parse<Meta>(guard.check(), handler_,
-                                        gas_remaining(), Meta::kSyscallNo,
-                                        std::move(parsed));
+    auto parsed = parse_args<Syscall>(guard, std::forward<Args>(args)...);
+    auto ran = wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
+                                      Meta::kSyscallNo, std::move(parsed));
+    assert(ran.has_value());
+    auto [res, gas_consumed] = ran();
 
     // The syscall ran within gas_remaining(), so its result already reports
     // anything it could not pay for; a frame left exactly empty is upgraded to
     // OutOfGas when it finishes (NativeContract::invoke_impl).
     std::ignore = consume_gas(gas_consumed);
-    co_return res;
+    return res;
   }
 
   SystemCallHandler &handler() { return handler_; }
@@ -80,8 +93,9 @@ public:
   native_token_balance(ContractAddress const &address);
 
   // Apply [amount] to [address]'s native token balance, charging this context
-  // a flat write cost up front; see native_token_balance above.
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  // a flat write cost up front; see native_token_balance above. A write only
+  // changes the frame's item view, so this never waits.
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &address, int128_t amount);
 
   GasAmount gas_remaining() const
@@ -117,6 +131,27 @@ private:
   SystemCallHandler &handler_;
   const GasAmount initial_gas_amount_;
   GasAmount gas_consumed_ = 0;
+
+  // Awaits a syscall that might wait, then charges what it consumed. Out of
+  // line for the reason native_token_balance is.
+  x23::Async<HostFnStatus<SyscallErrorCode>>
+  finish_awaited_syscall(MaybeAsyncSyscallResult pending);
+
+  // The arguments in the parsed form wrap_after_parse expects, registered
+  // with [guard].
+  template<SyscallNo Syscall, typename... Args>
+  static auto parse_args(AliasGuard &guard, Args &&...args)
+  {
+    using syscall_t = SyscallTypes<
+        std::remove_const_t<decltype(SyscallMeta<Syscall>::kInnerFunc)>>;
+    static_assert(sizeof...(Args) == syscall_t::kNumArgs);
+    return [&]<size_t... Is>(std::index_sequence<Is...>) {
+      // Braced so the arguments register with the guard left to right, as
+      // the other two entry paths do.
+      return std::tuple{to_parsed<typename syscall_t::template arg_i<Is>>(
+          guard, std::forward<Args>(args))...};
+    }(std::make_index_sequence<sizeof...(Args)>{});
+  }
 
   // Convert a native arg to the parsed form that wrap_after_parse expects.
   //
