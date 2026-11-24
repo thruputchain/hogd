@@ -1,6 +1,5 @@
 #include "hogd/hog_exec/interface/executor_context.h"
 
-#include <atomic>
 #include <cassert>
 #include <mutex>
 #include <new>
@@ -10,7 +9,6 @@
 #include "exec_result.hh"
 #include "exec_sched.hh"
 #include "ffi_enums.hh"
-#include "hogd/base/compiler.h"
 #include "hogd/base/coropoll.h"
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
@@ -300,9 +298,9 @@ ExecutorContext::spawn_event_emission(SystemCallHandler &handler,
                                       ExecResult exec_res,
                                       ProposedTransaction proposed_tx)
 {
-  // Release: the bump must be visible before other threads see it; finish_block
-  // drains the ledger at shutdown once acquire_reference() starts failing.
-  pending_event_calls_.fetch_add(1, std::memory_order_release);
+  // finish_block drains the ledger at shutdown once acquire_reference() starts
+  // failing, so the bump lands before this transaction's reference is released.
+  pending_event_calls_.add();
   // emit_and_release's own ramp frame allocates here, before its body runs; on
   // bad_alloc record a block event error and release the ledger. Allocations
   // inside the body are contained there, so no path strands the ledger.
@@ -330,25 +328,20 @@ ExecutorContext::log_event_return(SystemStatus<void> err)
       report_dropped_log("event error diagnostic");
     }
   }
-  // Use release ordering to ensure all event RPC operations (including
-  // server-side add_event/write_event) are visible before the decrement.
-  pending_event_calls_.fetch_sub(1, std::memory_order_release);
+  // done() publishes everything above (including the server-side effects of
+  // the event RPC) to the drain's waiter.  If this was the last call in flight,
+  // it resumes that waiter inline, and the waiter may destroy *this: nothing
+  // here may touch a member after it.
+  pending_event_calls_.done();
 }
 
 x23::Async<std::optional<SystemErrorCode>>
 ExecutorContext::await_event_return()
 {
-  uint32_t wait_count = 0;
-  // Use acquire ordering to ensure we see all operations that happened
-  // before the release-store in log_event_return, including all server-side
-  // event operations.
-  while (pending_event_calls_.load(std::memory_order_acquire) > 0) {
-    cpu_relax();
-    wait_count++;
-    if ((wait_count & 0xFF) == 0U) [[unlikely]] {
-      co_await default_threadpool().bg();
-    }
-  }
+  // Parks, holding no thread, until the last event call returns; that call's
+  // log_event_return() resumes us inline.  wait_idle() orders every retired
+  // call's writes, event_error_ included, before we read it.
+  co_await pending_event_calls_.wait_idle();
   co_return event_error_;
 }
 

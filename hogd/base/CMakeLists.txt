@@ -36,6 +36,7 @@ add_library(base_test_objects OBJECT
   chunked_vector_test.cc
   cli_test.cc
   cpputil_test.cc
+  drain_counter_test.cc
   io_test.cc
   json_test.cc
   network_config_params_test.cc
