@@ -161,12 +161,16 @@ hog_db_init(std::string_view path, size_t ram_bytes,
     Health::instance().set_current_block_height(-1)();
   }
 
-  HogDbStatus<void> reconcile_status =
-      reconcile_startup_native_token_ages(ctx.get_db());
-  if (!reconcile_status.has_value()) {
-    critical("Failed to reconcile startup native-token ages: {}",
-             reconcile_status.error());
-    return EXIT_FAILURE;
+  // A fresh database has no balances yet; only a recovered one can have
+  // native-token age rows that trail its committed balances.
+  if (ctx.has_committed_tip()) {
+    HogDbStatus<void> reconcile_status = reconcile_startup_native_token_ages(
+        ctx.get_db(), ctx.get_tip().value.proposal_header.block_height);
+    if (!reconcile_status.has_value()) {
+      critical("Failed to reconcile startup native-token ages: {}",
+               reconcile_status.error());
+      return EXIT_FAILURE;
+    }
   }
 
   // start the executor server.

@@ -85,27 +85,8 @@ public:
     CHECK_PTR(scheduler_.get());
     co_await scheduler_->process_transfers(transfers);
 
-    // We write the native-token ages to the database down here because we need
-    // to update the native-token ages above first
-    // ([scheduler_->process_transfers()]) *and*
-    // [scheduler_->process_transfers()] completes after block commit (when the
-    // pending native-token ages are applied) due to the
-    // [scheduler_->pending_native_token_age_update_lock_] lock acquired in
-    // [schedulercoord_commit_block()] and [process_transfers()].
-    //
-    // These writes must also never overlap ramdb's sync() for the *next*
-    // block's commit (Database::sync()'s precondition); otherwise ramdb
-    // state is corrupted. [pending_native_token_age_update_lock_] does not
-    // provide that ordering — it is released before this write runs. hog_db
-    // serializes its ramdb write passes with
-    // [RPCContext::ramdb_write_pass_lock()], and ramdb's [write_record()]
-    // CHECKs the invariant (#3397). As a side note, it is okay for
-    // [commit_snapshot()] and [abandon_snapshot()] to race. We ensure that
-    // [scheduler_->write_all_average_native_token_ages_to_db()] completes
-    // before we update [scheduler_->transfer_finished_], so we do not need to
-    // worry about these native-token age writes updating with the *next* block
-    // commit either.
-    co_await scheduler_->write_all_average_native_token_ages_to_db();
+    // The ages [process_transfers()] changed reach hog_db through the
+    // scheduler's background writer (#4384), not here.
 
     scheduler_->transfer_finished_.store(transfers.block);
     scheduler_->transfer_finished_.broadcast(&default_threadpool());

@@ -141,11 +141,11 @@ public:
   // returns an lsn that can be passed to snapshot() to indicate which
   // items should be included in a snapshot.
   //
-  // PRECONDITION: no put() or remove() may overlap a sync(). The caller must
-  // ensure every put()/remove() has returned and happens-before this call. An
-  // overlapping write is a data race / undefined behavior: sync() moves the
-  // per-head write buffers that put()/remove() mutate. Read-only access (get(),
-  // get_if_type(), get_each(), ...) is safe to run concurrently with sync().
+  // PRECONDITION: no put() or remove() may overlap a sync(); each must return
+  // and happen-before this call. An overlapping write is a data race (sync()
+  // moves the per-head write buffers it mutates), and it would be unclear which
+  // sync() holds it. get(), get_if_type(), get_each(), ... are safe during
+  // sync().
   DBStatus<uint64_t> sync();
 
   // write all of the state changes that happened after begin_lsn.
@@ -398,8 +398,6 @@ Database::get_each_parallel(GetEachCallback fn, size_t width, WorkerPool &pool)
       width, pool);
 }
 
-// Only safe to call while Database instance is quiescent (no ongoing calls to
-// put, get, remove, etc).
 inline DBStatus<uint64_t>
 Database::sync()
 {
