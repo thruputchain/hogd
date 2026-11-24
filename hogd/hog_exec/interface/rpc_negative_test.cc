@@ -1161,6 +1161,79 @@ TEST_F(RpcNegativeTest, TestFinishBlockWaitsForInFlightEventEmits)
             RPCError::kRPCNone);
 }
 
+// finish_block drains and closes without holding the executor's block-map
+// lock, so a finish parked on a slow event emit does not stall other blocks:
+// opening, proposing on, and finishing a second block all go through while it
+// waits.
+TEST_F(RpcNegativeTest, TestFinishBlockDrainDoesNotBlockOtherBlocks)
+{
+  init_executor();
+
+  BlockID slow_block_id = 3007;
+  BlockID other_block_id = 3008;
+  ASSERT_EQ(client_.executorsched_open_proposal_block(slow_block_id,
+                                                      kTestBlockExecution),
+            ExecResult::ExecResultOK);
+  open_db_block(slow_block_id);
+  open_event_block(slow_block_id);
+
+  event_wrapper_.block_emit_events();
+  auto propose_result = client_.executorsched_propose_transaction(
+      slow_block_id, SignedTransaction{.tx = make_tx_with_expiry(1'000'000)});
+  ASSERT_EQ(propose_result.result(),
+            ExecResult::ExecResultTxDeterministicError);
+
+  auto slow_client = make_srpc_multiclient<ExecutorSched1>(
+      x23::HostPort{"localhost", server_port_}, false);
+  auto slow_finish = std::async(std::launch::async, [&] {
+    return slow_client.executorsched_finish_block(slow_block_id);
+  });
+
+  // Off the test thread, so that a regression times out instead of hanging.
+  auto other_client = make_srpc_multiclient<ExecutorSched1>(
+      x23::HostPort{"localhost", server_port_}, false);
+  auto other_block = std::async(std::launch::async, [&] {
+    std::vector<ExecResult> results;
+    results.push_back(
+        other_client.executorsched_open_proposal_block(other_block_id,
+                                                       kTestBlockExecution));
+    open_db_block(other_block_id);
+    open_event_block(other_block_id);
+    // Looks the block up in the map; emits nothing, so its finish has nothing
+    // to wait for.
+    EXPECT_EQ(other_client
+                  .executorsched_propose_batch(other_block_id,
+                                               SignedTransactionBatch{})
+                  .size(),
+              0U);
+    results.push_back(other_client.executorsched_finish_block(other_block_id));
+    return results;
+  });
+
+  const bool other_done = other_block.wait_for(std::chrono::seconds(30)) ==
+                          std::future_status::ready;
+  const bool slow_parked = slow_finish.wait_for(std::chrono::seconds(0)) ==
+                           std::future_status::timeout;
+  // Release the slow block before asserting anything, so a failure cannot
+  // leave its finish (and the futures' destructors) waiting forever.
+  event_wrapper_.unblock_emit_events();
+
+  EXPECT_TRUE(other_done)
+      << "another block's lifecycle waited behind a draining finish_block";
+  EXPECT_TRUE(slow_parked)
+      << "finish_block answered with an event emit still in flight";
+  EXPECT_EQ(other_block.get(),
+            (std::vector<ExecResult>{ExecResult::ExecResultOK,
+                                     ExecResult::ExecResultOK}));
+  EXPECT_EQ(slow_finish.get(), ExecResult::ExecResultOK);
+  EXPECT_EQ(event_client_.eventsched_close_block(slow_block_id, slow_block_id)
+                .error(),
+            RPCError::kRPCNone);
+  EXPECT_EQ(event_client_.eventsched_close_block(other_block_id, other_block_id)
+                .error(),
+            RPCError::kRPCNone);
+}
+
 // Genesis load with a consensus value carrying a height other than the genesis
 // height (here the -1 bootstrap sentinel) is rejected up front with an RPC
 // error, rather than persisting the invalid height as the db tip and then
