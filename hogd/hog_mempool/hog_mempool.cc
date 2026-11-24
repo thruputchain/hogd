@@ -1,8 +1,10 @@
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
 #include <format>
 #include <future>
+#include <netinet/in.h>
 #include <optional>
 #include <print>
 #include <string>
@@ -33,6 +35,36 @@
 namespace hogd {
 
 namespace {
+
+// Only SchedulerCoord negotiates MPTCP. Plain TCP peers continue to use the
+// same port and RPC protocol, and disabled kernels retain the TCP listener.
+uint16_t
+start_coordinator_server(RpcServer<MempoolCoordinatorRpc> &coord,
+                         const x23::HostPort &bind_addr)
+{
+  const char *enabled = std::getenv("HOGD_COORD_MPTCP_LISTEN");
+  if (!enabled || std::string_view(enabled) != "1")
+    return coord.start_server(bind_addr);
+
+#if defined(__linux__) && defined(IPPROTO_MPTCP)
+  auto bound = coord.try_bind_server(bind_addr, IPPROTO_MPTCP);
+  if (bound) {
+    auto [port, fd] = std::move(*bound);
+    coord.start_accepting(std::move(fd));
+    info("SchedulerCoord MPTCP listener active port={}", port);
+    return port;
+  }
+  const auto error = bound.error();
+  if (error != EPROTONOSUPPORT && error != ENOPROTOOPT &&
+      error != EAFNOSUPPORT && error != EOPNOTSUPP && error != EPERM &&
+      error != EACCES)
+    exit_cannot_listen(bind_addr, error);
+  warn("SchedulerCoord MPTCP unavailable ({}); using TCP listener", error);
+#else
+  warn("SchedulerCoord MPTCP unavailable on this platform; using TCP listener");
+#endif
+  return coord.start_server(bind_addr);
+}
 
 int
 mempool_init(size_t num_db_shards, size_t num_exec_shards,
@@ -105,8 +137,8 @@ mempool_init(size_t num_db_shards, size_t num_exec_shards,
       db->impl(), auth->impl(), std::move(network_hash),
       MempoolCoordinatorRpc::kDefaultMempoolTxSizeLimit, num_exec_shards);
   coord->max_message_size_ = kBulkRpcMaxMessageSize;
-  uint16_t actual_coordinator_port =
-      coord.start_server(make_bind_host_port(bind_ip, coordinator_port));
+  uint16_t actual_coordinator_port = start_coordinator_server(
+      coord, make_bind_host_port(bind_ip, coordinator_port));
   CHECK(actual_coordinator_port == coordinator_port || coordinator_port == 0);
   info("PORT mempool.coordinator={}", actual_coordinator_port);
 
