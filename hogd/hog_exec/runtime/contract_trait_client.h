@@ -12,7 +12,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/string.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/hog_exec/runtime/native_syscall_context.h"
 #include "hogd/hog_exec/runtime/runtime.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
@@ -37,12 +37,8 @@ public:
   template<StringLiteral Name, typename... Args>
   Invocation make_invocation(GasAmount gas_amount, Args &&...args)
   {
-    auto calldata =
-        trait_meta_t::template make_calldata<Name>(std::forward<Args>(args)...);
-    return Invocation{.invoked_address = contract_address_,
-                      .entrypoint = trait_meta_t::template entrypoint<Name>(),
-                      .gas_limit = gas_amount,
-                      .calldata = calldata};
+    return trait_meta_t::template make_invocation<Name>(
+        contract_address_, gas_amount, std::forward<Args>(args)...);
   }
 
   template<StringLiteral Name,

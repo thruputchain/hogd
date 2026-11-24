@@ -33,12 +33,28 @@ LOCAL_OUTPUT=auth_bench_results
 # a slow host without letting a hung run hold the job.
 WAIT_TIMEOUT_SEC=${AUTH_BENCH_WAIT_TIMEOUT_SEC:-900}
 
+auth_command=(/bin/bash scripts/ci/auth_bench.sh "$BUILD_DIR" "$REMOTE_OUTPUT")
+pin_warm_batch64=${AUTH_BENCH_PIN_WARM_BATCH64:-}
+if [[ -n $pin_warm_batch64 ]]; then
+  [[ $pin_warm_batch64 == 1 && ${HOGD_CI_CONTAINER:-} == 1 &&
+    ${HOGD_CI_OFFLINE:-} == 1 && ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]
+elif [[ $COMMAND == start && ${GIT_BRANCH:-} == main &&
+  ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ &&
+  ${HOGD_CI_CONTAINER:-} == 1 && ${HOGD_CI_OFFLINE:-} == 1 &&
+  ${HOG_HOST:-} == hog10 && $HOST == hog9 ]]; then
+  # Use the qualified placement only for stock hosted Combined Metrics.
+  pin_warm_batch64=1
+fi
+if [[ $pin_warm_batch64 == 1 ]]; then
+  auth_command=(/usr/bin/env AUTH_BENCH_PIN_WARM_BATCH64=1 "${auth_command[@]}")
+fi
+
 case $COMMAND in
 start)
   ci_wait_control_server "$CONTROL_CLI" "$HOST" "$CI_CONTROL_PORT"
   ci_remote_run "$HOST" "rm -rf $REMOTE_OUTPUT"
   "$CONTROL_CLI" "$HOST" "$CI_CONTROL_PORT" start \
-    /bin/bash scripts/ci/auth_bench.sh "$BUILD_DIR" "$REMOTE_OUTPUT"
+    "${auth_command[@]}"
   ;;
 collect)
   status=0

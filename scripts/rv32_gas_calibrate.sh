@@ -117,24 +117,20 @@ if git -C "${REPO_ROOT}" rev-parse --git-dir >/dev/null 2>&1; then
   export RV32_GAS_SOURCE_REV="${REV}"
 fi
 
-# Pin to one core when possible. The estimator is already robust to slow drift
-# (points are measured round-robin and reduced by median), but migrating
-# between cores mid-sweep adds cache-cold samples that no amount of repeats
-# removes.
-RUNNER=()
-if command -v taskset >/dev/null 2>&1; then
-  RUNNER=(taskset -c 0)
-fi
-
+# Pin to one core. The estimator is already robust to slow drift (points are
+# measured round-robin and reduced by median), but migrating between cores
+# mid-sweep adds cache-cold samples that no amount of repeats removes.
+#
 # Pin the code layout. ASLR redraws handler addresses per process, which moves
 # indirect-branch aliasing in a direct-threaded dispatch.
 #
 # Demonstrated by removing it: unpinned, 25 of 100 cells move over 10% against
 # the pinned reference and ADD doubles, and two unpinned runs disagree with
 # each other (LH chase 1.70 vs 2.65). Pinned, three runs hold to 0.20% median.
-if command -v setarch >/dev/null 2>&1 &&
-  setarch "$(uname -m)" -R true >/dev/null 2>&1; then
-  RUNNER+=(setarch "$(uname -m)" -R)
-fi
+#
+# Either one missing is an error rather than a quieter run; see
+# rv32_pin_runner.sh.
+source "${REPO_ROOT}/scripts/rv32_pin_runner.sh"
+rv32_pin_runner
 
 exec "${RUNNER[@]}" "${BINARY}" "${HARNESS_ARGS[@]:-}"

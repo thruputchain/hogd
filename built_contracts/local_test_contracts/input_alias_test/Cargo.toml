@@ -1,0 +1,23 @@
+[package]
+name = "input_alias_test"
+version = "0.2.0"
+edition = "2021"
+
+[dependencies]
+thruput-sdk = { workspace = true }
+thruput-xdr = { workspace = true }
+thruput-syscall = { workspace = true }
+
+[lib]
+crate-type = ["cdylib", "rlib"]
+doctest = false
+
+[features]
+entrypoints = []
+dev = ["thruput-sdk/dev"]
+logging = ["thruput-sdk/logging"]
+
+[[bin]]
+name = "input_alias_test"
+path = "src/main.rs"
+required-features = ["entrypoints"]

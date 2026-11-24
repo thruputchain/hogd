@@ -1069,7 +1069,12 @@ TEST_F(HogDbTest, NewDeploymentLockStagesNoNativeTokenAge)
   EXPECT_EQ(age.error(), HogDbCode::kNotFound);
 }
 
-TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
+// The height of the committed tip a reconciliation test recovers at. Every
+// age the tests persist is at or before it, as on a real chain.
+constexpr BlockHeight kRecoveredHeight = 51;
+
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationCreditsDeficitAsReceivedAtTip)
 {
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 15));
@@ -1081,20 +1086,82 @@ TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationAddsDeficitToToSchedule)
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kRecoveredHeight));
+
+  // The 6 missing tokens join the received group as if they arrived at the
+  // recovered height: (2 * 30 + 6 * 51) / 8 = 45.75, rounded up to 46 as the
+  // scheduler rounds. The other groups are untouched.
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
+            4U);
+  EXPECT_EQ(from_xdr(
+                age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
+            3U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 8U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 46);
+}
+
+// A newly funded account recovering an all-zero row must not inherit the
+// genesis to-schedule age.
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationGivesNewlyFundedAccountTipAge)
+{
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(db_.write_address_balance(account, 100));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/0,
+                            /*already_scheduled=*/0,
+                            /*received=*/0,
+                            /*to_schedule_age=*/0,
+                            /*already_scheduled_age=*/0,
+                            /*received_age=*/0)));
+
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kRecoveredHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
   ASSERT_TRUE(age);
   EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupToSchedule]),
-            10U);
+            0U);
   EXPECT_EQ(from_xdr(
                 age->num_native_tokens[kNativeTokenAgeGroupAlreadyScheduled]),
-            3U);
-  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]), 2U);
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupToSchedule], 10);
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupAlreadyScheduled], 20);
-  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 30);
+            0U);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            100U);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], kRecoveredHeight);
+}
+
+TEST_F(HogDbTest,
+       StartupNativeTokenAgeReconciliationBlendsHugeReceivedGroupExactly)
+{
+  // 2^125 received tokens at age 1024 weigh 2^135, past uint128_t, yet the
+  // blend with 2^125 missing tokens at the recovered height stays exact.
+  constexpr uint128_t kReceived = uint128_t{1} << 125;
+  constexpr BlockHeight kTip = kRecoveredHeight + 2000;
+  Address account = make_address(kAddress);
+  ASSERT_TRUE(
+      db_.write_address_balance(account, static_cast<int128_t>(2 * kReceived)));
+  ASSERT_TRUE(db_.write_address_average_native_token_age(
+      make_native_token_age(account, /*to_schedule=*/0,
+                            /*already_scheduled=*/0,
+                            /*received=*/kReceived,
+                            /*to_schedule_age=*/0,
+                            /*already_scheduled_age=*/0,
+                            /*received_age=*/1024)));
+
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kTip));
+
+  // Equal halves at 1024 and 2051 average to 1537.5, rounded up.
+  HogDbStatus<NativeTokenAge> age =
+      db_.read_address_average_native_token_age(account);
+  ASSERT_TRUE(age);
+  EXPECT_EQ(from_xdr(age->num_native_tokens[kNativeTokenAgeGroupReceived]),
+            2 * kReceived);
+  EXPECT_EQ(age->average_ages[kNativeTokenAgeGroupReceived], 1538);
 }
 
 TEST_F(HogDbTest,
@@ -1110,7 +1177,7 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kRecoveredHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
@@ -1139,7 +1206,7 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  ASSERT_TRUE(reconcile_startup_native_token_ages(db_));
+  ASSERT_TRUE(reconcile_startup_native_token_ages(db_, kRecoveredHeight));
 
   HogDbStatus<NativeTokenAge> age =
       db_.read_address_average_native_token_age(account);
@@ -1162,7 +1229,8 @@ TEST_F(
   Address account = make_address(kAddress);
   ASSERT_TRUE(db_.write_address_balance(account, 10));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kRecoveredHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
@@ -1180,7 +1248,8 @@ TEST_F(
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kRecoveredHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kNotFound);
 }
@@ -1197,7 +1266,8 @@ TEST_F(HogDbTest, StartupNativeTokenAgeReconciliationFailsWhenBalanceIsNegative)
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kRecoveredHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
@@ -1220,7 +1290,8 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kRecoveredHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }
@@ -1243,7 +1314,8 @@ TEST_F(HogDbTest,
                             /*already_scheduled_age=*/20,
                             /*received_age=*/30)));
 
-  HogDbStatus<void> status = reconcile_startup_native_token_ages(db_);
+  HogDbStatus<void> status =
+      reconcile_startup_native_token_ages(db_, kRecoveredHeight);
   ASSERT_FALSE(status.has_value());
   EXPECT_EQ(status.error(), HogDbCode::kInternal);
 }

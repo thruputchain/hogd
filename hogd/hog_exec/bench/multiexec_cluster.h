@@ -351,9 +351,7 @@ public:
                              work_dir.work_dir().end());
     info("using work dir: {}", work_dir_str);
 
-    std::string hostname;
-    CHECK_EQ(get_hostname(hostname), 0);
-    std::string mempool_ip = hog_ip(hostname);
+    const std::string mempool_ip = local_hog_ip();
 
     for (auto &control_server_handle : control_server_handles_) {
       if (control_server_handle.ci_client.clear_work_dir() !=
@@ -366,7 +364,7 @@ public:
     control_server_handles_[server_idx].ci_client.start_server(
         "hogd/hog_event/hog-event",
         {"--bind-ip", hog_ip(server_addrs[server_idx]), "--mempool-addr",
-         std::format("{}:{}", mempool_ip, sched_event_port), "--work-dir",
+         format_advertised_address(mempool_ip, sched_event_port), "--work-dir",
          work_dir_str, "--indexer-port",
          std::to_string(kBenchEventIndexerPort)});
     const std::string event_ip = hog_ip(server_addrs[server_idx]);
@@ -379,7 +377,7 @@ public:
         "hogd/hog_db/hog-db",
         {"--db-path", work_dir_str, "--ram-bytes", "10000000000", "--bind-ip",
          hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-         std::format("{}:{}", mempool_ip, sched_db_port)});
+         format_advertised_address(mempool_ip, sched_db_port)});
     server_idx++;
 
     // Started before the executors so it is already draining the outbox by
@@ -389,8 +387,8 @@ public:
     control_server_handles_[server_idx].ci_client.start_server(
         "hogd/hog_indexer/hog-indexer",
         {"--bind-ip", indexer_ip_, "--event-addr",
-         std::format("{}:{}", event_ip, kBenchEventIndexerPort), "--db-path",
-         work_dir_str, "--block-explorer-port",
+         format_advertised_address(event_ip, kBenchEventIndexerPort),
+         "--db-path", work_dir_str, "--block-explorer-port",
          std::to_string(kBenchIndexerBlockExplorerPort)});
     server_idx++;
 
@@ -398,7 +396,7 @@ public:
       control_server_handles_[server_idx].ci_client.start_server(
           "hogd/hog_exec/hog-exec",
           {"--bind-ip", hog_ip(server_addrs[server_idx]), "--coordinator-addr",
-           std::format("{}:{}", mempool_ip, sched_exec_port)});
+           format_advertised_address(mempool_ip, sched_exec_port)});
     }
 
     auto db_cards = sched_db_test_->impl()->await_shard_cards(1);
@@ -474,7 +472,8 @@ public:
 
   std::string indexer_block_explorer_addr() const
   {
-    return std::format("{}:{}", indexer_ip_, kBenchIndexerBlockExplorerPort);
+    return format_advertised_address(indexer_ip_,
+                                     kBenchIndexerBlockExplorerPort);
   }
 
   bench_db_sched_client_t &db_sched_client() { return *db_sched_client_; }

@@ -30,7 +30,8 @@
 #include "hogd/base/xdr_util.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_exec/common/status.h"
-#include "hogd/hog_exec/runtime/contract_trait.h"
+#include "hogd/hog_exec/components/contract_trait.h"
+#include "hogd/hog_exec/components/serialize_calldata.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
 #include "hogd/hog_exec/runtime/native_contract_test_framework.h"
 #include "hogd/hog_exec/runtime/runtime.h"
@@ -41,7 +42,6 @@
 #include "hogd/hog_exec/runtime/rv32/runtime_context.h"
 #include "hogd/hog_exec/runtime/rv32/test_artifact_builder.h"
 #include "hogd/hog_exec/runtime/rv32/test_program_builder.h"
-#include "hogd/hog_exec/runtime/serialize_calldata.h"
 #include "rpc_types.hh"
 #include "storage_item.hh"
 #include "syscall.hh"
@@ -1194,7 +1194,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledSha256ReturnTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'977;
-  const GasAmount return_gas = 9'898;
+  const GasAmount return_gas = 9'888;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, expected_hash));
@@ -1242,7 +1242,7 @@ TEST_F(Rv32RuntimeContextTest, CompiledMultiMethodDispatchTraceIsExact)
   // Absolute gas pins for the compiled fixture; they shift when the fixture
   // is recompiled or the gas schedule changes.
   const GasAmount sha_gas = 9'974;
-  const GasAmount return_gas = 9'895;
+  const GasAmount return_gas = 9'885;
   SyscallTraceVec expected;
   expected.push_back(sha256_trace_entry(sha_gas, input, expected_hash));
   expected.push_back(return_trace_entry(return_gas, {}));
