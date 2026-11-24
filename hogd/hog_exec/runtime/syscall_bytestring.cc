@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
@@ -102,7 +103,7 @@ syscall_BytestringGetLen_inner(SystemCallHandler &syscall_handler,
                                WrappedGasAmount{kStorageAccessCost + load_gas}};
 };
 
-MaybeAsyncSyscallInnerResult
+std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
                             WrappedGasAmount remaining_gas,
                             const StorageKeyContractData &input_key,
@@ -114,23 +115,21 @@ syscall_BytestringSet_inner(SystemCallHandler &syscall_handler,
   // Reject before set_bytestring copies the value, as SHA256 does before
   // hashing; exact exhaustion also faults in the outer wrapper.
   if (remaining_gas.get() <= required_gas.get()) {
-    co_return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
-                                 remaining_gas};
+    return SyscallInnerResult{HostFnError{HostFnErrorCode::OutOfGas},
+                              remaining_gas};
   }
-  auto status =
-      co_await syscall_handler.set_bytestring(input_key, input_bytestring);
+  auto status = syscall_handler.set_bytestring(input_key, input_bytestring);
   if (!status) {
-    co_return SyscallInnerResult{status.error().to_host_fn_error(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{status.error().to_host_fn_error(),
+                              WrappedGasAmount{0}};
   }
   auto &set_status = *status;
   if (!set_status) {
-    co_return SyscallInnerResult{set_status.error().code(),
-                                 WrappedGasAmount{0}};
+    return SyscallInnerResult{set_status.error().code(), WrappedGasAmount{0}};
   }
 
-  co_return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                               required_gas};
+  return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
+                            required_gas};
 }
 
 } // namespace hogd

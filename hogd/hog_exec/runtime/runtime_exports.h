@@ -22,8 +22,8 @@ using ExternHostCallContext = void *;
 using SyscallResult = std::pair<HostFnStatus<SyscallErrorCode>, GasAmount>;
 
 // Either a SyscallResult outright or an Async the caller co_awaits (or blocks
-// on with operator()). Always the Async arm today: wrap_after_parse_async() is
-// a coroutine unconditionally, so every syscall allocates a frame.
+// on with operator()). Value arm: the body returned a plain result and ran with
+// no coroutine. Async arm: the body might wait (storage reads, deploy, invoke).
 using MaybeAsyncSyscallResult = x23::MaybeAsync<SyscallResult>;
 
 using SyscallFunction = MaybeAsyncSyscallResult (*)(

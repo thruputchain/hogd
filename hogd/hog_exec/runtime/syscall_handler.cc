@@ -1759,21 +1759,20 @@ SystemCallHandler::get_bytestring(StorageKeyContractData const &storage_key)
                  0};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_bytestring(StorageKeyContractData const &storage_key,
                                   std::span<const std::byte> input_bytestring)
 {
   CHECK(!is_read_only());
 
   if (input_bytestring.size() > config_params().max_bytestring_len) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
 
-  co_return item_view->set(BytestringItem(
+  return item_view->set(BytestringItem(
       {reinterpret_cast<const uint8_t *>(input_bytestring.data()),
        input_bytestring.size()}));
 }
@@ -1897,7 +1896,7 @@ SystemCallHandler::get_nnint(StorageKeyContractData const &storage_key,
                  0};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                              std::optional<int128_t> set_value,
                              const int128_t &add_value)
@@ -1911,7 +1910,7 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
   // is defined as equivalent to outputting set_add with set equal to
   // whatever the current database snapshot value is.  As such, it is correct to
   // overwrite the set value here with nullopt, in such a case.
-  co_return item_view->set(
+  return item_view->set(
       NNIntItem{.base_value_ =
                     set_value.has_value()
                         ? std::optional<int128_xdr>(to_xdr(*set_value))
@@ -1919,14 +1918,14 @@ SystemCallHandler::set_nnint(StorageKeyContractData const &storage_key,
                 .add_value_ = to_xdr(add_value)});
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::delete_object(StorageKeyContractData const &storage_key)
 {
   CHECK(!is_read_only());
 
   auto *item_view = invocation_frame_stack_.get_item_view(storage_key);
   assert(item_view);
-  co_return item_view->set(DeletedItem{});
+  return item_view->set(DeletedItem{});
 }
 
 SyscallStatus<void>
@@ -2440,30 +2439,29 @@ modify_auth_data(InvocationFrameStack &invocation_frame_stack,
 }
 } // namespace
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::change_public_key_registration(uint32_t key_index,
                                                   PublicKeyConfigOpt new_key)
 {
   if (key_index >= kMaxSigners) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   assert(!invocation_frame_stack_.empty());
-  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
-                             [&](AddressAuthDataItem &item) {
-                               item.change_public_key(key_index,
-                                                      std::move(new_key));
-                             });
+  return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                          [&](AddressAuthDataItem &item) {
+                            item.change_public_key(key_index,
+                                                   std::move(new_key));
+                          });
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::set_address_required_weight(Weight required_weight)
 {
-  co_return modify_auth_data(invocation_frame_stack_, get_current_address(),
-                             [&](AddressAuthDataItem &item) {
-                               item.set_required_weight(required_weight);
-                             });
+  return modify_auth_data(invocation_frame_stack_, get_current_address(),
+                          [&](AddressAuthDataItem &item) {
+                            item.set_required_weight(required_weight);
+                          });
 }
 
 const AuthClaim &
