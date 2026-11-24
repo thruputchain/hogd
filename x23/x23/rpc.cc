@@ -1,9 +1,11 @@
 
 #include <x23/rpc.h>
 
+#include <algorithm>
 #include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <expected>
 #include <sys/socket.h>
 #include <utility>
@@ -44,63 +46,12 @@ RpcStreamImpl::fail()
 
   auto oldmap = std::exchange(cstate_->xidmap_, {});
   for (auto [_xid, cb] : oldmap)
-    cb(Buf{});
+    cb(RecordRef{});
   cp_->poison(fd_);
 }
 
-Async<std::expected<std::uint32_t, Errno>>
-RpcStreamImpl::read_uint(SLOC_ARG0)
-{
-  Buf b;
-  auto r = co_await cp_->read(fd_, &b, 4, true, true);
-  if (!r) {
-    debug("read_uint(fd {}): {}", get_fd(), r.error());
-    co_return r.error();
-  }
-  if (*r != 4) {
-    if (*r)
-      debug("read_uint(fd {}): received only {} bytes", get_fd(), *r);
-    co_return Errno{ENOMSG};
-  }
-  co_return getbe<std::uint32_t>(b.data());
-}
-
-Async<Errno>
-RpcStreamImpl::read_record(Buf *bp SLOC_ARG)
-{
-  bp->clear();
-  bool done = false;
-  while (!done) {
-    std::uint32_t len;
-    if (auto res = co_await read_uint(); !res)
-      co_return res.error();
-    else
-      len = *res;
-    done = ((len & 0x80000000) != 0U);
-    len &= 0x7fffffff;
-    if (bp->size() + len > max_message_size) {
-      // NOLINTNEXTLINE(readability-static-accessed-through-instance)
-      debug.err(
-          "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
-          get_fd(), bp->size() + len, max_message_size);
-      co_return Errno{ENOMSG};
-    }
-    if (auto res = co_await cp_->read(fd_, bp, len, true, true); !res) {
-      debug("RpcStreamImpl: read(fd {}): {}", get_fd(), res.error());
-      co_return res.error();
-    }
-    else if (*res != len) {
-      // NOLINTNEXTLINE(readability-static-accessed-through-instance)
-      debug.err("RpcStreamImpl: read(fd {}, n {}) returned {} bytes", get_fd(),
-                len, *res);
-      co_return Errno{ENOMSG};
-    }
-  }
-  co_return 0;
-}
-
 std::uint32_t
-RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
+RpcStreamImpl::gen_call_xid(Awaitable<RecordRef> &a)
 {
   auto cs = cstate_.take();
   if (ss_.stop_requested())
@@ -112,65 +63,179 @@ RpcStreamImpl::gen_call_xid(Awaitable<Buf> &a)
   }
 }
 
+namespace {
+
+constexpr std::uint32_t kLastFragment = 0x8000'0000;
+
+} // namespace
+
+void
+RecvBuf::make_room(size_t need)
+{
+  const size_t pending = avail();
+  if (chunk_) {
+    const bool sole = chunk_->unique();
+    if (sole && pending == 0 && chunk_->capacity() > kMaxRetain)
+      chunk_ = nullptr;
+    else if (space() >= std::max(need, kMinRead) && (pending || !sole))
+      return;
+    else if (sole) {
+      if (pending && rpos_)
+        std::memmove(chunk_->data(), rptr(), pending);
+      rpos_ = 0;
+      wpos_ = pending;
+      if (space() >= need)
+        return;
+    }
+  }
+  auto fresh = RecvChunk::make(std::max(pending + need, kChunkSize));
+  if (pending)
+    std::memcpy(fresh->data(), rptr(), pending);
+  chunk_ = std::move(fresh);
+  rpos_ = 0;
+  wpos_ = pending;
+}
+
+bool
+RpcStreamImpl::input(const RefPtr<RecvChunk> &chunk, BufView record,
+                     const std::uint8_t *bufend)
+{
+  using enum msg_type;
+
+  // Every rpc_msg starts with the xid followed by the message type.
+  if (record.size() < 8) [[unlikely]] {
+    debug("RpcStreamImpl: fd {} received {}-byte record", get_fd(),
+          record.size());
+    fail();
+    return false;
+  }
+
+  if (getbe<std::uint32_t>(record.data() + 4) == std::uint32_t(REPLY)) {
+    // We leave decoding the rest of the header to the client that is
+    // waiting for this reply, so as to do it only once and off the
+    // reader's critical path.
+    const auto xid = getbe<std::uint32_t>(record.data());
+    auto cs = cstate_.take();
+    auto it = cs->xidmap_.find(xid);
+    if (it == cs->xidmap_.end())
+      return true;
+    auto cb = std::move(it->second);
+    cs->xidmap_.erase(it);
+    cs.reset();
+    // Re-enqueing this on a CPU of the LLC it came from cuts RPC
+    // throughput by about a factor of 10.  Seems to be much better
+    // to resume the client directly.
+    //
+    // cp_->pool_.make_callback(cb, RecordRef{chunk, record});
+    cb(RecordRef{chunk, record});
+    return true;
+  }
+
+  rpc_msg msg;
+  size_t hdrbytes;
+  try {
+    hdrbytes = deserialize_from(&msg, BufViewEnd{record, bufend});
+  } catch (XdrException &e) {
+    debug("RpcStreamImpl deserialization: {}", e.what());
+    fail();
+    return false;
+  }
+  if (msg.body.mtype() != CALL) [[unlikely]] {
+    debug("RpcStreamImpl: fd {} received bad message type", get_fd());
+    fail();
+    return false;
+  }
+
+  rpc_msg res;
+  if (RpcService *s = srvmap_.lookup(msg, &res)) {
+    // The arguments are only valid until we return, because the
+    // reader will go on to reuse the chunk.
+    auto awaitable = s->serve(msg, {record.subspan(hdrbytes), bufend});
+    // Only spawn another coroutine if result not already available
+    decltype(auto) awaiter = detail::get_awaiter(awaitable);
+    if (awaiter.await_ready())
+      cp_->dwrite(fd_, awaiter.await_resume());
+    else
+      [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
+        self->cp_->dwrite(self->fd_, co_await awaitable);
+      }(*this, std::move(awaitable));
+  }
+  else
+    send_msg(res);
+  return true;
+}
+
+// Reads as many bytes as the kernel has into a chunk, then parses
+// every complete record in place.  Once the chunk is allocated, this
+// performs no memory allocation (and creates no coroutine frames) per
+// record or per read.
 Detached
 RpcStreamImpl::reader(SLOC_ARG0)
 {
-  using enum msg_type;
-  // Having some extra bytes in the buffer allows us to elide certain
-  // bounds checks in deserialization.
-  constexpr size_t kMinBuf = 0;
   RefPtr<RpcStreamImpl> _r = *this;
-  Buf b;
-  if constexpr (kMinBuf != 0U)
-    b.reserve(kMinBuf);
+  RecvBuf in;
+  // Earlier fragments of a multi-fragment record.  We never send
+  // these ourselves, but ONC RPC allows them.
+  Buf frags;
+
   while (!ss_.stop_requested()) {
-    if (Errno err = co_await read_record(&b)) {
-      fail();
-      co_return;
+    // Number of bytes we still need before we can make progress.
+    size_t need;
+    if (in.avail() < 4)
+      need = 4 - in.avail();
+    else {
+      const auto marker = getbe<std::uint32_t>(in.rptr());
+      const size_t len = marker & ~kLastFragment;
+      if (frags.size() + len > max_message_size) {
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+        debug.err(
+            "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
+            get_fd(), frags.size() + len, max_message_size);
+        break;
+      }
+      if (in.avail() >= 4 + len) {
+        BufView body{in.rptr() + 4, len};
+        in.consume(4 + len);
+        if (!(marker & kLastFragment)) [[unlikely]]
+          frags.append(body.begin(), body.end());
+        else if (frags.empty()) [[likely]] {
+          if (!input(in.chunk(), body, in.bufend()))
+            co_return;
+        }
+        else {
+          // Reassemble into a chunk of its own, so that a reply can
+          // outlive the reader's buffer as usual.
+          const size_t total = frags.size() + len;
+          auto whole = RecvChunk::make(total);
+          std::memcpy(whole->data(), frags.data(), frags.size());
+          std::memcpy(whole->data() + frags.size(), body.data(), len);
+          frags.clear();
+          if (!input(whole, {whole->data(), total}, whole->data() + total))
+            co_return;
+        }
+        continue;
+      }
+      need = 4 + len - in.avail();
     }
-    rpc_msg msg;
-    size_t hdrbytes;
-    try {
-      hdrbytes = deserialize_from(&msg, b);
-    } catch (XdrException &e) {
-      debug("RpcStreamImpl deserialization: {}", e.what());
-      fail();
+
+    in.make_room(need);
+    auto res = co_await cp_->read_some(fd_, in.wptr(), in.space());
+    if (!res) {
+      if (res.error() == EAGAIN)
+        continue;
+      debug("RpcStreamImpl: read(fd {}): {}", get_fd(), res.error());
       break;
     }
-    if (msg.body.mtype() == REPLY) {
-      auto cs = cstate_.take();
-      auto it = cs->xidmap_.find(msg.xid);
-      if (it == cs->xidmap_.end())
-        continue;
-      auto cb = std::move(it->second);
-      cs->xidmap_.erase(it);
-      cs.reset();
-      // Re-enqueing this on a CPU of the LLC it came from cuts RPC
-      // throughput by about a factor of 10.  Seems to be much better
-      // to resume the client directly.
-      //
-      // cp_->pool_.make_callback(cb, std::move(b));
-      cb(std::move(b));
-      if constexpr (kMinBuf != 0U)
-        b.reserve(kMinBuf);
+    if (*res == 0) {
+      if (in.avail() || !frags.empty())
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+        debug.err("RpcStreamImpl: fd {} closed in the middle of a record",
+                  get_fd());
+      break;
     }
-    else if (msg.body.mtype() == CALL) {
-      rpc_msg res;
-      if (RpcService *s = srvmap_.lookup(msg, &res)) {
-        auto awaitable = s->serve(msg, {b.subspan(hdrbytes), b});
-        // Only spawn another coroutine if result not already available
-        decltype(auto) awaiter = detail::get_awaiter(awaitable);
-        if (awaiter.await_ready())
-          cp_->dwrite(fd_, awaiter.await_resume());
-        else
-          [](RefPtr<RpcStreamImpl> self, auto awaitable) -> Detached {
-            self->cp_->dwrite(self->fd_, co_await awaitable);
-          }(*this, std::move(awaitable));
-      }
-      else
-        send_msg(res);
-    }
+    in.commit(*res);
   }
+  fail();
 }
 
 } // namespace x23::detail
