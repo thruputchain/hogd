@@ -237,7 +237,7 @@ public:
     CHECK(initialized_.load(std::memory_order_acquire));
 
     const std::shared_ptr<const DbTip> tip = published_tip();
-    CHECK_PTR(tip);
+    CHECK_PTR(tip.get());
     if (tip->value.proposal_header.block_height == -1) {
       co_return SchedulerGetTipResult(
           SchedulerGetTipOutcome::SchedulerGetTipNoGenesisBlock);
