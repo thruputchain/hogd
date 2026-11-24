@@ -877,7 +877,7 @@ x23::Async<SchedGatewaySubmitOutcomeBatch>
 Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                    const x23::XdrVec<TransactionHash> &tx_hashes,
                    const SignedTransactionHashBatch &signed_tx_hashes,
-                   CachedVariant on_variant)
+                   CachedVariant on_variant, size_t encoded_bytes)
 {
   CHECK_EQ(txs.size(), tx_hashes.size());
   CHECK_EQ(txs.size(), signed_tx_hashes.size());
@@ -890,8 +890,11 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
   // [read_average_native_token_ages] on a separate thread.
   const auto &[found, missing] = co_await read_average_native_token_ages(txs);
 
+  // Small, light batches stay on this thread; each add copies the full
+  // transaction, so byte-heavy batches keep the pool dispatch.
+  const bool run_inline = run_batch_inline(txs.size(), encoded_bytes);
   const std::vector<ChunkRange> chunks =
-      make_chunks(txs.size(), available_parallelism());
+      make_chunks(txs.size(), run_inline ? 1 : available_parallelism());
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
@@ -903,8 +906,11 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
                          const std::unordered_set<ContractAddress,
                                                   SipHash24Hasher> &missing,
                          SchedGatewaySubmitOutcomeBatch &outcomes,
-                         Scheduler &scheduler) noexcept -> x23::Async<void> {
-      co_await default_coropoll().pool_.bg();
+                         Scheduler &scheduler,
+                         bool run_inline) noexcept -> x23::Async<void> {
+      if (!run_inline) {
+        co_await default_coropoll().pool_.bg();
+      }
 
       size_t num_added = 0;
       for (size_t tx_idx = chunk->start; tx_idx < chunk->end; tx_idx++) {
@@ -949,7 +955,7 @@ Scheduler::add_txs(const x23::XdrVec<SignedTransaction> &txs,
       scheduler.size_.fetch_add(num_added, std::memory_order_relaxed);
       co_return;
     }(&chunk, txs, tx_hashes, signed_tx_hashes, on_variant, missing, outcomes,
-                                                        *this));
+                                                   *this, run_inline));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;

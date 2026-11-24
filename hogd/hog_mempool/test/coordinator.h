@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cstdlib>
+#include <future>
+#include <mutex>
+#include <optional>
 #include <unordered_map>
 #include <utility>
 
@@ -23,13 +26,21 @@ public:
 
   static x23::Async<void> coordscheduler_null() { co_return; }
 
-  // We do not pass [txs] by reference just in case we call [co_await] in the
-  // function. If the coroutine gets paused and another RPC of the same name is
-  // delivered, the reference would become invalidated.
-  static x23::Async<void>
-  // NOLINTNEXTLINE(performance-unnecessary-value-param)
-  coordscheduler_notify_vetted(const ParallelSignedTransactionBatch txs)
+  std::future<ParallelSignedTransactionBatch> next_vetted_notification()
   {
+    std::lock_guard lock(mutex_);
+    return next_notification_.emplace().get_future();
+  }
+
+  // Own the incoming batch so the test can inspect it after the RPC returns.
+  x23::Async<void>
+  coordscheduler_notify_vetted(ParallelSignedTransactionBatch txs)
+  {
+    std::lock_guard lock(mutex_);
+    if (next_notification_) {
+      next_notification_->set_value(std::move(txs));
+      next_notification_.reset();
+    }
     co_return;
   }
 
@@ -37,6 +48,11 @@ public:
   {
     // TODO(jhumphri): Implement.
   }
+
+private:
+  std::mutex mutex_;
+  std::optional<std::promise<ParallelSignedTransactionBatch>>
+      next_notification_;
 };
 static_assert(is_CoordScheduler1<CoordinatorSchedRpc *, x23::Async>);
 
