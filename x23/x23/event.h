@@ -95,6 +95,8 @@ public:
     }
     return ret;
   }
+  // Like get(), but returns nullptr instead of creating the object.
+  RefPtr<T> peek() { return t_.load(); }
   void reset() { t_.store(nullptr); }
 
 private:
@@ -200,6 +202,7 @@ struct BufHolder {
   OnDemandSharedPtr<WriteBuffer> writer_;
 
   auto reader() { return reader_.get(); }
+  auto reader_if_exists() { return reader_.peek(); }
   auto writer() { return writer_.get(); }
   auto buf_clear()
   {
@@ -280,6 +283,14 @@ public:
     return std::move(async);
   }
 
+  // Like read_wait(tok), but resumes whoever co_awaits a caller-owned
+  // Awaitable instead of returning an Async.  This avoids allocating
+  // a coroutine frame for each wait.  You must co_await a afterwards.
+  void read_wait(ReadToken fd, Awaitable<Errno> &a)
+  {
+    setcb(fd, false, {CoroCB<Errno>{a}, cpuid()});
+  }
+
   WriteToken write_clear(BorrowedFd fd)
   {
     clear(fd, true);
@@ -352,7 +363,11 @@ protected:
   void wake();
   RefPtr<ReadBuffer> get_reader(BorrowedFd fd);
   RefPtr<WriteBuffer> get_writer(BorrowedFd fd);
-  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> get_rw(BorrowedFd fd);
+  // If make_reader is false, the ReadBuffer will be null unless
+  // something already created it.  The WriteBuffer is null only if
+  // the file descriptor is poisoned (or the CoroPoll is stopping).
+  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
+  get_rw(BorrowedFd fd, bool make_reader = true);
 
 private:
   std::stop_source ss_;
@@ -505,6 +520,56 @@ public:
   // of data.
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_DECL);
+
+  // Awaiter returned by read_some().
+  class ReadSome {
+  public:
+    ReadSome(CoroPoll &cp, BorrowedFd fd, void *buf, size_t len) noexcept
+      : cp_(cp), fd_(fd), buf_(buf), len_(len)
+    {}
+    ReadSome(const ReadSome &) = delete;
+
+    bool await_ready();
+    bool await_suspend(auto h)
+    {
+      waited_ = true;
+      cp_.read_wait(tok_, wait_);
+      // Once wait_ knows about h, another thread can resume the
+      // coroutine, so we must not touch *this after this call.
+      return wait_.await_suspend(h);
+    }
+    std::expected<size_t, Errno> await_resume();
+
+  private:
+    std::expected<size_t, Errno> attempt();
+
+    CoroPoll &cp_;
+    BorrowedFd fd_;
+    void *buf_;
+    size_t len_;
+    ReadToken tok_;
+    RefPtr<detail::WriteBuffer> w_{nullptr};
+    std::expected<size_t, Errno> res_;
+    bool waited_{false};
+    Awaitable<Errno> wait_;
+  };
+
+  // Read up to len bytes from fd into a buffer the caller manages,
+  // returning as soon as any bytes are available (0 means EOF).  This
+  // behaves like read(fd, out, len, false, true), flushing delayed
+  // writes before the coroutine goes to sleep, but must be awaited
+  // immediately and does not allocate: the awaiter lives in the
+  // calling coroutine's frame.  It also reads straight into buf
+  // without creating the file descriptor's 64KiB ReadBuffer, so is
+  // intended for callers that read large chunks and parse them in
+  // place.
+  //
+  // Can return EAGAIN after a spurious wakeup, in which case just
+  // call it again.
+  [[nodiscard]] ReadSome read_some(BorrowedFd fd, void *buf, size_t len)
+  {
+    return ReadSome{*this, fd, buf, len};
+  }
 
   // Asynchronous write.  Writes data to fd, but returns immediately
   // if some or all of the data will continue to be written in the
