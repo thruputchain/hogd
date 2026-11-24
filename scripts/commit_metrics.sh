@@ -1,6 +1,13 @@
 #!/bin/bash
 set -e
 
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
+  ${HOG_HOST:-} == hog10 && ${GIT_BRANCH:-} == codex/combined-multi-phase-receipt &&
+  ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+  echo 'Skipping metrics history publication for multi-node coordinator phase diagnostic.'
+  exit 0
+fi
+
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history

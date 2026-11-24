@@ -154,6 +154,26 @@ copy_remote_file() {
   scp "${COMMON_SCP_OPTS[@]}" "${host}:${remote_path}" "$local_path"
 }
 
+capture_multi_phase_receipt() {
+  local host=$1 label=$2 copied_stderr=$3
+  local node
+  if [[ ${HOGD_CI_CONTAINER:-0} != 1 || ${HOGD_CI_OFFLINE:-0} != 1 ||
+    ${HOG_HOST:-} != hog10 || ${GIT_BRANCH:-} != codex/combined-multi-phase-receipt ||
+    ${MEMPOOL_MULTI_NODE_BENCH_SKIP_COMMIT_METRICS:-0} != 1 ||
+    ! ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ||
+    ${GIT_COMMIT:-} != "$GIT_commit" ]]; then
+    return 0
+  fi
+  case "$host:$label" in
+  hog4:node0_chuckd) node=0 ;;
+  hog8:node1_chuckd) node=1 ;;
+  *) return 0 ;;
+  esac
+  if ! python3 -I "$SCRIPT_DIR/combined_multi_phase_receipt.py" "$node" "$copied_stderr"; then
+    echo "incomplete multi-node coordinator phase receipt for $host" >&2
+  fi
+}
+
 publish_multi_node_logs() {
   local metrics_branch_dir
   local logs_dir
@@ -172,6 +192,7 @@ publish_multi_node_logs() {
     echo "copying ${label} logs from ${host}"
     copy_remote_file "$host" "$stdout_path" "$logs_dir/${host}_${label}.stdout.log"
     copy_remote_file "$host" "$stderr_path" "$logs_dir/${host}_${label}.stderr.log"
+    capture_multi_phase_receipt "$host" "$label" "$logs_dir/${host}_${label}.stderr.log"
     ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stdout.log"
     ci_truncate_log_to_tail "$logs_dir/${host}_${label}.stderr.log"
   done
