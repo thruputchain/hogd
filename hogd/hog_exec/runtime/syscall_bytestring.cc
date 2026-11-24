@@ -5,6 +5,7 @@
 #include <cstddef>
 #include <cstring>
 #include <span>
+#include <utility>
 
 #include "ffi_enums.hh"
 #include "hogd/base/log.h"
