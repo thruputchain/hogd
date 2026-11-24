@@ -4,7 +4,7 @@
 #include <cstdlib>
 #include <format>
 #include <future>
-#include <netinet/in.h>
+#include <netinet/in.h> // IWYU pragma: keep (IPPROTO_MPTCP feature check)
 #include <optional>
 #include <print>
 #include <string>
@@ -31,6 +31,7 @@
 #include "hogd/init.h"
 #include "hogd/metrics/shared.h"
 #include "types.hh"
+#include "x23/sockio.h"
 
 namespace hogd {
 
