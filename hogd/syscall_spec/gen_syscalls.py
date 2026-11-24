@@ -137,7 +137,7 @@ errors:
   type: list of {code, description}
   required: no
   description: The error codes the syscall may return, beyond those any
-  syscall may (see SyscallAllowedErrors::is_allowed_error_code 
+  syscall may (see SyscallAllowedErrors::is_allowed_error_code
   in syscall_meta_concept.h).
 
 inputs and outputs are lists of parameters, of the following yaml type. The
