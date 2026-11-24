@@ -123,8 +123,9 @@ private:
   [[nodiscard]] x23::Async<SystemStatus<PerThreadARC<ExecutorContext> *>>
   try_get_context(BlockID block_id, ExecutionMode mode);
   // Releases the caller's reference. If this was the last reference, runs the
-  // deferred gc and returns its result so a late event-server error can be
-  // folded into the in-flight transaction's result.
+  // deferred gc (unless finish_block is still closing the block, in which case
+  // finish_block runs it) and returns its result so a late event-server error
+  // can be folded into the in-flight transaction's result.
   [[nodiscard]] x23::MaybeAsync<SystemStatus<void>>
   release_context(BlockID block_id, PerThreadARC<ExecutorContext> *ctx);
 
