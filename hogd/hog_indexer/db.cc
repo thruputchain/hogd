@@ -2,6 +2,7 @@
 #include "block_query_internal.hh"
 
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <cstdint>
@@ -11,6 +12,7 @@
 #include <filesystem>
 #include <format>
 #include <future>
+#include <map>
 #include <memory>
 #include <optional>
 #include <ranges>
@@ -441,66 +443,69 @@ make_tx_value(std::string &value, BlockHeight block_height,
                event_bytes.size());
 }
 
+struct IndexedHash {
+  TransactionHash hash;
+  size_t input_index;
+};
+
 void
 append_transaction_rows(rocksdb::WriteBatch &batch,
                         rocksdb::ColumnFamilyHandle *tx_cf,
                         rocksdb::ColumnFamilyHandle *contract_cf,
                         BlockHeight height,
-                        const IndexerCommittedBlockPayload &payload)
+                        const IndexerCommittedBlockPayload &payload,
+                        std::span<const IndexedHash> hashes)
 {
-  struct Rows {
-    std::string_view tx_key;
-    std::string tx_value;
-    std::vector<std::string> contract_keys;
+  // Within a block, contract keys sort by (address, kind, hash, sequence).
+  // Visiting hashes in lookup order sorts the suffix of every bucket for free.
+  struct Ref {
+    const TransactionHash *hash;
+    uint32_t sequence;
   };
-  // Reuse the buffers across windows so a large block doesn't require a
-  // second block-sized copy of its serialized rows alongside the batch.
+  std::map<ContractAddress, std::array<std::vector<Ref>, 2>> contracts;
   constexpr size_t kWindow = 8192;
   constexpr size_t kJobSize = 256;
-  const size_t total = payload.event_logs.size();
-  std::vector<Rows> rows(std::min(kWindow, total));
-  for (size_t start = 0; start < total; start += rows.size()) {
-    const size_t count = std::min(rows.size(), total - start);
+  std::vector<std::string> values(std::min(kWindow, hashes.size()));
+  for (size_t start = 0; start < hashes.size(); start += values.size()) {
+    const auto window =
+        hashes.subspan(start, std::min(values.size(), hashes.size() - start));
     auto build = [&](size_t i) {
-      auto &row = rows[i];
-      const auto &log = payload.event_logs[start + i];
-      const auto &body = payload.tx_bodies[start + i];
-      row.tx_key = IndexerKeyFormat::tx_key_view(log.tx_hash);
-      make_tx_value(row.tx_value, height, body, log);
-      row.contract_keys.resize(log.events.size() + 1);
-      for (size_t j = 0; j < log.events.size(); ++j) {
-        IndexerKeyFormat::make_contract_key(row.contract_keys[j],
-                                            log.events[j].contract_address,
-                                            IndexerKeyFormat::kEvent, height,
-                                            log.tx_hash,
-                                            static_cast<uint32_t>(j));
-      }
-      IndexerKeyFormat::make_contract_key(
-          row.contract_keys.back(),
-          body.signed_tx.tx.invocation.invoked_address,
-          IndexerKeyFormat::kRootTx, height, log.tx_hash, 0);
+      const size_t index = window[i].input_index;
+      make_tx_value(values[i], height, payload.tx_bodies[index],
+                    payload.event_logs[index]);
     };
-    auto indices = std::views::iota(size_t{0}, count);
-    if (count <= kJobSize) {
+    auto indices = std::views::iota(size_t{0}, window.size());
+    if (window.size() <= kJobSize) {
       std::ranges::for_each(indices, build);
     }
     else {
       WorkerPool::get_default_pool().for_each_parallel(indices, build,
                                                        kJobSize);
     }
-    for (const Rows &row : std::span(rows).first(count)) {
-      batch.Put(tx_cf, row.tx_key, row.tx_value);
-      for (const std::string &key : row.contract_keys) {
+    for (size_t i : indices) {
+      const auto &[hash, index] = window[i];
+      batch.Put(tx_cf, IndexerKeyFormat::tx_key_view(hash), values[i]);
+      const auto &events = payload.event_logs[index].events;
+      for (size_t j = 0; j < events.size(); ++j) {
+        contracts[events[j].contract_address][IndexerKeyFormat::kEvent]
+            .push_back({&hash, static_cast<uint32_t>(j)});
+      }
+      const auto &address =
+          payload.tx_bodies[index].signed_tx.tx.invocation.invoked_address;
+      contracts[address][IndexerKeyFormat::kRootTx].push_back({&hash, 0});
+    }
+  }
+  std::string key;
+  for (const auto &[address, kinds] : contracts) {
+    for (auto kind : {IndexerKeyFormat::kEvent, IndexerKeyFormat::kRootTx}) {
+      for (const auto &[hash, sequence] : kinds[kind]) {
+        IndexerKeyFormat::make_contract_key(key, address, kind, height, *hash,
+                                            sequence);
         batch.Put(contract_cf, key, rocksdb::Slice());
       }
     }
   }
 }
-
-struct IndexedHash {
-  TransactionHash hash;
-  size_t input_index;
-};
 
 // Bound pinned values and lookup scratch even for very large blocks.
 std::optional<IndexerBlockApplyResult>
@@ -1528,9 +1533,37 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
     if (auto failure = check_transaction_keys(*db_, tx_cf_handle_, hashes)) {
       return std::move(*failure);
     }
+    if (std::ranges::adjacent_find(hashes, {}, &IndexedHash::hash) !=
+        hashes.end()) {
+      return apply_failure(
+          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
+          "committed block repeats a transaction hash");
+    }
     rocksdb::WriteBatch batch;
     append_transaction_rows(batch, tx_cf_handle_, contract_cf_handle_, height,
-                            block.payload);
+                            block.payload, hashes);
+
+    IndexerInitializedProgress progress = *durable_progress_;
+    progress.contiguous_height = height;
+    progress.last_consensus_hash = block.identity.consensus_hash;
+    const x23::Buf identity_bytes = x23::serialize(block.identity);
+    const x23::Buf progress_bytes = x23::serialize(progress);
+    const uint64_t encoded_watermark =
+        std::byteswap(static_cast<uint64_t>(height));
+    batch.Put(db_->DefaultColumnFamily(),
+              rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
+              rocksdb::Slice(reinterpret_cast<const char *>(&encoded_watermark),
+                             sizeof(encoded_watermark)));
+    batch.Put(db_->DefaultColumnFamily(),
+              IndexerKeyFormat::make_block_identity_meta_key(height),
+              rocksdb::Slice(reinterpret_cast<const char *>(
+                                 identity_bytes.data()),
+                             identity_bytes.size()));
+    batch.Put(db_->DefaultColumnFamily(),
+              rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
+              rocksdb::Slice(reinterpret_cast<const char *>(
+                                 progress_bytes.data()),
+                             progress_bytes.size()));
 
     // The query projection is committed with rows and progress. It copies
     // consensus metadata only; bodies and logs remain in tx_index.
@@ -1543,12 +1576,6 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
               rocksdb::Slice(reinterpret_cast<const char *>(
                                  record_bytes.data()),
                              record_bytes.size()));
-    if (std::ranges::adjacent_find(hashes, {}, &IndexedHash::hash) !=
-        hashes.end()) {
-      return apply_failure(
-          IndexerBlockApplyOutcome::IndexerBlockContentConflict,
-          "committed block repeats a transaction hash");
-    }
     for (size_t i = 0; i < hashes.size(); ++i) {
       const uint64_t ordinal = std::byteswap(static_cast<uint64_t>(i));
       batch.Put(db_->DefaultColumnFamily(),
@@ -1556,28 +1583,6 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
                 rocksdb::Slice(reinterpret_cast<const char *>(&ordinal),
                                sizeof(ordinal)));
     }
-
-    IndexerInitializedProgress progress = *durable_progress_;
-    progress.contiguous_height = height;
-    progress.last_consensus_hash = block.identity.consensus_hash;
-    const x23::Buf identity_bytes = x23::serialize(block.identity);
-    const x23::Buf progress_bytes = x23::serialize(progress);
-    const uint64_t encoded_watermark =
-        std::byteswap(static_cast<uint64_t>(height));
-    batch.Put(db_->DefaultColumnFamily(),
-              IndexerKeyFormat::make_block_identity_meta_key(height),
-              rocksdb::Slice(reinterpret_cast<const char *>(
-                                 identity_bytes.data()),
-                             identity_bytes.size()));
-    batch.Put(db_->DefaultColumnFamily(),
-              rocksdb::Slice(IndexerKeyFormat::kDurableProgressMetaKey),
-              rocksdb::Slice(reinterpret_cast<const char *>(
-                                 progress_bytes.data()),
-                             progress_bytes.size()));
-    batch.Put(db_->DefaultColumnFamily(),
-              rocksdb::Slice(IndexerKeyFormat::kHighestIndexedBlockMetaKey),
-              rocksdb::Slice(reinterpret_cast<const char *>(&encoded_watermark),
-                             sizeof(encoded_watermark)));
 
     rocksdb::WriteOptions options;
     options.sync = true;

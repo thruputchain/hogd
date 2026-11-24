@@ -11,6 +11,7 @@
 #include <fstream>
 #include <future>
 #include <latch>
+#include <map>
 #include <memory>
 #include <optional>
 #include <rocksdb/db.h> // NOLINT(misc-header-include-cycle)
@@ -281,12 +282,24 @@ TEST_F(StrictIndexerTest, DuplicateLookupPreservesFirstFailureInBlockOrder)
   }
 }
 
-TEST_F(StrictIndexerTest, CommittedWriteBatchMatchesSerialEncoding)
+TEST_F(StrictIndexerTest, CommittedBlockWritesAllSerialRowsInOneBatch)
 {
   const auto origin = make_origin();
   const auto initialized = db_->initialize_epoch(origin);
   ASSERT_EQ(initialized.outcome(),
             IndexerEpochOutcome::IndexerEpochInitialized);
+  auto *metadata = storage().DefaultColumnFamily();
+  using Rows = std::map<std::string, std::string>;
+  auto read_rows = [&](rocksdb::ColumnFamilyHandle *cf) {
+    Rows rows;
+    std::unique_ptr<rocksdb::Iterator> it(storage().NewIterator({}, cf));
+    for (it->SeekToFirst(); it->Valid(); it->Next()) {
+      rows.emplace(it->key().ToString(), it->value().ToString());
+    }
+    EXPECT_TRUE(it->status().ok());
+    return rows;
+  };
+  auto expected_metadata = read_rows(metadata);
   const auto first_sequence = storage().GetLatestSequenceNumber() + 1;
   const BlockHeight height = 1;
   ProposedTransactionBatch bodies;
@@ -301,8 +314,7 @@ TEST_F(StrictIndexerTest, CommittedWriteBatchMatchesSerialEncoding)
   const auto applied = db_->apply_committed_block(origin, block)();
   ASSERT_EQ(applied.outcome(), IndexerBlockApplyOutcome::IndexerBlockApplied);
 
-  // Reconstruct the pre-parallel writer in input order and compare the
-  // complete encoded batch, including interleaved column-family IDs.
+  // Reconstruct the original transaction-order Puts independently.
   auto bytes = [](const auto &value) {
     return std::string(reinterpret_cast<const char *>(&value), sizeof(value));
   };
@@ -310,7 +322,12 @@ TEST_F(StrictIndexerTest, CommittedWriteBatchMatchesSerialEncoding)
     auto buf = x23::serialize(value);
     return std::string(reinterpret_cast<const char *>(buf.data()), buf.size());
   };
-  rocksdb::WriteBatch expected;
+  Rows expected_tx, expected_contract;
+  size_t put_count = 0;
+  auto put = [&](Rows &rows, std::string key, std::string value) {
+    rows.insert_or_assign(std::move(key), std::move(value));
+    ++put_count;
+  };
   std::vector<TransactionHash> hashes;
   std::string key;
   for (size_t i = 0; i < logs.size(); ++i) {
@@ -318,48 +335,51 @@ TEST_F(StrictIndexerTest, CommittedWriteBatchMatchesSerialEncoding)
     const auto &log = logs[i];
     hashes.push_back(log.tx_hash);
     IndexerKeyFormat::make_tx_key(key, log.tx_hash);
-    expected.Put(tx_cf(), key,
-                 bytes(height) + xdr_bytes(body) + xdr_bytes(log));
+    put(expected_tx, key, bytes(height) + xdr_bytes(body) + xdr_bytes(log));
     uint32_t sequence = 0;
     for (const auto &event : log.events) {
       IndexerKeyFormat::make_contract_key(key, event.contract_address,
                                           IndexerKeyFormat::kEvent, height,
                                           log.tx_hash, sequence++);
-      expected.Put(contract_cf(), key, "");
+      put(expected_contract, key, "");
     }
     IndexerKeyFormat::make_contract_key(
         key, body.signed_tx.tx.invocation.invoked_address,
         IndexerKeyFormat::kRootTx, height, log.tx_hash, 0);
-    expected.Put(contract_cf(), key, "");
+    put(expected_contract, key, "");
   }
-  expected.Put(IndexerKeyFormat::make_block_query_key(
-                   IndexerKeyFormat::kBlockQueryRecordPrefix, height),
-               xdr_bytes(
-                   BlockQueryRecord{.value = block.payload.consensus_value,
-                                    .transaction_count = logs.size()}));
+  put(expected_metadata,
+      IndexerKeyFormat::make_block_query_key(
+          IndexerKeyFormat::kBlockQueryRecordPrefix, height),
+      xdr_bytes(BlockQueryRecord{.value = block.payload.consensus_value,
+                                 .transaction_count = logs.size()}));
   std::ranges::sort(hashes);
   for (uint64_t i = 0; i < hashes.size(); ++i) {
-    expected.Put(IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
-                 bytes(std::byteswap(i)));
+    put(expected_metadata,
+        IndexerKeyFormat::make_block_ref_key(height, hashes[i]),
+        bytes(std::byteswap(i)));
   }
   auto progress = initialized.progress();
   progress.contiguous_height = height;
   progress.last_consensus_hash = block.identity.consensus_hash;
-  expected.Put(IndexerKeyFormat::make_block_identity_meta_key(height),
-               xdr_bytes(block.identity));
-  expected.Put(IndexerKeyFormat::kDurableProgressMetaKey, xdr_bytes(progress));
-  expected.Put(IndexerKeyFormat::kHighestIndexedBlockMetaKey,
-               bytes(std::byteswap(static_cast<uint64_t>(height))));
+  put(expected_metadata, IndexerKeyFormat::make_block_identity_meta_key(height),
+      xdr_bytes(block.identity));
+  put(expected_metadata, IndexerKeyFormat::kDurableProgressMetaKey,
+      xdr_bytes(progress));
+  put(expected_metadata, IndexerKeyFormat::kHighestIndexedBlockMetaKey,
+      bytes(std::byteswap(static_cast<uint64_t>(height))));
 
   std::unique_ptr<rocksdb::TransactionLogIterator> wal;
   ASSERT_TRUE(storage().GetUpdatesSince(first_sequence, &wal).ok());
   ASSERT_TRUE(wal->Valid());
   const auto actual = wal->GetBatch();
   ASSERT_EQ(actual.sequence, first_sequence);
-  // RocksDB assigns the leading sequence number only when it writes the WAL.
-  constexpr size_t offset = sizeof(rocksdb::SequenceNumber);
-  EXPECT_TRUE(std::string_view(actual.writeBatchPtr->Data()).substr(offset) ==
-              std::string_view(expected.Data()).substr(offset));
+  // Sorted insertion changes the WAL order. Check the byte contents of
+  // each CF separately and require every Put to belong to one WAL batch.
+  EXPECT_TRUE(read_rows(tx_cf()) == expected_tx);
+  EXPECT_TRUE(read_rows(contract_cf()) == expected_contract);
+  EXPECT_TRUE(read_rows(metadata) == expected_metadata);
+  EXPECT_EQ(actual.writeBatchPtr->Count(), put_count);
   wal->Next();
   EXPECT_FALSE(wal->Valid());
   EXPECT_TRUE(wal->status().ok());
