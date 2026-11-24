@@ -2206,6 +2206,7 @@ TEST_F(HogDbTest, RCQBlockIntegrityConsumeRemovesBlocksFromDbHash)
     delta.consume.emplace();
     delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
     delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->past_block_consumed_count = kEntriesPerBlock;
 
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, std::move(delta),
@@ -2298,6 +2299,7 @@ TEST_F(HogDbTest, RCQBlockIntegrityDeleteRemovesAllBlocksFromDbHash)
     delta.consume->past_block_consume.max_fully_consumed_block_number =
         kNumBlocks;
     delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->past_block_consumed_count = kNumBlocks * kEntriesPerBlock;
 
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, std::move(delta),
@@ -2695,6 +2697,7 @@ TEST_F(HogDbTest, RCQFullyConsumedDbHashMatchesEmptyDb)
     delta.consume->past_block_consume.max_fully_consumed_block_number =
         kNumBlocks;
     delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->past_block_consumed_count = kNumBlocks * 2;
 
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, std::move(delta),
@@ -3457,6 +3460,7 @@ TEST_F(HogDbTest, RCQConsumeAllPastAndCurrentEntries)
     delta.consume.emplace();
     delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
     delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->past_block_consumed_count = 1;
     // Consume ALL current block entries
     delta.consume->current_block_consumed.push_back(QueueEntry{0xAA});
     delta.consume->current_block_consumed.push_back(QueueEntry{0xBB});
@@ -3573,6 +3577,7 @@ TEST_F(HogDbTest, RCQPartialPastBlockConsumption)
     delta.consume.emplace();
     delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
     delta.consume->past_block_consume.partial_consumed_number = 2;
+    delta.consume->past_block_consumed_count = 2;
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, std::move(delta),
         std::to_underlying(StorageDeltaFlags::None)));
@@ -3585,6 +3590,7 @@ TEST_F(HogDbTest, RCQPartialPastBlockConsumption)
     delta.consume.emplace();
     delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
     delta.consume->past_block_consume.partial_consumed_number = 0;
+    delta.consume->past_block_consumed_count = 1;
     ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
         rcq_key, std::move(delta),
         std::to_underlying(StorageDeltaFlags::None)));
@@ -3692,6 +3698,7 @@ TEST_F(HogDbTest, RCQInsertThenConsumeCurrentBlockDiffInvokeTX)
       delta.consume.emplace();
       delta.consume->past_block_consume.max_fully_consumed_block_number = 1;
       delta.consume->past_block_consume.partial_consumed_number = 0;
+      delta.consume->past_block_consumed_count = 1;
       delta.consume->current_block_consumed.push_back(QueueEntry{0xAA});
       ASSERT_TRUE(invoke_tx.request_retrocausal_queue(
           rcq_key, std::move(delta),
@@ -5071,6 +5078,7 @@ TEST_F(HogDbTest, ExclusiveRCQCommitStaleBlock)
   consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
       1;
   consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  consuming_delta.consume->past_block_consumed_count = 1;
   ASSERT_TRUE(consuming_tx.request_retrocausal_queue(trigger_key,
                                                      std::move(consuming_delta),
                                                      kNoFlags));
@@ -5154,6 +5162,7 @@ TEST_F(HogDbTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
   consuming_delta.consume->past_block_consume.max_fully_consumed_block_number =
       1;
   consuming_delta.consume->past_block_consume.partial_consumed_number = 0;
+  consuming_delta.consume->past_block_consumed_count = 1;
   ASSERT_TRUE(
       itx.request_retrocausal_queue(key, std::move(consuming_delta), kNoFlags));
   ASSERT_TRUE(itx.sync_balance_locks());
@@ -5169,11 +5178,12 @@ TEST_F(HogDbTest, ExclusiveRCQCommitNonStaleBlockSucceeds)
 
 // Regression: rollback_to_savepoint must not crash or leave inconsistent state
 // when restoring an RCQ consume whose past block was pruned by a committed
-// sibling block. modify_lock re-derives the consume's past-block cost from the
-// live DAO; a sibling that deletes the queue and commits removes that block
-// (and invalidates this block, as invalidate_siblings would). The restore's
-// re-read then returns kNotFound. rollback_to_savepoint must surface that as a
-// stale block rather than assert(ret)-crash / desync the lock from changes_.
+// sibling block. modify_lock used to re-derive the consume's past-block cost
+// from the live DAO, so the restore's re-read of the pruned block returned
+// kNotFound and once assert(ret)-crashed. Admission now takes the count from
+// the delta and reads no block rows, so the restore succeeds; this pins that
+// the rollback returns cleanly and the invalidated block still surfaces
+// kStaleBlock on its next locked operation.
 TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
 {
   constexpr auto kNoFlags = std::to_underlying(StorageDeltaFlags::None);
@@ -5186,8 +5196,7 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   setup_contract_address(other_addr);
 
   // A delta that consumes `partial` entries from past block 1 and inserts
-  // `inserts`. The past-block consume forces try_atomic_change_lock to read
-  // block 1's size from the DAO.
+  // `inserts`.
   auto make_consume_insert_delta = [](uint64_t partial,
                                       const std::vector<uint8_t> &inserts) {
     RetrocausalQueueDelta delta;
@@ -5197,6 +5206,7 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
     delta.consume.emplace();
     delta.consume->past_block_consume.max_fully_consumed_block_number = 0;
     delta.consume->past_block_consume.partial_consumed_number = partial;
+    delta.consume->past_block_consumed_count = partial;
     return delta;
   };
 
@@ -5210,7 +5220,7 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
       });
   ASSERT_TRUE(db_.read_retrocausal_queue_block(queue_key, 1));
 
-  // Block 2 (the to-be-stale block): a consume that reads past block 1, then a
+  // Block 2 (the to-be-stale block): a consume from past block 1, then a
   // savepoint and a second consume that grows the insert high-water mark so the
   // restore takes the shrink branch.
   PerThreadARC<BlockTX> stale_block_tx(
@@ -5248,9 +5258,8 @@ TEST_F(HogDbTest, RollbackToSavepointStaleRCQConsumeReturnsStaleBlock)
   ASSERT_TRUE(sibling_block_tx.get().commit());
   ASSERT_FALSE(db_.read_retrocausal_queue_block(queue_key, 1));
 
-  // Roll back the savepoint. The restore re-derives the depth-0 consume cost by
-  // reading the now-deleted block 1. Before the fix this asserted(ret) and
-  // crashed; now it must return cleanly.
+  // Roll back the savepoint. The restore replays the depth-0 consume against
+  // the lock's cached block-start metadata and must return cleanly.
   stale_tx.rollback_to_savepoint(savepoint - 1);
 
   // The block stays invalidated and the caller observes kStaleBlock on its next

@@ -599,7 +599,7 @@ TEST_F(RCQTest, InsertThenAbortOnConsume)
 TEST_F(RCQTest, ConcurrentConsumerAndInserterRaceFix)
 {
   // This test targets a race where an inserter TX could overwrite the
-  // consumed_past_entries_ of a consumer TX.
+  // consumed past-block count of a consumer TX.
   setup_grant_storage_token(contract_address_, 1'000'000'000);
   ASSERT_TRUE(insert({1, 2, 3}));
   advance_block();
@@ -619,8 +619,8 @@ TEST_F(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                                                                    // item
       *context_);
   ASSERT_TRUE(handler_t1.root_invoke()().is_root_success());
-  // At this point, T1's RetrocausalQueueIt should have consumed_past_entries_
-  // = 1.
+  // At this point, T1's consume delta should report one consumed past-block
+  // entry.
 
   // T2: Inserter TX. Propose insert.
   auto handler_t2 = make_new_system_call_handler(
@@ -635,9 +635,8 @@ TEST_F(RCQTest, ConcurrentConsumerAndInserterRaceFix)
                             .uniquifier = make_new_uniquifier()}},
       *context_);
   ASSERT_TRUE(handler_t2.root_invoke()().is_root_success());
-  // T2's RetrocausalQueueIt should have consumed_past_entries_ = 0.
-  // In the OLD buggy code, this would have overwritten the global lock's
-  // consumed_past_entries_ to 0.
+  // T2 consumes nothing from past blocks. In the OLD buggy code, this would
+  // have overwritten the lock-wide consumed count to 0.
 
   // T1 Commits.
   ASSERT_EQ(handler_t1.try_commit_transaction()(), ExecResult::ExecResultOK);
