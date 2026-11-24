@@ -1203,21 +1203,14 @@ TEST_F(IndexerOutboxTest, CommittedPayloadXdrMatchesCrossLanguageGolden)
       make_committed_payload_golden_fixture();
   ASSERT_TRUE(validate_indexer_committed_payload(payload)().has_value());
   const x23::Buf encoded = x23::serialize(payload);
-  // The golden moved when gas_consumed joined TxEventLog: eight more bytes in
-  // the one event log, between its root output and its events. It moved again
-  // when SignedTransaction gained pubkey_claim_key: four more bytes for the
-  // absent key at the end of the one transaction body. It moved again, at the
-  // same length, when ProposalTxs began naming transactions by
-  // SignedTransactionHash, which changed the fixture's proposal_txs_hash.
-  // Full-key leaves and then direct key/value commitments changed the roots.
-  // The proposal_txs_hash moved again when its parts began combining in order
-  // instead of by XOR (hogd#4508).
+  // Shared with thruput-protocol-go's payload golden. It covers the payload's
+  // XDR and the fixture's proposal_txs_hash, so it moves when either does.
   constexpr size_t kExpectedByteLength = 588;
-  const SHA256Hash kExpectedDigest{0x85, 0xa1, 0x35, 0x5f, 0x69, 0xfa, 0x34,
-                                   0xd3, 0xc8, 0x79, 0xd6, 0x2a, 0x52, 0x44,
-                                   0x79, 0xb8, 0x30, 0x73, 0xf9, 0x74, 0x08,
-                                   0xb9, 0x9b, 0xdb, 0x29, 0xb1, 0xdf, 0xf2,
-                                   0x21, 0x07, 0xcc, 0x31};
+  const SHA256Hash kExpectedDigest{0xe4, 0xad, 0x12, 0x4c, 0x78, 0x33, 0xc2,
+                                   0x93, 0x31, 0xa6, 0x21, 0x42, 0x6e, 0x94,
+                                   0xd6, 0xec, 0x17, 0x1e, 0xe0, 0x85, 0x2c,
+                                   0xa9, 0xe6, 0x38, 0xdd, 0x77, 0x7e, 0x5f,
+                                   0x67, 0xf4, 0x66, 0x82};
 
   EXPECT_EQ(encoded.size(), kExpectedByteLength);
   EXPECT_EQ(sha256(encoded), kExpectedDigest);
