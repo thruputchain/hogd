@@ -2,6 +2,7 @@
 
 #include <array>
 #include <cstdlib>
+#include <cstdio>
 #include <cstring>
 #include <memory>
 #include <ranges>
@@ -274,6 +275,68 @@ BENCHMARK(bm_scheduler_admit_large_batch)
     ->Args({1'000'000, 20'000'000})
     ->UseManualTime()
     ->Unit(benchmark::kMillisecond);
+
+// Private diagnostic: identical transactions and occupancy, optional probes.
+void
+bm_scheduler_remove_batch_probe(benchmark::State &state)
+{
+  MempoolTestInfra server;
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  const auto n = static_cast<size_t>(state.range(0));
+  const auto backlog = static_cast<size_t>(state.range(1));
+  const bool enabled = state.range(2) != 0;
+  const auto accounts = make_benchmark_accounts(10'000);
+  seed_benchmark_native_token_ages(server, accounts);
+  scheduler->read_average_native_token_ages(
+      x23::XdrVec<ContractAddress>(accounts.begin(), accounts.end()))();
+  fib_client_t fib_client(accounts[0]);
+  const SignedTransaction prototype = generate_unsigned_txs(fib_client, 1)[0];
+  auto make_txs = [&](size_t count, size_t offset) {
+    SignedTransactionBatch txs(count, prototype);
+    TransactionHashBatch hashes(count);
+    WorkerPool::get_default_pool().for_each_parallel(
+        std::views::iota(size_t{0}, count), [&](size_t i) {
+          txs[i].tx.invocation.invoked_address =
+              accounts[(i + offset) % accounts.size()];
+          txs[i].tx.uniquifier.nonce = i + offset;
+          hashes[i] = sha256(txs[i].tx);
+        });
+    return std::pair{std::move(txs), std::move(hashes)};
+  };
+  if (backlog) {
+    auto [txs, hashes] = make_txs(backlog, n);
+    scheduler->add_txs(txs, hashes)();
+  }
+  CHECK_EQ(scheduler->size(), backlog);
+  CHECK_EQ(scheduler->tx_cache_size(), backlog);
+  auto [txs, hashes] = make_txs(n, 0);
+  for (auto _ : state) {
+    scheduler->add_txs(txs, hashes)();
+    CHECK_EQ(scheduler->size(), backlog + n);
+    CHECK_EQ(scheduler->tx_cache_size(), backlog + n);
+    SchedulerRemoveProbe probe;
+    ElapsedTimer timer;
+    scheduler->remove_from_scheduler(
+        x23::span<const TransactionHash>(hashes), enabled ? &probe : nullptr)();
+    const double elapsed = timer.elapsed();
+    state.SetIterationTime(elapsed);
+    CHECK_EQ(scheduler->size(), backlog);
+    CHECK_EQ(scheduler->tx_cache_size(), backlog);
+    std::fprintf(stderr, "REMOVE_FIXTURE enabled=%d requested=%zu backlog=%zu actual=%zu elapsed_s=%.9f\n",
+                 enabled, n, backlog, scheduler->tx_cache_size(), elapsed);
+    if (enabled) {
+      CHECK_EQ(probe.removed_from_runqueue, n);
+      CHECK_EQ(probe.expired, 0);
+      std::fprintf(stderr, "%s\n", probe.receipt(1, 1, n).c_str());
+    }
+  }
+  state.SetItemsProcessed(state.iterations() * n);
+}
+BENCHMARK(bm_scheduler_remove_batch_probe)
+    ->Args({1'000, 0, 0})->Args({1'000, 0, 1})
+    ->Args({1'000'000, 0, 0})->Args({1'000'000, 0, 1})
+    ->Args({1'000'000, 4'000'000, 0})->Args({1'000'000, 4'000'000, 1})
+    ->UseManualTime()->Unit(benchmark::kMillisecond);
 
 } // namespace
 

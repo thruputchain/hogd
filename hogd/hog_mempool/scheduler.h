@@ -23,6 +23,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_mempool/block_transfers.h"
 #include "hogd/hog_mempool/shared.h"
+#include "hogd/hog_mempool/scheduler_remove_probe.h"
 #include "hogd/xdr/signed_transaction_hash.h"
 #include "sched_db.hh"
 #include "sched_gateway.hh"
@@ -246,7 +247,8 @@ public:
   }
 
   x23::Async<void>
-  remove_from_scheduler(x23::span<const TransactionHash> hashes);
+  remove_from_scheduler(x23::span<const TransactionHash> hashes,
+                        SchedulerRemoveProbe *probe = nullptr);
 
   // We are exposing the functions below for testing. They should not be called
   // directly by non-test code.
@@ -474,7 +476,7 @@ private:
   AccountKey get_account_key(const ContractAddress &account);
 
   x23::Async<bool> account_is_ready(const ContractAddress &account,
-                                    bool remove_expired_txs);
+                                    bool remove_expired_txs, size_t *expired = nullptr);
 
   bool add_txs_helper(const SignedTransaction &tx,
                       const TransactionHash &tx_hash,

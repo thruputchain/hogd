@@ -3129,7 +3129,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   auto lock_commit_node =
       commit_dag.async<void>("lock commit", commit_dag.after(check_block_node),
                              [&, commit_guard]() -> x23::Async<void> {
+                               probe.commit_lock_begin = CommitPhaseProbe::Clock::now();
                                co_await (*commit_guard)(commit_lock_);
+                               probe.commit_lock_acquired = CommitPhaseProbe::Clock::now();
                                co_return;
                              });
 
@@ -3158,6 +3160,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       "prepare commit plan",
       commit_dag.after(check_block_node, lock_commit_node),
       [&]() -> x23::Async<void> {
+        probe.plan_begin = CommitPhaseProbe::Clock::now();
         commit_plan.abandon_block_ids.clear();
         if (nominated_block_cache_.block_id &&
             nominated_block_cache_.block_id == block_id) {
@@ -3197,7 +3200,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         // full-block threshold below.
         probe.record = true;
 #else
-        probe.record = probe.tx_count == kMaxBlockSize;
+        const char *all_blocks = std::getenv("HOGD_TEST_COMMIT_PHASE_ALL_BLOCKS");
+        probe.record = probe.tx_count == kMaxBlockSize ||
+                       (all_blocks && std::string_view(all_blocks) == "1");
 #endif
         probe.mark(probe.plan_end);
         co_return;
@@ -3405,7 +3410,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         }
         probe.mark(probe.outcomes_end);
         co_await scheduler_->remove_from_scheduler(
-            x23::span<const TransactionHash>(*remove_from_scheduler));
+            x23::span<const TransactionHash>(*remove_from_scheduler),
+            probe.record ? &probe.remove_probe : nullptr);
         probe.mark(probe.removal_end);
         if (commit_plan.committed_nominated) {
           InstrumentedCoroGuard cg(
@@ -3576,6 +3582,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
          ns(probe.native_release_end), ns(probe.finalize_begin),
          ns(probe.prune_begin), ns(probe.prune_end), ns(probe.finalize_end),
          ns(dag_end));
+    info("COMMIT_LOCK_PHASE_V1 height={} block_id={} commit_lock_begin={} "
+         "commit_lock_acquired={} plan_begin={} plan_end={} native_lock_end={}",
+         expected_value.proposal_header.block_height, block_id,
+         ns(probe.commit_lock_begin), ns(probe.commit_lock_acquired),
+         ns(probe.plan_begin), ns(probe.plan_end), ns(probe.native_lock_end));
+    info("{}", probe.remove_probe.receipt(expected_value.proposal_header.block_height,
+                                         block_id, remove_from_scheduler_size));
   }
   if (!commit_dag.ok() && commit_dag.failure().exception) {
     // An internal failure should have triggered [fatal_commit_cleanup]. We have

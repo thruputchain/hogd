@@ -5,6 +5,7 @@
 #include <array>
 #include <atomic>
 #include <chrono>
+#include <format>
 #include <iterator>
 #include <limits>
 #include <list>
@@ -1360,7 +1361,7 @@ Scheduler::refresh_ready_accounts(
 
 x23::Async<bool>
 Scheduler::account_is_ready(const ContractAddress &account,
-                            bool remove_expired_txs)
+                            bool remove_expired_txs, size_t *expired)
 {
   auto [account_state, lock] = get_account_state(account);
   std::map<TxKey, std::shared_ptr<TxValue>> &txs = account_state->txs;
@@ -1381,6 +1382,7 @@ Scheduler::account_is_ready(const ContractAddress &account,
       erase_cached_tx(tx_hash);
     }
     size_t to_remove = std::distance(txs.begin(), lower_it);
+    if (expired) *expired += to_remove;
     size_ -= to_remove;
     txs.erase(txs.begin(), lower_it);
   }
@@ -1612,10 +1614,52 @@ Scheduler::schedule(size_t num_txs, x23::XdrVec<TransactionHash> &tx_hashes,
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
 }
 
-x23::Async<void>
-Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
+std::string
+SchedulerRemoveProbe::receipt(uint64_t height, uint64_t block_id, size_t txs) const
 {
+  uint64_t queue_max = 0, worker_max = 0, worker_sum = 0, cpu_sum = 0;
+  uint64_t samples = 0, body = 0, account = 0, runqueue = 0, erase = 0;
+  uint64_t voluntary = 0, involuntary = 0;
+  for (const auto &c : chunks) {
+    queue_max = std::max(queue_max, duration(c.queued, c.started));
+    auto worker = duration(c.started, c.finished);
+    worker_max = std::max(worker_max, worker);
+    worker_sum += worker;
+    if (c.cpu_begin && c.cpu_end >= c.cpu_begin) cpu_sum += c.cpu_end-c.cpu_begin;
+    voluntary += c.voluntary;
+    involuntary += c.involuntary;
+    samples += c.samples;
+    body += c.body_lookup_ns;
+    account += c.account_lookup_ns;
+    runqueue += c.runqueue_ns;
+    erase += c.cache_erase_ns;
+  }
+  return std::format(
+      "SCHEDULER_REMOVE_PHASE_V1 height={} block_id={} tx_count={} "
+      "pending_before={} pending_after={} cache_before={} cache_after={} "
+      "removed_runqueue={} affected_accounts={} expired={} chunks={} "
+      "bg_end={} lock_begin={} lock_end={} clear_end={} launch_end={} "
+      "join_end={} collect_end={} ready_end={} return_end={} "
+      "queue_max_ns={} worker_max_ns={} worker_sum_ns={} worker_cpu_sum_ns={} "
+      "worker_voluntary_switches={} worker_involuntary_switches={} "
+      "sample_stride=256 sample_count={} sample_body_lookup_ns={} sample_account_lookup_ns={} "
+      "sample_runqueue_ns={} sample_cache_erase_ns={}",
+      height, block_id, txs, pending_before, pending_after, cache_before,
+      cache_after, removed_from_runqueue, affected_accounts, expired, chunks.size(),
+      duration(entry, bg_end), duration(entry, lock_begin), duration(entry, lock_end),
+      duration(entry, clear_end), duration(entry, launch_end), duration(entry, join_end),
+      duration(entry, collect_end), duration(entry, ready_end), duration(entry, return_end),
+      queue_max, worker_max, worker_sum, cpu_sum, voluntary, involuntary, samples, body, account,
+      runqueue, erase);
+}
+
+x23::Async<void>
+Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes,
+                                 SchedulerRemoveProbe *probe)
+{
+  if (probe) probe->entry = SchedulerRemoveProbe::Clock::now();
   co_await default_coropoll().pool_.bg();
+  if (probe) probe->bg_end = SchedulerRemoveProbe::Clock::now();
 
   static SynchronizedMap<ContractAddress, char, SipHash24Hasher> accounts;
 
@@ -1626,26 +1670,45 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
       make_chunks(tx_hashes.size(), kNumThreads);
   std::vector<x23::Async<size_t>> handles;
   handles.reserve(chunks.size());
+  if (probe) probe->chunks.resize(chunks.size());
 
   InstrumentedCoroGuard cg(
       MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
       MempoolMetrics::instance().scheduler_global_lock_hold_seconds);
+  if (probe) probe->lock_begin = SchedulerRemoveProbe::Clock::now();
   co_await cg(global_lock_);
+  if (probe) {
+    probe->lock_end = SchedulerRemoveProbe::Clock::now();
+    probe->pending_before = size();
+    probe->cache_before = tx_cache_size();
+  }
   // [accounts] is static and therefore used by multiple threads, so we wait to
   // call [clear()] on it until after we have acquired the lock.
   accounts.clear();
+  if (probe) probe->clear_end = SchedulerRemoveProbe::Clock::now();
 
   // NOLINTNEXTLINE(modernize-loop-convert)
   for (size_t i = 0; i < chunks.size(); i++) {
+    auto *chunk_probe = probe ? &probe->chunks[i] : nullptr;
+    if (chunk_probe) chunk_probe->queued = SchedulerRemoveProbe::Clock::now();
     handles.push_back(
         [](const ChunkRange *chunk, x23::span<const TransactionHash> tx_hashes,
            SynchronizedMap<ContractAddress, char, SipHash24Hasher> &accounts,
-           Scheduler &scheduler) noexcept -> x23::Async<size_t> {
+           Scheduler &scheduler, SchedulerRemoveProbe::Chunk *timing)
+            noexcept -> x23::Async<size_t> {
           co_await default_coropoll().pool_.bg();
+          SchedulerRemoveProbe::Chunk local_timing;
+          if (timing) {
+            local_timing.queued = timing->queued;
+            local_timing.started = SchedulerRemoveProbe::Clock::now();
+            local_timing.cpu_begin = SchedulerRemoveProbe::thread_cpu_ns();
+            SchedulerRemoveProbe::usage(local_timing.voluntary, local_timing.involuntary);
+          }
 
           x23::span<const TransactionHash> hash_chunk(
               tx_hashes.begin() + chunk->start, tx_hashes.begin() + chunk->end);
           size_t num_removed_from_runqueue = 0;
+          size_t sampled_ordinal = 0;
           for (const TransactionHash &tx_hash : hash_chunk) {
             // Even if the *nominated* block is being committed and thus the txs
             // have been removed from the runqueue, it is possible that the
@@ -1655,6 +1718,9 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             // are on the runqueue and remove them. We cannot skip this step and
             // just remove txs from the cache, even if the *nominated* block is
             // being committed rather than a *validated* block.
+            const bool sample = timing && (sampled_ordinal++ % 256 == 0);
+            SchedulerRemoveProbe::Time sample_time;
+            if (sample) sample_time = SchedulerRemoveProbe::Clock::now();
             std::shared_ptr<TxValue> tx_value;
             {
               const auto [tx_value_ptr, txs_lock] =
@@ -1663,6 +1729,11 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
               tx_value = *tx_value_ptr;
             }
 
+            if (sample) {
+              auto now = SchedulerRemoveProbe::Clock::now();
+              local_timing.body_lookup_ns += SchedulerRemoveProbe::duration(sample_time, now);
+              sample_time = now;
+            }
             const SignedTransaction &tx = tx_value->tx;
             const ContractAddress &account = tx.tx.invocation.invoked_address;
             const TxKey key = {.expiry_block_height =
@@ -1671,6 +1742,11 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
             {
               auto [account_state, account_lock] =
                   scheduler.get_account_state(account);
+              if (sample) {
+                auto now = SchedulerRemoveProbe::Clock::now();
+                local_timing.account_lookup_ns += SchedulerRemoveProbe::duration(sample_time, now);
+                sample_time = now;
+              }
               std::map<TxKey, std::shared_ptr<TxValue>> &txs =
                   account_state->txs;
               // The tx may or may not be on the runqueue. If the tx is included
@@ -1681,15 +1757,35 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
                 num_removed_from_runqueue++;
                 accounts.insert(account, 0);
               }
+              if (sample) {
+                auto now = SchedulerRemoveProbe::Clock::now();
+                local_timing.runqueue_ns += SchedulerRemoveProbe::duration(sample_time, now);
+                sample_time = now;
+              }
               // Keep the account locked until the cache entry is gone, so a
               // concurrent resubmit cannot restore only the runqueue entry.
               scheduler.erase_cached_tx(tx_hash);
+              if (sample) {
+                local_timing.cache_erase_ns += SchedulerRemoveProbe::duration(
+                    sample_time, SchedulerRemoveProbe::Clock::now());
+                ++local_timing.samples;
+              }
             }
           }
 
+          if (timing) {
+            uint64_t voluntary = 0, involuntary = 0;
+            SchedulerRemoveProbe::usage(voluntary, involuntary);
+            local_timing.voluntary = voluntary >= local_timing.voluntary ? voluntary - local_timing.voluntary : 0;
+            local_timing.involuntary = involuntary >= local_timing.involuntary ? involuntary - local_timing.involuntary : 0;
+            local_timing.cpu_end = SchedulerRemoveProbe::thread_cpu_ns();
+            local_timing.finished = SchedulerRemoveProbe::Clock::now();
+            *timing = local_timing;
+          }
           co_return num_removed_from_runqueue;
-        }(&chunks[i], tx_hashes, accounts, *this));
+        }(&chunks[i], tx_hashes, accounts, *this, chunk_probe));
   }
+  if (probe) probe->launch_end = SchedulerRemoveProbe::Clock::now();
   size_t total_removed_from_runqueue = 0;
   // There may be fewer chunks that [kNumThreads], so we iterate through the
   // number of chunks. If we were to iterate through all of the awaitables,
@@ -1700,6 +1796,8 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
     total_removed_from_runqueue += co_await handle;
   }
 
+  if (probe) probe->join_end = SchedulerRemoveProbe::Clock::now();
+
   // We need to [co_await] for each account in [accounts]. However,
   // [accounts.for_each()] does not support asynchronous callbacks, so we need
   // to add the accounts to [affected_accounts] and then do the [co_await] in a
@@ -1709,8 +1807,13 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
       [&affected_accounts](const std::pair<ContractAddress, char> &kv) {
         affected_accounts.push_back(kv.first);
       });
+  if (probe) {
+    probe->collect_end = SchedulerRemoveProbe::Clock::now();
+    probe->affected_accounts = affected_accounts.size();
+  }
   for (const ContractAddress &account : affected_accounts) {
-    if (!co_await account_is_ready(account, /*remove_expired_txs=*/true)) {
+    if (!co_await account_is_ready(account, /*remove_expired_txs=*/true,
+                                   probe ? &probe->expired : nullptr)) {
       // We do not CHECK that the account is removed from [ready_accounts_]
       // because the account may not be currently in [ready_accounts_]. For
       // example, if a tx is submitted that the contract does not have enough
@@ -1723,6 +1826,7 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
       ready_accounts_.erase(get_account_key(account));
     }
   }
+  if (probe) probe->ready_end = SchedulerRemoveProbe::Clock::now();
   size_.fetch_sub(total_removed_from_runqueue, std::memory_order_relaxed);
   double c = timer.elapsed();
 
@@ -1731,6 +1835,12 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes)
   MempoolMetrics::instance().scheduler_remove_duration_seconds.record(c);
   MempoolMetrics::instance().scheduler_pending_tx_count.record(size());
   MempoolMetrics::instance().scheduler_tx_cache_size.record(tx_cache_size());
+  if (probe) {
+    probe->removed_from_runqueue = total_removed_from_runqueue;
+    probe->pending_after = size();
+    probe->cache_after = tx_cache_size();
+    probe->return_end = SchedulerRemoveProbe::Clock::now();
+  }
 }
 
 } // namespace hogd

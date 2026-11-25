@@ -543,6 +543,8 @@ private:
     bool record = false;
     size_t tx_count = 0;
     Time gate_end, native_lock_end, plan_end;
+    Time commit_lock_begin, commit_lock_acquired, plan_begin;
+    SchedulerRemoveProbe remove_probe;
     Time joint_begin, db_begin, db_end, event_begin, event_end, joint_end;
     Time measure_begin, measure_end, abandon_db_begin, abandon_db_end;
     Time abandon_event_begin, abandon_event_end;

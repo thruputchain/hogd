@@ -6,7 +6,7 @@
 multi_node_storage_probe_mode() {
   case ${GIT_BRANCH:-} in
     codex/multinode-event-disk-probe) printf 'disk\n' ;;
-    codex/multinode-event-tmpfs-probe) printf 'tmpfs\n' ;;
+    codex/multinode-event-tmpfs-probe|codex/multinode-remove-lock-probe) printf 'tmpfs\n' ;;
     *) return 1 ;;
   esac
 }
