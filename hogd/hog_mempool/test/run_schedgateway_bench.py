@@ -77,7 +77,7 @@ def main():
     bootstrap = output / "bootstrap.json"
     subprocess.run([str(bench_bin), "--emit-bootstrap-manifest",
                     str(bootstrap), str(args.accounts)], env=env, check=True)
-    # Only the owned node's temp state moves; results and logs keep their paths.
+    # Only owned node state moves; result and log paths stay unchanged.
     data_root = env.get("HOGD_CI_SCHEDGATEWAY_DATA_ROOT") or None
     with tempfile.TemporaryDirectory(
             prefix="schedgateway-bench-", dir=data_root) as data, \
