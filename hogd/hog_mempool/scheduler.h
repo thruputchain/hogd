@@ -424,12 +424,12 @@ private:
     TransactionHash tx_hash;
     // The hash of [tx]'s exact signed encoding, its key in [txs_].
     SignedTransactionHash signed_tx_hash;
-    // Shared by all signed versions of this body. This is an [std::shared_ptr],
-    // so it is automatically freed when the last [TxValue] for this tx body is
-    // freed.
+    // Null for the common single encoding; [signed_tx_hash] is its sole key.
+    // On the first distinct vetted encoding, create one set shared by all
+    // variants while the account/body locks serialize replacement/removal.
+    // Every retained encoding keeps the same set alive until destroyed.
     std::shared_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
-        signed_tx_hashes = std::make_shared<
-            std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
+        signed_tx_hashes;
   };
 
   struct AccountState {

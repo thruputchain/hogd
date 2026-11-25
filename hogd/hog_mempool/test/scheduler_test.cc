@@ -548,12 +548,20 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
   {
     auto [entry, lock] = scheduler->txs_.find(sha256(a));
     ASSERT_NE(entry, nullptr);
-    shared_hashes = (*entry)->signed_tx_hashes;
+    EXPECT_FALSE((*entry)->signed_tx_hashes);
   }
   auto held_a = scheduler->find_signed_tx(sha256(a));
+  ASSERT_TRUE(held_a);
 
   scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
                      Scheduler::CachedVariant::kSubmitVetted)();
+  {
+    // The singleton's previously held TxValue now shares the aliases.
+    auto [entry, lock] = scheduler->txs_.find(sha256(a));
+    ASSERT_NE(entry, nullptr);
+    ASSERT_TRUE((*entry)->signed_tx_hashes);
+    shared_hashes = (*entry)->signed_tx_hashes;
+  }
   {
     auto [entry, lock] = scheduler->txs_.find(sha256(b));
     ASSERT_NE(entry, nullptr);
@@ -567,6 +575,52 @@ TEST(Scheduler, SignedVariantsShareHashSetLifetime)
   EXPECT_FALSE(shared_hashes.expired());
   held_b.reset();
   EXPECT_TRUE(shared_hashes.expired());
+}
+
+// Parallel distinct vetted encodings of one body share all alias keys; expiry
+// removes every signed encoding, but an in-flight reader retains its value.
+TEST(Scheduler, ConcurrentVettedAliasesExpireTogether)
+{
+  fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
+  SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
+  body.tx.uniquifier.block_expiry_height = 2;
+  const SignedTransaction a = with_signature(body, 1);
+  const TransactionHash tx_hash = sha256(body.tx);
+  MempoolTestInfra server;
+  server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
+  auto scheduler = server.mempool_coord_rpc().scheduler();
+  scheduler->add_txs({a}, {tx_hash})();
+  auto held = scheduler->find_signed_tx(sha256(a));
+  ASSERT_TRUE(held);
+  SignedTransactionBatch variants;
+  TransactionHashBatch hashes;
+  SignedTransactionHashBatch signed_hashes;
+  for (uint8_t i = 2; i < 33; ++i) {
+    auto tx = with_signature(body, i);
+    hashes.push_back(tx_hash);
+    signed_hashes.push_back(sha256(tx));
+    variants.push_back(std::move(tx));
+  }
+  scheduler->add_txs(variants, hashes, signed_hashes,
+                     Scheduler::CachedVariant::kSubmitVetted)();
+  ASSERT_EQ(scheduler->tx_cache_size(), 1UL);
+  EXPECT_EQ(scheduler->size(), 1);
+  for (const auto &hash : signed_hashes) {
+    EXPECT_TRUE(scheduler->find_signed_tx(hash));
+  }
+  scheduler->set_current_block(3);
+  TransactionHashBatch scheduled_hashes;
+  SignedTransactionHashBatch scheduled_signed_hashes;
+  SignedTransactionBatch scheduled;
+  scheduler->schedule(1, scheduled_hashes, scheduled_signed_hashes, scheduled)();
+  EXPECT_TRUE(scheduled.empty());
+  EXPECT_EQ(scheduler->size(), 0);
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
+  for (const auto &hash : signed_hashes) {
+    EXPECT_FALSE(scheduler->find_signed_tx(hash));
+  }
+  EXPECT_EQ(*held, a);
 }
 
 TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)

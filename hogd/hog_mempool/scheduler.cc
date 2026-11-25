@@ -810,11 +810,18 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // the repeated body's uniquifier. Vetted submissions are authenticated,
     // so only the body's signers can mint more encodings, and all of them go
     // when the body expires or commits.
+    auto aliases = (*tx_ptr)->signed_tx_hashes;
+    if (!aliases) {
+      aliases = std::make_shared<
+          std::unordered_set<SignedTransactionHash, SipHash24Hasher>>();
+      aliases->insert((*tx_ptr)->signed_tx_hash);
+      (*tx_ptr)->signed_tx_hashes = aliases;
+    }
     auto replacement = std::make_shared<TxValue>(
         TxValue{.tx = tx,
                 .tx_hash = tx_hash,
                 .signed_tx_hash = signed_tx_hash,
-                .signed_tx_hashes = (*tx_ptr)->signed_tx_hashes});
+                .signed_tx_hashes = std::move(aliases)});
     replacement->signed_tx_hashes->insert(signed_tx_hash);
 
     *tx_ptr = replacement;
@@ -825,7 +832,6 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
     return false;
   }
-  (*tx_ptr)->signed_tx_hashes->insert(signed_tx_hash);
   CHECK_PTR(txs_.insert(signed_tx_hash, *tx_ptr).first);
   // [txs_by_body_.find_or_insert()] acquires a lock, so the increment to
   // [tx_cache_size_] happens after the tx is added to the cache from the
@@ -859,15 +865,24 @@ Scheduler::erase_cached_tx(const TransactionHash &tx_hash,
     }
     mark(sample->cache_body_remove_ns);
 
-    const auto aliases = tx_value->signed_tx_hashes->size();
+    const auto aliases = tx_value->signed_tx_hashes ?
+        tx_value->signed_tx_hashes->size() : 1UL;
     sample->alias_entries += aliases;
     sample->alias_multi += aliases > 1;
     const auto signed_start = Probe::Clock::now();
-    for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+    auto erase_signed = [&](const SignedTransactionHash &signed_hash) {
       tick = Probe::Clock::now();
       CHECK_EQ(txs_.remove_after_lock(
           signed_hash, [&] { mark(sample->signed_lock_ns); }), 1UL);
       mark(sample->signed_remove_ns);
+    };
+    if (tx_value->signed_tx_hashes) {
+      for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+        erase_signed(signed_hash);
+      }
+    }
+    else {
+      erase_signed(tx_value->signed_tx_hash);
     }
     sample->signed_iter_ns += Probe::duration(signed_start, Probe::Clock::now());
     tick = Probe::Clock::now();
@@ -886,8 +901,13 @@ Scheduler::erase_cached_tx(const TransactionHash &tx_hash,
     tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
     CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
   }
-  for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
-    CHECK_EQ(txs_.remove(signed_hash), 1UL);
+  if (tx_value->signed_tx_hashes) {
+    for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+      CHECK_EQ(txs_.remove(signed_hash), 1UL);
+    }
+  }
+  else {
+    CHECK_EQ(txs_.remove(tx_value->signed_tx_hash), 1UL);
   }
 }
 
