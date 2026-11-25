@@ -1,4 +1,3 @@
-#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstdlib>
@@ -56,9 +55,7 @@ start_coordinator_server(RpcServer<MempoolCoordinatorRpc> &coord,
     return port;
   }
   const auto error = bound.error();
-  if (error != EPROTONOSUPPORT && error != ENOPROTOOPT &&
-      error != EAFNOSUPPORT && error != EOPNOTSUPP && error != EPERM &&
-      error != EACCES)
+  if (!x23::is_mptcp_unavailable(error))
     exit_cannot_listen(bind_addr, error);
   warn("SchedulerCoord MPTCP unavailable ({}); using TCP listener", error);
 #else

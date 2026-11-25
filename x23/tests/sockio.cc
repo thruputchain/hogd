@@ -172,6 +172,15 @@ TEST(TcpListen, AddressInUse)
   }
 }
 
+TEST(TcpListen, MultipathFallbackErrors)
+{
+  for (int error :
+       {EPROTONOSUPPORT, ENOPROTOOPT, EAFNOSUPPORT, EOPNOTSUPP, EPERM, EACCES})
+    EXPECT_TRUE(is_mptcp_unavailable(Errno(error)));
+  EXPECT_FALSE(is_mptcp_unavailable(Errno(EADDRINUSE)));
+  EXPECT_FALSE(is_mptcp_unavailable(Errno(ENOMEM)));
+}
+
 TEST(TcpListen, UnavailableStreamProtocolDoesNotPreventTcpFallback)
 {
   auto addr = numeric_addr("127.0.0.1", 0);
@@ -186,10 +195,7 @@ TEST(TcpListen, UnavailableStreamProtocolDoesNotPreventTcpFallback)
 TEST(TcpListen, MultipathAcceptsOrdinaryTcp)
 {
   auto listener = try_tcplisten(numeric_addr("127.0.0.1", 0), 5, IPPROTO_MPTCP);
-  if (!listener &&
-      (listener.error() == EPROTONOSUPPORT || listener.error() == ENOPROTOOPT ||
-       listener.error() == EOPNOTSUPP || listener.error() == EACCES ||
-       listener.error() == EPERM))
+  if (!listener && is_mptcp_unavailable(listener.error()))
     GTEST_SKIP() << "MPTCP is unavailable";
   ASSERT_TRUE(listener);
   int protocol = 0;

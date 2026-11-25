@@ -191,7 +191,7 @@ stcplisten(std::uint16_t port, int backlog)
 namespace {
 
 UniqueFd
-cloexec_stream_socket_protocol(int family, int protocol)
+cloexec_stream_socket(int family, int protocol)
 {
 #ifdef SOCK_CLOEXEC
   return UniqueFd(socket(family, SOCK_STREAM | SOCK_CLOEXEC, protocol));
@@ -206,7 +206,7 @@ cloexec_stream_socket_protocol(int family, int protocol)
 std::expected<UniqueFd, Errno>
 try_stcplisten(const sockaddr_storage &bind_addr, int backlog, int protocol = 0)
 {
-  UniqueFd lfd = cloexec_stream_socket_protocol(bind_addr.ss_family, protocol);
+  UniqueFd lfd = cloexec_stream_socket(bind_addr.ss_family, protocol);
   if (!lfd)
     return Errno{};
 
@@ -258,10 +258,18 @@ try_tcplisten(const sockaddr_storage &bind_addr, int backlog, int protocol)
   return lfd;
 }
 
+bool
+is_mptcp_unavailable(Errno error)
+{
+  return error == EPROTONOSUPPORT || error == ENOPROTOOPT ||
+         error == EAFNOSUPPORT || error == EOPNOTSUPP || error == EPERM ||
+         error == EACCES;
+}
+
 UniqueFd
 cloexec_stream_socket(int family)
 {
-  return cloexec_stream_socket_protocol(family, 0);
+  return cloexec_stream_socket(family, 0);
 }
 
 std::expected<UniqueFd, Errno>
