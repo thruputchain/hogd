@@ -261,7 +261,7 @@ write_coordinator_output() {
     return 1
   fi
   if ! copy_remote_file "${CHUCKD_HOSTS[0]}" "$node0_stdout" "$tmp_node0" ||
-     ! copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"; then
+    ! copy_remote_file "${CHUCKD_HOSTS[1]}" "$node1_stdout" "$tmp_node1"; then
     rm -f "$tmp_node0" "$tmp_node1"
     return 1
   fi
