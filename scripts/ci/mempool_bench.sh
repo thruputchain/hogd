@@ -21,7 +21,8 @@ if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
         ${GIT_BRANCH:-} == codex/multinode-event-disk-probe ||
         ${GIT_BRANCH:-} == codex/multinode-event-tmpfs-probe ||
         ${GIT_BRANCH:-} == codex/multinode-remove-lock-probe ||
-        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ) &&
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-lazy-probe ) &&
       ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
   split_storage=1
   split_disk_root="/workspace/.ci/single-node-split-$HOG_XID"
@@ -196,7 +197,8 @@ if [[ ${HOGD_CI_OFFLINE:-0} == 1 &&
         ${GIT_BRANCH:-} == codex/multinode-event-disk-probe ||
         ${GIT_BRANCH:-} == codex/multinode-event-tmpfs-probe ||
         ${GIT_BRANCH:-} == codex/multinode-remove-lock-probe ||
-        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ) ]]; then
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-lazy-probe ) ]]; then
   # Retain the exact same-clock phase and interval records in the uploaded
   # diagnostic artifact, rather than relying on a truncated Actions log.
   : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"

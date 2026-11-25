@@ -64,7 +64,8 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
         ${GIT_BRANCH:-} == codex/multinode-event-disk-probe ||
         ${GIT_BRANCH:-} == codex/multinode-event-tmpfs-probe ||
         ${GIT_BRANCH:-} == codex/multinode-remove-lock-probe ||
-        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ) &&
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-lazy-probe ) &&
      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]
   split_storage_role "$1" "${HOG_HOST:?}" /bench-combined /workspace "$HOG_XID"
 fi
