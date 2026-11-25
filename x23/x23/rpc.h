@@ -87,7 +87,6 @@
 #include <cstdio>
 #include <exception>
 #include <expected>
-#include <map>
 #include <new>
 #include <print>
 #include <stop_token>
@@ -116,6 +115,7 @@
 #include <x23/utility.h>
 #include <x23/vec.h>
 #include <x23/x23.h>
+#include <x23/xidmap.h>
 
 namespace x23 {
 
@@ -435,8 +435,7 @@ protected:
 
 private:
   struct ClientState {
-    std::uint32_t lastxid_{};
-    std::map<std::uint32_t, CpuHinted<CoroCB<RecordRef>>> xidmap_;
+    XidMap<CpuHinted<CoroCB<RecordRef>>> xidmap_;
   };
   MVar<ClientState> cstate_;
 

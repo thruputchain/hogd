@@ -45,8 +45,7 @@ RpcStreamImpl::fail()
     return;
 
   auto oldmap = std::exchange(cstate_->xidmap_, {});
-  for (auto [_xid, cb] : oldmap)
-    cb(RecordRef{});
+  oldmap.for_each([](auto cb) { cb(RecordRef{}); });
   cp_->poison(fd_);
 }
 
@@ -93,11 +92,7 @@ RpcStreamImpl::gen_call_xid(Awaitable<RecordRef> &a)
   auto cs = cstate_.take();
   if (ss_.stop_requested())
     throw XdrException("RPC call on failed file descriptor");
-  for (;;) {
-    std::uint32_t xid = ++cs->lastxid_;
-    if (auto r = cs->xidmap_.emplace(xid, a); r.second) [[likely]]
-      return xid;
-  }
+  return cs->xidmap_.insert(a);
 }
 
 Detached
@@ -193,11 +188,9 @@ RpcStreamImpl::reader(SLOC_ARG0)
     }
     if (msg.body.mtype() == REPLY) {
       auto cs = cstate_.take();
-      auto it = cs->xidmap_.find(msg.xid);
-      if (it == cs->xidmap_.end())
+      auto cb = cs->xidmap_.take(msg.xid);
+      if (!cb)
         continue;
-      auto cb = std::move(it->second);
-      cs->xidmap_.erase(it);
       cs.reset();
       // Re-enqueing this on a CPU of the LLC it came from cuts RPC
       // throughput by about a factor of 10.  Seems to be much better
