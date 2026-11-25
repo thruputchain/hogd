@@ -61,7 +61,7 @@ public:
   // helper that makes only these need not be a coroutine. Fails to compile for
   // one that might wait.
   template<SyscallNo Syscall, typename... Args>
-  requires kSyscallBodyIsDirect<SyscallMeta<Syscall>>
+  requires (kSyscallBodyIsDirect<SyscallMeta<Syscall>>)
   [[nodiscard]] HostFnStatus<SyscallErrorCode> direct_syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
