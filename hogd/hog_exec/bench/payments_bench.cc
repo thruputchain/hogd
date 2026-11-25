@@ -4,6 +4,8 @@
 #include <chrono>
 #include <cstdio>
 #include <cstdlib>
+#include <ctime>
+#include <fstream>
 #include <future>
 #include <optional>
 #include <print>
@@ -181,6 +183,210 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   }
 }
 
+// Private diagnostic: use one cache-line-sized slot per worker, no per-tx
+// timestamp or logging. The existing final Event callback writes one extra
+// atomic only after its existing pending count reaches zero. Its callback
+// captures remain exactly two references, as in the stock path.
+struct alignas(64) PaymentWorkerPhase {
+  uint64_t submit_ns = 0;
+  uint64_t start_ns = 0;
+  uint64_t context_ready_ns = 0;
+  uint64_t finish_ns = 0;
+  uint64_t return_ns = 0;
+  uint64_t txs = 0;
+};
+static_assert(sizeof(PaymentWorkerPhase) == 64);
+
+struct PaymentRepPhase {
+  explicit PaymentRepPhase(size_t workers_count) : workers(workers_count) {}
+  std::vector<PaymentWorkerPhase> workers;
+  uint64_t accounts = 0;
+  uint64_t txs = 0;
+  uint64_t threads = 0;
+  uint64_t rep = 0;
+  uint64_t worker_count = 0;
+  uint64_t start_ns = 0;
+  uint64_t submit_end_ns = 0;
+  uint64_t join_end_ns = 0;
+  uint64_t event_final_ns = 0;
+  uint64_t end_ns = 0;
+  uint64_t elapsed_us = 0;
+};
+
+struct PaymentPendingEvents {
+  std::atomic<uint64_t> pending;
+  std::atomic<uint64_t> final_ns{0};
+};
+
+uint64_t
+payment_phase_now_ns()
+{
+  struct timespec time{};
+  CHECK_EQ(clock_gettime(CLOCK_MONOTONIC, &time), 0);
+  return static_cast<uint64_t>(time.tv_sec) * 1'000'000'000 +
+         static_cast<uint64_t>(time.tv_nsec);
+}
+
+void
+write_payment_phase_records(const char *path,
+                            const std::vector<PaymentRepPhase> &records)
+{
+  std::ofstream out(path);
+  CHECK(out.is_open());
+  out << "PAYMENT_PHASE_V1\n";
+  for (const auto &r : records) {
+    out << "rep\t" << r.accounts << '\t' << r.txs << '\t' << r.threads << '\t'
+        << r.rep << '\t' << r.worker_count << '\t' << r.elapsed_us << '\t'
+        << r.start_ns << '\t' << r.submit_end_ns << '\t' << r.join_end_ns
+        << '\t' << r.event_final_ns << '\t' << r.end_ns << '\n';
+    for (size_t i = 0; i < r.worker_count; ++i) {
+      const auto &w = r.workers[i];
+      out << "worker\t" << r.accounts << '\t' << r.txs << '\t' << r.threads
+          << '\t' << r.rep << '\t' << i << '\t' << w.txs << '\t' << w.submit_ns
+          << '\t' << w.start_ns << '\t' << w.context_ready_ns << '\t'
+          << w.finish_ns << '\n';
+    }
+  }
+  out.flush();
+  CHECK(out.good());
+}
+
+void
+run_bench_rep_phase(BenchmarkState &bs,
+                    std::span<SignedTransaction> total_work_txs,
+                    int num_exec_threads, uint32_t num_txs_per_rep,
+                    size_t num_reps, std::vector<PaymentRepPhase> &records)
+{
+  WorkerPool exec_pool(num_exec_threads);
+  exec_pool.adjust_workers(num_exec_threads);
+  if (total_work_txs.size() < num_txs_per_rep * num_reps) {
+    panic("not enough transactions to run the benchmark");
+  }
+  assert((total_work_txs.size() % num_reps) == 0);
+  assert(num_txs_per_rep == total_work_txs.size() / num_reps);
+
+  // All storage for this configuration is allocated before its timed reps.
+  const size_t record_base = records.size();
+  for (size_t nrep = 0; nrep < num_reps; ++nrep) {
+    records.emplace_back(num_exec_threads);
+  }
+  for (size_t nrep = 0U; nrep < num_reps; nrep++) {
+    auto &phase = records[record_base + nrep];
+    phase.accounts = bs.num_accounts_;
+    phase.txs = num_txs_per_rep;
+    phase.threads = num_exec_threads;
+    phase.rep = nrep;
+    info("bench rep {} for {} txs (accts {}) on {} threads", nrep,
+         num_txs_per_rep, bs.num_accounts_, num_exec_threads);
+    auto work_txs =
+        total_work_txs.subspan(nrep * num_txs_per_rep, num_txs_per_rep);
+
+    // The work txs are reused across reps and scaling configs, so overwrite
+    // their uniquifiers each rep (the signature covers only the inner calldata,
+    // not the uniquifier). Capture the height they commit against so expiry
+    // heights are not yet expired; cleared after the rep.
+    const auto base_height = bs.block_height();
+    phase.start_ns = payment_phase_now_ns();
+    auto start_time = std::chrono::steady_clock::now();
+
+    uint32_t ntx_per_thread = num_txs_per_rep / num_exec_threads;
+    if (num_txs_per_rep % num_exec_threads != 0) {
+      ntx_per_thread++;
+    }
+
+    std::vector<std::future<void>> futures;
+    futures.reserve(num_exec_threads);
+
+    PaymentPendingEvents pending_events{num_txs_per_rep};
+    std::atomic<bool> events_done = false;
+
+    for (int i = 0; i < num_exec_threads; i++) {
+      uint32_t offset = static_cast<uint32_t>(i) * ntx_per_thread;
+      if (offset >= num_txs_per_rep) {
+        break;
+      }
+      uint32_t cur_count = std::min(ntx_per_thread, num_txs_per_rep - offset);
+
+      auto &worker = phase.workers[static_cast<size_t>(i)];
+      worker.txs = cur_count;
+      worker.submit_ns = payment_phase_now_ns();
+      futures.emplace_back(
+          exec_pool.submit([&bs, work_txs, offset, cur_count, base_height,
+                            &pending_events, &events_done, &worker]() -> void {
+            worker.start_ns = payment_phase_now_ns();
+            {
+              auto runtime_context = make_hog_exec_context();
+              worker.context_ready_ns = payment_phase_now_ns();
+
+              for (uint32_t j = 0; j < cur_count; j++) {
+
+                uint32_t k = offset + j;
+                work_txs[k].tx.uniquifier =
+                    CommonBenchState::bench_uniquifier(base_height, k);
+                auto const &tx = work_txs[k];
+
+                auto handler =
+                    bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
+                if (!handler.root_invoke()().is_root_success()) {
+                  error("Failed to invoke transaction");
+                  panic("Failed to invoke transaction");
+                }
+                if (handler.try_commit_transaction()() !=
+                    ExecResult::ExecResultOK) {
+                  panic("failed to perform commit operation");
+                }
+                handler.emit_events(ExecResult::ExecResultOK,
+                                    ProposedTransaction{.signed_tx = tx})(
+                    [&pending_events,
+                     &events_done](this auto,
+                                   SystemStatus<void> res) -> x23::Detached {
+                      if (!res.has_value()) {
+                        panic("failed to emit events");
+                      }
+                      auto r = pending_events.pending.fetch_sub(
+                          1, std::memory_order_relaxed);
+                      if (r == 1) {
+                        pending_events.final_ns.store(payment_phase_now_ns());
+                        events_done.store(true, std::memory_order_relaxed);
+                        events_done.notify_one();
+                      }
+                      co_return;
+                    });
+              }
+              worker.finish_ns = payment_phase_now_ns();
+            } // RuntimeContext destruction, as at the original lambda exit.
+            worker.return_ns = payment_phase_now_ns();
+          }));
+    }
+    phase.submit_end_ns = payment_phase_now_ns();
+    phase.worker_count = futures.size();
+    for (auto &f : futures) {
+      f.wait();
+    }
+    phase.join_end_ns = payment_phase_now_ns();
+    events_done.wait(false);
+    auto finish_time = std::chrono::steady_clock::now();
+    phase.end_ns = payment_phase_now_ns();
+    phase.event_final_ns = pending_events.final_ns.load();
+    phase.elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
+                           finish_time - start_time)
+                           .count();
+    std::println("time taken: {} us for {} txs (accts {}) on {} threads",
+                 std::chrono::duration_cast<std::chrono::microseconds>(
+                     finish_time - start_time)
+                     .count(),
+                 num_txs_per_rep, bs.num_accounts_, num_exec_threads);
+    info("bench rep tps: {}",
+         num_txs_per_rep * 1'000'000.0 /
+             std::chrono::duration_cast<std::chrono::microseconds>(finish_time -
+                                                                   start_time)
+                 .count());
+    // Expire this rep's uniquifiers so the reused txs can be re-committed with
+    // fresh uniquifiers next rep/config. Outside the timed region.
+    bs.clear_uniquifiers(num_txs_per_rep);
+  }
+}
+
 // Coroutine-driven variant of run_bench_rep.
 //
 // run_bench_rep sizes a WorkerPool and blocks one OS thread per in-flight
@@ -293,24 +499,36 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
   BenchmarkState bs(server_addrs, exec_port, coord_port, num_accounts);
   auto work_txs = bs.initialize(num_total_txs);
   size_t offset = 0;
+  const char *phase_file = std::getenv("HOGD_PAYMENT_PHASE_FILE");
+  std::vector<PaymentRepPhase> phase_records;
+  if (phase_file) {
+    phase_records.reserve(60);
+  }
+  auto run_blocking = [&](std::span<SignedTransaction> txs, int threads,
+                          uint32_t count) {
+    if (phase_file && threads <= 256) {
+      run_bench_rep_phase(bs, txs, threads, count, num_reps, phase_records);
+    }
+    else {
+      run_bench_rep(bs, txs, threads, count, num_reps);
+    }
+  };
 
   // strong scaling
   for (auto nthread : {64, 128, 256, 512, 1024, 2048}) {
     assert(offset + (100000 * num_reps) <= work_txs.size());
-    run_bench_rep(bs,
-                  std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 100000 *
-                                                                     num_reps),
-                  nthread, 100000, num_reps);
+    run_blocking(std::span<SignedTransaction>(work_txs).subspan(offset,
+                                                                100000 *
+                                                                    num_reps),
+                 nthread, 100000);
   }
   // weak scaling
   for (auto nthread : {64, 128, 256, 512, 1024, 2048}) {
     assert(offset + (100 * nthread * num_reps) <= work_txs.size());
-    run_bench_rep(bs,
-                  std::span<SignedTransaction>(work_txs).subspan(offset,
-                                                                 100 * nthread *
-                                                                     num_reps),
-                  nthread, 100 * nthread, num_reps);
+    run_blocking(std::span<SignedTransaction>(work_txs).subspan(offset,
+                                                                100 * nthread *
+                                                                    num_reps),
+                 nthread, 100 * nthread);
   }
 
   // Same strong-scaling work again, driven by coroutines instead of blocking
@@ -322,6 +540,10 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
                        std::span<SignedTransaction>(work_txs).subspan(
                            offset, 100000 * num_reps),
                        nconcurrent, 100000, num_reps);
+  }
+  // Emit after the entire sweep, not between timed repetitions.
+  if (phase_file) {
+    write_payment_phase_records(phase_file, phase_records);
   }
 }
 } // namespace
