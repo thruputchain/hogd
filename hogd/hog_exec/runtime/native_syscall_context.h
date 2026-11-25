@@ -61,10 +61,14 @@ public:
   // helper that makes only these need not be a coroutine. Fails to compile for
   // one that might wait.
   template<SyscallNo Syscall, typename... Args>
-  requires (kSyscallBodyIsDirect<SyscallMeta<Syscall>>)
   [[nodiscard]] HostFnStatus<SyscallErrorCode> direct_syscall(Args &&...args)
   {
     using Meta = SyscallMeta<Syscall>;
+    // Not a requires-clause: clang-tidy's google-readability-casting reports
+    // one on this enum parameter as a C-style cast when syscall() calls this.
+    static_assert(kSyscallBodyIsDirect<Meta>,
+                  "direct_syscall() is for syscalls whose body never waits; "
+                  "co_await syscall() for this one");
     AliasGuard guard;
     auto parsed = parse_args<Syscall>(guard, std::forward<Args>(args)...);
     auto ran = wrap_after_parse<Meta>(guard.check(), handler_, gas_remaining(),
