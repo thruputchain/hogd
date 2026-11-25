@@ -27,6 +27,7 @@
 #include "x23/async.h"
 #include "x23/fileio.h"
 #include "x23/serialize.h"
+#include "x23/tests/death_test.h"
 #include "x23/threadpool.h"
 #include "x23/vec.h"
 
@@ -626,7 +627,8 @@ main(int argc, char *argv[])
 #ifdef __linux__
 namespace hogd {
 namespace {
-void add_writeback_test_payload(EventBlockContext &context)
+void
+add_writeback_test_payload(EventBlockContext &context)
 {
   for (uint64_t i = 0; i < 140; ++i) {
     ProposedTransaction body{};
@@ -642,7 +644,8 @@ void add_writeback_test_payload(EventBlockContext &context)
 TEST_F(EventBlockContextTest, StreamWritebackUnsupportedStillDurablyCloses)
 {
   EventBlockContext context(temp_dir_, 1,
-                            EventBlockContext::create_events_file(temp_dir_, 1));
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   context.set_stream_writeback_test_hook([](int, off_t start, off_t length) {
     EXPECT_EQ(start, 0);
     EXPECT_GE(length, 32 * 1024 * 1024);
@@ -675,10 +678,100 @@ TEST_F(EventBlockContextTest, StreamWritebackUnsupportedStillDurablyCloses)
   }
 }
 
+TEST_F(EventBlockContextTest, StreamWritebackRetriesInterruptedHint)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
+  int calls = 0;
+  context.set_stream_writeback_test_hook(
+      [&](int, off_t, off_t) { return ++calls == 1 ? EINTR : 0; });
+  context.executor_open_block();
+  add_writeback_test_payload(context);
+  context.executor_close_block();
+  finish_file(context);
+  EXPECT_EQ(calls, 2);
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_FALSE(context.log_stats.writeback_unsupported);
+  EXPECT_GT(context.log_stats.writeback_bytes, 0U);
+  EXPECT_TRUE(
+      read_final_events_file(temp_dir_, context.get_root_hash()).has_value());
+}
+
+TEST_F(EventBlockContextTest, OptionalStreamWritebackErrorsFallBack)
+{
+  // All optional failures leave the mandatory final file+directory sync.
+  const int errors[] = {ENOSYS, EINVAL, ESPIPE, EPERM,
+                        EACCES, ENOMEM, EAGAIN, EINTR};
+  BlockID id = 1;
+  for (int err : errors) {
+    EventBlockContext context(temp_dir_, id,
+                              EventBlockContext::create_events_file(temp_dir_,
+                                                                    id));
+    ++id;
+    int calls = 0;
+    context.set_stream_writeback_test_hook([&](int, off_t, off_t) {
+      ++calls;
+      return err;
+    });
+    context.executor_open_block();
+    add_writeback_test_payload(context);
+    context.executor_close_block();
+    finish_file(context);
+    EXPECT_EQ(calls, err == EINTR ? 3 : 1);
+    EXPECT_TRUE(context.log_stats.writeback_unsupported);
+    EXPECT_EQ(context.log_stats.writeback_count, 1U);
+    EXPECT_EQ(context.log_stats.writeback_bytes, 0U);
+    auto root = context.get_root_hash();
+    auto file = EventBlockContext::final_events_filename(temp_dir_, root);
+    EXPECT_TRUE(read_final_events_file(temp_dir_, root).has_value());
+    EXPECT_EQ(std::filesystem::file_size(file),
+              context.log_stats.payload_bytes);
+    // Direct contexts do not use the RPC layer's shared-name reference count;
+    // this iteration has no other live holder, so clean its published file.
+    std::filesystem::remove(file);
+  }
+}
+
+using EventBlockContextDeathTest = EventBlockContextTest;
+
+TEST_F(EventBlockContextDeathTest, StreamWritebackIOErrorFailsStop)
+{
+  X23_EXPECT_DEATH(
+      {
+        EventBlockContext context(
+            temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
+        context.set_stream_writeback_test_hook(
+            [](int, off_t, off_t) { return EIO; });
+        context.executor_open_block();
+        add_writeback_test_payload(context);
+        context.executor_close_block();
+        finish_file(context);
+      },
+      "failed to initiate event file writeback");
+}
+
+TEST_F(EventBlockContextDeathTest, StreamWritebackNoSpaceFailsStop)
+{
+  X23_EXPECT_DEATH(
+      {
+        EventBlockContext context(
+            temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
+        context.set_stream_writeback_test_hook(
+            [](int, off_t, off_t) { return ENOSPC; });
+        context.executor_open_block();
+        add_writeback_test_payload(context);
+        context.executor_close_block();
+        finish_file(context);
+      },
+      "failed to initiate event file writeback");
+}
+
 TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
 {
   EventBlockContext context(temp_dir_, 1,
-                            EventBlockContext::create_events_file(temp_dir_, 1));
+                            EventBlockContext::create_events_file(temp_dir_,
+                                                                  1));
   std::latch entered(1), release(1), finished(1);
   context.set_stream_writeback_test_hook([&](int fd, off_t, off_t) {
     entered.count_down();

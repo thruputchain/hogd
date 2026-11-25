@@ -263,12 +263,18 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
       // hold the append lock during a potentially blocking hint.
       g.reset_no_yield();
       const auto hint_start = x23::fastclock::now();
-      int err = 0;
-      if (writeback_test_hook_) {
-        err = writeback_test_hook_(fd, start, length);
-      }
-      else if (sync_file_range(fd, start, length, SYNC_FILE_RANGE_WRITE) != 0) {
-        err = errno;
+      int err;
+      constexpr unsigned kMaxHintAttempts = 3;
+      for (unsigned attempt = 0; attempt < kMaxHintAttempts; ++attempt) {
+        err = writeback_test_hook_
+                  ? writeback_test_hook_(fd, start, length)
+                  : (sync_file_range(fd, start, length,
+                                     SYNC_FILE_RANGE_WRITE) == 0
+                         ? 0
+                         : errno);
+        if (err != EINTR) {
+          break;
+        }
       }
       const auto hint_ns = (x23::fastclock::now() - hint_start).count();
       co_await g(lock_);
@@ -278,9 +284,13 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
       if (err == 0) {
         log_stats.writeback_bytes += length;
       }
-      else if (err == ENOSYS || err == EOPNOTSUPP || err == EINVAL) {
-        // Filesystems without range writeback take the stock path for
-        // this file. Real I/O errors must not be swallowed.
+      else if (err == ENOSYS || err == EOPNOTSUPP || err == EINVAL ||
+               err == ESPIPE || err == EPERM || err == EACCES ||
+               err == ENOMEM || err == EAGAIN || err == EINTR) {
+        // Optional capability/resource/policy failure (or repeated signal
+        // interruption): disable hints for this file, then use the stock
+        // final fsync. Actual I/O errors such as EIO/ENOSPC/EDQUOT may
+        // already have been reported by the hint and must fail-stop.
         writeback_enabled_ = false;
         log_stats.writeback_unsupported = true;
       }
