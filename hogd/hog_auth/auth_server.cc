@@ -28,6 +28,7 @@
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
 #include "integration.hh"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
