@@ -227,9 +227,7 @@ TEST_F(AuthVerifyTest, MixedCachedAndColdSignedTransactions)
   };
   const SignedTransaction warm_good = make_signed(warm_address, warm_sk);
 
-  // Each size starts with a different, genuinely uncached account. The
-  // server receives only the warm account's update; the cold account exists
-  // in the DB and has a nonzero signature threshold.
+  // Each size starts with a different, genuinely uncached account.
   uint8_t cold_id = 9;
   for (size_t repeats : {size_t{1}, AuthServer::kMinTxsPerVerifyChunk}) {
     const ContractAddress cold_address = make_test_address(cold_id++);

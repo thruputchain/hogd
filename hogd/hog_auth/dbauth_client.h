@@ -36,7 +36,7 @@ public:
   // Bound replies too: an account may have kMaxSigners ML-DSA keys.
   static constexpr size_t kMaxLookupBatchSize = 256;
 
-  DBAuthClient(dbauth_client_t &&client);
+  explicit DBAuthClient(dbauth_client_t &&client);
 
   size_t max_lookup_batch_size() const { return max_lookup_batch_size_; }
 
@@ -50,6 +50,9 @@ public:
   x23::Async<BlockHeight> subscribe_to_auth_data_changes(AuthCard const &card);
 
 private:
+  static AuthStatus<std::optional<AddressAuthData>>
+  decode_auth_data(DBAuthResult res);
+
   // Sharded DB is not yet implemented.
   dbauth_client_t client_;
   size_t max_lookup_batch_size_;

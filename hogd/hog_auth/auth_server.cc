@@ -347,9 +347,8 @@ AuthServer::gather_missing_auth_data(BlockHeight height,
       pending_lookups;
   size_t next_lookup = 0;
 
-  // Each coroutine owns its arguments and writes only its distinct missing
-  // map entries. Rehashing preserves their addresses; verification starts
-  // after every lookup has finished.
+  // Each coroutine owns its arguments and writes only its own missing
+  // entries, whose addresses stay valid across rehashes.
   auto fetch_missing = [&](ContractAddressBatch addresses,
                            std::vector<AuthStatus<AuthCacheEntry> *> entries)
       -> x23::Async<void> {
@@ -434,9 +433,7 @@ AuthServer::gather_missing_auth_data(BlockHeight height,
   }
 
   if (!missing_auth_data.empty()) {
-    // Join all outcomes before publishing fetched snapshots to the positive
-    // map. Errors belong only to this request, never the cache. Leave mixed
-    // result positions failed so the original verifier skips them.
+    // Only successful snapshots are published; errors stay request-local.
     for (auto &[account, outcome] : missing_auth_data) {
       if (outcome.has_value()) {
         CHECK_PTR(outcome->get());
@@ -486,8 +483,7 @@ AuthServer::verify_transactions(BlockHeight height,
     }
     AuthCacheEntry entry = try_cached_auth_data(height, account);
     if (entry == nullptr) {
-      // Keep all batching state outside the entirely cached request's
-      // coroutine frame. The already collected snapshots stay request-owned.
+      // Hand off to the batching helper so the warm path keeps a small frame.
       had_misses = true;
       co_await gather_missing_auth_data(height, txs, i, auth_data, results);
       break;
@@ -496,7 +492,8 @@ AuthServer::verify_transactions(BlockHeight height,
     auth_data.emplace(account, std::move(entry));
   }
 
-  // Use main's original chunk geometry and signature entry points.
+  // Each chunk costs a hop to the pool and a wakeup, so only split calls big
+  // enough to pay for them; many calls in flight keep the pool busy anyway.
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(),
                   std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,

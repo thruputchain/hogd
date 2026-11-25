@@ -123,18 +123,21 @@ public:
   {
     first_released_.store(std::numeric_limits<size_t>::max());
   }
+
   bool wait_for_batches(size_t count)
   {
     std::unique_lock lock(mutex_);
     return progress_.wait_for(lock, std::chrono::seconds(5),
                               [&] { return batch_sizes_.size() >= count; });
   }
+
   bool wait_for_replies(size_t count)
   {
     std::unique_lock lock(mutex_);
     return progress_.wait_for(lock, std::chrono::seconds(5),
                               [&] { return completed_ >= count; });
   }
+
   void release_reply(size_t first_batch = 0)
   {
     first_released_.store(first_batch);
@@ -169,26 +172,24 @@ private:
 
 static_assert(is_DBAuth1<BatchDBAuthRpc *, x23::MaybeAsync>);
 
-ContractAddress
-address_for(size_t id)
-{
-  ContractAddress address{};
-  address[0] = static_cast<uint8_t>(id);
-  address[1] = static_cast<uint8_t>(id >> 8);
-  return address;
-}
-
-SignedTransaction
-unsigned_tx(ContractAddress address)
-{
-  SignedTransaction tx{};
-  tx.tx.invocation.invoked_address = address;
-  tx.tx.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
-  return tx;
-}
-
 class AuthBatchLookupTest : public ::testing::Test {
 protected:
+  static ContractAddress address_for(size_t id)
+  {
+    ContractAddress address{};
+    address[0] = static_cast<uint8_t>(id);
+    address[1] = static_cast<uint8_t>(id >> 8);
+    return address;
+  }
+
+  static SignedTransaction unsigned_tx(ContractAddress address)
+  {
+    SignedTransaction tx{};
+    tx.tx.invocation.invoked_address = address;
+    tx.tx.auth_claim = AuthClaim(AuthClaimType::kSourceAddressAuthData);
+    return tx;
+  }
+
   AuthBatchLookupTest()
   {
     port_ = db_.start_server(0);

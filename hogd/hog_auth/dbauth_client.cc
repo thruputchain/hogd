@@ -18,10 +18,9 @@
 #include "x23/serialize.h"
 
 namespace hogd {
-namespace {
 
 AuthStatus<std::optional<AddressAuthData>>
-decode_auth_data(DBAuthResult res)
+DBAuthClient::decode_auth_data(DBAuthResult res)
 {
   switch (res.error()) {
   case DBAuthError::kDBAuthSuccess:
@@ -38,14 +37,11 @@ decode_auth_data(DBAuthResult res)
   return AuthError(AuthErrorCode::kAuthInternal);
 }
 
-} // namespace
-
 DBAuthClient::DBAuthClient(dbauth_client_t &&client)
   : client_(std::move(client))
 {
-  // Use the cap enforced by this connection's reader, including clients
-  // configured below the default. Allow room for the reply envelope and
-  // vector length, and budget for fully populated ML-DSA key sets.
+  // Size the batch from this connection's message cap, allowing for the
+  // reply envelope and fully populated ML-DSA key sets.
   constexpr size_t kReplyOverhead = 1024;
   const size_t cap = client_.__send_call->max_message_size;
   CHECK_GT(cap, kReplyOverhead);
