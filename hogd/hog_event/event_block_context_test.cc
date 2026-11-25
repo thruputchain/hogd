@@ -1,13 +1,16 @@
 #include <gtest/gtest.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <cstring>
+#include <fcntl.h>
 #include <filesystem>
 #include <latch>
 #include <span>
 #include <string>
 #include <string_view>
+#include <sys/types.h>
 #include <thread>
 #include <unordered_map>
 #include <utility>

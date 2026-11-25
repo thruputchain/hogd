@@ -13,6 +13,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <expected>
+#include <fcntl.h>
 #include <format>
 #include <fstream>
 #include <ios>
@@ -20,6 +21,7 @@
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
+#include <sys/types.h>
 #include <sys/uio.h> // IWYU pragma: keep
 #include <type_traits>
 #include <unistd.h>
@@ -263,15 +265,17 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
       // hold the append lock during a potentially blocking hint.
       g.reset_no_yield();
       const auto hint_start = x23::fastclock::now();
-      int err;
+      int err = 0;
       constexpr unsigned kMaxHintAttempts = 3;
       for (unsigned attempt = 0; attempt < kMaxHintAttempts; ++attempt) {
-        err = writeback_test_hook_
-                  ? writeback_test_hook_(fd, start, length)
-                  : (sync_file_range(fd, start, length,
-                                     SYNC_FILE_RANGE_WRITE) == 0
-                         ? 0
-                         : errno);
+        if (writeback_test_hook_) {
+          err = writeback_test_hook_(fd, start, length);
+        }
+        else {
+          const int result =
+              sync_file_range(fd, start, length, SYNC_FILE_RANGE_WRITE);
+          err = result == 0 ? 0 : errno;
+        }
         if (err != EINTR) {
           break;
         }

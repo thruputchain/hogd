@@ -467,7 +467,7 @@ echo 'launch event and auth'
 # Other stages, native launches and non-container consumers retain defaults.
 event_command=("$EVENT_BINARY")
 if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
-      ${WORK_ROOT%/} == /workspace/ci_work_dir ]]; then
+  ${WORK_ROOT%/} == /workspace/ci_work_dir ]]; then
   event_command=(env HOGD_EVENT_STREAM_WRITEBACK=1 "$EVENT_BINARY")
 fi
 for node in "${NODE_IDS[@]}"; do
