@@ -13,12 +13,17 @@ ci_enable_error_trace
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
 . "$SCRIPT_DIR/multi_node_event_storage_probe.sh"
+. "$SCRIPT_DIR/multi_node_all_data_storage_probe.sh"
 MULTI_NODE_STORAGE_PROBE=
+MULTI_NODE_ALL_DATA_PROBE=
 if multi_node_storage_probe_mode >/dev/null; then
   multi_node_storage_probe_guard
   [[ $WORK_ROOT == /bench-combined/ci_work_dir/ || $WORK_ROOT == /bench-combined/ci_work_dir ]]
   MULTI_NODE_STORAGE_PROBE=1
-  # Both arms use the stock disk root; treatment alters only Event argv.
+  if [[ $(multi_node_storage_probe_mode) == all-tmpfs ]]; then
+    MULTI_NODE_ALL_DATA_PROBE=1
+  fi
+  # Keep logs, status files and all nonpersistent scratch on the stock disk root.
   WORK_ROOT=/workspace/ci_work_dir
 fi
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
@@ -89,7 +94,9 @@ node_dir() {
 }
 
 node_event_dir() {
-  if [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
+  if [[ -n $MULTI_NODE_ALL_DATA_PROBE ]]; then
+    multi_node_all_data_dir "$1" event
+  elif [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
     multi_node_event_probe_dir "$1"
   else
     printf '%s/event' "$(node_dir "$1")"
@@ -100,8 +107,17 @@ node_log_dir() {
   printf '%s/logs' "$(node_dir "$1")"
 }
 
+node_data_dir() {
+  local node=$1 leaf=$2
+  if [[ -n $MULTI_NODE_ALL_DATA_PROBE ]]; then
+    multi_node_all_data_dir "$node" "$leaf"
+  else
+    printf '%s/%s' "$(node_dir "$node")" "$leaf"
+  fi
+}
+
 node_storage_dir() {
-  printf '%s/chuckd-storage' "$(node_dir "$1")"
+  node_data_dir "$1" chuckd-storage
 }
 
 quote_cmd() {
@@ -318,12 +334,18 @@ kill_stale_processes() {
 }
 
 declare -a MULTI_NODE_STORAGE_PREPARED=()
+declare -a MULTI_NODE_STORAGE_SAMPLERS=()
 
 multi_node_storage_receipt() {
   local action=$1 node=$2 host=$3
   : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"
-  remote_run "$host" "bash /workspace/scripts/ci/multi_node_event_storage_probe.sh $action $node" |
-    tee -a "$HOG_DUMP_DIR/multi-node-event-storage-probe.log"
+  if [[ -n $MULTI_NODE_ALL_DATA_PROBE ]]; then
+    remote_run "$host" "bash /workspace/scripts/ci/multi_node_all_data_storage_probe.sh $action $node" </dev/null |
+      tee -a "$HOG_DUMP_DIR/multi-node-all-data-storage-probe.log"
+  else
+    remote_run "$host" "bash /workspace/scripts/ci/multi_node_event_storage_probe.sh $action $node" |
+      tee -a "$HOG_DUMP_DIR/multi-node-event-storage-probe.log"
+  fi
 }
 
 cleanup() {
@@ -338,8 +360,18 @@ cleanup() {
       IFS=: read -r node host <<<"$record"
       if ! multi_node_storage_receipt reclaim "$node" "$host"; then
         echo "failed to verify multi-node storage reclaim on $host" >&2
+        if [[ -n $MULTI_NODE_ALL_DATA_PROBE ]] && multi_node_all_data_host "$node" "$host"; then
+          multi_node_storage_receipt sample-stop "$node" "$host" || true
+        fi
         [[ $exit_code != 0 ]] || exit_code=1
       fi
+    done
+    # Successful reclaim stops each sampler via its own stage marker. A
+    # failed receipt must not leave a driver-side remote session hanging.
+    local pid
+    for pid in "${MULTI_NODE_STORAGE_SAMPLERS[@]}"; do
+      if [[ $exit_code != 0 ]]; then kill "$pid" 2>/dev/null || true; fi
+      if ! wait "$pid"; then [[ $exit_code != 0 ]] || exit_code=1; fi
     done
   fi
   exit "$exit_code"
@@ -378,6 +410,11 @@ if [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
     for host in ${NODE_HOST_GROUPS[$node]}; do
       multi_node_storage_receipt prepare "$node" "$host"
       MULTI_NODE_STORAGE_PREPARED+=("$node:$host")
+      if [[ -n $MULTI_NODE_ALL_DATA_PROBE ]] && multi_node_all_data_host "$node" "$host"; then
+        remote_run "$host" "bash /workspace/scripts/ci/multi_node_all_data_storage_probe.sh sample $node" </dev/null >"$HOG_DUMP_DIR/multi-node-all-data-sampler-$host.log" 2>&1 &
+        MULTI_NODE_STORAGE_SAMPLERS+=("$!")
+        multi_node_storage_receipt sample-ready "$node" "$host"
+      fi
     done
   done
 fi
@@ -476,7 +513,7 @@ done
 echo 'launch hog-db'
 for node in "${NODE_IDS[@]}"; do
   control_start_with_ulimit "${HOG_DB_HOSTS[$node]}" "node${node}_hog_db" "$SLOT_A_CPUS" \
-    "$HOG_DB_BINARY" --db-path "$(node_dir "$node")/hog-db" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOG_DB_HOSTS[$node]}")" \
+    "$HOG_DB_BINARY" --db-path "$(node_data_dir "$node" hog-db)" --ram-bytes 10000000000 --bind-ip "$(hog_ip "${HOG_DB_HOSTS[$node]}")" \
     --coordinator-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_DB_PORT" --executor-port "$DB_EXECUTOR_PORT" \
     --mempool-port "$DB_MEMPOOL_PORT" --auth-port "$DB_AUTH_PORT" --metrics-port "$DB_HTTP_PORT"
 done
@@ -509,7 +546,7 @@ echo 'launch indexers'
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
   control_start_with_ulimit "${INDEXER_HOSTS[$node]}" "node${node}_indexer" "$SLOT_B_CPUS" \
-    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_dir "$node")/indexer" \
+    "$INDEXER_BINARY" --event-addr "$(hog_ip "$event_host"):$EVENT_INDEXER_PORT" --db-path "$(node_data_dir "$node" indexer)" \
     --bind-ip "$(hog_ip "${INDEXER_HOSTS[$node]}")" --block-explorer-port "$INDEXER_BLOCK_EXPLORER_PORT" --metrics-port "$INDEXER_HTTP_PORT"
 done
 

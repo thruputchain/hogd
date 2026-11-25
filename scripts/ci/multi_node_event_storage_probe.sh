@@ -7,6 +7,7 @@ multi_node_storage_probe_mode() {
   case ${GIT_BRANCH:-} in
     codex/multinode-event-disk-probe) printf 'disk\n' ;;
     codex/multinode-event-tmpfs-probe) printf 'tmpfs\n' ;;
+    codex/multinode-all-data-tmpfs-probe) printf 'all-tmpfs\n' ;;
     *) return 1 ;;
   esac
 }
@@ -22,7 +23,10 @@ multi_node_event_probe_dir() {
   local node=$1
   [[ $node == 0 || $node == 1 ]] || return 1
   multi_node_storage_probe_guard || return 1
-  if [[ $(multi_node_storage_probe_mode) == tmpfs ]]; then
+  local mode
+  mode=$(multi_node_storage_probe_mode)
+  [[ $mode == disk || $mode == tmpfs ]] || return 2
+  if [[ $mode == tmpfs ]]; then
     printf '/bench-combined/multi-node-event-%s/node%s/event\n' "$HOG_XID" "$node"
   else
     printf '/workspace/ci_work_dir/mempool_multi_node_bench/node%s/event\n' "$node"
@@ -33,6 +37,7 @@ multi_node_probe_receipt() {
   local action=$1 node=$2 mode host disk_node baseline_file baseline= data_leaf= event_leaf= ram_parent= before= after= status= stopped=
   multi_node_storage_probe_guard
   mode=$(multi_node_storage_probe_mode)
+  [[ $mode == disk || $mode == tmpfs ]] || return 2
   host=${HOG_HOST:?}
   case "$node:$host" in
     0:hog4|1:hog8) data_leaf=chuckd-storage ;;
