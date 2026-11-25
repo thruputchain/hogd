@@ -37,6 +37,8 @@ using AuthCacheEntry =
 
 class AuthServer {
 public:
+  static constexpr size_t kMaxLookupBatchesInFlight = 4;
+
   // The most key changes one KeyChangeChunk forwarded to the mempool carries.
   // A KeyChange is 1.1 KB on the wire at most (21 signer slots), so a chunk
   // stays under 9 MiB, below x23's 16 MiB default record cap.
@@ -109,6 +111,14 @@ public:
   }
 
 private:
+  x23::Async<BlockHeight> wait_for_height(BlockHeight height);
+
+  // A successful null pointer means the DB must be queried. A non-null entry
+  // (including a cached missing account) or an error is already conclusive.
+  AuthStatus<AuthCacheEntry> check_auth_cache(BlockHeight height,
+                                              BlockHeight current_height,
+                                              const ContractAddress &address);
+
   // [address]'s cached entry if it is valid at [height], else nullptr. The
   // caller must have seen this server reach [height].
   AuthCacheEntry cached_entry_at(BlockHeight height,
