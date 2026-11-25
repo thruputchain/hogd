@@ -80,7 +80,8 @@ def main():
     # Only the owned node's temporary state moves. Results, logs and every
     # other process's temporary files keep their normal paths.
     data_root = env.get("HOGD_CI_SCHEDGATEWAY_DATA_ROOT") or None
-    with tempfile.TemporaryDirectory(prefix="schedgateway-bench-", dir=data_root) as data, \
+    with tempfile.TemporaryDirectory(
+            prefix="schedgateway-bench-", dir=data_root) as data, \
             (output / "node.log").open("w") as node_log, \
             (output / "readiness.json").open("w") as readiness, \
             (output / "client.log").open("w") as client_log:

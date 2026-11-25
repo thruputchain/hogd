@@ -44,7 +44,7 @@ for config in calls:64:1:5000000 batches:8:100:8000000; do
     data_root=$HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT
   fi
   HOGD_CI_SCHEDGATEWAY_DATA_ROOT="$data_root" \
-  SCHEDGATEWAY_BENCH_OUTSTANDING=$outstanding \
+    SCHEDGATEWAY_BENCH_OUTSTANDING=$outstanding \
     SCHEDGATEWAY_BENCH_BATCH=$batch \
     SCHEDGATEWAY_BENCH_TRANSACTIONS=$transactions \
     "$(dirname "$0")/schedgateway_bench.sh" "$OUTPUT_ROOT/$name" ||

@@ -8,7 +8,8 @@ import tempfile
 import unittest
 
 RUNNER = Path(__file__).with_name("run_schedgateway_bench.py")
-STRESS_WRAPPER = RUNNER.resolve().parents[3] / "scripts/ci/schedgateway_stress_bench.sh"
+STRESS_WRAPPER = (RUNNER.resolve().parents[3]
+                  / "scripts/ci/schedgateway_stress_bench.sh")
 
 NODE = """#!/usr/bin/env python3
 import json, pathlib, sys, time
@@ -48,7 +49,8 @@ class DataRootTest(unittest.TestCase):
             dedicated.mkdir()
             for path, contents in (
                 (build / "hogd/devnode/hog-devnode", NODE),
-                (build / "hogd/hog_mempool/test/schedgateway_client_bench", CLIENT),
+                (build / "hogd/hog_mempool/test/schedgateway_client_bench",
+                 CLIENT),
             ):
                 path.parent.mkdir(parents=True)
                 path.write_text(contents)
@@ -65,8 +67,10 @@ class DataRootTest(unittest.TestCase):
                 env=env, capture_output=True, text=True, timeout=10,
             )
             self.assertEqual(run.returncode == 0, not failures, run.stderr)
-            manifest = Path(json.loads((output / "readiness.json").read_text())["manifestPath"])
-            self.assertEqual(manifest.parent.parent.parent, dedicated if override else default)
+            readiness = json.loads((output / "readiness.json").read_text())
+            manifest = Path(readiness["manifestPath"])
+            self.assertEqual(manifest.parent.parent.parent,
+                             dedicated if override else default)
             self.assertTrue((output / "manifest.json").is_file())
             self.assertTrue((output / "node.log").is_file())
             self.assertTrue((output / "client.log").is_file())
@@ -84,16 +88,19 @@ class DataRootTest(unittest.TestCase):
                 '#!/usr/bin/env bash\n'
                 'mkdir -p "$1"\n'
                 'printf "%s;%s;%s;%s\\n" "$HOGD_CI_SCHEDGATEWAY_DATA_ROOT" '
-                '"$SCHEDGATEWAY_BENCH_OUTSTANDING" "$SCHEDGATEWAY_BENCH_BATCH" '
+                '"$SCHEDGATEWAY_BENCH_OUTSTANDING" '
+                '"$SCHEDGATEWAY_BENCH_BATCH" '
                 '"$SCHEDGATEWAY_BENCH_TRANSACTIONS" >"$1/receipt"\n'
             )
             fake.chmod(0o755)
-            env = dict(os.environ, HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT="/dedicated")
+            env = dict(os.environ,
+                       HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT="/dedicated")
             env.pop("HOGD_CI_SCHEDGATEWAY_DATA_ROOT", None)
             output = root / "output"
             subprocess.run(["bash", str(stress), str(output)], env=env,
                            check=True, capture_output=True)
-            self.assertEqual((output / "calls/receipt").read_text().strip(), ";64;1;5000000")
+            self.assertEqual((output / "calls/receipt").read_text().strip(),
+                             ";64;1;5000000")
             self.assertEqual((output / "batches/receipt").read_text().strip(),
                              "/dedicated;8;100;8000000")
 
