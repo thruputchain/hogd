@@ -280,6 +280,52 @@ wrapper_over_cap(const SignedTransaction &tx)
   return true;
 }
 
+using AuthDataByAccount =
+    std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
+
+// Verifies each of [txs] against its account's entry in [auth_data], writing
+// kAuthFailed to the matching element of [results] for each that fails. Skips
+// transactions the lookup pass already failed (over the size cap, or no auth
+// data); they have no entry in [auth_data].
+void
+verify_chunk(std::span<const SignedTransaction> txs,
+             std::span<AuthErrorCode> results,
+             const AuthDataByAccount &auth_data,
+             const NetworkHash &network_hash)
+{
+  x23::Buf signature_preimage;
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (results[i] != AuthErrorCode::kAuthSuccess) {
+      continue;
+    }
+
+    const auto account_it = auth_data.find(tx.tx.invocation.invoked_address);
+    CHECK(account_it != auth_data.end());
+    const std::optional<AddressAuthData> &source_auth_data =
+        account_it->second->second;
+
+    AuthVerifyStatus<void> verify_result =
+        verify_auth(tx, source_auth_data ? &*source_auth_data : nullptr,
+                    network_hash, signature_preimage);
+    if (!verify_result.has_value()) {
+      results[i] = AuthErrorCode::kAuthFailed;
+    }
+    // [results] starts as all kAuthSuccess, so a pass needs no write.
+  }
+}
+
+// verify_chunk() on the pool, for one chunk of a call split over several.
+x23::Async<void>
+verify_chunk_on_pool(std::span<const SignedTransaction> txs,
+                     std::span<AuthErrorCode> results,
+                     const AuthDataByAccount &auth_data,
+                     NetworkHash network_hash)
+{
+  co_await default_coropoll().pool_.bg();
+  verify_chunk(txs, results, auth_data, network_hash);
+}
+
 } // namespace
 
 x23::Async<AuthErrorCodeBatch>
@@ -296,12 +342,13 @@ AuthServer::verify_transactions(BlockHeight height,
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
+  // Retain the original positive-entry map and signature verifier on the
+  // cache-hit path. The separate outcome map is populated only for misses;
+  // pending RPCs never mutate the positive map while preparation is running.
+  AuthDataByAccount auth_data;
   std::unordered_map<ContractAddress, AuthStatus<AuthCacheEntry>,
                      SipHash24Hasher>
-      auth_data;
-  // The map owns each snapshot until all workers finish. These pointers avoid
-  // hashing the address again in every worker, including repeated addresses.
-  std::vector<const AuthStatus<AuthCacheEntry> *> tx_auth_data(txs.size());
+      missing_auth_data;
   ContractAddressBatch missing_addresses;
   std::vector<AuthStatus<AuthCacheEntry> *> missing_entries;
   // Reuse a fixed set of slots to bound outstanding RPCs without allocating
@@ -309,12 +356,10 @@ AuthServer::verify_transactions(BlockHeight height,
   std::array<std::optional<x23::Async<void>>, kMaxLookupBatchesInFlight>
       pending_lookups;
   size_t next_lookup = 0;
-  bool had_misses = false;
-  BlockHeight current_height = kUninitializedHeight;
 
-  // Each coroutine owns its arguments and writes only its distinct map
-  // entries. Rehashing preserves their addresses; verification starts after
-  // every lookup has finished.
+  // Each coroutine owns its arguments and writes only its distinct missing
+  // map entries. Rehashing preserves their addresses; verification starts
+  // after every lookup has finished.
   auto fetch_missing = [&](ContractAddressBatch addresses,
                            std::vector<AuthStatus<AuthCacheEntry> *> entries)
       -> x23::Async<void> {
@@ -366,28 +411,26 @@ AuthServer::verify_transactions(BlockHeight height,
       results[i] = AuthErrorCode::kAuthFailed;
       continue;
     }
-    auto [it, inserted] =
-        auth_data.try_emplace(tx.tx.invocation.invoked_address);
-    tx_auth_data[i] = &it->second;
-    if (inserted) {
-      if (current_height == kUninitializedHeight) {
-        CHECK_NE(height, kUninitializedHeight);
-        CHECK_NE(height, kInitializing);
-        current_height = current_height_futex_.load();
-        if (current_height == kUninitializedHeight ||
-            current_height == kInitializing || current_height < height) {
-          current_height = co_await wait_for_height(height);
-        }
-      }
-      it->second = check_auth_cache(height, current_height, it->first);
-      if (it->second.has_value() && *it->second == nullptr) {
-        had_misses = true;
-        missing_addresses.push_back(it->first);
-        missing_entries.push_back(&it->second);
-        if (missing_addresses.size() ==
-            dbauth_client_.max_lookup_batch_size()) {
-          co_await launch_lookup();
-        }
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
+    }
+    if (!missing_auth_data.empty() && missing_auth_data.contains(account)) {
+      continue;
+    }
+    if (AuthCacheEntry entry = try_cached_auth_data(height, account)) {
+      auth_data.emplace(account, std::move(entry));
+      continue;
+    }
+    auto [it, inserted] = missing_auth_data.try_emplace(account);
+    CHECK(inserted);
+    const BlockHeight current_height = co_await wait_for_height(height);
+    it->second = check_auth_cache(height, current_height, account);
+    if (it->second.has_value() && *it->second == nullptr) {
+      missing_addresses.push_back(account);
+      missing_entries.push_back(&it->second);
+      if (missing_addresses.size() == dbauth_client_.max_lookup_batch_size()) {
+        co_await launch_lookup();
       }
     }
   }
@@ -400,52 +443,52 @@ AuthServer::verify_transactions(BlockHeight height,
     }
   }
 
-  auto verify_chunk = [&](ChunkRange chunk) {
-    x23::Buf signature_preimage;
-    for (size_t i = chunk.start; i < chunk.end; i++) {
+  if (!missing_auth_data.empty()) {
+    // Join all outcomes before publishing fetched snapshots to the positive
+    // map. Errors belong only to this request, never the cache. Leave mixed
+    // result positions failed so the original verifier skips them.
+    for (auto &[account, outcome] : missing_auth_data) {
+      if (outcome.has_value()) {
+        CHECK_PTR(outcome->get());
+        auth_data.emplace(account, std::move(*outcome));
+      }
+    }
+    for (size_t i = 0; i < txs.size(); ++i) {
       if (results[i] != AuthErrorCode::kAuthSuccess) {
         continue;
       }
-      const auto &entry = *tx_auth_data[i];
-      if (!entry.has_value()) {
+      const auto miss =
+          missing_auth_data.find(txs[i].tx.invocation.invoked_address);
+      if (miss != missing_auth_data.end() && !miss->second.has_value()) {
         trace("Populate auth data error: {}",
-              std::to_underlying(entry.error().code()));
-        results[i] = entry.error().code();
-        continue;
-      }
-      CHECK_PTR(entry->get());
-      const auto &source_auth_data = (*entry)->second;
-      if (!verify_auth(txs[i], source_auth_data ? &*source_auth_data : nullptr,
-                       network_hash_, signature_preimage)) {
-        results[i] = AuthErrorCode::kAuthFailed;
+              std::to_underlying(miss->second.error().code()));
+        results[i] = miss->second.error().code();
       }
     }
-  };
+  }
 
-  // Retain main's minimum chunk width and single-chunk fast path.
+  // Use main's original chunk geometry and signature entry points.
   const std::vector<ChunkRange> chunks =
       make_chunks(txs.size(),
                   std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
                                      max_parallelism));
+  const std::span<AuthErrorCode> result_span(results.data(), results.size());
   if (chunks.size() == 1) {
-    // DB replies can resume the caller on the RPC reader thread. Keep
-    // signature verification off that thread without adding a hop to warm
-    // cache hits, which still run on the preparation worker.
-    if (had_misses) {
+    // DB replies can resume on the reader. Do not hold it for signatures.
+    if (!missing_auth_data.empty()) {
       co_await default_coropoll().pool_.bg();
     }
-    verify_chunk(chunks.front());
+    verify_chunk(txs, result_span, auth_data, network_hash_);
     co_return results;
   }
   std::vector<x23::Async<void>> handles;
   handles.reserve(chunks.size());
   for (const ChunkRange &chunk : chunks) {
+    const size_t count = chunk.end - chunk.start;
     handles.push_back(
-        [](ChunkRange chunk, const auto &verify) noexcept -> x23::Async<void> {
-          co_await default_coropoll().pool_.bg();
-          verify(chunk);
-          co_return;
-        }(chunk, verify_chunk));
+        verify_chunk_on_pool(txs.subspan(chunk.start, count),
+                             result_span.subspan(chunk.start, count), auth_data,
+                             network_hash_));
   }
   for (x23::Async<void> &handle : handles) {
     co_await handle;
