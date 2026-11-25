@@ -244,7 +244,7 @@ write_payment_phase_records(const char *path,
       out << "worker\t" << r.accounts << '\t' << r.txs << '\t' << r.threads
           << '\t' << r.rep << '\t' << i << '\t' << w.txs << '\t' << w.submit_ns
           << '\t' << w.start_ns << '\t' << w.context_ready_ns << '\t'
-          << w.finish_ns << '\n';
+          << w.finish_ns << '\t' << w.return_ns << '\n';
     }
   }
   out.flush();
