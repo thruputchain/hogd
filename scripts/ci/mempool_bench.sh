@@ -17,12 +17,12 @@ DB_WORK_DIR="$WORK_DIR/"
 split_storage=
 if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
       $WORK_ROOT == /bench-combined/ci_work_dir &&
-      ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe &&
+      ${GIT_BRANCH:-} == codex/single-commit-db-tmpfs-probe &&
       ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
   split_storage=1
   split_disk_root="/workspace/.ci/single-node-split-$HOG_XID"
   INDEXER_DB_DIR="$split_disk_root/indexer"
-  DB_WORK_DIR="$split_disk_root/db/"
+  DB_WORK_DIR="$WORK_ROOT/db/"
 fi
 . "$(dirname "$0")/single_node_control_log_capture.sh"
 
@@ -188,7 +188,7 @@ mempool_cmd=(timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --auth-port "$MEMPOOL_AUTH_PORT" \
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT")
 if [[ ${HOGD_CI_OFFLINE:-0} == 1 &&
-      ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe ]]; then
+      ${GIT_BRANCH:-} == codex/single-commit-db-tmpfs-probe ]]; then
   # Retain the exact same-clock phase and interval records in the uploaded
   # diagnostic artifact, rather than relying on a truncated Actions log.
   : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"

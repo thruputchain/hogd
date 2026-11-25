@@ -4,7 +4,7 @@ set -e
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   # Temporary diagnostic branch: retain all artifacts but do not request
   # publication from the trusted controller. This does not alter any main run.
-  if [[ ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe ]]; then
+  if [[ ${GIT_BRANCH:-} == codex/single-commit-db-tmpfs-probe ]]; then
     rm -f -- metrics_history/.publish-requested
     echo 'Commit phase probe: metrics are artifact-only (no publication request).'
     exit 0

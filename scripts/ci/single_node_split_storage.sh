@@ -9,7 +9,7 @@ split_storage_role() {
   case "$host" in
     hog4) ram_leaf="$ram_root/ci_work_dir/chuckd-storage"; writers='chuckd([.]dev)?|scpd([.]dev)?' ;;
     hog9) ram_leaf="$ram_root/ci_work_dir/event"; disk_leaf="$disk_root/.ci/single-node-split-$run/indexer"; writers='hog-event|hog-indexer' ;;
-    hog11) disk_leaf="$disk_root/.ci/single-node-split-$run/db"; writers='hog-db' ;;
+    hog11) ram_leaf="$ram_root/ci_work_dir/db"; writers='hog-db' ;;
     *) return 2 ;;
   esac
   [[ $(realpath -e "$ram_root") == "$ram_root" &&
@@ -22,6 +22,11 @@ split_storage_role() {
   if [[ $action == prepare ]]; then
     if [[ -n $ram_leaf ]]; then
       [[ ! -e $ram_leaf && ! -L $ram_leaf ]]
+      if [[ $host == hog11 ]]; then
+        mkdir -m 700 -- "$ram_leaf"
+        [[ $(realpath -e "$ram_leaf") == "$ram_leaf" &&
+           $(findmnt -rn -o TARGET,FSTYPE -T "$ram_leaf") == "$ram_root tmpfs" ]]
+      fi
       printf 'SINGLE_NODE_STORAGE role=%s action=prepare path=%s backing=tmpfs mount=%s\n' "$host" "$ram_leaf" "$ram_root"
       df -Pk -- "$ram_root"
     fi
@@ -60,7 +65,7 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   [[ $# == 1 && ${HOGD_CI_CONTAINER:-0} == 1 &&
      ${HOGD_CI_OFFLINE:-0} == 1 &&
      ${HOGD_COMBINED_WORK_DIR:-} == /bench-combined/ci_work_dir/ &&
-     ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe &&
+     ${GIT_BRANCH:-} == codex/single-commit-db-tmpfs-probe &&
      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]
   split_storage_role "$1" "${HOG_HOST:?}" /bench-combined /workspace "$HOG_XID"
 fi
