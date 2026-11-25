@@ -175,15 +175,14 @@ CoroPoll::ReadSome::attempt()
   if (cp_.stop_requested())
     return Errno{EBADF};
   tok_ = cp_.read_clear(fd_);
-  auto [r, w] = cp_.get_rw(fd_, false);
-  if (!w)
+  auto [r, w] = cp_.get_rw(fd_);
+  if (!r)
     return Errno{EBADF};
   w_ = std::move(w);
 
-  // Nothing should have used read() on a file descriptor before
-  // handing it to us, but if something did we must not skip over
-  // bytes it left in the ReadBuffer.
-  if (r && r->nbuffered()) [[unlikely]]
+  // We read straight into buf_, but must not skip over bytes that an
+  // earlier read() on this file descriptor left in its ReadBuffer.
+  if (r->nbuffered()) [[unlikely]]
     return size_t((*r)(fd_.get(), buf_, len_));
 
   ssize_t n = ::read(fd_.get(), buf_, len_);

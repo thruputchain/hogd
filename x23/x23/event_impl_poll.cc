@@ -70,7 +70,7 @@ CoroPollImpl::get_writer(BorrowedFd fd)
 }
 
 std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
-CoroPollImpl::get_rw(BorrowedFd fd, bool make_reader)
+CoroPollImpl::get_rw(BorrowedFd fd)
 {
   auto s = state_.take();
   if (stop_requested())
@@ -78,7 +78,7 @@ CoroPollImpl::get_rw(BorrowedFd fd, bool make_reader)
   auto &f = (*s)[fd.get()];
   if (f.poisoned)
     return {nullptr, nullptr};
-  return {make_reader ? f.reader() : f.reader_if_exists(), f.writer()};
+  return {f.reader(), f.writer()};
 }
 
 void

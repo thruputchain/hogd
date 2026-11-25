@@ -95,8 +95,6 @@ public:
     }
     return ret;
   }
-  // Like get(), but returns nullptr instead of creating the object.
-  RefPtr<T> peek() { return t_.load(); }
   void reset() { t_.store(nullptr); }
 
 private:
@@ -202,7 +200,6 @@ struct BufHolder {
   OnDemandSharedPtr<WriteBuffer> writer_;
 
   auto reader() { return reader_.get(); }
-  auto reader_if_exists() { return reader_.peek(); }
   auto writer() { return writer_.get(); }
   auto buf_clear()
   {
@@ -362,11 +359,7 @@ protected:
   void wake();
   RefPtr<ReadBuffer> get_reader(BorrowedFd fd);
   RefPtr<WriteBuffer> get_writer(BorrowedFd fd);
-  // If make_reader is false, the ReadBuffer will be null unless
-  // something already created it.  The WriteBuffer is null only if
-  // the file descriptor is poisoned (or the CoroPoll is stopping).
-  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>>
-  get_rw(BorrowedFd fd, bool make_reader = true);
+  std::pair<RefPtr<ReadBuffer>, RefPtr<WriteBuffer>> get_rw(BorrowedFd fd);
 
 private:
   std::stop_source ss_;
