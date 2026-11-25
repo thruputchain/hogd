@@ -145,7 +145,7 @@ $CONTROL_CLI hog11 $CI_CONTROL_PORT expect_running
 
 echo 'launch mempool'
 set +e
-timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
+mempool_cmd=(timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --bind-ip "$(hog_ip hog10)" \
   --metrics-port "$MEMPOOL_HTTP_PORT" \
   --network-hash 11111111111111111111111111111112 \
@@ -155,8 +155,23 @@ timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --event-port "$MEMPOOL_EVENT_PORT" \
   --executor-port "$MEMPOOL_EXECUTOR_PORT" \
   --auth-port "$MEMPOOL_AUTH_PORT" \
-  --coordinator-port "$MEMPOOL_COORDINATOR_PORT"
-mempool_status=$?
+  --coordinator-port "$MEMPOOL_COORDINATOR_PORT")
+if [[ ${HOGD_CI_OFFLINE:-0} == 1 &&
+      ${GIT_BRANCH:-} == codex/single-commit-component-probe ]]; then
+  # Retain the exact same-clock phase and interval records in the uploaded
+  # diagnostic artifact, rather than relying on a truncated Actions log.
+  : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"
+  "${mempool_cmd[@]}" 2>&1 | tee "$HOG_DUMP_DIR/single-commit-component-probe.log"
+  mempool_pipeline_status=("${PIPESTATUS[@]}")
+  mempool_status=${mempool_pipeline_status[0]}
+  if [[ ${mempool_pipeline_status[1]} != 0 ]]; then
+    echo 'failed to retain commit component diagnostic log' >&2
+    exit "${mempool_pipeline_status[1]}"
+  fi
+else
+  "${mempool_cmd[@]}"
+  mempool_status=$?
+fi
 set -e
 
 coordinator_status=0
