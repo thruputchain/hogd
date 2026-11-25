@@ -58,7 +58,11 @@ BUILD_DIR=$1
 
 ## payments_bench 10 accounts
 ./scripts/make_metric_file.sh payments-bench-rv32-10 $GIT_branch $GIT_commit $GIT_commit_time
-./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
+if [ "${GIT_BRANCH:-}" = codex/payment-event-media-abba ]; then
+    ./scripts/ci/payment_event_media_abba.sh "$BUILD_DIR" "metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit"
+else
+    ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
+fi
 
 ## payments_bench 2 accounts
 ./scripts/make_metric_file.sh payments-bench-rv32-2 $GIT_branch $GIT_commit $GIT_commit_time

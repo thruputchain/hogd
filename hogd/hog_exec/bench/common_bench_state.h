@@ -5,6 +5,7 @@
 #include <cstdlib>
 #include <format>
 #include <memory>
+#include <optional>
 #include <regex>
 #include <span>
 #include <string>
@@ -100,7 +101,8 @@ local_hog_ip()
 class CommonBenchState {
 public:
   CommonBenchState(std::vector<std::string> server_addrs, uint16_t exec_port,
-                   uint16_t coord_port)
+                   uint16_t coord_port,
+                   std::optional<std::string> event_dir = std::nullopt)
     : server_addrs_(std::move(server_addrs)), exec_port_(exec_port),
       coord_port_(coord_port)
   {
@@ -114,15 +116,15 @@ public:
     event_server_handle_ =
         std::make_unique<ControlServerHandle>(event_server_addr());
 
-    if (event_server_handle_->ci_client.clear_work_dir() !=
-        CIServerErrorCode::kCIServerErrorCodeOK) {
+    if (!event_dir && event_server_handle_->ci_client.clear_work_dir() !=
+                          CIServerErrorCode::kCIServerErrorCodeOK) {
       panic("Failed to clear event server work dir");
     }
 
     uint16_t event_server_port = mock_sched_event_server_.start_server(0);
 
     start_db_server();
-    event_card_ = start_event_server(event_server_port);
+    event_card_ = start_event_server(event_server_port, event_dir);
     connect_coord();
     connect_exec();
     connect_event();
@@ -262,18 +264,25 @@ private:
                                             "-c", std::to_string(coord_port_)});
   }
 
-  EventCard start_event_server(uint16_t event_server_port)
+  EventCard start_event_server(uint16_t event_server_port,
+                               const std::optional<std::string> &event_dir)
   {
     const std::string mempool_ip = local_hog_ip();
 
-    auto work_dir = event_server_handle_->ci_client.query_work_dir();
+    std::string work_dir;
+    if (event_dir) {
+      work_dir = *event_dir;
+    }
+    else {
+      auto status = event_server_handle_->ci_client.query_work_dir();
+      work_dir.assign(status.work_dir().begin(), status.work_dir().end());
+    }
 
     event_server_handle_->ci_client.start_server(
         "hogd/hog_event/hog-event",
         {"--mempool-addr",
          format_advertised_address(mempool_ip, event_server_port), "--bind-ip",
-         hog_ip(event_server_addr()), "--work-dir",
-         std::string(work_dir.work_dir().begin(), work_dir.work_dir().end())});
+         hog_ip(event_server_addr()), "--work-dir", work_dir});
 
     return mock_sched_event_server_->impl()->await_event_card();
   }

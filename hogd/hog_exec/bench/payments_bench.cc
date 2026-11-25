@@ -7,8 +7,10 @@
 #include <future>
 #include <optional>
 #include <print>
+#include <regex>
 #include <span>
 #include <string>
+#include <string_view>
 #include <utility>
 #include <vector>
 
@@ -33,10 +35,43 @@ namespace hogd {
 
 namespace {
 
+// Only the private nonpublishing physical diagnostic supplies this selector.
+// The stock caller retains CommonBenchState's usual remote work directory.
+std::optional<std::string>
+payment_event_media_dir(const std::vector<std::string> &servers,
+                        uint32_t accounts)
+{
+  const char *arm = std::getenv("HOGD_PAYMENT_EVENT_MEDIA_ARM");
+  if (!arm) {
+    return std::nullopt;
+  }
+  auto env = [](const char *key) -> std::string_view {
+    const char *value = std::getenv(key);
+    return value ? std::string_view(value) : std::string_view{};
+  };
+  CHECK(env("GIT_BRANCH") == "codex/payment-event-media-abba" &&
+        env("HOGD_CI_CONTAINER") == "1" && env("HOGD_CI_OFFLINE") == "1" &&
+        env("HOG_HOST") == "hog10" &&
+        env("HOGD_COMBINED_WORK_DIR") == "/bench-combined/ci_work_dir/");
+  CHECK(accounts == 10 && servers.size() == 2 && servers[0] == "hog11" &&
+        servers[1] == "hog8");
+  const std::string run(env("HOG_XID"));
+  CHECK(std::regex_match(
+      run, std::regex("hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*")));
+  const std::string_view slot(arm);
+  CHECK(slot == "1-disk" || slot == "2-ram" || slot == "3-ram" ||
+        slot == "4-disk");
+  return std::format("{}/payment-event-abba-{}-{}",
+                     slot.ends_with("ram") ? "/bench-combined"
+                                           : "/workspace/.ci",
+                     run, slot);
+}
+
 struct BenchmarkState : public CommonBenchState {
   BenchmarkState(std::vector<std::string> server_addrs, uint16_t exec_port,
                  uint16_t coord_port, uint32_t num_accounts)
-    : CommonBenchState(std::move(server_addrs), exec_port, coord_port),
+    : CommonBenchState(server_addrs, exec_port, coord_port,
+                       payment_event_media_dir(server_addrs, num_accounts)),
       num_accounts_(num_accounts)
   {}
 
