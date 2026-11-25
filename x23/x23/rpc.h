@@ -439,12 +439,6 @@ private:
     cp_->awrite(fd_, make_record(msg, x...));
   }
 
-  // Process one complete record that resides in chunk.  bufend is the
-  // end of the memory it is safe to read beyond the record.  Returns
-  // false if the record was bad and the stream has been failed.
-  bool input(const RefPtr<RecvChunk> &chunk, BufView record,
-             const std::uint8_t *bufend);
-
   friend class RefCount;
 };
 } // namespace detail
@@ -555,25 +549,15 @@ struct RpcStream : public detail::RpcStreamImpl {
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
     cp_->awrite(fd_, std::move(record));
 
-    // The reply stays in the reader's chunk, which rec keeps alive
-    // until we are done deserializing.
-    detail::RecordRef rec;
+    // The reply stays in the reader's chunk, which rbuf keeps alive.
+    detail::RecordRef rbuf;
     BufView rv;
     try {
-      rec = co_await a;
-      if (rec.empty()) {
+      rbuf = co_await a;
+      if (rbuf.empty()) {
         throw XdrException("RPC connection closed before reply");
       }
-      // The reader only looks at the xid and message type, so this is
-      // the one place the reply header gets decoded.
-      try {
-        rv = rec.bytes().subspan(deserialize_from(&msg, rec.bytes()));
-      } catch (...) {
-        // A reply with a garbled header means we can no longer trust
-        // anything the peer sends.
-        this->fail();
-        throw;
-      }
+      rv = rbuf.bytes().subspan(deserialize_from(&msg, rbuf.bytes()));
     } catch (const XdrBadInput &e) {
       throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());
     } catch (const std::exception &e) {
