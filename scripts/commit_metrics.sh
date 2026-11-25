@@ -2,6 +2,13 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
+  # Temporary diagnostic branch: retain all artifacts but do not request
+  # publication from the trusted controller. This does not alter any main run.
+  if [[ ${GIT_BRANCH:-} == codex/single-commit-component-probe ]]; then
+    rm -f -- metrics_history/.publish-requested
+    echo 'Commit phase probe: metrics are artifact-only (no publication request).'
+    exit 0
+  fi
   # The trusted controller publishes collected metrics after the job exits.
   mkdir -p metrics_history
   printf '%s\n' "${METRICS_COMMIT_REPO:-hogd}" >metrics_history/.publish-requested

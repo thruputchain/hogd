@@ -857,10 +857,18 @@ MempoolCoordinatorRpc::close_snapshot(BlockID block_id)
 
 x23::Async<RPCError>
 MempoolCoordinatorRpc::eventsched_commit_block(BlockID block_id,
-                                               const ConsensusValue &value)
+                                               const ConsensusValue &value,
+                                               CommitPhaseProbe *probe)
 {
-  co_return co_await event_sched_client_->eventsched_commit_block(block_id,
-                                                                  value);
+  if (probe) {
+    probe->mark(probe->event_begin);
+  }
+  auto result =
+      co_await event_sched_client_->eventsched_commit_block(block_id, value);
+  if (probe) {
+    probe->mark(probe->event_end);
+  }
+  co_return result;
 }
 
 x23::Async<EventBlockResult>
@@ -872,9 +880,18 @@ MempoolCoordinatorRpc::eventsched_close_block(BlockID block_id,
 }
 
 x23::Async<DbBlockResult>
-MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value)
+MempoolCoordinatorRpc::commit_snapshot(BlockID block_id, ConsensusValue value,
+                                       CommitPhaseProbe *probe)
 {
-  co_return co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  if (probe) {
+    probe->mark(probe->db_begin);
+  }
+  auto result =
+      co_await db_sched_client_->dbsched_commit_snapshot(block_id, value);
+  if (probe) {
+    probe->mark(probe->db_end);
+  }
+  co_return result;
 }
 
 x23::Async<void>
@@ -1620,15 +1637,19 @@ MempoolCoordinatorRpc::abandon_block(const PendingBlock &cache)
 }
 
 x23::Async<MempoolCoordinatorRpc::JointCommitResult>
-MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
+MempoolCoordinatorRpc::commit_block(const PendingBlock &cache,
+                                    CommitPhaseProbe *probe)
 {
+  if (probe) {
+    probe->mark(probe->joint_begin);
+  }
   x23::Async<DbBlockResult> commit_snapshot_handle =
-      commit_snapshot(cache.block_id, cache.db_tip.value);
+      commit_snapshot(cache.block_id, cache.db_tip.value, probe);
   std::optional<x23::Async<RPCError>> event_commit_handle;
   std::exception_ptr first_exception;
   try {
     event_commit_handle.emplace(
-        eventsched_commit_block(cache.block_id, cache.db_tip.value));
+        eventsched_commit_block(cache.block_id, cache.db_tip.value, probe));
   } catch (...) {
     first_exception = std::current_exception();
   }
@@ -1653,6 +1674,9 @@ MempoolCoordinatorRpc::commit_block(const PendingBlock &cache)
   }
   if (first_exception) {
     std::rethrow_exception(first_exception);
+  }
+  if (probe) {
+    probe->mark(probe->joint_end);
   }
   co_return result;
 }
@@ -2970,6 +2994,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   const std::chrono::steady_clock::time_point commit_started_at =
       std::chrono::steady_clock::now();
   ElapsedTimer timer;
+  CommitPhaseProbe probe;
   auto emit_commit_stats = [&](CommitMetricsOutcome outcome,
                                size_t reenqueue_size,
                                size_t remove_from_scheduler_size) {
@@ -3005,6 +3030,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
     co_return SchedulerCommitOutcome::SchedulerConcurrentCommit;
   }
 
+  probe.gate_end = CommitPhaseProbe::Clock::now();
   x23::Defer reopen_validation_gate([this]() noexcept {
     try {
       open_validation_gate();
@@ -3123,6 +3149,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
       [&, native_token_age_guard]() -> x23::Async<void> {
         co_await (*native_token_age_guard)(
             scheduler_->pending_native_token_age_update_lock_);
+        // This lock and commit preparation run independently.
+        probe.native_lock_end = CommitPhaseProbe::Clock::now();
         co_return;
       });
 
@@ -3163,6 +3191,15 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
               SchedulerCommitOutcome::SchedulerCommitInvalidConsensusValue;
           co_return;
         }
+        probe.tx_count = commit_plan.committed_cache->txs.size();
+#ifdef HOGD_TEST_COMMIT_PHASE_ALL_BLOCKS
+        // Only for the private small-block test binary; hosted builds use the
+        // full-block threshold below.
+        probe.record = true;
+#else
+        probe.record = probe.tx_count == kMaxBlockSize;
+#endif
+        probe.mark(probe.plan_end);
         co_return;
       });
 
@@ -3174,7 +3211,8 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
           co_return JointCommitResult{};
         }
         CHECK_PTR(commit_plan.committed_cache);
-        co_return co_await commit_block(*commit_plan.committed_cache);
+        co_return co_await commit_block(*commit_plan.committed_cache,
+                                        probe.record ? &probe : nullptr);
       });
 
   // Size the committed block while the commit RPCs are in flight, so
@@ -3191,11 +3229,13 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
                                  return 0;
                                }
                                CHECK_PTR(commit_plan.committed_cache);
+                               probe.mark(probe.measure_begin);
                                size_t tx_bytes = 0;
                                for (const SignedTransaction &tx :
                                     commit_plan.committed_cache->txs) {
                                  tx_bytes += x23::xdr_size(tx);
                                }
+                               probe.mark(probe.measure_end);
                                return tx_bytes;
                              });
 
@@ -3205,6 +3245,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
+        probe.mark(probe.abandon_db_begin);
         x23::Vec<DbSchedResult> results(commit_plan.abandon_block_ids.size(),
                                         DbSchedResult::DbSchedResultError);
         x23::Vec<x23::Async<DbSchedResult>> snapshot_handles;
@@ -3228,6 +3269,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         for (const DbSchedResult result : results) {
           CHECK_EQ(result, DbSchedResult::DbSchedResultOK);
         }
+        probe.mark(probe.abandon_db_end);
         co_return;
       });
 
@@ -3237,6 +3279,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
+        probe.mark(probe.abandon_event_begin);
         x23::Vec<RPCError> results(commit_plan.abandon_block_ids.size(),
                                    RPCError::kRPCUnrecoverable);
         x23::Vec<x23::Async<RPCError>> event_handles;
@@ -3260,6 +3303,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         for (const RPCError result : results) {
           CHECK_EQ(result, RPCError::kRPCNone);
         }
+        probe.mark(probe.abandon_event_end);
         co_return;
       });
 
@@ -3273,6 +3317,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
+        probe.mark(probe.scheduler_begin);
 
         // We need to do two things:
         // 1. If the nominated block is not the committed block, we need to
@@ -3329,6 +3374,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         reenqueue_size = return_to_runqueue.size();
         CHECK_PTR(remove_from_scheduler);
         remove_from_scheduler_size = remove_from_scheduler->size();
+        probe.mark(probe.outcomes_begin);
         if (commit_plan.committed_nominated) {
           // We committed the block we nominated.
           co_await scheduler_->record_committed_transaction_outcomes(
@@ -3357,8 +3403,10 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
               x23::span<const TransactionHash>(*remove_from_scheduler),
               expected_value.proposal_header.block_height);
         }
+        probe.mark(probe.outcomes_end);
         co_await scheduler_->remove_from_scheduler(
             x23::span<const TransactionHash>(*remove_from_scheduler));
+        probe.mark(probe.removal_end);
         if (commit_plan.committed_nominated) {
           InstrumentedCoroGuard cg(
               MempoolMetrics::instance().scheduler_global_lock_wait_seconds,
@@ -3382,6 +3430,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
               commit_plan.committed_cache->db_tip.value.proposal_header
                   .block_height);
         }
+        probe.mark(probe.scheduler_end);
         co_return;
       });
 
@@ -3389,14 +3438,14 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
   // native-token ages to DB after processing those deltas. Keep this lock held
   // until the scheduler has applied pending native-token ages and DB commit is
   // complete, matching the synchronization the pre-DAG code relied on.
-  auto release_native_token_age_node =
-      commit_dag.async<void>("release pending native-token age update",
-                             commit_dag.after(scheduler_update_node,
-                                              commit_block_node),
-                             [native_token_age_guard]() -> x23::Async<void> {
-                               (*native_token_age_guard).reset();
-                               co_return;
-                             });
+  auto release_native_token_age_node = commit_dag.async<void>(
+      "release pending native-token age update",
+      commit_dag.after(scheduler_update_node, commit_block_node),
+      [native_token_age_guard, &probe]() -> x23::Async<void> {
+        (*native_token_age_guard).reset();
+        probe.mark(probe.native_release_end);
+        co_return;
+      });
 
   commit_dag.async<void>(
       "finalize commit",
@@ -3406,6 +3455,7 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         if (invalid_consensus_value) {
           co_return;
         }
+        probe.mark(probe.finalize_begin);
         const JointCommitResult &joint_commit = commit_block_node.get();
         CHECK_EQ(joint_commit.db.result(), DbSchedResult::DbSchedResultOK);
         CHECK_EQ(joint_commit.event_commit, RPCError::kRPCNone);
@@ -3423,7 +3473,9 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         nominated_block_cache_.block_id = 0;
         validated_block_cache_.clear();
 
+        probe.mark(probe.prune_begin);
         co_await scheduler_->increment_current_block();
+        probe.mark(probe.prune_end);
         co_await Health::instance().set_current_block_height(
             last_committed_block_.value.proposal_header.block_height);
         MempoolMetrics::instance().current_block_height.record(
@@ -3466,10 +3518,65 @@ MempoolCoordinatorRpc::schedulercoord_commit_block_impl(
         last_commit_ = std::chrono::steady_clock::now();
         commit_outcome = SchedulerCommitOutcome::SchedulerCommitOK;
         fatal_commit_cleanup.disarm();
+        probe.mark(probe.finalize_end);
         co_return;
       });
 
   co_await commit_dag.run();
+  if (probe.record && commit_dag.ok() &&
+      commit_outcome == SchedulerCommitOutcome::SchedulerCommitOK) {
+    const auto dag_end = CommitPhaseProbe::Clock::now();
+    const auto ns = [&](CommitPhaseProbe::Time stamp) {
+      return std::chrono::duration_cast<std::chrono::nanoseconds>(
+                 stamp - commit_started_at)
+          .count();
+    };
+    info("COMMIT_PHASE_V1 height={} block_id={} tx_count={} nominated={} "
+         "removed={} reenqueue={} start_ns={} "
+         "gate_end={} "
+         "native_lock_end={} "
+         "plan_end={} "
+         "joint_begin={} "
+         "db_begin={} "
+         "db_end={} "
+         "event_begin={} "
+         "event_end={} "
+         "joint_end={} "
+         "measure_begin={} "
+         "measure_end={} "
+         "abandon_db_begin={} "
+         "abandon_db_end={} "
+         "abandon_event_begin={} "
+         "abandon_event_end={} "
+         "scheduler_begin={} "
+         "outcomes_begin={} "
+         "outcomes_end={} "
+         "removal_end={} "
+         "scheduler_end={} "
+         "native_release_end={} "
+         "finalize_begin={} "
+         "prune_begin={} "
+         "prune_end={} "
+         "finalize_end={} "
+         "dag_end={}",
+         expected_value.proposal_header.block_height, block_id, probe.tx_count,
+         commit_plan.committed_nominated, remove_from_scheduler_size,
+         reenqueue_size,
+         std::chrono::duration_cast<std::chrono::nanoseconds>(
+             commit_started_at.time_since_epoch())
+             .count(),
+         ns(probe.gate_end), ns(probe.native_lock_end), ns(probe.plan_end),
+         ns(probe.joint_begin), ns(probe.db_begin), ns(probe.db_end),
+         ns(probe.event_begin), ns(probe.event_end), ns(probe.joint_end),
+         ns(probe.measure_begin), ns(probe.measure_end),
+         ns(probe.abandon_db_begin), ns(probe.abandon_db_end),
+         ns(probe.abandon_event_begin), ns(probe.abandon_event_end),
+         ns(probe.scheduler_begin), ns(probe.outcomes_begin),
+         ns(probe.outcomes_end), ns(probe.removal_end), ns(probe.scheduler_end),
+         ns(probe.native_release_end), ns(probe.finalize_begin),
+         ns(probe.prune_begin), ns(probe.prune_end), ns(probe.finalize_end),
+         ns(dag_end));
+  }
   if (!commit_dag.ok() && commit_dag.failure().exception) {
     // An internal failure should have triggered [fatal_commit_cleanup]. We have
     // this extra CHECK here just in case there is a bug in our logic above.

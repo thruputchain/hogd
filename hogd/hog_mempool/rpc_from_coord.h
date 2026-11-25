@@ -535,6 +535,28 @@ private:
     x23::XdrVec<TransactionHash> failed_tx_hashes;
     x23::XdrVec<ExecResult> failed_tx_results;
   };
+  // Temporary artifact-only E2E commit phase diagnostic. Every timestamp
+  // uses hog10's steady clock and is emitted after the DAG has joined.
+  struct CommitPhaseProbe {
+    using Clock = std::chrono::steady_clock;
+    using Time = Clock::time_point;
+    bool record = false;
+    size_t tx_count = 0;
+    Time gate_end, native_lock_end, plan_end;
+    Time joint_begin, db_begin, db_end, event_begin, event_end, joint_end;
+    Time measure_begin, measure_end, abandon_db_begin, abandon_db_end;
+    Time abandon_event_begin, abandon_event_end;
+    Time scheduler_begin, outcomes_begin, outcomes_end, removal_end;
+    Time scheduler_end, native_release_end;
+    Time finalize_begin, prune_begin, prune_end, finalize_end;
+
+    void mark(Time &stamp) const
+    {
+      if (record) {
+        stamp = Clock::now();
+      }
+    }
+  };
   struct JointCommitResult {
     DbBlockResult db;
     RPCError event_commit = RPCError::kRPCUnrecoverable;
@@ -646,13 +668,15 @@ private:
   x23::Async<RPCError> eventsched_open_block(BlockID block_id);
   x23::Async<DbSchedResult> abandon_snapshot(BlockID block_id);
   x23::Async<RPCError> eventsched_commit_block(BlockID block_id,
-                                               const ConsensusValue &value);
+                                               const ConsensusValue &value,
+                                               CommitPhaseProbe *probe);
   x23::Async<RPCError> eventsched_abandon_block(BlockID block_id);
   x23::Async<DbBlockResult> close_snapshot(BlockID block_id);
   x23::Async<EventBlockResult> eventsched_close_block(BlockID block_id,
                                                       BlockHeight block_height);
   x23::Async<DbBlockResult> commit_snapshot(BlockID block_id,
-                                            ConsensusValue value);
+                                            ConsensusValue value,
+                                            CommitPhaseProbe *probe);
   x23::Async<void> finish_block(BlockID block_id, size_t executor_idx);
   x23::Async<void> finish_all_executors(BlockID block_id);
   x23::Vec<x23::DagNode<void>>
@@ -721,7 +745,8 @@ private:
       const std::shared_ptr<MerkleTriePrefix> &txset_trie,
       const x23::DagDeps &txset_hash_deps);
   x23::Async<void> abandon_block(const PendingBlock &cache);
-  x23::Async<JointCommitResult> commit_block(const PendingBlock &cache);
+  x23::Async<JointCommitResult> commit_block(const PendingBlock &cache,
+                                             CommitPhaseProbe *probe);
 
   x23::Async<SchedulerCommitOutcome>
   schedulercoord_commit_block_impl(BlockID block_id,
