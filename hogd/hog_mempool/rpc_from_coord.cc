@@ -1942,7 +1942,13 @@ MempoolCoordinatorRpc::schedulercoord_propose_block(BlockID parent_id,
   info("schedulercoord_nominate ret");
   // The reply owns its encoded batches. Commit retains its own transactions
   // and DB tip, and the next nomination reconstructs the cached reply.
-  co_return std::move(nominated_block_cache_.proposal_result);
+  SchedulerProposalResult reply =
+      std::move(nominated_block_cache_.proposal_result);
+  // A move keeps the block ID, proposer and timepoint but empties the batches.
+  // Fail closed so a retry is refused rather than served an empty block.
+  nominated_block_cache_.proposal_result.outcome(
+      SchedulerProposalOutcome::SchedulerProposalError);
+  co_return reply;
 }
 
 x23::Async<GenesisCeremonyResult>
