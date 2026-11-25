@@ -13,6 +13,17 @@ CONTROL_CLI="./$BUILD_DIR/hogd/hog_exec/bench/control_cli"
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "${WORK_DIR%/}" || printf '%s/%s' "$PWD" "${WORK_DIR%/}")
 EVENT_WORK_DIR="$WORK_ROOT/event"
 INDEXER_DB_DIR="$WORK_ROOT/indexer"
+DB_WORK_DIR="$WORK_DIR/"
+split_storage=
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
+      $WORK_ROOT == /bench-combined/ci_work_dir &&
+      ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe &&
+      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]; then
+  split_storage=1
+  split_disk_root="/workspace/.ci/single-node-split-$HOG_XID"
+  INDEXER_DB_DIR="$split_disk_root/indexer"
+  DB_WORK_DIR="$split_disk_root/db/"
+fi
 
 kill_stale_processes() {
   ci_remote_killall_hosts "$STALE_PROCESSES" "${STALE_PROCESS_HOSTS[@]}"
@@ -24,6 +35,15 @@ cleanup() {
   ci_enter_cleanup
   ci_control_stop_hosts "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
   kill_stale_processes
+  if [[ -n $split_storage ]]; then
+    local host
+    for host in hog4 hog9 hog11; do
+      if ! ci_remote_run "$host" 'bash /workspace/scripts/ci/single_node_split_storage.sh reclaim'; then
+        echo "Could not verify single-node split scratch reclaim on $host" >&2
+        [[ $exit_code != 0 ]] || exit_code=1
+      fi
+    done
+  fi
 
   exit "$exit_code"
 }
@@ -74,6 +94,12 @@ ci_control_clear_work_dirs "$CONTROL_CLI" "$CI_CONTROL_PORT" "${BENCH_HOSTS[@]}"
 echo 'kill stale processes'
 kill_stale_processes
 
+if [[ -n $split_storage ]]; then
+  for host in hog4 hog9 hog11; do
+    ci_remote_run "$host" 'bash /workspace/scripts/ci/single_node_split_storage.sh prepare'
+  done
+fi
+
 echo 'create event and indexer work dirs'
 ci_remote_run hog9 "mkdir -p $(printf '%q' "$EVENT_WORK_DIR") $(printf '%q' "$INDEXER_DB_DIR")"
 
@@ -104,7 +130,7 @@ echo 'launch indexer'
 $CONTROL_CLI hog9 $CI_CONTROL_PORT start hogd/hog_indexer/hog-indexer --event-addr "$(hog_ip hog9)":$EVENT_INDEXER_PORT --db-path "$INDEXER_DB_DIR" --bind-ip "$(hog_ip hog9)" --block-explorer-port $INDEXER_BLOCK_EXPLORER_PORT --metrics-port $INDEXER_HTTP_PORT
 
 echo 'launch hog-db'
-$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path $WORK_DIR/ --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
+$CONTROL_CLI hog11 $CI_CONTROL_PORT start hogd/hog_db/hog-db --db-path "$DB_WORK_DIR" --ram-bytes 10000000000 --bind-ip "$(hog_ip hog11)" --coordinator-addr "$(hog_ip hog10)":$MEMPOOL_DB_PORT --executor-port $DB_EXECUTOR_PORT --mempool-port $DB_MEMPOOL_PORT --auth-port $DB_AUTH_PORT --metrics-port $DB_HTTP_PORT
 
 echo 'launch auth'
 $CONTROL_CLI hog8 $CI_CONTROL_PORT start hogd/hog_auth/hog-auth --mempool-addr "$(hog_ip hog10)":$MEMPOOL_AUTH_PORT --bind-ip "$(hog_ip hog8)" --db-port $AUTH_DB_PORT --mempool-port $AUTH_MEMPOOL_PORT --metrics-port $AUTH_HTTP_PORT
@@ -157,7 +183,7 @@ mempool_cmd=(timeout 180s ./$BUILD_DIR/hogd/hog_mempool/hog-mempool \
   --auth-port "$MEMPOOL_AUTH_PORT" \
   --coordinator-port "$MEMPOOL_COORDINATOR_PORT")
 if [[ ${HOGD_CI_OFFLINE:-0} == 1 &&
-      ${GIT_BRANCH:-} == codex/single-commit-component-probe ]]; then
+      ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe ]]; then
   # Retain the exact same-clock phase and interval records in the uploaded
   # diagnostic artifact, rather than relying on a truncated Actions log.
   : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"
