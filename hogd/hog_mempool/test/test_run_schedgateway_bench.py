@@ -8,6 +8,7 @@ import tempfile
 import unittest
 
 RUNNER = Path(__file__).with_name("run_schedgateway_bench.py")
+STRESS_WRAPPER = RUNNER.resolve().parents[3] / "scripts/ci/schedgateway_stress_bench.sh"
 
 NODE = """#!/usr/bin/env python3
 import json, pathlib, sys, time
@@ -72,6 +73,29 @@ class DataRootTest(unittest.TestCase):
             self.assertEqual((output / "result.json").is_file(), not failures)
             self.assertEqual(list(default.iterdir()), [])
             self.assertEqual(list(dedicated.iterdir()), [])
+
+    def test_configured_storage_only_applies_to_stress_batches(self):
+        with tempfile.TemporaryDirectory() as temporary:
+            root = Path(temporary)
+            stress = root / "schedgateway_stress_bench.sh"
+            stress.write_text(STRESS_WRAPPER.read_text())
+            fake = root / "schedgateway_bench.sh"
+            fake.write_text(
+                '#!/usr/bin/env bash\n'
+                'mkdir -p "$1"\n'
+                'printf "%s;%s;%s;%s\\n" "$HOGD_CI_SCHEDGATEWAY_DATA_ROOT" '
+                '"$SCHEDGATEWAY_BENCH_OUTSTANDING" "$SCHEDGATEWAY_BENCH_BATCH" '
+                '"$SCHEDGATEWAY_BENCH_TRANSACTIONS" >"$1/receipt"\n'
+            )
+            fake.chmod(0o755)
+            env = dict(os.environ, HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT="/dedicated")
+            env.pop("HOGD_CI_SCHEDGATEWAY_DATA_ROOT", None)
+            output = root / "output"
+            subprocess.run(["bash", str(stress), str(output)], env=env,
+                           check=True, capture_output=True)
+            self.assertEqual((output / "calls/receipt").read_text().strip(), ";64;1;5000000")
+            self.assertEqual((output / "batches/receipt").read_text().strip(),
+                             "/dedicated;8;100;8000000")
 
     def test_default_location_and_unchanged_output(self):
         self.run_case(override=False)

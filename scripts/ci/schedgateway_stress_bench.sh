@@ -38,6 +38,12 @@ for config in calls:64:1:5000000 batches:8:100:8000000; do
   IFS=: read -r name outstanding batch transactions <<<"$config"
   echo "run schedgateway stress benchmark: $name, 8 connections x" \
     "$outstanding calls x $batch transaction(s)"
+  # The configured Combined scratch qualifies the batches case only.
+  data_root=${HOGD_CI_SCHEDGATEWAY_DATA_ROOT:-}
+  if [[ $name == batches && -n ${HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT:-} ]]; then
+    data_root=$HOGD_CI_SCHEDGATEWAY_STRESS_BATCHES_ROOT
+  fi
+  HOGD_CI_SCHEDGATEWAY_DATA_ROOT="$data_root" \
   SCHEDGATEWAY_BENCH_OUTSTANDING=$outstanding \
     SCHEDGATEWAY_BENCH_BATCH=$batch \
     SCHEDGATEWAY_BENCH_TRANSACTIONS=$transactions \
