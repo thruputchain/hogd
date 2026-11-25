@@ -167,6 +167,7 @@ struct Block {
 struct UnitTiming {
   uint64_t start_ns = 0;
   uint64_t end_ns = 0;
+  size_t connection = 0;
 };
 
 // Shared by every dispatch coroutine of one block. Each unit index is claimed
@@ -181,7 +182,7 @@ struct Dispatch {
 };
 
 x23::Detached
-dispatch_coro(exec_client_t &exec_client, Dispatch *d)
+dispatch_coro(exec_client_t &exec_client, Dispatch *d, size_t connection)
 {
   co_await default_threadpool().bg();
   for (;;) {
@@ -193,6 +194,7 @@ dispatch_coro(exec_client_t &exec_client, Dispatch *d)
     x23::span<const SignedTransaction> txs(d->block->txs.begin() + unit.start,
                                            d->block->txs.begin() + unit.start +
                                                unit.count);
+    d->timings[i].connection = connection;
     d->timings[i].start_ns = x23::fastclock::get_ns();
     auto r =
         co_await exec_client.executorsched_propose_batch(d->block_number, txs);
@@ -518,8 +520,8 @@ private:
     // connection's coroutines at a time would hand the first units of the
     // dispatch order (all the heavy ones, in `_first`) to one executor.
     for (uint32_t i = 0; i < params_.n_coros_per_connection; i++) {
-      for (auto &exec_client : exec_clients_) {
-        dispatch_coro(exec_client, &d);
+      for (size_t j = 0; j < exec_clients_.size(); j++) {
+        dispatch_coro(exec_clients_[j], &d, j);
       }
     }
     async();
@@ -638,7 +640,17 @@ private:
   TrialResult run_trial(const Scenario &s, uint32_t trial)
   {
     const Block block = make_block(s, trial);
+    const BlockID id = current_block_number_;
     const std::vector<UnitTiming> timings = run_block(block);
+    if (s.name == "reads_one") {
+      assert(timings.size() == 1);
+      const auto &t = timings.front();
+      std::println("makespan_executor: scenario={} trial={} block={} "
+                   "connection={} executor={} dispatch_us={} rpc_us={}",
+                   s.name, trial, id, t.connection,
+                   cluster_.executor_address(t.connection), t.start_ns / 1000,
+                   (t.end_ns - t.start_ns) / 1000);
+    }
 
     uint64_t makespan = 0;
     uint64_t heavy_done = 0;

@@ -466,6 +466,12 @@ public:
 
   size_t num_executors() const { return exec_cards_.size(); }
 
+  std::string executor_address(size_t connection) const
+  {
+    const auto &addr = exec_cards_[connection % exec_cards_.size()].address;
+    return std::string(addr.begin(), addr.end());
+  }
+
   // Where executors reach hog-db, for a client that wants to read from it
   // the way they do.
   const x23::HostPort &db_exec_addr() const { return db_exec_addr_; }

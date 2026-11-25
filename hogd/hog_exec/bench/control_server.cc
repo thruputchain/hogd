@@ -8,6 +8,7 @@
 #include <cstring>
 #include <exception>
 #include <filesystem>
+#include <fstream>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -266,6 +267,7 @@ public:
         std::jthread([pid, this]() { wait_for_child_process(pid); });
 
     info("forked process: {}", pid);
+    diagnostic_stderr_path_ = stderr_template;
     return LaunchMetadata{
         .pid = pid,
         .stdout_path = stdout_template,
@@ -285,6 +287,16 @@ public:
       waitpid_thread_.request_stop();
       waitpid_thread_.join();
     }
+    // Diagnostic branch only: relay the bounded aggregate after shutdown,
+    // without copying logs or doing file I/O in the measured RPC interval.
+    std::ifstream log_file(diagnostic_stderr_path_);
+    std::string line;
+    while (std::getline(log_file, line)) {
+      if (line.find("makespan_read_probe: ") != std::string::npos) {
+        std::println("{}", line);
+      }
+    }
+    std::fflush(stdout);
   }
 
 private:
@@ -308,6 +320,7 @@ private:
   std::optional<int> exit_code_ = std::nullopt;
 
   std::jthread waitpid_thread_;
+  std::string diagnostic_stderr_path_;
 };
 
 class CIControlRpc {

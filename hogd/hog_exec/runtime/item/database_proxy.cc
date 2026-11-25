@@ -1,6 +1,8 @@
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
 
 #include <algorithm>
+#include <array>
+#include <atomic>
 #include <cassert>
 #include <concepts>
 #include <exception>
@@ -36,6 +38,7 @@
 #include "types.hh"
 #include "x23/async.h"
 #include "x23/cpumap.h"
+#include "x23/fastclock.h"
 #include "x23/rpc_msg.hh"
 #include "x23/serialize.h"
 #include "x23/sockio.h"
@@ -226,8 +229,34 @@ x23::Async<SystemStatus<std::optional<WireStorageItem>>>
 DatabaseProxy::get_snapshot_item(BlockID block_id, AddressAndKey addrkey)
 {
   try {
+    // Diagnostic branch only: with the default five trials, the singleton
+    // reads_one scenario uses blocks 27..31 (one genesis + 25 prior blocks).
+    // Sample the first 1000 completed snapshot calls on each executor per
+    // singleton block. The runner emits its actual block ID and natural winner.
+    struct ReadProbe {
+      std::atomic<uint64_t> claimed{0};
+      std::atomic<uint64_t> count{0};
+      std::atomic<uint64_t> rpc_ns{0};
+      std::atomic<uint64_t> pool_ns{0};
+    };
+    static std::array<ReadProbe, 5> probes;
+    const bool measured = block_id >= 27 && block_id <= 31;
+    const auto start = measured ? x23::fastclock::get_ns() : 0;
     auto res = co_await client_.get_snapshot_item(block_id, addrkey);
+    const auto received = measured ? x23::fastclock::get_ns() : 0;
     co_await default_threadpool().bg();
+    if (measured) {
+      const auto resumed = x23::fastclock::get_ns();
+      auto &p = probes[block_id - 27];
+      if (p.claimed.fetch_add(1, std::memory_order_relaxed) < 1000) {
+        p.rpc_ns.fetch_add(received - start, std::memory_order_relaxed);
+        p.pool_ns.fetch_add(resumed - received, std::memory_order_relaxed);
+        if (p.count.fetch_add(1, std::memory_order_acq_rel) + 1 == 1000) {
+          info("makespan_read_probe: block={} count=1000 rpc_us={} pool_us={}",
+               block_id, p.rpc_ns.load() / 1000, p.pool_ns.load() / 1000);
+        }
+      }
+    }
     co_return to_system_error_code<std::nullopt>(
         res, [](WireStorageItem &&x) -> std::optional<WireStorageItem> {
           return std::make_optional<WireStorageItem>(std::move(x));
