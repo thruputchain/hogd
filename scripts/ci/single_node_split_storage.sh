@@ -60,7 +60,9 @@ if [[ ${BASH_SOURCE[0]} == "$0" ]]; then
   [[ $# == 1 && ${HOGD_CI_CONTAINER:-0} == 1 &&
      ${HOGD_CI_OFFLINE:-0} == 1 &&
      ${HOGD_COMBINED_WORK_DIR:-} == /bench-combined/ci_work_dir/ &&
-     ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe &&
+     ( ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-event-disk-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-event-tmpfs-probe ) &&
      ${HOG_XID:-} =~ ^hogd-combined-metrics-[1-9][0-9]*-[1-9][0-9]*$ ]]
   split_storage_role "$1" "${HOG_HOST:?}" /bench-combined /workspace "$HOG_XID"
 fi

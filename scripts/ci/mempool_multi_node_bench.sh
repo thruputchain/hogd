@@ -12,6 +12,15 @@ ci_enable_error_trace
 . "$SCRIPT_DIR/wait_port_report.sh"
 BUILD_ROOT=$([[ $BUILD_DIR = /* ]] && printf '%s' "$BUILD_DIR" || printf '%s' "$REPO_ROOT/$BUILD_DIR")
 WORK_ROOT=$([[ $WORK_DIR = /* ]] && printf '%s' "$WORK_DIR" || printf '%s' "$REPO_ROOT/$WORK_DIR")
+. "$SCRIPT_DIR/multi_node_event_storage_probe.sh"
+MULTI_NODE_STORAGE_PROBE=
+if multi_node_storage_probe_mode >/dev/null; then
+  multi_node_storage_probe_guard
+  [[ $WORK_ROOT == /bench-combined/ci_work_dir/ || $WORK_ROOT == /bench-combined/ci_work_dir ]]
+  MULTI_NODE_STORAGE_PROBE=1
+  # Both arms use the stock disk root; treatment alters only Event argv.
+  WORK_ROOT=/workspace/ci_work_dir
+fi
 BENCH_ROOT="$WORK_ROOT/mempool_multi_node_bench"
 CONTROL_CLI="$BUILD_ROOT/hogd/hog_exec/bench/control_cli"
 COMMON_SSH_OPTS=("${CI_SSH_OPTS[@]}")
@@ -77,6 +86,14 @@ export EVENT_HTTP_PORT=8093
 
 node_dir() {
   printf '%s/node%s' "$BENCH_ROOT" "$1"
+}
+
+node_event_dir() {
+  if [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
+    multi_node_event_probe_dir "$1"
+  else
+    printf '%s/event' "$(node_dir "$1")"
+  fi
 }
 
 node_log_dir() {
@@ -300,12 +317,31 @@ kill_stale_processes() {
   ci_remote_killall_hosts "loadgen_server hog-exec hog-event hog-indexer hog-db hog-auth hog-mempool chuckd chuckd.dev scpd scpd.dev" "${ALL_HOSTS[@]}"
 }
 
+declare -a MULTI_NODE_STORAGE_PREPARED=()
+
+multi_node_storage_receipt() {
+  local action=$1 node=$2 host=$3
+  : "${HOG_DUMP_DIR:?diagnostic dump directory must be configured}"
+  remote_run "$host" "bash /workspace/scripts/ci/multi_node_event_storage_probe.sh $action $node" |
+    tee -a "$HOG_DUMP_DIR/multi-node-event-storage-probe.log"
+}
+
 cleanup() {
   local exit_code=$1
   ci_enter_cleanup
   stop_live_log_streams
   publish_results
   kill_stale_processes
+  if [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
+    local record node host
+    for record in "${MULTI_NODE_STORAGE_PREPARED[@]}"; do
+      IFS=: read -r node host <<<"$record"
+      if ! multi_node_storage_receipt reclaim "$node" "$host"; then
+        echo "failed to verify multi-node storage reclaim on $host" >&2
+        [[ $exit_code != 0 ]] || exit_code=1
+      fi
+    done
+  fi
   exit "$exit_code"
 }
 
@@ -336,6 +372,15 @@ for node in "${NODE_IDS[@]}"; do
     remote_run "$host" "rm -rf $(printf '%q' "$(node_dir "$node")") && mkdir -p $(printf '%q' "$(node_log_dir "$node")") $(printf '%q' "$(node_dir "$node")/event")"
   done
 done
+
+if [[ -n $MULTI_NODE_STORAGE_PROBE ]]; then
+  for node in "${NODE_IDS[@]}"; do
+    for host in ${NODE_HOST_GROUPS[$node]}; do
+      multi_node_storage_receipt prepare "$node" "$host"
+      MULTI_NODE_STORAGE_PREPARED+=("$node:$host")
+    done
+  done
+fi
 
 echo 'launch loadgen servers'
 for node in "${NODE_IDS[@]}"; do
@@ -448,7 +493,7 @@ for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
   control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
     "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
-    --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
+    --work-dir "$(node_event_dir "$node")" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
 
   control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \
     "$AUTH_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_AUTH_PORT" --bind-ip "$(hog_ip "${AUTH_HOSTS[$node]}")" \
