@@ -23,7 +23,7 @@ while True:
 """
 
 CLIENT = """#!/usr/bin/env python3
-import json, pathlib, sys, os
+import json, os, pathlib, sys
 if sys.argv[1] == '--emit-bootstrap-manifest':
     pathlib.Path(sys.argv[2]).write_text('{}')
 else:
