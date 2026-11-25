@@ -315,14 +315,16 @@ concept implements_async_rpc =
 
 namespace detail {
 
-// Reference-counted block of received bytes.  Records are parsed in
-// place, and replies keep the chunk alive through a RecordRef.
+// Reference-counted block of received bytes, which live directly
+// after the object.  Records are parsed in place, and replies keep
+// the chunk alive through a RecordRef.
 class RecvChunk : public RefCount {
 public:
   static constexpr bool kAllowRefPtrConversion = true;
 
   static RefPtr<RecvChunk> make(size_t capacity)
   {
+    static_assert(alignof(RecvChunk) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
     return *new (::operator new(sizeof(RecvChunk) + capacity))
         RecvChunk(capacity);
   }
@@ -333,9 +335,9 @@ public:
   }
   size_t capacity() const noexcept { return capacity_; }
 
-  // True when no RecordRef points into the chunk.  Only the reader
-  // creates references, so once the reader sees this return true it
-  // can safely overwrite the chunk's contents.
+  // True when the caller's reference is the only one.  Only the
+  // reader hands out references, so once it sees this it may
+  // overwrite the chunk's contents.
   bool unique() const noexcept { return refcount() == 1; }
 
 private:
@@ -343,6 +345,8 @@ private:
 
   explicit RecvChunk(size_t capacity) noexcept : capacity_(capacity) {}
   ~RecvChunk() = default;
+  // Hides RefCount::finalize(), which would delete an object that
+  // make() did not allocate with a plain new expression.
   void finalize() noexcept
   {
     this->~RecvChunk();
@@ -351,11 +355,10 @@ private:
 
   friend class x23::RefCount;
 };
-static_assert(alignof(RecvChunk) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
 
 // The bytes of one received record (without the record marker), plus
-// a reference to the chunk that holds them.  A default-constructed
-// RecordRef is empty, which signals that the stream failed.
+// a reference to the chunk that holds them.  An empty RecordRef
+// signals that the stream failed.
 class RecordRef {
 public:
   RecordRef() noexcept = default;
@@ -364,6 +367,8 @@ public:
   {}
 
   bool empty() const noexcept { return bytes_.empty(); }
+  // Not a BufViewEnd: the reader may be filling the rest of the chunk
+  // from another thread, so nothing past the record may be read.
   BufView bytes() const noexcept { return bytes_; }
 
 private:
@@ -373,17 +378,20 @@ private:
 
 // Reader input buffer: bytes [rpos_, wpos_) are received but not yet
 // consumed.  Bytes below wpos_ may only be overwritten while the
-// reader holds the sole reference to the chunk.
+// reader holds the sole reference to the chunk.  There is no chunk
+// until the first make_room().  Defined here only so that tests can
+// exercise it directly.
 class RecvBuf {
 public:
   // Chunks are sized so that the whole allocation is 64KiB, unless a
   // single record needs more.
   static constexpr size_t kChunkSize = 0x10000 - sizeof(RecvChunk);
-  // Don't bother the kernel for less than this many bytes.
+  // Rewind or replace the chunk rather than read less than this into
+  // its tail.
   static constexpr size_t kMinRead = 0x1000;
 
   const RefPtr<RecvChunk> &chunk() const noexcept { return chunk_; }
-  size_t avail() const noexcept { return wpos_ - rpos_; }
+  size_t nbuffered() const noexcept { return wpos_ - rpos_; }
   const std::uint8_t *rptr() const noexcept { return chunk_->data() + rpos_; }
   void consume(size_t n) noexcept { rpos_ += n; }
 
@@ -395,10 +403,10 @@ public:
     return chunk_->data() + chunk_->capacity();
   }
 
-  // Ensure space() >= need, keeping the partial record at rptr()
+  // Ensure space() >= more, keeping the partial record at rptr()
   // contiguous.  Retains capacity and reuses the chunk once no reply
   // still references it.
-  void make_room(size_t need);
+  void make_room(size_t more);
 
 private:
   RefPtr<RecvChunk> chunk_{nullptr};

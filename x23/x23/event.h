@@ -280,8 +280,9 @@ public:
     return std::move(async);
   }
 
-  // Like read_wait(tok), but completes a caller-owned Awaitable
-  // instead of returning an Async.  The caller must co_await `a`.
+  // Like read_wait(tok), but without the coroutine frame that
+  // make_async allocates: completes a caller-owned Awaitable, which
+  // the caller must then co_await.  Used by CoroPoll::ReadSome.
   void read_wait(ReadToken fd, Awaitable<Errno> &a)
   {
     setcb(fd, false, {CoroCB<Errno>{a}, cpuid()});
@@ -513,47 +514,13 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_DECL);
 
-  // Awaiter returned by read_some().
-  class ReadSome {
-  public:
-    ReadSome(CoroPoll &cp, BorrowedFd fd, void *buf, size_t len) noexcept
-      : cp_(cp), fd_(fd), buf_(buf), len_(len)
-    {}
-    ReadSome(const ReadSome &) = delete;
-
-    bool await_ready();
-    bool await_suspend(auto h)
-    {
-      waited_ = true;
-      cp_.read_wait(tok_, wait_);
-      // Once wait_ knows about h, another thread can resume the
-      // coroutine, so we must not touch *this after this call.
-      return wait_.await_suspend(h);
-    }
-    std::expected<size_t, Errno> await_resume();
-
-  private:
-    std::expected<size_t, Errno> attempt();
-
-    CoroPoll &cp_;
-    BorrowedFd fd_;
-    void *buf_;
-    size_t len_;
-    ReadToken tok_;
-    RefPtr<detail::WriteBuffer> w_{nullptr};
-    std::expected<size_t, Errno> res_;
-    bool waited_{false};
-    Awaitable<Errno> wait_;
-  };
-
   // Read up to len bytes into a caller-owned buffer, returning as
   // soon as any are available (0 means EOF).  Flushes delayed writes
-  // like read() with sync set.  Must be awaited immediately, and may
-  // return EAGAIN on a spurious wakeup.
-  [[nodiscard]] ReadSome read_some(BorrowedFd fd, void *buf, size_t len)
-  {
-    return ReadSome{*this, fd, buf, len};
-  }
+  // like read() with sync set.  Unlike read() this is not a coroutine,
+  // so awaiting it allocates nothing, but it cannot wait twice: after
+  // a spurious wakeup it returns EAGAIN and the caller tries again.
+  class ReadSome;
+  [[nodiscard]] ReadSome read_some(BorrowedFd fd, void *buf, size_t len);
 
   // Asynchronous write.  Writes data to fd, but returns immediately
   // if some or all of the data will continue to be written in the
@@ -644,6 +611,45 @@ protected:
 
   void loop();
 };
+
+// Awaiter returned by CoroPoll::read_some().
+class CoroPoll::ReadSome {
+public:
+  ReadSome(CoroPoll &cp, BorrowedFd fd, void *buf, size_t len) noexcept
+    : cp_(cp), fd_(fd), buf_(buf), len_(len)
+  {}
+  ReadSome(const ReadSome &) = delete;
+
+  bool await_ready();
+  bool await_suspend(auto h SLOC_DECL)
+  {
+    suspended_ = true;
+    cp_.read_wait(tok_, readable_);
+    // Once readable_ knows about h, another thread can resume the
+    // coroutine, so we must not touch *this after this call.
+    return readable_.await_suspend(h SLOC_COMMA_VAR);
+  }
+  std::expected<size_t, Errno> await_resume();
+
+private:
+  std::expected<size_t, Errno> attempt();
+
+  CoroPoll &cp_;
+  BorrowedFd fd_;
+  void *buf_;
+  size_t len_;
+  ReadToken tok_;
+  RefPtr<detail::WriteBuffer> w_{nullptr};
+  std::expected<size_t, Errno> res_;
+  bool suspended_{false};
+  Awaitable<Errno> readable_;
+};
+
+inline CoroPoll::ReadSome
+CoroPoll::read_some(BorrowedFd fd, void *buf, size_t len)
+{
+  return ReadSome{*this, fd, buf, len};
+}
 
 namespace detail {
 class WriteBuffer::Service {

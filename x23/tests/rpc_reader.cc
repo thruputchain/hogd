@@ -86,14 +86,14 @@ append(Buf *out, BufView bytes)
 }
 
 // Re-frame a single-fragment record as several fragments of at most
-// chunk bytes.
+// max_len bytes.
 Buf
-fragment(BufView record, size_t chunk)
+fragment(BufView record, size_t max_len)
 {
   Buf ret;
   BufView body = record.subspan(4);
   while (!body.empty()) {
-    size_t n = std::min(chunk, body.size());
+    size_t n = std::min(max_len, body.size());
     uint8_t marker[4];
     putbe<uint32_t>(marker,
                     uint32_t(n) | (n == body.size() ? kLastFragment : 0));
@@ -106,7 +106,7 @@ fragment(BufView record, size_t chunk)
 
 // Read one record from the stream and return it without its marker.
 Buf
-read_record(BorrowedFd peer)
+read_raw_record(BorrowedFd peer)
 {
   Buf marker, record;
   if (auto res = fullread(peer, &marker, 4); !res)
@@ -122,7 +122,7 @@ read_record(BorrowedFd peer)
 std::pair<uint32_t, Data>
 read_echo_reply(BorrowedFd peer)
 {
-  Buf record = read_record(peer);
+  Buf record = read_raw_record(peer);
   rpc_msg msg;
   size_t n = deserialize_from(&msg, record);
   EXPECT_TRUE(rpc_is_success(msg));
@@ -135,7 +135,7 @@ read_echo_reply(BorrowedFd peer)
 uint32_t
 read_call_xid(BorrowedFd peer)
 {
-  Buf record = read_record(peer);
+  Buf record = read_raw_record(peer);
   rpc_msg msg;
   deserialize_from(&msg, record);
   EXPECT_EQ(msg.body.mtype(), msg_type::CALL);
@@ -161,7 +161,7 @@ closed_by_stream(BorrowedFd peer)
 Data
 pending_bytes(const detail::RecvBuf &buf)
 {
-  return Data(buf.rptr(), buf.rptr() + buf.avail());
+  return Data(buf.rptr(), buf.rptr() + buf.nbuffered());
 }
 
 // Receive size bytes of pattern(size, seed), as the reader would.
@@ -224,7 +224,7 @@ TEST(RecvBuf, PreservesBytesStillReferenced)
   // When there is not, move the partial record to a new chunk and
   // leave the old one alone.
   receive(&buf, buf.space(), 2);
-  buf.consume(buf.avail() - 10);
+  buf.consume(buf.nbuffered() - 10);
   Data partial = pending_bytes(buf);
   buf.make_room(90);
   EXPECT_NE(buf.chunk().get(), held.get());
@@ -234,7 +234,7 @@ TEST(RecvBuf, PreservesBytesStillReferenced)
 
   // The new chunk is unreferenced, so gets reused in place.
   const detail::RecvChunk *fresh = buf.chunk().get();
-  buf.consume(buf.avail());
+  buf.consume(buf.nbuffered());
   buf.make_room(4);
   EXPECT_EQ(buf.chunk().get(), fresh);
   EXPECT_EQ(buf.wptr(), buf.chunk()->data());

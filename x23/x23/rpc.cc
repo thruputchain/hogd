@@ -51,28 +51,35 @@ RpcStreamImpl::fail()
 }
 
 void
-RecvBuf::make_room(size_t need)
+RecvBuf::make_room(size_t more)
 {
-  const size_t pending = avail();
-  if (chunk_) {
-    const bool sole = chunk_->unique();
-    if (space() >= std::max(need, kMinRead) && (pending || !sole))
-      return;
-    if (sole) {
-      if (pending && rpos_)
-        std::memmove(chunk_->data(), rptr(), pending);
+  const size_t n = nbuffered();
+  const bool roomy = chunk_ && space() >= std::max(more, kMinRead);
+  if (chunk_ && chunk_->unique()) {
+    // No reply points into the chunk, so the bytes below rptr() are
+    // ours again.  Rewinding an empty buffer is free; a partial
+    // record is only worth moving when the tail is too small.
+    if (!n || !roomy) {
+      if (n && rpos_)
+        std::memmove(chunk_->data(), rptr(), n);
       rpos_ = 0;
-      wpos_ = pending;
-      if (space() >= need)
-        return;
+      wpos_ = n;
     }
+    if (space() >= more)
+      return;
   }
-  auto fresh = RecvChunk::make(std::max(pending + need, kChunkSize));
-  if (pending)
-    std::memcpy(fresh->data(), rptr(), pending);
+  else if (roomy)
+    // Replies still point into the chunk, so keep filling its tail.
+    return;
+
+  // Start a new chunk.  Replies that reference the old one keep it
+  // alive.  (n is 0 when there is no chunk yet.)
+  auto fresh = RecvChunk::make(std::max(n + more, kChunkSize));
+  if (n)
+    std::memcpy(fresh->data(), rptr(), n);
   chunk_ = std::move(fresh);
   rpos_ = 0;
-  wpos_ = pending;
+  wpos_ = n;
 }
 
 std::uint32_t
@@ -99,8 +106,9 @@ RpcStreamImpl::reader(SLOC_ARG0)
   Buf frags;
   while (!ss_.stop_requested()) {
     // A fragment is a 4-byte marker followed by len bytes.  Read
-    // until the buffer holds a complete one.
-    const size_t have = in.avail();
+    // until the buffer holds a complete one; marker and len are not
+    // used before then.
+    const size_t have = in.nbuffered();
     std::uint32_t marker = 0;
     size_t len = 0;
     size_t need = 4;
@@ -120,30 +128,39 @@ RpcStreamImpl::reader(SLOC_ARG0)
     if (have < need) {
       in.make_room(need - have);
       auto res = co_await cp_->read_some(fd_, in.wptr(), in.space());
-      if (res && *res)
-        in.commit(*res);
-      else if (res || res.error() != EAGAIN) {
-        if (!res)
-          debug("RpcStreamImpl: read(fd {}): {}", get_fd(), res.error());
-        else if (have || !frags.empty())
+      if (!res) {
+        // read_some reports a spurious wakeup instead of waiting again.
+        if (res.error() == EAGAIN)
+          continue;
+        debug("RpcStreamImpl: read(fd {}): {}", get_fd(), res.error());
+        fail();
+        co_return;
+      }
+      if (*res == 0) {
+        if (have || !frags.empty())
           // NOLINTNEXTLINE(readability-static-accessed-through-instance)
           debug.err("RpcStreamImpl: fd {} closed in the middle of a record",
                     get_fd());
         fail();
         co_return;
       }
+      in.commit(*res);
       continue;
     }
 
-    // The record stays where it is: b is a view of it, and a reply
-    // keeps its chunk alive by reference.
+    // A single-fragment record is parsed where it lies in the chunk.
+    // Deserialization may read, but not use, bytes up to bufend.
     BufView b{in.rptr() + 4, len};
     const std::uint8_t *bufend = in.bufend();
-    RefPtr<RecvChunk> whole{nullptr};
     in.consume(4 + len);
-    if (!(marker & kLastFragment) || !frags.empty()) [[unlikely]] {
+
+    // Rare: collect a multi-fragment record in frags, then copy it
+    // into a chunk of its own so that a reply can reference it.
+    const bool last = (marker & kLastFragment) != 0U;
+    RefPtr<RecvChunk> whole{nullptr};
+    if (!last || !frags.empty()) [[unlikely]] {
       frags.append(b.begin(), b.end());
-      if (!(marker & kLastFragment))
+      if (!last)
         continue;
       whole = RecvChunk::make(frags.size());
       std::memcpy(whole->data(), frags.data(), frags.size());
@@ -151,7 +168,6 @@ RpcStreamImpl::reader(SLOC_ARG0)
       bufend = b.data() + b.size();
       frags.clear();
     }
-    const RefPtr<RecvChunk> &chunk = whole ? whole : in.chunk();
 
     rpc_msg msg;
     size_t hdrbytes;
@@ -174,8 +190,8 @@ RpcStreamImpl::reader(SLOC_ARG0)
       // throughput by about a factor of 10.  Seems to be much better
       // to resume the client directly.
       //
-      // cp_->pool_.make_callback(cb, RecordRef{chunk, b});
-      cb(RecordRef{chunk, b});
+      // cp_->pool_.make_callback(cb, RecordRef{...});
+      cb(RecordRef{whole ? whole : in.chunk(), b});
     }
     else if (msg.body.mtype() == CALL) {
       rpc_msg res;
