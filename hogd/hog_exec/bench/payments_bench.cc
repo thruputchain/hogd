@@ -184,9 +184,8 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
 }
 
 // Private diagnostic: use one cache-line-sized slot per worker, no per-tx
-// timestamp or logging. The existing final Event callback writes one extra
-// atomic only after its existing pending count reaches zero. Its callback
-// captures remain exactly two references, as in the stock path.
+// timestamp or logging. The Event counter, callback and completion flag are
+// exactly the stock path; only the driver stamps its post-worker Event wait.
 struct alignas(64) PaymentWorkerPhase {
   uint64_t submit_ns = 0;
   uint64_t start_ns = 0;
@@ -208,14 +207,9 @@ struct PaymentRepPhase {
   uint64_t start_ns = 0;
   uint64_t submit_end_ns = 0;
   uint64_t join_end_ns = 0;
-  uint64_t event_final_ns = 0;
+  bool event_ready_at_join = false;
   uint64_t end_ns = 0;
   uint64_t elapsed_us = 0;
-};
-
-struct PaymentPendingEvents {
-  std::atomic<uint64_t> pending;
-  std::atomic<uint64_t> final_ns{0};
 };
 
 uint64_t
@@ -233,12 +227,12 @@ write_payment_phase_records(const char *path,
 {
   std::ofstream out(path);
   CHECK(out.is_open());
-  out << "PAYMENT_PHASE_V1\n";
+  out << "PAYMENT_PHASE_V2\n";
   for (const auto &r : records) {
     out << "rep\t" << r.accounts << '\t' << r.txs << '\t' << r.threads << '\t'
         << r.rep << '\t' << r.worker_count << '\t' << r.elapsed_us << '\t'
         << r.start_ns << '\t' << r.submit_end_ns << '\t' << r.join_end_ns
-        << '\t' << r.event_final_ns << '\t' << r.end_ns << '\n';
+        << '\t' << r.event_ready_at_join << '\t' << r.end_ns << '\n';
     for (size_t i = 0; i < r.worker_count; ++i) {
       const auto &w = r.workers[i];
       out << "worker\t" << r.accounts << '\t' << r.txs << '\t' << r.threads
@@ -297,7 +291,7 @@ run_bench_rep_phase(BenchmarkState &bs,
     std::vector<std::future<void>> futures;
     futures.reserve(num_exec_threads);
 
-    PaymentPendingEvents pending_events{num_txs_per_rep};
+    std::atomic<uint64_t> pending_events = num_txs_per_rep;
     std::atomic<bool> events_done = false;
 
     for (int i = 0; i < num_exec_threads; i++) {
@@ -310,53 +304,52 @@ run_bench_rep_phase(BenchmarkState &bs,
       auto &worker = phase.workers[static_cast<size_t>(i)];
       worker.txs = cur_count;
       worker.submit_ns = payment_phase_now_ns();
-      futures.emplace_back(
-          exec_pool.submit([&bs, work_txs, offset, cur_count, base_height,
-                            &pending_events, &events_done, &worker]() -> void {
-            worker.start_ns = payment_phase_now_ns();
-            {
-              auto runtime_context = make_hog_exec_context();
-              worker.context_ready_ns = payment_phase_now_ns();
+      futures.emplace_back(exec_pool.submit([&bs, work_txs, offset, cur_count,
+                                             base_height, &pending_events,
+                                             &events_done, &worker]() -> void {
+        worker.start_ns = payment_phase_now_ns();
+        {
+          auto runtime_context = make_hog_exec_context();
+          worker.context_ready_ns = payment_phase_now_ns();
 
-              for (uint32_t j = 0; j < cur_count; j++) {
+          for (uint32_t j = 0; j < cur_count; j++) {
 
-                uint32_t k = offset + j;
-                work_txs[k].tx.uniquifier =
-                    CommonBenchState::bench_uniquifier(base_height, k);
-                auto const &tx = work_txs[k];
+            uint32_t k = offset + j;
+            work_txs[k].tx.uniquifier =
+                CommonBenchState::bench_uniquifier(base_height, k);
+            auto const &tx = work_txs[k];
 
-                auto handler =
-                    bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
-                if (!handler.root_invoke()().is_root_success()) {
-                  error("Failed to invoke transaction");
-                  panic("Failed to invoke transaction");
-                }
-                if (handler.try_commit_transaction()() !=
-                    ExecResult::ExecResultOK) {
-                  panic("failed to perform commit operation");
-                }
-                handler.emit_events(ExecResult::ExecResultOK,
-                                    ProposedTransaction{.signed_tx = tx})(
-                    [&pending_events,
-                     &events_done](this auto,
-                                   SystemStatus<void> res) -> x23::Detached {
-                      if (!res.has_value()) {
-                        panic("failed to emit events");
-                      }
-                      auto r = pending_events.pending.fetch_sub(
-                          1, std::memory_order_relaxed);
-                      if (r == 1) {
-                        pending_events.final_ns.store(payment_phase_now_ns());
-                        events_done.store(true, std::memory_order_relaxed);
-                        events_done.notify_one();
-                      }
-                      co_return;
-                    });
-              }
-              worker.finish_ns = payment_phase_now_ns();
-            } // RuntimeContext destruction, as at the original lambda exit.
-            worker.return_ns = payment_phase_now_ns();
-          }));
+            auto handler =
+                bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
+            if (!handler.root_invoke()().is_root_success()) {
+              error("Failed to invoke transaction");
+              panic("Failed to invoke transaction");
+            }
+            if (handler.try_commit_transaction()() !=
+                ExecResult::ExecResultOK) {
+              panic("failed to perform commit operation");
+            }
+            handler.emit_events(ExecResult::ExecResultOK,
+                                ProposedTransaction{.signed_tx = tx})(
+                [&pending_events,
+                 &events_done](this auto,
+                               SystemStatus<void> res) -> x23::Detached {
+                  if (!res.has_value()) {
+                    panic("failed to emit events");
+                  }
+                  auto r =
+                      pending_events.fetch_sub(1, std::memory_order_relaxed);
+                  if (r == 1) {
+                    events_done.store(true, std::memory_order_relaxed);
+                    events_done.notify_one();
+                  }
+                  co_return;
+                });
+          }
+          worker.finish_ns = payment_phase_now_ns();
+        } // RuntimeContext destruction, as at the original lambda exit.
+        worker.return_ns = payment_phase_now_ns();
+      }));
     }
     phase.submit_end_ns = payment_phase_now_ns();
     phase.worker_count = futures.size();
@@ -364,10 +357,10 @@ run_bench_rep_phase(BenchmarkState &bs,
       f.wait();
     }
     phase.join_end_ns = payment_phase_now_ns();
+    phase.event_ready_at_join = events_done.load(std::memory_order_relaxed);
     events_done.wait(false);
     auto finish_time = std::chrono::steady_clock::now();
     phase.end_ns = payment_phase_now_ns();
-    phase.event_final_ns = pending_events.final_ns.load();
     phase.elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
                            finish_time - start_time)
                            .count();
@@ -502,11 +495,11 @@ run_payments_bench(std::vector<std::string> const &server_addrs,
   const char *phase_file = std::getenv("HOGD_PAYMENT_PHASE_FILE");
   std::vector<PaymentRepPhase> phase_records;
   if (phase_file) {
-    phase_records.reserve(60);
+    phase_records.reserve(20);
   }
   auto run_blocking = [&](std::span<SignedTransaction> txs, int threads,
                           uint32_t count) {
-    if (phase_file && threads <= 256) {
+    if (phase_file && threads == 128) {
       run_bench_rep_phase(bs, txs, threads, count, num_reps, phase_records);
     }
     else {
