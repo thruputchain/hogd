@@ -104,7 +104,11 @@ conformance testing.
 
 Production lowering builds one slot per instruction plus a fall-off sentinel.
 It resolves static branch targets, divides straight-line execution into gas
-runs, and fuses selected instruction pairs. A fused pair retains the tail's
+runs, and fuses selected instruction pairs. An x0-based load or store addresses
+its sign-extended immediate, so lowering settles its bounds check against the
+data-memory size: an unchecked handler in bounds, the memory trap itself out of
+bounds. Any other base register keeps the per-access check, because JALR can
+enter any slot with arbitrary register values. A fused pair retains the tail's
 standalone handler so a branch can enter it directly. Traced handlers preserve
 individual instruction observations for differential tests.
 

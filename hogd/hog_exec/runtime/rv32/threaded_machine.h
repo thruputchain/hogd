@@ -885,6 +885,43 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
+// x0-based ("absolute") accesses. With rs1 == x0 the effective address is the
+// sign-extended immediate, which no register value can change, and a
+// pre-instantiation's data-memory size is fixed (every machine copies its
+// full image), so preparation settles the bounds check once per slot. These
+// handlers are installed only where preparation proved the access in bounds;
+// an absolute access proved out of bounds gets trap_bad_memory itself as its
+// handler (absolute_access_handler). That holds for any entry into the slot,
+// including a JALR to an arbitrary pc, because the address has no register
+// input.
+template<bool Trace, uint32_t Width, bool SignExtend, bool Brk = false>
+StepResult
+op_load_abs(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  const uint32_t addr = bits_from_i32(ip->imm);
+  assert(memory_range_in_bounds<Width>(memsize, addr));
+  uint32_t v = le_load<Width>(mem, addr);
+  if constexpr (SignExtend) {
+    v = sign_extend<Width * 8>(v);
+  }
+  write_rd(c, ip->rd, v);
+  HOGD_STEP_NEXT(c, ip + 1);
+}
+
+template<bool Trace, uint32_t Width, bool Brk = false>
+StepResult
+op_store_abs(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
+             uint64_t gas)
+{
+  // In bounds implies a non-negative immediate (a negative one addresses
+  // 0xfffff800 and up, past every memory), so read imm16 zero-extended.
+  assert(ip->rb.imm16 >= 0);
+  const uint32_t addr = static_cast<uint16_t>(ip->rb.imm16);
+  assert(memory_range_in_bounds<Width>(memsize, addr));
+  le_store<Width>(mem, addr, c.m->regs_[ip->rb.rs2]);
+  HOGD_STEP_NEXT(c, ip + 1);
+}
+
 // Fused handlers retain both architectural retirement steps when tracing.
 // The tail slot remains executable as a branch target; normal fused execution
 // skips it. Both instructions are covered by the run's charge.
@@ -1283,6 +1320,78 @@ pick_handler(Op op, bool trace, bool brk)
     return trace ? handler_for<true, true>(op) : handler_for<false, true>(op);
   }
   return trace ? handler_for<true, false>(op) : handler_for<false, false>(op);
+}
+
+// Access width in bytes of a load or store; 0 for every other op.
+inline uint32_t
+memory_access_width(Op op)
+{
+  switch (op) {
+  case Op::kLb:
+  case Op::kLbu:
+  case Op::kSb:
+    return 1;
+  case Op::kLh:
+  case Op::kLhu:
+  case Op::kSh:
+    return 2;
+  case Op::kLw:
+  case Op::kSw:
+    return 4;
+  default:
+    return 0;
+  }
+}
+
+template<bool Trace, bool Brk>
+Handler
+absolute_access_handler_for(Op op, bool in_bounds)
+{
+  // The checked handler would reach exactly this call, with the same
+  // arguments, before touching registers or memory, so baking it in changes
+  // no observable state, trap pc, or gas.
+  if (!in_bounds) {
+    return &trap_bad_memory<Trace, Brk>;
+  }
+  switch (op) {
+  case Op::kLb:
+    return &op_load_abs<Trace, 1, true, Brk>;
+  case Op::kLh:
+    return &op_load_abs<Trace, 2, true, Brk>;
+  case Op::kLw:
+    return &op_load_abs<Trace, 4, false, Brk>;
+  case Op::kLbu:
+    return &op_load_abs<Trace, 1, false, Brk>;
+  case Op::kLhu:
+    return &op_load_abs<Trace, 2, false, Brk>;
+  case Op::kSb:
+    return &op_store_abs<Trace, 1, Brk>;
+  case Op::kSh:
+    return &op_store_abs<Trace, 2, Brk>;
+  case Op::kSw:
+    return &op_store_abs<Trace, 4, Brk>;
+  default:
+    assert(false && "absolute_access_handler_for: op is not a load or store");
+    std::abort();
+  }
+}
+
+// Handler for a load/store whose base register is x0, given the machine's
+// data-memory size. Called during preparation only.
+inline Handler
+absolute_access_handler(Op op, int32_t imm, uint32_t memory_size, bool trace,
+                        bool brk)
+{
+  const uint32_t width = memory_access_width(op);
+  assert(width != 0);
+  const bool in_bounds =
+      memory_range_in_bounds(memory_size, bits_from_i32(imm), width);
+  if (brk) {
+    return trace ? absolute_access_handler_for<true, true>(op, in_bounds)
+                 : absolute_access_handler_for<false, true>(op, in_bounds);
+  }
+  return trace ? absolute_access_handler_for<true, false>(op, in_bounds)
+               : absolute_access_handler_for<false, false>(op, in_bounds);
 }
 
 // Called during preparation for conditional branches only.
@@ -1826,6 +1935,15 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       }
     }
 
+    // An x0-based load/store has a constant address and total_memory_size is
+    // the size of every machine's memory, so decide its bounds check here (see
+    // op_load_abs). Fusion below may still give a head slot a checked fused
+    // handler; the tail of a fused pair keeps this one for branches into it.
+    if (d.rs1 == 0 && memory_access_width(d.op) != 0) {
+      slot.handler = absolute_access_handler(d.op, d.imm, total_memory_size,
+                                             trace, is_break_here);
+    }
+
     // Fuse disjoint adjacent pairs. The tail retains its standalone handler
     // and suffix gas so branches can still enter it. Calibration disables
     // fusion when measuring individual opcode costs.
@@ -1874,6 +1992,8 @@ ThreadedMachine::drive()
   const Slot *ip = c.base + (pc_ / kInstructionBytes);
   uint8_t *mem = memory_.bytes().data();
   const auto memsize = static_cast<uint32_t>(memory_.bytes().size());
+  // The absolute load/store handlers were selected against the image size.
+  assert(memsize == pre_instantiation_->initial_memory_image_.size());
   // Plain call+return, not a musttail: a non-static member function cannot
   // tail-call the free function enter_run (musttail needs matching signatures,
   // and the implicit `this` differs). enter_run begins the musttail chain,
