@@ -55,6 +55,7 @@ RecvBuf::make_room(size_t more)
 {
   const size_t n = nbuffered();
   const bool roomy = chunk_ && space() >= std::max(more, kMinRead);
+  size_t capacity = std::max(n + more, kChunkSize);
   if (chunk_ && chunk_->unique()) {
     // No reply points into the chunk, so the bytes below rptr() are
     // ours again.  Rewinding an empty buffer is free; a partial
@@ -67,6 +68,9 @@ RecvBuf::make_room(size_t more)
     }
     if (space() >= more)
       return;
+    // The record does not fit.  Grow geometrically, as Vec does, so
+    // that records of slowly increasing size do not each reallocate.
+    capacity = std::max(capacity, 2 * chunk_->capacity());
   }
   else if (roomy)
     // Replies still point into the chunk, so keep filling its tail.
@@ -74,7 +78,7 @@ RecvBuf::make_room(size_t more)
 
   // Start a new chunk.  Replies that reference the old one keep it
   // alive.  (n is 0 when there is no chunk yet.)
-  auto fresh = RecvChunk::make(std::max(n + more, kChunkSize));
+  auto fresh = RecvChunk::make(capacity);
   if (n)
     std::memcpy(fresh->data(), rptr(), n);
   chunk_ = std::move(fresh);

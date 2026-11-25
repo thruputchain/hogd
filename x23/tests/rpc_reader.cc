@@ -269,6 +269,27 @@ TEST(RecvBuf, RetainsCapacityForLargeRecords)
   }
 }
 
+// Records that each exceed the capacity by a little must not make the
+// buffer reallocate every time.
+TEST(RecvBuf, GrowsGeometrically)
+{
+  detail::RecvBuf buf;
+  buf.make_room(4);
+  size_t capacity = buf.chunk()->capacity();
+  unsigned growths = 0;
+  for (size_t i = 0; i < 256; ++i) {
+    const size_t size = 0x10000 + 4 * i;
+    buf.make_room(size);
+    if (buf.chunk()->capacity() != capacity) {
+      capacity = buf.chunk()->capacity();
+      ++growths;
+    }
+    buf.commit(size);
+    buf.consume(size);
+  }
+  EXPECT_EQ(growths, 1U);
+}
+
 struct ReaderTest : testing::Test {
   ThreadPool pool_{4};
   CoroPoll cp_{pool_};
