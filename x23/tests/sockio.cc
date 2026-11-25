@@ -8,7 +8,6 @@
 #include <arpa/inet.h>
 #include <fcntl.h>
 #include <netinet/tcp.h>
-#include <poll.h>
 #include <sys/socket.h>
 #include <sys/un.h>
 
@@ -171,66 +170,6 @@ TEST(TcpListen, AddressInUse)
         << e.what();
   }
 }
-
-TEST(TcpListen, MultipathFallbackErrors)
-{
-  for (int error :
-       {EPROTONOSUPPORT, ENOPROTOOPT, EAFNOSUPPORT, EOPNOTSUPP, EPERM, EACCES})
-    EXPECT_TRUE(is_mptcp_unavailable(Errno(error)));
-  EXPECT_FALSE(is_mptcp_unavailable(Errno(EADDRINUSE)));
-  EXPECT_FALSE(is_mptcp_unavailable(Errno(ENOMEM)));
-}
-
-TEST(TcpListen, UnavailableStreamProtocolDoesNotPreventTcpFallback)
-{
-  auto addr = numeric_addr("127.0.0.1", 0);
-  auto unavailable = try_tcplisten(addr, 5, IPPROTO_UDP);
-  ASSERT_FALSE(unavailable);
-  auto fallback = try_tcplisten(addr);
-  ASSERT_TRUE(fallback);
-  EXPECT_NE(get_port(local_addr(*fallback)), 0);
-}
-
-#if defined(__linux__) && defined(IPPROTO_MPTCP)
-TEST(TcpListen, MultipathAcceptsOrdinaryTcp)
-{
-  auto listener = try_tcplisten(numeric_addr("127.0.0.1", 0), 5, IPPROTO_MPTCP);
-  if (!listener && is_mptcp_unavailable(listener.error()))
-    GTEST_SKIP() << "MPTCP is unavailable";
-  ASSERT_TRUE(listener);
-  int protocol = 0;
-  socklen_t len = sizeof(protocol);
-  ASSERT_EQ(getsockopt(listener->get(), SOL_SOCKET, SO_PROTOCOL, &protocol,
-                       &len),
-            0);
-  EXPECT_EQ(protocol, IPPROTO_MPTCP);
-  EXPECT_NE(fcntl(listener->get(), F_GETFL) & O_NONBLOCK, 0);
-  EXPECT_NE(fcntl(listener->get(), F_GETFD) & FD_CLOEXEC, 0);
-  auto addr = local_addr(*listener);
-  EXPECT_NE(get_port(addr), 0);
-  auto occupied = try_tcplisten(addr, 5, IPPROTO_MPTCP);
-  ASSERT_FALSE(occupied);
-  EXPECT_EQ(occupied.error(), EADDRINUSE);
-
-  for (int client_protocol : {IPPROTO_TCP, IPPROTO_MPTCP}) {
-    UniqueFd client(
-        socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, client_protocol));
-    ASSERT_TRUE(client);
-    ASSERT_EQ(connect(client.get(), reinterpret_cast<const sockaddr *>(&addr),
-                      sockaddr_len(addr)),
-              0);
-    pollfd ready{listener->get(), POLLIN, 0};
-    ASSERT_EQ(poll(&ready, 1, 1000), 1);
-    UniqueFd accepted(accept(listener->get(), nullptr, nullptr));
-    ASSERT_TRUE(accepted);
-    constexpr char message = 'A';
-    ASSERT_EQ(send(client.get(), &message, 1, 0), 1);
-    char received{};
-    ASSERT_EQ(recv(accepted.get(), &received, 1, 0), 1);
-    EXPECT_EQ(received, message);
-  }
-}
-#endif
 
 TEST(SocketOptions, InvalidDescriptor)
 {

@@ -84,14 +84,14 @@ public:
 
   // Like bind_server, but returns a failure to listen instead of exiting.
   std::expected<std::pair<uint16_t, x23::UniqueFd>, x23::Errno>
-  try_bind_server(const x23::HostPort &bind_addr, int protocol = 0)
+  try_bind_server(const x23::HostPort &bind_addr)
   {
     CHECK(!bound_);
     std::expected<sockaddr_storage, x23::GaiError> addr =
         bind_addr.to_addr(/*dns=*/false);
     CHECK(addr.has_value());
     int backlog = 5 + cp_.pool_.nthreads_;
-    auto lfd = x23::try_tcplisten(*addr, backlog, protocol);
+    auto lfd = x23::try_tcplisten(*addr, backlog);
     if (!lfd)
       return std::unexpected(lfd.error());
     bound_ = true;
