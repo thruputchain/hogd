@@ -309,6 +309,7 @@ AuthServer::verify_transactions(BlockHeight height,
   std::array<std::optional<x23::Async<void>>, kMaxLookupBatchesInFlight>
       pending_lookups;
   size_t next_lookup = 0;
+  bool had_misses = false;
   BlockHeight current_height = kUninitializedHeight;
 
   // Each coroutine owns its arguments and writes only its distinct map
@@ -370,10 +371,17 @@ AuthServer::verify_transactions(BlockHeight height,
     tx_auth_data[i] = &it->second;
     if (inserted) {
       if (current_height == kUninitializedHeight) {
-        current_height = co_await wait_for_height(height);
+        CHECK_NE(height, kUninitializedHeight);
+        CHECK_NE(height, kInitializing);
+        current_height = current_height_futex_.load();
+        if (current_height == kUninitializedHeight ||
+            current_height == kInitializing || current_height < height) {
+          current_height = co_await wait_for_height(height);
+        }
       }
       it->second = check_auth_cache(height, current_height, it->first);
       if (it->second.has_value() && *it->second == nullptr) {
+        had_misses = true;
         missing_addresses.push_back(it->first);
         missing_entries.push_back(&it->second);
         if (missing_addresses.size() ==
@@ -383,7 +391,9 @@ AuthServer::verify_transactions(BlockHeight height,
       }
     }
   }
-  co_await launch_lookup();
+  if (!missing_addresses.empty()) {
+    co_await launch_lookup();
+  }
   for (auto &lookup : pending_lookups) {
     if (lookup.has_value()) {
       co_await *lookup;
@@ -418,21 +428,25 @@ AuthServer::verify_transactions(BlockHeight height,
                   std::clamp<size_t>(txs.size() / kMinTxsPerVerifyChunk, 1,
                                      max_parallelism));
   if (chunks.size() == 1) {
+    // DB replies can resume the caller on the RPC reader thread. Keep
+    // signature verification off that thread without adding a hop to warm
+    // cache hits, which still run on the preparation worker.
+    if (had_misses) {
+      co_await default_coropoll().pool_.bg();
+    }
     verify_chunk(chunks.front());
     co_return results;
   }
   std::vector<x23::Async<void>> handles;
-  handles.reserve(chunks.size() - 1);
-  for (size_t i = 1; i < chunks.size(); ++i) {
+  handles.reserve(chunks.size());
+  for (const ChunkRange &chunk : chunks) {
     handles.push_back(
         [](ChunkRange chunk, const auto &verify) noexcept -> x23::Async<void> {
           co_await default_coropoll().pool_.bg();
           verify(chunk);
           co_return;
-        }(chunks[i], verify_chunk));
+        }(chunk, verify_chunk));
   }
-  // Preparation already runs on the pool; use its worker for the first chunk.
-  verify_chunk(chunks.front());
   for (x23::Async<void> &handle : handles) {
     co_await handle;
   }

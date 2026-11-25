@@ -174,15 +174,23 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   stx3.tx = tx3;
   stx3.signatures.push_back(make_signature(sk2, tx3, /*public_key_id=*/0));
 
-  x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
+  x23::Vec<SignedTransaction> stx_vec;
+  // Exercise both inline and multi-chunk verification with mixed outcomes.
+  // Repeating this pattern spans the production minimum chunk width.
+  for (size_t i = 0; i < AuthServer::kMinTxsPerVerifyChunk; ++i) {
+    stx_vec.push_back(stx1);
+    stx_vec.push_back(stx2);
+    stx_vec.push_back(stx3);
+  }
   x23::span<SignedTransaction> stx_span(stx_vec);
-  // Exercise the inline chunk and concurrent workers with mixed outcomes.
   for (size_t parallelism : {1U, 2U, 8U}) {
     auto result = auth_server().verify_transactions(0, stx_span, parallelism)();
-    ASSERT_EQ(result.size(), 3);
-    EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
-    EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
-    EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+    ASSERT_EQ(result.size(), stx_vec.size());
+    for (size_t i = 0; i < result.size(); i += 3) {
+      EXPECT_EQ(result[i], AuthErrorCode::kAuthFailed);
+      EXPECT_EQ(result[i + 1], AuthErrorCode::kAuthSuccess);
+      EXPECT_EQ(result[i + 2], AuthErrorCode::kAuthFailed);
+    }
   }
 
   // batch verify
