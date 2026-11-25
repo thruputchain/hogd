@@ -4,7 +4,9 @@
 #include <chrono>
 #include <condition_variable>
 #include <cstddef>
+#include <cstdio>
 #include <mutex>
+#include <print>
 #include <stdexcept>
 #include <stop_token>
 
@@ -45,7 +47,12 @@ next_block_timepoint(TimePoint parent)
 std::size_t
 BlockDriver::produce_block()
 {
+  const auto start = std::chrono::steady_clock::now();
+  const auto micros_since = [](auto previous, auto next) {
+    return std::chrono::duration_cast<std::chrono::microseconds>(next - previous).count();
+  };
   auto tip = scheduler_.schedcoord_get_tip()();
+  const auto tip_done = std::chrono::steady_clock::now();
   require(tip.outcome() == SchedulerGetTipOutcome::SchedulerGetTipOK,
           "cannot read chain tip");
   auto proposal = scheduler_.schedulercoord_propose_block(
@@ -55,6 +62,7 @@ BlockDriver::produce_block()
               tip.db_tip().value.proposal_header.block_timepoint)})();
   require(proposal.outcome() == SchedulerProposalOutcome::SchedulerProposalOK,
           "block proposal failed");
+  const auto proposal_done = std::chrono::steady_clock::now();
   const auto &block = proposal.proposed_block();
   SignedTransactionBatch txs;
   require(parallel_batch_to_t(block.txs, txs, kNoBatchSizeLimit)(),
@@ -64,9 +72,17 @@ BlockDriver::produce_block()
   value.proposal_header = block.proposal.header;
   value.proposal_txs_hash =
       proposal_txs_compatibility_hash(block.proposal.transactions);
+  const auto decode_done = std::chrono::steady_clock::now();
   require(scheduler_.schedulercoord_commit_block(block.block_id, value)() ==
               SchedulerCommitOutcome::SchedulerCommitOK,
           "block commit failed");
+  const auto commit_done = std::chrono::steady_clock::now();
+  std::println(stderr, "gateway_block: txs={} tip_us={} propose_us={} decode_us={} commit_us={} total_us={}",
+               txs.size(), micros_since(start, tip_done),
+               micros_since(tip_done, proposal_done),
+               micros_since(proposal_done, decode_done),
+               micros_since(decode_done, commit_done),
+               micros_since(start, commit_done));
   ++blocks_;
   transactions_ += txs.size();
   return txs.size();

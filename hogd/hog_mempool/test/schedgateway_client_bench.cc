@@ -415,6 +415,8 @@ run_load(const Config &config,
   }
   stop.request_stop();
   driver.join();
+  std::println(stderr, "gateway_cadence: timed_blocks={} timed_committed={}",
+               block_driver.blocks(), block_driver.transactions());
   WorkerResult total;
   total.error = driver_error;
   for (const auto &r : results) {

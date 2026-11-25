@@ -38,6 +38,10 @@ for config in calls:64:1:5000000 batches:8:100:8000000; do
   IFS=: read -r name outstanding batch transactions <<<"$config"
   echo "run schedgateway stress benchmark: $name, 8 connections x" \
     "$outstanding calls x $batch transaction(s)"
+  if [[ $name == batches && ${GIT_BRANCH:-} == codex/gateway-hog7-storage-abba ]]; then
+    "$(dirname "$0")/schedgateway_storage_abba.sh" "$OUTPUT_ROOT/$name" || status=$?
+    continue
+  fi
   SCHEDGATEWAY_BENCH_OUTSTANDING=$outstanding \
     SCHEDGATEWAY_BENCH_BATCH=$batch \
     SCHEDGATEWAY_BENCH_TRANSACTIONS=$transactions \
