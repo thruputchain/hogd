@@ -37,8 +37,10 @@ PYTMP
   [[ -n $backing ]]
   read -r capacity used free < <(df -Pk "$tmpdir" | awk 'NR==2{print $2,$3,$4}')
   [[ $capacity =~ ^[0-9]+$ && $used =~ ^[0-9]+$ && $free =~ ^[0-9]+$ && $free -ge 10485760 ]]
-  printf 'PAYMENT_EVENT_DB_V1 run=%s arm=%s host=hog11 stopped=yes tmpdir=%s backing=%s capacity_kib=%s used_kib=%s free_kib=%s\n' \
-    "$HOG_XID" "$arm" "$tmpdir" "$backing" "$capacity" "$used" "$free"
+  db_binary=$(sha256sum /workspace/release/hogd/hog_exec/bench/bench_server | awk '{print $1}')
+  [[ $db_binary =~ ^[a-f0-9]{64}$ ]]
+  printf 'PAYMENT_EVENT_DB_V1 run=%s arm=%s host=hog11 stopped=yes tmpdir=%s backing=%s capacity_kib=%s used_kib=%s free_kib=%s binary_sha256=%s\n' \
+    "$HOG_XID" "$arm" "$tmpdir" "$backing" "$capacity" "$used" "$free" "$db_binary"
   exit
 fi
 [[ ${HOG_HOST:-} == hog8 ]]
@@ -63,8 +65,10 @@ if [[ $action == prepare ]]; then
   # Earlier stock 10-account Event fixture sampled 6.81 GiB peak; allow at least 10 GiB free.
   read -r capacity used free < <(df -Pk "$leaf" | awk 'NR==2{print $2,$3,$4}')
   [[ $capacity =~ ^[0-9]+$ && $used =~ ^[0-9]+$ && $free =~ ^[0-9]+$ && $free -ge 10485760 ]]
-  printf 'PAYMENT_EVENT_MEDIA_V1 action=prepare run=%s arm=%s host=hog8 path=%s backing=%s capacity_kib=%s baseline_mount_kib=%s baseline_ram_kib=%s\n' \
-    "$HOG_XID" "$arm" "$leaf" "$expected" "$capacity" "$used" "$(cat "$meta/baseline")"
+  event_binary=$(sha256sum /workspace/release/hogd/hog_event/hog-event | awk '{print $1}')
+  [[ $event_binary =~ ^[a-f0-9]{64}$ ]]
+  printf 'PAYMENT_EVENT_MEDIA_V1 action=prepare run=%s arm=%s host=hog8 path=%s backing=%s capacity_kib=%s baseline_mount_kib=%s baseline_ram_kib=%s binary_sha256=%s\n' \
+    "$HOG_XID" "$arm" "$leaf" "$expected" "$capacity" "$used" "$(cat "$meta/baseline")" "$event_binary"
   exit
 fi
 [[ -d $meta && ! -L $meta && $(realpath -e "$meta") == "$meta" && -d $leaf && ! -L $leaf && $(realpath -e "$leaf") == "$leaf" && $(findmnt -rn -o FSTYPE -T "$leaf") == "$expected" ]]
@@ -108,8 +112,10 @@ reclaim)
   [[ ! -e $leaf && ! -L $leaf ]]
   siblings | cmp - "$meta/siblings"
   after=$(ram_usage); [[ $after == "$baseline" ]]
-  printf 'PAYMENT_EVENT_MEDIA_V1 action=reclaim run=%s arm=%s host=hog8 path=%s backing=%s writers_stopped=yes siblings_preserved=yes peak_mount_kib=%s samples=%s final_leaf_kib=%s ram_before_kib=%s ram_after_kib=%s baseline_ram_kib=%s\n' \
-    "$HOG_XID" "$arm" "$leaf" "$expected" "$peak" "$samples" "$final" "$before" "$after" "$baseline"
+  event_binary=$(sha256sum /workspace/release/hogd/hog_event/hog-event | awk '{print $1}')
+  [[ $event_binary =~ ^[a-f0-9]{64}$ ]]
+  printf 'PAYMENT_EVENT_MEDIA_V1 action=reclaim run=%s arm=%s host=hog8 path=%s backing=%s writers_stopped=yes siblings_preserved=yes peak_mount_kib=%s samples=%s final_leaf_kib=%s ram_before_kib=%s ram_after_kib=%s baseline_ram_kib=%s binary_sha256=%s\n' \
+    "$HOG_XID" "$arm" "$leaf" "$expected" "$peak" "$samples" "$final" "$before" "$after" "$baseline" "$event_binary"
   rm -f -- "$meta/baseline" "$meta/siblings" "$meta/peak" "$meta/final" "$meta/stop"
   rmdir -- "$meta"
   ;;

@@ -35,6 +35,7 @@ trap 'exit 130' INT
 trap 'exit 143' TERM
 for slot in 1-disk 2-ram 3-ram 4-disk; do
   arm=$slot
+  sha256sum "./$build/hogd/hog_exec/bench/payments_bench" >"$evidence/$arm.client.sha256"
   host_action hog11 db-receipt >"$evidence/$arm.receipts"
   host_action hog8 prepare >>"$evidence/$arm.receipts"
   prepared=yes
@@ -46,6 +47,7 @@ for slot in 1-disk 2-ram 3-ram 4-disk; do
   date +%s.%N >"$evidence/$arm.end"
   printf '%s\n' "$status" >"$evidence/$arm.status"
   cleanup_arm
+  sha256sum -c "$evidence/$arm.client.sha256"
   arm=
   [[ $status == 0 ]]
   if [[ $slot == 1-disk ]]; then cp -- "$evidence/$slot.stdout" "$output"; fi
