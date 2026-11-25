@@ -24,7 +24,7 @@ class NativeSyscallContext;
 // balance check, no Transfer event, so callers on the public ERC20 surface
 // must run the strict checks first. `amount` must be nonnegative; both writes
 // are charged to `ctx`.
-[[nodiscard]] x23::Async<InvokeStatus<void>>
+[[nodiscard]] InvokeStatus<void>
 native_token_unchecked_transfer(NativeSyscallContext &ctx,
                                 ContractAddress const &from,
                                 ContractAddress const &to, int128_t amount);
