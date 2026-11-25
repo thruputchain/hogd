@@ -383,7 +383,8 @@ TEST_F(DatabaseTest, SyncStats)
   DBStatus<uint64_t> lsn = db_->sync();
   ASSERT_TRUE(lsn);
   auto stats = db_->last_sync_stats();
-  ASSERT_TRUE(stats);
+  if (!stats)
+    FAIL() << "missing WAL sync stats";
   const SyncStats &st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_GT(st.dirty_heads, 0U);
@@ -428,7 +429,8 @@ TEST(DiskWriterTest, SyncStatsEarlyLoglets)
   DBStatus<uint64_t> lsn = dw.sync();
   ASSERT_TRUE(lsn);
   auto stats = dw.last_sync_stats();
-  ASSERT_TRUE(stats);
+  if (!stats)
+    FAIL() << "missing WAL sync stats";
   SyncStats st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_EQ(st.bytes_early, early);
@@ -443,7 +445,8 @@ TEST(DiskWriterTest, SyncStatsEarlyLoglets)
   lsn = dw.sync();
   ASSERT_TRUE(lsn);
   stats = dw.last_sync_stats();
-  ASSERT_TRUE(stats);
+  if (!stats)
+    FAIL() << "missing WAL sync stats for empty sync";
   st = *stats;
   EXPECT_EQ(st.lsn, *lsn);
   EXPECT_EQ(st.dirty_heads, 0U);
