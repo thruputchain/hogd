@@ -127,6 +127,21 @@ public:
     return {&it->second, std::move(ul)};
   }
 
+  // Private sampled diagnostic: callback after the original shard lock is
+  // acquired, before the map operation. No additional synchronization.
+  template<typename AfterLock>
+  std::pair<T *, std::unique_lock<lock_type>>
+  find_after_lock(const Key &key, AfterLock after_lock)
+  {
+    auto [map, ul] = get_bucket(key);
+    after_lock();
+    auto it = map.find(key);
+    if (it == map.end()) {
+      return {nullptr, std::move(ul)};
+    }
+    return {&it->second, std::move(ul)};
+  }
+
   // find_shared with shared lock
   std::pair<const T *, std::shared_lock<lock_type>>
   find_shared(const Key &key) const requires shared_mutex_like<lock_type>
@@ -204,6 +219,14 @@ public:
   size_t remove(const Key &key)
   {
     auto [map, ul] = get_bucket(key);
+    return map.erase(key);
+  }
+
+  template<typename AfterLock>
+  size_t remove_after_lock(const Key &key, AfterLock after_lock)
+  {
+    auto [map, ul] = get_bucket(key);
+    after_lock();
     return map.erase(key);
   }
 

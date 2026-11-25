@@ -12,6 +12,9 @@
 #include <vector>
 
 #include "db_sched.hh"
+#include "built_contracts/itc_erc20.h"
+#include "built_contracts/simple_wallet_authclaim.h"
+#include "hogd/hog_exec/components/contract_trait.h"
 #include "hogd/base/chunked_vector.h"
 #include "hogd/base/log.h"
 #include "hogd/base/time.h"
@@ -285,6 +288,8 @@ bm_scheduler_remove_batch_probe(benchmark::State &state)
   const auto n = static_cast<size_t>(state.range(0));
   const auto backlog = static_cast<size_t>(state.range(1));
   const bool enabled = state.range(2) != 0;
+  const bool nominated = state.range(3) != 0;
+  const bool payment_shape = state.range(4) != 0;
   const auto accounts = make_benchmark_accounts(10'000);
   seed_benchmark_native_token_ages(server, accounts);
   scheduler->read_average_native_token_ages(
@@ -296,9 +301,36 @@ bm_scheduler_remove_batch_probe(benchmark::State &state)
     TransactionHashBatch hashes(count);
     WorkerPool::get_default_pool().for_each_parallel(
         std::views::iota(size_t{0}, count), [&](size_t i) {
-          txs[i].tx.invocation.invoked_address =
-              accounts[(i + offset) % accounts.size()];
+          const size_t sender = (i + offset) % accounts.size();
+          txs[i].tx.invocation.invoked_address = accounts[sender];
           txs[i].tx.uniquifier.nonce = i + offset;
+          if (payment_shape) {
+            // Same allocation/XDR shape as ERC20BasicAuthExperimentState,
+            // synthetic signature bytes: this directly tests scheduler
+            // removal, not cryptographic validity.
+            using erc20_meta = ContractTraitMeta<itc_erc20::ERC20>;
+            using wallet_meta =
+                ContractTraitMeta<simple_wallet_authclaim::SimpleWalletAuthClaim>;
+            const ContractAddress erc20_address = accounts.back();
+            const Calldata internal = x23::serialize(
+                erc20_address, erc20_meta::entrypoint<u8"transfer">(),
+                GasAmount{1'000'000},
+                erc20_meta::make_calldata<u8"transfer">(
+                    accounts[(sender+1)%accounts.size()],
+                    std::tuple<int64_t,uint64_t>{0,10}));
+            txs[i].tx.invocation.entrypoint =
+                wallet_meta::entrypoint<u8"do_action">();
+            txs[i].tx.invocation.gas_limit = GasAmount{100'000};
+            txs[i].tx.invocation.calldata =
+                wallet_meta::make_calldata<u8"do_action">(internal);
+            txs[i].tx.uniquifier.block_expiry_height = 1'000'000'000;
+            txs[i].tx.auth_claim = make_sign_claim(0);
+            Signature sig(CryptographicScheme::Ed25519);
+            sig.ed25519() = {};
+            txs[i].signatures.clear();
+            txs[i].signatures.push_back(DecoratedSignature{
+                .public_key_id = 0, .signature = sig});
+          }
           hashes[i] = sha256(txs[i].tx);
         });
     return std::pair{std::move(txs), std::move(hashes)};
@@ -309,33 +341,50 @@ bm_scheduler_remove_batch_probe(benchmark::State &state)
   }
   CHECK_EQ(scheduler->size(), backlog);
   CHECK_EQ(scheduler->tx_cache_size(), backlog);
-  auto [txs, hashes] = make_txs(n, 0);
+  size_t offset = n+backlog;
+  size_t cycle = 0;
   for (auto _ : state) {
+    ++cycle;
+    auto [txs, hashes] = make_txs(n, offset);
+    offset += n;
     scheduler->add_txs(txs, hashes)();
     CHECK_EQ(scheduler->size(), backlog + n);
     CHECK_EQ(scheduler->tx_cache_size(), backlog + n);
+    TransactionHashBatch nominated_hashes;
+    SignedTransactionHashBatch nominated_signed_hashes;
+    SignedTransactionBatch nominated_txs;
+    if (nominated) {
+      scheduler->schedule(n, nominated_hashes, nominated_signed_hashes, nominated_txs)();
+      CHECK_EQ(nominated_hashes.size(), n);
+      CHECK_EQ(nominated_signed_hashes.size(), n);
+      CHECK_EQ(nominated_txs.size(), n);
+      CHECK_EQ(scheduler->size(), backlog);
+      CHECK_EQ(scheduler->tx_cache_size(), backlog + n);
+    }
     SchedulerRemoveProbe probe;
     ElapsedTimer timer;
     scheduler->remove_from_scheduler(
-        x23::span<const TransactionHash>(hashes), enabled ? &probe : nullptr)();
+        x23::span<const TransactionHash>(nominated ? nominated_hashes : hashes), enabled ? &probe : nullptr)();
     const double elapsed = timer.elapsed();
     state.SetIterationTime(elapsed);
     CHECK_EQ(scheduler->size(), backlog);
     CHECK_EQ(scheduler->tx_cache_size(), backlog);
-    std::fprintf(stderr, "REMOVE_FIXTURE enabled=%d requested=%zu backlog=%zu actual=%zu elapsed_s=%.9f\n",
-                 enabled, n, backlog, scheduler->tx_cache_size(), elapsed);
+    std::fprintf(stderr, "REMOVE_FIXTURE enabled=%d payment_shape=%d cycle=%zu requested=%zu backlog=%zu actual=%zu elapsed_s=%.9f\n",
+                 enabled, payment_shape, cycle, n, backlog, scheduler->tx_cache_size(), elapsed);
     if (enabled) {
-      CHECK_EQ(probe.removed_from_runqueue, n);
+      CHECK_EQ(probe.removed_from_runqueue, nominated ? 0 : n);
       CHECK_EQ(probe.expired, 0);
-      std::fprintf(stderr, "%s\n", probe.receipt(1, 1, n).c_str());
+      std::fprintf(stderr, "%s\n", probe.receipt(cycle, cycle, n).c_str());
     }
   }
   state.SetItemsProcessed(state.iterations() * n);
 }
 BENCHMARK(bm_scheduler_remove_batch_probe)
-    ->Args({1'000, 0, 0})->Args({1'000, 0, 1})
-    ->Args({1'000'000, 0, 0})->Args({1'000'000, 0, 1})
-    ->Args({1'000'000, 4'000'000, 0})->Args({1'000'000, 4'000'000, 1})
+    ->Args({1'000, 0, 1, 1, 1})
+    ->Args({1'000'000, 5'000'000, 0, 1, 1})
+    ->Args({1'000'000, 5'000'000, 1, 1, 1})
+    ->Args({1'000'000, 5'000'000, 1, 1, 0})
+    ->Args({1'000'000, 7'000'000, 1, 1, 1})
     ->UseManualTime()->Unit(benchmark::kMillisecond);
 
 } // namespace

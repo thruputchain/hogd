@@ -835,8 +835,46 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
 }
 
 void
-Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
+Scheduler::erase_cached_tx(const TransactionHash &tx_hash,
+                           SchedulerRemoveProbe::Chunk *sample)
 {
+  if (sample) {
+    using Probe = SchedulerRemoveProbe;
+    auto tick = Probe::Clock::now();
+    auto mark = [&](uint64_t &total) {
+      auto end = Probe::Clock::now();
+      total += Probe::duration(tick, end);
+      tick = end;
+    };
+    std::shared_ptr<TxValue> tx_value;
+    {
+      auto [tx_value_ptr, txs_lock] = txs_by_body_.find_after_lock(
+          tx_hash, [&] { mark(sample->cache_body_lock_ns); });
+      CHECK_PTR(tx_value_ptr);
+      mark(sample->cache_body_find_ns);
+      tx_value = *tx_value_ptr;
+      tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
+      mark(sample->cache_counter_ns);
+      CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
+    }
+    mark(sample->cache_body_remove_ns);
+
+    const auto aliases = tx_value->signed_tx_hashes->size();
+    sample->alias_entries += aliases;
+    sample->alias_multi += aliases > 1;
+    const auto signed_start = Probe::Clock::now();
+    for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+      tick = Probe::Clock::now();
+      CHECK_EQ(txs_.remove_after_lock(
+          signed_hash, [&] { mark(sample->signed_lock_ns); }), 1UL);
+      mark(sample->signed_remove_ns);
+    }
+    sample->signed_iter_ns += Probe::duration(signed_start, Probe::Clock::now());
+    tick = Probe::Clock::now();
+    tx_value.reset();
+    mark(sample->inner_release_ns);
+    return;
+  }
   std::shared_ptr<TxValue> tx_value;
   {
     auto [tx_value_ptr, txs_lock] = txs_by_body_.find(tx_hash);
@@ -1620,6 +1658,7 @@ SchedulerRemoveProbe::receipt(uint64_t height, uint64_t block_id, size_t txs) co
   uint64_t queue_max = 0, worker_max = 0, worker_sum = 0, cpu_sum = 0;
   uint64_t samples = 0, body = 0, account = 0, runqueue = 0, erase = 0;
   uint64_t voluntary = 0, involuntary = 0;
+  Chunk detail;
   for (const auto &c : chunks) {
     queue_max = std::max(queue_max, duration(c.queued, c.started));
     auto worker = duration(c.started, c.finished);
@@ -1633,6 +1672,18 @@ SchedulerRemoveProbe::receipt(uint64_t height, uint64_t block_id, size_t txs) co
     account += c.account_lookup_ns;
     runqueue += c.runqueue_ns;
     erase += c.cache_erase_ns;
+    detail.cache_body_lock_ns += c.cache_body_lock_ns;
+    detail.cache_body_find_ns += c.cache_body_find_ns;
+    detail.cache_counter_ns += c.cache_counter_ns;
+    detail.cache_body_remove_ns += c.cache_body_remove_ns;
+    detail.signed_iter_ns += c.signed_iter_ns;
+    detail.signed_lock_ns += c.signed_lock_ns;
+    detail.signed_remove_ns += c.signed_remove_ns;
+    detail.alias_entries += c.alias_entries;
+    detail.alias_multi += c.alias_multi;
+    detail.inner_release_ns += c.inner_release_ns;
+    detail.outer_release_ns += c.outer_release_ns;
+    detail.outer_last_owner += c.outer_last_owner;
   }
   return std::format(
       "SCHEDULER_REMOVE_PHASE_V1 height={} block_id={} tx_count={} "
@@ -1650,7 +1701,16 @@ SchedulerRemoveProbe::receipt(uint64_t height, uint64_t block_id, size_t txs) co
       duration(entry, clear_end), duration(entry, launch_end), duration(entry, join_end),
       duration(entry, collect_end), duration(entry, ready_end), duration(entry, return_end),
       queue_max, worker_max, worker_sum, cpu_sum, voluntary, involuntary, samples, body, account,
-      runqueue, erase);
+      runqueue, erase) + std::format(
+      " cache_body_lock_ns={} cache_body_find_ns={} cache_counter_ns={} "
+      "cache_body_remove_ns={} signed_iter_ns={} signed_lock_ns={} "
+      "signed_remove_ns={} alias_entries={} alias_multi={} "
+      "inner_release_ns={} outer_release_ns={} outer_last_owner={}",
+      detail.cache_body_lock_ns, detail.cache_body_find_ns,
+      detail.cache_counter_ns, detail.cache_body_remove_ns,
+      detail.signed_iter_ns, detail.signed_lock_ns, detail.signed_remove_ns,
+      detail.alias_entries, detail.alias_multi, detail.inner_release_ns,
+      detail.outer_release_ns, detail.outer_last_owner);
 }
 
 x23::Async<void>
@@ -1764,12 +1824,19 @@ Scheduler::remove_from_scheduler(x23::span<const TransactionHash> tx_hashes,
               }
               // Keep the account locked until the cache entry is gone, so a
               // concurrent resubmit cannot restore only the runqueue entry.
-              scheduler.erase_cached_tx(tx_hash);
+              scheduler.erase_cached_tx(tx_hash, sample ? &local_timing : nullptr);
               if (sample) {
                 local_timing.cache_erase_ns += SchedulerRemoveProbe::duration(
                     sample_time, SchedulerRemoveProbe::Clock::now());
                 ++local_timing.samples;
               }
+            }
+            if (sample) {
+              local_timing.outer_last_owner += tx_value.use_count() == 1;
+              const auto release_start = SchedulerRemoveProbe::Clock::now();
+              tx_value.reset();
+              local_timing.outer_release_ns += SchedulerRemoveProbe::duration(
+                  release_start, SchedulerRemoveProbe::Clock::now());
             }
           }
 

@@ -486,7 +486,8 @@ private:
   // [txs_], along with every other encoding of it. The caller holds the lock of
   // the tx's account, as every cache writer does, so the entry read here is
   // current.
-  void erase_cached_tx(const TransactionHash &tx_hash);
+  void erase_cached_tx(const TransactionHash &tx_hash,
+                       SchedulerRemoveProbe::Chunk *sample = nullptr);
   // TODO(jhumphri): Give this a better name.
   x23::Async<void> cycle_accounts_during_schedule_helper(
       const std::unordered_set<ContractAddress, SipHash24Hasher> &accounts,

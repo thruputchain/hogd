@@ -21,6 +21,11 @@ struct SchedulerRemoveProbe {
     uint64_t voluntary = 0, involuntary = 0;
     uint64_t samples = 0, body_lookup_ns = 0, account_lookup_ns = 0;
     uint64_t runqueue_ns = 0, cache_erase_ns = 0;
+    uint64_t cache_body_lock_ns = 0, cache_body_find_ns = 0;
+    uint64_t cache_counter_ns = 0, cache_body_remove_ns = 0;
+    uint64_t signed_iter_ns = 0, signed_lock_ns = 0, signed_remove_ns = 0;
+    uint64_t alias_entries = 0, alias_multi = 0;
+    uint64_t inner_release_ns = 0, outer_release_ns = 0, outer_last_owner = 0;
   };
   Time entry, bg_end, lock_begin, lock_end, clear_end, launch_end;
   Time join_end, collect_end, ready_end, return_end;
