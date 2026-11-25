@@ -328,24 +328,13 @@ verify_chunk_on_pool(std::span<const SignedTransaction> txs,
 
 } // namespace
 
-x23::Async<AuthErrorCodeBatch>
-AuthServer::verify_transactions(BlockHeight height,
-                                std::span<const SignedTransaction> txs,
-                                size_t max_parallelism)
+x23::Async<void>
+AuthServer::gather_missing_auth_data(BlockHeight height,
+                                     std::span<const SignedTransaction> txs,
+                                     size_t first_missing,
+                                     AuthDataByAccount &auth_data,
+                                     AuthErrorCodeBatch &results)
 {
-  CHECK_GT(max_parallelism, 0UL);
-  if (txs.empty()) {
-    co_return AuthErrorCodeBatch{};
-  }
-  co_await default_coropoll().pool_.bg();
-
-  AuthErrorCodeBatch results;
-  results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
-
-  // Retain the original positive-entry map and signature verifier on the
-  // cache-hit path. The separate outcome map is populated only for misses;
-  // pending RPCs never mutate the positive map while preparation is running.
-  AuthDataByAccount auth_data;
   std::unordered_map<ContractAddress, AuthStatus<AuthCacheEntry>,
                      SipHash24Hasher>
       missing_auth_data;
@@ -405,7 +394,7 @@ AuthServer::verify_transactions(BlockHeight height,
     next_lookup = (next_lookup + 1) % pending_lookups.size();
   };
 
-  for (size_t i = 0; i < txs.size(); i++) {
+  for (size_t i = first_missing; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (wrapper_over_cap(tx)) {
       results[i] = AuthErrorCode::kAuthFailed;
@@ -453,7 +442,7 @@ AuthServer::verify_transactions(BlockHeight height,
         auth_data.emplace(account, std::move(*outcome));
       }
     }
-    for (size_t i = 0; i < txs.size(); ++i) {
+    for (size_t i = first_missing; i < txs.size(); ++i) {
       if (results[i] != AuthErrorCode::kAuthSuccess) {
         continue;
       }
@@ -466,6 +455,45 @@ AuthServer::verify_transactions(BlockHeight height,
       }
     }
   }
+}
+
+x23::Async<AuthErrorCodeBatch>
+AuthServer::verify_transactions(BlockHeight height,
+                                std::span<const SignedTransaction> txs,
+                                size_t max_parallelism)
+{
+  CHECK_GT(max_parallelism, 0UL);
+  if (txs.empty()) {
+    co_return AuthErrorCodeBatch{};
+  }
+  co_await default_coropoll().pool_.bg();
+
+  AuthErrorCodeBatch results;
+  results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
+
+  AuthDataByAccount auth_data;
+  bool had_misses = false;
+  for (size_t i = 0; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (wrapper_over_cap(tx)) {
+      results[i] = AuthErrorCode::kAuthFailed;
+      continue;
+    }
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
+    }
+    AuthCacheEntry entry = try_cached_auth_data(height, account);
+    if (entry == nullptr) {
+      // Keep all batching state outside the entirely cached request's
+      // coroutine frame. The already collected snapshots stay request-owned.
+      had_misses = true;
+      co_await gather_missing_auth_data(height, txs, i, auth_data, results);
+      break;
+    }
+    CHECK_PTR(entry.get());
+    auth_data.emplace(account, std::move(entry));
+  }
 
   // Use main's original chunk geometry and signature entry points.
   const std::vector<ChunkRange> chunks =
@@ -475,7 +503,7 @@ AuthServer::verify_transactions(BlockHeight height,
   const std::span<AuthErrorCode> result_span(results.data(), results.size());
   if (chunks.size() == 1) {
     // DB replies can resume on the reader. Do not hold it for signatures.
-    if (!missing_auth_data.empty()) {
+    if (had_misses) {
       co_await default_coropoll().pool_.bg();
     }
     verify_chunk(txs, result_span, auth_data, network_hash_);

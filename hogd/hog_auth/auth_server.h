@@ -5,6 +5,7 @@
 #include <optional>
 #include <span>
 #include <unistd.h>
+#include <unordered_map>
 #include <utility>
 
 #include "address_auth.hh"
@@ -18,6 +19,7 @@
 #include "hogd/base/log.h"
 #include "hogd/base/os.h"
 #include "hogd/base/types.h"
+#include "hogd/crypto/crypto.h"
 #include "hogd/hog_auth/auth_data_cache.h"
 #include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
@@ -111,6 +113,16 @@ public:
   }
 
 private:
+  using AuthDataByAccount =
+      std::unordered_map<ContractAddress, AuthCacheEntry, SipHash24Hasher>;
+
+  // Collect the remaining cache misses, retaining preceding cache snapshots.
+  x23::Async<void>
+  gather_missing_auth_data(BlockHeight height,
+                           std::span<const SignedTransaction> txs,
+                           size_t first_missing, AuthDataByAccount &auth_data,
+                           AuthErrorCodeBatch &results);
+
   x23::Async<BlockHeight> wait_for_height(BlockHeight height);
 
   // A successful null pointer means the DB must be queried. A non-null entry
