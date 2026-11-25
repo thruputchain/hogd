@@ -98,20 +98,27 @@ RpcStreamImpl::reader(SLOC_ARG0)
   // these ourselves, but ONC RPC allows them.
   Buf frags;
   while (!ss_.stop_requested()) {
-    // Read until the buffer holds a complete fragment.
+    // A fragment is a 4-byte marker followed by len bytes.  Read
+    // until the buffer holds a complete one.
     const size_t have = in.avail();
-    const std::uint32_t marker = have < 4 ? 0 : getbe<std::uint32_t>(in.rptr());
-    const size_t len = marker & ~kLastFragment;
-    if (frags.size() + len > max_message_size) {
-      // NOLINTNEXTLINE(readability-static-accessed-through-instance)
-      debug.err(
-          "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
-          get_fd(), frags.size() + len, max_message_size);
-      fail();
-      co_return;
+    std::uint32_t marker = 0;
+    size_t len = 0;
+    size_t need = 4;
+    if (have >= 4) {
+      marker = getbe<std::uint32_t>(in.rptr());
+      len = marker & ~kLastFragment;
+      if (frags.size() + len > max_message_size) {
+        // NOLINTNEXTLINE(readability-static-accessed-through-instance)
+        debug.err(
+            "RpcStreamImpl: fd {} received record size {} exceeds maximum {}",
+            get_fd(), frags.size() + len, max_message_size);
+        fail();
+        co_return;
+      }
+      need = 4 + len;
     }
-    if (have < 4 + len) {
-      in.make_room(4 + len - have);
+    if (have < need) {
+      in.make_room(need - have);
       auto res = co_await cp_->read_some(fd_, in.wptr(), in.space());
       if (res && *res)
         in.commit(*res);
