@@ -6,8 +6,8 @@
 #include <cstdint>
 #include <cstring>
 #include <expected>
-#include <functional>
 #include <fcntl.h>
+#include <functional>
 #include <memory>
 #include <optional>
 #include <span>
@@ -133,8 +133,8 @@ public:
 #ifdef __linux__
   // Test-only syscall replacement. Install before opening executor handles.
   // Return zero on success, otherwise an errno value.
-  void set_stream_writeback_test_hook(
-      std::function<int(int, off_t, off_t)> hook)
+  void
+  set_stream_writeback_test_hook(std::function<int(int, off_t, off_t)> hook)
   {
     writeback_enabled_ = true;
     writeback_test_hook_ = std::move(hook);
