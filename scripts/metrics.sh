@@ -56,6 +56,13 @@ BUILD_DIR=$1
 ./scripts/make_metric_file.sh rv32-vm-bench $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/rv32_vm_bench.sh $BUILD_DIR >metrics_history/metrics/rv32-vm-bench/$GIT_branch/${GIT_commit_time}_$GIT_commit
 
+# Private artifact-only source comparison: preserve every preceding metric,
+# the stock two payment workloads, and stop before unrelated later metrics.
+if [ "${GIT_BRANCH:-}" = codex/payment-source-historical ] || [ "${GIT_BRANCH:-}" = codex/payment-source-current ]; then
+    ./scripts/ci/payment_source_pair.sh "$BUILD_DIR" "$GIT_branch" "$GIT_commit" "$GIT_commit_time"
+    exit $?
+fi
+
 ## payments_bench 10 accounts
 ./scripts/make_metric_file.sh payments-bench-rv32-10 $GIT_branch $GIT_commit $GIT_commit_time
 ./scripts/metrics/payments_bench.sh $BUILD_DIR 10 >metrics_history/metrics/payments-bench-rv32-10/$GIT_branch/${GIT_commit_time}_$GIT_commit
