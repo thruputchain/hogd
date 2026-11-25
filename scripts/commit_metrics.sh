@@ -7,7 +7,8 @@ if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
   if [[ ( ${GIT_BRANCH:-} == codex/single-commit-stock-storage-probe ||
         ${GIT_BRANCH:-} == codex/multinode-event-disk-probe ||
         ${GIT_BRANCH:-} == codex/multinode-event-tmpfs-probe ||
-        ${GIT_BRANCH:-} == codex/multinode-remove-lock-probe ) ]]; then
+        ${GIT_BRANCH:-} == codex/multinode-remove-lock-probe ||
+        ${GIT_BRANCH:-} == codex/multinode-cache-erase-detail-probe ) ]]; then
     rm -f -- metrics_history/.publish-requested
     echo 'Commit phase probe: metrics are artifact-only (no publication request).'
     exit 0
