@@ -153,9 +153,9 @@ RpcStreamImpl::reader(SLOC_ARG0)
       continue;
     }
 
-    // read_some() fails once the descriptor is poisoned, which is how
-    // a server shuts a connection down.  A record that was already
-    // buffered never gets that far, so it must not be dispatched.
+    // Stop dispatching buffered records once the descriptor is
+    // poisoned.  This is an optimization, not a guarantee: a poison
+    // that lands after this check does not stop the record below.
     if (cp_->poisoned(fd_)) {
       fail();
       co_return;
