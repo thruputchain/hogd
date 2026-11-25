@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <expected>
 #include <format>
@@ -51,6 +52,18 @@
 namespace hogd {
 
 constexpr static size_t kBufferThreshold = 500_KiB;
+
+#ifdef __linux__
+bool
+EventBlockContext::stream_writeback_enabled()
+{
+  static const bool enabled = [] {
+    const char *value = std::getenv("HOGD_EVENT_STREAM_WRITEBACK");
+    return value && std::string_view(value) == "1";
+  }();
+  return enabled;
+}
+#endif
 
 void
 EventBlockContext::warn_slow_phase(std::string_view phase, BlockID block_id,
@@ -233,7 +246,50 @@ EventBlockContext::flush_buffer_async(std::vector<uint8_t> buf)
     if (!r) [[unlikely]] {
       panic("failed to write events to file: {}", r.error());
     }
-    if (--pending_write_count_ == 0 && state_ == BlockState::kFinishing) {
+    streamed_bytes_ += buf.size();
+#ifdef __linux__
+    // Initiate writeback of large, already-appended ranges while the
+    // executor continues to send events. This is only a hint: closing
+    // still fsyncs the complete file and syncs the directory after linking.
+    constexpr uint64_t kHintStride = 32ULL * 1024 * 1024;
+    if (writeback_enabled_ && !writeback_active_ &&
+        streamed_bytes_ - hinted_bytes_ >= kHintStride) {
+      const auto start = static_cast<off_t>(hinted_bytes_);
+      const auto length = static_cast<off_t>(streamed_bytes_ - hinted_bytes_);
+      hinted_bytes_ = streamed_bytes_;
+      const int fd = events_file_.get();
+      writeback_active_ = true;
+      // The pending write count pins the file until we return. Do not
+      // hold the append lock during a potentially blocking hint.
+      g.reset_no_yield();
+      const auto hint_start = x23::fastclock::now();
+      int err = 0;
+      if (writeback_test_hook_) {
+        err = writeback_test_hook_(fd, start, length);
+      }
+      else if (sync_file_range(fd, start, length, SYNC_FILE_RANGE_WRITE) != 0) {
+        err = errno;
+      }
+      const auto hint_ns = (x23::fastclock::now() - hint_start).count();
+      co_await g(lock_);
+      writeback_active_ = false;
+      ++log_stats.writeback_count;
+      log_stats.writeback_ns += hint_ns;
+      if (err == 0) {
+        log_stats.writeback_bytes += length;
+      }
+      else if (err == ENOSYS || err == EOPNOTSUPP || err == EINVAL) {
+        // Filesystems without range writeback take the stock path for
+        // this file. Real I/O errors must not be swallowed.
+        writeback_enabled_ = false;
+        log_stats.writeback_unsupported = true;
+      }
+      else {
+        panic("failed to initiate event file writeback: {}", strerror(err));
+      }
+    }
+#endif
+    if (--pending_write_count_ == 0 && state_ != BlockState::kActive) {
       all_writes_done_.store(true);
       all_writes_done_.broadcast();
     }
@@ -358,6 +414,7 @@ EventBlockContext::finish_file_write()
   log_stats.residual_write_ns = (ts3 - ts2).count();
   log_stats.residual_buffers = buffers;
   log_stats.residual_bytes = total_bytes;
+  log_stats.payload_bytes = streamed_bytes_ + total_bytes;
   warn_slow_phase("write_events", block_id_, *log_stats.write_events_ns);
   warn_slow_phase("residual_write", block_id_, *log_stats.residual_write_ns);
   debug("time to write events: {} ns (pending writes {} ns, residual {} ns in "

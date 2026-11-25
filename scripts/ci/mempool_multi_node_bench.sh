@@ -507,10 +507,25 @@ for node in "${NODE_IDS[@]}"; do
 done
 
 echo 'launch event and auth'
+# The paired arms retain the same ordinary paths. The source and all prior
+# stages are identical; only the Event process's writeback hint is selected.
+event_command=("$EVENT_BINARY")
+case ${GIT_BRANCH:-} in
+  codex/multinode-event-writeback-control)
+    multi_node_storage_probe_guard
+    event_command=(env HOGD_EVENT_STREAM_WRITEBACK=0 "$EVENT_BINARY")
+    echo 'EVENT_WRITEBACK_MODE_V1 enabled=0'
+    ;;
+  codex/multinode-event-writeback-treatment)
+    multi_node_storage_probe_guard
+    event_command=(env HOGD_EVENT_STREAM_WRITEBACK=1 "$EVENT_BINARY")
+    echo 'EVENT_WRITEBACK_MODE_V1 enabled=1'
+    ;;
+esac
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
   control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
-    "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
+    "${event_command[@]}" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_event_dir "$node")" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
 
   control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \

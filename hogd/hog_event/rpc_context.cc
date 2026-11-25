@@ -430,6 +430,16 @@ EventRPCContext::close_block(BlockID block_id, BlockHeight block_height)
   stats.prepare_context_and_async_s = stage_prepare_context_and_async;
   stats.close_total_s = timer.elapsed();
   stats.close_total_ns = static_cast<std::int64_t>(*stats.close_total_s * 1e9);
+  if (stats.payload_bytes >= 32ULL * 1024 * 1024) {
+    info("EVENT_WRITEBACK_CLOSE_V1 height={} block_id={} payload_bytes={} "
+         "residual_bytes={} hint_count={} hint_bytes={} hint_ns={} "
+         "hint_unsupported={} sync_ns={} pending_writes_ns={} "
+         "close_total_ns={} root={}",
+         block_height, block_id, stats.payload_bytes, *stats.residual_bytes,
+         stats.writeback_count, stats.writeback_bytes, stats.writeback_ns,
+         stats.writeback_unsupported, *stats.sync_ns, *stats.pending_writes_ns,
+         *stats.close_total_ns, encode_hex(std::as_bytes(std::span(out_hash))));
+  }
   EventBlockContext::warn_slow_phase(
       "prepare_context_and_async", block_id,
       static_cast<std::int64_t>(stage_prepare_context_and_async * 1e9));
