@@ -80,9 +80,16 @@ tcplisten(const sockaddr_storage &bind_addr, int backlog = 5)
 
 // Like tcplisten(bind_addr), but returns a failure to listen (the address
 // already in use, say) rather than throwing it, for callers whose listen
-// address is configuration they can report.
+// address is configuration they can report. An explicit socket protocol (such
+// as MPTCP) may be requested; zero selects the system default (TCP).
+// Keep the two-argument overload for binary compatibility.
 std::expected<UniqueFd, Errno> try_tcplisten(const sockaddr_storage &bind_addr,
                                              int backlog = 5);
+std::expected<UniqueFd, Errno> try_tcplisten(const sockaddr_storage &bind_addr,
+                                             int backlog, int protocol);
+
+// Whether a failure to listen using MPTCP permits retrying with TCP.
+bool is_mptcp_unavailable(Errno error);
 
 constexpr socklen_t
 sockaddr_len(const sockaddr_storage &ss)
