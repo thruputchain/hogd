@@ -462,10 +462,18 @@ for node in "${NODE_IDS[@]}"; do
 done
 
 echo 'launch event and auth'
+# Ordinary container multi-node Event streams large candidates to disk. Start
+# writeback during streaming, without changing the final durable close.
+# Other stages, native launches and non-container consumers retain defaults.
+event_command=("$EVENT_BINARY")
+if [[ ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
+      ${WORK_ROOT%/} == /workspace/ci_work_dir ]]; then
+  event_command=(env HOGD_EVENT_STREAM_WRITEBACK=1 "$EVENT_BINARY")
+fi
 for node in "${NODE_IDS[@]}"; do
   event_host="${EVENT_HOSTS[$node]}"
   control_start_with_ulimit "$event_host" "node${node}_event" "$SLOT_A_CPUS" \
-    "$EVENT_BINARY" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
+    "${event_command[@]}" --mempool-addr "$(hog_ip "${MEMPOOL_HOSTS[$node]}"):$MEMPOOL_EVENT_PORT" --bind-ip "$(hog_ip "$event_host")" \
     --work-dir "$(node_dir "$node")/event" --executor-port "$EVENT_EXECUTOR_PORT" --mempool-port "$EVENT_MEMPOOL_PORT" --indexer-port "$EVENT_INDEXER_PORT" --metrics-port "$EVENT_HTTP_PORT"
 
   control_start_with_ulimit "${AUTH_HOSTS[$node]}" "node${node}_auth" "$SLOT_B_CPUS" \

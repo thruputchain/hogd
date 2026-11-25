@@ -620,3 +620,87 @@ main(int argc, char *argv[])
   testing::InitGoogleTest(&argc, argv);
   return RUN_ALL_TESTS();
 }
+
+// Test the stream-writeback path with an actual payload above the threshold.
+// Large transaction bodies keep the event-trie memory small even in Debug.
+#ifdef __linux__
+namespace hogd {
+namespace {
+void add_writeback_test_payload(EventBlockContext &context)
+{
+  for (uint64_t i = 0; i < 140; ++i) {
+    ProposedTransaction body{};
+    body.signed_tx.tx.invocation.calldata.resize(256 * 1024, 0x5a);
+    body.signed_tx.tx.uniquifier.nonce = i;
+    TxEventLog event{};
+    event.tx_hash = sha256(body.signed_tx.tx);
+    EXPECT_TRUE(context.add_event(std::move(event), std::move(body))());
+  }
+}
+} // namespace
+
+TEST_F(EventBlockContextTest, StreamWritebackUnsupportedStillDurablyCloses)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_, 1));
+  context.set_stream_writeback_test_hook([](int, off_t start, off_t length) {
+    EXPECT_EQ(start, 0);
+    EXPECT_GE(length, 32 * 1024 * 1024);
+    return EOPNOTSUPP;
+  });
+  context.executor_open_block();
+  add_writeback_test_payload(context);
+  context.executor_close_block();
+  finish_file(context);
+  const auto hash = context.get_root_hash();
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_TRUE(context.log_stats.writeback_unsupported);
+  EXPECT_EQ(context.log_stats.writeback_bytes, 0);
+  EXPECT_GT(context.log_stats.payload_bytes, 32U * 1024 * 1024);
+  auto path = EventBlockContext::final_events_filename(temp_dir_, hash);
+  EXPECT_EQ(std::filesystem::file_size(path), context.log_stats.payload_bytes);
+  auto recovered = read_final_events_file(temp_dir_, hash);
+  ASSERT_TRUE(recovered.has_value());
+  ASSERT_EQ(recovered->tx_bodies.size(), 140);
+  ASSERT_EQ(recovered->event_logs.size(), 140);
+  std::vector<bool> seen(140);
+  for (size_t i = 0; i < recovered->tx_bodies.size(); ++i) {
+    const auto &body = recovered->tx_bodies[i];
+    const auto id = body.signed_tx.tx.uniquifier.nonce;
+    ASSERT_LT(id, seen.size());
+    EXPECT_FALSE(seen[id]);
+    seen[id] = true;
+    EXPECT_EQ(recovered->event_logs[i].tx_hash, sha256(body.signed_tx.tx));
+    EXPECT_EQ(body.signed_tx.tx.invocation.calldata.size(), 256U * 1024);
+  }
+}
+
+TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
+{
+  EventBlockContext context(temp_dir_, 1,
+                            EventBlockContext::create_events_file(temp_dir_, 1));
+  std::latch entered(1), release(1), finished(1);
+  context.set_stream_writeback_test_hook([&](int fd, off_t, off_t) {
+    entered.count_down();
+    release.wait();
+    EXPECT_GE(fcntl(fd, F_GETFD), 0);
+    return 0;
+  });
+  context.executor_open_block();
+  add_writeback_test_payload(context);
+  entered.wait();
+  auto abandoned = context.await_abandon();
+  // The coroutine starts eagerly and cannot finish until its pending range
+  // writeback leaves the fd-pinning pending write count.
+  abandoned([&finished] { finished.count_down(); });
+  EXPECT_FALSE(finished.try_wait());
+  release.count_down();
+  finished.wait();
+  EXPECT_EQ(context.log_stats.writeback_count, 1);
+  EXPECT_GT(context.log_stats.writeback_bytes, 0U);
+  context.delete_events_file();
+  EXPECT_FALSE(std::filesystem::exists(
+      EventBlockContext::temp_events_filename(temp_dir_, 1)));
+}
+} // namespace hogd
+#endif
