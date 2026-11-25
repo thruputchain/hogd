@@ -3,6 +3,7 @@
 // the reader's buffer, multi-fragment records, and malformed input.
 
 #include <algorithm>
+#include <atomic>
 #include <cerrno>
 #include <cstdint>
 #include <cstring>
@@ -433,6 +434,37 @@ TEST_F(ReaderTest, MalformedRecordFailsStream)
       shutdown(p.peer.get(), SHUT_WR);
     EXPECT_TRUE(closed_by_stream(p.peer));
   }
+}
+
+// hogd's RpcServer shuts a connection down by poisoning its file
+// descriptor.  A call that the reader had already buffered by then
+// must not reach its handler.
+TEST_F(ReaderTest, PoisonStopsBufferedCalls)
+{
+  struct PoisoningServer {
+    using rpc_service = blank_rpc_v1;
+    CoroPoll &cp_;
+    int fd_;
+    std::atomic<unsigned> calls_{0};
+
+    void null() {}
+    Data echo(Data arg)
+    {
+      ++calls_;
+      cp_.poison(fd_);
+      return arg;
+    }
+  };
+
+  Pair p;
+  PoisoningServer server{cp_, p.stream_fd};
+  rpc_stream(cp_, p.stream_fd)->server(&server);
+
+  Buf both = echo_call(1, pattern(8, 1));
+  append(&both, echo_call(2, pattern(8, 2)));
+  ASSERT_TRUE(fullwrite(p.peer, both));
+  EXPECT_TRUE(closed_by_stream(p.peer));
+  EXPECT_EQ(server.calls_, 1U);
 }
 
 // A stream must not lose bytes that an earlier CoroPoll::read() on the

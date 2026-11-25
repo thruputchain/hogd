@@ -337,6 +337,10 @@ public:
   void poison(BorrowedFd fd);
   void poison(BorrowedFd fd, uint64_t generation_number);
 
+  // True if reads and writes on fd now fail with EBADF, because it
+  // was poisoned or the CoroPoll is shutting down.
+  bool poisoned(BorrowedFd fd);
+
   // If there's a callback for reading (write == false) or writing
   // (write == true) on file descriptor fd, then immediately make the
   // callback with condition err, even though the awaited condition

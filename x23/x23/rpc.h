@@ -398,10 +398,8 @@ public:
   std::uint8_t *wptr() noexcept { return chunk_->data() + wpos_; }
   size_t space() const noexcept { return chunk_->capacity() - wpos_; }
   void commit(size_t n) noexcept { wpos_ += n; }
-  const std::uint8_t *bufend() const noexcept
-  {
-    return chunk_->data() + chunk_->capacity();
-  }
+  // End of the bytes received, which may be read beyond a record.
+  const std::uint8_t *bufend() const noexcept { return chunk_->data() + wpos_; }
 
   // Ensure space() >= more, keeping the partial record at rptr()
   // contiguous.  Retains capacity and reuses the chunk once no reply

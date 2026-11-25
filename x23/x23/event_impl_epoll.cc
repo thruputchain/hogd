@@ -327,6 +327,12 @@ CoroPollImpl::poison(BorrowedFd fd)
   setmode(fdp, FdState::Mode::kPoisoned);
 }
 
+bool
+CoroPollImpl::poisoned(BorrowedFd fd)
+{
+  return stop_requested() || getfd(fd)->mode() == FdState::Mode::kPoisoned;
+}
+
 void
 CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
 {

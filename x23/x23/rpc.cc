@@ -57,17 +57,18 @@ RecvBuf::make_room(size_t more)
   const bool roomy = chunk_ && space() >= std::max(more, kMinRead);
   size_t capacity = std::max(n + more, kChunkSize);
   if (chunk_ && chunk_->unique()) {
-    // No reply points into the chunk, so the bytes below rptr() are
-    // ours again.  Rewinding an empty buffer is free; a partial
-    // record is only worth moving when the tail is too small.
-    if (!n || !roomy) {
-      if (n && rpos_)
-        std::memmove(chunk_->data(), rptr(), n);
-      rpos_ = 0;
-      wpos_ = n;
-    }
-    if (space() >= more)
+    if (n + more <= chunk_->capacity()) {
+      // No reply points into the chunk, so the bytes below rptr() are
+      // ours again.  Rewinding an empty buffer is free; a partial
+      // record is only worth moving when the tail is too small.
+      if (!n || !roomy) {
+        if (n && rpos_)
+          std::memmove(chunk_->data(), rptr(), n);
+        rpos_ = 0;
+        wpos_ = n;
+      }
       return;
+    }
     // The record does not fit.  Grow geometrically, as Vec does, so
     // that records of slowly increasing size do not each reallocate.
     capacity = std::max(capacity, 2 * chunk_->capacity());
@@ -150,6 +151,14 @@ RpcStreamImpl::reader(SLOC_ARG0)
       }
       in.commit(*res);
       continue;
+    }
+
+    // read_some() fails once the descriptor is poisoned, which is how
+    // a server shuts a connection down.  A record that was already
+    // buffered never gets that far, so it must not be dispatched.
+    if (cp_->poisoned(fd_)) {
+      fail();
+      co_return;
     }
 
     // A single-fragment record is parsed where it lies in the chunk.
