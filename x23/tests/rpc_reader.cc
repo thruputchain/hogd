@@ -240,7 +240,7 @@ TEST(RecvBuf, PreservesBytesStillReferenced)
   EXPECT_EQ(buf.wptr(), buf.chunk()->data());
 }
 
-TEST(RecvBuf, GrowsForLargeRecordThenShrinks)
+TEST(RecvBuf, RetainsCapacityForLargeRecords)
 {
   using detail::RecvBuf;
   RecvBuf buf;
@@ -248,30 +248,25 @@ TEST(RecvBuf, GrowsForLargeRecordThenShrinks)
   receive(&buf, 100, 3);
   Data partial = pending_bytes(buf);
 
-  // A record that cannot fit in a chunk gets one big enough to hold
-  // it contiguously, without losing the part already received.
-  const size_t big = 2 * RecvBuf::kMaxRetain;
+  // Growing must preserve the partial record already received.
+  const size_t big = 2 * 1024 * 1024;
   buf.make_room(big - 100);
   EXPECT_EQ(pending_bytes(buf), partial);
   EXPECT_GE(buf.space(), big - 100);
-  EXPECT_GE(buf.chunk()->capacity(), big);
-
-  // The oversized chunk is released once drained.
+  const detail::RecvChunk *chunk = buf.chunk().get();
+  const uint8_t *start = buf.rptr();
   buf.commit(big - 100);
   buf.consume(big);
-  buf.make_room(4);
-  EXPECT_EQ(buf.chunk()->capacity(), RecvBuf::kChunkSize);
 
-  // A moderately large chunk, on the other hand, is kept, so that a
-  // stream of such records does not allocate for each of them.
-  const size_t medium = 3 * RecvBuf::kChunkSize;
-  buf.make_room(medium);
-  const detail::RecvChunk *chunk = buf.chunk().get();
-  EXPECT_GE(chunk->capacity(), medium);
-  buf.commit(medium);
-  buf.consume(medium);
-  buf.make_room(4);
-  EXPECT_EQ(buf.chunk().get(), chunk);
+  // Reading the next marker must not discard a large reusable chunk.
+  for (size_t size : {4UZ, big, 17UZ, big}) {
+    buf.make_room(size);
+    EXPECT_EQ(buf.chunk().get(), chunk);
+    EXPECT_EQ(buf.wptr(), start);
+    EXPECT_GE(buf.space(), big);
+    buf.commit(size);
+    buf.consume(size);
+  }
 }
 
 struct ReaderTest : testing::Test {

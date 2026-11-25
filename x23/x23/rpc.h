@@ -381,9 +381,6 @@ public:
   static constexpr size_t kChunkSize = 0x10000 - sizeof(RecvChunk);
   // Don't bother the kernel for less than this many bytes.
   static constexpr size_t kMinRead = 0x1000;
-  // Once drained, free a chunk that grew beyond this size to hold a
-  // large record, rather than keep it for the life of the connection.
-  static constexpr size_t kMaxRetain = 0x10'0000;
 
   const RefPtr<RecvChunk> &chunk() const noexcept { return chunk_; }
   size_t avail() const noexcept { return wpos_ - rpos_; }
@@ -399,7 +396,8 @@ public:
   }
 
   // Ensure space() >= need, keeping the partial record at rptr()
-  // contiguous.  Reuses the chunk if no reply still references it.
+  // contiguous.  Retains capacity and reuses the chunk once no reply
+  // still references it.
   void make_room(size_t need);
 
 private:

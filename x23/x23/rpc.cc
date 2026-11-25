@@ -69,11 +69,9 @@ RecvBuf::make_room(size_t need)
   const size_t pending = avail();
   if (chunk_) {
     const bool sole = chunk_->unique();
-    if (sole && pending == 0 && chunk_->capacity() > kMaxRetain)
-      chunk_ = nullptr;
-    else if (space() >= std::max(need, kMinRead) && (pending || !sole))
+    if (space() >= std::max(need, kMinRead) && (pending || !sole))
       return;
-    else if (sole) {
+    if (sole) {
       if (pending && rpos_)
         std::memmove(chunk_->data(), rptr(), pending);
       rpos_ = 0;
