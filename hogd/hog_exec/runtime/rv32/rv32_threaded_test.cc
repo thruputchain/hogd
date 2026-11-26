@@ -98,10 +98,12 @@ struct ThreadedMachinePreInstantiationTestPeer {
         ++coverage.alu_branch;
       }
       for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
-        if (handler == load_run_handler(n, /*descending=*/false, true)) {
+        if (handler ==
+            load_run_handler(n, /*descending=*/false, /*wide=*/false, true)) {
           ++coverage.load_run_ascending;
         }
-        if (handler == load_run_handler(n, /*descending=*/true, true)) {
+        if (handler ==
+            load_run_handler(n, /*descending=*/true, /*wide=*/false, true)) {
           ++coverage.load_run_descending;
         }
       }
@@ -2817,10 +2819,11 @@ handlers_of(std::span<const uint32_t> words, uint32_t memory_bytes = 256,
   return handlers;
 }
 
+// The untraced lw-run handler; wide unless a recent store wrote the run.
 Handler
-run_of(uint32_t n, bool descending = false)
+run_of(uint32_t n, bool descending = false, bool wide = true)
 {
-  return load_run_handler(n, descending, /*trace=*/false);
+  return load_run_handler(n, descending, wide, /*trace=*/false);
 }
 
 // Run `words` on all four threaded lowerings. The fused ones must match the
@@ -3015,8 +3018,11 @@ TEST(Rv32ThreadedLoadRun, preparationSelectsTheRunStartingAtEachSlot)
     const auto h = handlers_of(words);
     for (size_t i = 0; i < 9; ++i) {
       for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
-        EXPECT_NE(h[i], run_of(n)) << "slot " << i;
-        EXPECT_NE(h[i], run_of(n, /*descending=*/true)) << "slot " << i;
+        for (const bool descending : {false, true}) {
+          for (const bool wide : {false, true}) {
+            EXPECT_NE(h[i], run_of(n, descending, wide)) << "slot " << i;
+          }
+        }
       }
     }
   }
@@ -3058,6 +3064,117 @@ load_run_prelude(int32_t base)
   }
   words.push_back(addi(5, 0, base));
   return words;
+}
+
+TEST(Rv32ThreadedLoadRun, recentStoresSelectTheNarrowHandler)
+{
+  using test_program::branch;
+  using test_program::j_type;
+  using test_program::load;
+  using test_program::store;
+  const std::vector<uint32_t> run = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                     load(8, 2, 5, 8)};
+  auto head_handler = [&](std::vector<uint32_t> before) {
+    const size_t head = before.size();
+    before.insert(before.end(), run.begin(), run.end());
+    before.push_back(kEcallWord);
+    return handlers_of(before)[head];
+  };
+  const Handler wide = run_of(3);
+  const Handler narrow = run_of(3, /*descending=*/false, /*wide=*/false);
+  // No store: wide.
+  EXPECT_EQ(head_handler({op(3, 0, 0, 0, 0)}), wide);
+  // A store into the run's bytes through its base: narrow, for any width
+  // and any overlap, including a word that straddles the run's start.
+  EXPECT_EQ(head_handler({store(5, 10, 4, 2)}), narrow);
+  EXPECT_EQ(head_handler({store(5, 10, 11, 0)}), narrow);
+  EXPECT_EQ(head_handler({store(5, 10, -2, 2)}), narrow);
+  // A store outside the run's bytes, or through another base: wide.
+  EXPECT_EQ(head_handler({store(5, 10, 12, 2)}), wide);
+  EXPECT_EQ(head_handler({store(5, 10, -4, 2)}), wide);
+  EXPECT_EQ(head_handler({store(6, 10, 4, 2)}), wide);
+  // The store is found across up to kLoadRunStoreLookback instructions and
+  // conditional branches, but not past that, a jump, or a write to the base.
+  {
+    std::vector<uint32_t> before = {store(5, 10, 4, 2)};
+    before.insert(before.end(), kLoadRunStoreLookback - 1, op(3, 0, 0, 0, 0));
+    EXPECT_EQ(head_handler(before), narrow);
+    before.push_back(op(3, 0, 0, 0, 0));
+    EXPECT_EQ(head_handler(before), wide);
+  }
+  EXPECT_EQ(head_handler({store(5, 10, 4, 2), branch(1, 3, 0, 8)}), narrow);
+  EXPECT_EQ(head_handler({store(5, 10, 4, 2), j_type(0, 4)}), wide);
+  EXPECT_EQ(head_handler({store(5, 10, 4, 2), addi(5, 5, 0)}), wide);
+  // One byte of overlap at either end of [0, 12) is enough.
+  EXPECT_EQ(head_handler({store(5, 10, -3, 2)}), narrow);
+  EXPECT_EQ(head_handler({store(5, 10, -1, 1)}), narrow);
+  EXPECT_EQ(head_handler({store(5, 10, -2, 1)}), wide);
+  // A descending run from offset 8 reads [0, 12).
+  {
+    const std::vector<uint32_t> descending = {load(6, 2, 5, 8),
+                                              load(7, 2, 5, 4),
+                                              load(8, 2, 5, 0), kEcallWord};
+    auto descending_head = [&](uint32_t store_word) {
+      std::vector<uint32_t> words = {store_word};
+      words.insert(words.end(), descending.begin(), descending.end());
+      return handlers_of(words)[1];
+    };
+    const Handler descending_wide = run_of(3, /*descending=*/true);
+    const Handler descending_narrow =
+        run_of(3, /*descending=*/true, /*wide=*/false);
+    EXPECT_EQ(descending_head(store(5, 10, 0, 2)), descending_narrow);
+    EXPECT_EQ(descending_head(store(5, 10, 8, 2)), descending_narrow);
+    EXPECT_EQ(descending_head(store(5, 10, 12, 2)), descending_wide);
+    EXPECT_EQ(descending_head(store(5, 10, 16, 2)), descending_wide);
+    EXPECT_EQ(descending_head(store(5, 10, -4, 2)), descending_wide);
+  }
+}
+
+TEST(Rv32ThreadedLoadRun, runLeavesItsLastLoadToALoadUsePair)
+{
+  using test_program::load;
+  // lw x8 feeds the add right after it, a load-use pair; the run takes only
+  // the two loads before it, so the pair still forwards x8 to the add.
+  const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                       load(8, 2, 5, 8), op(9, 8, 6, 0, 0),
+                                       kEcallWord};
+  const auto h = handlers_of(words);
+  EXPECT_EQ(h[0], run_of(2));
+  EXPECT_EQ(h[2], (fused_load_handler<false>(Op::kLw, Op::kAdd, true)));
+  EXPECT_FALSE(expect_load_run_semantics(words, 256, 100));
+  // Two loads ending in a load-use pair leave no run at all.
+  const std::vector<uint32_t> pair = {load(7, 2, 5, 4), load(8, 2, 5, 8),
+                                      op(9, 8, 6, 0, 0), kEcallWord};
+  EXPECT_EQ(handlers_of(pair)[0], (&op_load<false, 4, false>));
+}
+
+TEST(Rv32ThreadedLoadRun, narrowRunsMatchCanonical)
+{
+  using test_program::load;
+  using test_program::store;
+  // Every run is preceded by a store into its bytes, so all of them take the
+  // narrow handlers.
+  std::vector<uint32_t> words = load_run_prelude(64);
+  std::vector<size_t> heads;
+  for (const bool descending : {false, true}) {
+    for (int32_t n = 2; n <= 16; ++n) {
+      words.push_back(store(5, 10, descending ? 60 : 0, 2));
+      heads.push_back(words.size());
+      for (int32_t k = 0; k < n; ++k) {
+        const int32_t offset = descending ? 60 - (4 * k) : 4 * k;
+        words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5, offset));
+      }
+      words.push_back(op(3, 0, 0, 0, 0));
+    }
+  }
+  words.push_back(kEcallWord);
+  const auto lowered = threaded_from_words(words, 256);
+  for (const size_t head : heads) {
+    const auto load_run = lowered->load_run_at(head);
+    ASSERT_TRUE(load_run.has_value()) << "slot " << head;
+    EXPECT_FALSE(load_run->wide) << "slot " << head;
+  }
+  EXPECT_FALSE(expect_load_run_semantics(words, 256, 10'000));
 }
 
 TEST(Rv32ThreadedLoadRun, inBoundsRunsMatchCanonical)

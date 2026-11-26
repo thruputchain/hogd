@@ -112,9 +112,15 @@ It also fuses lw runs: up to 16 consecutive `lw` on one base register at
 consecutive words, ascending or descending, inside one charged chunk, with
 distinct destinations and only the last load allowed to overwrite the base.
 Compilers emit these to copy multi-word values and to restore saved
-registers. `op_load_run` checks the run's whole byte range once, reads it with
-8-byte loads, and dispatches once. Every member slot heads the run starting at
-it, so a branch into a run still runs fused.
+registers. `op_load_run` checks the run's whole byte range once, loads the
+words, and dispatches once. Every member slot heads the run starting at it, so
+a branch into a run still runs fused. Wide handlers load a pair of words at a
+time (one 8-byte load on x86-64, one `ldp` on AArch64). A wide load cannot be
+forwarded from the two narrower stores that wrote its words while they are in
+flight, so a run that stores through the same base wrote within the preceding
+8 instructions gets narrow handlers instead: 4-byte loads in program order. A
+run also stops short of a last load that heads a load-use pair, so that pair
+still forwards the value to its consumer.
 
 Dispatch requires the `musttail` attribute. [musttail.h](musttail.h) rejects
 unsupported compilers because ordinary recursive calls would grow the host
