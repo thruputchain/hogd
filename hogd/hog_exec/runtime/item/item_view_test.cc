@@ -45,8 +45,7 @@ protected:
   {
     assert(db_proxy_);
     AddressAndKey addrkey{};
-    auto entry = SnapshotStorageItem::make_variant(
-        WireStorageItem(StorageItemType::kItemTypeDeleted), addrkey.key);
+    auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
     CHECK(entry.has_value());
     return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
                                                  std::move(addrkey), BlockID{1},
@@ -59,8 +58,7 @@ protected:
     AddressAndKey addrkey{.address = ContractAddress{},
                           .key = StorageKey(
                               StorageKeyType::FreeNativeTokenBalance)};
-    auto entry = SnapshotStorageItem::make_variant(
-        WireStorageItem(StorageItemType::kItemTypeDeleted), addrkey.key);
+    auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
     CHECK(entry.has_value());
     return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
                                                  std::move(addrkey), BlockID{1},
