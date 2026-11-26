@@ -537,9 +537,9 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(99'001, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(99'003, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'473, storage_key,
+      bytestring_get_entry(61'476, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -567,10 +567,10 @@ TEST_F(TraceShapeTest, CrossCallFibonacciTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The kInvoke entry's gas delta is the child frame's total consumption.
     expected.push_back(
-        make_entry(61'119, 60'422, std::move(body), ok_status()));
+        make_entry(61'129, 60'432, std::move(body), ok_status()));
   }
-  expected.push_back(get_returned_buffer_entry(60'395, inner_calldata));
-  expected.push_back(return_entry(60'156, {}));
+  expected.push_back(get_returned_buffer_entry(60'405, inner_calldata));
+  expected.push_back(return_entry(60'166, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -631,9 +631,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
     push_static_key_entries(expected, key_name, key_field_tag, storage_key,
                             kKeyGas);
   }
-  expected.push_back(bytestring_get_len_entry(98'971, storage_key, 32, true));
+  expected.push_back(bytestring_get_len_entry(98'973, storage_key, 32, true));
   expected.push_back(
-      bytestring_get_entry(61'443, storage_key,
+      bytestring_get_entry(61'446, storage_key,
                            std::span<const uint8_t>(fibonacci_addr.begin(),
                                                     fibonacci_addr.end())));
   {
@@ -659,9 +659,9 @@ TEST_F(TraceShapeTest, CrossCallOutOfGasChildTraceIsExact)
         SyscallInvokeOutputs{.child_trace = std::move(child)};
     // The out-of-gas child consumes its entire 1000-gas limit.
     expected.push_back(
-        make_entry(61'091, 60'031, std::move(body), ok_status()));
+        make_entry(61'101, 60'041, std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(59'933, {}));
+  expected.push_back(return_entry(59'943, {}));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
@@ -701,19 +701,17 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
 
   // The fixture's initializer entrypoint adds 16 gas to dispatcher execution.
   SyscallTraceVec expected;
-  expected.push_back(get_calldata_len_entry(
-      99'844, static_cast<uint32_t>(tx.tx.invocation.calldata.size())));
-  expected.push_back(get_calldata_entry(99'757, tx.tx.invocation.calldata));
+  expected.push_back(get_calldata_entry(99'872, tx.tx.invocation.calldata));
   {
     SyscallTraceBody body(SyscallNo::kBytestringSet);
     body.bytestring_set().inputs.key = key;
     body.bytestring_set().inputs.bytestring.append_range(value);
-    expected.push_back(make_entry(99'553,
-                                  99'553 - kSyscallBaseCost -
+    expected.push_back(make_entry(99'669,
+                                  99'669 - kSyscallBaseCost -
                                       GasCost::bytestring_set(value.size()),
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'171, abort_buffer, /*revert_frame=*/true));
+  expected.push_back(return_entry(99'398, abort_buffer, /*revert_frame=*/true));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

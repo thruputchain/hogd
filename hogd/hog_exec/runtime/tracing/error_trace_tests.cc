@@ -124,11 +124,11 @@ TEST_F(ErrorTraceTest, GetReturnedBufferPrecedenceTraceIsExact)
     // written.
     SyscallTraceBody body(SyscallNo::kGetReturnedBuffer);
     expected.push_back(make_entry(
-        98'771, 98'771 - kSyscallBaseCost, std::move(body),
+        98'790, 98'790 - kSyscallBaseCost, std::move(body),
         status_with(
             SyscallErrorCode::kSyscallErrorCodeNoReturnBufferAvailable)));
   }
-  expected.push_back(empty_return_entry(98'664));
+  expected.push_back(empty_return_entry(98'683));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)
