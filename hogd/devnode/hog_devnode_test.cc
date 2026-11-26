@@ -94,6 +94,7 @@
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "pagination.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"

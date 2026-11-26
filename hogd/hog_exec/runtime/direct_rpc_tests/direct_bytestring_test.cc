@@ -1945,8 +1945,7 @@ TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   TransactionID next_tx_id = 920'000;
   auto push_batch_of = [&](std::vector<size_t> const &lens) {
     PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
-                                   TransactionID{next_tx_id++},
-                                   NetworkConfigParams{});
+                                   next_tx_id++, NetworkConfigParams{});
     for (size_t i = 0; i < lens.size(); ++i) {
       tx.add_delta(make_addrkey(contract_addr, "cap" + std::to_string(i)),
                    make_bytestring_delta(std::string(lens[i], 'x')),
