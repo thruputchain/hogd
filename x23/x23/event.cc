@@ -52,35 +52,39 @@ WriteBuffer::Service::go()
   wb_->want_write_ = true;
   if (!lk_.try_lock())
     return 0;
-  BufVec work = get_work();
+  get_work();
+  auto &work = wb_->work_;
   // Try writing once before allocating coroutine
   if (work.empty() && !work_needed())
     return 0;
   if (auto err = write(work))
     return err;
   if (!work.empty() || work_needed())
-    worker(std::move(*this), std::move(work));
+    worker(std::move(*this));
   return 0;
 }
 
 Detached
-WriteBuffer::Service::worker(Service self, BufVec work)
+WriteBuffer::Service::worker(Service self)
 {
   RefPtr<WriteBuffer> wbref(*self.wb_);
+  auto &work = wbref->work_;
   // We need to release the mutex before destroying wbref, since wb_
   // could be destroyed as soon as wbref goes out of scope.
   Defer _unlock([&lk = self.lk_] { lk = {}; });
   for (;;) {
     while (!work.empty()) {
-      if (self.tok_ && co_await self.cp_->write_wait(self.tok_))
+      if (self.tok_ && co_await self.cp_->write_wait(self.tok_)) {
+        work.clear();
         co_return;
+      }
       if (self.write(work))
         co_return;
     }
 
     if (!self.work_needed())
       co_return;
-    work = self.get_work();
+    self.get_work();
   }
 }
 

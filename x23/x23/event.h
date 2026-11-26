@@ -191,6 +191,9 @@ private:
   std::atomic_bool want_write_{false};
   TestLock service_lock_;
   MVar<BufVec> writer_;
+  // Only the service lock holder touches work_.  Swapping it with writer_
+  // returns the drained batch's capacity to producers.
+  BufVec work_;
 
   class Service;
 };
@@ -680,13 +683,14 @@ private:
     lk_.unlock();
     return wb_->want_write_ && lk_.try_lock();
   }
-  BufVec get_work()
+  void get_work()
   {
     wb_->want_write_ = false;
-    return wb_->writer_.exchange({});
+    x23assert(wb_->work_.empty());
+    wb_->writer_->swap(wb_->work_);
   }
   Errno write(BufVec &work);
-  static Detached worker(Service self, BufVec work);
+  static Detached worker(Service self);
 };
 
 inline Errno

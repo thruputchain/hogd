@@ -180,6 +180,8 @@ struct BufVec {
   void clear()
   {
     data_.clear();
+    for (auto &s : storage_)
+      recycle(s.bytes_);
     storage_.clear();
     nconsumed_ = 0;
   }
@@ -191,6 +193,7 @@ struct BufVec {
     using std::swap;
     swap(storage_, other.storage_);
     swap(data_, other.data_);
+    swap(spare_, other.spare_);
     swap(nconsumed_, other.nconsumed_);
   }
 
@@ -208,14 +211,17 @@ struct BufVec {
     const size_t nbytes = b.size() - offset;
     if (!nbytes)
       return;
-    if (storage_.empty())
-      storage_.emplace_back().bytes_.reserve(
-          std::max(2 * kCopyThreshold, nbytes));
-    else if (storage_.back().room() < nbytes)
+    if (storage_.empty()) {
+      auto &bytes = storage_.emplace_back().bytes_;
+      bytes.swap(spare_);
+      bytes.reserve(std::max(2 * kCopyThreshold, nbytes));
+    }
+    else if (storage_.back().room() < nbytes) {
       storage_.emplace_back().bytes_.reserve(
           std::max(nbytes,
                    std::min<size_t>(PTRDIFF_MAX,
                                     2 * storage_.back().bytes_.capacity())));
+    }
     Storage &back = storage_.back();
     auto *p = back.copy(b.data() + offset, nbytes);
     // Note p and the last iov_base could technically be part of
@@ -284,8 +290,10 @@ struct BufVec {
       return;
     }
     size_t nfree = 0, e = storage_.size();
-    while (nfree < e && storage_[nfree].iovnum_ < nconsumed_)
+    while (nfree < e && storage_[nfree].iovnum_ < nconsumed_) {
+      recycle(storage_[nfree].bytes_);
       ++nfree;
+    }
     storage_.pop_front(nfree);
   }
 
@@ -310,6 +318,17 @@ struct BufVec {
   }
 
 private:
+  // Keep one small staging buffer without retaining large RPC payloads.
+  Buf spare_;
+
+  void recycle(Buf &bytes)
+  {
+    if (!spare_.capacity() && bytes.capacity() == 2 * kCopyThreshold) {
+      bytes.clear();
+      bytes.swap(spare_);
+    }
+  }
+
   size_t iovnum() const { return nconsumed_ + data_.size(); }
 };
 
