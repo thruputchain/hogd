@@ -2136,7 +2136,7 @@ TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaultsExceptOutputLimit)
   NetworkConfig expected = NetworkConfigParams::stated_defaults();
   NetworkConfigParams::set_param(
       expected, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
-      kStockMaxSubtransactionOutputBytes);
+      64U * 1024 * 1024);
   EXPECT_EQ(stock_network_config(), expected);
 }
 

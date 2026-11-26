@@ -126,13 +126,13 @@ NetworkConfig
 stock_network_config()
 {
   // This repository's dev and test chains run at the protocol defaults from
-  // network_config_params.h, except where noted below. Every parameter is
+  // network_config_params.h, except where set below. Every parameter is
   // stated outright rather than left to a node's default, so a change to any
   // of them is visible in the config hash.
   NetworkConfig config = NetworkConfigParams::stated_defaults();
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
-      kStockMaxSubtransactionOutputBytes);
+      64 * 1024 * 1024);
   return config;
 }
 

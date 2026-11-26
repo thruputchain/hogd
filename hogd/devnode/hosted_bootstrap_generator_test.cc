@@ -155,7 +155,7 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
   EXPECT_EQ(NetworkConfigParams(
                 artifact.genesis_configuration.network_config.v0())
                 .max_subtransaction_output_bytes,
-            kStockMaxSubtransactionOutputBytes);
+            64U * 1024 * 1024);
   const auto &stated_params =
       artifact.genesis_configuration.network_config.v0().params;
   ASSERT_EQ(encoded_params.size(), stated_params.size());
