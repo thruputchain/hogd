@@ -465,7 +465,7 @@ public:
   peek_native_token_balance_load_gas(ContractAddress const &contract_address);
   [[nodiscard]] x23::Async<SystemStatus<StorageRead<int128_t>>>
   get_native_token_balance(ContractAddress const &contract_address);
-  [[nodiscard]] x23::Async<SystemStatus<SyscallStatus<void>>>
+  [[nodiscard]] SystemStatus<SyscallStatus<void>>
   modify_native_token_balance(ContractAddress const &contract_address,
                               int128_t transfer_amount);
 

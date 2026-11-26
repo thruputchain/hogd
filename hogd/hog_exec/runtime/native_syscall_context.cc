@@ -3,6 +3,7 @@
 #include "hogd/base/types.h"
 #include "hogd/hog_exec/common/status.h"
 #include "hogd/hog_exec/runtime/gas_cost_table.h"
+#include "hogd/hog_exec/runtime/runtime_exports.h"
 #include "hogd/hog_exec/runtime/syscall_handler.h"
 #include "syscall_error.hh"
 #include "types.hh"
@@ -40,7 +41,7 @@ NativeSyscallContext::native_token_balance(ContractAddress const &address)
   co_return std::move(status->result);
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 NativeSyscallContext::modify_native_token_balance(
     ContractAddress const &address, int128_t amount)
 {
@@ -51,11 +52,20 @@ NativeSyscallContext::modify_native_token_balance(
     std::ignore = consume_gas(kStorageAccessCost);
     const SyscallStatus<void> refused =
         SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
-    co_return refused;
+    return refused;
   }
   // Affordable: checked just above.
   std::ignore = consume_gas(kStorageAccessCost);
-  co_return co_await handler_.modify_native_token_balance(address, amount);
+  return handler_.modify_native_token_balance(address, amount);
+}
+
+x23::Async<HostFnStatus<SyscallErrorCode>>
+NativeSyscallContext::finish_awaited_syscall(MaybeAsyncSyscallResult pending)
+{
+  auto [res, gas_consumed] = co_await pending;
+  // As in direct_syscall().
+  std::ignore = consume_gas(gas_consumed);
+  co_return res;
 }
 
 } // namespace hogd

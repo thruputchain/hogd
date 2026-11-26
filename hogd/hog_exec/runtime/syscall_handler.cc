@@ -2366,14 +2366,13 @@ SystemCallHandler::get_native_token_balance(
   co_return Read{balance, load_gas};
 }
 
-x23::Async<SystemStatus<SyscallStatus<void>>>
+SystemStatus<SyscallStatus<void>>
 SystemCallHandler::modify_native_token_balance(
     ContractAddress const &contract_address, int128_t transfer_amount)
 {
   assert(!invocation_frame_stack_.empty());
   if (is_read_only()) {
-    co_return SyscallError{
-        SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
+    return SyscallError{SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
   }
 
   AddressAndKey addrkey{.address = contract_address,
@@ -2386,17 +2385,17 @@ SystemCallHandler::modify_native_token_balance(
   if (auto const *balance_item = item_view->get<NativeTokenBalanceItem>()) {
     auto current_add = from_xdr(balance_item->add_value_);
     if (integer_add_overflow(current_add, transfer_amount)) {
-      co_return SyscallError{
+      return SyscallError{
           SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput};
     }
     auto new_add = current_add + transfer_amount;
-    co_return item_view->set(NativeTokenBalanceItem(
+    return item_view->set(NativeTokenBalanceItem(
         NNIntItem{.base_value_ = balance_item->base_value_,
                   .add_value_ = to_xdr(new_add)}));
   }
 
   assert(item_view->get<UnmodifiedItem>());
-  co_return item_view->set(
+  return item_view->set(
       NativeTokenBalanceItem(NNIntItem{.base_value_ = std::nullopt,
                                        .add_value_ = to_xdr(transfer_amount)}));
 }
