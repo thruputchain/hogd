@@ -11,6 +11,7 @@ target_link_libraries(hog_auth
 )
 
 add_executable(hog_auth_test
+    auth_batch_lookup_test.cc
     auth_data_cache_test.cc
     auth_server_test.cc
     auth_verify_test.cc

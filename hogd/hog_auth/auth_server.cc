@@ -1,6 +1,8 @@
 #include "hogd/hog_auth/auth_server.h"
 
 #include <algorithm>
+#include <array>
+#include <exception>
 #include <memory>
 #include <optional>
 #include <span>
@@ -22,9 +24,11 @@
 #include "hogd/base/log.h"
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
+#include "hogd/hog_auth/dbauth_client.h"
 #include "hogd/hog_auth/status.h"
 #include "hogd/metrics/health.h"
 #include "integration.hh"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -61,8 +65,8 @@ AuthServer::try_cached_auth_data(BlockHeight height,
   return cached_entry_at(height, address);
 }
 
-x23::Async<AuthStatus<AuthCacheEntry>>
-AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
+x23::Async<BlockHeight>
+AuthServer::wait_for_height(BlockHeight height)
 {
   CHECK_NE(height, kUninitializedHeight);
   CHECK_NE(height, kInitializing);
@@ -83,16 +87,33 @@ AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
   CHECK_GE(current_height, height);
   CHECK_NE(current_height, kUninitializedHeight);
   CHECK_NE(current_height, kInitializing);
+  co_return current_height;
+}
 
-  if (AuthCacheEntry cached = cached_entry_at(height, address)) {
-    co_return cached;
+AuthStatus<AuthCacheEntry>
+AuthServer::check_auth_cache(BlockHeight height, BlockHeight current_height,
+                             const ContractAddress &address)
+{
+  CHECK_GE(current_height, height);
+  if (AuthCacheEntry entry = cached_entry_at(height, address)) {
+    return entry;
   }
 
   if (current_height > height) {
     // [height] is too old for us to look up this particular wallet's auth data.
-    co_return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
+    return AuthError(AuthErrorCode::kAuthStaleBlockHeight);
   }
-  CHECK_EQ(current_height, height);
+  return AuthCacheEntry{};
+}
+
+x23::Async<AuthStatus<AuthCacheEntry>>
+AuthServer::lookup_auth_data(BlockHeight height, ContractAddress address)
+{
+  const BlockHeight current_height = co_await wait_for_height(height);
+  auto cached = check_auth_cache(height, current_height, address);
+  if (!cached.has_value() || *cached != nullptr) {
+    co_return cached;
+  }
 
   auto db_auth_data = co_await dbauth_client_.lookup_auth_data(height, address);
   if (!db_auth_data.has_value()) {
@@ -308,18 +329,148 @@ verify_chunk_on_pool(std::span<const SignedTransaction> txs,
 
 } // namespace
 
+x23::Async<void>
+AuthServer::gather_missing_auth_data(BlockHeight height,
+                                     std::span<const SignedTransaction> txs,
+                                     size_t first_missing,
+                                     AuthDataByAccount &auth_data,
+                                     AuthErrorCodeBatch &results)
+{
+  std::unordered_map<ContractAddress, AuthStatus<AuthCacheEntry>,
+                     SipHash24Hasher>
+      missing_auth_data;
+  ContractAddressBatch missing_addresses;
+  std::vector<AuthStatus<AuthCacheEntry> *> missing_entries;
+  // Reuse a fixed set of slots to bound outstanding RPCs without allocating
+  // a queue on the warm-cache path.
+  std::array<std::optional<x23::Async<void>>, kMaxLookupBatchesInFlight>
+      pending_lookups;
+  size_t next_lookup = 0;
+
+  // Each coroutine owns its arguments and writes only its own missing
+  // entries, whose addresses stay valid across rehashes.
+  auto fetch_missing = [&](ContractAddressBatch addresses,
+                           std::vector<AuthStatus<AuthCacheEntry> *> entries)
+      -> x23::Async<void> {
+    std::vector<AuthStatus<std::optional<AddressAuthData>>> replies;
+    try {
+      replies =
+          co_await dbauth_client_.lookup_auth_data_batch(height, addresses);
+    } catch (const std::exception &e) {
+      // Convert a failed RPC to per-address outcomes so the other in-flight
+      // lookups are still joined before their destination entries are freed.
+      warn("DB auth lookup batch failed: {}", e.what());
+      for (auto *entry : entries) {
+        *entry = AuthError(AuthErrorCode::kAuthInternal);
+      }
+      co_return;
+    }
+    for (size_t i = 0; i < replies.size(); ++i) {
+      if (!replies[i].has_value()) {
+        *entries[i] = replies[i].error();
+        continue;
+      }
+      auto entry = std::make_shared<
+          std::pair<BlockHeight, std::optional<AddressAuthData>>>(
+          height, std::move(*replies[i]));
+      // put() rejects older replies if an update arrived while the RPC ran.
+      // This request still owns its snapshot even if the cache rejects it.
+      auth_data_cache_.put(addresses[i], entry);
+      *entries[i] = std::move(entry);
+    }
+  };
+
+  auto launch_lookup = [&]() -> x23::Async<void> {
+    if (missing_addresses.empty()) {
+      co_return;
+    }
+    auto &slot = pending_lookups[next_lookup];
+    if (slot.has_value()) {
+      co_await *slot;
+      slot.reset();
+    }
+    slot.emplace(fetch_missing(std::exchange(missing_addresses, {}),
+                               std::exchange(missing_entries, {})));
+    next_lookup = (next_lookup + 1) % pending_lookups.size();
+  };
+
+  for (size_t i = first_missing; i < txs.size(); i++) {
+    const SignedTransaction &tx = txs[i];
+    if (wrapper_over_cap(tx)) {
+      results[i] = AuthErrorCode::kAuthFailed;
+      continue;
+    }
+    const ContractAddress &account = tx.tx.invocation.invoked_address;
+    if (auth_data.contains(account)) {
+      continue;
+    }
+    if (!missing_auth_data.empty() && missing_auth_data.contains(account)) {
+      continue;
+    }
+    if (AuthCacheEntry entry = try_cached_auth_data(height, account)) {
+      auth_data.emplace(account, std::move(entry));
+      continue;
+    }
+    auto [it, inserted] = missing_auth_data.try_emplace(account);
+    CHECK(inserted);
+    const BlockHeight current_height = co_await wait_for_height(height);
+    it->second = check_auth_cache(height, current_height, account);
+    if (it->second.has_value() && *it->second == nullptr) {
+      missing_addresses.push_back(account);
+      missing_entries.push_back(&it->second);
+      if (missing_addresses.size() == dbauth_client_.max_lookup_batch_size()) {
+        co_await launch_lookup();
+      }
+    }
+  }
+  if (!missing_addresses.empty()) {
+    co_await launch_lookup();
+  }
+  for (auto &lookup : pending_lookups) {
+    if (lookup.has_value()) {
+      co_await *lookup;
+    }
+  }
+
+  if (!missing_auth_data.empty()) {
+    // Only successful snapshots are published; errors stay request-local.
+    for (auto &[account, outcome] : missing_auth_data) {
+      if (outcome.has_value()) {
+        CHECK_PTR(outcome->get());
+        auth_data.emplace(account, std::move(*outcome));
+      }
+    }
+    for (size_t i = first_missing; i < txs.size(); ++i) {
+      if (results[i] != AuthErrorCode::kAuthSuccess) {
+        continue;
+      }
+      const auto miss =
+          missing_auth_data.find(txs[i].tx.invocation.invoked_address);
+      if (miss != missing_auth_data.end() && !miss->second.has_value()) {
+        trace("Populate auth data error: {}",
+              std::to_underlying(miss->second.error().code()));
+        results[i] = miss->second.error().code();
+      }
+    }
+  }
+}
+
 x23::Async<AuthErrorCodeBatch>
 AuthServer::verify_transactions(BlockHeight height,
                                 std::span<const SignedTransaction> txs,
                                 size_t max_parallelism)
 {
   CHECK_GT(max_parallelism, 0UL);
+  if (txs.empty()) {
+    co_return AuthErrorCodeBatch{};
+  }
   co_await default_coropoll().pool_.bg();
 
   AuthErrorCodeBatch results;
   results.resize(txs.size(), AuthErrorCode::kAuthSuccess);
 
   AuthDataByAccount auth_data;
+  bool had_misses = false;
   for (size_t i = 0; i < txs.size(); i++) {
     const SignedTransaction &tx = txs[i];
     if (wrapper_over_cap(tx)) {
@@ -332,14 +483,10 @@ AuthServer::verify_transactions(BlockHeight height,
     }
     AuthCacheEntry entry = try_cached_auth_data(height, account);
     if (entry == nullptr) {
-      auto looked_up = co_await lookup_auth_data(height, account);
-      if (!looked_up.has_value()) {
-        trace("Populate auth data error: {}",
-              std::to_underlying(looked_up.error().code()));
-        results[i] = looked_up.error().code();
-        continue;
-      }
-      entry = std::move(*looked_up);
+      // Hand off to the batching helper so the warm path keeps a small frame.
+      had_misses = true;
+      co_await gather_missing_auth_data(height, txs, i, auth_data, results);
+      break;
     }
     CHECK_PTR(entry.get());
     auth_data.emplace(account, std::move(entry));
@@ -353,6 +500,10 @@ AuthServer::verify_transactions(BlockHeight height,
                                      max_parallelism));
   const std::span<AuthErrorCode> result_span(results.data(), results.size());
   if (chunks.size() == 1) {
+    // DB replies can resume on the reader. Do not hold it for signatures.
+    if (had_misses) {
+      co_await default_coropoll().pool_.bg();
+    }
     verify_chunk(txs, result_span, auth_data, network_hash_);
     co_return results;
   }

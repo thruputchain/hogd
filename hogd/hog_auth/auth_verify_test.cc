@@ -10,6 +10,8 @@
 #include "hogd/base/types.h"
 #include "hogd/crypto/crypto.h"
 #include "hogd/crypto/domain_separators.h"
+#include "hogd/hog_auth/auth_server.h"
+#include "hogd/hog_auth/mock_dbauth_rpc.h"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/vec.h"
@@ -80,6 +82,11 @@ class AuthVerifyTest : public ::testing::Test, public AuthServerTestFramework {
 protected:
 private:
 };
+
+TEST_F(AuthVerifyTest, EmptyBatchDoesNotWaitForInitialization)
+{
+  EXPECT_TRUE(auth_server().verify_transactions(0, {}, 4)().empty());
+}
 
 TEST_F(AuthVerifyTest, VerifyTransaction)
 {
@@ -169,14 +176,24 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
   stx3.tx = tx3;
   stx3.signatures.push_back(make_signature(sk2, tx3, /*public_key_id=*/0));
 
-  x23::Vec<SignedTransaction> stx_vec{stx1, stx2, stx3};
+  x23::Vec<SignedTransaction> stx_vec;
+  // Exercise both inline and multi-chunk verification with mixed outcomes.
+  // Repeating this pattern spans the production minimum chunk width.
+  for (size_t i = 0; i < AuthServer::kMinTxsPerVerifyChunk; ++i) {
+    stx_vec.push_back(stx1);
+    stx_vec.push_back(stx2);
+    stx_vec.push_back(stx3);
+  }
   x23::span<SignedTransaction> stx_span(stx_vec);
-  auto result = auth_server().verify_transactions(0, stx_span)();
-
-  ASSERT_EQ(result.size(), 3);
-  EXPECT_EQ(result[0], AuthErrorCode::kAuthFailed);
-  EXPECT_EQ(result[1], AuthErrorCode::kAuthSuccess);
-  EXPECT_EQ(result[2], AuthErrorCode::kAuthFailed);
+  for (size_t parallelism : {1U, 2U, 8U}) {
+    auto result = auth_server().verify_transactions(0, stx_span, parallelism)();
+    ASSERT_EQ(result.size(), stx_vec.size());
+    for (size_t i = 0; i < result.size(); i += 3) {
+      EXPECT_EQ(result[i], AuthErrorCode::kAuthFailed);
+      EXPECT_EQ(result[i + 1], AuthErrorCode::kAuthSuccess);
+      EXPECT_EQ(result[i + 2], AuthErrorCode::kAuthFailed);
+    }
+  }
 
   // batch verify
   EXPECT_EQ(auth_server().verify_batch(0, {stx1, stx2, stx3})(),
@@ -185,6 +202,64 @@ TEST_F(AuthVerifyTest, VerifyMultipleTransaction)
             AuthErrorCode::kAuthFailed);
   EXPECT_EQ(auth_server().verify_batch(0, {stx2, stx2, stx2})(),
             AuthErrorCode::kAuthSuccess);
+}
+
+TEST_F(AuthVerifyTest, MixedCachedAndColdSignedTransactions)
+{
+  const ContractAddress warm_address = make_test_address(8);
+  auto [warm_pk, warm_sk] = make_key_pair();
+  AddressAuthData warm_auth_data{};
+  add_pk_to_auth_data(warm_auth_data, 0, warm_pk);
+  warm_auth_data.required_weight = 1;
+  mock_db().set(warm_address, warm_auth_data);
+  mock_db().compute_key_changes_for_current_height();
+  auth_server().register_auth_data_updates(0,
+                                           mock_db().get_key_changes_at_height(
+                                               0))();
+  mock_db().address_should_be_cached(warm_address);
+
+  auto make_signed = [](ContractAddress address, const SecretKey &sk) {
+    SignedTransaction tx{};
+    tx.tx.invocation.invoked_address = address;
+    tx.tx.auth_claim = make_self_individual_key_claim(0);
+    tx.signatures.push_back(make_signature(sk, tx.tx, /*public_key_id=*/0));
+    return tx;
+  };
+  const SignedTransaction warm_good = make_signed(warm_address, warm_sk);
+
+  // Each size starts with a different, genuinely uncached account.
+  uint8_t cold_id = 9;
+  for (size_t repeats : {size_t{1}, AuthServer::kMinTxsPerVerifyChunk}) {
+    const ContractAddress cold_address = make_test_address(cold_id++);
+    auto [cold_pk, cold_sk] = make_key_pair();
+    AddressAuthData cold_auth_data{};
+    add_pk_to_auth_data(cold_auth_data, 0, cold_pk);
+    cold_auth_data.required_weight = 1;
+    mock_db().set(cold_address, cold_auth_data);
+
+    const SignedTransaction cold_good = make_signed(cold_address, cold_sk);
+    const SignedTransaction cold_bad = make_signed(cold_address, warm_sk);
+    x23::Vec<SignedTransaction> txs;
+    for (size_t i = 0; i < repeats; ++i) {
+      txs.push_back(warm_good);
+      txs.push_back(cold_bad);
+      txs.push_back(cold_good);
+    }
+    const size_t lookups_before = mock_db().lookup_count();
+    const auto results = auth_server().verify_transactions(0, txs, 4)();
+    ASSERT_EQ(results.size(), txs.size());
+    for (size_t i = 0; i < results.size(); i += 3) {
+      EXPECT_EQ(results[i], AuthErrorCode::kAuthSuccess);
+      EXPECT_EQ(results[i + 1], AuthErrorCode::kAuthFailed);
+      EXPECT_EQ(results[i + 2], AuthErrorCode::kAuthSuccess);
+    }
+    // Only the distinct cold account is fetched, even with repeated good
+    // and bad signatures in different chunks. Its cache entry is reusable.
+    EXPECT_EQ(mock_db().lookup_count(), lookups_before + 1);
+    mock_db().address_should_be_cached(cold_address);
+    EXPECT_EQ(auth_server().verify_transactions(0, txs, 4)(), results);
+    EXPECT_EQ(mock_db().lookup_count(), lookups_before + 1);
+  }
 }
 
 TEST_F(AuthVerifyTest, PubkeyClaimNoAuthEntry)
