@@ -71,8 +71,8 @@ code PTSan did not instrument; see the next section.
   and full LTO.
 - BLAKE3 uses its C intrinsics backend rather than assembly, and RocksDB is
   built without jemalloc, liburing, and compression. The indexer therefore
-  stores its database uncompressed, and a PTSan binary cannot open a database
-  that a regular build compressed.
+  stores its database uncompressed. A PTSan binary has not been tried on a
+  database that a regular build wrote; RocksDB without LZ4 should refuse it.
 
 Code that the PTSan compiler did not build cannot be handed a tagged pointer,
 and memory it allocates must not come back tagged. hogd calls three such
