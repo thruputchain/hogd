@@ -4,6 +4,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <print>
 #include <span>
 #include <string>
@@ -14,6 +15,7 @@
 #include "hogd/hog_exec/runtime/rv32/encoding.h"
 #include "hogd/hog_exec/runtime/rv32/fuzz/fuzz_common.h"
 #include "hogd/hog_exec/runtime/rv32/host.h"
+#include "hogd/hog_exec/runtime/rv32/load_run_reference.h"
 #include "hogd/hog_exec/runtime/rv32/machine.h"
 #include "hogd/hog_exec/runtime/rv32/program.h"
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
@@ -25,12 +27,13 @@ using hogd::rv32::ExecTrace;
 using hogd::rv32::kInstructionBytes;
 using hogd::rv32::kRegisterCount;
 using hogd::rv32::load_u32_le;
+using hogd::rv32::LoadRunFault;
 using hogd::rv32::Machine;
 using hogd::rv32::Program;
 using hogd::rv32::strip_trace_gas;
 using hogd::rv32::ThreadedMachine;
 using hogd::rv32::ThreadedMachinePreInstantiation;
-using hogd::rv32::trace_execution;
+using hogd::rv32::trace_execution_with_load_runs;
 using hogd::rv32::TraceObserver;
 using hogd::rv32::Trap;
 namespace fuzz = hogd::rv32::fuzz;
@@ -153,8 +156,12 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
                     cmachine.memory().begin() + in->memory_start);
   cmachine.seed_method_id(in->method_id);
   fuzz::ScriptedHost chost(in->host_seed);
-  const ExecTrace ctrace =
-      trace_execution(cmachine, chost, fuzz::kFuzzTraceMaxSteps);
+  // Canonical execution under the production lowering's lw-run rule: a fused
+  // run that fails its range check traps at its first load.
+  ExecTrace ctrace;
+  const std::optional<LoadRunFault> run_fault =
+      trace_execution_with_load_runs(cmachine, chost, *pre_untraced, code,
+                                     ctrace, fuzz::kFuzzTraceMaxSteps);
 
   ThreadedMachine tmachine(*pre, in->gas_budget);
   tmachine.seed_method_id(in->method_id);
@@ -174,15 +181,17 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
     fail("host call log mismatch", *in);
   }
 
-  const bool canonical_oog = cmachine.trap() == Trap::kOutOfGas;
+  const bool canonical_oog =
+      (run_fault ? run_fault->trap : cmachine.trap()) == Trap::kOutOfGas;
   const bool threaded_oog = tmachine.trap() == Trap::kOutOfGas;
   const bool untraced_oog = umachine.trap() == Trap::kOutOfGas;
   if (canonical_oog != threaded_oog || canonical_oog != untraced_oog) {
     fail("OOG classification mismatch", *in);
   }
   if (canonical_oog) {
-    if (cmachine.gas_remaining() != 0 || tmachine.gas_remaining() != 0 ||
-        umachine.gas_remaining() != 0) {
+    if ((run_fault ? run_fault->gas_remaining : cmachine.gas_remaining()) !=
+            0 ||
+        tmachine.gas_remaining() != 0 || umachine.gas_remaining() != 0) {
       fail("OOG did not saturate gas_remaining to zero", *in);
     }
     return 0;
@@ -190,6 +199,28 @@ LLVMFuzzerTestOneInput(const uint8_t *data, size_t size)
 
   const ExecTrace cstripped = strip_trace_gas(ctrace);
   const ExecTrace tstripped = strip_trace_gas(tobs.trace());
+  if (run_fault.has_value()) {
+    // Both engines trap at the run's first load with the rule's gas, after
+    // the same steps as the canonical machine.
+    for (ThreadedMachine *machine : {&tmachine, &umachine}) {
+      if (machine->trap() != Trap::kBadMemory ||
+          machine->pc() != run_fault->pc ||
+          machine->gas_remaining() != run_fault->gas_remaining) {
+        fail("lw run trap mismatch", *in);
+      }
+    }
+    if (tstripped.steps.size() != cstripped.steps.size() + 1) {
+      fail("step count before lw run trap mismatch", *in);
+    }
+    for (std::size_t i = 0; i < cstripped.steps.size(); ++i) {
+      if (cstripped.steps[i].result != tstripped.steps[i].result ||
+          cstripped.steps[i].state != tstripped.steps[i].state ||
+          cstripped.steps[i].state_before != tstripped.steps[i].state_before) {
+        fail("step before lw run trap mismatch", *in);
+      }
+    }
+    return 0;
+  }
   const std::string divergence =
       describe_trace_divergence(cstripped, tstripped);
   if (!divergence.empty()) {

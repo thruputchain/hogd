@@ -263,6 +263,18 @@ generate_engine_only_program(uint64_t seed)
   code.push_back(test_program::op(20, 15, 19, 0, 0x00)); // lw feeds rs2
   code.push_back(test_program::load(18, 2, 12, -4));
   code.push_back(test_program::store(12, 18, 8, 2)); // lw+sw
+  // lw runs: ascending words off x12 of random length 2..5, a separator, then
+  // a descending pair. Both stay inside the region written above.
+  {
+    const auto ascending = static_cast<int32_t>(2 + (rng() % 4));
+    for (int32_t k = 0; k < ascending; ++k) {
+      code.push_back(test_program::load(static_cast<uint8_t>(21 + k), 2, 12,
+                                        -4 + (4 * k)));
+    }
+    code.push_back(test_program::op(3, 1, 2, 0, 0x00)); // separator add
+    code.push_back(test_program::load(26, 2, 12, 4));
+    code.push_back(test_program::load(27, 2, 12, 0)); // descending lw run
+  }
 
   // auipc+jalr fused head path: target is the instruction after one skipped
   // slot. The jalr link register is nonzero to cover link visibility.

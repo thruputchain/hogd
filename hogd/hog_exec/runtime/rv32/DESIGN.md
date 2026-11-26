@@ -108,6 +108,14 @@ runs, and fuses selected instruction pairs. A fused pair retains the tail's
 standalone handler so a branch can enter it directly. Traced handlers preserve
 individual instruction observations for differential tests.
 
+It also fuses lw runs: up to 16 consecutive `lw` on one base register at
+consecutive words, ascending or descending, inside one charged chunk, with
+distinct destinations and only the last load allowed to overwrite the base.
+Compilers emit these to copy multi-word values and to restore saved
+registers. `op_load_run` checks the run's whole byte range once, reads it with
+8-byte loads, and dispatches once. Every member slot heads the run starting at
+it, so a branch into a run still runs fused.
+
 Dispatch requires the `musttail` attribute. [musttail.h](musttail.h) rejects
 unsupported compilers because ordinary recursive calls would grow the host
 stack with guest execution. The `rv32_isa_core` target has no artifact, crypto,
@@ -152,6 +160,16 @@ Registers, memory, trap PC, and intermediate trace gas may differ after
 speculative execution in a frame that will be discarded. The trap-gas and
 deficit tests in [rv32_threaded_test.cc](rv32_threaded_test.cc) cover this
 distinction, including fused instructions and split runs.
+
+One rule departs from canonical execution on purpose. An lw run that fails
+its range check traps at its first load, wherever its first out-of-bounds
+word lies: kBadMemory with the gas of a fault at that `lw`, or kOutOfGas when
+that `lw` is unaffordable. Canonical execution would trap at the first
+out-of-bounds load, charging the in-bounds loads before it. Every validator
+runs this engine, so the rule is deterministic consensus behavior; only the
+refund and state that a trap discards differ. Differential tests and the
+engine-diff fuzzer apply it to the canonical `Machine` through
+[load_run_reference.h](load_run_reference.h).
 
 ## Syscalls
 

@@ -114,6 +114,15 @@ public:
   ThreadedMachinePreInstantiation &
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
+  // The lw run (op_load_run) that execution entering instruction `index` runs,
+  // if any. Differential tests and the engine-diff fuzzer use it to model the
+  // run's fault rule on the canonical Machine.
+  struct LoadRun {
+    uint32_t length;
+    bool descending;
+  };
+  [[nodiscard]] std::optional<LoadRun> load_run_at(size_t index) const;
+
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,
@@ -1099,6 +1108,79 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
+// --- lw runs
+// ------------------------------------------------------------------
+//
+// N consecutive lw on one base register at consecutive words, ascending or
+// (Descending) descending, where no load but the last writes the base and no
+// two loads write the same register (x0 aside). create() forms runs only
+// inside one charged chunk and only when the memory holds at least 4N bytes.
+//
+// One range check covers the run's 4N contiguous bytes; the words are then
+// read with 8-byte loads in address order and written to their registers,
+// with no per-access check or dispatch. Address order is exact because the
+// destinations are distinct, and reading the base once is exact because only
+// the last load may overwrite it.
+//
+// A run that fails the check traps at its first load: kBadMemory with the gas
+// of a fault at that lw (trap_bad_memory refunds the rest of the chunk), or
+// kOutOfGas when that lw itself was unaffordable. That is the run's defined
+// semantics; per-instruction execution would trap at the first out-of-bounds
+// load instead, which differs only in the refund and in state that a trap
+// discards. Every slot of a run keeps a handler of its own (the run starting
+// there, or the standalone lw) for branches into it.
+inline constexpr uint32_t kMaxLoadRun = 16;
+
+template<bool Trace, uint32_t N, bool Descending>
+StepResult
+op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  static_assert(N >= 2 && N <= kMaxLoadRun);
+  assert(memsize >= N * 4);
+  const uint32_t head = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  const uint32_t lowest = Descending ? head - ((N - 1) * 4) : head;
+  // In bounds iff lowest + 4N <= memsize. memsize >= 4N, so the limit does not
+  // wrap, and passing it means no address in the run wrapped either.
+  if (lowest > memsize - (N * 4)) [[unlikely]] {
+    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
+  }
+  const uint8_t *words = mem + lowest;
+  // Slot of the load reading the w-th word from the lowest.
+  constexpr auto slot_of = [](uint32_t w) {
+    return Descending ? N - 1 - w : w;
+  };
+  if constexpr (Trace) {
+    // Program order, so each load retires as its own step.
+    for (uint32_t k = 0; k < N; ++k) {
+      write_rd(c, ip[k].rd, le_load<4>(words, 4 * slot_of(k)));
+      if (k + 1 < N) {
+        HOGD_RETIRE_OP1(c, ip + k);
+      }
+    }
+  }
+  else {
+    for (uint32_t w = 0; w + 1 < N; w += 2) {
+#if defined(__aarch64__)
+      // Adjacent 32-bit loads, which AArch64 pairs into one ldp.
+      const uint32_t low = le_load<4>(words, 4 * w);
+      const uint32_t high = le_load<4>(words, 4 * (w + 1));
+#else
+      // One 8-byte load per pair of words.
+      uint64_t pair;
+      std::memcpy(&pair, words + (4 * w), sizeof(pair));
+      const auto low = static_cast<uint32_t>(pair);
+      const auto high = static_cast<uint32_t>(pair >> 32);
+#endif
+      write_rd(c, ip[slot_of(w)].rd, low);
+      write_rd(c, ip[slot_of(w + 1)].rd, high);
+    }
+    if constexpr (N % 2 != 0) {
+      write_rd(c, ip[slot_of(N - 1)].rd, le_load<4>(words, 4 * (N - 1)));
+    }
+  }
+  HOGD_THREAD_NEXT(c, ip + N);
+}
+
 // alu ; conditional branch  (e.g. addi;bltu -- loop induction + bound check).
 // op2 is a barrier: it ends the run, entering the taken target or the
 // fall-through. create() only fuses when the branch target is in range, so
@@ -1693,6 +1775,64 @@ fuse_alu_branch(const FusionCtx &f, Slot &s)
   return true;
 }
 
+// op_load_run handlers by run length, from 2.
+template<bool Trace, bool Descending, uint32_t... Ns>
+constexpr std::array<Handler, sizeof...(Ns)>
+make_load_run_handlers(std::integer_sequence<uint32_t, Ns...>)
+{
+  return {&op_load_run<Trace, Ns + 2, Descending>...};
+}
+
+template<bool Trace, bool Descending>
+inline constexpr std::array<Handler, kMaxLoadRun - 1> kLoadRunHandlers =
+    make_load_run_handlers<Trace, Descending>(
+        std::make_integer_sequence<uint32_t, kMaxLoadRun - 1>{});
+
+// The op_load_run handler for a run of n (2..kMaxLoadRun) loads.
+inline Handler
+load_run_handler(uint32_t n, bool descending, bool trace)
+{
+  assert(n >= 2 && n <= kMaxLoadRun);
+  if (descending) {
+    return trace ? kLoadRunHandlers<true, true>[n - 2]
+                 : kLoadRunHandlers<false, true>[n - 2];
+  }
+  return trace ? kLoadRunHandlers<true, false>[n - 2]
+               : kLoadRunHandlers<false, false>[n - 2];
+}
+
+inline std::optional<ThreadedMachinePreInstantiation::LoadRun>
+ThreadedMachinePreInstantiation::load_run_at(size_t index) const
+{
+  assert(index < exec_.size());
+  const Handler handler = exec_[index].handler;
+  for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
+    for (const bool descending : {false, true}) {
+      if (handler == load_run_handler(n, descending, trace_)) {
+        return LoadRun{.length = n, .descending = descending};
+      }
+    }
+  }
+  return std::nullopt;
+}
+
+// The longest prefix of run_length slots starting at exec[i] whose
+// destinations are distinct, x0 aside (op_load_run writes in address order).
+inline uint32_t
+distinct_destination_prefix(std::span<const Slot> exec, size_t i,
+                            uint32_t run_length)
+{
+  for (uint32_t k = 1; k < run_length; ++k) {
+    const uint8_t rd = exec[i + k].rd;
+    for (uint32_t j = 0; rd != 0 && j < k; ++j) {
+      if (exec[i + j].rd == rd) {
+        return k;
+      }
+    }
+  }
+  return run_length;
+}
+
 // Rules are tried in order, first match wins. The head ops are disjoint per
 // rule (lui / auipc / lw / ...), or the rules differ on the tail, so the order
 // needs no priority tuning.
@@ -1740,9 +1880,13 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   // Decode, price, and fuse in one backward pass. Carry the successor's
   // decoded instruction, whether it heads a fused pair, and whether it ends
   // a chunk. These guards prevent overlapping pairs and skipped chunk charges.
+  // Also carry the length of the ascending and descending lw chains starting
+  // at the successor (0 when it cannot be part of one).
   Instr next_op = {};
   bool next_fused = false;
   bool next_is_break = false;
+  uint32_t next_ascending_chain = 0;
+  uint32_t next_descending_chain = 0;
 
   for (size_t i = n; i-- > 0;) {
     const auto instruction = program->instruction_at(i);
@@ -1830,9 +1974,39 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // and suffix gas so branches can still enter it. Calibration disables
     // fusion when measuring individual opcode costs.
     bool fused_here = false;
+
+    // lw runs (op_load_run). An lw that is not a break carrier links to its
+    // successor when that loads the next word up (or down) from the same base
+    // and this load leaves the base intact. Every slot heads the longest run
+    // starting at it, capped at kMaxLoadRun and at what memory can hold, and
+    // cut before a repeated destination, so a branch into a run still runs
+    // fused and longer runs chain through successive heads. Members are plain
+    // lw slots with unpacked operands, so runs may overlap runs and pairs
+    // headed at their members; a run is preferred over pairing its head.
+    uint32_t ascending_chain = 0;
+    uint32_t descending_chain = 0;
+    if (fuse && d.op == Op::kLw && !is_break_here) {
+      const bool links = i + 1 < n && d.rd != d.rs1 && next_op.op == Op::kLw &&
+                         next_op.rs1 == d.rs1;
+      ascending_chain =
+          1 + ((links && next_op.imm == d.imm + 4) ? next_ascending_chain : 0);
+      descending_chain =
+          1 + ((links && next_op.imm == d.imm - 4) ? next_descending_chain : 0);
+      const bool descending = descending_chain > ascending_chain;
+      const uint32_t run = distinct_destination_prefix(
+          exec, i,
+          std::min({descending ? descending_chain : ascending_chain,
+                    kMaxLoadRun, total_memory_size / 4}));
+      if (run >= 2) {
+        slot.handler = load_run_handler(run, descending, trace);
+        fused_here = true;
+      }
+    }
+
     // A fused handler skips the intervening dispatch, so neither member may
     // be a break carrier: that would skip charging the next chunk.
-    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    if (fuse && !fused_here && i + 1 < n && !next_fused && !is_break_here &&
+        !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
@@ -1849,6 +2023,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     next_op = d;
     next_fused = fused_here;
     next_is_break = is_break_here;
+    next_ascending_chain = ascending_chain;
+    next_descending_chain = descending_chain;
   }
 
   return ThreadedMachinePreInstantiation(std::move(exec),
