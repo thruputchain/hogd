@@ -10,7 +10,6 @@
 #include <span>
 #include <string>
 #include <string_view>
-#include <sys/types.h>
 #include <thread>
 #include <unordered_map>
 #include <utility>
@@ -25,6 +24,7 @@
 #include "hogd/crypto/crypto.h"
 #include "hogd/hog_event/event_block_context.h"
 #include "hogd/init.h"
+#include "rpc_types.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/async.h"
@@ -649,7 +649,7 @@ TEST_F(EventBlockContextTest, StreamWritebackUnsupportedStillDurablyCloses)
   EventBlockContext context(temp_dir_, 1,
                             EventBlockContext::create_events_file(temp_dir_,
                                                                   1));
-  context.set_stream_writeback_test_hook([](int, off_t start, off_t length) {
+  context.set_stream_writeback_test_hook([](int, auto start, auto length) {
     EXPECT_EQ(start, 0);
     EXPECT_GE(length, 32 * 1024 * 1024);
     return EOPNOTSUPP;
@@ -688,7 +688,7 @@ TEST_F(EventBlockContextTest, StreamWritebackRetriesInterruptedHint)
                                                                   1));
   int calls = 0;
   context.set_stream_writeback_test_hook(
-      [&](int, off_t, off_t) { return ++calls == 1 ? EINTR : 0; });
+      [&](int, auto, auto) { return ++calls == 1 ? EINTR : 0; });
   context.executor_open_block();
   add_writeback_test_payload(context);
   context.executor_close_block();
@@ -704,8 +704,9 @@ TEST_F(EventBlockContextTest, StreamWritebackRetriesInterruptedHint)
 TEST_F(EventBlockContextTest, OptionalStreamWritebackErrorsFallBack)
 {
   // All optional failures leave the mandatory final file+directory sync.
-  const int errors[] = {ENOSYS, EINVAL, ESPIPE, EPERM,
-                        EACCES, ENOMEM, EAGAIN, EINTR};
+  const int errors[] = {
+      ENOSYS, EINVAL, ESPIPE, EPERM, EACCES, ENOMEM, EAGAIN, EINTR,
+  };
   BlockID id = 1;
   for (int err : errors) {
     EventBlockContext context(temp_dir_, id,
@@ -713,7 +714,7 @@ TEST_F(EventBlockContextTest, OptionalStreamWritebackErrorsFallBack)
                                                                     id));
     ++id;
     int calls = 0;
-    context.set_stream_writeback_test_hook([&](int, off_t, off_t) {
+    context.set_stream_writeback_test_hook([&](int, auto, auto) {
       ++calls;
       return err;
     });
@@ -745,7 +746,7 @@ TEST_F(EventBlockContextDeathTest, StreamWritebackIOErrorFailsStop)
         EventBlockContext context(
             temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
         context.set_stream_writeback_test_hook(
-            [](int, off_t, off_t) { return EIO; });
+            [](int, auto, auto) { return EIO; });
         context.executor_open_block();
         add_writeback_test_payload(context);
         context.executor_close_block();
@@ -761,7 +762,7 @@ TEST_F(EventBlockContextDeathTest, StreamWritebackNoSpaceFailsStop)
         EventBlockContext context(
             temp_dir_, 1, EventBlockContext::create_events_file(temp_dir_, 1));
         context.set_stream_writeback_test_hook(
-            [](int, off_t, off_t) { return ENOSPC; });
+            [](int, auto, auto) { return ENOSPC; });
         context.executor_open_block();
         add_writeback_test_payload(context);
         context.executor_close_block();
@@ -776,7 +777,7 @@ TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
                             EventBlockContext::create_events_file(temp_dir_,
                                                                   1));
   std::latch entered(1), release(1), finished(1);
-  context.set_stream_writeback_test_hook([&](int fd, off_t, off_t) {
+  context.set_stream_writeback_test_hook([&](int fd, auto, auto) {
     entered.count_down();
     release.wait();
     EXPECT_GE(fcntl(fd, F_GETFD), 0);
