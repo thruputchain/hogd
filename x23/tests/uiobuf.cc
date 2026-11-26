@@ -380,3 +380,58 @@ TEST(uiobuf, SelfMovePreservesQueuedData)
   ASSERT_EQ(iov.size(), 1UZ);
   EXPECT_EQ(std::memcmp(iov[0].iov_base, data.data(), data.size()), 0);
 }
+
+TEST(uiobuf, DrainedBatchReusesStorage)
+{
+  x23::BufVec buffers;
+  x23::Buf data(100, 0x5a);
+  buffers.append(data);
+  const auto *iov = buffers.to_vec().data();
+  auto *bytes = iov[0].iov_base;
+  auto *storage = buffers.storage_.data();
+  for (unsigned i = 0; i < 100; ++i) {
+    buffers.trim(buffers.nbytes());
+    ASSERT_TRUE(buffers.empty());
+    buffers.append(data);
+    EXPECT_EQ(buffers.to_vec().data(), iov);
+    EXPECT_EQ(buffers.to_vec()[0].iov_base, bytes);
+    EXPECT_EQ(buffers.storage_.data(), storage);
+    EXPECT_TRUE(buf_eq(data, buffers.to_vec()));
+  }
+}
+
+TEST(uiobuf, ReuseAfterPartialTrimAndSwapPreservesMixedWrites)
+{
+  x23::BufVec buffers, other;
+  x23::Buf small(100, 0x11);
+  x23::Buf large(1024 * 1024, 0x22);
+  buffers.append(small);
+  auto *bytes = buffers.to_vec()[0].iov_base;
+  buffers.append(x23::Buf(large));
+  // The small staging buffer is moved behind the large owned buffer.
+  buffers.append(small);
+  buffers.trim(small.size() + (large.size() / 2));
+  x23::Buf expected(large.size() / 2, 0x22);
+  expected += small;
+  EXPECT_TRUE(buf_eq(expected, buffers.to_vec()));
+  buffers.swap(other);
+  other.trim(other.nbytes());
+  other.swap(buffers);
+  buffers.append(small);
+  EXPECT_EQ(buffers.to_vec()[0].iov_base, bytes);
+  EXPECT_TRUE(buf_eq(small, buffers.to_vec()));
+}
+
+TEST(uiobuf, RecyclesStagingConsumedBeforeTheRestOfTheBatch)
+{
+  x23::BufVec buffers;
+  x23::Buf full(8192, 0x33);
+  buffers.append(full);
+  auto *bytes = buffers.to_vec()[0].iov_base;
+  buffers.append(x23::Buf(16384, 0x44));
+  buffers.trim(full.size());
+  buffers.trim(buffers.nbytes());
+  buffers.append(full);
+  EXPECT_EQ(buffers.to_vec()[0].iov_base, bytes);
+  EXPECT_TRUE(buf_eq(full, buffers.to_vec()));
+}

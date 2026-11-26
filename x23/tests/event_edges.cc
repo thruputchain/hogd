@@ -2,10 +2,12 @@
 #include <cerrno>
 #include <chrono>
 #include <csignal>
+#include <cstdint>
 #include <ranges>
 #include <semaphore>
 #include <string>
 #include <string_view>
+#include <utility>
 
 #include <fcntl.h>
 #include <sys/socket.h>
@@ -13,9 +15,12 @@
 
 #include <gtest/gtest.h>
 
+#include "x23/cleanup.h"
 #include "x23/event.h"
 #include "x23/signal.h"
 #include "x23/sockio.h"
+#include "x23/threadpool.h"
+#include "x23/vec.h"
 
 using namespace x23;
 using namespace std::chrono;
@@ -134,6 +139,57 @@ TEST(EventEdges, WriteBackpressureCanBeAborted)
   res = cp.write(sockets.a, BufView(data.data(), 1))();
   ASSERT_FALSE(res);
   EXPECT_EQ(res.error(), EPIPE);
+}
+
+TEST(EventEdges, QueuedWritesSurviveBackpressureAndReuse)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  CoroPoll cp(pool);
+  int size = 4096;
+  ASSERT_EQ(setsockopt(sockets.a.get(), SOL_SOCKET, SO_SNDBUF, &size,
+                       sizeof(size)),
+            0);
+  Defer reset([&] {
+    cp.reset(sockets.a);
+    cp.reset(sockets.b);
+  });
+  for (unsigned round = 0; round < 8; ++round) {
+    Buf expected(256 * 1024, static_cast<std::uint8_t>(round));
+    ASSERT_EQ(cp.awrite(sockets.a, Buf(expected)), 0);
+    // The large write is stalled.  Fill the other queue with a mix of
+    // copied and owned buffers before allowing the writer to resume.
+    for (unsigned i = 0; i < 32; ++i) {
+      Buf next(i % 2 ? 100 : 8192, static_cast<std::uint8_t>(i + round));
+      expected += next;
+      ASSERT_EQ(cp.awrite(sockets.a, std::move(next)), 0);
+    }
+    Buf received;
+    auto res = cp.read(sockets.b, &received, expected.size())();
+    ASSERT_TRUE(res);
+    EXPECT_EQ(received, expected);
+  }
+}
+
+TEST(EventEdges, AbortedWriteBatchIsClearedBeforeReuse)
+{
+  ThreadPool pool(8);
+  SocketPair sockets;
+  ManualPoll cp(pool);
+  std::array<char, 4096> bytes;
+  bytes.fill('x');
+  while (::write(sockets.a.get(), bytes.data(), bytes.size()) > 0)
+    ;
+  ASSERT_EQ(errno, EAGAIN);
+  ASSERT_EQ(cp.awrite(sockets.a, Buf(100, 'a')), 0);
+  cp.abort(sockets.a, true, ECANCELED);
+  pool.drain();
+  while (::read(sockets.b.get(), bytes.data(), bytes.size()) > 0)
+    ;
+  ASSERT_EQ(errno, EAGAIN);
+  ASSERT_EQ(cp.awrite(sockets.a, Buf{'b'}), 0);
+  ASSERT_EQ(::read(sockets.b.get(), bytes.data(), bytes.size()), 1);
+  EXPECT_EQ(bytes[0], 'b');
 }
 
 TEST(EventEdges, AcceptAndReadWaitsPropagateAbort)
