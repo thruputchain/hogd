@@ -15,6 +15,7 @@
 #include <fcntl.h>
 #include <sched.h>
 #include <stdio.h>
+#include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
@@ -40,6 +41,7 @@ HOGD_PTSAN_INTERPOSED(fchmodat);
 HOGD_PTSAN_INTERPOSED(fcntl);
 HOGD_PTSAN_INTERPOSED(fdopendir);
 HOGD_PTSAN_INTERPOSED(fread_unlocked);
+HOGD_PTSAN_INTERPOSED(madvise);
 HOGD_PTSAN_INTERPOSED(symlink);
 
 extern "C" {
@@ -123,6 +125,13 @@ fread_unlocked(void *ptr, size_t size, size_t n, FILE *stream)
 {
   UninstrumentedCall call;
   return HOGD_PTSAN_NEXT(fread_unlocked)(raw(ptr), size, n, raw(stream));
+}
+
+int
+madvise(void *addr, size_t length, int advice) noexcept
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(madvise)(raw(addr), length, advice);
 }
 
 // std::filesystem::create_symlink() calls this.

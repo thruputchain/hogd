@@ -93,10 +93,11 @@ not know, add a shim. `libc_shims.cc` says how to list the libc candidates.
 ## Limits
 
 With 16-bit IDs PTSan tracks at most 65,535 live objects. Beyond that, new
-objects share one fallback ID and are not checked. How far a running node
-exceeds that has not been measured. `-DHOGD_PTSAN_CONFIG=ptsan-glibc-id32.cfg`
-selects PTSan's 32-bit IDs instead, but hogd has not been built that way, and
-the first patch below does not cover it.
+objects share one fallback ID and are not checked. An idle `hog-devnode` that
+has run a handful of transactions holds about 23,000; a node under load has
+not been measured. `-DHOGD_PTSAN_CONFIG=ptsan-glibc-id32.cfg` selects PTSan's
+32-bit IDs instead, but hogd has not been built that way, and the first patch
+below does not cover it.
 
 `hogd::TaggedPointer` keeps its tag in the pointer bits PTSan uses, so the two
 cannot be combined. Nothing but the class's own test uses it, and that test
@@ -124,8 +125,8 @@ and each workaround can go once a PTSan release fixes the defect.
   glibc's `__cxa_thread_atexit_impl` gets tagged memory from PTSan's
   allocator. `fdopendir` fails the same way, and with it
   `std::filesystem::remove_all`. (`libc_shims.cc`)
-- `fchmodat`, `symlink`, `faccessat`, `fread_unlocked`, `CPU_COUNT`, and the
-  pointer argument of `fcntl` reach glibc still tagged. So
-  `std::filesystem::permissions` and `create_symlink` fail with `EFAULT`, and
-  RocksDB can neither lock its database directory nor read its files.
+- `fchmodat`, `symlink`, `faccessat`, `fread_unlocked`, `madvise`,
+  `CPU_COUNT`, and the pointer argument of `fcntl` reach glibc still tagged.
+  So `std::filesystem::permissions` and `create_symlink` fail with `EFAULT`,
+  and RocksDB can neither lock its database directory nor read its files.
   (`libc_shims.cc`)
