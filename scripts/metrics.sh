@@ -58,7 +58,7 @@ BUILD_DIR=$1
 
 # Private artifact-only source comparison: preserve every preceding metric,
 # the stock two payment workloads, and stop before unrelated later metrics.
-if [ "${GIT_BRANCH:-}" = codex/payment-rep-phase-probe ]; then
+if [ "${GIT_BRANCH:-}" = codex/payment-sparse-phase-screen ]; then
     ./scripts/ci/payment_source_pair.sh "$BUILD_DIR" "$GIT_branch" "$GIT_commit" "$GIT_commit_time"
     exit $?
 fi

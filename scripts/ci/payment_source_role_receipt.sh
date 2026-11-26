@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
 # Private artifact-only standalone payments source comparison.
 set -euo pipefail
-[[ $# == 2 && ${GIT_BRANCH:-} == codex/payment-rep-phase-probe &&
+[[ $# == 2 && ${GIT_BRANCH:-} == codex/payment-sparse-phase-screen &&
    ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 &&
    ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ && ${GIT_COMMIT:-} =~ ^[a-f0-9]{40}$ ]]
 role=$1 point=$2

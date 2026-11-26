@@ -2,9 +2,9 @@
 set -e
 
 if [[ "${HOGD_CI_OFFLINE:-0}" == 1 ]]; then
-  if [[ ${GIT_BRANCH:-} == codex/payment-rep-phase-probe ]]; then
+  if [[ ${GIT_BRANCH:-} == codex/payment-sparse-phase-screen ]]; then
     rm -f -- metrics_history/.publish-requested
-    echo 'Payment phase probe: metrics are artifact-only (no publication request).'
+    echo 'Payment sparse probe: metrics are artifact-only (no publication request).'
     exit 0
   fi
   # The trusted controller publishes collected metrics after the job exits.

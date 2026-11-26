@@ -1,7 +1,7 @@
 #!/usr/bin/env bash
-# Called only after the stock pre-payment metrics in standalone Metrics.
+# Called only after stock prepayment metrics in the protected standalone.
 set -Eeuo pipefail
-[[ $# == 4 && ${GIT_BRANCH:-} == codex/payment-rep-phase-probe &&
+[[ $# == 4 && ${GIT_BRANCH:-} == codex/payment-sparse-phase-screen &&
    ${HOGD_CI_CONTAINER:-0} == 1 && ${HOGD_CI_OFFLINE:-0} == 1 && ${HOG_HOST:-} == hog10 &&
    ${HOG_XID:-} =~ ^hogd-metrics-[1-9][0-9]*-[1-9][0-9]*$ && ${GIT_COMMIT:-} =~ ^[a-f0-9]{40}$ ]]
 build=$1 branch=$2 commit=$3 time=$4
@@ -18,20 +18,42 @@ findmnt -T /workspace >"$evidence/driver-mount.txt"
 findmnt -T /tmp >"$evidence/driver-tmp.txt"
 sha256sum "./$build/hogd/hog_exec/bench/payments_bench" >"$evidence/client.sha256"
 git submodule status --recursive >"$evidence/submodules.txt"
-for acct in 10 2; do
-  receipt="$evidence/$acct.receipts"
-  ci_remote_run hog11 "bash /workspace/scripts/ci/payment_source_role_receipt.sh db before$acct" >"$receipt"
-  ci_remote_run hog8 "bash /workspace/scripts/ci/payment_source_role_receipt.sh event before$acct" >>"$receipt"
-  ./scripts/make_metric_file.sh "payments-bench-rv32-$acct" "$branch" "$commit" "$time"
-  output="metrics_history/metrics/payments-bench-rv32-$acct/$branch/${time}_$commit"
-  date +%s.%N >"$evidence/$acct.start"
-  status=0
-  HOGD_PAYMENT_PHASE_FILE="$evidence/$acct.phase.tsv" ./scripts/metrics/payments_bench.sh "$build" "$acct" >"$output" || status=$?
-  date +%s.%N >"$evidence/$acct.end"
-  printf '%s\n' "$status" >"$evidence/$acct.status"
-  ci_control_stop_hosts "$control" "$port" hog8 hog11
-  ci_remote_run hog11 "bash /workspace/scripts/ci/payment_source_role_receipt.sh db after$acct" >>"$receipt"
-  ci_remote_run hog8 "bash /workspace/scripts/ci/payment_source_role_receipt.sh event after$acct" >>"$receipt"
-  sha256sum -c "$evidence/client.sha256"
-  [[ $status == 0 && -s $evidence/$acct.phase.tsv ]]
+# Read only immutable linked libraries for these known versioned binaries.
+# Receipt work is outside every stock benchmark invocation.
+ldd "./$build/hogd/hog_exec/bench/payments_bench" >"$evidence/driver.ldd.txt"
+ci_remote_run hog11 'ldd /workspace/release/hogd/hog_exec/bench/bench_server' >"$evidence/db.ldd.txt"
+ci_remote_run hog8 'ldd /workspace/release/hogd/hog_event/hog-event' >"$evidence/event.ldd.txt"
+for probe in off on; do
+  arm="$evidence/$probe"
+  mkdir -m 700 -- "$arm"
+  for acct in 10 2; do
+    receipt="$arm/$acct.receipts"
+    ci_remote_run hog11 "bash /workspace/scripts/ci/payment_source_role_receipt.sh db before$acct" >"$receipt"
+    ci_remote_run hog8 "bash /workspace/scripts/ci/payment_source_role_receipt.sh event before$acct" >>"$receipt"
+    if [[ $probe == off ]]; then
+      ./scripts/make_metric_file.sh "payments-bench-rv32-$acct" "$branch" "$commit" "$time"
+      output="metrics_history/metrics/payments-bench-rv32-$acct/$branch/${time}_$commit"
+      cmd=(env -u HOGD_PAYMENT_PHASE_FILE ./scripts/metrics/payments_bench.sh "$build" "$acct")
+    else
+      output="$arm/$acct.stdout"
+      cmd=(env HOGD_PAYMENT_PHASE_FILE="$arm/$acct.phase.tsv" ./scripts/metrics/payments_bench.sh "$build" "$acct")
+    fi
+    date +%s.%N >"$arm/$acct.start"
+    status=0
+    "${cmd[@]}" >"$output" || status=$?
+    date +%s.%N >"$arm/$acct.end"
+    printf '%s\n' "$status" >"$arm/$acct.status"
+    ci_control_stop_hosts "$control" "$port" hog8 hog11
+    ci_remote_run hog11 "bash /workspace/scripts/ci/payment_source_role_receipt.sh db after$acct" >>"$receipt"
+    ci_remote_run hog8 "bash /workspace/scripts/ci/payment_source_role_receipt.sh event after$acct" >>"$receipt"
+    sha256sum -c "$evidence/client.sha256"
+    [[ $status == 0 ]]
+    if [[ $probe == off ]]; then
+      cp -- "$output" "$arm/$acct.stdout"
+      [[ ! -e $arm/$acct.phase.tsv ]]
+    else
+      [[ -s $arm/$acct.phase.tsv ]]
+      [[ $(head -n 1 "$arm/$acct.phase.tsv") == PAYMENT_SPARSE_V1 ]]
+    fi
+  done
 done
