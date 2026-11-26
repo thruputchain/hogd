@@ -1816,11 +1816,8 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
     EXPECT_TRUE(r.value()) << "a small delta batch must commit";
   }
 
-  // A batch of max-size (1 KiB) bytestrings across enough distinct keys to
-  // exceed the 16 MiB protocol default. Each delta is ~1104 bytes
-  // (key+framing+1028), so 16000 deltas ~= 16.8 MiB > cap. Rejected before any
-  // push is attempted. The stock config states a larger limit, so this proxy
-  // enforces the protocol default.
+  // 16000 max-size deltas (~16.8 MiB) exceed the 16 MiB protocol default,
+  // which this proxy pins because the stock config states more.
   const std::string max_value(kDefaultMaxBytestringLen, 'x');
   const auto spray = [&](auto &tx) {
     for (int i = 0; i < 16000; ++i) {
@@ -1887,14 +1884,9 @@ TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
   }
 }
 
-// The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
-// (footprint + kMessageOverhead > limit). Under the 16 MiB protocol default
-// (kExecToDbMessageCap), a batch whose type-derived footprint lands exactly on
-// the budget is pushed; one XDR word (4 bytes) more is rejected as a clean
-// conflict. The bound arithmetic is
-// mirrored from database_proxy.cc, so a change to the cap, the message
-// overhead, or the per-delta bound moves this boundary and fails the test --
-// an off-by-one tightening would abort transactions other validators accept.
+// Pins the push gate's boundary under the 16 MiB protocol default: exactly the
+// budget is pushed, one XDR word more is rejected. An off-by-one would abort
+// transactions other validators accept.
 TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
 {
   constexpr size_t kWord = 4;
