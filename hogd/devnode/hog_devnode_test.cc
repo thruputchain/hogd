@@ -2129,10 +2129,15 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
 }
 
 // The stock config takes its values from the protocol defaults rather than
-// restating them, so a default change reaches dev and test chains.
-TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
+// restating them, so a default change reaches dev and test chains. The one
+// exception is the subtransaction output limit.
+TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaultsExceptOutputLimit)
 {
-  EXPECT_EQ(stock_network_config(), NetworkConfigParams::stated_defaults());
+  NetworkConfig expected = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(
+      expected, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      kStockMaxSubtransactionOutputBytes);
+  EXPECT_EQ(stock_network_config(), expected);
 }
 
 TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)

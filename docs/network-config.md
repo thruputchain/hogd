@@ -20,6 +20,12 @@ its header and initial memory, without network-config overrides. These are
 also the protocol defaults for omitted parameters. Configurations that state
 explicit values retain them.
 
+The stock config differs from the protocol defaults in one parameter:
+`max_subtransaction_output_bytes` is 64 MiB, not 16 MiB. Local devnode chains
+and hosted bootstrap genesis both use the stock config, so a contract meets the
+same limit locally and on a hosted devnet built from it. A chain whose genesis
+omits the parameter keeps the 16 MiB default.
+
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 
 - `dbsched_load_genesis_configuration` installs it via

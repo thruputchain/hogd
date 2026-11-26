@@ -106,9 +106,14 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
 
 DeployedContractHash native_default_wallet_hash();
 
-// The execution parameters this repository's dev and test chains run under.
-// The protocol sets no value for any of them, so a real chain passes its own
-// to build() the same way it picks its own root contract.
+// The subtransaction output limit dev and test chains state. Larger than the
+// 16 MiB protocol default, which chains that omit the parameter keep.
+inline constexpr uint32_t kStockMaxSubtransactionOutputBytes = 64 * 1024 * 1024;
+
+// The execution parameters this repository's dev and test chains run under:
+// the protocol defaults with kStockMaxSubtransactionOutputBytes. The protocol
+// sets no value for any of them, so a real chain passes its own to build()
+// the same way it picks its own root contract.
 NetworkConfig stock_network_config();
 
 // Visit only the records required to execute the height-1 root ceremony.

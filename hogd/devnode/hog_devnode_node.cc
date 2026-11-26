@@ -945,6 +945,9 @@ HogDevnodeNode::load_recovered_bootstrap_metadata(
                                              ctx_->get_cost_model());
   genesis_configuration_ = std::move(artifact.genesis_configuration);
   genesis_configuration_.storage_cost_model = ctx_->get_cost_model().to_xdr();
+  // The chain keeps the network config it was created with, which can differ
+  // from this build's stock config.
+  genesis_configuration_.network_config = ctx_->get_tip().network_config;
   bootstrap_accounts_ = std::move(artifact.accounts);
   if (ctx_->get_tip().value.proposal_header.block_height == 0) {
     throw std::runtime_error(
