@@ -96,7 +96,7 @@ With 16-bit IDs PTSan tracks at most 65,535 live objects. Beyond that, new
 objects share one fallback ID and are not checked. How far a running node
 exceeds that has not been measured. `-DHOGD_PTSAN_CONFIG=ptsan-glibc-id32.cfg`
 selects PTSan's 32-bit IDs instead, but hogd has not been built that way, and
-the patch below does not cover it.
+the first patch below does not cover it.
 
 `hogd::TaggedPointer` keeps its tag in the pointer bits PTSan uses, so the two
 cannot be combined. Nothing but the class's own test uses it, and that test
@@ -107,15 +107,19 @@ built with PTSan.
 
 ## PTSan 0.4.0 defects
 
-hogd runs into these. The first is fixed by a patch to the toolchain, since
-nothing in hogd can avoid it; the rest are worked around in the tree, and each
-workaround can go once a PTSan release fixes the defect.
+hogd runs into these. The first two are fixed by patches to the toolchain,
+since nothing in hogd can avoid them. The rest are worked around in the tree,
+and each workaround can go once a PTSan release fixes the defect.
 
 - PTSan reports valid accesses of the form `begin[(end - begin) - 1]`, which
   is how `x23::Vec::back()` reads its last element. The optimizer turns the
   address into a GEP whose base is the literal -1, and PTSan takes the
   object ID from that literal.
   (`scripts/ptsan/patches/0001-ptsan-literal-gep-base.patch`)
+- Compilation stops with `Size should not be negative!` at a `memcpy` or
+  `memset` whose constant length has the top bit set. `v.resize(v.size() - 4)`
+  on a `std::vector` inlines to one.
+  (`scripts/ptsan/patches/0002-ptsan-huge-constant-size.patch`)
 - A `thread_local` object with a destructor crashes at first use, because
   glibc's `__cxa_thread_atexit_impl` gets tagged memory from PTSan's
   allocator. `fdopendir` fails the same way, and with it
@@ -123,7 +127,3 @@ workaround can go once a PTSan release fixes the defect.
 - `fchmodat`, `symlink`, `faccessat`, and `CPU_COUNT` receive tagged pointers
   unchanged, so `std::filesystem::permissions` and `create_symlink` fail with
   `EFAULT`. (`libc_shims.cc`)
-- Compilation stops with `Size should not be negative!` at a `memcpy` or
-  `memset` whose constant length has the top bit set. `v.resize(v.size() - 4)`
-  on a `std::vector` inlines to one. A file this happens in is built in
-  PTSan's unchecked strip-only mode with `hogd_ptsan_strip_only()`.

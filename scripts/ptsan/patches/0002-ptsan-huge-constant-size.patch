@@ -1,0 +1,49 @@
+PTSan: check, rather than stop on, a constant access size with the top bit set
+
+`v.resize(v.size() - 4)` on a std::vector inlines to
+
+  memset(end, 0, (size_t)-4)
+
+on the growing path that a wrapped-around size would take. PTSan 0.4.0 builds
+its access ranges from signed SCEVs and stops the compilation when it meets
+one whose size is known to be negative:
+
+  void f(char *d, int c) { if (c) memset(d, 0, (size_t)-4); }
+
+  Size should not be negative! -4
+
+No object holds an access that large. Check it against a size that is just as
+impossible but representable, the 48-bit address space, so that the program
+compiles and the access is reported if it ever executes.
+
+diff --git a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp
+index e5768c772..cf48f745c 100644
+--- a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp
++++ b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp
+@@ -94,6 +94,17 @@ void PTSanDiscoverer::addPtrSink(const PtrOp &Op) {
+     return;
+   }
+ 
++  // A constant size with the top bit set fits no object, and the access
++  // ranges, which are signed, cannot represent it. Check a size that is just
++  // as impossible, the whole 48-bit address space, so that executing the
++  // access is still reported. `v.resize(v.size() - 4)` on a std::vector
++  // leaves such a memset behind, on the path a wrapped-around size takes.
++  PtrOp CheckedOp = Op;
++  if (auto *SizeConst = dyn_cast<ConstantInt>(Op.Size);
++      SizeConst && SizeConst->isNegative()) {
++    CheckedOp.Size = ConstantInt::get(SizeConst->getType(), 1ULL << 48);
++  }
++
+   Ptr = BoundedPtrCheck::getUnstrippedPtrFromUse(Op.U, DS);
+   Value *Base = findPTSanBasePointer(Ptr, PTA.PTU);
+   auto ID = GetIDAnchor::create(DS, UserI, Base);
+@@ -104,7 +115,7 @@ void PTSanDiscoverer::addPtrSink(const PtrOp &Op) {
+   if (Cl32BitIDs) {
+     Origin = LoadBoundAnchor::createOrigin(DS, UserI, ID.Call, BoundsMask);
+   }
+-  AccessAnchor::create(DS, UserI, Op, ID, BaseBound, SpanBound, Origin);
++  AccessAnchor::create(DS, UserI, CheckedOp, ID, BaseBound, SpanBound, Origin);
+ }
+ 
+ void PTSanDiscoverer::handleMainIfMain() {

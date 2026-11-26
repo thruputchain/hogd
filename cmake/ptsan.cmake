@@ -18,17 +18,6 @@ option(HOGD_PTSAN
 set(HOGD_PTSAN_CONFIG "ptsan-glibc.cfg" CACHE STRING
   "Clang --config file of the PTSan toolchain to build with")
 
-# hogd_ptsan_strip_only(<source>...) builds sources that the PTSan pass cannot
-# compile in its strip-only mode instead, the mode the PTSan libc++ is built
-# in: their accesses work on tagged pointers and are not checked. It applies
-# to targets of the calling directory and does nothing unless HOGD_PTSAN is on.
-function(hogd_ptsan_strip_only)
-  if(HOGD_PTSAN)
-    set_source_files_properties(${ARGN} PROPERTIES COMPILE_OPTIONS
-      "-fno-sanitize=ptsan;-mllvm;-ptsan-strip-ids;-mllvm;-ptsan-strip-ids-on-cmp")
-  endif()
-endfunction()
-
 if(NOT HOGD_PTSAN)
   return()
 endif()
