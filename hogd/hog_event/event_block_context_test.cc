@@ -784,7 +784,10 @@ TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
     return 0;
   });
   context.executor_open_block();
-  add_writeback_test_payload(context);
+  // Even with one pool worker blocked in the hook, the test thread must be
+  // free to request abandonment and release it. The producer can be waiting
+  // for an append-lock continuation on that same worker.
+  std::thread producer([&] { add_writeback_test_payload(context); });
   entered.wait();
   auto abandoned = context.await_abandon();
   // The coroutine starts eagerly and cannot finish until its pending range
@@ -793,6 +796,7 @@ TEST_F(EventBlockContextTest, AbandonWaitsForOutstandingStreamWriteback)
   EXPECT_FALSE(finished.try_wait());
   release.count_down();
   finished.wait();
+  producer.join();
   EXPECT_EQ(context.log_stats.writeback_count, 1);
   EXPECT_GT(context.log_stats.writeback_bytes, 0U);
   context.delete_events_file();

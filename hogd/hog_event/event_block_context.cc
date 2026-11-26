@@ -21,7 +21,6 @@
 #include <span>
 #include <string_view>
 #include <sys/fcntl.h>
-#include <sys/types.h>
 #include <sys/uio.h> // IWYU pragma: keep
 #include <type_traits>
 #include <unistd.h>
