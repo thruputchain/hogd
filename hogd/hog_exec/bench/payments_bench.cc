@@ -183,16 +183,18 @@ run_bench_rep(BenchmarkState &bs, std::span<SignedTransaction> total_work_txs,
   }
 }
 
-// Private diagnostic: use one cache-line-sized slot per worker, no per-tx
-// timestamp or logging. The Event counter, callback and completion flag are
-// exactly the stock path; only the driver stamps its post-worker Event wait.
+// Private diagnostic: sample exactly one preselected transaction per worker in
+// each selected repetition. The callback and stock completion wait are left
+// untouched. Each worker owns its cache line; no timestamps on other txs.
 struct alignas(64) PaymentWorkerPhase {
-  uint64_t submit_ns = 0;
-  uint64_t start_ns = 0;
-  uint64_t context_ready_ns = 0;
-  uint64_t finish_ns = 0;
-  uint64_t return_ns = 0;
   uint64_t txs = 0;
+  uint64_t sample_index = 0;
+  uint64_t tx_start_ns = 0;
+  uint64_t handler_ready_ns = 0;
+  uint64_t root_done_ns = 0;
+  uint64_t commit_done_ns = 0;
+  uint64_t emit_launch_done_ns = 0;
+  uint64_t tx_done_ns = 0;
 };
 static_assert(sizeof(PaymentWorkerPhase) == 64);
 
@@ -205,9 +207,6 @@ struct PaymentRepPhase {
   uint64_t rep = 0;
   uint64_t worker_count = 0;
   uint64_t start_ns = 0;
-  uint64_t submit_end_ns = 0;
-  uint64_t join_end_ns = 0;
-  bool event_ready_at_join = false;
   uint64_t end_ns = 0;
   uint64_t elapsed_us = 0;
 };
@@ -227,18 +226,19 @@ write_payment_phase_records(const char *path,
 {
   std::ofstream out(path);
   CHECK(out.is_open());
-  out << "PAYMENT_PHASE_V2\n";
+  out << "PAYMENT_SPARSE_V1\n";
   for (const auto &r : records) {
     out << "rep\t" << r.accounts << '\t' << r.txs << '\t' << r.threads << '\t'
         << r.rep << '\t' << r.worker_count << '\t' << r.elapsed_us << '\t'
-        << r.start_ns << '\t' << r.submit_end_ns << '\t' << r.join_end_ns
-        << '\t' << r.event_ready_at_join << '\t' << r.end_ns << '\n';
+        << r.start_ns << '\t' << r.end_ns << '\n';
     for (size_t i = 0; i < r.worker_count; ++i) {
       const auto &w = r.workers[i];
-      out << "worker\t" << r.accounts << '\t' << r.txs << '\t' << r.threads
-          << '\t' << r.rep << '\t' << i << '\t' << w.txs << '\t' << w.submit_ns
-          << '\t' << w.start_ns << '\t' << w.context_ready_ns << '\t'
-          << w.finish_ns << '\t' << w.return_ns << '\n';
+      out << "sample\t" << r.accounts << '\t' << r.txs << '\t' << r.threads
+          << '\t' << r.rep << '\t' << i << '\t' << w.txs << '\t'
+          << w.sample_index << '\t' << w.tx_start_ns << '\t'
+          << w.handler_ready_ns << '\t' << w.root_done_ns << '\t'
+          << w.commit_done_ns << '\t' << w.emit_launch_done_ns << '\t'
+          << w.tx_done_ns << '\n';
     }
   }
   out.flush();
@@ -280,7 +280,6 @@ run_bench_rep_phase(BenchmarkState &bs,
     // not the uniquifier). Capture the height they commit against so expiry
     // heights are not yet expired; cleared after the rep.
     const auto base_height = bs.block_height();
-    phase.start_ns = payment_phase_now_ns();
     auto start_time = std::chrono::steady_clock::now();
 
     uint32_t ntx_per_thread = num_txs_per_rep / num_exec_threads;
@@ -303,17 +302,21 @@ run_bench_rep_phase(BenchmarkState &bs,
 
       auto &worker = phase.workers[static_cast<size_t>(i)];
       worker.txs = cur_count;
-      worker.submit_ns = payment_phase_now_ns();
+      // Spread samples over each worker's range, independently of tx contents
+      // and observed timing. Rotate the positions between repetitions.
+      worker.sample_index =
+          (static_cast<uint64_t>(i) * 37 + nrep * 13) % cur_count;
       futures.emplace_back(exec_pool.submit([&bs, work_txs, offset, cur_count,
                                              base_height, &pending_events,
                                              &events_done, &worker]() -> void {
-        worker.start_ns = payment_phase_now_ns();
-        {
-          auto runtime_context = make_hog_exec_context();
-          worker.context_ready_ns = payment_phase_now_ns();
-
-          for (uint32_t j = 0; j < cur_count; j++) {
-
+        auto runtime_context = make_hog_exec_context();
+        auto sample_index = worker.sample_index;
+        for (uint32_t j = 0; j < cur_count; j++) {
+          const bool sample = j == sample_index;
+          if (sample) {
+            worker.tx_start_ns = payment_phase_now_ns();
+          }
+          {
             uint32_t k = offset + j;
             work_txs[k].tx.uniquifier =
                 CommonBenchState::bench_uniquifier(base_height, k);
@@ -321,13 +324,22 @@ run_bench_rep_phase(BenchmarkState &bs,
 
             auto handler =
                 bs.make_handler(tx, bs.allocate_txid(), *runtime_context);
+            if (sample) {
+              worker.handler_ready_ns = payment_phase_now_ns();
+            }
             if (!handler.root_invoke()().is_root_success()) {
               error("Failed to invoke transaction");
               panic("Failed to invoke transaction");
             }
+            if (sample) {
+              worker.root_done_ns = payment_phase_now_ns();
+            }
             if (handler.try_commit_transaction()() !=
                 ExecResult::ExecResultOK) {
               panic("failed to perform commit operation");
+            }
+            if (sample) {
+              worker.commit_done_ns = payment_phase_now_ns();
             }
             handler.emit_events(ExecResult::ExecResultOK,
                                 ProposedTransaction{.signed_tx = tx})(
@@ -345,22 +357,30 @@ run_bench_rep_phase(BenchmarkState &bs,
                   }
                   co_return;
                 });
+            if (sample) {
+              worker.emit_launch_done_ns = payment_phase_now_ns();
+            }
+          } // Handler destruction remains at the end of this iteration.
+          if (sample) {
+            worker.tx_done_ns = payment_phase_now_ns();
           }
-          worker.finish_ns = payment_phase_now_ns();
-        } // RuntimeContext destruction, as at the original lambda exit.
-        worker.return_ns = payment_phase_now_ns();
+        }
       }));
     }
-    phase.submit_end_ns = payment_phase_now_ns();
     phase.worker_count = futures.size();
     for (auto &f : futures) {
       f.wait();
     }
-    phase.join_end_ns = payment_phase_now_ns();
-    phase.event_ready_at_join = events_done.load(std::memory_order_relaxed);
     events_done.wait(false);
     auto finish_time = std::chrono::steady_clock::now();
-    phase.end_ns = payment_phase_now_ns();
+    // On Linux steady_clock is CLOCK_MONOTONIC, the same domain used by the
+    // samples. Retain the stock time points with no extra clock reads.
+    phase.start_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                         start_time.time_since_epoch())
+                         .count();
+    phase.end_ns = std::chrono::duration_cast<std::chrono::nanoseconds>(
+                       finish_time.time_since_epoch())
+                       .count();
     phase.elapsed_us = std::chrono::duration_cast<std::chrono::microseconds>(
                            finish_time - start_time)
                            .count();
