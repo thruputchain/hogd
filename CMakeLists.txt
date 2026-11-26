@@ -202,6 +202,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_link_options("$<$<STREQUAL:$<TARGET_PROPERTY:TYPE>,EXECUTABLE>:-Wl,--build-id=sha1>")
 endif()
 
+# After the base flags, which it adjusts, and before the first configure check
+# or subdirectory, which have to see the result.
+include(cmake/ptsan.cmake)
+
 message(STATUS "Using CMAKE_C_FLAGS_DEBUG: ${CMAKE_C_FLAGS_DEBUG}")
 message(STATUS "HOGD_FRAME_POINTERS: ${HOGD_FRAME_POINTERS}")
 message(STATUS "HOGD_RELEASE_DEBUGINFO: ${HOGD_RELEASE_DEBUGINFO}")
@@ -227,8 +231,12 @@ add_library(built_headers_interface INTERFACE)
 # Only this target provides the include dir where the header lives:
 target_include_directories(built_headers_interface INTERFACE "${BUILT_HEADERS_DIR}")
 
-include(CheckIPOSupported)
-check_ipo_supported()
+# PTSan builds never use IPO (cmake/ptsan.cmake), and its toolchain has no
+# linker plugin for the linker this check would use.
+if(NOT HOGD_PTSAN)
+  include(CheckIPOSupported)
+  check_ipo_supported()
+endif()
 
 # Enable GoogleTest (Google's unit testing library)
 set(gtest_force_shared_crt ON CACHE BOOL "" FORCE)
@@ -382,11 +390,14 @@ endif()
 set(PORTABLE ON CACHE BOOL "" FORCE)
 set(FORCE_SSE42 ON CACHE BOOL "" FORCE)  # Enable SSE4.2 (modern CPUs)
 # Compression support (all fast and commonly available)
-set(WITH_SNAPPY ON CACHE BOOL "" FORCE)
-set(WITH_LZ4 ON CACHE BOOL "" FORCE)
-set(WITH_ZSTD ON CACHE BOOL "" FORCE)
-set(WITH_ZLIB ON CACHE BOOL "" FORCE)
-set(WITH_BZ2 ON CACHE BOOL "" FORCE)
+if(NOT DEFINED HOGD_ROCKSDB_COMPRESSION)
+  set(HOGD_ROCKSDB_COMPRESSION ON)
+endif()
+set(WITH_SNAPPY ${HOGD_ROCKSDB_COMPRESSION} CACHE BOOL "" FORCE)
+set(WITH_LZ4 ${HOGD_ROCKSDB_COMPRESSION} CACHE BOOL "" FORCE)
+set(WITH_ZSTD ${HOGD_ROCKSDB_COMPRESSION} CACHE BOOL "" FORCE)
+set(WITH_ZLIB ${HOGD_ROCKSDB_COMPRESSION} CACHE BOOL "" FORCE)
+set(WITH_BZ2 ${HOGD_ROCKSDB_COMPRESSION} CACHE BOOL "" FORCE)
 # Set variables for config.h
 set(ROCKSDB_WITH_SNAPPY ${WITH_SNAPPY})
 set(ROCKSDB_WITH_LZ4 ${WITH_LZ4})
@@ -467,4 +478,8 @@ if(BUILD_BENCHMARKS)
     rv32_vm_bench
     payments_exec_bench
     erc20_experiment_bench)
+endif()
+
+if(HOGD_PTSAN)
+  hogd_ptsan_disable_ipo("${CMAKE_SOURCE_DIR}")
 endif()

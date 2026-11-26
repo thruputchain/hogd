@@ -135,6 +135,10 @@ add_executable(
   rv32_vm_test.cc
   rv32_vm_test_main.cc
 )
+# PTSan 0.4.0 stops compiling at a memset whose constant length has the top
+# bit set. The vector resize(size() - 4) calls in this file inline to one, on
+# the growing path that a wrapped-around size would take.
+hogd_ptsan_strip_only(rv32_vm_test.cc)
 
 target_link_libraries(
   rv32_vm_test

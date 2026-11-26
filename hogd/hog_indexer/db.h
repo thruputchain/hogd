@@ -18,6 +18,7 @@
 #include "block_query_internal.hh"
 #include "event.hh"
 #include "event_outbox_internal.hh"
+#include "hogd/config.h"
 #include "hogd/hog_indexer/status.h"
 #include "indexer.hh"
 #include "pagination.hh"
@@ -42,30 +43,32 @@ struct RocksDBDeleter {
 // RAII wrapper around RocksDB instance for indexer storage
 class IndexDB {
 public:
+  // LZ4 is the suggested default compression, per the rocksdb documentation.
+  // A build whose RocksDB has no LZ4, which today is only a
+  // PointerTagSanitizer build (docs/ptsan.md), stores the index uncompressed.
+  static constexpr rocksdb::CompressionType kDefaultCompression =
+      ROCKSDB_WITH_LZ4 ? rocksdb::CompressionType::kLZ4Compression
+                       : rocksdb::CompressionType::kNoCompression;
+
   // Create a new database at the specified path
   // Creates the directory if it doesn't exist
-  // LZ4 is the suggested default compression, per the rocksdb documentation
-  static IndexerStatus<IndexDB>
-  make_new(const std::filesystem::path &path,
-           rocksdb::CompressionType compression_algorithm =
-               rocksdb::CompressionType::kLZ4Compression);
+  static IndexerStatus<IndexDB> make_new(
+      const std::filesystem::path &path,
+      rocksdb::CompressionType compression_algorithm = kDefaultCompression);
 
   // Open an existing database at the specified path
-  // LZ4 is the suggested default compression, per the rocksdb documentation
   static IndexerStatus<IndexDB>
   open(const std::filesystem::path &path,
-       rocksdb::CompressionType compression_algorithm =
-           rocksdb::CompressionType::kLZ4Compression);
+       rocksdb::CompressionType compression_algorithm = kDefaultCompression);
 
   // Open the database at [path], creating one only where there is nothing
   // to open: no such path, or an empty directory. A directory that exists
   // is not a database -- a daemon's data directory is routinely created
   // before the daemon runs -- and a directory with anything else in it is
   // [open]'s to refuse.
-  static IndexerStatus<IndexDB>
-  open_or_make_new(const std::filesystem::path &path,
-                   rocksdb::CompressionType compression_algorithm =
-                       rocksdb::CompressionType::kLZ4Compression);
+  static IndexerStatus<IndexDB> open_or_make_new(
+      const std::filesystem::path &path,
+      rocksdb::CompressionType compression_algorithm = kDefaultCompression);
 
   ~IndexDB();
 

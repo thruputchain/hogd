@@ -1,0 +1,57 @@
+PTSan: do not take a pointer's ID from a literal GEP base
+
+For `begin[(end - begin) - 1]`, the optimizer leaves
+
+  %e = ptrtoint ptr %end to i64
+  %p = getelementptr i8, ptr inttoptr (i64 -1 to ptr), i64 %e
+
+so the tagged pointer is the GEP's index and its base is the literal -1.
+PTSan 0.4.0 peels a GEP to its pointer operand unconditionally, reads the
+object ID out of the literal (0xffff), and checks the access against the
+fallback ID's bounds with a pointer that carries the real ID. The check fails
+on a valid access:
+
+  struct V { unsigned char *begin, *end; };
+  void flip(V &v) { v.begin[(v.end - v.begin) - 1] ^= 1; }
+
+  Found bad COMPOUND access: #0. Function ID: ..., Ptr ID: 0xffff
+
+Stop peeling at a literal base. The GEP is then its own base, its ID is read
+from its value, and no strip is moved onto the literal.
+
+This covers 16-bit IDs only. With 32-bit IDs the same change crashes the strip
+hoisting (PTSanMinCutRewriter::rewrite) while building libc++, so that mode is
+left as it was and still reports the access above.
+
+diff --git a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanUtils.cpp b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanUtils.cpp
+index e4e8010d6..87f0d5bca 100644
+--- a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanUtils.cpp
++++ b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanUtils.cpp
+@@ -277,6 +277,16 @@ Use *getPTSanRewriteablePointerUse(Instruction &I) {
+   }
+ 
+   if (auto *GEP = dyn_cast<GetElementPtrInst>(&I)) {
++    // The optimizer can canonicalize pointer arithmetic done on integers so
++    // that a literal address is the GEP base and the tagged pointer is an
++    // index, as in `getelementptr i8, ptr inttoptr (i64 -1 to ptr), i64 %end`
++    // for `begin[(end - begin) - 1]`. The result then takes its ID from the
++    // index: the literal is neither its base nor a place to move a strip to.
++    // ID16 only. An ID32 strip needs the ID of its operand's base, and the
++    // strip hoisting does not expect a GEP to be one.
++    if (!Cl32BitIDs && isUntaggedConstantPtr(GEP->getPointerOperand())) {
++      return nullptr;
++    }
+     return &GEP->getOperandUse(0);
+   }
+ 
+@@ -310,6 +320,10 @@ Value *getPTSanPointerPeel(Value *V) {
+   }
+ 
+   if (auto *GEP = dyn_cast<GEPOperator>(V)) {
++    // As in getPTSanRewriteablePointerUse: a literal address is not a base.
++    if (!Cl32BitIDs && isUntaggedConstantPtr(GEP->getPointerOperand())) {
++      return nullptr;
++    }
+     return GEP->getPointerOperand();
+   }
+ 

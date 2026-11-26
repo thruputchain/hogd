@@ -57,6 +57,13 @@ TEST(BitsTest, WrappingSequence)
 
 TEST(BitsTest, TaggedPointer)
 {
+#ifdef __has_feature
+#if __has_feature(pointer_tag_sanitizer)
+  // PointerTagSanitizer keeps its object ID in the pointer bits TaggedPointer
+  // keeps its tag in, so the two cannot be used together (docs/ptsan.md).
+  GTEST_SKIP() << "TaggedPointer does not work under PointerTagSanitizer";
+#endif
+#endif
   static constexpr uint8_t kTag = 0x3B;
   std::unique_ptr tmp = std::make_unique<int>();
 
