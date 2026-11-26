@@ -118,6 +118,25 @@ private:
   }
 };
 
+// The contract writes 1025 bytes and expects the write to fail, so pin the
+// 1024-byte protocol default; stock genesis allows 4096.
+class SyscallMiscTestsDefaultBytestringLen : public SyscallMiscTestsBase {
+public:
+  SyscallMiscTestsDefaultBytestringLen()
+    : SyscallMiscTestsBase(bytestring_config())
+  {}
+
+private:
+  static NetworkConfig bytestring_config()
+  {
+    auto config = stock_network_config();
+    NetworkConfigParams::set_param(config,
+                                   ConfigParamID::kConfigParamMaxBytestringLen,
+                                   kDefaultMaxBytestringLen);
+    return config;
+  }
+};
+
 // max_cross_invoke_depth = 1 leaves room for the root frame and nothing else,
 // so every cross invoke a test entrypoint makes is over the bound. Stock
 // genesis sets 16, which no contract here comes close to.
@@ -330,7 +349,7 @@ TEST_F(SyscallMiscTests, TestBsGetWrongType)
 
 // ── #11: BytestringSet (too long) ───────────────────────────────────
 
-TEST_F(SyscallMiscTests, TestBsSetTooLong)
+TEST_F(SyscallMiscTestsDefaultBytestringLen, TestBsSetTooLong)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =

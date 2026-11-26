@@ -130,6 +130,9 @@ stock_network_config()
   // stated outright rather than left to a node's default, so a change to any
   // of them is visible in the config hash.
   NetworkConfig config = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 4096);
   NetworkConfigParams::set_param(
       config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
       64 * 1024 * 1024);
