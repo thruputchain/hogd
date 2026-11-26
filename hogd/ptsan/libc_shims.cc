@@ -14,10 +14,12 @@
 #include <dirent.h>
 #include <fcntl.h>
 #include <sched.h>
+#include <stdio.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
 
+#include <cstdarg>
 #include <cstddef>
 
 #include "hogd/ptsan/shim.h"
@@ -34,8 +36,10 @@ int __cxa_thread_atexit_impl(void (*func)(void *), void *obj,
 HOGD_PTSAN_INTERPOSED(__cxa_thread_atexit_impl);
 HOGD_PTSAN_INTERPOSED(__sched_cpucount);
 HOGD_PTSAN_INTERPOSED(faccessat);
-HOGD_PTSAN_INTERPOSED(fdopendir);
 HOGD_PTSAN_INTERPOSED(fchmodat);
+HOGD_PTSAN_INTERPOSED(fcntl);
+HOGD_PTSAN_INTERPOSED(fdopendir);
+HOGD_PTSAN_INTERPOSED(fread_unlocked);
 HOGD_PTSAN_INTERPOSED(symlink);
 
 extern "C" {
@@ -65,6 +69,46 @@ faccessat(int dirfd, const char *pathname, int mode, int flags) noexcept
   return HOGD_PTSAN_NEXT(faccessat)(dirfd, raw(pathname), mode, flags);
 }
 
+// std::filesystem::permissions() calls this.
+int
+fchmodat(int dirfd, const char *pathname, mode_t mode, int flags) noexcept
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(fchmodat)(dirfd, raw(pathname), mode, flags);
+}
+
+// The optional argument is a pointer for the lock, owner and write-hint
+// commands and an integer otherwise. RocksDB locks its database directory
+// with F_SETLK.
+int
+fcntl(int fd, int cmd, ...)
+{
+  va_list args;
+  va_start(args, cmd);
+  unsigned long arg = va_arg(args, unsigned long);
+  va_end(args);
+  switch (cmd) {
+  case F_GETLK:
+  case F_SETLK:
+  case F_SETLKW:
+  case F_OFD_GETLK:
+  case F_OFD_SETLK:
+  case F_OFD_SETLKW:
+  case F_GETOWN_EX:
+  case F_SETOWN_EX:
+  case F_GET_RW_HINT:
+  case F_SET_RW_HINT:
+  case F_GET_FILE_RW_HINT:
+  case F_SET_FILE_RW_HINT:
+    arg = ptsan_get_address(reinterpret_cast<const void *>(arg));
+    break;
+  default:
+    break;
+  }
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(fcntl)(fd, cmd, arg);
+}
+
 // Allocates the DIR it returns. std::filesystem::remove_all() calls this too.
 DIR *
 fdopendir(int fd)
@@ -73,12 +117,12 @@ fdopendir(int fd)
   return HOGD_PTSAN_NEXT(fdopendir)(fd);
 }
 
-// std::filesystem::permissions() calls this.
-int
-fchmodat(int dirfd, const char *pathname, mode_t mode, int flags) noexcept
+// RocksDB reads its sequential files with this.
+size_t
+fread_unlocked(void *ptr, size_t size, size_t n, FILE *stream)
 {
   UninstrumentedCall call;
-  return HOGD_PTSAN_NEXT(fchmodat)(dirfd, raw(pathname), mode, flags);
+  return HOGD_PTSAN_NEXT(fread_unlocked)(raw(ptr), size, n, raw(stream));
 }
 
 // std::filesystem::create_symlink() calls this.

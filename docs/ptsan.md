@@ -124,6 +124,8 @@ and each workaround can go once a PTSan release fixes the defect.
   glibc's `__cxa_thread_atexit_impl` gets tagged memory from PTSan's
   allocator. `fdopendir` fails the same way, and with it
   `std::filesystem::remove_all`. (`libc_shims.cc`)
-- `fchmodat`, `symlink`, `faccessat`, and `CPU_COUNT` receive tagged pointers
-  unchanged, so `std::filesystem::permissions` and `create_symlink` fail with
-  `EFAULT`. (`libc_shims.cc`)
+- `fchmodat`, `symlink`, `faccessat`, `fread_unlocked`, `CPU_COUNT`, and the
+  pointer argument of `fcntl` reach glibc still tagged. So
+  `std::filesystem::permissions` and `create_symlink` fail with `EFAULT`, and
+  RocksDB can neither lock its database directory nor read its files.
+  (`libc_shims.cc`)
