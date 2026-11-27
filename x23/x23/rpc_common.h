@@ -113,6 +113,9 @@ std::string msg_show_stat(const rpc_msg &msg);
 // bytes.
 constexpr inline size_t kMaxRecordPayloadSize = 0x7fffffffUZ;
 
+// The high bit of a record marker, set on a record's final fragment.
+constexpr inline std::uint32_t kLastFragment = 0x8000'0000U;
+
 // Reject a message-size cap that a single-fragment record marker cannot
 // represent.  Checked once when a stream/client is created (not on the hot
 // path) so an unsupported cap fails loudly at setup rather than silently
@@ -132,7 +135,7 @@ make_record(const rpc_msg &msg, const X &...x)
 {
   Buf ret = serialize(std::uint32_t{}, msg, x...);
   x23assert(ret.size() <= 0x80000003UZ);
-  putbe<std::uint32_t>(ret.data(), 0x80000000 | (ret.size() - 4));
+  putbe<std::uint32_t>(ret.data(), kLastFragment | (ret.size() - 4));
   return ret;
 }
 

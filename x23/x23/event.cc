@@ -166,6 +166,63 @@ CoroPoll::read(BorrowedFd fd, Buf *out, size_t len, bool full,
   co_return out->size() - startsize;
 }
 
+// Make one attempt to read.  As in read() with sync set, delayed
+// writes are flushed every time we go to the kernel for input.
+std::expected<size_t, Errno>
+CoroPoll::ReadSome::attempt()
+{
+  if (cp_.stop_requested())
+    return Errno{EBADF};
+  tok_ = cp_.read_clear(fd_);
+  auto [r, w] = cp_.get_rw(fd_);
+  if (!r)
+    return Errno{EBADF};
+  w_ = std::move(w);
+
+  // We read straight into buf_, but must not skip over bytes that an
+  // earlier read() on this file descriptor left in its ReadBuffer.
+  // This only copies, so cannot fail.
+  if (r->nbuffered()) [[unlikely]]
+    return size_t((*r)(fd_.get(), buf_, len_));
+
+  ssize_t n = ::read(fd_.get(), buf_, len_);
+  if (detail::is_eagain(n))
+    // The flush is up to await_ready(), which must first tell writers
+    // not to delay.
+    return Errno{EAGAIN};
+  const Errno err{}; // before flush() can change errno
+  w_->flush(cp_, fd_);
+  if (n < 0)
+    return err;
+  return size_t(n);
+}
+
+bool
+CoroPoll::ReadSome::await_ready()
+{
+  res_ = attempt();
+  if (res_ || res_.error() != EAGAIN)
+    return true;
+  // attempt() got as far as the kernel, so w_ is set.
+  w_->waiting_for_read_ = true;
+  w_->flush(cp_, fd_);
+  return false;
+}
+
+std::expected<size_t, Errno>
+CoroPoll::ReadSome::await_resume()
+{
+  if (suspended_) {
+    Errno err = readable_.await_resume();
+    w_->waiting_for_read_ = false;
+    if (err)
+      return err;
+    // If this hits EAGAIN again, the caller's next read_some() flushes.
+    res_ = attempt();
+  }
+  return res_;
+}
+
 Async<std::expected<size_t, Errno>>
 CoroPoll::write(BorrowedFd fd, BufView data SLOC_ARG)
 {

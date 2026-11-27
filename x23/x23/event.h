@@ -280,6 +280,14 @@ public:
     return std::move(async);
   }
 
+  // Like read_wait(tok), but without the coroutine frame that
+  // make_async allocates: completes a caller-owned Awaitable, which
+  // the caller must then co_await.  Used by CoroPoll::ReadSome.
+  void read_wait(ReadToken fd, Awaitable<Errno> &a)
+  {
+    setcb(fd, false, {CoroCB<Errno>{a}, cpuid()});
+  }
+
   WriteToken write_clear(BorrowedFd fd)
   {
     clear(fd, true);
@@ -328,6 +336,10 @@ public:
   // generation_number.
   void poison(BorrowedFd fd);
   void poison(BorrowedFd fd, uint64_t generation_number);
+
+  // True if reads and writes on fd now fail with EBADF, because it
+  // was poisoned or the CoroPoll is shutting down.
+  bool poisoned(BorrowedFd fd);
 
   // If there's a callback for reading (write == false) or writing
   // (write == true) on file descriptor fd, then immediately make the
@@ -506,6 +518,14 @@ public:
   Async<std::expected<size_t, Errno>> write(BorrowedFd fd,
                                             BufView data SLOC_DECL);
 
+  // Read up to len bytes into a caller-owned buffer, returning as
+  // soon as any are available (0 means EOF).  Flushes delayed writes
+  // like read() with sync set.  Unlike read() this is not a coroutine,
+  // so awaiting it allocates nothing, but it cannot wait twice: after
+  // a spurious wakeup it returns EAGAIN and the caller tries again.
+  class ReadSome;
+  [[nodiscard]] ReadSome read_some(BorrowedFd fd, void *buf, size_t len);
+
   // Asynchronous write.  Writes data to fd, but returns immediately
   // if some or all of the data will continue to be written in the
   // background.  Returns EINVAL if the file descriptor is poisoned,
@@ -595,6 +615,45 @@ protected:
 
   void loop();
 };
+
+// Awaiter returned by CoroPoll::read_some().
+class CoroPoll::ReadSome {
+public:
+  ReadSome(CoroPoll &cp, BorrowedFd fd, void *buf, size_t len) noexcept
+    : cp_(cp), fd_(fd), buf_(buf), len_(len)
+  {}
+  ReadSome(const ReadSome &) = delete;
+
+  bool await_ready();
+  bool await_suspend(auto h SLOC_DECL)
+  {
+    suspended_ = true;
+    cp_.read_wait(tok_, readable_);
+    // Once readable_ knows about h, another thread can resume the
+    // coroutine, so we must not touch *this after this call.
+    return readable_.await_suspend(h SLOC_COMMA_VAR);
+  }
+  std::expected<size_t, Errno> await_resume();
+
+private:
+  std::expected<size_t, Errno> attempt();
+
+  CoroPoll &cp_;
+  BorrowedFd fd_;
+  void *buf_;
+  size_t len_;
+  ReadToken tok_;
+  RefPtr<detail::WriteBuffer> w_{nullptr};
+  std::expected<size_t, Errno> res_;
+  bool suspended_{false};
+  Awaitable<Errno> readable_;
+};
+
+inline CoroPoll::ReadSome
+CoroPoll::read_some(BorrowedFd fd, void *buf, size_t len)
+{
+  return ReadSome{*this, fd, buf, len};
+}
 
 namespace detail {
 class WriteBuffer::Service {

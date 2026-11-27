@@ -153,6 +153,7 @@ add_x23_gtest(testlock)
 add_x23_gtest(signal)
 add_x23_gtest(rpc_dispatch)
 add_x23_gtest(rpc_client)
+add_x23_gtest(rpc_reader)
 if(GOOGLETEST_PATH AND CMAKE_SYSTEM_NAME STREQUAL "Linux")
   add_x23_gtest(srpc)
   target_link_options(test_srpc PRIVATE
@@ -165,7 +166,7 @@ add_x23_gtest(progname)
 
 if(GOOGLETEST_PATH)
 set_tests_properties(async corosync testlock signal rpc_dispatch rpc_client
-  PROPERTIES TIMEOUT 60)
+  rpc_reader PROPERTIES TIMEOUT 60)
 set_tests_properties(event_edges PROPERTIES TIMEOUT 30 ENVIRONMENT "X23SERVER_TRACE=2")
 set_tests_properties(shutdown PROPERTIES TIMEOUT 10)
 # threadpool's DestructionWakeupStress builds 10000 pools and its cost tracks

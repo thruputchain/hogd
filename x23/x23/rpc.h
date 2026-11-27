@@ -88,6 +88,7 @@
 #include <exception>
 #include <expected>
 #include <map>
+#include <new>
 #include <print>
 #include <stop_token>
 #include <string>
@@ -313,6 +314,104 @@ concept implements_async_rpc =
     implements_rpc<T, VersMeta, MaybeAsync, ExtraArgs...>;
 
 namespace detail {
+
+// Reference-counted block of received bytes, which live directly
+// after the object.  Records are parsed in place, and replies keep
+// the chunk alive through a RecordRef.
+class RecvChunk : public RefCount {
+public:
+  static constexpr bool kAllowRefPtrConversion = true;
+
+  static RefPtr<RecvChunk> make(size_t capacity)
+  {
+    static_assert(alignof(RecvChunk) <= __STDCPP_DEFAULT_NEW_ALIGNMENT__);
+    return *new (::operator new(sizeof(RecvChunk) + capacity))
+        RecvChunk(capacity);
+  }
+
+  std::uint8_t *data() noexcept
+  {
+    return reinterpret_cast<std::uint8_t *>(this + 1);
+  }
+  size_t capacity() const noexcept { return capacity_; }
+
+  // True when the caller's reference is the only one.  Only the
+  // reader hands out references, so once it sees this it may
+  // overwrite the chunk's contents.
+  bool unique() const noexcept { return refcount() == 1; }
+
+private:
+  size_t capacity_;
+
+  explicit RecvChunk(size_t capacity) noexcept : capacity_(capacity) {}
+  ~RecvChunk() = default;
+  // Hides RefCount::finalize(), which would delete an object that
+  // make() did not allocate with a plain new expression.
+  void finalize() noexcept
+  {
+    this->~RecvChunk();
+    ::operator delete(this);
+  }
+
+  friend class x23::RefCount;
+};
+
+// The bytes of one received record (without the record marker), plus
+// a reference to the chunk that holds them.  An empty RecordRef
+// signals that the stream failed.
+class RecordRef {
+public:
+  RecordRef() noexcept = default;
+  RecordRef(RefPtr<RecvChunk> chunk, BufView bytes) noexcept
+    : chunk_(std::move(chunk)), bytes_(bytes)
+  {}
+
+  bool empty() const noexcept { return bytes_.empty(); }
+  // Not a BufViewEnd: the reader may be filling the rest of the chunk
+  // from another thread, so nothing past the record may be read.
+  BufView bytes() const noexcept { return bytes_; }
+
+private:
+  RefPtr<RecvChunk> chunk_{nullptr};
+  BufView bytes_;
+};
+
+// Reader input buffer: bytes [rpos_, wpos_) are received but not yet
+// consumed.  Bytes below wpos_ may only be overwritten while the
+// reader holds the sole reference to the chunk.  There is no chunk
+// until the first make_room().  Defined here only so that tests can
+// exercise it directly.
+class RecvBuf {
+public:
+  // Chunks are sized so that the whole allocation is 64KiB, unless a
+  // single record needs more.
+  static constexpr size_t kChunkSize = 0x10000 - sizeof(RecvChunk);
+  // Rewind or replace the chunk rather than read less than this into
+  // its tail.
+  static constexpr size_t kMinRead = 0x1000;
+
+  const RefPtr<RecvChunk> &chunk() const noexcept { return chunk_; }
+  size_t nbuffered() const noexcept { return wpos_ - rpos_; }
+  const std::uint8_t *rptr() const noexcept { return chunk_->data() + rpos_; }
+  void consume(size_t n) noexcept { rpos_ += n; }
+
+  std::uint8_t *wptr() noexcept { return chunk_->data() + wpos_; }
+  size_t space() const noexcept { return chunk_->capacity() - wpos_; }
+  void commit(size_t n) noexcept { wpos_ += n; }
+  // End of the bytes received, which may be read beyond a record.
+  const std::uint8_t *bufend() const noexcept { return chunk_->data() + wpos_; }
+
+  // Ensure space() >= more, keeping the partial record at rptr()
+  // contiguous.  Retains capacity and reuses the chunk once no reply
+  // still references it.
+  void make_room(size_t more);
+
+private:
+  RefPtr<RecvChunk> chunk_{nullptr};
+  size_t rpos_{0};
+  size_t wpos_{0};
+};
+
 class RpcStreamImpl : public RefCount {
 public:
   static constexpr bool kAllowRefPtrConversion = true;
@@ -330,14 +429,14 @@ protected:
 
   RpcStreamImpl(CoroPoll &cp, UniqueFd fd);
   virtual ~RpcStreamImpl();
-  [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<Buf> &);
+  [[nodiscard]] std::uint32_t gen_call_xid(Awaitable<RecordRef> &);
   Detached reader(SLOC_DECL0);
   virtual void log_message(std::string msg) = 0;
 
 private:
   struct ClientState {
     std::uint32_t lastxid_{};
-    std::map<std::uint32_t, CpuHinted<CoroCB<Buf>>> xidmap_;
+    std::map<std::uint32_t, CpuHinted<CoroCB<RecordRef>>> xidmap_;
   };
   MVar<ClientState> cstate_;
 
@@ -345,9 +444,6 @@ private:
   {
     cp_->awrite(fd_, make_record(msg, x...));
   }
-
-  Async<std::expected<std::uint32_t, Errno>> read_uint(SLOC_DECL0);
-  Async<Errno> read_record(Buf *b SLOC_DECL);
 
   friend class RefCount;
 };
@@ -453,20 +549,21 @@ struct RpcStream : public detail::RpcStreamImpl {
     // Note we generate the xid after calling make_record just in case
     // make_record throws because of illegal XDR values (such as an
     // invalid union discriminant).
-    Awaitable<Buf> a;
+    Awaitable<detail::RecordRef> a;
     putbe(record.data() + 4, msg.xid = gen_call_xid(a));
 
     logger_.template log_client<ProcMeta>(msg, std::forward_as_tuple(args...));
     cp_->awrite(fd_, std::move(record));
 
-    Buf rbuf;
+    // The reply stays in the reader's chunk, which rbuf keeps alive.
+    detail::RecordRef rbuf;
     BufView rv;
     try {
       rbuf = co_await a;
       if (rbuf.empty()) {
         throw XdrException("RPC connection closed before reply");
       }
-      rv = rbuf.subspan(deserialize_from(&msg, rbuf));
+      rv = rbuf.bytes().subspan(deserialize_from(&msg, rbuf.bytes()));
     } catch (const XdrBadInput &e) {
       throw XdrBadInput("{}: {}", ProcMeta::proc_name, e.what());
     } catch (const std::exception &e) {

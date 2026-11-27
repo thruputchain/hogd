@@ -559,8 +559,11 @@ serialize_to(Buf *bufp, const is_xdr_serializable auto &x)
 Buf
 serialize(const is_xdr_serializable auto &...x)
 {
+  // One allocation for all the arguments rather than one for each.
   Buf ret;
-  (serialize_to(&ret, x), ...);
+  ret.resize_uninitialized((0UZ + ... + xdr_size(x)));
+  detail::Serializer s{ret.data()};
+  (s(x), ...);
   return ret;
 }
 

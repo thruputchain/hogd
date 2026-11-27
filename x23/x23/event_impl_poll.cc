@@ -187,6 +187,16 @@ CoroPollImpl::poison(BorrowedFd fd)
   pool_.go(std::move(work));
 }
 
+bool
+CoroPollImpl::poisoned(BorrowedFd fd)
+{
+  auto s = state_.take();
+  if (stop_requested())
+    return true;
+  auto it = s->find(fd.get());
+  return it != s->end() && it->second.poisoned;
+}
+
 void
 CoroPollImpl::poison(BorrowedFd fd, uint64_t genno)
 {
