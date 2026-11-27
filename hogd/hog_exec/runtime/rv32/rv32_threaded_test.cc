@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ios>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -2970,13 +2971,27 @@ TEST(Rv32ThreadedAbsoluteAccess, outOfBoundsAccessTrapsLikeCanonical)
     uint32_t memory_bytes;
   };
   const std::array<Case, 7> cases = {{
-      {load(4, 2, 0, 253), kWideLoadGas, 256},          // lw straddles the end
-      {load(4, 0, 0, 256), kBaseInstructionGas, 256},   // lb one past the end
-      {store(0, 1, 255, 1), kBaseInstructionGas, 256},  // sh straddles
-      {store(0, 1, 2047, 2), kBaseInstructionGas, 256}, // sw far past
-      {load(4, 2, 0, -4), kWideLoadGas, 4096},          // wraps to 0xfffffffc
-      {store(0, 1, -1, 0), kBaseInstructionGas, 4096},  // 0xffffffff
-      {load(4, 4, 0, 0), kBaseInstructionGas, 0},       // zero-sized memory
+      {.access = load(4, 2, 0, 253),
+       .access_gas = kWideLoadGas,
+       .memory_bytes = 256}, // lw straddles the end
+      {.access = load(4, 0, 0, 256),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // lb one past the end
+      {.access = store(0, 1, 255, 1),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // sh straddles
+      {.access = store(0, 1, 2047, 2),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // sw far past
+      {.access = load(4, 2, 0, -4),
+       .access_gas = kWideLoadGas,
+       .memory_bytes = 4096}, // wraps to 0xfffffffc
+      {.access = store(0, 1, -1, 0),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 4096}, // 0xffffffff
+      {.access = load(4, 4, 0, 0),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 0}, // zero-sized memory
   }};
   for (const Case &c : cases) {
     SCOPED_TRACE(::testing::Message() << std::hex << c.access);
@@ -3063,7 +3078,7 @@ TEST(Rv32ThreadedAbsoluteAccess, randomProgramsMatchCanonical)
                                                      2050, 4096};
   constexpr std::array<uint8_t, 5> kLoadFunct3 = {0, 1, 2, 4, 5};
   for (uint64_t seed = 0; seed < 400; ++seed) {
-    std::mt19937_64 rng(seed * 0x9e3779b97f4a7c15ULL + 1);
+    std::mt19937_64 rng((seed * 0x9e3779b97f4a7c15ULL) + 1);
     const uint32_t memory_bytes = kMemorySizes[rng() % kMemorySizes.size()];
     auto random_imm = [&]() -> int32_t {
       if (rng() % 2 == 0) {
