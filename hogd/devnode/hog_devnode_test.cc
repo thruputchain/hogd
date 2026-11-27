@@ -94,6 +94,7 @@
 #include "indexer.hh"
 #include "indexer_payload_validation.h"
 #include "invoke_flag.hh"
+#include "network_config.hh"
 #include "pagination.hh"
 #include "proposal.hh"
 #include "proposal_hash.h"
@@ -2128,11 +2129,14 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
 
-// The stock config is the protocol defaults, so a default change reaches dev
-// and test chains.
-TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaults)
+// Stock config is the defaults, plus the bytestring limit set here.
+TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaultsWithBytestringLimit)
 {
-  EXPECT_EQ(stock_network_config(), NetworkConfigParams::stated_defaults());
+  NetworkConfig expected = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(expected,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 16384);
+  EXPECT_EQ(stock_network_config(), expected);
 }
 
 TEST(HogDevnode, NetworkOverridesRejectUnknownDuplicateAndInvalidValues)

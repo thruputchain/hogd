@@ -106,6 +106,10 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
 
 DeployedContractHash native_default_wallet_hash();
 
+// Stock bytestring limit, above the protocol default; see
+// docs/network-config.md.
+inline constexpr uint32_t kStockMaxBytestringLen = 16384;
+
 // The execution parameters this repository's dev and test chains run under.
 // The protocol sets no value for any of them, so a real chain passes its own
 // to build() the same way it picks its own root contract.
