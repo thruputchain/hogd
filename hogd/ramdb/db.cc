@@ -572,7 +572,8 @@ Database::write_snapshot(const std::string &path, uint64_t begin_lsn,
 DBStatus<std::unique_ptr<Database>>
 Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
                         size_t heap_size, int bucket_order,
-                        size_t log_file_size_threshold)
+                        size_t log_file_size_threshold,
+                        SyncStatsMode sync_stats)
 {
   DBStatus<std::unique_ptr<Database>> ret =
       create_db(path, heap_size, bucket_order);
@@ -599,7 +600,8 @@ Database::open_internal(std::string_view path, std::optional<uint64_t> lsn,
     info("no existing database found; creating a new database.");
   else
     info("loaded up to LSN {}, {} items", *load_ret, db->map_.size());
-  db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold);
+  db->disk_writer_.init(*load_ret, "{}.log", log_file_size_threshold,
+                        sync_stats);
   db->max_snapshot_end_lsn_ = snap_end;
   db->wal_bytes_at_open_ = DiskReader::log_bytes(db->dir_);
   return db;

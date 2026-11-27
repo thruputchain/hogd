@@ -159,7 +159,8 @@ protected:
 
   DBStatus<void>
   open_db(uint64_t target_lsn = std::numeric_limits<uint64_t>::max(),
-          size_t log_file_size_threshold = kDiskLogFileThreshold);
+          size_t log_file_size_threshold = kDiskLogFileThreshold,
+          SyncStatsMode sync_stats = SyncStatsMode::kDisabled);
   void insert_n(size_t count);
   DBError insert_until_failure();
   void remove_every_n(int n);
@@ -175,14 +176,15 @@ protected:
 };
 
 DBStatus<void>
-DatabaseTest::open_db(uint64_t target_lsn, size_t log_file_size_threshold)
+DatabaseTest::open_db(uint64_t target_lsn, size_t log_file_size_threshold,
+                      SyncStatsMode sync_stats)
 {
   size_t heap_size =
       Database::estimate_heap_size(kInsertions * 2, kKeySize, kValueSize);
   DBStatus<std::unique_ptr<Database>> ret =
       target_lsn == std::numeric_limits<uint64_t>::max()
           ? Database::open(dir_.get_path(), heap_size, kBucketOrder,
-                           log_file_size_threshold)
+                           log_file_size_threshold, sync_stats)
           : Database::open_lsn(dir_.get_path(), target_lsn, heap_size,
                                kBucketOrder, log_file_size_threshold);
   if (!ret)
@@ -369,6 +371,90 @@ TEST_F(DatabaseTest, InsertionsAndRemovals)
   check_integrity();
 }
 
+// A small batch stays in the heads until sync() drains and writes it.
+TEST_F(DatabaseTest, SyncStats)
+{
+  db_.reset();
+  ASSERT_TRUE(open_db(std::numeric_limits<uint64_t>::max(),
+                      kDiskLogFileThreshold, SyncStatsMode::kEnabled));
+  EXPECT_FALSE(db_->last_sync_stats().has_value());
+
+  size_t out = db_->disk_bytes_written();
+  insert_n(64);
+  DBStatus<uint64_t> lsn = db_->sync();
+  ASSERT_TRUE(lsn);
+  auto stats = db_->last_sync_stats();
+  if (!stats)
+    FAIL() << "missing WAL sync stats";
+  const SyncStats &st = *stats;
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_GT(st.dirty_heads, 0U);
+  EXPECT_LE(st.dirty_heads, 64U);
+  EXPECT_EQ(st.loglets_synced, st.dirty_heads);
+  EXPECT_GT(st.bytes_drained, 0U);
+  EXPECT_EQ(st.bytes_synced, st.bytes_drained);
+  EXPECT_EQ(st.bytes_early, 0U);
+  EXPECT_EQ(db_->disk_bytes_written() - out, st.bytes_synced);
+  // A fast phase may complete within one tick of the steady clock.
+  EXPECT_LE(st.inflight + st.crc + st.write + st.flush + st.fdatasync,
+            st.total);
+  EXPECT_LE(st.drain, st.total);
+}
+
+// Full loglets the writer wrote before sync() count as early; sync() writes
+// only the partial loglet left in the head.
+TEST(DiskWriterTest, SyncStatsEarlyLoglets)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  std::unique_ptr<LogletAllocator> la =
+      LogletAllocator::create(16 * kLogletRegionSize, kCompactionThreads,
+                              [] {});
+  DiskWriter dw(*la, *dir, 0, [] {}); // one head
+  dw.init(0, "{}.log", std::numeric_limits<size_t>::max(),
+          SyncStatsMode::kEnabled);
+
+  // ~1,000 of these tombstones fill a loglet, so this queues two full
+  // loglets and leaves a partial one in the head.
+  std::vector<std::byte> key(2048);
+  for (int i = 0; i < 2'500; ++i) {
+    std::ranges::copy(byte_view(static_cast<uint64_t>(i)), key.begin());
+    ASSERT_TRUE(static_cast<bool>(dw.write_record(0).remove(key)));
+  }
+  for (int i = 0; i < 10'000 && dw.bytes_buffered() > 0; ++i)
+    std::this_thread::sleep_for(std::chrono::milliseconds(1));
+  ASSERT_EQ(dw.bytes_buffered(), 0U);
+  size_t early = dw.get_bytes_out();
+  ASSERT_GE(early, (2 * kLogletRegionSize) - (2 * (sizeof(ItemHeader) + 2048)));
+
+  DBStatus<uint64_t> lsn = dw.sync();
+  ASSERT_TRUE(lsn);
+  auto stats = dw.last_sync_stats();
+  if (!stats)
+    FAIL() << "missing WAL sync stats";
+  SyncStats st = *stats;
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_EQ(st.bytes_early, early);
+  EXPECT_EQ(st.dirty_heads, 1U);
+  EXPECT_EQ(st.loglets_synced, 1U);
+  EXPECT_GT(st.bytes_drained, 0U);
+  EXPECT_EQ(st.bytes_synced, st.bytes_drained);
+  EXPECT_EQ(st.bytes_early + st.bytes_synced, dw.get_bytes_out());
+  EXPECT_EQ(st.inflight.count(), 0);
+
+  // A sync with nothing written reports no bytes.
+  lsn = dw.sync();
+  ASSERT_TRUE(lsn);
+  stats = dw.last_sync_stats();
+  if (!stats)
+    FAIL() << "missing WAL sync stats for empty sync";
+  st = *stats;
+  EXPECT_EQ(st.lsn, *lsn);
+  EXPECT_EQ(st.dirty_heads, 0U);
+  EXPECT_EQ(st.bytes_early + st.bytes_synced, 0U);
+  EXPECT_EQ(st.loglets_synced, 0U);
+}
+
 TEST_F(DatabaseTest, SyncAndLoad)
 {
   // make changes to items.
@@ -380,6 +466,7 @@ TEST_F(DatabaseTest, SyncAndLoad)
   // sync to disk.
   DBStatus<uint64_t> lsn = db_->sync();
   EXPECT_TRUE(lsn);
+  EXPECT_FALSE(db_->last_sync_stats().has_value());
   if (lsn.has_value()) {
     EXPECT_EQ(*lsn, 1);
   }

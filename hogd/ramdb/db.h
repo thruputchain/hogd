@@ -48,7 +48,8 @@ public:
   // open opens a database at path.
   static DBStatus<std::unique_ptr<Database>>
   open(std::string_view path, size_t heap_size, int bucket_order = 0,
-       size_t log_file_size_threshold = kDiskLogFileThreshold);
+       size_t log_file_size_threshold = kDiskLogFileThreshold,
+       SyncStatsMode sync_stats = SyncStatsMode::kDisabled);
 
   // open_lsn opens a database at path and loads only up to a specific LSN.
   static DBStatus<std::unique_ptr<Database>>
@@ -185,6 +186,13 @@ public:
   // the last database recovery.
   size_t disk_bytes_written() const { return disk_writer_.get_bytes_out(); }
 
+  // Returns the last successful sync's timing and byte counts if collection
+  // was enabled when opening the database.
+  std::optional<SyncStats> last_sync_stats()
+  {
+    return disk_writer_.last_sync_stats();
+  }
+
   // snapshot_bytes_written returns the total bytes written to snapshot files
   // since the last database recovery.
   size_t snapshot_bytes_written() const
@@ -302,7 +310,7 @@ private:
   static DBStatus<std::unique_ptr<Database>>
   open_internal(std::string_view path, std::optional<uint64_t> lsn,
                 size_t heap_size, int bucket_order,
-                size_t log_file_size_threshold);
+                size_t log_file_size_threshold, SyncStatsMode sync_stats);
 
   // The in-flight snapshot thread, if any. Assigning a new thread joins the
   // previous, already-finished one. Declared last so destruction joins it —
@@ -313,10 +321,10 @@ private:
 
 inline DBStatus<std::unique_ptr<Database>>
 Database::open(std::string_view path, size_t heap_size, int bucket_order,
-               size_t log_file_size_threshold)
+               size_t log_file_size_threshold, SyncStatsMode sync_stats)
 {
   return open_internal(path, std::nullopt, heap_size, bucket_order,
-                       log_file_size_threshold);
+                       log_file_size_threshold, sync_stats);
 }
 
 inline DBStatus<std::unique_ptr<Database>>
@@ -324,7 +332,7 @@ Database::open_lsn(std::string_view path, uint64_t lsn, size_t heap_size,
                    int bucket_order, size_t log_file_size_threshold)
 {
   return open_internal(path, {lsn}, heap_size, bucket_order,
-                       log_file_size_threshold);
+                       log_file_size_threshold, SyncStatsMode::kDisabled);
 }
 
 inline DBStatus<DBItem>

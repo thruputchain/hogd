@@ -1,12 +1,16 @@
 // db_bench.cc - benchmarks for the database subsystem
 
+#include <algorithm>
+#include <array>
 #include <atomic>
 #include <bit>
 #include <chrono>
 #include <cstddef>
 #include <future>
 #include <memory>
+#include <numeric>
 #include <print>
+#include <ratio>
 #include <span>
 #include <string>
 #include <string_view>
@@ -18,12 +22,15 @@
 #include "hogd/base/compiler.h"
 #include "hogd/base/io.h"
 #include "hogd/base/log.h"
+#include "hogd/base/os.h"
 #include "hogd/base/span.h"
 #include "hogd/base/status.h"
 #include "hogd/base/types.h"
 #include "hogd/init.h"
+#include "hogd/ramdb/constants.h"
 #include "hogd/ramdb/db.h"
 #include "hogd/ramdb/db_status.h"
+#include "hogd/ramdb/disk_writer.h"
 
 namespace hogd {
 
@@ -70,6 +77,8 @@ public:
   void delete_items();
   // sync flushes and synchronizes all changes to disk.
   uint64_t sync();
+  // last_sync_stats returns the stats of the last sync().
+  SyncStats last_sync_stats() { return db_->last_sync_stats().value(); }
   // initializes the database with items (initial state for benchmarks).
   void prefill();
   // closes the DB and reloads all of its contents from disk.
@@ -188,7 +197,8 @@ Benchmark::sync_and_snapshot()
 }
 
 std::unique_ptr<Benchmark>
-make_benchmark(size_t n, int threads, size_t value_size)
+make_benchmark(size_t n, int threads, size_t value_size,
+               SyncStatsMode sync_stats = SyncStatsMode::kDisabled)
 {
   // delete the old database (if present).
   Directory dir(db_path);
@@ -212,7 +222,8 @@ make_benchmark(size_t n, int threads, size_t value_size)
 
   // create the database.
   DBStatus<std::unique_ptr<Database>> db =
-      Database::open(db_path, heap_size, bucket_order);
+      Database::open(db_path, heap_size, bucket_order, kDiskLogFileThreshold,
+                     sync_stats);
   if (!db)
     fail(db.error());
 
@@ -306,6 +317,71 @@ do_snapshot_ongoing_puts(int num, int cores, int value_size)
   return r;
 }
 
+// do_blocks models a block loop: put num items on all available cores, then
+// sync, rounds times. It prints each sync's wall time and overlapping phase
+// timings, then the median of each column. Restrict cores with taskset.
+void
+do_blocks(int num, int value_size, int rounds)
+{
+  int threads = static_cast<int>(available_parallelism());
+  std::unique_ptr<Benchmark> benchmark =
+      make_benchmark(num, threads, value_size, SyncStatsMode::kEnabled);
+  benchmark->prefill();
+
+  std::println("# threads {}, write heads {}, items/block {}, value size {}",
+               threads, scalable_shard_size(kBaseWriteHeadOrder), num,
+               value_size);
+  std::println("round, put_ms, sync_ms, drain_ms, inflight_ms, crc_ms, "
+               "write_ms, flush_ms, fdatasync_ms, dirty_heads, "
+               "early_mib, synced_mib, loglets_synced");
+
+  constexpr size_t kCols = 12;
+  std::vector<std::array<double, kCols>> rows;
+  rows.reserve(static_cast<size_t>(rounds));
+  auto ms = [](std::chrono::nanoseconds d) {
+    return std::chrono::duration<double, std::milli>(d).count();
+  };
+  auto mib = [](size_t n) { return static_cast<double>(n) / 1_MiB; };
+  auto print_row = [](std::string_view label,
+                      const std::array<double, kCols> &r) {
+    std::print("{}", label);
+    for (double v : r)
+      std::print(", {:.3f}", v);
+    std::println();
+  };
+
+  for (int i = 0; i < rounds; ++i) {
+    double put_s = measure([&benchmark] { benchmark->write_items(); });
+    benchmark->sync();
+    SyncStats st = benchmark->last_sync_stats();
+    rows.push_back({
+        put_s * 1e3,
+        ms(st.total),
+        ms(st.drain),
+        ms(st.inflight),
+        ms(st.crc),
+        ms(st.write),
+        ms(st.flush),
+        ms(st.fdatasync),
+        static_cast<double>(st.dirty_heads),
+        mib(st.bytes_early),
+        mib(st.bytes_synced),
+        static_cast<double>(st.loglets_synced),
+    });
+    print_row(std::to_string(i), rows.back());
+  }
+
+  std::array<double, kCols> median{};
+  std::vector<double> col(rows.size());
+  for (size_t c = 0; c < kCols; ++c) {
+    for (size_t r = 0; r < rows.size(); ++r)
+      col[r] = rows[r][c];
+    std::ranges::sort(col);
+    median[c] = std::midpoint(col[(col.size() - 1) / 2], col[col.size() / 2]);
+  }
+  print_row("median", median);
+}
+
 using bench_fn = double (*)(int num, int cores, int value_size);
 
 void
@@ -343,10 +419,12 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   hogd::info("starting db_bench!");
 
   auto print_usage = [] {
-    std::println("usage: [db_path] [command] [num] [value_size]");
+    std::println("usage: [db_path] [command] [num] [value_size] [rounds]");
     std::println("commands");
     for (const auto &[name, desc, ign] : hogd::benchmarks)
       std::println("  {}: {}", name, desc);
+    std::println("  blocks: puts num items on all available cores then "
+                 "syncs, [rounds] times (default 20); prints sync stats");
   };
 
   if (argc < 5) {
@@ -357,6 +435,20 @@ main(int argc, char *argv[]) // NOLINT(bugprone-exception-escape)
   std::string cmd = argv[2];
   int num = std::stoi(argv[3], nullptr, 0);
   int value_size = std::stoi(argv[4], nullptr, 0);
+
+  if (cmd == "blocks") {
+    int rounds = argc > 5 ? std::stoi(argv[5], nullptr, 0) : 20;
+    // each put thread writes num / threads items, so num must divide evenly.
+    int threads = static_cast<int>(hogd::available_parallelism());
+    if (num <= 0 || num % threads != 0 || rounds <= 0) {
+      std::println("blocks: num must be a positive multiple of {} (the "
+                   "available cores), rounds must be positive",
+                   threads);
+      return 1;
+    }
+    hogd::do_blocks(num, value_size, rounds);
+    return 0;
+  }
 
   for (const auto &[name, ign, fn] : hogd::benchmarks) {
     if (cmd != name)
