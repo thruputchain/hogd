@@ -16,7 +16,7 @@ option adapts hogd to it. Only Linux on x86-64 has been tried.
 
 Build the toolchain once. This clones PTSan 0.4.0 (LLVM 23.1.5), applies the
 patches in `scripts/ptsan/patches`, and builds clang. It takes about 35
-minutes on 4 cores and 5 GB of disk:
+minutes on 4 cores and 7 GB of disk:
 
 ```sh
 ./scripts/ptsan/build-toolchain.sh
@@ -34,8 +34,10 @@ ctest --test-dir build/ptsan --output-on-failure
 
 `build.sh` takes the options of `scripts/build.sh`. Compiling with PTSan takes
 about 2.5 times as long as without, and the pass is slower still on large
-coroutine code: `hog_devnode_node.cc` takes 13 minutes. hogd's largest files
-need 3.5 to 5 GB of memory each with or without PTSan, so choose `-j` to fit.
+coroutine code: `hog_devnode_node.cc` takes 13 minutes and 5 GB of memory.
+The large test files need about 3.5 GB each, with or without PTSan, so choose
+`-j` to fit. Building everything is about 11 hours of compile time, a little
+under four hours with `-j3`, and 5 GB of disk.
 
 A PTSan binary reports a bad access and exits with status 1:
 

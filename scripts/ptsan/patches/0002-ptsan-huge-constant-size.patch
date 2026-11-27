@@ -16,6 +16,10 @@ No object holds an access that large. Check it against a size that is just as
 impossible but representable, the 48-bit address space, so that the program
 compiles and the access is reported if it ever executes.
 
+The loop preanalysis runs before that and stops the same way when the access
+is inside a loop. It has no range to hoist for such an access, so it now
+leaves the access to the check above.
+
 diff --git a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp
 index e5768c772..cf48f745c 100644
 --- a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanDiscovery.cpp
@@ -47,3 +51,22 @@ index e5768c772..cf48f745c 100644
  }
  
  void PTSanDiscoverer::handleMainIfMain() {
+diff --git a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanLoopInfoGather.cpp b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanLoopInfoGather.cpp
+index 8e861207c..5d38044c4 100644
+--- a/llvm/lib/Transforms/Instrumentation/PTSan/PTSanLoopInfoGather.cpp
++++ b/llvm/lib/Transforms/Instrumentation/PTSan/PTSanLoopInfoGather.cpp
+@@ -90,6 +90,14 @@ void PTSanLoopInfoGather::analyzePtrOp(DenseMap<Loop *, SmallVector<CheckInfo>>
+   Value *BasePtr = PTU.findBasePointer(Ptr);
+   DBG(errs() << "Got base pointer " << *BasePtr << "\n");
+ 
++  // A constant size with the top bit set has no range to hoist. The access
++  // keeps the check that PTSanDiscoverer::addPtrSink gives it.
++  if (auto *SizeConst = dyn_cast_or_null<ConstantInt>(Op.Size);
++      SizeConst && SizeConst->isNegative()) {
++    DBG(errs() << "\tAccess size is not representable\n");
++    return;
++  }
++
+   auto PointRange = PTU.getScalarEnvelope(Ptr, Op.Size, Op.Mask, I);
+   if (!PointRange) {
+     DBG(errs() << "\tAccess does not have a scalar range\n");
