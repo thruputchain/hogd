@@ -57,6 +57,7 @@ XDR files (`.x`) are compiled by x23c into `.hh` headers:
 ```
 x23c -o output.hh input.x        # C++ header
 x23c --rust -o output.rs input.x  # Rust
+x23c --c -o output.h input.x      # C (types only)
 ```
 
 CMake functions: `add_xdr(target files...)` creates an interface library from `.x` files. `use_x23(target)` processes any `.x` files in the target's sources.
