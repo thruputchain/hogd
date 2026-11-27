@@ -42,6 +42,7 @@
 #include "hogd/ramdb/item_allocator.h"
 #include "hogd/ramdb/loglet.h"
 #include "hogd/ramdb/scalable_map.h"
+#include "x23/tests/death_test.h"
 
 namespace hogd {
 
@@ -112,16 +113,16 @@ make_value(uint64_t seed, size_t len)
 // loglets that are half dead, and no free loglet beyond the reserve.
 class CompactionUnderPressure {
 public:
-  // Two loglets' worth of live data per reserved loglet, in sources that are
-  // half live.
-  static constexpr size_t kThreads = 2;
+  // Sources that are half live hold four loglets' worth of live data, more
+  // than the reserve for the thread counts used here.
   static constexpr size_t kSourceLoglets = 8;
   static constexpr size_t kHeapLoglets = 24;
   static constexpr size_t kValueLen = 1400;
 
-  CompactionUnderPressure(Directory d)
-    : s_(std::move(d), kHeapLoglets * kLogletRegionSize, /*mutex_order=*/6,
-         /*bucket_order=*/12, kThreads)
+  CompactionUnderPressure(Directory d, size_t threads)
+    : threads_(threads),
+      s_(std::move(d), kHeapLoglets * kLogletRegionSize, /*mutex_order=*/6,
+         /*bucket_order=*/12, threads)
   {}
 
   MapStack &stack() { return s_; }
@@ -149,7 +150,7 @@ public:
     }
 
     // An ordinary allocation waits unless a loglet beyond the reserve is free.
-    while (free_loglets() > kThreads) {
+    while (free_loglets() > threads_) {
       ballast_.push_back(make_unique_loglet(*s_.la, LogletMode::kMemoryItems));
       ASSERT_TRUE(static_cast<bool>(ballast_.back()));
     }
@@ -168,6 +169,7 @@ public:
   }
 
 private:
+  size_t threads_;
   MapStack s_;
   std::vector<UniqueLoglet> ballast_;
   std::unordered_map<std::string, std::string> oracle_;
@@ -1728,54 +1730,36 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
 // free. Each worker has to free its source loglet as it finishes it: a pass
 // that keeps every source until it returns needs destinations for all the live
 // data at once, and ran the reserved path of LogletAllocator::alloc() off the
-// end of an empty free list (#4891). The reserve and the pool are fixed at two
-// here, so this does not depend on the host's core count.
-TEST(Compaction, PassFitsInReservedLoglets)
+// end of an empty free list (#4891). The reserve and the pool have a fixed
+// small size here, so this does not depend on the host's core count.
+class CompactionReserveTest : public testing::TestWithParam<size_t> {};
+
+TEST_P(CompactionReserveTest, PassFitsInReservedLoglets)
 {
+  const size_t threads = GetParam();
   ErrnoStatus<Directory> dir = Directory::open_temporary();
   ASSERT_TRUE(static_cast<bool>(dir));
-  CompactionUnderPressure p(*dir);
+  CompactionUnderPressure p(*dir, threads);
   ASSERT_NO_FATAL_FAILURE(p.fill());
-  ASSERT_EQ(p.free_loglets(), CompactionUnderPressure::kThreads);
+  ASSERT_EQ(p.free_loglets(), threads);
 
   // Half of each source is dead, so the pass must give loglets back.
   EXPECT_GT(p.stack().ia.compact(1.0F), 0U);
-  EXPECT_GT(p.free_loglets(), CompactionUnderPressure::kThreads);
+  EXPECT_GT(p.free_loglets(), threads);
+  p.check_contents();
+
+  // A second pass starts with partly filled destinations and nothing to
+  // reclaim; it must fit as well.
+  p.stack().ia.compact(1.0F);
   p.check_contents();
 }
 
-// If the reserve is empty all the same, compaction must leave the loglets it
-// cannot finish to a later pass and lose nothing (#4891).
-TEST(Compaction, DefersWhenReserveIsExhausted)
-{
-  ErrnoStatus<Directory> dir = Directory::open_temporary();
-  ASSERT_TRUE(static_cast<bool>(dir));
-  CompactionUnderPressure p(*dir);
-  ASSERT_NO_FATAL_FAILURE(p.fill());
-  LogletAllocator &la = *p.stack().la;
+INSTANTIATE_TEST_SUITE_P(Threads, CompactionReserveTest,
+                         testing::Values(1, 2, 3));
 
-  // Take the reserve away from the compactor.
-  std::vector<UniqueLoglet> reserve;
-  for (size_t i = 0; i < CompactionUnderPressure::kThreads; ++i) {
-    reserve.push_back(make_unique_loglet(la, LogletMode::kMemoryItems, true));
-    ASSERT_TRUE(static_cast<bool>(reserve.back()));
-  }
-  ASSERT_EQ(p.free_loglets(), 0U);
-
-  EXPECT_EQ(p.stack().ia.compact(1.0F), 0U);
-  EXPECT_EQ(p.free_loglets(), 0U);
-  p.check_contents();
-
-  // With the reserve back, the deferred loglets are compacted.
-  reserve.clear();
-  EXPECT_GT(p.stack().ia.compact(1.0F), 0U);
-  EXPECT_GT(p.free_loglets(), CompactionUnderPressure::kThreads);
-  p.check_contents();
-}
-
-// The reserved path does not wait, so it must report an empty free list
-// instead of popping it (#4891).
-TEST(Loglet, ReservedAllocReturnsNullWhenEmpty)
+// The reserved path does not wait, so with an empty free list it must stop
+// rather than pop the list, in Release builds too (#4891).
+TEST(LogletDeathTest, ReservedAllocStopsWhenEmpty)
 {
   auto allocator = LogletAllocator::create(2 * kLogletRegionSize, 1, [] {});
   ASSERT_NE(allocator, nullptr);
@@ -1784,12 +1768,8 @@ TEST(Loglet, ReservedAllocReturnsNullWhenEmpty)
   UniqueLoglet b =
       make_unique_loglet(*allocator, LogletMode::kMemoryItems, true);
   ASSERT_TRUE(static_cast<bool>(b));
-  EXPECT_EQ(allocator->alloc(LogletMode::kMemoryItems, true), nullptr);
-
-  // A freed loglet is available to the reserved path again.
-  b.reset();
-  b = make_unique_loglet(*allocator, LogletMode::kMemoryItems, true);
-  EXPECT_TRUE(static_cast<bool>(b));
+  X23_EXPECT_DEATH(allocator->alloc(LogletMode::kMemoryItems, true),
+                   "CHECK FAILED");
 }
 
 TEST(Loglet, CloneZeroesNextSlot)

@@ -108,38 +108,9 @@ ItemAllocator::compact(float utilization_thresh)
   // WorkerPool's promise / UniqueFunction / std::queue allocations) after
   // its inner lambda is constructed, the loglet survives the lambda's
   // destruction and we can put it back into compactable_loglets_.
-  //
-  // The shared_ptr must not keep a compacted source alive, though: the worker
-  // frees the loglet (compact_one resets *l) as soon as its live items have
-  // moved. Holding every source until the pass returned made the pass need a
-  // destination for all live data before any source came back, which the
-  // reserved loglets cannot supply under memory pressure (#4891).
   std::vector<std::shared_ptr<UniqueLoglet>> in_flight;
   std::vector<std::future<CompactionStats>> completions;
   CompactionStats stats{};
-
-  // requeue_unfinished returns every loglet that a worker did not finish (and
-  // so did not free) to compactable_loglets_, for the next pass. The
-  // emplace_back cannot throw because the ItemAllocator constructor reserved
-  // capacity to LogletAllocator::loglet_count() — the maximum possible
-  // occupancy. All submitted workers must have completed.
-  auto requeue_unfinished = [this, &in_flight, &claimed] {
-    std::scoped_lock guard(lock_);
-    size_t count = 0;
-    for (std::shared_ptr<UniqueLoglet> &l : in_flight) {
-      if (l && *l) {
-        compactable_loglets_.emplace_back(std::move(*l));
-        count++;
-      }
-    }
-    for (UniqueLoglet &ll : claimed) {
-      if (ll) {
-        compactable_loglets_.emplace_back(std::move(ll));
-        count++;
-      }
-    }
-    return count;
-  };
 
   try {
     in_flight.reserve(claimed.size());
@@ -147,19 +118,28 @@ ItemAllocator::compact(float utilization_thresh)
 
     for (auto &ll : claimed) {
       in_flight.push_back(std::make_shared<UniqueLoglet>(std::move(ll)));
-      completions.emplace_back(pool_.submit(
-          [this, l = in_flight.back()] { return compact_one(*l); }));
+      completions.emplace_back(pool_.submit([this, l = in_flight.back()] {
+        CompactionStats s = compact_one(std::move(*l));
+        // Free the source now, not when the pass returns: its memory backs
+        // the destinations of the loglets still to be compacted, and the
+        // reserved loglets alone cannot hold a whole pass (#4891).
+        l->reset();
+        return s;
+      }));
     }
 
     // wait for the compactions to finish.
     for (std::future<CompactionStats> &f : completions)
       stats += f.get();
   } catch (const std::bad_alloc &) {
-    // Drain any submitted workers so each has either freed its loglet or
-    // left it in place before we inspect in_flight.
+    // Drain any submitted workers so their std::move(*l) settles before
+    // we inspect in_flight. compactable_loglets_'s emplace_back below
+    // cannot throw because the ItemAllocator constructor reserved capacity
+    // to LogletAllocator::loglet_count() — the maximum possible occupancy.
     for (std::future<CompactionStats> &f : completions) {
       try {
-        // We call get() only to drain the worker; the [[nodiscard]] stats are
+        // We call get() only to drain the worker and let its std::move(*l)
+        // settle before we inspect in_flight; the [[nodiscard]] stats are
         // intentionally unused here.
         [[maybe_unused]] auto stats = f.get();
       } catch (...) { // NOLINT(bugprone-empty-catch)
@@ -169,17 +149,15 @@ ItemAllocator::compact(float utilization_thresh)
         // reserve, so this catch is not expected to fire in practice.
       }
     }
-    warn("compact: deferred {} loglets after bad_alloc", requeue_unfinished());
+    std::scoped_lock guard(lock_);
+    for (std::shared_ptr<UniqueLoglet> &l : in_flight)
+      if (l && *l)
+        compactable_loglets_.emplace_back(std::move(*l));
+    for (UniqueLoglet &ll : claimed)
+      if (ll)
+        compactable_loglets_.emplace_back(std::move(ll));
+    warn("compact: deferred {} loglets after bad_alloc", claimed.size());
     return 0;
-  }
-
-  // A worker that found no reserved loglet left its source in place. Queue
-  // those for the next pass; their unmoved items are still live in the map.
-  if (stats.loglets_deferred > 0) [[unlikely]] {
-    [[maybe_unused]] size_t requeued = requeue_unfinished();
-    assert(requeued == stats.loglets_deferred);
-    error("compact: deferred {} loglets; the reserved loglets ran out",
-          stats.loglets_deferred);
   }
 
   // print the compaction rate.
@@ -207,27 +185,17 @@ ItemAllocator::compact(float utilization_thresh)
 }
 
 detail::CompactionStats
-ItemAllocator::compact_one(UniqueLoglet &src)
+ItemAllocator::compact_one(UniqueLoglet &&src)
 {
   CompactionStats stats{};
   size_t bytes_moved = 0;
-  // set when a destination loglet is needed but none can be allocated.
-  bool no_destination = false;
 
-  // alloc_loglet is a utility for allocating reserved loglets. The result is
-  // empty if the reserve is exhausted.
-  //
-  // A thread never needs more than one per source: an empty destination holds
-  // all of a source's live items, so a source fills at most the destination
-  // it started with. Since the source is freed below before this thread takes
-  // the next one, a thread never holds more than one reserved loglet beyond
-  // those it has given back, and a reserve of one loglet per compaction
-  // thread suffices.
+  // alloc_loglet is a utility for allocating reserved loglets.
   auto alloc_loglet = [this, &stats]() {
     UniqueLoglet dst =
         make_unique_loglet(allocator_, LogletMode::kMemoryItems, true);
-    if (dst) [[likely]]
-      stats.loglets_freed--;
+    assert(static_cast<bool>(dst));
+    stats.loglets_freed--;
     return dst;
   };
 
@@ -251,8 +219,8 @@ ItemAllocator::compact_one(UniqueLoglet &src)
     // try to move the item to the new loglet.
     [[maybe_unused]] bool found = map_->modify_locked(
         src_item->get_key(),
-        [this, alloc_loglet, src_item, &bytes_moved, &stats,
-         &no_destination](ItemHeader **hptr, size_t /* hash */) mutable {
+        [this, alloc_loglet, src_item, &bytes_moved,
+         &stats](ItemHeader **hptr, size_t /* hash */) mutable {
           // modify_locked matched by key, not by pointer. A concurrent
           // different-sized put or remove+put may have already unlinked
           // src_item and inserted a new same-key header; unlink()
@@ -260,20 +228,14 @@ ItemAllocator::compact_one(UniqueLoglet &src)
           // then the new live header, and cloning src_item over it would
           // clobber the live value with stale bytes. src_item is already
           // dead, so skip it; its memory is reclaimed when this source
-          // loglet is freed below. The same check skips the stale copies
-          // that an earlier, deferred attempt at this loglet already moved.
+          // loglet is freed once compact_one returns.
           if (*hptr != src_item)
             return;
 
           // initialize the first use of the per-thread loglet.
           static thread_local UniqueLoglet dst;
-          if (!dst) [[unlikely]] {
+          if (!dst) [[unlikely]]
             dst = alloc_loglet();
-            if (!dst) [[unlikely]] {
-              no_destination = true;
-              return;
-            }
-          }
 
           // allocate the destination item
           ItemHeader *dst_item = dst->clone(src_item);
@@ -281,10 +243,6 @@ ItemAllocator::compact_one(UniqueLoglet &src)
             // loglet is full; get a new one.
             give_to_compactor(std::move(dst));
             dst = alloc_loglet();
-            if (!dst) [[unlikely]] {
-              no_destination = true;
-              return;
-            }
             dst_item = dst->clone(src_item);
             assert(dst_item != nullptr);
           }
@@ -299,20 +257,8 @@ ItemAllocator::compact_one(UniqueLoglet &src)
           stats.live_items++;
           bytes_moved += dst_item->total_bytes();
         });
-
-    // Without a destination the remaining live items must stay where the map
-    // points, so the loglet cannot be freed. Leave it to the caller.
-    if (no_destination) [[unlikely]] {
-      stats.loglets_deferred++;
-      return stats;
-    }
   }
 
-  // Nothing in the map points into the source any more: every item was moved
-  // or is dead, and readers only follow map pointers under the bucket lock.
-  // Free it now, not when the pass ends, so its memory backs the destinations
-  // of the loglets still to be compacted.
-  src.reset();
   stats.loglets_freed++;
   return stats;
 }
