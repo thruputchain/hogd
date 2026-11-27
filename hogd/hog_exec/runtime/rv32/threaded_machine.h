@@ -1099,6 +1099,43 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
   HOGD_THREAD_NEXT(c, ip + 2);
 }
 
+// --- lw runs
+// ------------------------------------------------------------------
+//
+// N same-base lw at consecutive words behind one range check (DESIGN.md). A
+// run that fails the check executes its loads one at a time instead.
+inline constexpr uint32_t kMaxLoadRun = 16;
+
+template<bool Trace, uint32_t N, bool Descending>
+StepResult
+op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
+{
+  static_assert(N >= 2 && N <= kMaxLoadRun);
+  assert(memsize >= N * 4);
+  const uint32_t head = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
+  const uint32_t lowest = Descending ? head - ((N - 1) * 4) : head;
+  // In bounds iff lowest + 4N <= memsize. memsize >= 4N, so the limit does not
+  // wrap, and passing it means no address in the run wrapped either.
+  if (lowest > memsize - (N * 4)) [[unlikely]] {
+    // The head as a plain lw, then its successor's own handler: exactly
+    // per-instruction execution, including where and with what gas it traps.
+    HOGD_MUSTTAIL return op_load<Trace, 4, false>(c, ip, mem, memsize, gas);
+  }
+  // Program order. Only the last load may overwrite the base, so reading it
+  // once is exact.
+  const uint8_t *words = mem + lowest;
+  for (uint32_t k = 0; k < N; ++k) {
+    const uint32_t offset = 4 * (Descending ? N - 1 - k : k);
+    write_rd(c, ip[k].rd, le_load<4>(words, offset));
+    if constexpr (Trace) {
+      if (k + 1 < N) {
+        HOGD_RETIRE_OP1(c, ip + k);
+      }
+    }
+  }
+  HOGD_THREAD_NEXT(c, ip + N);
+}
+
 // alu ; conditional branch  (e.g. addi;bltu -- loop induction + bound check).
 // op2 is a barrier: it ends the run, entering the taken target or the
 // fall-through. create() only fuses when the branch target is in range, so
@@ -1693,6 +1730,33 @@ fuse_alu_branch(const FusionCtx &f, Slot &s)
   return true;
 }
 
+// op_load_run handlers by run length, from 2.
+template<bool Trace, bool Descending, uint32_t... Ns>
+constexpr std::array<Handler, sizeof...(Ns)>
+make_load_run_handlers(std::integer_sequence<uint32_t, Ns...> /*lengths*/)
+{
+  return {&op_load_run<Trace, Ns + 2, Descending>...};
+}
+
+template<bool Trace, bool Descending>
+inline constexpr std::array<Handler, kMaxLoadRun - 1> kLoadRunHandlers =
+    make_load_run_handlers<Trace, Descending>(
+        std::make_integer_sequence<uint32_t, kMaxLoadRun - 1>{});
+
+// The op_load_run handler for a run of n (2..kMaxLoadRun) loads.
+inline Handler
+load_run_handler(uint32_t n, bool descending, bool trace)
+{
+  assert(n >= 2 && n <= kMaxLoadRun);
+  const size_t i = n - 2;
+  if (trace) {
+    return descending ? kLoadRunHandlers<true, true>[i]
+                      : kLoadRunHandlers<true, false>[i];
+  }
+  return descending ? kLoadRunHandlers<false, true>[i]
+                    : kLoadRunHandlers<false, false>[i];
+}
+
 // Rules are tried in order, first match wins. The head ops are disjoint per
 // rule (lui / auipc / lw / ...), or the rules differ on the tail, so the order
 // needs no priority tuning.
@@ -1740,9 +1804,16 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
   // Decode, price, and fuse in one backward pass. Carry the successor's
   // decoded instruction, whether it heads a fused pair, and whether it ends
   // a chunk. These guards prevent overlapping pairs and skipped chunk charges.
+  // Also carry the length of the ascending and descending lw chains starting
+  // at the successor (0 when it cannot be part of one).
   Instr next_op = {};
   bool next_fused = false;
   bool next_is_break = false;
+  uint32_t next_ascending_chain = 0;
+  uint32_t next_descending_chain = 0;
+  // Slots heading a load-use pair (fuse_load_use), which forwards the loaded
+  // value straight into its consumer.
+  std::vector<bool> heads_load_use(n, false);
 
   for (size_t i = n; i-- > 0;) {
     const auto instruction = program->instruction_at(i);
@@ -1830,9 +1901,34 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // and suffix gas so branches can still enter it. Calibration disables
     // fusion when measuring individual opcode costs.
     bool fused_here = false;
+
+    // lw runs. Every slot heads the longest run starting at it, so a branch
+    // into a run still runs fused (op_load_run, DESIGN.md).
+    uint32_t ascending_chain = 0;
+    uint32_t descending_chain = 0;
+    if (fuse && d.op == Op::kLw && !is_break_here) {
+      const bool links = i + 1 < n && d.rd != d.rs1 && next_op.op == Op::kLw &&
+                         next_op.rs1 == d.rs1;
+      ascending_chain =
+          1 + ((links && next_op.imm == d.imm + 4) ? next_ascending_chain : 0);
+      descending_chain =
+          1 + ((links && next_op.imm == d.imm - 4) ? next_descending_chain : 0);
+      const bool descending = descending_chain > ascending_chain;
+      uint32_t run = std::min({descending ? descending_chain : ascending_chain,
+                               kMaxLoadRun, total_memory_size / 4});
+      if (run >= 2 && heads_load_use[i + run - 1]) {
+        --run;
+      }
+      if (run >= 2) {
+        slot.handler = load_run_handler(run, descending, trace);
+        fused_here = true;
+      }
+    }
+
     // A fused handler skips the intervening dispatch, so neither member may
     // be a break carrier: that would skip charging the next chunk.
-    if (fuse && i + 1 < n && !next_fused && !is_break_here && !next_is_break) {
+    if (fuse && !fused_here && i + 1 < n && !next_fused && !is_break_here &&
+        !next_is_break) {
       const FusionCtx fctx{.head = d,
                            .tail = next_op,
                            .head_pc =
@@ -1842,6 +1938,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       for (const FusionRule rule : kFusionRules) {
         if (rule(fctx, exec[i])) {
           fused_here = true;
+          heads_load_use[i] = rule == &fuse_load_use;
           break;
         }
       }
@@ -1849,6 +1946,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     next_op = d;
     next_fused = fused_here;
     next_is_break = is_break_here;
+    next_ascending_chain = ascending_chain;
+    next_descending_chain = descending_chain;
   }
 
   return ThreadedMachinePreInstantiation(std::move(exec),

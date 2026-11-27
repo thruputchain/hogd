@@ -108,6 +108,18 @@ runs, and fuses selected instruction pairs. A fused pair retains the tail's
 standalone handler so a branch can enter it directly. Traced handlers preserve
 individual instruction observations for differential tests.
 
+It also fuses lw runs: up to 16 consecutive `lw` on one base register at
+consecutive words, ascending or descending, inside one charged chunk, with
+only the last load allowed to overwrite the base. Compilers emit these to copy
+multi-word values and to restore saved registers. `op_load_run` checks the
+run's whole byte range once, loads the words in program order, and dispatches
+once. A run that fails the check executes its first `lw` as a plain load and
+continues with the next slot's handler, so a fault traps at the same
+instruction, with the same gas, as per-instruction execution. Every member slot
+heads the run starting at it, so a branch into a run still runs fused. A run
+stops short of a last load that heads a load-use pair, so that pair still
+forwards the value to its consumer.
+
 Dispatch requires the `musttail` attribute. [musttail.h](musttail.h) rejects
 unsupported compilers because ordinary recursive calls would grow the host
 stack with guest execution. The `rv32_isa_core` target has no artifact, crypto,

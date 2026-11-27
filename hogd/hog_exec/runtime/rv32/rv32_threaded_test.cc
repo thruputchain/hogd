@@ -43,6 +43,8 @@ struct FusionCoverage {
   size_t store_alu = 0;
   size_t load_store = 0;
   size_t alu_branch = 0;
+  size_t load_run_ascending = 0;
+  size_t load_run_descending = 0;
 };
 
 struct ThreadedMachinePreInstantiationTestPeer {
@@ -93,6 +95,16 @@ struct ThreadedMachinePreInstantiationTestPeer {
       }
       if (handler == alu_branch_handler<true>(Op::kAddi, Op::kBne)) {
         ++coverage.alu_branch;
+      }
+      for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
+        if (handler ==
+            load_run_handler(n, /*descending=*/false, /*trace=*/true)) {
+          ++coverage.load_run_ascending;
+        }
+        if (handler ==
+            load_run_handler(n, /*descending=*/true, /*trace=*/true)) {
+          ++coverage.load_run_descending;
+        }
       }
     }
     return coverage;
@@ -393,6 +405,8 @@ expect_engine_only_fusion_coverage(
   EXPECT_GE(coverage.store_alu, 1U) << "engine seed " << seed;
   EXPECT_GE(coverage.load_store, 1U) << "engine seed " << seed;
   EXPECT_GE(coverage.alu_branch, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_run_ascending, 1U) << "engine seed " << seed;
+  EXPECT_GE(coverage.load_run_descending, 1U) << "engine seed " << seed;
 }
 
 TEST(Rv32Threaded, runsBasicArithmetic)
@@ -2764,6 +2778,559 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
     expect_trap_gas_parity(words, Trap::kBadMemory,
                            /*expected_gas_remaining=*/98);
   }
+}
+
+// --- lw runs ----------------------------------------------------------------
+
+std::shared_ptr<const ThreadedMachinePreInstantiation>
+lowered_without_fusion(std::span<const uint32_t> words, uint32_t memory_bytes,
+                       bool trace, uint32_t max_run_gas)
+{
+  auto pre_instantiation =
+      ThreadedMachinePreInstantiation::create(words_to_bytes(words),
+                                              /*memory=*/{}, /*memory_start=*/0,
+                                              memory_bytes, trace, max_run_gas,
+                                              /*fuse=*/false);
+  EXPECT_TRUE(pre_instantiation.has_value());
+  return std::make_shared<const ThreadedMachinePreInstantiation>(
+      std::move(pre_instantiation.value()));
+}
+
+std::vector<Handler>
+handlers_of(std::span<const uint32_t> words, uint32_t memory_bytes = 256,
+            uint32_t max_run_gas = kMaxRunGas, bool fuse = true)
+{
+  auto pre_instantiation = ThreadedMachinePreInstantiation::create(
+      words_to_bytes(words), /*memory=*/{}, /*memory_start=*/0, memory_bytes,
+      /*trace=*/false, max_run_gas, fuse);
+  EXPECT_TRUE(pre_instantiation.has_value());
+  std::vector<Handler> handlers;
+  handlers.reserve(words.size());
+  for (size_t i = 0; i < words.size(); ++i) {
+    handlers.push_back(
+        ThreadedMachinePreInstantiationTestPeer::handler_at(*pre_instantiation,
+                                                            i));
+  }
+  return handlers;
+}
+
+// `count` lw at ascending words from `offset` off `base` into x6, x7, ...,
+// then an ecall.
+std::vector<uint32_t>
+ascending_load_words(int32_t count, uint8_t base, int32_t offset)
+{
+  std::vector<uint32_t> words;
+  words.reserve(static_cast<size_t>(count) + 1);
+  for (int32_t k = 0; k < count; ++k) {
+    words.push_back(test_program::load(static_cast<uint8_t>(6 + k), 2, base,
+                                       offset + (4 * k)));
+  }
+  words.push_back(kEcallWord);
+  return words;
+}
+
+// The untraced lw-run handler.
+Handler
+run_of(uint32_t n, bool descending = false)
+{
+  return load_run_handler(n, descending, /*trace=*/false);
+}
+
+// Runs `words` on the canonical Machine and on all four lowerings, which must
+// match it exactly. Returns the canonical trap.
+Trap
+expect_matches_canonical(std::span<const uint32_t> words, uint32_t memory_bytes,
+                         uint64_t gas, uint32_t max_run_gas = kMaxRunGas)
+{
+  const auto program = make_program(words);
+  EXPECT_NE(program, nullptr);
+  if (program == nullptr) {
+    return Trap::kNone;
+  }
+  Machine canonical(program, memory_bytes, gas);
+  RecordingHost canonical_host;
+  const ExecTrace canonical_trace = trace_execution(canonical, canonical_host);
+  for (const bool fuse : {true, false}) {
+    for (const bool trace : {false, true}) {
+      SCOPED_TRACE(::testing::Message() << (fuse ? "fused" : "unfused")
+                                        << (trace ? ", traced" : ""));
+      const auto lowered =
+          fuse
+              ? threaded_from_words(words, memory_bytes, trace, max_run_gas)
+              : lowered_without_fusion(words, memory_bytes, trace, max_run_gas);
+      ThreadedMachine machine(*lowered, gas);
+      RecordingHost host;
+      TraceObserver observer;
+      EXPECT_EQ(trace ? machine.run(host, observer) : machine.run(host),
+                canonical_trace.final_result);
+      EXPECT_EQ(machine.trap(), canonical.trap());
+      EXPECT_EQ(machine.gas_remaining(), canonical.gas_remaining());
+      EXPECT_EQ(host.call_count(), canonical_host.call_count());
+      if (canonical.trap() == Trap::kOutOfGas) {
+        continue; // The rest is speculative state a failed call discards.
+      }
+      EXPECT_EQ(machine.pc(), canonical.pc());
+      EXPECT_EQ(machine.halted(), canonical.halted());
+      EXPECT_EQ(machine.halt_code(), canonical.halt_code());
+      for (size_t r = 0; r < kRegisterCount; ++r) {
+        EXPECT_EQ(machine.reg(r), canonical.reg(r)) << "x" << r;
+      }
+      EXPECT_TRUE(std::ranges::equal(machine.memory(), canonical.memory()));
+      if (trace) {
+        const ExecTrace expected = strip_trace_gas(canonical_trace);
+        const ExecTrace actual = strip_trace_gas(observer.trace());
+        EXPECT_EQ(describe_trace_divergence(expected, actual), "");
+        for (size_t i = 0; i < expected.steps.size() && i < actual.steps.size();
+             ++i) {
+          EXPECT_EQ(actual.steps[i].state_before,
+                    expected.steps[i].state_before)
+              << "step " << i;
+        }
+      }
+    }
+  }
+  return canonical.trap();
+}
+
+TEST(Rv32ThreadedLoadRun, preparationSelectsTheRunStartingAtEachSlot)
+{
+  using test_program::load;
+  const Handler plain = &op_load<false, 4, false>;
+  {
+    // Four ascending words: each slot heads the run of its suffix, so a
+    // branch into the middle still runs fused; the last lw stays plain.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                         load(8, 2, 5, 8), load(9, 2, 5, 12),
+                                         kEcallWord};
+    const auto h = handlers_of(words);
+    EXPECT_EQ(h[0], run_of(4));
+    EXPECT_EQ(h[1], run_of(3));
+    EXPECT_EQ(h[2], run_of(2));
+    EXPECT_EQ(h[3], plain);
+  }
+  {
+    // Descending, as an epilogue restoring ra, s0, s1 from sp.
+    const std::vector<uint32_t> words = {load(1, 2, 2, 28), load(8, 2, 2, 24),
+                                         load(9, 2, 2, 20), kEcallWord};
+    const auto h = handlers_of(words);
+    EXPECT_EQ(h[0], run_of(3, /*descending=*/true));
+    EXPECT_EQ(h[1], run_of(2, /*descending=*/true));
+    EXPECT_EQ(h[2], plain);
+  }
+  {
+    // Twenty words: a head covers at most kMaxLoadRun loads, and the next
+    // dispatched head continues the run.
+    const auto h = handlers_of(ascending_load_words(20, 5, 0));
+    EXPECT_EQ(h[0], run_of(16));
+    EXPECT_EQ(h[4], run_of(16));
+    EXPECT_EQ(h[5], run_of(15));
+    EXPECT_EQ(h[16], run_of(4));
+    EXPECT_EQ(h[18], run_of(2));
+    EXPECT_EQ(h[19], plain);
+  }
+  {
+    // A load that overwrites the base can only end a run.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(5, 2, 5, 4),
+                                         load(7, 2, 5, 8), kEcallWord};
+    const auto h = handlers_of(words);
+    EXPECT_EQ(h[0], run_of(2));
+    EXPECT_EQ(h[1], plain);
+    EXPECT_EQ(h[2], plain);
+  }
+  {
+    // Destinations may repeat: the loads retire in program order.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                         load(6, 2, 5, 8), kEcallWord};
+    EXPECT_EQ(handlers_of(words)[0], run_of(3));
+  }
+  {
+    // The last member of an ascending run can head a descending one.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 4), load(7, 2, 5, 8),
+                                         load(8, 2, 5, 4), load(9, 2, 5, 0),
+                                         kEcallWord};
+    const auto h = handlers_of(words);
+    EXPECT_EQ(h[0], run_of(2));
+    EXPECT_EQ(h[1], run_of(3, /*descending=*/true));
+    EXPECT_EQ(h[2], run_of(2, /*descending=*/true));
+  }
+  {
+    // x0 is an ordinary base for runs.
+    const std::vector<uint32_t> words = {load(6, 2, 0, 0), load(7, 2, 0, 4),
+                                         kEcallWord};
+    EXPECT_EQ(handlers_of(words)[0], run_of(2));
+  }
+  {
+    // Not runs: stride 8, a different base, the same word twice, and a
+    // narrower load in between.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 0),   load(7, 2, 5, 8),
+                                         load(8, 2, 6, 12),  load(9, 2, 5, 12),
+                                         load(10, 2, 5, 12), load(14, 1, 5, 16),
+                                         load(15, 2, 5, 20), kEcallWord};
+    const auto h = handlers_of(words);
+    for (size_t i = 0; i < 7; ++i) {
+      for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
+        EXPECT_NE(h[i], run_of(n)) << "slot " << i;
+        EXPECT_NE(h[i], run_of(n, /*descending=*/true)) << "slot " << i;
+      }
+    }
+  }
+  {
+    // A memory too small to hold two words, and calibration's unfused
+    // lowering, form no runs.
+    const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                         kEcallWord};
+    EXPECT_EQ(handlers_of(words, /*memory_bytes=*/7)[0], plain);
+    EXPECT_EQ(handlers_of(words, 256, kMaxRunGas, /*fuse=*/false)[0], plain);
+    EXPECT_EQ(handlers_of(words, /*memory_bytes=*/8)[0], run_of(2));
+  }
+  {
+    // Under a 9-gas cap, chunks split this run after slot 2, which becomes a
+    // break carrier; no run includes it.
+    const auto h =
+        handlers_of(ascending_load_words(5, 5, 0), 256, 3 * kWideLoadGas);
+    EXPECT_EQ(h[0], run_of(2));
+    EXPECT_EQ(h[1], plain);
+    EXPECT_EQ(h[2], (&op_load<false, 4, false, true>));
+    EXPECT_EQ(h[3], run_of(2));
+    EXPECT_EQ(h[4], plain);
+  }
+}
+
+TEST(Rv32ThreadedLoadRun, runLeavesItsLastLoadToALoadUsePair)
+{
+  using test_program::load;
+  // lw x8 feeds the add right after it, a load-use pair; the run takes only
+  // the two loads before it, so the pair still forwards x8 to the add.
+  const std::vector<uint32_t> words = {load(6, 2, 5, 0), load(7, 2, 5, 4),
+                                       load(8, 2, 5, 8), op(9, 8, 6, 0, 0),
+                                       kEcallWord};
+  const auto h = handlers_of(words);
+  EXPECT_EQ(h[0], run_of(2));
+  EXPECT_EQ(h[2], (fused_load_handler<false>(Op::kLw, Op::kAdd, true)));
+  EXPECT_EQ(expect_matches_canonical(words, 256, 100), Trap::kNone);
+  // Two loads ending in a load-use pair leave no run at all.
+  const std::vector<uint32_t> pair = {load(7, 2, 5, 4), load(8, 2, 5, 8),
+                                      op(9, 8, 6, 0, 0), kEcallWord};
+  EXPECT_EQ(handlers_of(pair)[0], (&op_load<false, 4, false>));
+}
+
+// x5 = 64; distinct words over [64, 128); then x5 = base.
+std::vector<uint32_t>
+load_run_prelude(int32_t base)
+{
+  using test_program::store;
+  std::vector<uint32_t> words = {addi(5, 0, 64)};
+  for (int32_t k = 0; k < 16; ++k) {
+    words.push_back(addi(10, 0, 0x100 + (k * 0x11)));
+    words.push_back(store(5, 10, 4 * k, 2));
+  }
+  words.push_back(addi(5, 0, base));
+  return words;
+}
+
+TEST(Rv32ThreadedLoadRun, inBoundsRunsMatchCanonical)
+{
+  using test_program::load;
+  std::vector<uint32_t> words = load_run_prelude(64);
+  // Ascending, then descending, runs of every length 2..16, each ended by a
+  // separator add.
+  for (const bool descending : {false, true}) {
+    for (int32_t n = 2; n <= 16; ++n) {
+      for (int32_t k = 0; k < n; ++k) {
+        const int32_t offset = descending ? 60 - (4 * k) : 4 * k;
+        words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5, offset));
+      }
+      words.push_back(op(3, 0, 0, 0, 0));
+    }
+  }
+  // An x0 destination, unaligned words, a repeated destination, and a run
+  // ended by a load into its base.
+  words.push_back(load(0, 2, 5, 0));
+  words.push_back(load(7, 2, 5, 4));
+  words.push_back(op(3, 0, 0, 0, 0));
+  words.push_back(load(8, 2, 5, 1));
+  words.push_back(load(9, 2, 5, 5));
+  words.push_back(load(10, 2, 5, 9));
+  words.push_back(op(3, 0, 0, 0, 0));
+  words.push_back(load(12, 2, 5, 24));
+  words.push_back(load(13, 2, 5, 28));
+  words.push_back(load(12, 2, 5, 32));
+  words.push_back(op(3, 0, 0, 0, 0));
+  words.push_back(load(11, 2, 5, 16));
+  words.push_back(load(5, 2, 5, 20));
+  words.push_back(kEcallWord);
+  EXPECT_EQ(expect_matches_canonical(words, 256, 10'000), Trap::kNone);
+}
+
+TEST(Rv32ThreadedLoadRun, failingRunTrapsAtItsFirstOutOfBoundsLoad)
+{
+  using test_program::load;
+  // An add, the run, and two adds (unexecuted suffix to refund). The run
+  // traps at its first out-of-bounds load, having charged the add and every
+  // load up to that one.
+  struct Case {
+    int32_t base;
+    std::vector<int32_t> offsets;
+    uint32_t memory_bytes;
+    uint32_t faulting_load;
+  };
+  const std::vector<Case> cases = {
+      {244, {0, 4, 8, 12}, 256, 3},  // last load straddles the end
+      {256, {0, 4, 8}, 256, 0},      // first load past the end
+      {250, {0, 4}, 256, 1},         // unaligned: [254, 258) straddles
+      {0, {8, 4, 0, -4}, 256, 3},    // descending into 0xfffffffc
+      {-8, {0, 4, 8}, 256, 0},       // starts at 0xfffffff8
+      {-4, {0, 4}, 256, 0},          // 0xfffffffc, then wraps to 0
+      {0, {0, -4}, 256, 1},          // descending wraps after 0
+      {252, {4, 0, -4, -8}, 256, 0}, // descending, head past the end
+      {4, {0, 4}, 8, 1},             // memory holds only the first word
+  };
+  for (const Case &c : cases) {
+    SCOPED_TRACE(::testing::Message()
+                 << "base " << c.base << " head offset " << c.offsets[0]);
+    std::vector<uint32_t> words = {addi(5, 0, c.base)};
+    for (size_t k = 0; k < c.offsets.size(); ++k) {
+      words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5, c.offsets[k]));
+    }
+    words.push_back(op(20, 0, 0, 0, 0));
+    words.push_back(op(21, 0, 0, 0, 0));
+    EXPECT_EQ(handlers_of(words, c.memory_bytes)[1],
+              run_of(static_cast<uint32_t>(c.offsets.size()),
+                     c.offsets[1] < c.offsets[0]))
+        << "the run did not fuse";
+    for (const bool trace : {false, true}) {
+      auto threaded = threaded_from_words(words, c.memory_bytes, trace);
+      ThreadedMachine machine(*threaded, 100);
+      RecordingHost host;
+      TraceObserver observer;
+      EXPECT_EQ(trace ? machine.run(host, observer) : machine.run(host),
+                StepResult::kTrap);
+      EXPECT_EQ(machine.trap(), Trap::kBadMemory);
+      EXPECT_EQ(machine.pc(), (1 + c.faulting_load) * kInstructionBytes);
+      EXPECT_EQ(machine.gas_remaining(),
+                100 - (kBaseInstructionGas +
+                       ((c.faulting_load + 1) * kWideLoadGas)));
+    }
+    EXPECT_EQ(expect_matches_canonical(words, c.memory_bytes, 100),
+              Trap::kBadMemory);
+    // Budgets that run out before, at, and after the faulting load.
+    for (uint64_t gas = 0; gas <= 20; ++gas) {
+      SCOPED_TRACE(gas);
+      expect_matches_canonical(words, c.memory_bytes, gas);
+    }
+  }
+}
+
+TEST(Rv32ThreadedLoadRun, outOfGasInsideARunMatchesCanonical)
+{
+  using test_program::load;
+  // Every budget from zero to past the program's cost, so execution runs out
+  // before, inside and after an in-bounds run of eight, in both directions.
+  for (const bool descending : {false, true}) {
+    SCOPED_TRACE(descending ? "descending" : "ascending");
+    std::vector<uint32_t> words = {addi(5, 0, 64)};
+    for (int32_t k = 0; k < 8; ++k) {
+      words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5,
+                           descending ? 28 - (4 * k) : 4 * k));
+    }
+    words.push_back(op(20, 6, 7, 0, 0));
+    words.push_back(kEcallWord);
+    EXPECT_EQ(handlers_of(words)[1], run_of(8, descending));
+    // addi, eight lw, add, ecall.
+    constexpr uint64_t kCost = (3 * kBaseInstructionGas) + (8 * kWideLoadGas);
+    for (uint64_t gas = 0; gas <= kCost + 2; ++gas) {
+      SCOPED_TRACE(gas);
+      EXPECT_EQ(expect_matches_canonical(words, 256, gas),
+                gas < kCost ? Trap::kOutOfGas : Trap::kNone);
+    }
+  }
+}
+
+TEST(Rv32ThreadedLoadRun, wrappedRunWithinBoundsRunsFused)
+{
+  using test_program::load;
+  using test_program::store;
+  // base 0xfffffff8: offsets 8, 12, 16 address words 0, 4, 8 after wrapping.
+  // The check sees the wrapped head and stays on the fused path.
+  std::vector<uint32_t> words = load_run_prelude(-8);
+  for (int32_t k = 0; k < 3; ++k) {
+    words.push_back(addi(10, 0, 0x7a0 + k));
+    words.push_back(store(0, 10, 4 * k, 2)); // seed words 0, 4, 8
+  }
+  const size_t head = words.size();
+  words.push_back(load(6, 2, 5, 8));
+  words.push_back(load(7, 2, 5, 12));
+  words.push_back(load(8, 2, 5, 16));
+  words.push_back(kEcallWord);
+  EXPECT_EQ(handlers_of(words)[head], run_of(3));
+  EXPECT_EQ(expect_matches_canonical(words, 256, 1000), Trap::kNone);
+}
+
+TEST(Rv32ThreadedLoadRun, branchIntoTheMiddleOfARun)
+{
+  using test_program::branch;
+  using test_program::load;
+  // The branch skips two loads and lands on the third, which heads the run of
+  // the remaining two. With base 64 every word is in bounds; with base 252
+  // the run entered at the third straddles the end and faults at the fourth.
+  for (const int32_t base : {64, 252}) {
+    SCOPED_TRACE(base);
+    std::vector<uint32_t> words = load_run_prelude(base);
+    const size_t first = words.size() + 1;
+    words.push_back(branch(0, 0, 0, 12));
+    words.push_back(load(6, 2, 5, -8));
+    words.push_back(load(7, 2, 5, -4));
+    words.push_back(load(8, 2, 5, 0)); // branch target
+    words.push_back(load(9, 2, 5, 4));
+    words.push_back(kEcallWord);
+    const auto h = handlers_of(words);
+    EXPECT_EQ(h[first], run_of(4));
+    EXPECT_EQ(h[first + 2], run_of(2));
+    EXPECT_EQ(expect_matches_canonical(words, 256, 1000),
+              base == 252 ? Trap::kBadMemory : Trap::kNone);
+  }
+}
+
+TEST(Rv32ThreadedLoadRun, overlappingRunsMatchCanonical)
+{
+  using test_program::load;
+  // The run at slot 1 covers four words, the last out of bounds; its fallback
+  // continues through the members' own runs to the faulting load.
+  const std::vector<uint32_t> straddling = {
+      addi(5, 0, 244),   load(6, 2, 5, 0),   load(7, 2, 5, 4), load(8, 2, 5, 8),
+      load(6, 2, 5, 12), op(20, 0, 0, 0, 0), kEcallWord};
+  EXPECT_EQ(expect_matches_canonical(straddling, 256, 100), Trap::kBadMemory);
+  // The last member of an in-bounds ascending run heads a descending run
+  // that wraps below 0; the engine dispatches the next slot's descending run,
+  // which fails its check and faults at slot 4 like canonical execution.
+  const std::vector<uint32_t> turning = {addi(5, 0, -4),   load(6, 2, 5, 4),
+                                         load(7, 2, 5, 8), load(8, 2, 5, 4),
+                                         load(9, 2, 5, 0), op(20, 0, 0, 0, 0),
+                                         kEcallWord};
+  EXPECT_EQ(expect_matches_canonical(turning, 256, 100), Trap::kBadMemory);
+  auto threaded = threaded_from_words(turning, 256);
+  ThreadedMachine machine(*threaded, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.pc(), 4 * kInstructionBytes);
+}
+
+TEST(Rv32ThreadedLoadRun, loopOverRunsMatchesCanonical)
+{
+  using test_program::j_type;
+  using test_program::load;
+  // Each pass moves the base up a word and runs a two-load run, then a
+  // four-load run. When the base reaches 244 the four-load run's last word is
+  // out of bounds while the two-load run is still in bounds; both engines
+  // trap at that fourth load.
+  const std::vector<uint32_t> words = {
+      addi(5, 5, 4),     load(6, 2, 5, 0),   load(7, 2, 5, 4),
+      op(3, 0, 0, 0, 0), load(8, 2, 5, 0),   load(9, 2, 5, 4),
+      load(10, 2, 5, 8), load(11, 2, 5, 12), j_type(0, -32),
+  };
+  EXPECT_EQ(expect_matches_canonical(words, 256, 10'000), Trap::kBadMemory);
+  auto threaded = threaded_from_words(words, 256);
+  ThreadedMachine machine(*threaded, 10'000);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.pc(), 7 * kInstructionBytes);
+  EXPECT_EQ(machine.reg(5), 244U);
+}
+
+TEST(Rv32ThreadedLoadRun, breakCarrierSplitBudgetSweep)
+{
+  // The 9-gas-cap layout from the selection test (runs at slots 0 and 3, a
+  // carrier at slot 2), in bounds and with the last word out of bounds.
+  for (const int32_t base : {64, 256 - 16}) {
+    SCOPED_TRACE(base);
+    const std::vector<uint32_t> words = ascending_load_words(5, 0, base);
+    for (uint64_t gas = 0; gas <= 24; ++gas) {
+      SCOPED_TRACE(gas);
+      expect_matches_canonical(words, 256, gas, 3 * kWideLoadGas);
+    }
+  }
+}
+
+// Random programs dense in same-base lw runs: random directions, lengths,
+// direction changes, unaligned and wrapping bases, destinations that repeat or
+// overwrite the base, stores and forward branches between runs, small
+// memories, and budgets small enough to stop mid-run.
+TEST(Rv32ThreadedLoadRun, randomProgramsMatchCanonical)
+{
+  using test_program::branch;
+  using test_program::load;
+  using test_program::store;
+  using test_program::u_type;
+  constexpr std::array<uint32_t, 8> kMemorySizes = {0,   7,   16,   64,
+                                                    255, 256, 1024, 4096};
+  size_t faulted = 0;
+  for (uint64_t seed = 0; seed < 400; ++seed) {
+    std::mt19937_64 rng((seed * 0xd1b54a32d192ed03ULL) + 7);
+    const uint32_t memory_bytes = kMemorySizes[rng() % kMemorySizes.size()];
+    auto base_value = [&]() -> uint32_t {
+      switch (rng() % 4) {
+      case 0: // near the end of memory
+        return memory_bytes - 32 + static_cast<uint32_t>(rng() % 48);
+      case 1: // near zero, either side
+        return static_cast<uint32_t>(static_cast<int32_t>(rng() % 64) - 32);
+      default:
+        return static_cast<uint32_t>(rng() % (memory_bytes + 16));
+      }
+    };
+    std::vector<uint32_t> words;
+    for (uint8_t base = 5; base <= 7; ++base) {
+      const uint32_t v = base_value();
+      const uint32_t hi = (v + 0x800U) & 0xfffff000U;
+      words.push_back(u_type(0x37, base, hi));
+      words.push_back(addi(base, base, static_cast<int32_t>(v - hi)));
+    }
+    const size_t groups = 4 + (rng() % 8);
+    for (size_t g = 0; g < groups; ++g) {
+      const auto base = static_cast<uint8_t>(5 + (rng() % 3));
+      int32_t step = (rng() % 3 == 0) ? -4 : 4;
+      const size_t length = 1 + (rng() % 18);
+      int32_t offset = static_cast<int32_t>(rng() % 64) - 24;
+      for (size_t k = 0; k < length; ++k) {
+        // Mostly fresh destinations; sometimes the base or a repeat.
+        auto rd = static_cast<uint8_t>(8 + ((k + g) % 20));
+        if (rng() % 10 == 0) {
+          rd = base;
+        }
+        else if (rng() % 10 == 0) {
+          rd = static_cast<uint8_t>(8 + (rng() % 20));
+        }
+        words.push_back(load(rd, 2, base, offset));
+        if (rng() % 12 == 0) {
+          step = -step; // turn around mid-run
+        }
+        offset += step;
+      }
+      switch (rng() % 4) {
+      case 0:
+        words.push_back(store(base, static_cast<uint8_t>(8 + (rng() % 20)),
+                              static_cast<int32_t>(rng() % 32), 2));
+        break;
+      case 1:
+        // Forward skip of one or two instructions, possibly into a run.
+        words.push_back(
+            branch(0, 0, 0, static_cast<int32_t>(4 * (2 + (rng() % 2)))));
+        break;
+      default:
+        words.push_back(op(3, 0, 0, 0, 0));
+        break;
+      }
+    }
+    words.insert(words.end(), 3, kEcallWord);
+    const uint64_t gas = (rng() % 4 == 0) ? rng() % 40 : 10'000;
+    SCOPED_TRACE(::testing::Message() << "seed " << seed << " memory "
+                                      << memory_bytes << " gas " << gas);
+    if (expect_matches_canonical(words, memory_bytes, gas) ==
+        Trap::kBadMemory) {
+      ++faulted;
+    }
+  }
+  // Failing runs must actually be exercised, not just in-bounds ones.
+  EXPECT_GE(faulted, 40U);
 }
 
 #if HOGD_RV32_STACK_USAGE_ENABLED
