@@ -26,15 +26,27 @@ word_at(std::span<const uint8_t> code, size_t index)
          (uint32_t{code[offset + 3]} << 24);
 }
 
-// Probe a word between register-disjoint fillers. Branch offsets stay within
-// this four-instruction program. Handler selection does not depend on memory
-// size, so a small image avoids zeroing default-size memory per lookup.
-std::optional<Handler>
-isolated_handler(uint32_t word)
+// True for a load or store whose base register is x0. Preparation selects
+// its handler from the memory size (absolute_access_handler).
+bool
+is_absolute_access(uint32_t word)
 {
-  static thread_local std::unordered_map<uint32_t, std::optional<Handler>>
+  const uint32_t opcode = word & 0x7fU;
+  return (opcode == 0x03U || opcode == 0x23U) && ((word >> 15) & 0x1fU) == 0;
+}
+
+// Probe a word between register-disjoint fillers. Branch offsets stay within
+// this four-instruction program. Only x0-based loads/stores select their
+// handler by memory size, so they are probed at the audited size; every other
+// word uses a small image to avoid zeroing default-size memory per lookup.
+std::optional<Handler>
+isolated_handler(uint32_t word, uint32_t memory_bytes)
+{
+  const uint32_t probe_bytes = is_absolute_access(word) ? memory_bytes : 64;
+  const uint64_t key = (uint64_t{probe_bytes} << 32) | word;
+  static thread_local std::unordered_map<uint64_t, std::optional<Handler>>
       cache;
-  const auto cached = cache.find(word);
+  const auto cached = cache.find(key);
   if (cached != cache.end()) {
     return cached->second;
   }
@@ -43,8 +55,7 @@ isolated_handler(uint32_t word)
       test_program::code_from_words({filler_instruction_word(0), word,
                                      filler_instruction_word(1), 0x00000073U});
   std::optional<Handler> handler;
-  auto probe = ThreadedMachinePreInstantiation::create(code, {}, 0,
-                                                       /*total_memory_size=*/64,
+  auto probe = ThreadedMachinePreInstantiation::create(code, {}, 0, probe_bytes,
                                                        /*trace=*/false);
   if (probe.has_value()) {
     const std::span<const Slot> slots =
@@ -53,7 +64,7 @@ isolated_handler(uint32_t word)
       handler = slots[1].handler;
     }
   }
-  cache.emplace(word, handler);
+  cache.emplace(key, handler);
   return handler;
 }
 
@@ -125,7 +136,7 @@ audit_body(std::span<const uint8_t> code, std::span<const uint8_t> memory,
       ++audit.body_runs;
     }
     previous_was_barrier = decoded_is_barrier(word);
-    const std::optional<Handler> plain = isolated_handler(word);
+    const std::optional<Handler> plain = isolated_handler(word, memory_bytes);
     if (!plain.has_value() || slot.handler != *plain) {
       ++audit.rewritten_slots;
       if (!first_recorded) {

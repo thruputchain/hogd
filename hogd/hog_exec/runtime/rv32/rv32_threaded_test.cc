@@ -2,6 +2,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <ios>
 #include <limits>
 #include <memory>
 #include <optional>
@@ -1737,22 +1738,28 @@ TEST(Rv32ThreadedTrapGas, branchIntoMidRunLoadFaultChargesFromBranchInPoint)
   // A taken branch lands directly on the lw at slot 2 -- which is also the
   // preserved standalone tail of an alu_load fusion (slots 1+2) -- so
   // enter_run charges gas_to_run[2] (lw + both adds). Charged: beq, lw = 2 ->
-  // the two adds are unexecuted suffix.
-  const std::vector<uint32_t> words = {
-      branch(0, 0, 0, 8),  // beq x0, x0, +8 -> lands on the lw
-      addi(6, 0, 1),       // skipped (fuses alu_load with the lw)
-      load(4, 2, 0, 2047), // lw x4, 2047(x0) -> FAULT (branch-in run head)
-      op(7, 6, 6, 0, 0),   // add x7, x6, x6 (never runs)
-      op(8, 6, 6, 0, 0),   // add x8, x6, x6 (never runs)
-  };
-  auto threaded = threaded_from_words(words);
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1),
-            alu_load_handler<false>(Op::kAddi, Op::kLw));
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
-            (&op_load<false, 4, false>));
-  expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/100 -
-                             (kBranchInstructionGas + kWideLoadGas));
+  // the two adds are unexecuted suffix. Base x9 is zero at entry and keeps the
+  // runtime-checked op_load; base x0 makes the same address absolute, so
+  // preparation bakes the trap into the tail slot.
+  for (const uint8_t base : {uint8_t{9}, uint8_t{0}}) {
+    SCOPED_TRACE(base);
+    const std::vector<uint32_t> words = {
+        branch(0, 0, 0, 8),     // beq x0, x0, +8 -> lands on the lw
+        addi(6, 0, 1),          // skipped (fuses alu_load with the lw)
+        load(4, 2, base, 2047), // lw x4, 2047(base) -> FAULT (branch-in head)
+        op(7, 6, 6, 0, 0),      // add x7, x6, x6 (never runs)
+        op(8, 6, 6, 0, 0),      // add x8, x6, x6 (never runs)
+    };
+    auto threaded = threaded_from_words(words);
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1),
+              alu_load_handler<false>(Op::kAddi, Op::kLw));
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 2),
+              (base == 0 ? Handler{&trap_bad_memory<false>}
+                         : Handler{&op_load<false, 4, false>}));
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/100 -
+                               (kBranchInstructionGas + kWideLoadGas));
+  }
 }
 
 TEST(Rv32ThreadedTrapGas, fusedLoadRrHeadFault)
@@ -2574,23 +2581,29 @@ TEST(Rv32ThreadedTrapGas, loadBreakCarrierFaultRefundsNoSuffix)
   // the lead chunk in full; the threaded break-variant lw must refund NO suffix
   // (its successor heads the next, uncharged chunk), leaving the same amount
   // charged. A non-Brk refund would credit the next chunk's whole kMaxRunGas.
+  // Base x9 is zero at entry and keeps the runtime-checked carrier; base x0
+  // bakes trap_bad_memory<.., Brk> into the carrier slot instead.
   constexpr size_t kLeadDivs = (kMaxRunGas - kWideLoadGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
-  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(load(4, 2, 0,
-                       2047)); // lw x4, 2047(x0) -> OOB fault at break carrier
-  words.insert(words.end(), kTrailDivs,
-               op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
+  for (const uint8_t base : {uint8_t{9}, uint8_t{0}}) {
+    SCOPED_TRACE(base);
+    std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
+    words.push_back(load(4, 2, base,
+                         2047)); // lw x4, 2047(base) -> OOB fault at carrier
+    words.insert(words.end(), kTrailDivs,
+                 op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
-  auto threaded = threaded_from_words(words);
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
-                                                                kLeadDivs),
-            (&op_load<false, 4, false, true>));
+    auto threaded = threaded_from_words(words);
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                  kLeadDivs),
+              (base == 0 ? Handler{&trap_bad_memory<false, true>}
+                         : Handler{&op_load<false, 4, false, true>}));
 
-  const uint64_t charged = (kLeadDivs * kDivInstructionGas) + kWideLoadGas;
-  expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/20000 - charged,
-                         /*check_pc=*/true, /*gas_limit=*/20000);
+    const uint64_t charged = (kLeadDivs * kDivInstructionGas) + kWideLoadGas;
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/20000 - charged,
+                           /*check_pc=*/true, /*gas_limit=*/20000);
+  }
 }
 
 TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
@@ -2602,25 +2615,30 @@ TEST(Rv32ThreadedTrapGas, storeBreakCarrierFaultRefundsNoSuffix)
   // kMaxRunGas chunk the tail-greedy lowering cannot fold the store into, so
   // the store is the break carrier. The whole lead chunk is charged; the
   // break-variant sw refunds no suffix.
+  // Base x9 / x0 as in the load case above.
   constexpr size_t kLeadDivs =
       (kMaxRunGas - kBaseInstructionGas) / kDivInstructionGas;
   constexpr size_t kTrailDivs = kMaxRunGas / kDivInstructionGas;
-  std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
-  words.push_back(store(0, 2, 2047,
-                        2)); // sw x2, 2047(x0) -> OOB fault at break carrier
-  words.insert(words.end(), kTrailDivs,
-               op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
+  for (const uint8_t base : {uint8_t{9}, uint8_t{0}}) {
+    SCOPED_TRACE(base);
+    std::vector<uint32_t> words(kLeadDivs, op(3, 1, 2, 4, 0x01)); // valid divs
+    words.push_back(store(base, 2, 2047,
+                          2)); // sw x2, 2047(base) -> OOB fault at carrier
+    words.insert(words.end(), kTrailDivs,
+                 op(3, 1, 2, 4, 0x01)); // full trailing chunk (never reached)
 
-  auto threaded = threaded_from_words(words);
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
-                                                                kLeadDivs),
-            (&op_store<false, 4, true>));
+    auto threaded = threaded_from_words(words);
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded,
+                                                                  kLeadDivs),
+              (base == 0 ? Handler{&trap_bad_memory<false, true>}
+                         : Handler{&op_store<false, 4, true>}));
 
-  const uint64_t charged =
-      (kLeadDivs * kDivInstructionGas) + kBaseInstructionGas;
-  expect_trap_gas_parity(words, Trap::kBadMemory,
-                         /*expected_gas_remaining=*/20000 - charged,
-                         /*check_pc=*/true, /*gas_limit=*/20000);
+    const uint64_t charged =
+        (kLeadDivs * kDivInstructionGas) + kBaseInstructionGas;
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/20000 - charged,
+                           /*check_pc=*/true, /*gas_limit=*/20000);
+  }
 }
 
 // Sweep every budget 0..max_budget over `words` lowered with a non-default
@@ -2669,15 +2687,21 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultOnCarrierBudgetSweep)
   using test_program::load;
   // At kMinRunGasCap, LW fills a chunk by itself. Its break-carrier fault
   // refunds no suffix gas. Sweep budgets across the prefix and faulting load.
-  std::vector<uint32_t> words(7, addi(1, 0, 1));
-  words.push_back(load(5, 2, 0, 300)); // slot 7: OOB lw -> carrier
-  words.insert(words.end(), 7, addi(2, 0, 2));
-  words.push_back(kEcallWord);
-  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
-                                      /*trace=*/false, kMinRunGasCap);
-  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
-            (&op_load<false, 4, false, true>));
-  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+  // Base x9 is zero at entry (runtime-checked carrier); base x0 bakes the
+  // carrier's trap during preparation.
+  for (const uint8_t base : {uint8_t{9}, uint8_t{0}}) {
+    SCOPED_TRACE(base);
+    std::vector<uint32_t> words(7, addi(1, 0, 1));
+    words.push_back(load(5, 2, base, 300)); // slot 7: OOB lw -> carrier
+    words.insert(words.end(), 7, addi(2, 0, 2));
+    words.push_back(kEcallWord);
+    auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                        /*trace=*/false, kMinRunGasCap);
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+              (base == 0 ? Handler{&trap_bad_memory<false, true>}
+                         : Handler{&op_load<false, 4, false, true>}));
+    expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
+  }
 }
 
 TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
@@ -2763,6 +2787,333 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
     const std::vector<uint32_t> words = {addi(1, 0, 1), load(2, 0, 1, -2)};
     expect_trap_gas_parity(words, Trap::kBadMemory,
                            /*expected_gas_remaining=*/98);
+  }
+}
+
+// --- x0-based (absolute) loads and stores -----------------------------------
+// Handler selection and parity with the canonical Machine.
+
+std::shared_ptr<const ThreadedMachinePreInstantiation>
+threaded_from_words_unfused(std::span<const uint32_t> words,
+                            uint32_t total_memory_size, bool trace)
+{
+  auto pre_instantiation =
+      ThreadedMachinePreInstantiation::create(words_to_bytes(words),
+                                              /*memory=*/{}, /*memory_start=*/0,
+                                              total_memory_size, trace,
+                                              kMaxRunGas, /*fuse=*/false);
+  EXPECT_TRUE(pre_instantiation.has_value());
+  return std::make_shared<const ThreadedMachinePreInstantiation>(
+      std::move(pre_instantiation.value()));
+}
+
+// Compares the canonical Machine against all four threaded lowerings; after
+// kOutOfGas only (trap, gas) is compared.
+void
+expect_final_state_parity(std::span<const uint32_t> words,
+                          uint32_t memory_bytes, uint64_t gas_limit)
+{
+  const auto canonical = make_program(words);
+  ASSERT_NE(canonical, nullptr);
+  Machine cmachine(canonical, memory_bytes, gas_limit);
+  RecordingHost chost;
+  const StepResult cresult = cmachine.run(chost);
+
+  for (const bool trace : {false, true}) {
+    for (const bool fuse : {true, false}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "trace=" << trace << " fuse=" << fuse);
+      auto threaded =
+          fuse ? threaded_from_words(words, memory_bytes, trace)
+               : threaded_from_words_unfused(words, memory_bytes, trace);
+      ThreadedMachine tmachine(*threaded, gas_limit);
+      RecordingHost thost;
+      TraceObserver tobs;
+      const StepResult tresult =
+          trace ? tmachine.run(thost, tobs) : tmachine.run(thost);
+      EXPECT_EQ(tresult, cresult);
+      EXPECT_EQ(tmachine.trap(), cmachine.trap());
+      EXPECT_EQ(tmachine.gas_remaining(), cmachine.gas_remaining());
+      if (cmachine.trap() == Trap::kOutOfGas) {
+        continue;
+      }
+      EXPECT_EQ(tmachine.pc(), cmachine.pc());
+      EXPECT_EQ(tmachine.halted(), cmachine.halted());
+      EXPECT_EQ(tmachine.halt_code(), cmachine.halt_code());
+      for (size_t r = 0; r < kRegisterCount; ++r) {
+        EXPECT_EQ(tmachine.reg(r), cmachine.reg(r)) << "x" << r;
+      }
+      EXPECT_TRUE(std::ranges::equal(tmachine.memory(), cmachine.memory()));
+    }
+  }
+}
+
+TEST(Rv32ThreadedAbsoluteAccess, preparationSelectsHandlerFromConstantAddress)
+{
+  using test_program::load;
+  using test_program::store;
+  // Each access is followed by an ecall, which no rule fuses with, so slot 0
+  // keeps its standalone handler. Memory is 256 bytes unless stated.
+  auto handler_for_access = [](uint32_t word, uint32_t memory_bytes = 256,
+                               bool trace = false) {
+    const std::vector<uint32_t> words = {word, kEcallWord};
+    auto threaded = threaded_from_words(words, memory_bytes, trace);
+    return ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 0);
+  };
+  const Handler trap = &trap_bad_memory<false>;
+
+  // Last in-bounds address for each width, then the first that is not.
+  EXPECT_EQ(handler_for_access(load(1, 2, 0, 252)),
+            (&op_load_abs<false, 4, false>));
+  EXPECT_EQ(handler_for_access(load(1, 2, 0, 253)), trap);
+  EXPECT_EQ(handler_for_access(load(1, 1, 0, 254)),
+            (&op_load_abs<false, 2, true>));
+  EXPECT_EQ(handler_for_access(load(1, 1, 0, 255)), trap);
+  EXPECT_EQ(handler_for_access(load(1, 5, 0, 254)),
+            (&op_load_abs<false, 2, false>));
+  EXPECT_EQ(handler_for_access(load(1, 0, 0, 255)),
+            (&op_load_abs<false, 1, true>));
+  EXPECT_EQ(handler_for_access(load(1, 0, 0, 256)), trap);
+  EXPECT_EQ(handler_for_access(load(1, 4, 0, 255)),
+            (&op_load_abs<false, 1, false>));
+  EXPECT_EQ(handler_for_access(store(0, 1, 252, 2)), (&op_store_abs<false, 4>));
+  EXPECT_EQ(handler_for_access(store(0, 1, 253, 2)), trap);
+  EXPECT_EQ(handler_for_access(store(0, 1, 254, 1)), (&op_store_abs<false, 2>));
+  EXPECT_EQ(handler_for_access(store(0, 1, 255, 1)), trap);
+  EXPECT_EQ(handler_for_access(store(0, 1, 255, 0)), (&op_store_abs<false, 1>));
+  EXPECT_EQ(handler_for_access(store(0, 1, 256, 0)), trap);
+
+  // A negative immediate addresses the top of the 32-bit space, which is past
+  // every admissible memory size.
+  EXPECT_EQ(handler_for_access(load(1, 0, 0, -1), kMemoryCeilingBytes), trap);
+  EXPECT_EQ(handler_for_access(store(0, 1, -2048, 2), kMemoryCeilingBytes),
+            trap);
+  // Zero-sized memory: every absolute access traps.
+  EXPECT_EQ(handler_for_access(load(1, 4, 0, 0), /*memory_bytes=*/0), trap);
+  // The traced lowering makes the same decision with traced handlers.
+  EXPECT_EQ(handler_for_access(load(1, 2, 0, 0), 256, /*trace=*/true),
+            (&op_load_abs<true, 4, false>));
+  EXPECT_EQ(handler_for_access(load(1, 2, 0, 253), 256, /*trace=*/true),
+            Handler{&trap_bad_memory<true>});
+  // A non-x0 base keeps the runtime check, even when it holds zero.
+  EXPECT_EQ(handler_for_access(load(1, 2, 9, 252)),
+            (&op_load<false, 4, false>));
+  EXPECT_EQ(handler_for_access(store(9, 1, 252, 2)), (&op_store<false, 4>));
+}
+
+TEST(Rv32ThreadedAbsoluteAccess, inBoundsAccessesMatchCanonical)
+{
+  using test_program::load;
+  using test_program::store;
+  using test_program::u_type;
+  // Every width, sign and zero extension, unaligned accesses, and the last
+  // byte of memory, all through x0. The unfused lowering puts every access on
+  // op_load_abs / op_store_abs; the fused one also covers fused heads.
+  const std::vector<uint32_t> words = {
+      addi(1, 0, -128),             // x1 = 0xffffff80
+      store(0, 1, 0, 0),            // sb x1, 0(x0)
+      addi(2, 0, -2),               // x2 = 0xfffffffe
+      store(0, 2, 2, 1),            // sh x2, 2(x0)
+      u_type(0x37, 3, 0x81234000U), // lui x3, 0x81234
+      addi(3, 3, 0x567),            // x3 = 0x81234567
+      store(0, 3, 4, 2),            // sw x3, 4(x0)
+      store(0, 3, 249, 2),          // sw x3, 249(x0) (unaligned)
+      store(0, 3, 255, 0),          // sb x3, 255(x0) (last byte)
+      load(10, 0, 0, 0),            // lb x10, 0(x0)   = -128
+      load(11, 4, 0, 0),            // lbu x11, 0(x0)  = 128
+      load(12, 1, 0, 2),            // lh x12, 2(x0)   = -2
+      load(13, 5, 0, 2),            // lhu x13, 2(x0)  = 0xfffe
+      load(14, 2, 0, 4),            // lw x14, 4(x0)
+      load(15, 2, 0, 249),          // lw x15, 249(x0) (unaligned)
+      load(16, 1, 0, 251),          // lh x16, 251(x0) (unaligned)
+      load(17, 4, 0, 255),          // lbu x17, 255(x0)
+      load(0, 2, 0, 8),             // lw x0, 8(x0) (discarded)
+      kEcallWord,
+  };
+  const auto unfused = threaded_from_words_unfused(words, 256, /*trace=*/false);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*unfused, 14),
+            (&op_load_abs<false, 4, false>));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*unfused, 15),
+            (&op_load_abs<false, 2, true>));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*unfused, 7),
+            (&op_store_abs<false, 4>));
+  expect_final_state_parity(words, 256, 1000);
+
+  Machine cmachine(make_program(words), 256, 1000);
+  RecordingHost host;
+  ASSERT_EQ(cmachine.run(host), StepResult::kHalted);
+  EXPECT_EQ(cmachine.reg(10), 0xffffff80U);
+  EXPECT_EQ(cmachine.reg(11), 0x80U);
+  EXPECT_EQ(cmachine.reg(12), 0xfffffffeU);
+  EXPECT_EQ(cmachine.reg(13), 0xfffeU);
+  EXPECT_EQ(cmachine.reg(14), 0x81234567U);
+  EXPECT_EQ(cmachine.reg(15), 0x81234567U);
+  EXPECT_EQ(cmachine.reg(16), 0xffff8123U);
+  EXPECT_EQ(cmachine.reg(17), 0x67U);
+}
+
+TEST(Rv32ThreadedAbsoluteAccess, outOfBoundsAccessTrapsLikeCanonical)
+{
+  using test_program::load;
+  using test_program::store;
+  // A plain add before the access (no rule fuses add with a load or store)
+  // and two adds after it (unexecuted suffix to refund). The access traps at
+  // its own pc with only add + access charged.
+  struct Case {
+    uint32_t access;
+    uint64_t access_gas;
+    uint32_t memory_bytes;
+  };
+  const std::array<Case, 7> cases = {{
+      {.access = load(4, 2, 0, 253),
+       .access_gas = kWideLoadGas,
+       .memory_bytes = 256}, // lw straddles the end
+      {.access = load(4, 0, 0, 256),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // lb one past the end
+      {.access = store(0, 1, 255, 1),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // sh straddles
+      {.access = store(0, 1, 2047, 2),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 256}, // sw far past
+      {.access = load(4, 2, 0, -4),
+       .access_gas = kWideLoadGas,
+       .memory_bytes = 4096}, // wraps to 0xfffffffc
+      {.access = store(0, 1, -1, 0),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 4096}, // 0xffffffff
+      {.access = load(4, 4, 0, 0),
+       .access_gas = kBaseInstructionGas,
+       .memory_bytes = 0}, // zero-sized memory
+  }};
+  for (const Case &c : cases) {
+    SCOPED_TRACE(::testing::Message() << std::hex << c.access);
+    const std::vector<uint32_t> words = {
+        op(1, 0, 0, 0, 0), // add x1, x0, x0
+        c.access,          // -> FAULT
+        op(7, 6, 6, 0, 0), // add x7, x6, x6 (never runs)
+        op(8, 6, 6, 0, 0), // add x8, x6, x6 (never runs)
+    };
+    auto threaded = threaded_from_words(words, c.memory_bytes);
+    EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 1),
+              Handler{&trap_bad_memory<false>});
+    expect_trap_gas_parity(words, Trap::kBadMemory,
+                           /*expected_gas_remaining=*/100 -
+                               (kBaseInstructionGas + c.access_gas),
+                           /*check_pc=*/true, /*gas_limit=*/100,
+                           c.memory_bytes);
+    // Budgets below the charged prefix leave the access in deficit.
+    for (uint64_t gas = 0; gas <= 6; ++gas) {
+      SCOPED_TRACE(gas);
+      expect_final_state_parity(words, c.memory_bytes, gas);
+    }
+  }
+}
+
+TEST(Rv32ThreadedAbsoluteAccess, branchIntoAbsoluteTailOfFusedPair)
+{
+  using test_program::branch;
+  using test_program::load;
+  using test_program::store;
+  // Slots 3+4 fuse (addi;lw), so the fused head runs a checked load; the
+  // branch skips the head and enters the tail, whose standalone handler is
+  // the absolute load.
+  const std::vector<uint32_t> words = {
+      addi(5, 0, 77),     // x5 = 77
+      store(0, 5, 8, 2),  // sw x5, 8(x0)
+      branch(0, 0, 0, 8), // beq x0, x0, +8 -> slot 4
+      addi(6, 0, 1),      // skipped
+      load(7, 2, 0, 8),   // lw x7, 8(x0) (branch-in)
+      kEcallWord,
+  };
+  auto threaded = threaded_from_words(words);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 3),
+            alu_load_handler<false>(Op::kAddi, Op::kLw));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 4),
+            (&op_load_abs<false, 4, false>));
+  ThreadedMachine machine(*threaded, 100);
+  RecordingHost host;
+  ASSERT_EQ(machine.run(host), StepResult::kHalted);
+  EXPECT_EQ(machine.reg(7), 77U);
+  EXPECT_EQ(machine.reg(6), 0U);
+  expect_final_state_parity(words, 256, 100);
+}
+
+TEST(Rv32ThreadedAbsoluteAccess, inBoundsBreakCarrierBudgetSweep)
+{
+  using test_program::load;
+  // The layout of cappedLoadFaultOnCarrierBudgetSweep with an in-bounds
+  // absolute lw: slot 7 is a break carrier, so it gets the Brk variant, which
+  // must enter the next chunk instead of threading into it.
+  std::vector<uint32_t> words(7, addi(1, 0, 1));
+  words.push_back(load(5, 2, 0, 252)); // slot 7: in-bounds lw -> carrier
+  words.insert(words.end(), 7, addi(2, 0, 2));
+  words.push_back(kEcallWord);
+  auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
+                                      /*trace=*/false, kMinRunGasCap);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
+            (&op_load_abs<false, 4, false, true>));
+  expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/30);
+}
+
+// Random absolute-access programs vs the canonical Machine.
+TEST(Rv32ThreadedAbsoluteAccess, randomProgramsMatchCanonical)
+{
+  using test_program::branch;
+  using test_program::load;
+  using test_program::store;
+  constexpr std::array<uint32_t, 10> kMemorySizes = {0,    1,   3,    64,
+                                                     255,  256, 2047, 2048,
+                                                     2050, 4096};
+  constexpr std::array<uint8_t, 5> kLoadFunct3 = {0, 1, 2, 4, 5};
+  for (uint64_t seed = 0; seed < 400; ++seed) {
+    std::mt19937_64 rng((seed * 0x9e3779b97f4a7c15ULL) + 1);
+    const uint32_t memory_bytes = kMemorySizes[rng() % kMemorySizes.size()];
+    auto random_imm = [&]() -> int32_t {
+      if (rng() % 2 == 0) {
+        // Within 8 bytes of the end of memory, clamped to the 12-bit range.
+        const int64_t imm =
+            int64_t{memory_bytes} - 8 + static_cast<int64_t>(rng() % 16);
+        return static_cast<int32_t>(std::clamp<int64_t>(imm, -2048, 2047));
+      }
+      return static_cast<int32_t>(rng() % 4096) - 2048;
+    };
+    auto reg = [&]() { return static_cast<uint8_t>(rng() % 8); };
+    std::vector<uint32_t> words;
+    const size_t length = 8 + (rng() % 40);
+    for (size_t i = 0; i < length; ++i) {
+      switch (rng() % 6) {
+      case 0:
+      case 1:
+        words.push_back(load(reg(), kLoadFunct3[rng() % kLoadFunct3.size()], 0,
+                             random_imm()));
+        break;
+      case 2:
+        words.push_back(
+            store(0, reg(), random_imm(), static_cast<uint8_t>(rng() % 3)));
+        break;
+      case 3:
+        words.push_back(
+            addi(reg(), reg(), static_cast<int32_t>(rng() % 4096) - 2048));
+        break;
+      case 4:
+        words.push_back(op(reg(), reg(), reg(), 0, 0)); // add
+        break;
+      default:
+        // Forward skip of one or two instructions.
+        words.push_back(
+            branch(0, 0, 0, static_cast<int32_t>(4 * (2 + rng() % 2))));
+        break;
+      }
+    }
+    // Halt, plus landing pads so a skip from the last instruction stays in
+    // the image (a kBadPc trap pc is not a cross-engine invariant).
+    words.insert(words.end(), 3, kEcallWord);
+    const uint64_t gas = (rng() % 4 == 0) ? rng() % 24 : 10'000;
+    SCOPED_TRACE(::testing::Message() << "seed " << seed << " memory "
+                                      << memory_bytes << " gas " << gas);
+    expect_final_state_parity(words, memory_bytes, gas);
   }
 }
 
