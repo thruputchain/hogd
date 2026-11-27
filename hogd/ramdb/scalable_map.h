@@ -54,6 +54,12 @@ public:
   // get finds an item for a given key.
   DBStatus<DBItem> get(std::span<const std::byte> key);
 
+  // get_with_size returns an item's type and value size; the value is not
+  // copied when its type is metadata_only_type, so callers that need only the
+  // size of such items avoid copying a potentially large value.
+  DBStatus<SizedDBItem> get_with_size(std::span<const std::byte> key,
+                                      uint8_t metadata_only_type);
+
   // get_if_type finds an item of a specific type for a given key. If the type
   // does not match, it will return DBCode::kTypeMismatch.
   DBStatus<OwningSpan<const std::byte>>
