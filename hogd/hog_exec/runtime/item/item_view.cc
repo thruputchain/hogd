@@ -2,10 +2,12 @@
 
 #include <algorithm>
 #include <cassert>
+#include <limits>
 #include <memory>
 #include <optional>
 #include <random>
 #include <span>
+#include <type_traits>
 #include <utility>
 #include <variant>
 
@@ -20,6 +22,7 @@
 #include "hogd/hog_exec/runtime/item/item_view_type.h"
 #include "hogd/hog_exec/runtime/item/snapshot_storage_item.h"
 #include "hogd/hog_exec/runtime/item/storage_snapshot_cache.h"
+#include "hogd/storage_cost/storage_cost_model.h"
 #include "retrocausal_queue.hh"
 #include "storage_item.hh"
 #include "syscall_error.hh"
@@ -70,7 +73,167 @@ replay_exhausted_at_cap(bool cap_exceeded)
   return SystemError{SystemErrorCode::ValidationFailure};
 }
 
+// Scalar reservations are cost - snapshot_cost under ExclusiveLock and
+// max(cost - snapshot_cost, 0) otherwise. Shared RCQs instead reserve a fixed
+// standalone insertion cost. Keep this dependence on the *same* snapshot until
+// subtracting the two views; independently bounding each loses cancellation.
+struct StorageReservation {
+  enum class Kind { kConstant, kExclusive, kShared };
+  int128_t cost;
+  Kind kind;
+
+  int128_t at(int128_t snapshot_cost) const
+  {
+    switch (kind) {
+    case Kind::kConstant:
+      return cost;
+    case Kind::kExclusive:
+      return cost - snapshot_cost;
+    case Kind::kShared:
+      return std::max<int128_t>(cost - snapshot_cost, 0);
+    }
+    panic("invalid storage reservation kind");
+  }
+};
+
+std::optional<int128_t>
+snapshot_storage_cost(SnapshotStorageItem const *snapshot,
+                      StorageCostModel const &model)
+{
+  if (!snapshot) {
+    return std::nullopt;
+  }
+  auto type = snapshot->type();
+  if (!type) {
+    return 0;
+  }
+  switch (*type) {
+  case ItemViewType::kBytestring:
+    return model.get_bytestring_cost(snapshot->bytestring().size());
+  case ItemViewType::kNNInt:
+    return model.get_nnint_cost();
+  case ItemViewType::kRetrocausalQueue:
+    return model.get_retrocausal_queue_cost(
+        snapshot->retrocausal_queue_metadata().live_entries);
+  default:
+    return std::nullopt;
+  }
+}
+
+StorageCostChangeBounds
+reservation_change_bounds(StorageReservation const &before,
+                          StorageReservation const &after,
+                          std::optional<int128_t> snapshot_cost)
+{
+  auto difference = [&](int128_t cost) {
+    return after.at(cost) - before.at(cost);
+  };
+  if (snapshot_cost) {
+    int128_t change = difference(*snapshot_cost);
+    return {.lower = change, .upper = change};
+  }
+
+  // The difference is piecewise linear over nonnegative snapshot costs. Its
+  // only possible bends are the two clamp thresholds. Beyond both thresholds,
+  // only an exclusive reservation still has slope -1.
+  int128_t low = difference(0);
+  int128_t high = low;
+  for (int128_t cost : {before.cost, after.cost}) {
+    int128_t change = difference(cost);
+    low = std::min(low, change);
+    high = std::max(high, change);
+  }
+  StorageCostChangeBounds out{.lower = low, .upper = high};
+  bool before_exclusive = before.kind == StorageReservation::Kind::kExclusive;
+  bool after_exclusive = after.kind == StorageReservation::Kind::kExclusive;
+  if (after_exclusive && !before_exclusive) {
+    out.lower.reset();
+  }
+  if (before_exclusive && !after_exclusive) {
+    out.upper.reset();
+  }
+  return out;
+}
+
 } // namespace
+
+SnapshotStorageItem const *
+ItemView::get_loaded_snapshot() const
+{
+  if (auto const *item = std::get_if<UnmodifiedItem>(&delta_args_)) {
+    return item->is_loaded() ? &item->base_item() : nullptr;
+  }
+  if (auto const *item = std::get_if<RetrocausalQueueItem>(&delta_args_)) {
+    return &item->base_item();
+  }
+  return nullptr;
+}
+
+StorageCostChangeBounds
+ItemView::get_storage_cost_change_bounds(
+    ItemView const &before, StorageCostModel const &cost_model,
+    SnapshotStorageItem const *snapshot) const
+{
+  if (this == &before) {
+    return {.lower = 0, .upper = 0};
+  }
+  auto reservation = [&](ItemView const &view) {
+    bool exclusive =
+        (static_cast<uint32_t>(view.flags_) &
+         static_cast<uint32_t>(StorageDeltaFlags::ExclusiveLock)) != 0;
+    auto kind = exclusive ? StorageReservation::Kind::kExclusive
+                          : StorageReservation::Kind::kShared;
+    return std::visit(
+        [&](auto const &item) -> std::optional<StorageReservation> {
+          using T = std::decay_t<decltype(item)>;
+          if constexpr (std::is_same_v<T, UnmodifiedItem>) {
+            return StorageReservation{.cost = 0,
+                                      .kind =
+                                          StorageReservation::Kind::kConstant};
+          }
+          else if constexpr (std::is_same_v<T, DeletedItem>) {
+            return StorageReservation{.cost = 0, .kind = kind};
+          }
+          else if constexpr (std::is_same_v<T, BytestringItem>) {
+            return StorageReservation{.cost = cost_model.get_bytestring_cost(
+                                          item.bytestring_.size()),
+                                      .kind = kind};
+          }
+          else if constexpr (std::is_same_v<T, NNIntItem>) {
+            // A blind add still has a fixed resulting footprint.
+            return StorageReservation{.cost = cost_model.get_nnint_cost(),
+                                      .kind = kind};
+          }
+          else if constexpr (std::is_same_v<T, RetrocausalQueueItem>) {
+            auto cost = item.get_storage_cost(cost_model, exclusive);
+            if (!cost) {
+              return std::nullopt;
+            }
+            return StorageReservation{
+                .cost = *cost,
+                .kind = exclusive ? kind : StorageReservation::Kind::kConstant};
+          }
+          else {
+            return std::nullopt;
+          }
+        },
+        view.delta_args_);
+  };
+
+  auto prior = reservation(before);
+  auto next = reservation(*this);
+  if (!prior || !next) {
+    return {.lower = std::nullopt, .upper = std::nullopt};
+  }
+  if (!snapshot) {
+    snapshot = before.get_loaded_snapshot();
+  }
+  if (!snapshot) {
+    snapshot = get_loaded_snapshot();
+  }
+  return reservation_change_bounds(*prior, *next,
+                                   snapshot_storage_cost(snapshot, cost_model));
+}
 
 std::pair<std::optional<StorageDelta>, StorageDeltaFlagSet>
 ItemView::get_delta(std::span<QueueEntry const> observed_entries) const
@@ -160,6 +323,36 @@ NNIntItem::validate() const
 
 // RetrocausalQueueItem implementation
 
+std::optional<int128_t>
+RetrocausalQueueItem::get_storage_cost(StorageCostModel const &cost_model,
+                                       bool exclusive) const
+{
+  CHECK_LE(self_consumed_index_, queue_delta_.insert.added_entries.size());
+  int128_t current_entries =
+      int128_t{queue_delta_.insert.added_entries.size()} -
+      self_consumed_index_ - locally_consumed_index_;
+  if (!exclusive) {
+    // Match RetrocausalQueueLock: past-block consumes cannot reduce a shared
+    // reservation, since concurrent changes can invalidate that baseline.
+    return cost_model.get_retrocausal_queue_cost(
+        static_cast<int64_t>(std::max<int128_t>(current_entries, 0)));
+  }
+
+  int128_t past_entries =
+      base_item_->type() == ItemViewType::kRetrocausalQueue
+          ? int128_t{base_item_->retrocausal_queue_metadata().live_entries}
+          : 0;
+  int128_t live_entries =
+      past_entries - past_block_consumed_count_ + current_entries;
+  if (live_entries < 0 || live_entries > std::numeric_limits<int64_t>::max()) {
+    // The DB must reject such an exclusive delta. Do not turn an invalid
+    // count into a wrapped price (or panic on contract-controlled input).
+    return std::nullopt;
+  }
+  return cost_model.get_retrocausal_queue_cost(
+      static_cast<int64_t>(live_entries));
+}
+
 RetrocausalQueueItem
 RetrocausalQueueItem::make_fully_consumed_item(
     const SnapshotStorageItem &base_item, x23::Vec<QueueEntry> consumed_entries)
@@ -189,6 +382,7 @@ RetrocausalQueueItem::make_fully_consumed_item(
     if (base_item.type() == ItemViewType::kRetrocausalQueue) {
       auto const &meta = base_item.retrocausal_queue_metadata();
       past_consume.max_fully_consumed_block_number = meta.max_live_block_num;
+      item.past_block_consumed_count_ = meta.live_entries;
     }
     item.queue_delta_.consume.emplace(RetrocausalQueueConsumeDelta{
         .past_block_consume = past_consume,
