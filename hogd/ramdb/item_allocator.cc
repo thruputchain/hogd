@@ -122,8 +122,10 @@ ItemAllocator::compact(float utilization_thresh)
         CompactionStats s = compact_one(std::move(*l));
         // Free the source now, not when the pass returns: its memory backs
         // the destinations of the loglets still to be compacted, and the
-        // reserved loglets alone cannot hold a whole pass (#4891).
-        l->reset();
+        // reserved loglets alone cannot hold a whole pass (#4891). Dropping
+        // `l` does not do it, because in_flight shares ownership, and
+        // compact_one does not move from its argument.
+        (*l).reset();
         return s;
       }));
     }
