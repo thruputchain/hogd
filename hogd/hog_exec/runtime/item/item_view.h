@@ -117,6 +117,12 @@ public:
   [[nodiscard]] x23::Async<SystemStatus<const QueueEntry *>>
   get_next_item(ExecutionModeData &execution_mode_data, bool advance_cursor);
 
+  // The block number the next get_next_item() searches past blocks from, or
+  // nullopt when the committed value is not a queue and so that search reads
+  // nothing. The search is a database read unless the block cache already
+  // holds the answer.
+  std::optional<uint64_t> past_block_lookup_index() const;
+
   [[nodiscard]] SyscallStatus<void> insert_entry(QueueEntry const &entry);
 
   uint32_t get_retrocausally_consumed_count() const
@@ -125,6 +131,12 @@ public:
   }
 
 private:
+  struct PastBlockCursor {
+    uint64_t block_index;
+    uint64_t partial_consume_quantity;
+  };
+  PastBlockCursor past_block_cursor() const;
+
   x23::MaybeAsync<SystemStatus<const RetrocausalQueueBlock *>>
   get_next_block(uint64_t search_start_index) const;
 
