@@ -53,6 +53,15 @@ if(BUILD_BENCHMARKS)
     )
 
     set_property(TARGET hog_indexer_bench PROPERTY INTERPROCEDURAL_OPTIMIZATION True)
+
+    add_executable(hog_indexer_strict_apply_bench
+        strict_apply_bench.cc
+    )
+
+    target_link_libraries(hog_indexer_strict_apply_bench
+        hog_indexer
+        hogd
+    )
 endif()
 
 add_executable(

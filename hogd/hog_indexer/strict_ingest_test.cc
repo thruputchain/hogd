@@ -15,6 +15,7 @@
 #include <rocksdb/options.h>
 #include <rocksdb/perf_context.h>
 #include <rocksdb/perf_level.h>
+#include <rocksdb/utilities/options_util.h>
 #include <span>
 #include <stdexcept>
 #include <string>
@@ -1886,6 +1887,28 @@ TEST_F(StrictIndexerTest, DuplicateHashesCannotCommitPartialBlockProjection)
     EXPECT_EQ(db_->durable_progress().initialized().contiguous_height, 0);
     EXPECT_FALSE(db_->get_tx_record(event.tx_hash));
     EXPECT_FALSE(db_->get_block_by_height(1));
+  }
+}
+
+TEST_F(StrictIndexerTest, ReopenUsesTheMemtableOptionsOfANewDatabase)
+{
+  db_.reset();
+  auto reopened = IndexDB::open(path_);
+  ASSERT_TRUE(reopened.has_value());
+
+  // RocksDB records the options of the latest open in an OPTIONS file.
+  rocksdb::ConfigOptions config;
+  rocksdb::DBOptions db_options;
+  std::vector<rocksdb::ColumnFamilyDescriptor> column_families;
+  ASSERT_TRUE(rocksdb::LoadLatestOptions(config, path_.string(), &db_options,
+                                         &column_families)
+                  .ok());
+  ASSERT_EQ(column_families.size(), 3u);
+  for (const auto &family : column_families) {
+    SCOPED_TRACE(family.name);
+    EXPECT_EQ(family.options.write_buffer_size, 256_MiB);
+    EXPECT_EQ(family.options.max_write_buffer_number, 6);
+    EXPECT_EQ(family.options.target_file_size_base, 256_MiB);
   }
 }
 
