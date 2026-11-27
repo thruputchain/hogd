@@ -125,9 +125,13 @@ load_stock_genesis_root_contract()
 NetworkConfig
 stock_network_config()
 {
-  // Stating every parameter keeps any later default change visible in the
-  // config hash.
-  return NetworkConfigParams::stated_defaults();
+  // Protocol defaults except the parameter set below. Stating every parameter
+  // keeps any later default change visible in the config hash.
+  NetworkConfig config = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 kStockMaxBytestringLen);
+  return config;
 }
 
 GenesisConfiguration

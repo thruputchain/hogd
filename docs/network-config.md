@@ -20,10 +20,19 @@ its header and initial memory, without network-config overrides. These are
 also the protocol defaults for omitted parameters. Configurations that state
 explicit values retain them.
 
-The stock config states every parameter at its protocol default. Local
-devnode chains and hosted bootstrap genesis both use it, so a contract meets
-the same limits locally and on a hosted devnet. A chain whose genesis omits a
-parameter gets its default.
+The stock config states every parameter at its protocol default except
+`max_bytestring_len`, which is 16384 rather than 4096. A storage read's
+first-touch cost is flat whatever the value size, so a contract that reads a
+large table pays per value rather than per byte: a 16 KiB value holds four
+4 KiB polynomials per read, and is the largest size that still fits a value
+and its working set in the 64 KiB guest memory. Storage deposit is charged per
+byte, so the larger limit does not change storage economics.
+
+Local devnode chains and hosted bootstrap genesis both use the stock config, so
+a contract meets the same limits locally and on a hosted devnet. A chain whose
+genesis omits a parameter gets its default. An existing chain keeps the value
+stated in its genesis, and a hosted network whose operators pin the parameter
+when generating genesis keeps the pinned value.
 
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 
