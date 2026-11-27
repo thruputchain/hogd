@@ -110,17 +110,15 @@ individual instruction observations for differential tests.
 
 It also fuses lw runs: up to 16 consecutive `lw` on one base register at
 consecutive words, ascending or descending, inside one charged chunk, with
-distinct destinations and only the last load allowed to overwrite the base.
-Compilers emit these to copy multi-word values and to restore saved
-registers. `op_load_run` checks the run's whole byte range once, loads the
-words, and dispatches once. Every member slot heads the run starting at it, so
-a branch into a run still runs fused. Wide handlers load a pair of words at a
-time (one 8-byte load on x86-64, one `ldp` on AArch64). A wide load cannot be
-forwarded from the two narrower stores that wrote its words while they are in
-flight, so a run that stores through the same base wrote within the preceding
-8 instructions gets narrow handlers instead: 4-byte loads in program order. A
-run also stops short of a last load that heads a load-use pair, so that pair
-still forwards the value to its consumer.
+only the last load allowed to overwrite the base. Compilers emit these to copy
+multi-word values and to restore saved registers. `op_load_run` checks the
+run's whole byte range once, loads the words in program order, and dispatches
+once. A run that fails the check executes its first `lw` as a plain load and
+continues with the next slot's handler, so a fault traps at the same
+instruction, with the same gas, as per-instruction execution. Every member slot
+heads the run starting at it, so a branch into a run still runs fused. A run
+stops short of a last load that heads a load-use pair, so that pair still
+forwards the value to its consumer.
 
 Dispatch requires the `musttail` attribute. [musttail.h](musttail.h) rejects
 unsupported compilers because ordinary recursive calls would grow the host
@@ -166,16 +164,6 @@ Registers, memory, trap PC, and intermediate trace gas may differ after
 speculative execution in a frame that will be discarded. The trap-gas and
 deficit tests in [rv32_threaded_test.cc](rv32_threaded_test.cc) cover this
 distinction, including fused instructions and split runs.
-
-One rule departs from canonical execution on purpose. An lw run that fails
-its range check traps at its first load, wherever its first out-of-bounds
-word lies: kBadMemory with the gas of a fault at that `lw`, or kOutOfGas when
-that `lw` is unaffordable. Canonical execution would trap at the first
-out-of-bounds load, charging the in-bounds loads before it. Every validator
-runs this engine, so the rule is deterministic consensus behavior; only the
-refund and state that a trap discards differ. Differential tests and the
-engine-diff fuzzer apply it to the canonical `Machine` through
-[load_run_reference.h](load_run_reference.h).
 
 ## Syscalls
 

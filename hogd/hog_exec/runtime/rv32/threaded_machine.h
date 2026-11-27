@@ -114,16 +114,6 @@ public:
   ThreadedMachinePreInstantiation &
   operator=(const ThreadedMachinePreInstantiation &) = delete;
 
-  // The lw run (op_load_run) that execution entering instruction `index` runs,
-  // if any. Differential tests and the engine-diff fuzzer use it to model the
-  // run's fault rule on the canonical Machine.
-  struct LoadRun {
-    uint32_t length;
-    bool descending;
-    bool wide; // the handler's load width; it does not affect results
-  };
-  [[nodiscard]] std::optional<LoadRun> load_run_at(size_t index) const;
-
 private:
   ThreadedMachinePreInstantiation(std::vector<Slot> exec,
                                   std::vector<uint8_t> initial_memory_image,
@@ -1112,58 +1102,35 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 // --- lw runs
 // ------------------------------------------------------------------
 //
-// N same-base lw at consecutive words behind one range check (DESIGN.md); a
-// run that fails the check traps at its first load.
+// N same-base lw at consecutive words behind one range check (DESIGN.md). A
+// run that fails the check executes its loads one at a time instead.
 inline constexpr uint32_t kMaxLoadRun = 16;
 
-template<bool Trace, uint32_t N, bool Descending, bool Wide>
+template<bool Trace, uint32_t N, bool Descending>
 StepResult
 op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
 {
   static_assert(N >= 2 && N <= kMaxLoadRun);
-  static_assert(!(Trace && Wide), "traced runs retire in program order");
   assert(memsize >= N * 4);
   const uint32_t head = c.m->regs_[ip->rs1] + bits_from_i32(ip->imm);
   const uint32_t lowest = Descending ? head - ((N - 1) * 4) : head;
   // In bounds iff lowest + 4N <= memsize. memsize >= 4N, so the limit does not
   // wrap, and passing it means no address in the run wrapped either.
   if (lowest > memsize - (N * 4)) [[unlikely]] {
-    HOGD_MUSTTAIL return trap_bad_memory<Trace>(c, ip, mem, memsize, gas);
+    // The head as a plain lw, then its successor's own handler: exactly
+    // per-instruction execution, including where and with what gas it traps.
+    HOGD_MUSTTAIL return op_load<Trace, 4, false>(c, ip, mem, memsize, gas);
   }
+  // Program order. Only the last load may overwrite the base, so reading it
+  // once is exact.
   const uint8_t *words = mem + lowest;
-  // Slot of the load reading the w-th word from the lowest.
-  constexpr auto kSlotOf = [](uint32_t w) {
-    return Descending ? N - 1 - w : w;
-  };
-  if constexpr (!Wide) {
-    // Program order; the traced handlers retire each load as its own step.
-    for (uint32_t k = 0; k < N; ++k) {
-      write_rd(c, ip[k].rd, le_load<4>(words, 4 * kSlotOf(k)));
-      if constexpr (Trace) {
-        if (k + 1 < N) {
-          HOGD_RETIRE_OP1(c, ip + k);
-        }
+  for (uint32_t k = 0; k < N; ++k) {
+    const uint32_t offset = 4 * (Descending ? N - 1 - k : k);
+    write_rd(c, ip[k].rd, le_load<4>(words, offset));
+    if constexpr (Trace) {
+      if (k + 1 < N) {
+        HOGD_RETIRE_OP1(c, ip + k);
       }
-    }
-  }
-  else {
-    for (uint32_t w = 0; w + 1 < N; w += 2) {
-#ifdef __aarch64__
-      // Adjacent 32-bit loads, which AArch64 pairs into one ldp.
-      const uint32_t low = le_load<4>(words, 4 * w);
-      const uint32_t high = le_load<4>(words, 4 * (w + 1));
-#else
-      // One 8-byte load per pair of words.
-      uint64_t pair;
-      std::memcpy(&pair, words + (4 * w), sizeof(pair));
-      const auto low = static_cast<uint32_t>(pair);
-      const auto high = static_cast<uint32_t>(pair >> 32);
-#endif
-      write_rd(c, ip[kSlotOf(w)].rd, low);
-      write_rd(c, ip[kSlotOf(w + 1)].rd, high);
-    }
-    if constexpr (N % 2 != 0) {
-      write_rd(c, ip[kSlotOf(N - 1)].rd, le_load<4>(words, 4 * (N - 1)));
     }
   }
   HOGD_THREAD_NEXT(c, ip + N);
@@ -1764,120 +1731,30 @@ fuse_alu_branch(const FusionCtx &f, Slot &s)
 }
 
 // op_load_run handlers by run length, from 2.
-template<bool Trace, bool Descending, bool Wide, uint32_t... Ns>
+template<bool Trace, bool Descending, uint32_t... Ns>
 constexpr std::array<Handler, sizeof...(Ns)>
 make_load_run_handlers(std::integer_sequence<uint32_t, Ns...> /*lengths*/)
 {
-  return {&op_load_run<Trace, Ns + 2, Descending, Wide>...};
+  return {&op_load_run<Trace, Ns + 2, Descending>...};
 }
 
-template<bool Trace, bool Descending, bool Wide>
+template<bool Trace, bool Descending>
 inline constexpr std::array<Handler, kMaxLoadRun - 1> kLoadRunHandlers =
-    make_load_run_handlers<Trace, Descending, Wide>(
+    make_load_run_handlers<Trace, Descending>(
         std::make_integer_sequence<uint32_t, kMaxLoadRun - 1>{});
 
-// The op_load_run handler for a run of n (2..kMaxLoadRun) loads. Traced
-// handlers are always narrow.
+// The op_load_run handler for a run of n (2..kMaxLoadRun) loads.
 inline Handler
-load_run_handler(uint32_t n, bool descending, bool wide, bool trace)
+load_run_handler(uint32_t n, bool descending, bool trace)
 {
   assert(n >= 2 && n <= kMaxLoadRun);
   const size_t i = n - 2;
   if (trace) {
-    return descending ? kLoadRunHandlers<true, true, false>[i]
-                      : kLoadRunHandlers<true, false, false>[i];
+    return descending ? kLoadRunHandlers<true, true>[i]
+                      : kLoadRunHandlers<true, false>[i];
   }
-  if (descending) {
-    return wide ? kLoadRunHandlers<false, true, true>[i]
-                : kLoadRunHandlers<false, true, false>[i];
-  }
-  return wide ? kLoadRunHandlers<false, false, true>[i]
-              : kLoadRunHandlers<false, false, false>[i];
-}
-
-inline std::optional<ThreadedMachinePreInstantiation::LoadRun>
-ThreadedMachinePreInstantiation::load_run_at(size_t index) const
-{
-  assert(index < exec_.size());
-  const Handler handler = exec_[index].handler;
-  for (uint32_t n = 2; n <= kMaxLoadRun; ++n) {
-    for (const bool descending : {false, true}) {
-      for (const bool wide : {false, true}) {
-        if (handler == load_run_handler(n, descending, wide, trace_)) {
-          return LoadRun{.length = n,
-                         .descending = descending,
-                         .wide = wide && !trace_};
-        }
-      }
-    }
-  }
-  return std::nullopt;
-}
-
-// How far back lowering looks for stores whose data a run may read while they
-// are still in flight.
-inline constexpr size_t kLoadRunStoreLookback = 8;
-
-// False when a recent store through the same base wrote [low, high): a wide
-// load cannot forward from two narrower stores (DESIGN.md).
-inline bool
-load_run_is_wide(const ThreadedProgram &program, size_t i, uint8_t base,
-                 int32_t low, int32_t high)
-{
-  for (size_t back = 1; back <= kLoadRunStoreLookback && back <= i; ++back) {
-    const auto instruction = program.instruction_at(i - back);
-    if (!instruction.has_value()) {
-      return true;
-    }
-    const Instr &in = *instruction;
-    int32_t store_width = 0;
-    switch (in.op) {
-    case Op::kJal:
-    case Op::kJalr:
-    case Op::kEcall:
-    case Op::kEbreak:
-    case Op::kUnimp:
-      return true;
-    case Op::kSb:
-      store_width = 1;
-      break;
-    case Op::kSh:
-      store_width = 2;
-      break;
-    case Op::kSw:
-      store_width = 4;
-      break;
-    default:
-      break;
-    }
-    if (store_width != 0) {
-      if (in.rs1 == base && in.imm < high && in.imm + store_width > low) {
-        return false;
-      }
-      continue;
-    }
-    if (!is_conditional_branch(in.op) && base != 0 && in.rd == base) {
-      return true;
-    }
-  }
-  return true;
-}
-
-// The longest prefix of run_length slots starting at exec[i] whose
-// destinations are distinct, x0 aside (op_load_run writes in address order).
-inline uint32_t
-distinct_destination_prefix(std::span<const Slot> exec, size_t i,
-                            uint32_t run_length)
-{
-  for (uint32_t k = 1; k < run_length; ++k) {
-    const uint8_t rd = exec[i + k].rd;
-    for (uint32_t j = 0; rd != 0 && j < k; ++j) {
-      if (exec[i + j].rd == rd) {
-        return k;
-      }
-    }
-  }
-  return run_length;
+  return descending ? kLoadRunHandlers<false, true>[i]
+                    : kLoadRunHandlers<false, false>[i];
 }
 
 // Rules are tried in order, first match wins. The head ops are disjoint per
@@ -2037,18 +1914,13 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       descending_chain =
           1 + ((links && next_op.imm == d.imm - 4) ? next_descending_chain : 0);
       const bool descending = descending_chain > ascending_chain;
-      uint32_t run = distinct_destination_prefix(
-          exec, i,
-          std::min({descending ? descending_chain : ascending_chain,
-                    kMaxLoadRun, total_memory_size / 4}));
+      uint32_t run = std::min({descending ? descending_chain : ascending_chain,
+                               kMaxLoadRun, total_memory_size / 4});
       if (run >= 2 && heads_load_use[i + run - 1]) {
         --run;
       }
       if (run >= 2) {
-        const auto span = static_cast<int32_t>(4 * run);
-        const int32_t low = descending ? d.imm + 4 - span : d.imm;
-        const bool wide = load_run_is_wide(*program, i, d.rs1, low, low + span);
-        slot.handler = load_run_handler(run, descending, wide, trace);
+        slot.handler = load_run_handler(run, descending, trace);
         fused_here = true;
       }
     }
