@@ -23,7 +23,6 @@
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 
