@@ -89,6 +89,11 @@ indexer_options(rocksdb::CompressionType compression_algorithm)
   table_options.cache_index_and_filter_blocks = false;
   options.table_factory.reset(
       rocksdb::NewBlockBasedTableFactory(table_options));
+
+  // One large block is a single huge WriteBatch; create and reopen share these.
+  options.write_buffer_size = 256_MiB;
+  options.max_write_buffer_number = 6;
+  options.target_file_size_base = 256_MiB;
   return options;
 }
 
@@ -537,14 +542,6 @@ IndexDB::make_new(const std::filesystem::path &path,
 
   auto options = indexer_options(compression_algorithm);
   options.create_if_missing = true;
-
-  // Performance optimizations for bulk loading
-  // Increase write buffer size for better SST file writing performance
-  options.write_buffer_size = 256_MiB; // 256 MB (default is 64 MB)
-  // Increase target file size for larger SST files (better for bulk loading)
-  options.target_file_size_base = 256_MiB; // 256 MB (default is 64 MB)
-  // Allow more write buffers in memory
-  options.max_write_buffer_number = 6; // default is 2
 
   rocksdb::DB *db_ptr = nullptr;
 
