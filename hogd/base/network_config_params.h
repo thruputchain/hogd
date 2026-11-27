@@ -48,10 +48,10 @@ inline constexpr uint32_t kDefaultMaxReturnBufferLen = 1024;
 // one now gets this cap rather than none.
 inline constexpr GasAmount kDefaultMaxTxGas = 1'000'000'000;
 
-// The executor->HogDb message budget every chain ran under before the
-// parameter, so a chain that does not state one keeps the same limit.
+// Chains that predate the parameter ran under 16 MiB; omitting it now gives
+// them this larger limit.
 inline constexpr uint32_t kDefaultMaxSubtransactionOutputBytes =
-    16 * 1024 * 1024;
+    64U * 1024 * 1024;
 
 // The parameters in force, flattened from the list that states them.
 // Resolve once where a tip is pinned; the invoke path reads these per frame.
