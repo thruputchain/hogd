@@ -20,11 +20,11 @@ its header and initial memory, without network-config overrides. These are
 also the protocol defaults for omitted parameters. Configurations that state
 explicit values retain them.
 
-The stock config differs from the protocol defaults in two parameters:
-`max_bytestring_len` is 4096, not 1024, and `max_subtransaction_output_bytes`
-is 64 MiB, not 16 MiB. Local devnode chains and hosted bootstrap genesis both
-use the stock config, so a contract meets the same limits locally and on a
-hosted devnet. A chain whose genesis omits a parameter keeps its default.
+The stock config differs from the protocol defaults in one parameter:
+`max_bytestring_len` is 4096, not 1024. Local devnode chains and hosted
+bootstrap genesis both use the stock config, so a contract meets the same
+limits locally and on a hosted devnet. A chain whose genesis omits a parameter
+gets its default.
 
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 
@@ -43,7 +43,10 @@ From there it rides the `DbTip`, exactly as `default_wallet` does:
 `ConfigHashPreimage` pairs it with the storage cost model and the default
 wallet, and `ProposalHeader::config_hash` commits to their hash -- so a block
 records the rules it was executed under, and a validator holding a different
-configuration rejects the proposal instead of diverging silently.
+configuration rejects the proposal instead of diverging silently. The hash
+covers only the parameters a config states. An omitted parameter takes the
+build's default, so changing a default changes the rules for such a chain
+without changing its hash; every node on it must upgrade together.
 
 That hash is also what authenticates all three on a node's own disk. `<DBTIP`
 and `<COSTMODEL` are global metadata, which `is_state_item` leaves out of

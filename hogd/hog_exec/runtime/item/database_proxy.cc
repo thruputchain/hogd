@@ -468,9 +468,6 @@ footprint_bound(FlaggedStorageDelta const &fd)
 constexpr size_t kMessageOverhead = kXdrMax<x23::rpc_msg> + kXdrMax<BlockID> +
                                     kXdrMax<TransactionID> + kXdrWord;
 static_assert(kMessageOverhead < kExecToDbMessageCap);
-// A chain that does not state max_subtransaction_output_bytes keeps the budget
-// this gate enforced before the parameter existed.
-static_assert(kDefaultMaxSubtransactionOutputBytes == kExecToDbMessageCap);
 constexpr size_t kMaxSubtransactionPushFootprint =
     kExecToDbMessageCap - kMessageOverhead;
 

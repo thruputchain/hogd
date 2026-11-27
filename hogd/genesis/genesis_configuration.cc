@@ -131,9 +131,6 @@ stock_network_config()
   NetworkConfigParams::set_param(config,
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  4096);
-  NetworkConfigParams::set_param(
-      config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
-      64U * 1024 * 1024);
   return config;
 }
 

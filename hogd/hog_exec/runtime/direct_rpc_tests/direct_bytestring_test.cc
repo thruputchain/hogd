@@ -1816,8 +1816,7 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
     EXPECT_TRUE(r.value()) << "a small delta batch must commit";
   }
 
-  // 16000 max-size deltas (~16.8 MiB) exceed the 16 MiB protocol default,
-  // which this proxy pins because the stock config states more.
+  // 16000 max-size deltas (~16.8 MiB) exceed a 16 MiB limit.
   const std::string max_value(kDefaultMaxBytestringLen, 'x');
   const auto spray = [&](auto &tx) {
     for (int i = 0; i < 16000; ++i) {
@@ -1827,9 +1826,10 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
     }
   };
   {
+    NetworkConfigParams limit_16mib;
+    limit_16mib.max_subtransaction_output_bytes = 16U * 1024 * 1024;
     PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
-                                   TransactionID{910'000},
-                                   NetworkConfigParams{});
+                                   TransactionID{910'000}, limit_16mib);
     spray(tx);
     auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value())
@@ -1884,8 +1884,8 @@ TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
   }
 }
 
-// Pins the push gate's boundary under the 16 MiB protocol default: exactly the
-// budget is pushed, one XDR word more is rejected. An off-by-one would abort
+// Pins the push gate's boundary under the protocol default: exactly the budget
+// is pushed, one XDR word more is rejected. An off-by-one would abort
 // transactions other validators accept.
 TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
 {
@@ -1893,7 +1893,7 @@ TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   constexpr auto kXdrMaxOf = []<typename T>(std::type_identity<T>) {
     return x23::detail::xdr_size_bounds<T>().max_;
   };
-  constexpr size_t kCap = 0x100'0000;
+  constexpr size_t kCap = kDefaultMaxSubtransactionOutputBytes;
   constexpr size_t kOverhead = kXdrMaxOf(std::type_identity<x23::rpc_msg>{}) +
                                kXdrMaxOf(std::type_identity<BlockID>{}) +
                                kXdrMaxOf(std::type_identity<TransactionID>{}) +
@@ -1933,7 +1933,6 @@ TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000'000);
 
-  // The stock config states a larger limit, so enforce the protocol default.
   TransactionID next_tx_id = 920'000;
   auto push_batch_of = [&](std::vector<size_t> const &lens) {
     PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),

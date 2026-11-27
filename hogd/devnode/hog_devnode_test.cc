@@ -2138,9 +2138,6 @@ TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaultsWithChainLimits)
   NetworkConfigParams::set_param(expected,
                                  ConfigParamID::kConfigParamMaxBytestringLen,
                                  4096);
-  NetworkConfigParams::set_param(
-      expected, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
-      64U * 1024 * 1024);
   EXPECT_EQ(stock_network_config(), expected);
 }
 
