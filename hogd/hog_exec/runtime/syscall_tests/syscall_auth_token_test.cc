@@ -1739,6 +1739,77 @@ TEST_F(SyscallAuthTokenTest, MintAuthTokenRejectsOverDepthTree)
   ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
 }
 
+// Each mint retains its decoded tree for the base crossing charge, so a
+// transaction may attempt at most max_auth_tokens mints (#4653). A failed
+// decode counts too.
+TEST_F(SyscallAuthTokenTest, MintAuthTokenStopsAtMaxAuthTokens)
+{
+  constexpr ContractAddress kAddr = make_contract_address(0);
+
+  std::unordered_map<Runtime::MethodID, NativeContract::function_t>
+      fns_contract;
+  fns_contract.emplace(
+      0, [&](NativeSyscallContext &ctx) -> x23::Async<InvokeStatus<void>> {
+        auto over_depth = x23::serialize(
+            make_auth_token_chain(kAddr, uint32_t{kAuthTokenMaxDepth} + 1));
+        uint32_t failed_id = 0;
+        auto failed_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(over_depth), failed_id);
+        EXPECT_TRUE(failed_res.has_value());
+        EXPECT_EQ(failed_res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+
+        auto serialized = x23::serialize(make_auth_token_chain(kAddr, 1));
+        for (uint32_t i = 0; i + 1 < kDefaultMaxAuthTokens; ++i) {
+          uint32_t token_id = 0;
+          auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+              BlockHeight{1000}, as_byte_span(serialized), token_id);
+          EXPECT_TRUE(mint_res.has_value());
+          EXPECT_EQ(mint_res.value(), SyscallErrorCode::kSyscallErrorCodeNone);
+          EXPECT_EQ(token_id, i);
+        }
+
+        uint32_t token_id = 0xDEAD'BEEF;
+        auto mint_res = co_await ctx.syscall<SyscallNo::kMintAuthToken>(
+            BlockHeight{1000}, as_byte_span(serialized), token_id);
+        EXPECT_TRUE(mint_res.has_value());
+        EXPECT_EQ(mint_res.value(),
+                  SyscallErrorCode::kSyscallErrorCodeInvalidSyscallInput);
+        EXPECT_EQ(token_id, 0xDEAD'BEEF)
+            << "output must be untouched on reject";
+
+        co_return InvokeStatus<void>{};
+      });
+  auto contract = std::make_unique<NativeContract>(std::move(fns_contract));
+
+  std::unordered_map<int32_t, std::unique_ptr<NativeContract>> contract_map;
+  contract_map.emplace(0, std::move(contract));
+  auto runtime_context =
+      std::make_unique<NativeContext>(std::move(contract_map));
+
+  auto contract_xdr = make_native_contract(0);
+  write_contract(contract_xdr);
+  write_deployment(kAddr, contract_xdr);
+
+  auto handler = make_new_system_call_handler(
+      SignedTransaction{
+          .tx =
+              Transaction{
+                  .invocation =
+                      Invocation{
+                          .invoked_address = kAddr,
+                          .entrypoint = entrypoint_from_method_id(0),
+                          .gas_limit = kDefaultMaxTxGas,
+                          .calldata = {},
+                      },
+                  .uniquifier = make_new_uniquifier(),
+              }},
+      *runtime_context);
+  auto res = handler.root_invoke()();
+  ASSERT_TRUE(res.is_root_success());
+  ASSERT_EQ(handler.try_commit_transaction()(), ExecResult::ExecResultOK);
+}
+
 TEST_F(SyscallAuthTokenTest, MintAuthTokenAcceptsMaxDepthTree)
 {
   constexpr ContractAddress kAddr = make_contract_address(0);
