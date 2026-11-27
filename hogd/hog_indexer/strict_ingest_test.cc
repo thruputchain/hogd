@@ -1903,7 +1903,7 @@ TEST_F(StrictIndexerTest, ReopenUsesTheMemtableOptionsOfANewDatabase)
   ASSERT_TRUE(rocksdb::LoadLatestOptions(config, path_.string(), &db_options,
                                          &column_families)
                   .ok());
-  ASSERT_EQ(column_families.size(), 3u);
+  ASSERT_EQ(column_families.size(), 3U);
   for (const auto &family : column_families) {
     SCOPED_TRACE(family.name);
     EXPECT_EQ(family.options.write_buffer_size, 256_MiB);
