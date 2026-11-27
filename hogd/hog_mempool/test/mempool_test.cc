@@ -3964,6 +3964,59 @@ TEST(Mempool, GetTip)
             x23::serialize(db_tip.value));
 }
 
+// The gateway health probe calls get_tip every few seconds. It must answer
+// with the current tip while a commit holds [commit_lock_], rather than wait
+// for the commit to finish.
+TEST(Mempool, GetTipDoesNotWaitForCommitLock)
+{
+  MempoolTestInfra server;
+  MempoolCoordinatorRpc &coord = server.mempool_coord_rpc();
+  MempoolGatewayRpc gateway(&coord);
+
+  const SchedulerGetTipResult before = coord.schedcoord_get_tip()();
+  ASSERT_EQ(before.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+
+  std::promise<void> locked;
+  std::promise<void> release;
+  std::shared_future<void> released = release.get_future().share();
+  std::thread holder([&] {
+    coord.test_with_commit_lock([&] {
+      locked.set_value();
+      released.wait();
+    })();
+  });
+  locked.get_future().wait();
+
+  std::future<ExpectedDBTip> gateway_tip = std::async(std::launch::async, [&] {
+    return gateway.schedgateway_get_tip()();
+  });
+  std::future<SchedulerGetTipResult> coord_tip =
+      std::async(std::launch::async,
+                 [&] { return coord.schedcoord_get_tip()(); });
+  constexpr auto kTimeout = std::chrono::seconds(10);
+  const bool gateway_answered =
+      gateway_tip.wait_for(kTimeout) == std::future_status::ready;
+  const bool coord_answered =
+      coord_tip.wait_for(kTimeout) == std::future_status::ready;
+
+  // Release before asserting, so a failure does not leave the waiters hung.
+  release.set_value();
+  holder.join();
+
+  EXPECT_TRUE(gateway_answered)
+      << "schedgateway_get_tip waited on commit_lock_";
+  EXPECT_TRUE(coord_answered) << "schedcoord_get_tip waited on commit_lock_";
+
+  const ExpectedDBTip from_gateway = gateway_tip.get();
+  ASSERT_EQ(from_gateway.error(), RPCError::kRPCNone);
+  EXPECT_EQ(x23::serialize(from_gateway.db_tip()),
+            x23::serialize(before.db_tip()));
+  const SchedulerGetTipResult from_coord = coord_tip.get();
+  ASSERT_EQ(from_coord.outcome(), SchedulerGetTipOutcome::SchedulerGetTipOK);
+  EXPECT_EQ(x23::serialize(from_coord.db_tip()),
+            x23::serialize(before.db_tip()));
+}
+
 class MempoolSubmissionAuthTest : public testing::TestWithParam<bool> {
 protected:
   static bool is_submit_vetted() { return GetParam(); }
