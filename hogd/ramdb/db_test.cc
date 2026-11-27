@@ -107,10 +107,8 @@ make_value(uint64_t seed, size_t len)
   return v;
 }
 
-// CompactionUnderPressure builds the state that a compaction pass sees when
-// memory is low, on a MapStack whose reserve and pool have a small fixed size
-// so the result does not depend on the host's core count: several compactable
-// loglets that are half dead, and no free loglet beyond the reserve.
+// CompactionUnderPressure builds the state a compaction pass sees under memory
+// pressure: half-dead compactable loglets and nothing free beyond the reserve.
 class CompactionUnderPressure {
 public:
   // Sources that are half live hold four loglets' worth of live data, more
@@ -1726,12 +1724,8 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
   resizer.join();
 }
 
-// A compaction pass must fit in the reserved loglets when no other loglet is
-// free. Each worker has to free its source loglet as it finishes it: a pass
-// that keeps every source until it returns needs destinations for all the live
-// data at once, and ran the reserved path of LogletAllocator::alloc() off the
-// end of an empty free list (#4891). The reserve and the pool have a fixed
-// small size here, so this does not depend on the host's core count.
+// A pass must fit in the reserved loglets when nothing else is free, whatever
+// the host's core count; workers free their sources as they go (#4891).
 class CompactionReserveTest : public testing::TestWithParam<size_t> {};
 
 TEST_P(CompactionReserveTest, PassFitsInReservedLoglets)

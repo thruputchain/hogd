@@ -120,11 +120,8 @@ ItemAllocator::compact(float utilization_thresh)
       in_flight.push_back(std::make_shared<UniqueLoglet>(std::move(ll)));
       completions.emplace_back(pool_.submit([this, l = in_flight.back()] {
         CompactionStats s = compact_one(std::move(*l));
-        // Free the source now, not when the pass returns: its memory backs
-        // the destinations of the loglets still to be compacted, and the
-        // reserved loglets alone cannot hold a whole pass (#4891). Dropping
-        // `l` does not do it, because in_flight shares ownership, and
-        // compact_one does not move from its argument.
+        // Free the source now; later loglets compact into its memory
+        // (#4891). in_flight shares ownership, so dropping `l` would not.
         (*l).reset();
         return s;
       }));
