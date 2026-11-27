@@ -2811,12 +2811,28 @@ handlers_of(std::span<const uint32_t> words, uint32_t memory_bytes = 256,
       /*trace=*/false, max_run_gas, fuse);
   EXPECT_TRUE(pre_instantiation.has_value());
   std::vector<Handler> handlers;
+  handlers.reserve(words.size());
   for (size_t i = 0; i < words.size(); ++i) {
     handlers.push_back(
         ThreadedMachinePreInstantiationTestPeer::handler_at(*pre_instantiation,
                                                             i));
   }
   return handlers;
+}
+
+// `count` lw at ascending words from `offset` off `base` into x6, x7, ...,
+// then an ecall.
+std::vector<uint32_t>
+ascending_load_words(int32_t count, uint8_t base, int32_t offset)
+{
+  std::vector<uint32_t> words;
+  words.reserve(static_cast<size_t>(count) + 1);
+  for (int32_t k = 0; k < count; ++k) {
+    words.push_back(test_program::load(static_cast<uint8_t>(6 + k), 2, base,
+                                       offset + (4 * k)));
+  }
+  words.push_back(kEcallWord);
+  return words;
 }
 
 // The untraced lw-run handler; wide unless a recent store wrote the run.
@@ -2957,12 +2973,7 @@ TEST(Rv32ThreadedLoadRun, preparationSelectsTheRunStartingAtEachSlot)
   {
     // Twenty words: a head covers at most kMaxLoadRun loads, and the next
     // dispatched head continues the run.
-    std::vector<uint32_t> words;
-    for (int32_t k = 0; k < 20; ++k) {
-      words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5, 4 * k));
-    }
-    words.push_back(kEcallWord);
-    const auto h = handlers_of(words);
+    const auto h = handlers_of(ascending_load_words(20, 5, 0));
     EXPECT_EQ(h[0], run_of(16));
     EXPECT_EQ(h[4], run_of(16));
     EXPECT_EQ(h[5], run_of(15));
@@ -3038,12 +3049,8 @@ TEST(Rv32ThreadedLoadRun, preparationSelectsTheRunStartingAtEachSlot)
   {
     // Under a 9-gas cap, chunks split this run after slot 2, which becomes a
     // break carrier; no run includes it.
-    std::vector<uint32_t> words;
-    for (int32_t k = 0; k < 5; ++k) {
-      words.push_back(load(static_cast<uint8_t>(6 + k), 2, 5, 4 * k));
-    }
-    words.push_back(kEcallWord);
-    const auto h = handlers_of(words, 256, 3 * kWideLoadGas);
+    const auto h =
+        handlers_of(ascending_load_words(5, 5, 0), 256, 3 * kWideLoadGas);
     EXPECT_EQ(h[0], run_of(2));
     EXPECT_EQ(h[1], plain);
     EXPECT_EQ(h[2], (&op_load<false, 4, false, true>));
@@ -3372,11 +3379,7 @@ TEST(Rv32ThreadedLoadRun, breakCarrierSplitBudgetSweep)
   // carrier at slot 2), in bounds and with the last word out of bounds.
   for (const int32_t base : {64, 256 - 16}) {
     SCOPED_TRACE(base);
-    std::vector<uint32_t> words;
-    for (int32_t k = 0; k < 5; ++k) {
-      words.push_back(load(static_cast<uint8_t>(6 + k), 2, 0, base + (4 * k)));
-    }
-    words.push_back(kEcallWord);
+    const std::vector<uint32_t> words = ascending_load_words(5, 0, base);
     for (uint64_t gas = 0; gas <= 24; ++gas) {
       SCOPED_TRACE(gas);
       expect_load_run_semantics(words, 256, gas, 3 * kWideLoadGas);
@@ -3425,7 +3428,7 @@ TEST(Rv32ThreadedLoadRun, randomProgramsMatchCanonical)
       int32_t offset = static_cast<int32_t>(rng() % 64) - 24;
       for (size_t k = 0; k < length; ++k) {
         // Mostly fresh destinations; sometimes the base or a repeat.
-        uint8_t rd = static_cast<uint8_t>(8 + ((k + g) % 20));
+        auto rd = static_cast<uint8_t>(8 + ((k + g) % 20));
         if (rng() % 10 == 0) {
           rd = base;
         }

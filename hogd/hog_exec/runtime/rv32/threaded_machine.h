@@ -1152,13 +1152,13 @@ op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   }
   const uint8_t *words = mem + lowest;
   // Slot of the load reading the w-th word from the lowest.
-  constexpr auto slot_of = [](uint32_t w) {
+  constexpr auto kSlotOf = [](uint32_t w) {
     return Descending ? N - 1 - w : w;
   };
   if constexpr (!Wide) {
     // Program order; the traced handlers retire each load as its own step.
     for (uint32_t k = 0; k < N; ++k) {
-      write_rd(c, ip[k].rd, le_load<4>(words, 4 * slot_of(k)));
+      write_rd(c, ip[k].rd, le_load<4>(words, 4 * kSlotOf(k)));
       if constexpr (Trace) {
         if (k + 1 < N) {
           HOGD_RETIRE_OP1(c, ip + k);
@@ -1168,7 +1168,7 @@ op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   }
   else {
     for (uint32_t w = 0; w + 1 < N; w += 2) {
-#if defined(__aarch64__)
+#ifdef __aarch64__
       // Adjacent 32-bit loads, which AArch64 pairs into one ldp.
       const uint32_t low = le_load<4>(words, 4 * w);
       const uint32_t high = le_load<4>(words, 4 * (w + 1));
@@ -1179,11 +1179,11 @@ op_load_run(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
       const auto low = static_cast<uint32_t>(pair);
       const auto high = static_cast<uint32_t>(pair >> 32);
 #endif
-      write_rd(c, ip[slot_of(w)].rd, low);
-      write_rd(c, ip[slot_of(w + 1)].rd, high);
+      write_rd(c, ip[kSlotOf(w)].rd, low);
+      write_rd(c, ip[kSlotOf(w + 1)].rd, high);
     }
     if constexpr (N % 2 != 0) {
-      write_rd(c, ip[slot_of(N - 1)].rd, le_load<4>(words, 4 * (N - 1)));
+      write_rd(c, ip[kSlotOf(N - 1)].rd, le_load<4>(words, 4 * (N - 1)));
     }
   }
   HOGD_THREAD_NEXT(c, ip + N);
@@ -1786,7 +1786,7 @@ fuse_alu_branch(const FusionCtx &f, Slot &s)
 // op_load_run handlers by run length, from 2.
 template<bool Trace, bool Descending, bool Wide, uint32_t... Ns>
 constexpr std::array<Handler, sizeof...(Ns)>
-make_load_run_handlers(std::integer_sequence<uint32_t, Ns...>)
+make_load_run_handlers(std::integer_sequence<uint32_t, Ns...> /*lengths*/)
 {
   return {&op_load_run<Trace, Ns + 2, Descending, Wide>...};
 }
