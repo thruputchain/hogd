@@ -149,6 +149,9 @@ TEST(HostedBootstrapGenerator, GeneratesGenesisAndMetadata)
                     "params");
   ASSERT_EQ(params.type(), json::Value::Type::kArray);
   const auto encoded_params = params.as_array();
+  // Hosted genesis states the same config as local devnode chains.
+  EXPECT_EQ(artifact.genesis_configuration.network_config,
+            stock_network_config());
   const auto &stated_params =
       artifact.genesis_configuration.network_config.v0().params;
   ASSERT_EQ(encoded_params.size(), stated_params.size());

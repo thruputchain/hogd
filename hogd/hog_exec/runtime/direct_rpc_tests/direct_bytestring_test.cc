@@ -1816,22 +1816,36 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
     EXPECT_TRUE(r.value()) << "a small delta batch must commit";
   }
 
-  // A batch of max-size (1 KiB) bytestrings across enough distinct keys to
-  // exceed the 16 MiB cap. Each delta is ~1104 bytes (key+framing+1028), so
-  // 16000 deltas ~= 16.8 MiB > cap. Rejected before any push is attempted.
-  {
-    const std::string max_value(kDefaultMaxBytestringLen, 'x');
-    auto tx = make_new_per_tx_db_proxy();
+  // 16000 max-size deltas (~16.8 MiB) exceed the 16 MiB protocol default,
+  // which this proxy pins because the stock config states more.
+  const std::string max_value(kDefaultMaxBytestringLen, 'x');
+  const auto spray = [&](auto &tx) {
     for (int i = 0; i < 16000; ++i) {
       tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
                    make_bytestring_delta(max_value),
                    std::to_underlying(StorageDeltaFlags::None));
     }
+  };
+  {
+    PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
+                                   TransactionID{910'000},
+                                   NetworkConfigParams{});
+    spray(tx);
     auto r = tx.try_push_current_subtransaction()();
     ASSERT_TRUE(r.has_value())
         << "over-budget push must be a clean conflict, not a system error";
     EXPECT_FALSE(r.value())
         << "an over-cap delta batch must be rejected as a conflict";
+  }
+
+  // The same batch fits the 64 MiB stock limit and crosses the executor to
+  // HogDb link, so no other 16 MiB bound applies to a push.
+  {
+    auto tx = make_new_per_tx_db_proxy();
+    spray(tx);
+    auto r = tx.try_push_current_subtransaction()();
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value()) << "a 16.8 MiB batch must fit the stock limit";
   }
 }
 
@@ -1870,13 +1884,9 @@ TEST_F(DirectBytestringTest, ConfiguredOutputLimitBoundsPush)
   }
 }
 
-// The footprint gate in DatabaseProxy::try_push_new_subtransaction is strict
-// (footprint + kMessageOverhead > kExecToDbMessageCap): a batch whose
-// type-derived footprint lands exactly on the budget is pushed; one XDR word
-// (4 bytes) more is rejected as a clean conflict. The bound arithmetic is
-// mirrored from database_proxy.cc, so a change to the cap, the message
-// overhead, or the per-delta bound moves this boundary and fails the test --
-// an off-by-one tightening would abort transactions other validators accept.
+// Pins the push gate's boundary under the 16 MiB protocol default: exactly the
+// budget is pushed, one XDR word more is rejected. An off-by-one would abort
+// transactions other validators accept.
 TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
 {
   constexpr size_t kWord = 4;
@@ -1923,8 +1933,11 @@ TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
   auto contract_addr = make_contract_address(0);
   setup_grant_storage_token(contract_addr, 1'000'000'000'000);
 
+  // The stock config states a larger limit, so enforce the protocol default.
+  TransactionID next_tx_id = 920'000;
   auto push_batch_of = [&](std::vector<size_t> const &lens) {
-    auto tx = make_new_per_tx_db_proxy();
+    PerTransactionDatabaseProxy tx(get_db_proxy(), get_block_number(),
+                                   next_tx_id++, NetworkConfigParams{});
     for (size_t i = 0; i < lens.size(); ++i) {
       tx.add_delta(make_addrkey(contract_addr, "cap" + std::to_string(i)),
                    make_bytestring_delta(std::string(lens[i], 'x')),
@@ -1933,19 +1946,22 @@ TEST_F(DirectBytestringTest, DeltaBatchFootprintCapExactBoundary)
     return tx.try_push_current_subtransaction()();
   };
 
-  {
-    auto r = push_batch_of(lens_for_target(kBudget));
-    ASSERT_TRUE(r.has_value());
-    EXPECT_TRUE(r.value())
-        << "a batch footprint of exactly the message budget must be pushed";
-  }
-
+  // Over budget first: the at-budget push leaves its transaction holding the
+  // same keys, so a wrongly admitted later push would fail as a HogDb conflict
+  // and still read as rejected.
   {
     auto r = push_batch_of(lens_for_target(kBudget + kWord));
     ASSERT_TRUE(r.has_value())
         << "an over-budget push must be a clean conflict, not a system error";
     EXPECT_FALSE(r.value())
         << "one XDR word over the message budget must be rejected";
+  }
+
+  {
+    auto r = push_batch_of(lens_for_target(kBudget));
+    ASSERT_TRUE(r.has_value());
+    EXPECT_TRUE(r.value())
+        << "a batch footprint of exactly the message budget must be pushed";
   }
 }
 

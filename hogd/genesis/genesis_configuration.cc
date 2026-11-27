@@ -125,11 +125,16 @@ load_stock_genesis_root_contract()
 NetworkConfig
 stock_network_config()
 {
-  // This repository's dev and test chains run at the protocol defaults from
-  // network_config_params.h. Every parameter is stated outright rather than
-  // left to a node's default, so a change to any of them is visible in the
-  // config hash.
-  return NetworkConfigParams::stated_defaults();
+  // Protocol defaults except the parameters set below. Stating every
+  // parameter keeps any change visible in the config hash.
+  NetworkConfig config = NetworkConfigParams::stated_defaults();
+  NetworkConfigParams::set_param(config,
+                                 ConfigParamID::kConfigParamMaxBytestringLen,
+                                 4096);
+  NetworkConfigParams::set_param(
+      config, ConfigParamID::kConfigParamMaxSubtransactionOutputBytes,
+      64U * 1024 * 1024);
+  return config;
 }
 
 GenesisConfiguration
