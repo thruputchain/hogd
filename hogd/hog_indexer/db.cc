@@ -1447,12 +1447,8 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
                         .kind = IndexerKeyFormat::kRootTx,
                         .sequence = 0});
     };
-    // A committed transaction hash appears at most once. The hash covers the
-    // root address and uniquifier, every included transaction (reverted ones
-    // too) consumes that uniquifier in hog-db's replay cache, and hog-db
-    // rejects a consumed or expired uniquifier. A replayed height is caught
-    // above by the durable block identity, so no per-transaction lookup is
-    // needed here.
+    // Committed tx hashes are unique: hog-db's replay cache consumes each
+    // uniquifier, and the block identity check above catches replayed heights.
     if (!order_puts) {
       for (size_t i = 0; i < events.size(); ++i) {
         IndexerKeyFormat::make_tx_key(key, events[i].tx_hash);
