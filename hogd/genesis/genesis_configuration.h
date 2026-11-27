@@ -106,10 +106,8 @@ calculate_genesis_deployment_address(SHA256Hash const &contract_hash,
 
 DeployedContractHash native_default_wallet_hash();
 
-// The bytestring limit the stock config states, above the protocol default.
-// A storage read's first-touch cost is flat, so a contract reading a large
-// table pays per value; 16 KiB holds four 4 KiB polynomials per read and still
-// lets the 64 KiB guest hold a value plus its working set.
+// Stock bytestring limit, above the protocol default; see
+// docs/network-config.md.
 inline constexpr uint32_t kStockMaxBytestringLen = 16384;
 
 // The execution parameters this repository's dev and test chains run under.

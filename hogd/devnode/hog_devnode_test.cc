@@ -2129,9 +2129,7 @@ TEST(HogDevnode, NamedNetworkConfigOverridesAreCanonical)
   EXPECT_EQ(local_network_config({}), stock_network_config());
 }
 
-// The stock config takes its values from the protocol defaults rather than
-// restating them, so a default change reaches dev and test chains. It differs
-// only in the parameter set here.
+// Stock config is the defaults, plus the bytestring limit set here.
 TEST(HogDevnode, StockNetworkConfigIsTheProtocolDefaultsWithBytestringLimit)
 {
   NetworkConfig expected = NetworkConfigParams::stated_defaults();
