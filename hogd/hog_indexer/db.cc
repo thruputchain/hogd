@@ -1447,31 +1447,13 @@ IndexDB::apply_validated_committed_block(const IndexerOutboxOrigin &origin,
                         .kind = IndexerKeyFormat::kRootTx,
                         .sequence = 0});
     };
-    // Keep point lookups in input order so conflicts with stored rows take
-    // precedence over duplicate hashes within the candidate block.
-    for (size_t i = 0; i < events.size(); ++i) {
-      const TxEventLog &event_log = events[i];
-      IndexerKeyFormat::make_tx_key(key, event_log.tx_hash);
-
-      std::string existing;
-      const rocksdb::Status existing_status =
-          db_->Get(rocksdb::ReadOptions(), tx_cf_handle_, key, &existing);
-      if (!existing_status.IsNotFound()) {
-        if (!existing_status.ok()) {
-          error("failed to check existing transaction row: {}",
-                existing_status.ToString());
-          return apply_failure(
-              IndexerBlockApplyOutcome::IndexerBlockInternalFailure,
-              "failed to inspect transaction index");
-        }
-        return apply_failure(
-            IndexerBlockApplyOutcome::IndexerBlockContentConflict,
-            "committed transaction hash already exists at another height");
-      }
-
-      if (!order_puts) {
+    // Committed tx hashes are unique: hog-db's replay cache consumes each
+    // uniquifier, and the block identity check above catches replayed heights.
+    if (!order_puts) {
+      for (size_t i = 0; i < events.size(); ++i) {
+        IndexerKeyFormat::make_tx_key(key, events[i].tx_hash);
         batch.Put(tx_cf_handle_, key,
-                  make_tx_value(height, bodies[i], event_log));
+                  make_tx_value(height, bodies[i], events[i]));
         visit_contract_rows(i, put_contract);
       }
     }
