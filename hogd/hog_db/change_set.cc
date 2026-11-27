@@ -25,7 +25,7 @@ ChangeSet::put(std::span<const std::byte> key, uint8_t type,
   auto &alloc = *alloc_;
   auto &changes = *changes_;
 
-  auto item = alloc.store_item(key, type, value);
+  auto item = alloc.store_item(key, value);
 
   MaterializedChange change;
   change.op = MaterializedChange::Op::kPut;
