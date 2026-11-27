@@ -45,8 +45,6 @@ SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
   case StorageItemType::kItemTypeRetrocausalQueue:
     return variant_type{std::in_place_type<RetrocausalQueueEntry>,
                         std::move(item.metadata())};
-  case StorageItemType::kItemTypeDeleted:
-    return variant_type{std::in_place_type<DeletedEntry>};
   case StorageItemType::kItemTypeReplayCacheData:
     return variant_type{std::in_place_type<ReplayCacheEntry>};
   default:
@@ -57,36 +55,42 @@ SnapshotStorageItem::make_contract_key_variant(WireStorageItem item)
 }
 
 SystemStatus<SnapshotStorageItem::variant_type>
-SnapshotStorageItem::make_variant(WireStorageItem item,
+SnapshotStorageItem::make_variant(std::optional<WireStorageItem> item,
                                   StorageKey const &db_key)
 {
-  // handle different key types differently
+  // handle different key types differently.  Under each one the cache serves,
+  // a key the snapshot holds nothing under still maps to an entry.
   switch (db_key.key_type()) {
   case StorageKeyType::ContractData:
-    return make_contract_key_variant(std::move(item));
+    if (!item) {
+      return variant_type{std::in_place_type<DeletedEntry>};
+    }
+    return make_contract_key_variant(std::move(*item));
   case StorageKeyType::FreeNativeTokenBalance:
-    switch (item.type()) {
+    if (!item) {
+      return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
+    }
+    switch (item->type()) {
     case StorageItemType::kItemTypeNonnegativeInt:
       return variant_type{std::in_place_type<NativeTokenBalanceEntry>,
-                          from_xdr(item.nnint())};
-    case StorageItemType::kItemTypeDeleted:
-      return variant_type{std::in_place_type<NativeTokenBalanceEntry>, 0};
+                          from_xdr(item->nnint())};
     default:
       error("Unrecoverable: unsupported wire item type {} for "
             "FreeNativeTokenBalance key",
-            static_cast<int>(item.type()));
+            static_cast<int>(item->type()));
       return SystemError{SystemErrorCode::Unrecoverable};
     }
   case StorageKeyType::AuthData:
-    switch (item.type()) {
+    if (!item) {
+      return variant_type{std::in_place_type<DeletedEntry>};
+    }
+    switch (item->type()) {
     case StorageItemType::kItemTypeAuthData:
       return variant_type{std::in_place_type<AddressAuthDataEntry>,
-                          std::move(item.auth_data())};
-    case StorageItemType::kItemTypeDeleted:
-      return variant_type{std::in_place_type<DeletedEntry>};
+                          std::move(item->auth_data())};
     default:
       error("Unrecoverable: unsupported wire item type {} for AuthData key",
-            static_cast<int>(item.type()));
+            static_cast<int>(item->type()));
       return SystemError{SystemErrorCode::Unrecoverable};
     }
   default:

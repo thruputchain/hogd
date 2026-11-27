@@ -42,8 +42,7 @@ protected:
   {
     assert(db_proxy_);
     AddressAndKey addrkey{};
-    auto entry = SnapshotStorageItem::make_variant(
-        WireStorageItem(StorageItemType::kItemTypeDeleted), addrkey.key);
+    auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
     CHECK(entry.has_value());
     return std::make_unique<SnapshotStorageItem>(std::move(entry).value(),
                                                  std::move(addrkey), BlockID{1},
@@ -68,19 +67,45 @@ TEST_F(SnapshotStorageItemTest, AuthDataMakeVariant)
   EXPECT_EQ(item.auth_data().last_written_height, 42U);
 }
 
-TEST_F(SnapshotStorageItemTest, AuthDataDeletedMakeVariant)
+// A key the snapshot holds nothing under still gets an item, one with no
+// type: the block may yet create something there.
+TEST_F(SnapshotStorageItemTest, AuthDataMissingMakeVariant)
 {
   AddressAndKey addrkey{.address = {},
                         .key = StorageKey(StorageKeyType::AuthData)};
 
-  WireStorageItem wire_item(StorageItemType::kItemTypeDeleted);
-
-  auto entry =
-      SnapshotStorageItem::make_variant(std::move(wire_item), addrkey.key);
+  auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
   ASSERT_TRUE(entry.has_value());
   SnapshotStorageItem item(std::move(entry).value(), std::move(addrkey),
                            BlockID{1}, *db_proxy_);
   EXPECT_EQ(item.type(), std::nullopt);
+}
+
+TEST_F(SnapshotStorageItemTest, ContractDataMissingMakeVariant)
+{
+  AddressAndKey addrkey{.address = {},
+                        .key = StorageKey(StorageKeyType::ContractData)};
+
+  auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  SnapshotStorageItem item(std::move(entry).value(), std::move(addrkey),
+                           BlockID{1}, *db_proxy_);
+  EXPECT_EQ(item.type(), std::nullopt);
+}
+
+// An address that has never held native tokens has a balance, of zero.
+TEST_F(SnapshotStorageItemTest, NativeTokenBalanceMissingMakeVariant)
+{
+  AddressAndKey addrkey{.address = {},
+                        .key =
+                            StorageKey(StorageKeyType::FreeNativeTokenBalance)};
+
+  auto entry = SnapshotStorageItem::make_variant(std::nullopt, addrkey.key);
+  ASSERT_TRUE(entry.has_value());
+  SnapshotStorageItem item(std::move(entry).value(), std::move(addrkey),
+                           BlockID{1}, *db_proxy_);
+  ASSERT_EQ(item.type(), ItemViewType::kNativeTokenBalance);
+  EXPECT_EQ(item.native_token_balance(), 0);
 }
 
 TEST_F(SnapshotStorageItemTest, RCQGetBlocks)
@@ -226,7 +251,7 @@ TEST_F(SnapshotStorageItemTest, RCQConcurrentEntryErrorGuards)
 
 TEST(SnapshotStorageItemMakeVariant, RejectsUnsupportedWireTypes)
 {
-  // ContractData accepts value/queue/deleted/replay-cache; not auth or
+  // ContractData accepts value/queue/replay-cache; not auth or
   // deployed-contract-hash.
   EXPECT_TRUE(SnapshotStorageItem::make_variant(
                   WireStorageItem(StorageItemType::kItemTypeBytestring),
@@ -242,7 +267,7 @@ TEST(SnapshotStorageItemMakeVariant, RejectsUnsupportedWireTypes)
           StorageKey(StorageKeyType::ContractData))
           .has_value());
 
-  // FreeNativeTokenBalance accepts nnint/deleted only.
+  // FreeNativeTokenBalance accepts nnint only.
   EXPECT_TRUE(SnapshotStorageItem::make_variant(
                   WireStorageItem(StorageItemType::kItemTypeNonnegativeInt),
                   StorageKey(StorageKeyType::FreeNativeTokenBalance))
@@ -252,7 +277,7 @@ TEST(SnapshotStorageItemMakeVariant, RejectsUnsupportedWireTypes)
                    StorageKey(StorageKeyType::FreeNativeTokenBalance))
                    .has_value());
 
-  // AuthData accepts auth/deleted only.
+  // AuthData accepts auth only.
   EXPECT_TRUE(SnapshotStorageItem::make_variant(
                   WireStorageItem(StorageItemType::kItemTypeAuthData),
                   StorageKey(StorageKeyType::AuthData))
@@ -261,5 +286,12 @@ TEST(SnapshotStorageItemMakeVariant, RejectsUnsupportedWireTypes)
                    WireStorageItem(StorageItemType::kItemTypeBytestring),
                    StorageKey(StorageKeyType::AuthData))
                    .has_value());
+
+  // A key type the cache does not serve is rejected whether or not the
+  // snapshot holds an item under it.
+  EXPECT_FALSE(
+      SnapshotStorageItem::make_variant(std::nullopt,
+                                        StorageKey(StorageKeyType::Metadata))
+          .has_value());
 }
 } // namespace hogd

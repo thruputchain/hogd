@@ -23,7 +23,6 @@
 #include "hogd/hog_exec/runtime/prepared_contract.h"
 #include "hogd/hog_exec/runtime/rv32/rv32_contract.h"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "types.hh"
 #include "x23/async.h"
 
@@ -180,14 +179,8 @@ StorageSnapshotCache::load_snapshot_item(FrameItemKey key)
 
   // cache both positive and negative lookups.  Move the item out of the reply:
   // a bytestring can be large, and nothing reads db_res after this.
-  auto &maybe_item = *db_res;
-  WireStorageItem db_item =
-      maybe_item.has_value()
-          ? std::move(*maybe_item)
-          : WireStorageItem(StorageItemType::kItemTypeDeleted);
-
   auto entry =
-      SnapshotStorageItem::make_variant(std::move(db_item), addrkey.key);
+      SnapshotStorageItem::make_variant(std::move(*db_res), addrkey.key);
   if (!entry) {
     co_return entry.error();
   }

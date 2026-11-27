@@ -213,12 +213,13 @@ private:
                    AddressAuthDataEntry>;
 
 public:
-  // Map a wire StorageItem under a given key to its entry variant. Returns
-  // Unrecoverable for an unsupported/unexpected (key_type, item_type)
+  // Map what the database returned for a key to its entry variant: the wire
+  // StorageItem, or nullopt when the snapshot holds nothing under the key.
+  // Returns Unrecoverable for an unsupported/unexpected (key_type, item_type)
   // combination. Single source of truth for the mapping; the cache calls it
   // and surfaces the status before constructing the (immovable) item.
-  static SystemStatus<variant_type> make_variant(WireStorageItem item,
-                                                 StorageKey const &db_key);
+  static SystemStatus<variant_type>
+  make_variant(std::optional<WireStorageItem> item, StorageKey const &db_key);
 
   // Construct from an already-mapped entry (see make_variant).
   SnapshotStorageItem(variant_type entry, AddressAndKey addrkey,
