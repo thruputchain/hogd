@@ -217,8 +217,10 @@ public:
 class CpuMap {
 public:
   // Construct CpuMap from a vector mapping CPU numbers to bucket IDs.
+  // An empty vector means a single bucket holding every CPU.
   explicit CpuMap(Vec<int> map) noexcept
-    : map_(std::move(map)), nbuckets_(1 + std::ranges::max(map_))
+    : map_(std::move(map)),
+      nbuckets_(map_.empty() ? 1 : 1 + std::ranges::max(map_))
   {
 #if HAVE_SCHED_SETAFFINITY
     compute_cpusets();
@@ -238,6 +240,8 @@ public:
     if (size_t(n) < map_.size()) [[likely]]
       return map_[n];
 #endif // HAVE_SCHED_GETCPU
+    if (map_.empty())
+      return 0;
     return map_[size_t(n) % map_.size()];
   }
 
@@ -270,7 +274,7 @@ constexpr populate_t populate;
 // NOLINTEND(readability-identifier-naming)
 
 // Construct one instance of type T for each CpuSet in a CpuMap.  If
-// ValidOnly is false, then it will only construct a T for CpuSets on
+// ValidOnly is true, then it will only construct a T for CpuSets on
 // which we can actually be scheduled.
 template<typename T, bool ValidOnly = false> class PerCpuSet {
 public:
