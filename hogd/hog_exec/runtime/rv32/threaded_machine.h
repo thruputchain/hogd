@@ -1112,28 +1112,8 @@ op_load_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize,
 // --- lw runs
 // ------------------------------------------------------------------
 //
-// N consecutive lw on one base register at consecutive words, ascending or
-// (Descending) descending, where no load but the last writes the base and no
-// two loads write the same register (x0 aside). create() forms runs only
-// inside one charged chunk and only when the memory holds at least 4N bytes.
-//
-// One range check covers the run's 4N contiguous bytes; the words are then
-// read and written to their registers with no per-access check or dispatch.
-// Reading the base once is exact because only the last load may overwrite it.
-// Wide handlers read the words in address order a pair at a time (one 8-byte
-// load on x86-64, one ldp on AArch64), which is exact because the
-// destinations are distinct. A wide load cannot be forwarded from the two
-// narrower stores that wrote its words while they are still in flight, so
-// lowering picks the narrow handlers, 4-byte loads in program order, for a
-// run that recent stores through the same base wrote (load_run_is_wide).
-//
-// A run that fails the check traps at its first load: kBadMemory with the gas
-// of a fault at that lw (trap_bad_memory refunds the rest of the chunk), or
-// kOutOfGas when that lw itself was unaffordable. That is the run's defined
-// semantics; per-instruction execution would trap at the first out-of-bounds
-// load instead, which differs only in the refund and in state that a trap
-// discards. Every slot of a run keeps a handler of its own (the run starting
-// there, or the standalone lw) for branches into it.
+// N same-base lw at consecutive words behind one range check (DESIGN.md); a
+// run that fails the check traps at its first load.
 inline constexpr uint32_t kMaxLoadRun = 16;
 
 template<bool Trace, uint32_t N, bool Descending, bool Wide>
@@ -1838,13 +1818,8 @@ ThreadedMachinePreInstantiation::load_run_at(size_t index) const
 // are still in flight.
 inline constexpr size_t kLoadRunStoreLookback = 8;
 
-// Whether the lw run at instruction i, reading byte offsets [low, high) from
-// base register `base`, gets the wide handler. Not when one of the
-// kLoadRunStoreLookback preceding instructions stores through the same base
-// into those bytes: a wide load spanning two such stores cannot be forwarded
-// from them and waits for both to commit. The scan stops at a jump or host
-// boundary and at a write to the base, after which offsets are no longer
-// comparable. Either width gives the same results; this picks the faster.
+// False when a recent store through the same base wrote [low, high): a wide
+// load cannot forward from two narrower stores (DESIGN.md).
 inline bool
 load_run_is_wide(const ThreadedProgram &program, size_t i, uint8_t base,
                  int32_t low, int32_t high)
@@ -2050,17 +2025,8 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
     // fusion when measuring individual opcode costs.
     bool fused_here = false;
 
-    // lw runs (op_load_run). An lw that is not a break carrier links to its
-    // successor when that loads the next word up (or down) from the same base
-    // and this load leaves the base intact. Every slot heads the longest run
-    // starting at it, capped at kMaxLoadRun and at what memory can hold, and
-    // cut before a repeated destination, so a branch into a run still runs
-    // fused and longer runs chain through successive heads. Members are plain
-    // lw slots with unpacked operands, so runs may overlap runs and pairs
-    // headed at their members; a run is preferred over pairing its head. A
-    // run stops short of a last load that heads a load-use pair: the pair
-    // keeps forwarding that value to its consumer, and the dispatch count is
-    // the same.
+    // lw runs. Every slot heads the longest run starting at it, so a branch
+    // into a run still runs fused (op_load_run, DESIGN.md).
     uint32_t ascending_chain = 0;
     uint32_t descending_chain = 0;
     if (fuse && d.op == Op::kLw && !is_break_here) {

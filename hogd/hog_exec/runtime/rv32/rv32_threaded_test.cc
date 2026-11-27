@@ -2782,11 +2782,6 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
 }
 
 // --- lw runs ----------------------------------------------------------------
-//
-// op_load_run executes a run of same-base, consecutive-word lw slots behind
-// one range check, and a run that fails the check traps at its first load.
-// These pin where preparation installs it and hold the engine to the
-// canonical Machine under that rule (load_run_reference.h).
 
 std::shared_ptr<const ThreadedMachinePreInstantiation>
 lowered_without_fusion(std::span<const uint32_t> words, uint32_t memory_bytes,
@@ -2842,12 +2837,8 @@ run_of(uint32_t n, bool descending = false, bool wide = true)
   return load_run_handler(n, descending, wide, /*trace=*/false);
 }
 
-// Run `words` on all four threaded lowerings. The fused ones must match the
-// canonical Machine under the lw-run rule: trap and gas always; pc, halt
-// state, registers, memory, and the traced step sequence unless out of gas
-// (after a run's trap, the steps before it and the trap pc). The unfused ones
-// form no runs and must match the canonical Machine as is. Returns whether
-// the rule fired.
+// Runs `words` on all four lowerings; fused ones must match the canonical
+// Machine under the lw-run rule. Returns whether the rule fired.
 bool
 expect_load_run_semantics(std::span<const uint32_t> words,
                           uint32_t memory_bytes, uint64_t gas,

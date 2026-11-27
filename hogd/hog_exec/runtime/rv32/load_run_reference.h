@@ -13,10 +13,7 @@
 #include "hogd/hog_exec/runtime/rv32/threaded_machine.h"
 
 // Test support: canonical execution under the threaded engine's lw-run fault
-// rule. A fused lw run (op_load_run) that fails its range check traps at its
-// first load instead of at its first out-of-bounds load, so differential
-// tests and the engine-diff fuzzer step the canonical Machine and stop where
-// the engine would apply that rule.
+// rule (op_load_run).
 namespace hogd::rv32 {
 
 // The trap op_load_run reports for a run that failed its range check: at the
@@ -28,12 +25,8 @@ struct LoadRunFault {
   uint64_t gas_remaining = 0;
 };
 
-// Tracks where the engine dispatches a slot handler. After a run passes its
-// check, its remaining members execute inside the run's handler rather than
-// their own, so their (possibly longer or opposite-direction) runs do not
-// apply. Everything else that reaches a run head dispatches it: the slot
-// after a run, any control transfer, and re-entering a run's slots later
-// (a loop back over it).
+// Tracks which slots the engine dispatches: a passed run's remaining members
+// do not apply their own runs; any other arrival at a run head does.
 class LoadRunRule {
 public:
   LoadRunRule(const ThreadedMachinePreInstantiation &lowered,
