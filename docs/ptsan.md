@@ -85,7 +85,7 @@ the mechanism.
 |---|---|---|
 | Rust crypto crate | `rust_shims.cc` | every exported function |
 | System libcrypto | `openssl_shims.cc` | the functions hogd calls |
-| glibc functions PTSan does not wrap | `libc_shims.cc` | the ones hogd, x23, and libc++ have run into |
+| glibc functions PTSan does not wrap | `libc_shims.cc` | the ones a hogd binary calls with a pointer |
 
 A call into uninstrumented code that has no shim still links. At run time it
 faults inside the library, or, for a system call, fails with `EFAULT`. When
@@ -127,8 +127,16 @@ and each workaround can go once a PTSan release fixes the defect.
   glibc's `__cxa_thread_atexit_impl` gets tagged memory from PTSan's
   allocator. `fdopendir` fails the same way, and with it
   `std::filesystem::remove_all`. (`libc_shims.cc`)
-- `fchmodat`, `symlink`, `faccessat`, `fread_unlocked`, `madvise`,
-  `CPU_COUNT`, and the pointer argument of `fcntl` reach glibc still tagged.
-  So `std::filesystem::permissions` and `create_symlink` fail with `EFAULT`,
-  and RocksDB can neither lock its database directory nor read its files.
-  (`libc_shims.cc`)
+- `fchmodat`, `symlink`, `faccessat`, `fread_unlocked`, `madvise`, `msync`,
+  `posix_madvise`, `sched_setscheduler`, `wcscasecmp`, `CPU_COUNT`, and the
+  pointer argument of `fcntl` reach glibc still tagged. So
+  `std::filesystem::permissions` and `create_symlink` fail with `EFAULT`,
+  RocksDB can neither lock its database directory nor read its files, and
+  GoogleTest crashes when it compares wide strings. (`libc_shims.cc`)
+- Memory from `aligned_alloc` has no object ID, and PTSan checks no access to
+  it. The C++ runtime implements over-aligned `operator new` with it, so that
+  covers every heap object of an `alignas(64)` type. `libc_shims.cc` replaces
+  those operators with ones that allocate through `posix_memalign`. Memory
+  from a direct `aligned_alloc` call stays unchecked: the runtime allocates
+  exceptions that way too, and the system unwinder has to be able to read
+  them.

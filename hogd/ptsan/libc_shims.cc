@@ -2,26 +2,33 @@
 //
 // See shim.h. PTSan's runtime wraps the libc functions it knows about. A call
 // to any other one passes tagged pointers straight into glibc, and memory
-// glibc allocates during it comes back tagged. These are the functions hogd,
-// x23 and the PTSan libc++ use that PTSan 0.4.0 does not wrap. To look for
-// more, list what a PTSan-built binary still imports from libc:
+// glibc allocates during it comes back tagged. These are the functions that
+// PTSan 0.4.0 does not wrap and that code in a hogd binary calls with a
+// pointer: hogd itself, x23, RocksDB, GoogleTest and the PTSan libc++. To
+// look for more, list what a PTSan-built binary still imports from libc:
 //
 //   llvm-nm -D --undefined-only build/ptsan/hogd/base/base_test
 //
 // Functions the runtime wraps are defined in the binary and so are absent
-// from that list.
+// from that list. dlsym() is on it and has no shim, because the shims find
+// the next definition with it. Its one caller in instrumented code is
+// RocksDB's dynamic library loader, which hogd does not use.
 
 #include <dirent.h>
 #include <fcntl.h>
 #include <sched.h>
 #include <stdio.h>
+#include <stdlib.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <sys/types.h>
 #include <unistd.h>
+#include <wchar.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstddef>
+#include <new>
 
 #include "hogd/ptsan/shim.h"
 
@@ -42,7 +49,11 @@ HOGD_PTSAN_INTERPOSED(fcntl);
 HOGD_PTSAN_INTERPOSED(fdopendir);
 HOGD_PTSAN_INTERPOSED(fread_unlocked);
 HOGD_PTSAN_INTERPOSED(madvise);
+HOGD_PTSAN_INTERPOSED(msync);
+HOGD_PTSAN_INTERPOSED(posix_madvise);
+HOGD_PTSAN_INTERPOSED(sched_setscheduler);
 HOGD_PTSAN_INTERPOSED(symlink);
+HOGD_PTSAN_INTERPOSED(wcscasecmp);
 
 extern "C" {
 
@@ -134,6 +145,30 @@ madvise(void *addr, size_t length, int advice) noexcept
   return HOGD_PTSAN_NEXT(madvise)(raw(addr), length, advice);
 }
 
+// RocksDB syncs files it writes through mmap with this.
+int
+msync(void *addr, size_t length, int flags)
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(msync)(raw(addr), length, flags);
+}
+
+// RocksDB passes access hints for files it reads through mmap with this.
+int
+posix_madvise(void *addr, size_t length, int advice) noexcept
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(posix_madvise)(raw(addr), length, advice);
+}
+
+// RocksDB lowers the priority of its background threads with this.
+int
+sched_setscheduler(pid_t pid, int policy, const sched_param *param) noexcept
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(sched_setscheduler)(pid, policy, raw(param));
+}
+
 // std::filesystem::create_symlink() calls this.
 int
 symlink(const char *target, const char *linkpath) noexcept
@@ -142,4 +177,87 @@ symlink(const char *target, const char *linkpath) noexcept
   return HOGD_PTSAN_NEXT(symlink)(raw(target), raw(linkpath));
 }
 
+// GoogleTest compares wide strings with this for EXPECT_STRCASEEQ.
+int
+wcscasecmp(const wchar_t *s1, const wchar_t *s2) noexcept
+{
+  UninstrumentedCall call;
+  return HOGD_PTSAN_NEXT(wcscasecmp)(raw(s1), raw(s2));
+}
+
 } // extern "C"
+
+// Over-aligned operator new is here because of one more function PTSan does
+// not wrap, aligned_alloc(). The C++ runtime implements these operators with
+// it, glibc serves it, and its memory has no object ID: PTSan would check no
+// access to a heap object of an alignas(64) type. PTSan does wrap
+// posix_memalign(), which wants an alignment that is a multiple of the
+// pointer size.
+//
+// aligned_alloc() itself cannot be redirected the same way. The runtime also
+// allocates exceptions with it, and the system unwinder, which is not
+// instrumented, reads those.
+//
+// The definitions are weak so that a test which replaces operator new, as
+// hogd/base/test_support/alloc_fault.cc does, still links. The runtime's
+// operator delete releases the memory with free().
+
+namespace {
+
+// Returns nullptr once allocation fails and no new-handler is installed.
+void *
+aligned_new(std::size_t size, std::align_val_t alignment)
+{
+  std::size_t align =
+      std::max(static_cast<std::size_t>(alignment), sizeof(void *));
+  for (;;) {
+    void *ptr = nullptr;
+    if (posix_memalign(&ptr, align, size == 0 ? 1 : size) == 0) {
+      return ptr;
+    }
+    std::new_handler handler = std::get_new_handler();
+    if (handler == nullptr) {
+      return nullptr;
+    }
+    handler();
+  }
+}
+
+} // namespace
+
+[[gnu::weak]] void *
+operator new(std::size_t size, std::align_val_t alignment)
+{
+  if (void *ptr = aligned_new(size, alignment)) {
+    return ptr;
+  }
+  throw std::bad_alloc();
+}
+
+[[gnu::weak]] void *
+operator new(std::size_t size, std::align_val_t alignment,
+             const std::nothrow_t &) noexcept
+{
+  try {
+    return ::operator new(size, alignment);
+  } catch (...) {
+    return nullptr;
+  }
+}
+
+[[gnu::weak]] void *
+operator new[](std::size_t size, std::align_val_t alignment)
+{
+  return ::operator new(size, alignment);
+}
+
+[[gnu::weak]] void *
+operator new[](std::size_t size, std::align_val_t alignment,
+               const std::nothrow_t &) noexcept
+{
+  try {
+    return ::operator new[](size, alignment);
+  } catch (...) {
+    return nullptr;
+  }
+}
