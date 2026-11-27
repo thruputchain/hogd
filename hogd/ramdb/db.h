@@ -62,6 +62,9 @@ public:
   Database(Directory dir, size_t heap_size, int lock_order, int bucket_order,
            int write_head_order)
     : dir_(std::move(dir)),
+      // The reserve is one loglet per thread of pool_, which is what
+      // compaction can hold beyond what it has freed (see
+      // ItemAllocator::compact_one).
       loglet_allocator_(LogletAllocator::create(heap_size,
                                                 available_parallelism(),
                                                 [this] { notify_low_mem(); })),

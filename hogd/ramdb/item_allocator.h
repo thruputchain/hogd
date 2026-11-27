@@ -23,6 +23,7 @@
 
 #pragma once
 
+#include <cassert>
 #include <vector>
 
 #include "hogd/base/perthread.h"
@@ -73,12 +74,15 @@ struct CompactionStats {
   size_t items;
   size_t live_items;
   size_t loglets_freed;
+  // source loglets left for a later pass because no reserved loglet was free.
+  size_t loglets_deferred;
 
   CompactionStats &operator+=(const CompactionStats &stats)
   {
     items += stats.items;
     live_items += stats.live_items;
     loglets_freed += stats.loglets_freed;
+    loglets_deferred += stats.loglets_deferred;
     return *this;
   }
 };
@@ -98,6 +102,9 @@ public:
     // and compact()'s defer-on-bad_alloc recovery can both emplace_back
     // without ever growing the vector — so neither path can throw bad_alloc.
     compactable_loglets_.reserve(allocator_.loglet_count());
+    // Each compaction thread can hold one reserved loglet more than it has
+    // given back (see compact_one), so the reserve must cover the pool.
+    assert(allocator_.reserved_count() >= pool_.worker_count());
   }
   ~ItemAllocator() = default;
 
@@ -152,8 +159,11 @@ private:
   // each thread gets its own loglet head.
   PerThread<detail::ItemHead> head_;
 
-  // compact_one is a helper function that compacts a single loglet.
-  CompactionStats compact_one(UniqueLoglet &&src);
+  // compact_one is a helper function that compacts a single loglet. It frees
+  // src once every live item has moved out of it. If it cannot finish (the
+  // reserved loglets ran out, or it threw), it leaves src owning the loglet so
+  // the caller can give it back to the compactor.
+  CompactionStats compact_one(UniqueLoglet &src);
 };
 
 template<bool Rewind>

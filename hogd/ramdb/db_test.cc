@@ -86,10 +86,13 @@ struct MapStack {
   DiskWriter dw;
   ScalableMap map;
 
-  MapStack(Directory d, size_t heap, int mutex_order, int bucket_order)
+  // compaction_threads sizes both the worker pool and the loglet reserve, as
+  // Database does with available_parallelism().
+  MapStack(Directory d, size_t heap, int mutex_order, int bucket_order,
+           size_t compaction_threads = kCompactionThreads)
     : dir(std::move(d)),
-      la(LogletAllocator::create(heap, kCompactionThreads, [] {})),
-      pool(static_cast<int>(kCompactionThreads)), ia(*la, pool, &map),
+      la(LogletAllocator::create(heap, compaction_threads, [] {})),
+      pool(static_cast<int>(compaction_threads)), ia(*la, pool, &map),
       dw(*la, dir, 0, [] {}), map(ia, dw, mutex_order, bucket_order)
   {}
 };
@@ -102,6 +105,90 @@ make_value(uint64_t seed, size_t len)
     v[i] = static_cast<char>(((seed * 1103515245U) + (i * 12345U)) & 0xFFU);
   return v;
 }
+
+// CompactionUnderPressure builds the state that a compaction pass sees when
+// memory is low, on a MapStack whose reserve and pool have a small fixed size
+// so the result does not depend on the host's core count: several compactable
+// loglets that are half dead, and no free loglet beyond the reserve.
+class CompactionUnderPressure {
+public:
+  // Two loglets' worth of live data per reserved loglet, in sources that are
+  // half live.
+  static constexpr size_t kThreads = 2;
+  static constexpr size_t kSourceLoglets = 8;
+  static constexpr size_t kHeapLoglets = 24;
+  static constexpr size_t kValueLen = 1400;
+
+  CompactionUnderPressure(Directory d)
+    : s_(std::move(d), kHeapLoglets * kLogletRegionSize, /*mutex_order=*/6,
+         /*bucket_order=*/12, kThreads)
+  {}
+
+  MapStack &stack() { return s_; }
+  size_t free_loglets() const { return s_.la->usage_stats().free; }
+
+  // fill inserts items until kSourceLoglets loglets are full, removes every
+  // other one, and then takes every loglet that an ordinary allocation can
+  // get, leaving exactly the reserve free.
+  void fill()
+  {
+    using enum ItemStorage;
+    const size_t before = free_loglets();
+    std::vector<std::string> keys;
+    // The thread's head loglet is not compactable, so fill one more.
+    for (uint64_t i = 0; before - free_loglets() < kSourceLoglets + 1; ++i) {
+      std::string key = std::format("key-{:08}", i);
+      std::string val = make_value(i, kValueLen);
+      ASSERT_NO_FATAL_FAILURE(apply(kNormal, key, val));
+      oracle_.emplace(key, std::move(val));
+      keys.push_back(std::move(key));
+    }
+    for (size_t i = 0; i < keys.size(); i += 2) {
+      ASSERT_NO_FATAL_FAILURE(apply(kTombstone, keys[i], {}));
+      oracle_.erase(keys[i]);
+    }
+
+    // An ordinary allocation waits unless a loglet beyond the reserve is free.
+    while (free_loglets() > kThreads) {
+      ballast_.push_back(make_unique_loglet(*s_.la, LogletMode::kMemoryItems));
+      ASSERT_TRUE(static_cast<bool>(ballast_.back()));
+    }
+  }
+
+  // check_contents expects the map to hold exactly the live items.
+  void check_contents()
+  {
+    std::unordered_map<std::string, std::string> found;
+    s_.map.for_each([&](ItemHeader *h) {
+      auto [it, inserted] =
+          found.emplace(to_string(h->get_key()), to_string(h->get_value()));
+      EXPECT_TRUE(inserted) << "duplicate key in map";
+    });
+    EXPECT_EQ(found, oracle_);
+  }
+
+private:
+  MapStack s_;
+  std::vector<UniqueLoglet> ballast_;
+  std::unordered_map<std::string, std::string> oracle_;
+  uint64_t lsn_{0};
+
+  void apply(ItemStorage storage, const std::string &key,
+             const std::string &val)
+  {
+    // A WAL-style record for apply_change, which copies it into the map.
+    alignas(ItemHeader) std::array<std::byte, 2048> buf;
+    ASSERT_LE(sizeof(ItemHeader) + key.size() + val.size(), buf.size());
+    auto *rec = new (buf.data())
+        ItemHeader(storage, /*type=*/0, static_cast<uint16_t>(key.size()),
+                   static_cast<uint32_t>(val.size()));
+    ASSERT_NE(rec, nullptr);
+    std::ranges::copy(std::as_bytes(std::span(key)), rec->get_key().begin());
+    std::ranges::copy(std::as_bytes(std::span(val)), rec->get_value().begin());
+    rec->lsn = ++lsn_;
+    ASSERT_TRUE(static_cast<bool>(s_.map.apply_change(rec)));
+  }
+};
 
 // Rewrites the LSN in a snapshot's trailing commit record to new_lsn and
 // recomputes the same unkeyed CRC32C recovery verifies, so only the LSN is out
@@ -1635,6 +1722,74 @@ TEST(ScalableMapRecoveryConcurrency, PrepareExpandWaitsForBucketHolders)
 
   holder.join();
   resizer.join();
+}
+
+// A compaction pass must fit in the reserved loglets when no other loglet is
+// free. Each worker has to free its source loglet as it finishes it: a pass
+// that keeps every source until it returns needs destinations for all the live
+// data at once, and ran the reserved path of LogletAllocator::alloc() off the
+// end of an empty free list (#4891). The reserve and the pool are fixed at two
+// here, so this does not depend on the host's core count.
+TEST(Compaction, PassFitsInReservedLoglets)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  CompactionUnderPressure p(*dir);
+  ASSERT_NO_FATAL_FAILURE(p.fill());
+  ASSERT_EQ(p.free_loglets(), CompactionUnderPressure::kThreads);
+
+  // Half of each source is dead, so the pass must give loglets back.
+  EXPECT_GT(p.stack().ia.compact(1.0F), 0U);
+  EXPECT_GT(p.free_loglets(), CompactionUnderPressure::kThreads);
+  p.check_contents();
+}
+
+// If the reserve is empty all the same, compaction must leave the loglets it
+// cannot finish to a later pass and lose nothing (#4891).
+TEST(Compaction, DefersWhenReserveIsExhausted)
+{
+  ErrnoStatus<Directory> dir = Directory::open_temporary();
+  ASSERT_TRUE(static_cast<bool>(dir));
+  CompactionUnderPressure p(*dir);
+  ASSERT_NO_FATAL_FAILURE(p.fill());
+  LogletAllocator &la = *p.stack().la;
+
+  // Take the reserve away from the compactor.
+  std::vector<UniqueLoglet> reserve;
+  for (size_t i = 0; i < CompactionUnderPressure::kThreads; ++i) {
+    reserve.push_back(make_unique_loglet(la, LogletMode::kMemoryItems, true));
+    ASSERT_TRUE(static_cast<bool>(reserve.back()));
+  }
+  ASSERT_EQ(p.free_loglets(), 0U);
+
+  EXPECT_EQ(p.stack().ia.compact(1.0F), 0U);
+  EXPECT_EQ(p.free_loglets(), 0U);
+  p.check_contents();
+
+  // With the reserve back, the deferred loglets are compacted.
+  reserve.clear();
+  EXPECT_GT(p.stack().ia.compact(1.0F), 0U);
+  EXPECT_GT(p.free_loglets(), CompactionUnderPressure::kThreads);
+  p.check_contents();
+}
+
+// The reserved path does not wait, so it must report an empty free list
+// instead of popping it (#4891).
+TEST(Loglet, ReservedAllocReturnsNullWhenEmpty)
+{
+  auto allocator = LogletAllocator::create(2 * kLogletRegionSize, 1, [] {});
+  ASSERT_NE(allocator, nullptr);
+  UniqueLoglet a = make_unique_loglet(*allocator, LogletMode::kMemoryItems);
+  ASSERT_TRUE(static_cast<bool>(a));
+  UniqueLoglet b =
+      make_unique_loglet(*allocator, LogletMode::kMemoryItems, true);
+  ASSERT_TRUE(static_cast<bool>(b));
+  EXPECT_EQ(allocator->alloc(LogletMode::kMemoryItems, true), nullptr);
+
+  // A freed loglet is available to the reserved path again.
+  b.reset();
+  b = make_unique_loglet(*allocator, LogletMode::kMemoryItems, true);
+  EXPECT_TRUE(static_cast<bool>(b));
 }
 
 TEST(Loglet, CloneZeroesNextSlot)

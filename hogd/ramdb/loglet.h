@@ -382,10 +382,17 @@ public:
   LogletAllocator(const LogletAllocator &la) = delete;
   LogletAllocator &operator=(const LogletAllocator &la) = delete;
 
-  // alloc allocates a loglet. If use_reserved is true, it can never fail or
-  // block because it draws from a pool of loglets reserved for compaction.
-  // Otherwise, it could return nullptr if no loglets are available and
-  // attempts to free loglets have failed.
+  // alloc allocates a loglet. If use_reserved is true, it never blocks because
+  // it may draw from the reserved_count loglets that ordinary allocations
+  // leave free for compaction. It returns nullptr only if the free list is
+  // empty, i.e. the reserve's users hold more than reserved_count loglets
+  // taken from it. Compaction never does as long as reserved_count is at
+  // least the number of compaction threads, because each thread takes at most
+  // one loglet per source loglet and frees that source before starting the
+  // next (see ItemAllocator::compact_one).
+  // Otherwise, it waits for a loglet beyond the reserve and could return
+  // nullptr if no loglets are available and attempts to free loglets have
+  // failed.
   Loglet *alloc(LogletMode mode, bool use_reserved = false);
   // free frees a loglet, allowing it to be reused.
   void free(Loglet *ll);
@@ -416,6 +423,10 @@ public:
 
   // size returns the size in bytes of all loglets together.
   size_t size() const { return len_; }
+
+  // reserved_count returns the number of loglets set aside for alloc() calls
+  // with use_reserved.
+  size_t reserved_count() const noexcept { return reserved_count_; }
 
   // loglet_count returns the total number of loglets in the region. This is
   // the maximum number of loglets that can ever be live across all pools

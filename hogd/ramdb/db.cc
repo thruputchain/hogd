@@ -318,7 +318,10 @@ Database::estimate_heap_size(size_t bytes)
 {
   size_t heap_size = align_up(bytes, kLogletRegionSize);
 
-  // need two loglets per compactor thread and one loglet per worker thread.
+  // need two loglets per compactor thread (the destination it keeps between
+  // passes and the reserved one it may take before it frees a source; see
+  // the reserve in the Database constructor) and one loglet per worker
+  // thread.
   heap_size += available_parallelism() * kLogletRegionSize * 3;
 
   // add disk buffering overhead.

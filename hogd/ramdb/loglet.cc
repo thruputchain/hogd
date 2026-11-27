@@ -211,8 +211,17 @@ LogletAllocator::alloc(LogletMode mode, bool use_reserved)
       return nullptr;
   }
 
+  // Only the reserved path can find the free list empty: the wait above leaves
+  // more than reserved_count_ loglets. It means the reserve's users took more
+  // than reserved_count_ loglets without returning one, which a correctly
+  // sized reserve rules out (see alloc() in loglet.h). Report it rather than
+  // pop an empty vector; the caller must cope with nullptr (#4891).
+  if (free_loglets_.empty()) [[unlikely]] {
+    assert(use_reserved);
+    return nullptr;
+  }
+
   // allocate a free loglet.
-  assert(!free_loglets_.empty());
   Loglet *ll = free_loglets_.back();
   free_loglets_.pop_back();
   if constexpr (is_debug_build())
