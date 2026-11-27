@@ -32,7 +32,6 @@
 #include "network_config.hh"
 #include "retrocausal_queue.hh"
 #include "rpc_types.hh"
-#include "storage_item.hh"
 #include "transaction.hh"
 #include "types.hh"
 #include "x23/serialize_cxs.h"
@@ -119,11 +118,11 @@ private:
   }
 };
 
-// The contract writes 1025 bytes and expects the write to fail, so pin the
-// 1024-byte protocol default; stock genesis allows 4096.
-class SyscallMiscTestsDefaultBytestringLen : public SyscallMiscTestsBase {
+// The contract writes 1025 bytes and expects the write to fail, so pin a
+// 1024-byte limit.
+class SyscallMiscTestsBytestringLen1024 : public SyscallMiscTestsBase {
 public:
-  SyscallMiscTestsDefaultBytestringLen()
+  SyscallMiscTestsBytestringLen1024()
     : SyscallMiscTestsBase(bytestring_config())
   {}
 
@@ -133,7 +132,7 @@ private:
     auto config = stock_network_config();
     NetworkConfigParams::set_param(config,
                                    ConfigParamID::kConfigParamMaxBytestringLen,
-                                   kDefaultMaxBytestringLen);
+                                   1024);
     return config;
   }
 };
@@ -350,7 +349,7 @@ TEST_F(SyscallMiscTests, TestBsGetWrongType)
 
 // ── #11: BytestringSet (too long) ───────────────────────────────────
 
-TEST_F(SyscallMiscTestsDefaultBytestringLen, TestBsSetTooLong)
+TEST_F(SyscallMiscTestsBytestringLen1024, TestBsSetTooLong)
 {
   auto handler = make_new_system_call_handler(
       Transaction{.invocation =

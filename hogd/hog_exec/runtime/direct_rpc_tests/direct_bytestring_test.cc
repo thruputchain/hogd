@@ -1816,12 +1816,12 @@ TEST_F(DirectBytestringTest, OversizedDeltaBatchRejectedAsConflict)
     EXPECT_TRUE(r.value()) << "a small delta batch must commit";
   }
 
-  // 16000 max-size deltas (~16.8 MiB) exceed a 16 MiB limit.
-  const std::string max_value(kDefaultMaxBytestringLen, 'x');
+  // 16000 1 KiB deltas (~16.8 MiB) exceed a 16 MiB limit.
+  const std::string value(1024, 'x');
   const auto spray = [&](auto &tx) {
     for (int i = 0; i < 16000; ++i) {
       tx.add_delta(make_addrkey(contract_addr, "spray" + std::to_string(i)),
-                   make_bytestring_delta(max_value),
+                   make_bytestring_delta(value),
                    std::to_underlying(StorageDeltaFlags::None));
     }
   };

@@ -263,7 +263,7 @@ constexpr uint32_t kMaxBytestringBytes = kBytestringBytes.back();
 // The length the ecall-crossing rows use: the stock configured limit, so the
 // one length driven end to end is the largest a chain running this repo's
 // parameters would actually admit.
-constexpr size_t kBytestringVmRow = 3;
+constexpr size_t kBytestringVmRow = 4;
 static_assert(kBytestringVmRow < kBytestringBytes.size());
 static_assert(kBytestringBytes[kBytestringVmRow] == kDefaultMaxBytestringLen);
 static_assert(kBytestringPayloadAddress + kMaxBytestringBytes <=

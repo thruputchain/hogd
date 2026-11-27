@@ -20,11 +20,10 @@ its header and initial memory, without network-config overrides. These are
 also the protocol defaults for omitted parameters. Configurations that state
 explicit values retain them.
 
-The stock config differs from the protocol defaults in one parameter:
-`max_bytestring_len` is 4096, not 1024. Local devnode chains and hosted
-bootstrap genesis both use the stock config, so a contract meets the same
-limits locally and on a hosted devnet. A chain whose genesis omits a parameter
-gets its default.
+The stock config states every parameter at its protocol default. Local
+devnode chains and hosted bootstrap genesis both use it, so a contract meets
+the same limits locally and on a hosted devnet. A chain whose genesis omits a
+parameter gets its default.
 
 From there it rides the `DbTip`, exactly as `default_wallet` does:
 
