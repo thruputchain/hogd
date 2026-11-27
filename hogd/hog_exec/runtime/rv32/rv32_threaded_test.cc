@@ -2791,11 +2791,7 @@ TEST(Rv32ThreadedTrapGas, addressWraparoundTrapsLikeCanonical)
 }
 
 // --- x0-based (absolute) loads and stores -----------------------------------
-//
-// Preparation decides the bounds check of every load/store whose base is x0:
-// op_load_abs / op_store_abs where the constant address is in bounds,
-// trap_bad_memory where it is not. These pin the selection and hold both
-// outcomes to the canonical Machine.
+// Handler selection and parity with the canonical Machine.
 
 std::shared_ptr<const ThreadedMachinePreInstantiation>
 threaded_from_words_unfused(std::span<const uint32_t> words,
@@ -2811,10 +2807,8 @@ threaded_from_words_unfused(std::span<const uint32_t> words,
       std::move(pre_instantiation.value()));
 }
 
-// Run `words` on the canonical Machine and on all four threaded lowerings
-// (traced/untraced x fused/unfused). Trap and gas must always agree; when
-// neither engine ran out of gas, pc, halt state, registers, and memory must
-// agree too (after kOutOfGas only the (trap, 0) pair is consensus-visible).
+// Compares the canonical Machine against all four threaded lowerings; after
+// kOutOfGas only (trap, gas) is compared.
 void
 expect_final_state_parity(std::span<const uint32_t> words,
                           uint32_t memory_bytes, uint64_t gas_limit)
@@ -3063,11 +3057,7 @@ TEST(Rv32ThreadedAbsoluteAccess, inBoundsBreakCarrierBudgetSweep)
   expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/30);
 }
 
-// Random straight-line programs dense in absolute accesses: every width, an
-// immediate drawn either near the end of memory or from the whole 12-bit
-// range, memory sizes on both sides of the immediate range, forward branches
-// that land in the middle of fused pairs, and budgets small enough to cut the
-// program off mid-run.
+// Random absolute-access programs vs the canonical Machine.
 TEST(Rv32ThreadedAbsoluteAccess, randomProgramsMatchCanonical)
 {
   using test_program::branch;

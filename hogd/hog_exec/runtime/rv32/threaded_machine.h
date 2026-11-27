@@ -885,15 +885,9 @@ op_store(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
   HOGD_STEP_NEXT(c, ip + 1);
 }
 
-// x0-based ("absolute") accesses. With rs1 == x0 the effective address is the
-// sign-extended immediate, which no register value can change, and a
-// pre-instantiation's data-memory size is fixed (every machine copies its
-// full image), so preparation settles the bounds check once per slot. These
-// handlers are installed only where preparation proved the access in bounds;
-// an absolute access proved out of bounds gets trap_bad_memory itself as its
-// handler (absolute_access_handler). That holds for any entry into the slot,
-// including a JALR to an arbitrary pc, because the address has no register
-// input.
+// rs1 == x0 makes the address a constant, so preparation settles the bounds
+// check per slot (absolute_access_handler): these handlers where it is in
+// bounds, trap_bad_memory where it is not.
 template<bool Trace, uint32_t Width, bool SignExtend, bool Brk = false>
 StepResult
 op_load_abs(Ctx c, const Slot *ip, uint8_t *mem, uint32_t memsize, uint64_t gas)
@@ -1935,10 +1929,7 @@ ThreadedMachinePreInstantiation::create(std::span<const uint8_t> code,
       }
     }
 
-    // An x0-based load/store has a constant address and total_memory_size is
-    // the size of every machine's memory, so decide its bounds check here (see
-    // op_load_abs). Fusion below may still give a head slot a checked fused
-    // handler; the tail of a fused pair keeps this one for branches into it.
+    // x0-based loads/stores: see op_load_abs.
     if (d.rs1 == 0 && memory_access_width(d.op) != 0) {
       slot.handler = absolute_access_handler(d.op, d.imm, total_memory_size,
                                              trace, is_break_here);
