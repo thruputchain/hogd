@@ -431,6 +431,13 @@ public:
   [[nodiscard]] SystemStatus<SyscallStatus<void>>
   delete_object(StorageKeyContractData const &storage_key);
 
+  // What writing [storage_key] adds to the root commit: kCommitKeyCost if no
+  // frame on the stack holds a pending write to it, nothing otherwise. Asked
+  // before the write and billed only if it succeeds, so a write that a faulted
+  // frame drops leaves the next one to pay.
+  [[nodiscard]] GasAmount
+  commit_key_gas(StorageKeyContractData const &storage_key);
+
   // === Storage flags syscalls ===
   // A key's flags belong to the transaction's pending write to it, not to any
   // single write: writes leave them alone, and every delta pushed for the key

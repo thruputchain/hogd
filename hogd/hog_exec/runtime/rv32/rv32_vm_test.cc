@@ -1538,6 +1538,7 @@ TEST(Rv32GasTest, version_pins_full_cost_table)
           {u8"U256Sqrt", 60},
           {u8"U256MulDivRem", 110},
           {u8"U128MulDivRem", 70},
+          {u8"CommitKey", 1'200},
       }};
 
   EXPECT_EQ(kOpCount, 49U);

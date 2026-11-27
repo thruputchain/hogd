@@ -122,6 +122,11 @@ constexpr static uint64_t kStorageAccessCost = 150;
 // hosts pays a hop this does not.
 constexpr static uint64_t kDBRPCCost = 37300;
 
+// Root commit's hog_db admission of one written key, paid by a contract-data
+// write to a key with no pending write on the frame stack. See #4837 and
+// rv32/gas_calibration/MEASUREMENTS.md.
+constexpr static uint64_t kCommitKeyCost = 1200;
+
 // What copying a bytestring costs, per block, on top of the storage access
 // every bytestring call already pays. A block rather than a per-byte rate
 // because the measured rate is a fraction of a gas unit, and a fraction needs
@@ -303,7 +308,7 @@ struct SyscallGasCostEntry {
 
 // Every constant the cost functions above read. Syscalls not named here charge
 // kSyscallBaseCost and nothing more.
-constexpr std::array<SyscallGasCostEntry, 22> kSyscallGasCostSchedule = {{
+constexpr std::array<SyscallGasCostEntry, 23> kSyscallGasCostSchedule = {{
     {.name = u8"SyscallBase", .cost = kSyscallBaseCost},
     {.name = u8"SHA256HashBlock", .cost = kSHA256HashBlockCost},
     {.name = u8"SHA256Stream", .cost = kSHA256StreamCost},
@@ -328,6 +333,7 @@ constexpr std::array<SyscallGasCostEntry, 22> kSyscallGasCostSchedule = {{
     {.name = u8"U256Sqrt", .cost = kU256SqrtCost},
     {.name = u8"U256MulDivRem", .cost = kU256MulDivRemCost},
     {.name = u8"U128MulDivRem", .cost = kU128MulDivRemCost},
+    {.name = u8"CommitKey", .cost = kCommitKeyCost},
 }};
 
 } // namespace hogd

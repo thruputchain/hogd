@@ -336,8 +336,8 @@ TEST_F(SyscallOutputTraceTest, NnintGetTraceConditionalPresenceIsExact)
     body.nonnegative_int_set_add().inputs.key = set_key;
     body.nonnegative_int_set_add().inputs.set_value = to_xdr(int128_t{5});
     body.nonnegative_int_set_add().inputs.add_value = to_xdr(int128_t{7});
-    expected.push_back(
-        step_entry(gas, kStorageAccessCost, std::move(body), ok_status()));
+    expected.push_back(step_entry(gas, kStorageAccessCost + kCommitKeyCost,
+                                  std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kNonnegativeIntGet);
@@ -1389,8 +1389,9 @@ TEST_F(SyscallOutputTraceTest, BytestringGetTraceRecordsFullValueWhenTruncated)
     // Named rather than spelled as a literal, the way the SHA256 and storage
     // expectations in this file already are, so the next repricing moves these
     // with the schedule instead of through them.
-    expected.push_back(step_entry(gas, GasCost::bytestring_set(value.size()),
-                                  std::move(body), ok_status()));
+    expected.push_back(
+        step_entry(gas, GasCost::bytestring_set(value.size()) + kCommitKeyCost,
+                   std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kBytestringGet);

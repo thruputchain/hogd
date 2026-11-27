@@ -15,6 +15,7 @@ std::pair<HostFnStatus<SyscallErrorCode>, WrappedGasAmount>
 syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
                            const StorageKeyContractData &input_key)
 {
+  const GasAmount commit_gas = syscall_handler.commit_key_gas(input_key);
   auto status = syscall_handler.delete_object(input_key);
   if (!status) {
     return SyscallInnerResult{status.error().to_host_fn_error(),
@@ -30,7 +31,7 @@ syscall_DeleteObject_inner(SystemCallHandler &syscall_handler,
   }
 
   return SyscallInnerResult{SyscallErrorCode::kSyscallErrorCodeNone,
-                            WrappedGasAmount{kStorageAccessCost}};
+                            WrappedGasAmount{kStorageAccessCost + commit_gas}};
 }
 
 } // namespace hogd

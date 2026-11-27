@@ -481,6 +481,10 @@ public:
   ItemView *get_item_view(AddressAndKey const &addrkey);
   ItemView *get_item_view(FrameItemKey const &key);
 
+  // Whether some frame on the stack holds a pending write to [key]. Unlike
+  // get_item_view(), creates no view.
+  bool has_pending_write(FrameItemKey const &key);
+
   // The frame key for `data_key` under the active frame's address, laid out
   // and hashed once. A syscall that may reach the snapshot cache builds this,
   // probes the frames with it, and hands the same key to UnmodifiedItem::load,

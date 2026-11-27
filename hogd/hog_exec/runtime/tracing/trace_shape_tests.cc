@@ -418,17 +418,19 @@ TEST_F(TraceShapeTest, StorageWriteAndLogEventTraceIsExact)
     body.bytestring_set().inputs.bytestring.append_range(value);
     expected.push_back(make_entry(99'621,
                                   99'621 - kSyscallBaseCost -
-                                      GasCost::bytestring_set(value.size()),
+                                      GasCost::bytestring_set(value.size()) -
+                                      kCommitKeyCost,
                                   std::move(body), ok_status()));
   }
   {
     SyscallTraceBody body(SyscallNo::kLogEvent);
     body.log_event().inputs.topic0 = topic0;
     body.log_event().inputs.data.append_range(data);
-    expected.push_back(make_entry(99'387, 99'387 - kSyscallBaseCost,
+    expected.push_back(make_entry(99'387 - kCommitKeyCost,
+                                  99'387 - kCommitKeyCost - kSyscallBaseCost,
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'243, {}));
+  expected.push_back(return_entry(99'243 - kCommitKeyCost, {}));
 
   ASSERT_EQ(trace.system_calls, expected) << x23::show(trace.system_calls);
 
@@ -708,10 +710,12 @@ TEST_F(TraceShapeTest, ManualRevertAbortTraceIsExact)
     body.bytestring_set().inputs.bytestring.append_range(value);
     expected.push_back(make_entry(99'669,
                                   99'669 - kSyscallBaseCost -
-                                      GasCost::bytestring_set(value.size()),
+                                      GasCost::bytestring_set(value.size()) -
+                                      kCommitKeyCost,
                                   std::move(body), ok_status()));
   }
-  expected.push_back(return_entry(99'398, abort_buffer, /*revert_frame=*/true));
+  expected.push_back(return_entry(99'398 - kCommitKeyCost, abort_buffer,
+                                  /*revert_frame=*/true));
 
   ASSERT_NE(handler.get_trace(), nullptr);
   ASSERT_EQ(handler.get_trace()->system_calls, expected)

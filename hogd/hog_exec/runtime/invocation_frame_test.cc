@@ -18,6 +18,7 @@
 #include "hogd/hog_exec/components/validated_auth_tokens.h"
 #include "hogd/hog_exec/runtime/invocation_frame.h"
 #include "hogd/hog_exec/runtime/item/database_proxy.h"
+#include "hogd/hog_exec/runtime/item/frame_item_key.h"
 #include "hogd/hog_exec/runtime/item/item_view.h"
 #include "hogd/hog_exec/runtime/test_util/block_snapshot_server.h"
 #include "invoke_flag.hh"
@@ -502,6 +503,41 @@ TEST_F(InvocationFrameTest, ChildFramesShareParentBytestring)
   auto const &root_item = *stack.get_item_view(addrkey)->get<BytestringItem>();
   EXPECT_EQ(root_item.bytes().data(), root_data);
   EXPECT_TRUE(std::ranges::equal(root_item.bytes(), payload));
+}
+
+// #4837: commit gas is charged off has_pending_write(), so a child's write
+// must stay pending once the child commits and vanish once it reverts.
+TEST_F(InvocationFrameTest, PendingWriteFollowsChildOutcome)
+{
+  const auto key = FrameItemKey::from(
+      AddressAndKey{.address = make_test_address(1),
+                    .key = StorageKey(StorageKeyType::ContractData)});
+
+  InvocationFrameStack stack(nullptr, *per_tx_db_proxy_, kConfigParams);
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(0), Calldata{}, 0, {}).has_value());
+  EXPECT_FALSE(stack.has_pending_write(key));
+
+  // A reverted child's write is dropped.
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(stack.get_item_view(key)->set(BytestringItem(Bytestring{1})));
+  EXPECT_TRUE(stack.has_pending_write(key));
+  stack.set_active_frame_return(
+      InvocationFrameOutput(InvocationFrameStatusCode::Fault));
+  finish_child(stack, /*expect_revert=*/true);
+  EXPECT_FALSE(stack.has_pending_write(key));
+
+  // A committed child's write stays pending, including for a later child.
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+  ASSERT_TRUE(stack.get_item_view(key)->set(BytestringItem(Bytestring{1})));
+  finish_child(stack);
+  EXPECT_TRUE(stack.has_pending_write(key));
+  ASSERT_TRUE(
+      stack.start_frame(make_test_address(1), Calldata{}, 0, {}).has_value());
+  EXPECT_TRUE(stack.has_pending_write(key));
+  finish_child(stack);
 }
 
 // A frame numbers its forwarded tokens 0..N-1, in the order its parent listed

@@ -271,6 +271,17 @@ this measurement. Billing follows the
 transaction's first load, independently of whether the shared snapshot cache
 happens to contain the key.
 
+### Commit admission per written key
+
+Each distinct key a transaction writes is one delta that root commit hands
+`BlockTX::lock`, which reads the row on the key's first touch in the block.
+The frame rows above exclude root commit, so `kCommitKeyCost` prices it.
+Measured with #4837's PoC (Release, production `DatabaseProxy`, in-process
+hog_db over RAMDB, 30 pairs, not the calibration host): a root commit of 64
+distinct empty bytestring writes took a median 113 us longer than 64 writes to
+one key, about 1.8 us or 1100 gas per extra key. The price is rounded up to
+1200 and is a first estimate rather than a calibrated value.
+
 ## Bytestrings
 
 Run `34001119814` used five repetitions of 0.5 seconds. Reported deviations were
