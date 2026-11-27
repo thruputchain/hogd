@@ -90,9 +90,7 @@ indexer_options(rocksdb::CompressionType compression_algorithm)
   options.table_factory.reset(
       rocksdb::NewBlockBasedTableFactory(table_options));
 
-  // A large committed block is one WriteBatch of hundreds of megabytes, so
-  // give flushes headroom. Create and reopen share these values so a
-  // restarted indexer runs with the same settings as a new one.
+  // One large block is a single huge WriteBatch; create and reopen share these.
   options.write_buffer_size = 256_MiB;
   options.max_write_buffer_number = 6;
   options.target_file_size_base = 256_MiB;
