@@ -26,7 +26,7 @@ word_at(std::span<const uint8_t> code, size_t index)
          (uint32_t{code[offset + 3]} << 24);
 }
 
-// Probe a word between register-disjoint fillers. Branch offsets stay within
+// Probe a word with fusion disabled. Branch offsets stay within
 // this four-instruction program. Handler selection does not depend on memory
 // size, so a small image avoids zeroing default-size memory per lookup.
 std::optional<Handler>
@@ -43,9 +43,11 @@ isolated_handler(uint32_t word)
       test_program::code_from_words({filler_instruction_word(0), word,
                                      filler_instruction_word(1), 0x00000073U});
   std::optional<Handler> handler;
-  auto probe = ThreadedMachinePreInstantiation::create(code, {}, 0,
-                                                       /*total_memory_size=*/64,
-                                                       /*trace=*/false);
+  auto probe =
+      ThreadedMachinePreInstantiation::create(code, {}, 0,
+                                              /*total_memory_size=*/64,
+                                              /*trace=*/false, kMaxRunGas,
+                                              /*fuse=*/false);
   if (probe.has_value()) {
     const std::span<const Slot> slots =
         ThreadedMachinePreInstantiationTestPeer::slots(*probe);

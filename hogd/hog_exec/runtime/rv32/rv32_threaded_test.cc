@@ -2899,6 +2899,160 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsTheMaterializedConstant)
 
 #endif // HOGD_RV32_STACK_USAGE_ENABLED
 
+// Compare full retirement traces with ample gas, and trap/gas outcomes across
+// insufficient budgets (where the threaded engine can execute speculatively).
+void
+expect_multiply_fusion_parity(std::span<const uint32_t> words)
+{
+  for (const uint32_t cap : {kMinRunGasCap, kMaxRunGas}) {
+    expect_budget_sweep_parity_capped(words, cap, 25);
+    auto canonical = make_program(words);
+    Machine cmachine(canonical, 256, 1000);
+    RecordingHost chost;
+    const ExecTrace expected = trace_execution(cmachine, chost);
+    for (const bool trace : {false, true}) {
+      auto program = threaded_from_words(words, 256, trace, cap);
+      ThreadedMachine machine(*program, 1000);
+      RecordingHost host;
+      if (trace) {
+        TraceObserver observer;
+        machine.run(host, observer);
+        const ExecTrace actual = strip_trace_gas(observer.trace());
+        const ExecTrace stripped = strip_trace_gas(expected);
+        EXPECT_EQ(describe_trace_divergence(stripped, actual), "");
+        ASSERT_EQ(actual.steps.size(), stripped.steps.size());
+        for (size_t i = 0; i < actual.steps.size(); ++i) {
+          EXPECT_EQ(actual.steps[i].state_before,
+                    stripped.steps[i].state_before);
+        }
+      }
+      else {
+        EXPECT_EQ(machine.run(host), expected.final_result);
+      }
+      EXPECT_EQ(machine.trap(), cmachine.trap());
+      EXPECT_EQ(machine.gas_remaining(), cmachine.gas_remaining());
+      for (uint32_t r = 0; r < kRegisterCount; ++r) {
+        EXPECT_EQ(machine.reg(r), cmachine.reg(r));
+      }
+    }
+  }
+}
+
+TEST(Rv32Threaded, multiplyFusionsSelectLoadConsumersAndAllMultiplyAddPairs)
+{
+  using test_program::load;
+  using test_program::op;
+  for (const bool loads : {false, true}) {
+    for (const uint8_t rd : {0, 3}) {
+      for (const uint8_t rs1 : {0, 3, 4}) {
+        for (const uint8_t rs2 : {0, 3, 4}) {
+          const std::vector<uint32_t> words = {loads ? load(rd, 2, 0, 128)
+                                                     : op(rd, 3, 4, 0, 1),
+                                               op(5, rs1, rs2, 0,
+                                                  loads ? 1 : 0)};
+          for (const bool trace : {false, true}) {
+            auto program = threaded_from_words(words, 256, trace);
+            const bool fusible =
+                !loads || (rd != 0 && (rs1 == rd || rs2 == rd));
+            Handler expected =
+                pick_handler(loads ? Op::kLw : Op::kMul, trace, false);
+            if (fusible) {
+              if (loads) {
+                expected = trace ? fused_load_handler<true>(Op::kLw, Op::kMul,
+                                                            rs1 == rd)
+                                 : fused_load_handler<false>(Op::kLw, Op::kMul,
+                                                             rs1 == rd);
+              }
+              else {
+                expected = trace ? alu_alu_handler<true>(Op::kMul, Op::kAdd)
+                                 : alu_alu_handler<false>(Op::kMul, Op::kAdd);
+              }
+            }
+            EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(
+                          *program, 0),
+                      expected);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Rv32Threaded, multiplyFusionsPreserveAliasesFaultsGasAndTrace)
+{
+  using test_program::load;
+  using test_program::op;
+  using test_program::store;
+  for (const bool loads : {false, true}) {
+    for (const uint8_t rd : {0, 3, 4}) {
+      for (const uint8_t rs1 : {0, 3, 4}) {
+        for (const uint8_t rs2 : {0, 3, 4}) {
+          for (const int32_t offset : {128, 254}) {
+            const std::vector<uint32_t> words = {addi(3, 0, -7),
+                                                 addi(4, 0, 11),
+                                                 store(0, 3, 128, 2),
+                                                 loads ? load(rd, 2, 0, offset)
+                                                       : op(rd, 3, 4, 0, 1),
+                                                 op(rd, rs1, rs2, 0,
+                                                    loads ? 1 : 0),
+                                                 0x00100073U};
+            expect_multiply_fusion_parity(words);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Rv32Threaded, multiplyFusionTailsRemainBranchTargets)
+{
+  using test_program::branch;
+  using test_program::load;
+  using test_program::op;
+  for (const bool loads : {false, true}) {
+    const std::vector<uint32_t> words = {addi(3, 0, -7),
+                                         addi(4, 0, 11),
+                                         branch(0, 0, 0, 8),
+                                         loads ? load(3, 2, 0, 254)
+                                               : op(3, 3, 4, 0, 1),
+                                         op(5, 3, 4, 0, loads ? 1 : 0),
+                                         0x00100073U};
+    expect_multiply_fusion_parity(words);
+  }
+}
+
+TEST(Rv32Threaded, multiplyFusionsRespectChunkBreaksAndDoNotOverlap)
+{
+  using test_program::load;
+  using test_program::op;
+  const std::vector<uint32_t> chain = {load(3, 2, 0, 128), op(4, 3, 4, 0, 1),
+                                       op(5, 4, 5, 0, 0)};
+  auto program = threaded_from_words(chain);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 0),
+            (handler_for<false, false>(Op::kLw)));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 1),
+            alu_alu_handler<false>(Op::kMul, Op::kAdd));
+  expect_multiply_fusion_parity(chain);
+  for (const bool loads : {false, true}) {
+    for (const bool tail_break : {false, true}) {
+      // DIV leaves room for the tail, making the head carry a break. LW
+      // fills the chunk, forcing the tail itself to carry a break instead.
+      const std::vector<uint32_t> words = {loads ? load(3, 2, 0, 128)
+                                                 : op(3, 3, 4, 0, 1),
+                                           op(4, 3, 4, 0, loads ? 1 : 0),
+                                           tail_break ? load(5, 2, 0, 128)
+                                                      : op(5, 4, 4, 4, 1)};
+      auto capped = threaded_from_words(words, 256, false, kMinRunGasCap);
+      EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*capped, 1),
+                pick_handler(loads ? Op::kMul : Op::kAdd, false, tail_break));
+      EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*capped, 0),
+                pick_handler(loads ? Op::kLw : Op::kMul, false,
+                             loads || !tail_break));
+      expect_multiply_fusion_parity(words);
+    }
+  }
+}
+
 // NOLINTEND(bugprone-unchecked-optional-access)
 
 } // namespace

@@ -54,7 +54,11 @@ guest's instructions will fuse.
 
 The harness also varies target count in a fixed body of filler instructions.
 That substitution sweep reports a slope and its standard error as diagnostics.
-It is not the primary estimator: layout differences between kernels can dominate
+Single-opcode sweeps, their filler baseline, and their noise-floor measurements
+also disable fusion explicitly; independent register operands alone do not
+prevent fusion with a filler. Pair and workload measurements retain production
+fusion. The lowering audit compares handlers against a fusion-disabled probe.
+The substitution sweep is not the primary estimator: layout differences can dominate
 the timing difference and produce negative slopes. `cost_ns()` in
 `scripts/rv32_gas_report.py` prefers saturation, then an absolute upper bound,
 then the older substitution estimate. `saturated_note` explains missing
