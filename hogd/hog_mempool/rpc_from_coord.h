@@ -468,8 +468,8 @@ public:
   // Runs immediately before/after the submission auth RPC, with commit
   // unlocked.
   void set_submission_auth_test_hook(
-      std::function<x23::Async<void>(BlockHeight,
-                                     const SignedTransactionBatch &, bool)>
+      std::function<x23::Async<void>(
+          BlockHeight, const SharedSignedTransactionBatch &, bool)>
           hook)
   {
     submission_auth_test_hook_ = std::move(hook);
@@ -498,7 +498,7 @@ private:
 
   // Returns with [commit_guard] held, so results stay valid through admission.
   x23::Async<AuthErrorCodeBatch>
-  verify_submission(const SignedTransactionBatch &txs,
+  verify_submission(const SharedSignedTransactionBatch &txs,
                     InstrumentedCoroGuard &commit_guard);
 
   x23::Async<SchedGatewaySubmitOutcomeBatch>
@@ -515,7 +515,7 @@ private:
     // ProposalContext when proposing, from the proposal's header when
     // validating.
     BlockExecutionContext block_execution;
-    x23::XdrVec<SignedTransaction> txs;
+    SharedSignedTransactionBatch txs;
     // The block's txs by [TransactionHash], which keys the mempool's runqueue
     // and the txset trie behind [ProposalHeader::txs_hash].
     x23::XdrVec<TransactionHash> tx_hashes;
@@ -554,7 +554,7 @@ private:
   };
 
   struct PreparedAndValidatedChunk {
-    x23::XdrVec<SignedTransaction> txs;
+    SharedSignedTransactionBatch txs;
     SignedTransactionHashBatch missing_signed_tx_hashes;
     SchedulerValidationOutcome outcome =
         SchedulerValidationOutcome::SchedulerValidationOK;
@@ -661,17 +661,17 @@ private:
                                  const x23::Vec<x23::DagCleanup> &cleanups);
 
   x23::Async<void> propose_batch(
-      BlockID block_id, x23::span<const SignedTransaction> txs,
+      BlockID block_id, x23::span<const Arc<SignedTransaction>> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
       x23::span<ExecResult> ret_chunk, size_t executor_idx);
 
   x23::Async<void> multiplex_large_chunk_across_executors(
-      BlockID block_id, x23::span<const SignedTransaction> txs,
+      BlockID block_id, x23::span<const Arc<SignedTransaction>> txs,
       x23::Vec<x23::XdrVec<NondeterministicProposalData>> &nomination_chunks,
       x23::span<ExecResult> ret);
 
   x23::Async<void> propose_batch_in_chunks(
-      BlockID block_id, x23::span<SignedTransaction> txs,
+      BlockID block_id, x23::span<Arc<SignedTransaction>> txs,
       x23::XdrVec<NondeterministicProposalData> &transaction_nominations,
       x23::span<ExecResult> ret);
 
@@ -852,8 +852,8 @@ private:
   std::unique_ptr<event_sched_client_t> event_sched_client_;
   std::function<void(BlockID, size_t)> finish_executor_started_test_hook_;
   std::function<void(ExecProposeBatchResult &)> propose_batch_result_test_hook_;
-  std::function<x23::Async<void>(BlockHeight, const SignedTransactionBatch &,
-                                 bool)>
+  std::function<x23::Async<void>(BlockHeight,
+                                 const SharedSignedTransactionBatch &, bool)>
       submission_auth_test_hook_;
   std::function<void(BlockHeight)> auth_data_wait_test_hook_;
   std::unique_ptr<auth_sched_client_t> auth_client_;
