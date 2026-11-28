@@ -531,42 +531,62 @@ TEST(Scheduler, ReplacedVariantKeepsEveryEncoding)
   EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
 }
 
-TEST(Scheduler, SignedVariantsShareHashSetLifetime)
+// Removing a body removes every encoding of it exactly once, including one
+// that was displaced and then made live again, while lookups that are still in
+// flight keep the transactions they hold.
+TEST(Scheduler, RemovalDropsEveryEncodingOfTheBody)
 {
   fib_client_t fib_client(MempoolTestInfra::kAccountAddresses[0]);
   const SignedTransaction body = generate_unsigned_txs(fib_client, 1)[0];
   const SignedTransaction a = with_signature(body, 1);
   const SignedTransaction b = with_signature(body, 2);
+  const SignedTransaction c = with_signature(body, 3);
   const TransactionHash tx_hash = sha256(body.tx);
 
   MempoolTestInfra server;
   server.mempool_coord_rpc().wait_for_block_commit(/*expected_height=*/1)();
   auto scheduler = server.mempool_coord_rpc().scheduler();
   scheduler->add_txs({a}, {tx_hash})();
-  std::weak_ptr<std::unordered_set<SignedTransactionHash, SipHash24Hasher>>
-      shared_hashes;
   {
+    // A body with one encoding carries no list of displaced ones.
     auto [entry, lock] = scheduler->txs_.find(sha256(a));
     ASSERT_NE(entry, nullptr);
-    shared_hashes = (*entry)->signed_tx_hashes;
+    EXPECT_TRUE((*entry)->displaced_signed_tx_hashes.empty());
   }
-  auto held_a = scheduler->find_signed_tx(sha256(a));
-
-  scheduler->add_txs({b}, {tx_hash}, {sha256(b)},
-                     Scheduler::CachedVariant::kSubmitVetted)();
+  // a, then b, then c, then a again: a is displaced and brought back.
+  for (const SignedTransaction &encoding : {b, c, a}) {
+    scheduler->add_txs({encoding}, {tx_hash}, {sha256(encoding)},
+                       Scheduler::CachedVariant::kSubmitVetted)();
+  }
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), a);
   {
-    auto [entry, lock] = scheduler->txs_.find(sha256(b));
+    auto [entry, lock] = scheduler->txs_by_body_.find(tx_hash);
     ASSERT_NE(entry, nullptr);
-    EXPECT_EQ((*entry)->signed_tx_hashes, shared_hashes.lock());
+    const std::unordered_set<SignedTransactionHash, SipHash24Hasher> displaced(
+        (*entry)->displaced_signed_tx_hashes.begin(),
+        (*entry)->displaced_signed_tx_hashes.end());
+    EXPECT_EQ((*entry)->displaced_signed_tx_hashes.size(), 2UL);
+    EXPECT_EQ(displaced,
+              (std::unordered_set<SignedTransactionHash, SipHash24Hasher>{
+                  sha256(b), sha256(c)}));
   }
   auto held_b = scheduler->find_signed_tx(sha256(b));
+  ASSERT_TRUE(held_b);
+
   TransactionHashBatch removed{tx_hash};
   scheduler->remove_from_scheduler(x23::span<const TransactionHash>(removed))();
-  EXPECT_FALSE(shared_hashes.expired());
-  held_a.reset();
-  EXPECT_FALSE(shared_hashes.expired());
-  held_b.reset();
-  EXPECT_TRUE(shared_hashes.expired());
+  EXPECT_EQ(scheduler->tx_cache_size(), 0UL);
+  EXPECT_FALSE(scheduler->find_tx(tx_hash));
+  for (const SignedTransaction &encoding : {a, b, c}) {
+    EXPECT_FALSE(scheduler->find_signed_tx(sha256(encoding)));
+  }
+  EXPECT_EQ(*held_b, b);
+  EXPECT_TRUE(cache_matches_runqueue(*scheduler, /*nominated=*/0));
+
+  // Nothing of the body is left behind, so it can be cached again.
+  scheduler->add_txs({c}, {tx_hash})();
+  EXPECT_EQ(*scheduler->find_tx(tx_hash), c);
+  EXPECT_FALSE(scheduler->find_signed_tx(sha256(a)));
 }
 
 TEST(Scheduler, VariantReplacedDuringNominationIsReenqueuedAfterAbandon)

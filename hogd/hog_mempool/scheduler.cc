@@ -809,12 +809,24 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     // the repeated body's uniquifier. Vetted submissions are authenticated,
     // so only the body's signers can mint more encodings, and all of them go
     // when the body expires or commits.
+    //
+    // The replacement lists every encoding it displaces. [signed_tx_hash] may
+    // be one of them, resubmitted; its [txs_] entry is the one assigned below,
+    // so it must not be listed too.
+    std::vector<SignedTransactionHash> displaced;
+    displaced.reserve((*tx_ptr)->displaced_signed_tx_hashes.size() + 1);
+    for (const SignedTransactionHash &displaced_hash :
+         (*tx_ptr)->displaced_signed_tx_hashes) {
+      if (displaced_hash != signed_tx_hash) {
+        displaced.push_back(displaced_hash);
+      }
+    }
+    displaced.push_back((*tx_ptr)->signed_tx_hash);
     auto replacement = std::make_shared<TxValue>(
         TxValue{.tx = tx,
                 .tx_hash = tx_hash,
                 .signed_tx_hash = signed_tx_hash,
-                .signed_tx_hashes = (*tx_ptr)->signed_tx_hashes});
-    replacement->signed_tx_hashes->insert(signed_tx_hash);
+                .displaced_signed_tx_hashes = std::move(displaced)});
 
     *tx_ptr = replacement;
     if (auto it = account_state->txs.find(key);
@@ -824,7 +836,6 @@ Scheduler::add_txs_helper(const SignedTransaction &tx,
     txs_.insert_or_assign(signed_tx_hash, std::move(replacement));
     return false;
   }
-  (*tx_ptr)->signed_tx_hashes->insert(signed_tx_hash);
   CHECK_PTR(txs_.insert(signed_tx_hash, *tx_ptr).first);
   // [txs_by_body_.find_or_insert()] acquires a lock, so the increment to
   // [tx_cache_size_] happens after the tx is added to the cache from the
@@ -847,7 +858,9 @@ Scheduler::erase_cached_tx(const TransactionHash &tx_hash)
     tx_cache_size_.fetch_sub(1, std::memory_order_relaxed);
     CHECK_EQ(txs_by_body_.remove(tx_hash, txs_lock), 1UL);
   }
-  for (const SignedTransactionHash &signed_hash : *tx_value->signed_tx_hashes) {
+  CHECK_EQ(txs_.remove(tx_value->signed_tx_hash), 1UL);
+  for (const SignedTransactionHash &signed_hash :
+       tx_value->displaced_signed_tx_hashes) {
     CHECK_EQ(txs_.remove(signed_hash), 1UL);
   }
 }
