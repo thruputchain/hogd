@@ -2692,7 +2692,7 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultAtChunkHeadAfterCarrierBudgetSweep)
   auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
                                       /*trace=*/false, kMinRunGasCap);
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 7),
-            (&op_ri<false, add_op, true>));
+            (&op_lui<false, true>));
   expect_budget_sweep_parity_capped(words, kMinRunGasCap, /*max_budget=*/20);
 }
 
@@ -2719,7 +2719,7 @@ TEST(Rv32ThreadedTrapGas, cappedLoadFaultMidSecondChunkBudgetSweep)
   auto threaded = threaded_from_words(words, /*total_memory_size=*/256,
                                       /*trace=*/false, kCap);
   EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*threaded, 5),
-            (&op_ri<false, add_op, true>));
+            (&op_lui<false, true>));
   expect_budget_sweep_parity_capped(words, kCap, /*max_budget=*/20);
 }
 
@@ -2898,6 +2898,66 @@ TEST(Rv32ThreadedStackUsage, fusedLuiAddiRecordsTheMaterializedConstant)
 }
 
 #endif // HOGD_RV32_STACK_USAGE_ENABLED
+
+TEST(Rv32Threaded, liUsesImmediateWriteHandler)
+{
+  using test_program::op;
+  for (const bool trace : {false, true}) {
+    for (const uint32_t cap : {kMinRunGasCap, kMaxRunGas}) {
+      for (const uint8_t rd : {0, 5}) {
+        for (const int32_t imm : {-2048, -1, 0, 2047}) {
+          // DIV + EBREAK fills a minimum-size chunk, so LI carries a break.
+          const std::vector<uint32_t> words = {addi(rd, 0, imm),
+                                               op(6, 5, 5, 4, 1), 0x00100073U};
+          auto program = threaded_from_words(words, 256, trace, cap);
+          EXPECT_EQ(
+              ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 0),
+              pick_handler(Op::kLui, trace, cap == kMinRunGasCap));
+          auto canonical = make_program(words);
+          Machine cmachine(canonical, 256, 1000);
+          RecordingHost chost;
+          const ExecTrace expected = trace_execution(cmachine, chost);
+          ThreadedMachine machine(*program, 1000);
+          RecordingHost host;
+          if (trace) {
+            TraceObserver observer;
+            machine.run(host, observer);
+            EXPECT_EQ(describe_trace_divergence(strip_trace_gas(expected),
+                                                strip_trace_gas(
+                                                    observer.trace())),
+                      "");
+          }
+          else {
+            EXPECT_EQ(machine.run(host), expected.final_result);
+          }
+          EXPECT_EQ(machine.trap(), cmachine.trap());
+          EXPECT_EQ(machine.gas_remaining(), cmachine.gas_remaining());
+          for (uint32_t r = 0; r < kRegisterCount; ++r) {
+            EXPECT_EQ(machine.reg(r), cmachine.reg(r));
+          }
+          expect_budget_sweep_parity_capped(words, cap, 25);
+        }
+      }
+    }
+  }
+}
+
+TEST(Rv32Threaded, liSpecializationPreservesAddiFusionAndRegisterReads)
+{
+  // Keep ADDI's decoded opcode: it can still head a fused ADDI+ADDI pair.
+  const std::vector<uint32_t> words = {addi(5, 0, -7), addi(6, 5, 11),
+                                       0x00100073U};
+  auto program = threaded_from_words(words);
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 0),
+            alu_alu_handler<false>(Op::kAddi, Op::kAddi));
+  EXPECT_EQ(ThreadedMachinePreInstantiationTestPeer::handler_at(*program, 1),
+            (handler_for<false, false>(Op::kAddi)));
+  ThreadedMachine machine(*program, 100);
+  RecordingHost host;
+  EXPECT_EQ(machine.run(host), StepResult::kTrap);
+  EXPECT_EQ(machine.reg(5), uint32_t(-7));
+  EXPECT_EQ(machine.reg(6), 4U);
+}
 
 // NOLINTEND(bugprone-unchecked-optional-access)
 
