@@ -1,6 +1,5 @@
 #pragma once
 
-#include <atomic>
 #include <memory>
 #include <mutex>
 #include <optional>
@@ -18,6 +17,7 @@
 #include "rpc_types.hh"
 #include "transaction.hh"
 #include "x23/async.h"
+#include "x23/corosync.h"
 
 namespace hogd {
 
@@ -67,7 +67,10 @@ public:
     return std::move(snapshot_cache_);
   }
 
-  // Block until all event calls have returned.
+  // Suspends until every event call spawned so far has returned, then yields
+  // the event error recorded for the block, if any.  The last event call to
+  // return resumes the caller inline (see x23::CoroDrain).  One caller at a
+  // time.
   x23::Async<std::optional<SystemErrorCode>> await_event_return();
 
 private:
@@ -91,6 +94,9 @@ private:
                                  ExecResult exec_res,
                                  ProposedTransaction proposed_tx);
 
+  // Records [error], if any, and retires one event call.  May resume the
+  // await_event_return() caller inline, which may destroy *this before this
+  // returns.
   void log_event_return(SystemStatus<void> error);
 
   const ExecutionMode mode_;
@@ -101,7 +107,7 @@ private:
 
   std::mutex event_accumulate_mutex_;
   std::optional<SystemErrorCode> event_error_ = std::nullopt;
-  std::atomic<uint32_t> pending_event_calls_ = 0;
+  x23::CoroDrain pending_event_calls_;
 };
 
 } // namespace hogd
